@@ -1,0 +1,48 @@
+Type: cli
+Command: python3 -c "import sys; sys.path.insert(0, 'src'); [functional test suite for Entry dataclass]"
+Expected: All enum values, dataclass fields, and serialisation round-trip verified with STATUS: PASS
+Timestamp: 2026-03-21T00:00:00+00:00
+
+=== T01.2 Proof: Entry dataclass and enums ===
+
+--- EntryType enum ---
+  SESSION = 'session'
+  BOOKMARK = 'bookmark'
+  MINUTES = 'minutes'
+  MEETING = 'meeting'
+  REFERENCE = 'reference'
+  IDEA = 'idea'
+  INBOX = 'inbox'
+
+--- EntrySource enum ---
+  CLAUDE_CODE = 'claude-code'
+  MANUAL = 'manual'
+  IMPORT = 'import'
+
+--- EntryStatus enum ---
+  ACTIVE = 'active'
+  PENDING_REVIEW = 'pending_review'
+  ARCHIVED = 'archived'
+
+--- Entry creation (auto-generated fields) ---
+  id (auto): [UUID auto-generated]
+  version (auto): 1
+  status (default): active
+  created_at (tz-aware): UTC
+  updated_at (tz-aware): UTC
+
+--- Round-trip serialisation ---
+  to_dict keys: ['author', 'content', 'created_at', 'entry_type', 'id', 'metadata', 'project', 'source', 'status', 'tags', 'updated_at', 'version']
+  entry_type in dict: 'session'
+  source in dict: 'claude-code'
+  status in dict: 'active'
+  created_at type in dict: str
+  from_dict -> restored successfully, all fields match
+
+--- SearchResult ---
+  SearchResult(entry=<Entry>, score=0.87)
+
+--- All enum values tested ---
+  All 7 EntryType, 3 EntrySource, 3 EntryStatus values: OK
+
+STATUS: PASS

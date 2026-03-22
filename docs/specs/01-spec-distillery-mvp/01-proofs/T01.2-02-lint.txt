@@ -1,0 +1,8 @@
+Type: cli
+Command: python3 -m ruff check src/distillery/models.py
+Expected: All checks passed (no lint errors)
+Timestamp: 2026-03-21T00:00:00+00:00
+
+All checks passed!
+
+STATUS: PASS
