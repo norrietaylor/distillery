@@ -35,6 +35,7 @@ dev = [
 
 [project.scripts]
 distillery = "distillery.cli:main"
+distillery-mcp = "distillery.mcp.__main__:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/distillery"]

@@ -1,0 +1,31 @@
+Type: test
+Command: python3 -c "from distillery.mcp.server import create_server, error_response, success_response, validate_required, validate_type; from distillery.mcp._stub_embedding import StubEmbeddingProvider; from distillery.mcp.__main__ import main"
+Expected: All imports succeed; functions are callable
+Timestamp: 2026-03-22T00:00:00Z
+
+=== T04.1 Import & Function Test ===
+
+1. create_server: function
+2. error_response: {
+  "error": true,
+  "code": "TEST_CODE",
+  "message": "test message"
+}
+3. success_response: {
+  "status": "ok",
+  "count": 42
+}
+4. validate_required (pass): None
+5. validate_required (fail): Missing required fields: missing
+6. validate_type (pass): None
+7. validate_type (fail): Field 'n' must be a integer
+
+=== StubEmbeddingProvider ===
+model_name: stub
+dimensions: 8
+embed result (8 dims): [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+embed_batch result: [[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]
+
+ALL CHECKS: PASS
+
+Status: PASS
