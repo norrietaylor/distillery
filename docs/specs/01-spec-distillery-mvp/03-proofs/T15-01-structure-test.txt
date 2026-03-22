@@ -1,0 +1,21 @@
+Type: test
+Command: python3 -c "structural verification of JinaEmbeddingProvider"
+Expected: All protocol methods/properties present, defaults correct, ValueError on missing key
+Timestamp: 2026-03-21T00:00:00Z
+
+=== JinaEmbeddingProvider Structure Verification ===
+
+  [PASS] model_name property
+  [PASS] dimensions property
+  [PASS] embed method
+  [PASS] embed_batch method
+  [PASS] default model_name (jina-embeddings-v3)
+  [PASS] default dimensions (1024)
+  [PASS] empty batch returns []
+  [PASS] ValueError on missing key
+  [PASS] custom model configurable
+  [PASS] custom dimensions configurable
+  [PASS] embed has task_type param
+  [PASS] embed_batch has task_type param
+
+Status: PASS
