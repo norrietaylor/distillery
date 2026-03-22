@@ -83,3 +83,19 @@ classification:
   # Minimum confidence score [0.0, 1.0] for an auto-classification to be
   # accepted. Entries with scores below this threshold remain unclassified.
   confidence_threshold: 0.6
+
+  # Deduplication thresholds control how the distillery_check_dedup tool
+  # maps cosine similarity scores to recommended actions.
+  # Constraint: dedup_link_threshold <= dedup_merge_threshold <= dedup_skip_threshold
+
+  # At or above this score: content is treated as a near-exact duplicate (skip).
+  dedup_skip_threshold: 0.95
+
+  # At or above this score (but below skip): merge into the existing entry.
+  dedup_merge_threshold: 0.80
+
+  # At or above this score (but below merge): link new entry to similar ones.
+  dedup_link_threshold: 0.60
+
+  # Maximum number of similar entries to retrieve during a dedup check.
+  dedup_limit: 5

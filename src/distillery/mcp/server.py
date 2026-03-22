@@ -628,6 +628,25 @@ def create_server(config: DistilleryConfig | None = None) -> Server:
                     "required": ["entry_id", "action"],
                 },
             ),
+            types.Tool(
+                name="distillery_check_dedup",
+                description=(
+                    "Check whether a piece of content duplicates existing knowledge entries. "
+                    "Returns a recommended action (skip, merge, link, or create), the most "
+                    "similar entries found, the highest similarity score, and a human-readable "
+                    "reasoning string. Uses the dedup thresholds configured in distillery.yaml."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "content": {
+                            "type": "string",
+                            "description": "Raw text content to check for duplication.",
+                        },
+                    },
+                    "required": ["content"],
+                },
+            ),
         ]
 
     @server.call_tool()  # type: ignore[untyped-decorator]
@@ -674,6 +693,9 @@ def create_server(config: DistilleryConfig | None = None) -> Server:
 
         if tool_name == "distillery_resolve_review":
             return await _handle_resolve_review(store, arguments)
+
+        if tool_name == "distillery_check_dedup":
+            return await _handle_check_dedup(store, cfg, arguments)
 
         return error_response("UNKNOWN_TOOL", f"Unknown tool: {tool_name!r}")
 
@@ -1493,6 +1515,81 @@ async def _handle_resolve_review(
         return error_response("STORE_ERROR", f"Failed to update entry: {exc}")
 
     return success_response(updated_entry.to_dict())
+
+
+# ---------------------------------------------------------------------------
+# T03 tool handler: check_dedup
+# ---------------------------------------------------------------------------
+
+
+async def _handle_check_dedup(
+    store: Any,
+    config: DistilleryConfig,
+    arguments: dict[str, Any],
+) -> list[types.TextContent]:
+    """Implement the ``distillery_check_dedup`` tool.
+
+    Runs :class:`~distillery.classification.dedup.DeduplicationChecker` against
+    the store using thresholds from *config* and returns the deduplication
+    result as a JSON payload.
+
+    Args:
+        store: Initialised store with a ``find_similar`` method.
+        config: Loaded :class:`~distillery.config.DistilleryConfig` (dedup
+            thresholds are read from ``config.classification``).
+        arguments: Tool argument dict. Must contain ``"content"`` (str).
+
+    Returns:
+        MCP content list with a single JSON ``TextContent`` block.
+    """
+    # --- validate input -----------------------------------------------------
+    err = validate_required(arguments, "content")
+    if err:
+        return error_response("INVALID_INPUT", err)
+
+    content = str(arguments["content"])
+
+    # --- run dedup checker --------------------------------------------------
+    from distillery.classification.dedup import DeduplicationChecker
+
+    cls_cfg = config.classification
+    checker = DeduplicationChecker(
+        store=store,
+        skip_threshold=cls_cfg.dedup_skip_threshold,
+        merge_threshold=cls_cfg.dedup_merge_threshold,
+        link_threshold=cls_cfg.dedup_link_threshold,
+        dedup_limit=cls_cfg.dedup_limit,
+    )
+
+    try:
+        result = await checker.check(content)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error running dedup check")
+        return error_response("DEDUP_ERROR", f"Deduplication check failed: {exc}")
+
+    # --- serialise result ---------------------------------------------------
+    similar_entries_serialised = []
+    for sr in result.similar_entries:
+        similar_entries_serialised.append(
+            {
+                "entry_id": str(sr.entry.id),
+                "score": sr.score,
+                "content_preview": sr.entry.content[:120],
+                "entry_type": sr.entry.entry_type.value,
+                "author": sr.entry.author,
+                "project": sr.entry.project,
+                "created_at": sr.entry.created_at.isoformat() if sr.entry.created_at else None,
+            }
+        )
+
+    return success_response(
+        {
+            "action": result.action.value,
+            "highest_score": result.highest_score,
+            "reasoning": result.reasoning,
+            "similar_entries": similar_entries_serialised,
+        }
+    )
 
 
 # ---------------------------------------------------------------------------

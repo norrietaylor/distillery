@@ -69,9 +69,24 @@ class ClassificationConfig:
     Attributes:
         confidence_threshold: Minimum confidence score [0.0, 1.0] required
             before an auto-classification label is accepted.
+        dedup_skip_threshold: Similarity score at or above which content is
+            treated as a near-exact duplicate and should be skipped. Default
+            ``0.95``.
+        dedup_merge_threshold: Similarity score at or above which (but below
+            *dedup_skip_threshold*) the content should be merged with the most
+            similar entry. Default ``0.80``.
+        dedup_link_threshold: Similarity score at or above which (but below
+            *dedup_merge_threshold*) a new entry should be linked to similar
+            entries. Default ``0.60``.
+        dedup_limit: Maximum number of similar entries to retrieve from the
+            store during deduplication checks. Default ``5``.
     """
 
     confidence_threshold: float = 0.6
+    dedup_skip_threshold: float = 0.95
+    dedup_merge_threshold: float = 0.80
+    dedup_link_threshold: float = 0.60
+    dedup_limit: int = 5
 
 
 @dataclass
@@ -163,17 +178,59 @@ def _parse_team(raw: dict[str, Any]) -> TeamConfig:
     return TeamConfig(name=str(raw.get("name", "")))
 
 
-def _parse_classification(raw: dict[str, Any]) -> ClassificationConfig:
-    threshold_raw = raw.get("confidence_threshold", 0.6)
+def _parse_float_field(raw: dict[str, Any], key: str, default: float, label: str) -> float:
+    """Parse a float field from *raw*, raising :class:`ValueError` on failure.
+
+    Args:
+        raw: The raw dict section from the YAML file.
+        key: Field name within *raw*.
+        default: Value to use when the field is absent.
+        label: Human-readable name for error messages.
+
+    Returns:
+        Parsed float value.
+
+    Raises:
+        ValueError: If the value cannot be converted to a float.
+    """
+    value_raw = raw.get(key, default)
     try:
-        threshold = float(threshold_raw)
+        return float(value_raw)
     except (TypeError, ValueError) as exc:
         raise ValueError(
-            "classification.confidence_threshold must be a float, "
-            f"got: {threshold_raw!r}"
+            f"{label} must be a float, got: {value_raw!r}"
         ) from exc
 
-    return ClassificationConfig(confidence_threshold=threshold)
+
+def _parse_classification(raw: dict[str, Any]) -> ClassificationConfig:
+    threshold = _parse_float_field(
+        raw, "confidence_threshold", 0.6, "classification.confidence_threshold"
+    )
+    skip = _parse_float_field(
+        raw, "dedup_skip_threshold", 0.95, "classification.dedup_skip_threshold"
+    )
+    merge = _parse_float_field(
+        raw, "dedup_merge_threshold", 0.80, "classification.dedup_merge_threshold"
+    )
+    link = _parse_float_field(
+        raw, "dedup_link_threshold", 0.60, "classification.dedup_link_threshold"
+    )
+
+    limit_raw = raw.get("dedup_limit", 5)
+    try:
+        limit = int(limit_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"classification.dedup_limit must be an integer, got: {limit_raw!r}"
+        ) from exc
+
+    return ClassificationConfig(
+        confidence_threshold=threshold,
+        dedup_skip_threshold=skip,
+        dedup_merge_threshold=merge,
+        dedup_link_threshold=link,
+        dedup_limit=limit,
+    )
 
 
 def _validate(config: DistilleryConfig) -> None:
@@ -203,6 +260,33 @@ def _validate(config: DistilleryConfig) -> None:
         raise ValueError(
             "classification.confidence_threshold must be between 0.0 and 1.0, "
             f"got: {threshold}"
+        )
+
+    link = config.classification.dedup_link_threshold
+    merge = config.classification.dedup_merge_threshold
+    skip = config.classification.dedup_skip_threshold
+
+    for name, value in [
+        ("dedup_link_threshold", link),
+        ("dedup_merge_threshold", merge),
+        ("dedup_skip_threshold", skip),
+    ]:
+        if not (0.0 <= value <= 1.0):
+            raise ValueError(
+                f"classification.{name} must be between 0.0 and 1.0, got: {value}"
+            )
+
+    if not (link <= merge <= skip):
+        raise ValueError(
+            "classification dedup thresholds must satisfy "
+            f"dedup_link_threshold ({link}) <= dedup_merge_threshold ({merge}) "
+            f"<= dedup_skip_threshold ({skip})"
+        )
+
+    if config.classification.dedup_limit <= 0:
+        raise ValueError(
+            "classification.dedup_limit must be a positive integer, "
+            f"got: {config.classification.dedup_limit}"
         )
 
 

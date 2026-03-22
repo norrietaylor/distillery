@@ -1,0 +1,22 @@
+Type: test
+Command: python3 -m pytest tests/test_mcp_dedup.py -v
+Expected: distillery_check_dedup tool returns correct actions at various similarity levels (9 tests)
+Timestamp: 2026-03-22T00:00:00Z
+
+============================= test session starts ==============================
+platform darwin -- Python 3.14.0, pytest-8.4.2, pluggy-1.6.0
+asyncio: mode=Mode.AUTO
+
+tests/test_mcp_dedup.py::TestCheckDedupNoEntries::test_empty_store_returns_create PASSED
+tests/test_mcp_dedup.py::TestCheckDedupNoEntries::test_create_result_has_reasoning PASSED
+tests/test_mcp_dedup.py::TestCheckDedupValidation::test_missing_content_returns_error PASSED
+tests/test_mcp_dedup.py::TestCheckDedupSkipAction::test_identical_embedding_returns_skip PASSED
+tests/test_mcp_dedup.py::TestCheckDedupSkipAction::test_skip_result_includes_entry_fields PASSED
+tests/test_mcp_dedup.py::TestCheckDedupMergeAction::test_high_similarity_returns_merge PASSED
+tests/test_mcp_dedup.py::TestCheckDedupLinkAction::test_moderate_similarity_returns_link PASSED
+tests/test_mcp_dedup.py::TestCheckDedupConfigThresholds::test_custom_skip_threshold_applied PASSED
+tests/test_mcp_dedup.py::TestCheckDedupConfigThresholds::test_dedup_limit_controls_similar_entries_returned PASSED
+
+============================== 9 passed in 0.73s ==============================
+
+Status: PASS

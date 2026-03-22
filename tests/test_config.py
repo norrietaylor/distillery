@@ -66,6 +66,15 @@ class TestDefaultConfig:
         cfg = load_config()
         assert cfg.classification.confidence_threshold == pytest.approx(0.6)
 
+    def test_dedup_threshold_defaults(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        cfg = load_config()
+        assert cfg.classification.dedup_skip_threshold == pytest.approx(0.95)
+        assert cfg.classification.dedup_merge_threshold == pytest.approx(0.80)
+        assert cfg.classification.dedup_link_threshold == pytest.approx(0.60)
+        assert cfg.classification.dedup_limit == 5
+
 
 # ---------------------------------------------------------------------------
 # YAML loading: all fields
@@ -89,6 +98,10 @@ class TestYAMLLoading:
 
         classification:
           confidence_threshold: 0.75
+          dedup_skip_threshold: 0.92
+          dedup_merge_threshold: 0.78
+          dedup_link_threshold: 0.55
+          dedup_limit: 10
     """
 
     def test_loads_storage(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -114,6 +127,14 @@ class TestYAMLLoading:
         p = write_yaml(tmp_path, self.FULL_YAML)
         cfg = load_config(str(p))
         assert cfg.classification.confidence_threshold == pytest.approx(0.75)
+
+    def test_loads_dedup_thresholds(self, tmp_path: Path) -> None:
+        p = write_yaml(tmp_path, self.FULL_YAML)
+        cfg = load_config(str(p))
+        assert cfg.classification.dedup_skip_threshold == pytest.approx(0.92)
+        assert cfg.classification.dedup_merge_threshold == pytest.approx(0.78)
+        assert cfg.classification.dedup_link_threshold == pytest.approx(0.55)
+        assert cfg.classification.dedup_limit == 10
 
     def test_openai_provider(self, tmp_path: Path) -> None:
         yaml_content = """\
@@ -222,6 +243,66 @@ class TestValidationErrors:
         with pytest.raises(ValueError):
             load_config(str(p))
 
+    def test_dedup_skip_threshold_above_one_raises_value_error(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            classification:
+              dedup_skip_threshold: 1.5
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="dedup_skip_threshold"):
+            load_config(str(p))
+
+    def test_dedup_link_threshold_below_zero_raises_value_error(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            classification:
+              dedup_link_threshold: -0.1
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="dedup_link_threshold"):
+            load_config(str(p))
+
+    def test_dedup_threshold_ordering_violated_raises_value_error(self, tmp_path: Path) -> None:
+        """link > merge violates the ordering constraint."""
+        yaml_content = """\
+            classification:
+              dedup_link_threshold: 0.90
+              dedup_merge_threshold: 0.80
+              dedup_skip_threshold: 0.95
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="dedup_link_threshold"):
+            load_config(str(p))
+
+    def test_dedup_merge_above_skip_raises_value_error(self, tmp_path: Path) -> None:
+        """merge > skip violates the ordering constraint."""
+        yaml_content = """\
+            classification:
+              dedup_link_threshold: 0.50
+              dedup_merge_threshold: 0.98
+              dedup_skip_threshold: 0.90
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="dedup_merge_threshold"):
+            load_config(str(p))
+
+    def test_dedup_limit_zero_raises_value_error(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            classification:
+              dedup_limit: 0
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="dedup_limit"):
+            load_config(str(p))
+
+    def test_dedup_limit_non_integer_raises_value_error(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            classification:
+              dedup_limit: not_a_number
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError):
+            load_config(str(p))
+
     def test_explicit_missing_path_raises_file_not_found(self, tmp_path: Path) -> None:
         missing = str(tmp_path / "no_such_file.yaml")
         with pytest.raises(FileNotFoundError):
@@ -311,3 +392,12 @@ class TestExampleConfigFile:
         example_path = repo_root / "distillery.yaml.example"
         cfg = load_config(str(example_path))
         assert cfg.classification.confidence_threshold == pytest.approx(0.6)
+
+    def test_example_config_dedup_thresholds(self) -> None:
+        repo_root = Path(__file__).parent.parent
+        example_path = repo_root / "distillery.yaml.example"
+        cfg = load_config(str(example_path))
+        assert cfg.classification.dedup_skip_threshold == pytest.approx(0.95)
+        assert cfg.classification.dedup_merge_threshold == pytest.approx(0.80)
+        assert cfg.classification.dedup_link_threshold == pytest.approx(0.60)
+        assert cfg.classification.dedup_limit == 5

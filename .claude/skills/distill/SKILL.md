@@ -114,23 +114,52 @@ If the user wants to edit, accept their revised version.
 
 ### Step 6: Check for Duplicates
 
-Call `distillery_find_similar` with the distilled content and threshold `0.8`:
+Call `distillery_check_dedup` with the distilled content:
 
 ```
-distillery_find_similar(content="<distilled summary>", threshold=0.8)
+distillery_check_dedup(content="<distilled summary>")
 ```
 
-If no similar entries are found (score < 0.8), proceed directly to Step 7.
+This tool returns an `action` field that tells you what to do next:
 
-If similar entries are found, display a comparison table and prompt the user:
+**If `action` is `"create"`:**
+No similar entries were found. Proceed directly to Step 7.
+
+**If `action` is `"skip"`:**
+The content is a near-exact duplicate. Display:
 
 ```
-Similar entries found in the knowledge base:
+Near-duplicate detected (similarity: <highest_score * 100>%)
 
+Reasoning: <reasoning from tool>
+
+Similar entry:
 | Entry ID | Similarity | Preview |
 |----------|-----------|---------|
-| <id>     | 92%       | <first 80 chars of content> |
-| <id>     | 84%       | <first 80 chars of content> |
+| <id>     | <score%>  | <content_preview> |
+
+How would you like to proceed?
+1. Store anyway — save as a new entry
+2. Skip — do not store this entry
+
+Enter 1 or 2:
+```
+
+If the user chooses skip (2): Confirm "Skipped. No new entry was stored." and stop.
+If the user chooses store anyway (1): Continue to Step 7.
+
+**If `action` is `"merge"`:**
+The content is very similar to an existing entry. Display:
+
+```
+Very similar entry found (similarity: <highest_score * 100>%)
+
+Reasoning: <reasoning from tool>
+
+Similar entries:
+| Entry ID | Similarity | Preview |
+|----------|-----------|---------|
+| <id>     | <score%>  | <content_preview> |
 
 How would you like to proceed?
 1. Store anyway — save as a new entry
@@ -140,18 +169,39 @@ How would you like to proceed?
 Enter 1, 2, or 3:
 ```
 
-**If the user chooses merge (2):**
+If the user chooses merge (2):
 - Combine the new summary with the most similar entry's content
 - Call `distillery_update` with the entry ID and merged content
 - Confirm: "Updated entry `<id>` with merged content."
 - Stop here.
 
-**If the user chooses skip (3):**
-- Confirm: "Skipped. No new entry was stored."
-- Stop here.
+If the user chooses skip (3): Confirm "Skipped. No new entry was stored." and stop.
+If the user chooses store anyway (1): Continue to Step 7.
 
-**If the user chooses store anyway (1):**
-- Continue to Step 7.
+**If `action` is `"link"`:**
+The content is related but distinct. Display the similar entries and note that the new entry will be linked:
+
+```
+Related entries found (similarity: <highest_score * 100>%)
+
+Reasoning: <reasoning from tool>
+
+| Entry ID | Similarity | Preview |
+|----------|-----------|---------|
+| <id>     | <score%>  | <content_preview> |
+
+A new entry will be created and linked to these related entries.
+Proceed? (yes / skip)
+```
+
+If the user chooses skip: Confirm "Skipped. No new entry was stored." and stop.
+If yes: Continue to Step 7. When calling `distillery_store` (Step 8), include the related entry IDs in the metadata:
+```
+metadata={
+  "session_id": "sess-<YYYY-MM-DD>-<short-random-id>",
+  "related_entries": ["<id1>", "<id2>"]
+}
+```
 
 ### Step 7: Extract Tags
 
@@ -235,7 +285,7 @@ Updated entry <id> with merged content.
 
 - Never store raw session dumps — always distill to decisions, rationale, and insights
 - Always show the distilled summary to the user before storing, so they can review and edit
-- Always check for duplicates before storing (threshold 0.8)
+- Always check for duplicates before storing using `distillery_check_dedup`
 - Always respect the user's choice on duplicate handling (store / merge / skip)
 - If session context is unclear, ask the user what to capture rather than guessing
 - If MCP is unavailable, display the setup message and stop immediately

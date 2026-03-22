@@ -1,0 +1,8 @@
+Type: test
+Command: python3 -m pytest tests/ -q
+Expected: Full test suite (all 384 tests) passes after T03 changes
+Timestamp: 2026-03-22T00:00:00Z
+
+384 passed in 5.51s
+
+Status: PASS
