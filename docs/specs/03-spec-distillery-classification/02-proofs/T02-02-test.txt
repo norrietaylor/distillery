@@ -1,0 +1,14 @@
+Type: test
+Command: python3 -m pytest -q (full suite regression check)
+Expected: All 366 tests pass (no regressions from T02 changes)
+Timestamp: 2026-03-22T00:00:00Z
+
+366 passed in 4.90s
+
+Breakdown:
+- Original 50 test_mcp_server.py tests: PASS (updated test_server_registers_all_seven_tools
+  to test_server_registers_all_ten_tools to reflect 10 registered tools)
+- 27 new test_mcp_classify.py tests: PASS
+- All other test suites: PASS
+
+Status: PASS

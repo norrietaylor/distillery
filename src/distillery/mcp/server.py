@@ -22,6 +22,16 @@ Tools added in T04.3:
     (default 0.8); returns similar entries with scores for deduplication.
   - distillery_list: Accept optional filters, limit, offset; returns entries
     without semantic ranking (newest first).
+
+Tools added in T02 (classification extensions):
+  - distillery_classify: Accept entry_id and pre-computed classification
+    result fields; persist classification metadata onto the entry and update
+    its status according to confidence threshold.
+  - distillery_review_queue: Return pending_review entries sorted by
+    created_at desc with id, content preview, entry_type, confidence, author,
+    created_at, and classification_reasoning.
+  - distillery_resolve_review: Accept entry_id and action
+    (approve/reclassify/archive); update entry accordingly.
 """
 
 from __future__ import annotations
@@ -513,6 +523,111 @@ def create_server(config: DistilleryConfig | None = None) -> Server:
                     "required": [],
                 },
             ),
+            types.Tool(
+                name="distillery_classify",
+                description=(
+                    "Store a pre-computed classification result on an existing entry. "
+                    "Updates the entry's type, status (based on confidence vs. the "
+                    "configured threshold), and classification metadata fields. "
+                    "Handles reclassification of already-classified entries. "
+                    "Returns the updated entry or a structured error."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "entry_id": {
+                            "type": "string",
+                            "description": "The UUID of the entry to classify.",
+                        },
+                        "entry_type": {
+                            "type": "string",
+                            "description": (
+                                "Predicted semantic category. One of: "
+                                "session, bookmark, minutes, meeting, reference, idea, inbox."
+                            ),
+                        },
+                        "confidence": {
+                            "type": "number",
+                            "description": "Classification confidence score in [0.0, 1.0].",
+                        },
+                        "reasoning": {
+                            "type": "string",
+                            "description": "Human-readable explanation of the classification.",
+                        },
+                        "suggested_tags": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Tags suggested by the classifier (merged with existing tags).",
+                        },
+                        "suggested_project": {
+                            "type": "string",
+                            "description": "Project name suggested by the classifier.",
+                        },
+                    },
+                    "required": ["entry_id", "entry_type", "confidence"],
+                },
+            ),
+            types.Tool(
+                name="distillery_review_queue",
+                description=(
+                    "Return entries that are pending manual review, sorted newest first. "
+                    "Each result includes a content preview, entry_type, confidence, "
+                    "author, created_at, and classification_reasoning. "
+                    "Supports optional filtering by entry_type and a result limit."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of entries to return. Defaults to 20.",
+                        },
+                        "entry_type": {
+                            "type": "string",
+                            "description": (
+                                "Filter by entry type. One of: "
+                                "session, bookmark, minutes, meeting, reference, idea, inbox."
+                            ),
+                        },
+                    },
+                    "required": [],
+                },
+            ),
+            types.Tool(
+                name="distillery_resolve_review",
+                description=(
+                    "Resolve a pending-review entry by approving, reclassifying, or archiving it. "
+                    "approve: sets status to active and records reviewed_at/reviewed_by metadata. "
+                    "reclassify: updates entry_type (requires new_entry_type) and sets reclassified_from. "
+                    "archive: soft-deletes the entry by setting status to archived. "
+                    "Returns the updated entry or a structured error."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "entry_id": {
+                            "type": "string",
+                            "description": "The UUID of the entry to resolve.",
+                        },
+                        "action": {
+                            "type": "string",
+                            "description": "Resolution action: approve, reclassify, or archive.",
+                        },
+                        "new_entry_type": {
+                            "type": "string",
+                            "description": (
+                                "Required when action=reclassify. New entry type to assign. "
+                                "One of: session, bookmark, minutes, meeting, reference, idea, inbox."
+                            ),
+                        },
+                        "reviewer": {
+                            "type": "string",
+                            "description": "Identifier of the person performing the review.",
+                        },
+                    },
+                    "required": ["entry_id", "action"],
+                },
+            ),
         ]
 
     @server.call_tool()  # type: ignore[untyped-decorator]
@@ -550,6 +665,15 @@ def create_server(config: DistilleryConfig | None = None) -> Server:
 
         if tool_name == "distillery_list":
             return await _handle_list(store, arguments)
+
+        if tool_name == "distillery_classify":
+            return await _handle_classify(store, cfg, arguments)
+
+        if tool_name == "distillery_review_queue":
+            return await _handle_review_queue(store, arguments)
+
+        if tool_name == "distillery_resolve_review":
+            return await _handle_resolve_review(store, arguments)
 
         return error_response("UNKNOWN_TOOL", f"Unknown tool: {tool_name!r}")
 
@@ -1080,6 +1204,295 @@ async def _handle_list(
             "offset": offset,
         }
     )
+
+
+# ---------------------------------------------------------------------------
+# T02 tool handlers: classify, review_queue, resolve_review
+# ---------------------------------------------------------------------------
+
+# Valid resolve-review actions.
+_VALID_REVIEW_ACTIONS = {"approve", "reclassify", "archive"}
+
+
+async def _handle_classify(
+    store: Any,
+    config: DistilleryConfig,
+    arguments: dict[str, Any],
+) -> list[types.TextContent]:
+    """Implement the ``distillery_classify`` tool.
+
+    Stores a pre-computed classification result onto an existing entry.
+    Updates the entry's type, status, and classification metadata fields.
+    Handles reclassification of already-classified entries.
+
+    Args:
+        store: Initialised ``DuckDBStore``.
+        config: The loaded Distillery configuration (for confidence threshold).
+        arguments: Raw MCP tool arguments dict.
+
+    Returns:
+        MCP content list with the serialised updated entry or an error.
+    """
+    from datetime import datetime, timezone
+    from distillery.models import EntryType, EntryStatus
+
+    # --- input validation ---------------------------------------------------
+    err = validate_required(arguments, "entry_id", "entry_type", "confidence")
+    if err:
+        return error_response("INVALID_INPUT", err)
+
+    entry_id: str = arguments["entry_id"]
+    entry_type_str: str = arguments["entry_type"]
+    confidence_raw = arguments["confidence"]
+
+    if entry_type_str not in _VALID_ENTRY_TYPES:
+        return error_response(
+            "INVALID_INPUT",
+            f"Invalid entry_type {entry_type_str!r}. "
+            f"Must be one of: {', '.join(sorted(_VALID_ENTRY_TYPES))}.",
+        )
+
+    if not isinstance(confidence_raw, (int, float)):
+        return error_response("INVALID_INPUT", "Field 'confidence' must be a number")
+    confidence = float(confidence_raw)
+    if not (0.0 <= confidence <= 1.0):
+        return error_response("INVALID_INPUT", "Field 'confidence' must be in [0.0, 1.0]")
+
+    tags_err = validate_type(arguments, "suggested_tags", list, "list of strings")
+    if tags_err:
+        return error_response("INVALID_INPUT", tags_err)
+
+    # --- retrieve existing entry --------------------------------------------
+    try:
+        entry = await store.get(entry_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error fetching entry id=%s for classify", entry_id)
+        return error_response("STORE_ERROR", f"Failed to retrieve entry: {exc}")
+
+    if entry is None:
+        return error_response(
+            "NOT_FOUND",
+            f"No entry found with id={entry_id!r}.",
+            details={"entry_id": entry_id},
+        )
+
+    # --- build updates ------------------------------------------------------
+    threshold = config.classification.confidence_threshold
+    new_status = EntryStatus.ACTIVE if confidence >= threshold else EntryStatus.PENDING_REVIEW
+
+    # Merge suggested tags with existing tags (de-duplicate, preserve order).
+    suggested_tags: list[str] = list(arguments.get("suggested_tags") or [])
+    merged_tags = list(entry.tags) + [t for t in suggested_tags if t not in entry.tags]
+
+    # Build updated metadata -- preserve existing metadata, add classification fields.
+    new_metadata: dict[str, Any] = dict(entry.metadata)
+
+    # If this entry was already classified, record the previous type.
+    if "classified_at" in new_metadata:
+        new_metadata["reclassified_from"] = entry.entry_type.value
+
+    classified_at = datetime.now(tz=timezone.utc).isoformat()
+    new_metadata["confidence"] = confidence
+    new_metadata["classified_at"] = classified_at
+    if "reasoning" in arguments:
+        new_metadata["classification_reasoning"] = arguments["reasoning"]
+
+    suggested_project: str | None = arguments.get("suggested_project")
+
+    updates: dict[str, Any] = {
+        "entry_type": EntryType(entry_type_str),
+        "status": new_status,
+        "tags": merged_tags,
+        "metadata": new_metadata,
+    }
+    if suggested_project and entry.project is None:
+        updates["project"] = suggested_project
+
+    # --- persist ------------------------------------------------------------
+    try:
+        updated_entry = await store.update(entry_id, updates)
+    except KeyError:
+        return error_response(
+            "NOT_FOUND",
+            f"No entry found with id={entry_id!r}.",
+            details={"entry_id": entry_id},
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error updating entry id=%s during classify", entry_id)
+        return error_response("STORE_ERROR", f"Failed to update entry: {exc}")
+
+    return success_response(updated_entry.to_dict())
+
+
+async def _handle_review_queue(
+    store: Any,
+    arguments: dict[str, Any],
+) -> list[types.TextContent]:
+    """Implement the ``distillery_review_queue`` tool.
+
+    Returns ``pending_review`` entries sorted by ``created_at`` descending
+    with a content preview and classification metadata fields.
+
+    Args:
+        store: Initialised ``DuckDBStore``.
+        arguments: Tool argument dict (all fields optional).
+
+    Returns:
+        MCP content list with a JSON payload of ``entries`` and ``count``.
+    """
+    limit_raw = arguments.get("limit", 20)
+    err_limit = validate_type(arguments, "limit", int, "integer")
+    if err_limit:
+        return error_response("VALIDATION_ERROR", err_limit)
+    limit = int(limit_raw) if limit_raw is not None else 20
+    if limit < 1:
+        return error_response("VALIDATION_ERROR", "Field 'limit' must be >= 1")
+    if limit > 500:
+        return error_response("VALIDATION_ERROR", "Field 'limit' must be <= 500")
+
+    filters: dict[str, Any] = {"status": "pending_review"}
+    if "entry_type" in arguments and arguments["entry_type"] is not None:
+        entry_type_str = arguments["entry_type"]
+        if entry_type_str not in _VALID_ENTRY_TYPES:
+            return error_response(
+                "INVALID_INPUT",
+                f"Invalid entry_type {entry_type_str!r}. "
+                f"Must be one of: {', '.join(sorted(_VALID_ENTRY_TYPES))}.",
+            )
+        filters["entry_type"] = entry_type_str
+
+    try:
+        entries = await store.list_entries(filters=filters, limit=limit, offset=0)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error in distillery_review_queue")
+        return error_response("LIST_ERROR", f"list_entries failed: {exc}")
+
+    # Project each entry to the review-queue summary shape.
+    items = []
+    for entry in entries:
+        items.append(
+            {
+                "id": entry.id,
+                "content_preview": entry.content[:200],
+                "entry_type": entry.entry_type.value,
+                "confidence": entry.metadata.get("confidence"),
+                "author": entry.author,
+                "created_at": entry.created_at.isoformat(),
+                "classification_reasoning": entry.metadata.get("classification_reasoning"),
+            }
+        )
+
+    return success_response({"entries": items, "count": len(items)})
+
+
+async def _handle_resolve_review(
+    store: Any,
+    arguments: dict[str, Any],
+) -> list[types.TextContent]:
+    """Implement the ``distillery_resolve_review`` tool.
+
+    Resolves a pending-review entry by approving, reclassifying, or archiving
+    it.
+
+    * **approve**: sets ``status=active`` and records ``reviewed_at`` /
+      ``reviewed_by`` in metadata.
+    * **reclassify**: updates ``entry_type`` and sets ``reclassified_from`` in
+      metadata.  Requires ``new_entry_type``.
+    * **archive**: soft-deletes the entry by setting ``status=archived``.
+
+    Args:
+        store: Initialised ``DuckDBStore``.
+        arguments: Raw MCP tool arguments dict.
+
+    Returns:
+        MCP content list with the serialised updated entry or an error.
+    """
+    from datetime import datetime, timezone
+    from distillery.models import EntryType, EntryStatus
+
+    # --- input validation ---------------------------------------------------
+    err = validate_required(arguments, "entry_id", "action")
+    if err:
+        return error_response("INVALID_INPUT", err)
+
+    entry_id: str = arguments["entry_id"]
+    action: str = arguments["action"]
+
+    if action not in _VALID_REVIEW_ACTIONS:
+        return error_response(
+            "INVALID_INPUT",
+            f"Invalid action {action!r}. Must be one of: {', '.join(sorted(_VALID_REVIEW_ACTIONS))}.",
+        )
+
+    # --- retrieve existing entry --------------------------------------------
+    try:
+        entry = await store.get(entry_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error fetching entry id=%s for resolve_review", entry_id)
+        return error_response("STORE_ERROR", f"Failed to retrieve entry: {exc}")
+
+    if entry is None:
+        return error_response(
+            "NOT_FOUND",
+            f"No entry found with id={entry_id!r}.",
+            details={"entry_id": entry_id},
+        )
+
+    # --- build updates per action -------------------------------------------
+    now = datetime.now(tz=timezone.utc).isoformat()
+    reviewer: str | None = arguments.get("reviewer")
+    new_metadata: dict[str, Any] = dict(entry.metadata)
+
+    updates: dict[str, Any] = {}
+
+    if action == "approve":
+        updates["status"] = EntryStatus.ACTIVE
+        new_metadata["reviewed_at"] = now
+        if reviewer:
+            new_metadata["reviewed_by"] = reviewer
+        updates["metadata"] = new_metadata
+
+    elif action == "reclassify":
+        new_type_str: str | None = arguments.get("new_entry_type")
+        if not new_type_str:
+            return error_response(
+                "INVALID_INPUT",
+                "Field 'new_entry_type' is required when action='reclassify'.",
+            )
+        if new_type_str not in _VALID_ENTRY_TYPES:
+            return error_response(
+                "INVALID_INPUT",
+                f"Invalid new_entry_type {new_type_str!r}. "
+                f"Must be one of: {', '.join(sorted(_VALID_ENTRY_TYPES))}.",
+            )
+        new_metadata["reclassified_from"] = entry.entry_type.value
+        new_metadata["reviewed_at"] = now
+        if reviewer:
+            new_metadata["reviewed_by"] = reviewer
+        updates["entry_type"] = EntryType(new_type_str)
+        updates["metadata"] = new_metadata
+
+    elif action == "archive":
+        updates["status"] = EntryStatus.ARCHIVED
+        new_metadata["archived_at"] = now
+        if reviewer:
+            new_metadata["archived_by"] = reviewer
+        updates["metadata"] = new_metadata
+
+    # --- persist ------------------------------------------------------------
+    try:
+        updated_entry = await store.update(entry_id, updates)
+    except KeyError:
+        return error_response(
+            "NOT_FOUND",
+            f"No entry found with id={entry_id!r}.",
+            details={"entry_id": entry_id},
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error updating entry id=%s during resolve_review", entry_id)
+        return error_response("STORE_ERROR", f"Failed to update entry: {exc}")
+
+    return success_response(updated_entry.to_dict())
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,24 @@
+Type: file
+Check: New tool handlers exist in src/distillery/mcp/server.py
+Expected: _handle_classify, _handle_review_queue, _handle_resolve_review functions present;
+          10 tools registered in _list_tools; dispatch cases added to _call_tool
+Timestamp: 2026-03-22T00:00:00Z
+
+Files verified:
+  src/distillery/mcp/server.py
+    - _handle_classify: PRESENT (stores pre-computed classification, merges tags,
+      sets status based on confidence threshold, records reclassified_from on re-runs)
+    - _handle_review_queue: PRESENT (lists pending_review entries with content preview
+      and classification metadata, supports entry_type filter and limit)
+    - _handle_resolve_review: PRESENT (approve/reclassify/archive actions,
+      records reviewer, sets appropriate metadata fields)
+    - _list_tools: 10 tools registered (was 7)
+    - _call_tool: dispatch cases for 3 new tools added
+
+  tests/test_mcp_classify.py
+    - 27 test cases covering all 3 tools and the end-to-end flow
+
+Tool count change: 7 -> 10 (task specified server grows from 7 to 10 tools;
+  11th tool is in T03).
+
+Status: PASS
