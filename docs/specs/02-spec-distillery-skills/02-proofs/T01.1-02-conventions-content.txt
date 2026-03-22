@@ -1,0 +1,48 @@
+Type: file
+Description: Verify CONVENTIONS.md exists and contains required sections
+Command: wc -l ./.claude/skills/CONVENTIONS.md && head -30 ./.claude/skills/CONVENTIONS.md
+Expected: File exists with sections for SKILL.md structure, author ID, project ID, MCP detection, error handling, and metadata
+Timestamp: 2026-03-22T09:03:30Z
+
+OUTPUT:
+-------
+     424 ./.claude/skills/CONVENTIONS.md
+
+# Distillery Skills — Shared Conventions
+
+This document establishes the common patterns and conventions used by all Distillery skills (`/distill`, `/recall`, `/pour`, `/bookmark`, `/minutes`).
+
+## SKILL.md Structure
+
+All skills follow the same structure for consistency and clarity:
+
+```yaml
+---
+name: <skill-name>
+description: "Description of the skill's purpose and trigger phrases (case-insensitive: e.g., 'use when user says ...', 'triggered by ...')"
+---
+
+# <Skill Name> — Purpose/Tagline
+
+One-sentence introduction of what the skill does.
+
+## When to Use
+
+- Bullet list of situations when the user should invoke this skill
+- Common invocation phrases (e.g., "when user says 'save knowledge', 'capture this'")
+
+## Process
+
+VERIFICATION:
+✓ File exists: ./.claude/skills/CONVENTIONS.md (424 lines)
+✓ Contains SKILL.md Structure section
+✓ Contains Author Identification section
+✓ Contains Project Identification section
+✓ Contains MCP Unavailability Detection section
+✓ Contains Error Handling section
+✓ Contains Tag Extraction section
+✓ Contains Common MCP Tools section
+✓ Contains Metadata Storage section
+✓ Contains Response Provenance section
+
+Status: PASS

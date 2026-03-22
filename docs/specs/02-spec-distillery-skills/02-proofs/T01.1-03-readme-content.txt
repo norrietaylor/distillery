@@ -1,0 +1,37 @@
+Type: file
+Description: Verify README.md exists and documents skill usage
+Command: wc -l ./.claude/skills/README.md && grep -E "^##|^-.*\/" ./.claude/skills/README.md | head -20
+Expected: File exists with sections for setup, usage, skills list, conventions, and debugging
+Timestamp: 2026-03-22T09:03:35Z
+
+OUTPUT:
+-------
+     89 ./.claude/skills/README.md
+
+## Available Skills
+- **`distill/`** — `/distill` — Capture session knowledge with duplicate detection
+- **`recall/`** — `/recall` — Semantic search for knowledge entries
+- **`pour/`** — `/pour` — Multi-entry synthesis and deep dives
+- **`bookmark/`** — `/bookmark` — Store and summarize URLs
+- **`minutes/`** — `/minutes` — Create and update meeting notes
+## Getting Started
+## Set Up the Distillery MCP Server
+## Using a Skill
+## Skill Structure
+## Conventions
+## Developing New Skills
+## MCP Tools Available
+## Debugging
+
+VERIFICATION:
+✓ File exists: ./.claude/skills/README.md (89 lines)
+✓ Contains "Available Skills" section with all 5 skills listed
+✓ Contains "Getting Started" section
+✓ Contains "Using a Skill" section with example commands
+✓ Contains "Skill Structure" section
+✓ Contains "Conventions" reference
+✓ Contains "Developing New Skills" section
+✓ Contains "MCP Tools Available" section with all 7 tools
+✓ Contains "Debugging" section
+
+Status: PASS
