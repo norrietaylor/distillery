@@ -1,0 +1,62 @@
+Type: test
+Command: python3 -c "... comprehensive inline test ..."
+Expected: All 13 test cases pass for search(), find_similar(), list_entries()
+Timestamp: 2026-03-21T00:00:00Z
+Status: PASS
+
+Output:
+=== Test 1: search() with no filters ===
+Results count: 5
+Top result: JavaScript frontend framework comparison... (score=0.9416)
+PASS
+
+=== Test 2: search() with entry_type filter ===
+Results count: 2
+PASS
+
+=== Test 3: search() with author filter ===
+Results count: 3
+PASS
+
+=== Test 4: search() with tags filter ===
+Results count: 2
+PASS
+
+=== Test 5: search() with project filter ===
+Results count: 1
+PASS
+
+=== Test 6: search() with limit ===
+Results count: 2
+PASS
+
+=== Test 7: find_similar() ===
+Results count: 2
+Top result: Python async programming patterns... (score=1.0000)
+PASS
+
+=== Test 8: find_similar() with high threshold returns fewer results ===
+Low threshold: 4 results, High threshold: 0 results
+PASS
+
+=== Test 9: list_entries() no filters ===
+Results count: 5
+PASS
+
+=== Test 10: list_entries() with author filter ===
+Results count: 3
+PASS
+
+=== Test 11: list_entries() with pagination ===
+Page 1: 2, Page 2: 2, Page 3: 1
+PASS
+
+=== Test 12: list_entries() with status filter ===
+Results count: 1
+PASS
+
+=== Test 13: list_entries() with entry_type list filter ===
+Results count: 3
+PASS
+
+ALL TESTS PASSED

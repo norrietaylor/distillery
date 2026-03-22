@@ -9,18 +9,23 @@ This module provides:
   - VSS extension loading and HNSW index creation
   - Async wrappers around synchronous DuckDB operations
 
-CRUD operations and search methods are added by subsequent tasks (T02.3, T02.4).
+CRUD operations are added by T02.3; search, find_similar, and list_entries
+are implemented below (T02.4).
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import duckdb
+
+from distillery.models import Entry, EntryStatus
 
 if TYPE_CHECKING:
     from distillery.embedding.protocol import EmbeddingProvider
@@ -196,24 +201,293 @@ class DuckDBStore:
         return self._embedding_provider
 
     # ------------------------------------------------------------------
-    # Stub protocol methods (to be implemented by T02.3 and T02.4)
+    # CRUD protocol methods (T02.3)
     # ------------------------------------------------------------------
 
-    async def store(self, entry: Any) -> str:
-        """Persist a new entry and return its ID."""
-        raise NotImplementedError("store() will be implemented in T02.3")
+    # Fields that callers may never overwrite via update().
+    _IMMUTABLE_FIELDS = frozenset({"id", "created_at", "source"})
 
-    async def get(self, entry_id: str) -> Any:
-        """Retrieve an entry by its ID."""
-        raise NotImplementedError("get() will be implemented in T02.3")
+    def _sync_store(self, entry: "Entry") -> str:
+        """Synchronous implementation of store(); called via asyncio.to_thread."""
+        conn = self.connection
+        dimensions = self._embedding_provider.dimensions
+        # Placeholder embedding: all zeros until embedding provider is wired
+        # in T03.4.  The column is FLOAT[] so we pass a list of floats.
+        placeholder_embedding = [0.0] * dimensions
 
-    async def update(self, entry_id: str, updates: dict) -> Any:
-        """Apply a partial update to an existing entry."""
-        raise NotImplementedError("update() will be implemented in T02.3")
+        sql = (
+            "INSERT INTO entries "
+            "(id, content, entry_type, source, author, project, tags, status, "
+            " metadata, created_at, updated_at, version, embedding) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        )
+        params = [
+            entry.id,
+            entry.content,
+            entry.entry_type.value,
+            entry.source.value,
+            entry.author,
+            entry.project,
+            list(entry.tags),
+            entry.status.value,
+            json.dumps(entry.metadata),
+            entry.created_at,
+            entry.updated_at,
+            entry.version,
+            placeholder_embedding,
+        ]
+        conn.execute(sql, params)
+        logger.debug("Stored entry id=%s", entry.id)
+        return entry.id
+
+    async def store(self, entry: "Entry") -> str:
+        """Persist a new entry and return its ID.
+
+        The embedding column is populated with a zero-vector placeholder
+        until the embedding provider is integrated in T03.4.
+
+        Returns:
+            The UUID string of the stored entry.
+        """
+        return await asyncio.to_thread(self._sync_store, entry)
+
+    def _sync_get(self, entry_id: str) -> "Entry | None":
+        """Synchronous implementation of get(); called via asyncio.to_thread."""
+        conn = self.connection
+        sql = (
+            f"SELECT {self._ENTRY_COLUMNS} FROM entries WHERE id = ?"
+        )
+        result = conn.execute(sql, [entry_id])
+        col_names = [desc[0] for desc in result.description]
+        row = result.fetchone()
+        if row is None:
+            return None
+        return self._row_to_entry(row, col_names)
+
+    async def get(self, entry_id: str) -> "Entry | None":
+        """Retrieve an entry by its ID.
+
+        Returns:
+            The matching ``Entry``, or ``None`` if the ID does not exist.
+        """
+        return await asyncio.to_thread(self._sync_get, entry_id)
+
+    def _sync_update(self, entry_id: str, updates: dict) -> "Entry":
+        """Synchronous implementation of update(); called via asyncio.to_thread."""
+        # Reject attempts to change immutable fields.
+        bad_keys = self._IMMUTABLE_FIELDS & updates.keys()
+        if bad_keys:
+            raise ValueError(
+                f"Cannot update immutable field(s): {', '.join(sorted(bad_keys))}"
+            )
+
+        conn = self.connection
+
+        # Verify the entry exists first.
+        check_sql = "SELECT id FROM entries WHERE id = ?"
+        check_result = conn.execute(check_sql, [entry_id])
+        if check_result.fetchone() is None:
+            raise KeyError(f"No entry found with id={entry_id!r}")
+
+        now = datetime.now(tz=timezone.utc)
+
+        # Build SET clause from the caller-supplied updates plus system fields.
+        set_parts: list[str] = []
+        set_params: list[Any] = []
+
+        for key, value in updates.items():
+            set_parts.append(f"{key} = ?")
+            # Serialise enum values to their string representation.
+            if hasattr(value, "value"):
+                set_params.append(value.value)
+            elif key == "metadata" and isinstance(value, dict):
+                set_params.append(json.dumps(value))
+            elif key == "tags" and isinstance(value, list):
+                set_params.append(list(value))
+            else:
+                set_params.append(value)
+
+        # Always increment version and refresh updated_at.
+        set_parts.append("version = version + 1")
+        set_parts.append("updated_at = ?")
+        set_params.append(now)
+
+        set_sql = ", ".join(set_parts)
+        sql = f"UPDATE entries SET {set_sql} WHERE id = ?"
+        set_params.append(entry_id)
+
+        conn.execute(sql, set_params)
+        logger.debug("Updated entry id=%s", entry_id)
+
+        # Re-fetch to return the updated state.
+        fetch_result = conn.execute(
+            f"SELECT {self._ENTRY_COLUMNS} FROM entries WHERE id = ?",
+            [entry_id],
+        )
+        col_names = [desc[0] for desc in fetch_result.description]
+        row = fetch_result.fetchone()
+        if row is None:  # pragma: no cover -- shouldn't happen after update
+            raise KeyError(f"Entry disappeared after update: id={entry_id!r}")
+        return self._row_to_entry(row, col_names)
+
+    async def update(self, entry_id: str, updates: dict) -> "Entry":
+        """Apply a partial update to an existing entry.
+
+        Increments ``version`` by 1 and refreshes ``updated_at`` to the
+        current UTC time.  Attempts to update ``id``, ``created_at``, or
+        ``source`` are rejected with a ``ValueError``.
+
+        Raises:
+            ValueError: If ``updates`` contains any immutable field.
+            KeyError: If no entry with ``entry_id`` exists.
+
+        Returns:
+            The updated ``Entry``.
+        """
+        return await asyncio.to_thread(self._sync_update, entry_id, updates)
+
+    def _sync_delete(self, entry_id: str) -> bool:
+        """Synchronous implementation of delete(); called via asyncio.to_thread."""
+        conn = self.connection
+        now = datetime.now(tz=timezone.utc)
+        sql = (
+            "UPDATE entries SET status = ?, updated_at = ? WHERE id = ?"
+        )
+        conn.execute(sql, [EntryStatus.ARCHIVED.value, now, entry_id])
+
+        # Check whether any row was actually affected by inspecting row count.
+        count_result = conn.execute(
+            "SELECT COUNT(*) FROM entries WHERE id = ? AND status = ?",
+            [entry_id, EntryStatus.ARCHIVED.value],
+        )
+        count = count_result.fetchone()[0]
+        found = count > 0
+        if found:
+            logger.debug("Soft-deleted (archived) entry id=%s", entry_id)
+        else:
+            logger.debug("delete() called for non-existent entry id=%s", entry_id)
+        return found
 
     async def delete(self, entry_id: str) -> bool:
-        """Soft-delete an entry by setting its status to ``archived``."""
-        raise NotImplementedError("delete() will be implemented in T02.3")
+        """Soft-delete an entry by setting its status to ``archived``.
+
+        Returns:
+            ``True`` if the entry was found and archived, ``False`` otherwise.
+        """
+        return await asyncio.to_thread(self._sync_delete, entry_id)
+
+    # ------------------------------------------------------------------
+    # Filter helpers (shared by search, find_similar, list_entries)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_filter_clauses(
+        filters: dict | None,
+    ) -> tuple[list[str], list[Any]]:
+        """Translate a user-facing filter dict into SQL WHERE fragments.
+
+        Returns a tuple of ``(clauses, params)`` where each clause is a SQL
+        expression using ``?`` placeholders and *params* contains the
+        corresponding bind values in order.
+
+        Supported filter keys
+        ---------------------
+        - ``entry_type`` (str | list[str])
+        - ``author`` (str)
+        - ``project`` (str)
+        - ``tags`` (list[str]) -- matches entries containing *any* listed tag
+        - ``status`` (str)
+        - ``date_from`` (datetime | str) -- inclusive lower bound on ``created_at``
+        - ``date_to`` (datetime | str) -- inclusive upper bound on ``created_at``
+        """
+        if not filters:
+            return [], []
+
+        clauses: list[str] = []
+        params: list[Any] = []
+
+        if "entry_type" in filters:
+            val = filters["entry_type"]
+            if isinstance(val, list):
+                placeholders = ", ".join("?" for _ in val)
+                clauses.append(f"entry_type IN ({placeholders})")
+                params.extend(str(v) for v in val)
+            else:
+                clauses.append("entry_type = ?")
+                params.append(str(val))
+
+        if "author" in filters:
+            clauses.append("author = ?")
+            params.append(filters["author"])
+
+        if "project" in filters:
+            clauses.append("project = ?")
+            params.append(filters["project"])
+
+        if "tags" in filters:
+            tag_list = filters["tags"]
+            if tag_list:
+                # list_has_any checks whether the tags array shares any
+                # element with the provided list.
+                clauses.append("list_has_any(tags, ?)")
+                params.append(tag_list)
+
+        if "status" in filters:
+            clauses.append("status = ?")
+            params.append(str(filters["status"]))
+
+        if "date_from" in filters:
+            val = filters["date_from"]
+            if isinstance(val, str):
+                val = datetime.fromisoformat(val)
+            clauses.append("created_at >= ?")
+            params.append(val)
+
+        if "date_to" in filters:
+            val = filters["date_to"]
+            if isinstance(val, str):
+                val = datetime.fromisoformat(val)
+            clauses.append("created_at <= ?")
+            params.append(val)
+
+        return clauses, params
+
+    def _row_to_entry(self, row: tuple, columns: list[str]) -> "Entry":
+        """Convert a DuckDB result row into an ``Entry`` instance.
+
+        Parameters
+        ----------
+        row:
+            A single row tuple from a ``fetchall()`` call.
+        columns:
+            Column names corresponding to each position in *row*.
+        """
+        from distillery.models import Entry
+
+        data: dict[str, Any] = dict(zip(columns, row))
+
+        # Tags come back as a Python list from DuckDB VARCHAR[].
+        if data.get("tags") is None:
+            data["tags"] = []
+
+        # Metadata stored as JSON string needs parsing.
+        meta = data.get("metadata")
+        if isinstance(meta, str):
+            data["metadata"] = json.loads(meta)
+        elif meta is None:
+            data["metadata"] = {}
+
+        return Entry.from_dict(data)
+
+    # Column list used by search / find_similar (excludes ``embedding``).
+    _ENTRY_COLUMNS = (
+        "id, content, entry_type, source, author, project, "
+        "tags, status, metadata, created_at, updated_at, version"
+    )
+
+    # ------------------------------------------------------------------
+    # Search / similarity / listing (T02.4)
+    # ------------------------------------------------------------------
 
     async def search(
         self,
@@ -221,8 +495,53 @@ class DuckDBStore:
         filters: dict | None,
         limit: int,
     ) -> list:
-        """Perform semantic search with optional metadata filters."""
-        raise NotImplementedError("search() will be implemented in T02.4")
+        """Perform semantic search with optional metadata filters.
+
+        Embeds *query* via the configured embedding provider, then uses the
+        HNSW index to find nearest neighbours by cosine similarity.  Metadata
+        filters are applied as SQL ``WHERE`` predicates.
+
+        Returns a ``list[SearchResult]`` sorted by descending similarity.
+        """
+        from distillery.store.protocol import SearchResult
+
+        embedding = self._embedding_provider.embed(query)
+
+        def _sync() -> list:
+            conn = self.connection
+
+            where_clauses, params = self._build_filter_clauses(filters)
+            where_sql = ""
+            if where_clauses:
+                where_sql = "WHERE " + " AND ".join(where_clauses)
+
+            # DuckDB's array_cosine_similarity returns a value in [-1, 1].
+            # We normalise to [0, 1] for the SearchResult.score field.
+            sql = (
+                f"SELECT {self._ENTRY_COLUMNS}, "
+                f"array_cosine_similarity(embedding, ?::FLOAT[{self._embedding_provider.dimensions}]) AS score "
+                f"FROM entries "
+                f"{where_sql} "
+                f"ORDER BY score DESC "
+                f"LIMIT ?"
+            )
+            all_params = [embedding] + params + [limit]
+            result = conn.execute(sql, all_params)
+            col_names = [desc[0] for desc in result.description]
+
+            rows = result.fetchall()
+            results: list[SearchResult] = []
+            for row in rows:
+                row_dict = dict(zip(col_names, row))
+                score = float(row_dict.pop("score"))
+                entry = self._row_to_entry(
+                    tuple(row_dict.values()),
+                    list(row_dict.keys()),
+                )
+                results.append(SearchResult(entry=entry, score=score))
+            return results
+
+        return await asyncio.to_thread(_sync)
 
     async def find_similar(
         self,
@@ -230,8 +549,43 @@ class DuckDBStore:
         threshold: float,
         limit: int,
     ) -> list:
-        """Find entries whose cosine similarity exceeds *threshold*."""
-        raise NotImplementedError("find_similar() will be implemented in T02.4")
+        """Find entries whose cosine similarity to *content* exceeds *threshold*.
+
+        Returns a ``list[SearchResult]`` with ``score >= threshold``, sorted by
+        descending similarity.
+        """
+        from distillery.store.protocol import SearchResult
+
+        embedding = self._embedding_provider.embed(content)
+
+        def _sync() -> list:
+            conn = self.connection
+
+            sql = (
+                f"SELECT {self._ENTRY_COLUMNS}, "
+                f"array_cosine_similarity(embedding, ?::FLOAT[{self._embedding_provider.dimensions}]) AS score "
+                f"FROM entries "
+                f"WHERE array_cosine_similarity(embedding, ?::FLOAT[{self._embedding_provider.dimensions}]) >= ? "
+                f"ORDER BY score DESC "
+                f"LIMIT ?"
+            )
+            params = [embedding, embedding, threshold, limit]
+            result = conn.execute(sql, params)
+            col_names = [desc[0] for desc in result.description]
+
+            rows = result.fetchall()
+            results: list[SearchResult] = []
+            for row in rows:
+                row_dict = dict(zip(col_names, row))
+                score = float(row_dict.pop("score"))
+                entry = self._row_to_entry(
+                    tuple(row_dict.values()),
+                    list(row_dict.keys()),
+                )
+                results.append(SearchResult(entry=entry, score=score))
+            return results
+
+        return await asyncio.to_thread(_sync)
 
     async def list_entries(
         self,
@@ -239,5 +593,36 @@ class DuckDBStore:
         limit: int,
         offset: int,
     ) -> list:
-        """List entries with optional filtering and pagination."""
-        raise NotImplementedError("list_entries() will be implemented in T02.4")
+        """List entries with optional metadata filtering and pagination.
+
+        Unlike ``search``, this method does **not** perform semantic ranking.
+        Results are ordered by ``created_at`` descending (newest first).
+
+        Returns a ``list[Entry]``.
+        """
+
+        def _sync() -> list:
+            conn = self.connection
+
+            where_clauses, params = self._build_filter_clauses(filters)
+            where_sql = ""
+            if where_clauses:
+                where_sql = "WHERE " + " AND ".join(where_clauses)
+
+            sql = (
+                f"SELECT {self._ENTRY_COLUMNS} "
+                f"FROM entries "
+                f"{where_sql} "
+                f"ORDER BY created_at DESC "
+                f"LIMIT ? OFFSET ?"
+            )
+            all_params = params + [limit, offset]
+            result = conn.execute(sql, all_params)
+            col_names = [desc[0] for desc in result.description]
+
+            rows = result.fetchall()
+            return [
+                self._row_to_entry(row, col_names) for row in rows
+            ]
+
+        return await asyncio.to_thread(_sync)
