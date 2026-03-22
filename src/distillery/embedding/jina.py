@@ -1,0 +1,1 @@
+"""Jina embedding provider implementation."""

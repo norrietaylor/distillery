@@ -1,0 +1,31 @@
+Type: file
+Description: Project structure verification
+Expected: Full directory structure with __init__.py and placeholder modules
+Timestamp: 2026-03-21T00:00:00Z
+
+=== Directory Structure ===
+/Users/norrie/code/distillery/pyproject.toml
+/Users/norrie/code/distillery/src/distillery/__init__.py
+/Users/norrie/code/distillery/src/distillery/config.py
+/Users/norrie/code/distillery/src/distillery/embedding/__init__.py
+/Users/norrie/code/distillery/src/distillery/embedding/jina.py
+/Users/norrie/code/distillery/src/distillery/embedding/openai.py
+/Users/norrie/code/distillery/src/distillery/embedding/protocol.py
+/Users/norrie/code/distillery/src/distillery/mcp/__init__.py
+/Users/norrie/code/distillery/src/distillery/mcp/server.py
+/Users/norrie/code/distillery/src/distillery/models.py
+/Users/norrie/code/distillery/src/distillery/store/__init__.py
+/Users/norrie/code/distillery/src/distillery/store/duckdb.py
+/Users/norrie/code/distillery/src/distillery/store/protocol.py
+/Users/norrie/code/distillery/tests/__init__.py
+
+=== Verification ===
+✓ pyproject.toml exists
+✓ src/distillery/ package created
+✓ src/distillery/store/ subpackage created with __init__.py
+✓ src/distillery/embedding/ subpackage created with __init__.py
+✓ src/distillery/mcp/ subpackage created with __init__.py
+✓ tests/ directory created
+✓ All placeholder modules created (config.py, models.py, protocol.py, etc.)
+
+Status: PASS
