@@ -1,0 +1,75 @@
+Type: cli
+Task: T04.3
+Tool: distillery_find_similar
+Timestamp: 2026-03-22T00:18:00Z
+Expected: distillery_find_similar handler accepts content string + optional threshold
+          (default 0.8) + optional limit (default 10). Returns JSON with 'results'
+          list (score + entry), 'count', and 'threshold'. Validates that threshold
+          is in [0.0, 1.0]. Content field is required.
+
+Command: python3 -c "
+import asyncio, json
+from distillery.mcp.server import _handle_find_similar
+from distillery.store.duckdb import DuckDBStore
+from distillery.mcp._stub_embedding import StubEmbeddingProvider
+from distillery.models import Entry, EntryType, EntrySource
+
+async def test():
+    provider = StubEmbeddingProvider(dimensions=4)
+    store = DuckDBStore(db_path=':memory:', embedding_provider=provider)
+    await store.initialize()
+
+    # Test: missing content
+    r = await _handle_find_similar(store, {})
+    data = json.loads(r[0].text)
+    assert data['error'] == True
+    assert data['code'] == 'VALIDATION_ERROR'
+    print('PASS: validation error on missing content')
+
+    # Test: invalid threshold > 1.0
+    r = await _handle_find_similar(store, {'content': 'test', 'threshold': 1.5})
+    data = json.loads(r[0].text)
+    assert data['error'] == True
+    assert 'threshold' in data['message']
+    print('PASS: validation error on threshold > 1.0')
+
+    # Test: invalid threshold < 0.0
+    r = await _handle_find_similar(store, {'content': 'test', 'threshold': -0.1})
+    data = json.loads(r[0].text)
+    assert data['error'] == True
+    print('PASS: validation error on threshold < 0.0')
+
+    # Test: valid call with defaults
+    r = await _handle_find_similar(store, {'content': 'hello world'})
+    data = json.loads(r[0].text)
+    assert 'results' in data
+    assert 'count' in data
+    assert data['threshold'] == 0.8
+    print(f'PASS: find_similar with defaults: threshold={data[\"threshold\"]}, count={data[\"count\"]}')
+
+    # Test: custom threshold
+    r = await _handle_find_similar(store, {'content': 'test', 'threshold': 0.95, 'limit': 5})
+    data = json.loads(r[0].text)
+    assert data['threshold'] == 0.95
+    print(f'PASS: find_similar custom threshold=0.95, count={data[\"count\"]}')
+
+asyncio.run(test())
+"
+
+Output:
+PASS: validation error on missing content
+PASS: validation error on threshold > 1.0
+PASS: validation error on threshold < 0.0
+PASS: find_similar with defaults: threshold=0.8, count=0
+PASS: find_similar custom threshold=0.95, count=0
+
+Status: PASS
+
+Notes:
+- distillery_find_similar tool registered in _list_tools with full inputSchema
+- dispatch added in _call_tool: tool_name == 'distillery_find_similar' -> _handle_find_similar
+- _handle_find_similar validates required 'content', threshold in [0.0, 1.0] (default 0.8),
+  limit in [1, 200] (default 10)
+- delegates to store.find_similar(content=..., threshold=..., limit=...)
+- returns success_response({'results': [...], 'count': N, 'threshold': threshold})
+- designed for deduplication: typical use case is threshold >= 0.8

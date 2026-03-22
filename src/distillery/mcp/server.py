@@ -7,8 +7,21 @@ Tools implemented here (T04.1):
   - distillery_status: Returns DB stats (total entries, by type, by status,
     database size, embedding model in use).
 
-Additional tools are added in T04.2 (store, get, update) and T04.3 (search,
-find_similar, list).
+Tools added in T04.2:
+  - distillery_store: Accept content, entry_type, author, project, tags,
+    metadata; store in DB; run find_similar for dedup warnings; return entry
+    ID and any warnings.
+  - distillery_get: Accept entry_id; return full entry or structured error.
+  - distillery_update: Accept entry_id and fields to update; return updated
+    entry or structured error.
+
+Tools added in T04.3:
+  - distillery_search: Accept query string, optional filters, optional limit
+    (default 10); returns entries with cosine similarity scores.
+  - distillery_find_similar: Accept content string and optional threshold
+    (default 0.8); returns similar entries with scores for deduplication.
+  - distillery_list: Accept optional filters, limit, offset; returns entries
+    without semantic ranking (newest first).
 """
 
 from __future__ import annotations
@@ -241,6 +254,264 @@ def create_server(config: DistilleryConfig | None = None) -> Server:
                     "required": [],
                 },
             ),
+            types.Tool(
+                name="distillery_store",
+                description=(
+                    "Store a new knowledge entry in the Distillery knowledge base. "
+                    "Automatically checks for similar existing entries and returns "
+                    "deduplication warnings when similar content is found. "
+                    "Returns the new entry ID and any similarity warnings."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "content": {
+                            "type": "string",
+                            "description": "The full text content of the knowledge entry.",
+                        },
+                        "entry_type": {
+                            "type": "string",
+                            "description": (
+                                "Semantic category of the entry. One of: "
+                                "session, bookmark, minutes, meeting, reference, idea, inbox."
+                            ),
+                        },
+                        "author": {
+                            "type": "string",
+                            "description": "Creator identifier (e.g. a GitHub username).",
+                        },
+                        "project": {
+                            "type": "string",
+                            "description": "Optional project or repository name for scoping.",
+                        },
+                        "tags": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Optional list of string labels for faceted retrieval.",
+                        },
+                        "metadata": {
+                            "type": "object",
+                            "description": "Optional type-specific extension fields.",
+                        },
+                        "dedup_threshold": {
+                            "type": "number",
+                            "description": (
+                                "Cosine similarity threshold for deduplication warnings. "
+                                "Defaults to 0.92. Set to 1.0 to disable."
+                            ),
+                        },
+                        "dedup_limit": {
+                            "type": "integer",
+                            "description": "Maximum number of similar entries to report. Defaults to 3.",
+                        },
+                    },
+                    "required": ["content", "entry_type", "author"],
+                },
+            ),
+            types.Tool(
+                name="distillery_get",
+                description=(
+                    "Retrieve a single knowledge entry by its UUID. "
+                    "Returns the full entry fields or a structured NOT_FOUND error."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "entry_id": {
+                            "type": "string",
+                            "description": "The UUID of the entry to retrieve.",
+                        },
+                    },
+                    "required": ["entry_id"],
+                },
+            ),
+            types.Tool(
+                name="distillery_update",
+                description=(
+                    "Apply a partial update to an existing knowledge entry. "
+                    "Immutable fields (id, created_at, source) cannot be changed. "
+                    "Returns the updated entry or a structured error."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "entry_id": {
+                            "type": "string",
+                            "description": "The UUID of the entry to update.",
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "New text content (triggers re-embedding).",
+                        },
+                        "entry_type": {
+                            "type": "string",
+                            "description": "New entry type.",
+                        },
+                        "author": {
+                            "type": "string",
+                            "description": "New author identifier.",
+                        },
+                        "project": {
+                            "type": "string",
+                            "description": "New project name.",
+                        },
+                        "tags": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Replacement tag list.",
+                        },
+                        "status": {
+                            "type": "string",
+                            "description": "New lifecycle status: active, pending_review, or archived.",
+                        },
+                        "metadata": {
+                            "type": "object",
+                            "description": "Replacement metadata dict.",
+                        },
+                    },
+                    "required": ["entry_id"],
+                },
+            ),
+            types.Tool(
+                name="distillery_search",
+                description=(
+                    "Perform semantic search over the Distillery knowledge base. "
+                    "Embeds the query string and returns entries ranked by cosine "
+                    "similarity. Optional metadata filters narrow the result set. "
+                    "Returns a list of entries with their similarity scores."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Natural-language query string to embed and search.",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of results to return. Defaults to 10.",
+                        },
+                        "entry_type": {
+                            "type": "string",
+                            "description": (
+                                "Filter by entry type. One of: "
+                                "session, bookmark, minutes, meeting, reference, idea, inbox."
+                            ),
+                        },
+                        "author": {
+                            "type": "string",
+                            "description": "Filter by author identifier.",
+                        },
+                        "project": {
+                            "type": "string",
+                            "description": "Filter by project name.",
+                        },
+                        "tags": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Filter to entries containing any of the listed tags.",
+                        },
+                        "status": {
+                            "type": "string",
+                            "description": "Filter by lifecycle status: active, pending_review, or archived.",
+                        },
+                        "date_from": {
+                            "type": "string",
+                            "description": "Inclusive lower bound on created_at (ISO 8601 string).",
+                        },
+                        "date_to": {
+                            "type": "string",
+                            "description": "Inclusive upper bound on created_at (ISO 8601 string).",
+                        },
+                    },
+                    "required": ["query"],
+                },
+            ),
+            types.Tool(
+                name="distillery_find_similar",
+                description=(
+                    "Find knowledge entries similar to a given piece of content. "
+                    "Intended for deduplication checks before storing new content. "
+                    "Returns entries whose cosine similarity to the input exceeds "
+                    "the specified threshold, along with their scores."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "content": {
+                            "type": "string",
+                            "description": "Raw text content to compare against the stored corpus.",
+                        },
+                        "threshold": {
+                            "type": "number",
+                            "description": (
+                                "Minimum cosine similarity (inclusive) for a result to be returned. "
+                                "Defaults to 0.8. Use 0.95 for high-confidence duplicate detection."
+                            ),
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of results to return. Defaults to 10.",
+                        },
+                    },
+                    "required": ["content"],
+                },
+            ),
+            types.Tool(
+                name="distillery_list",
+                description=(
+                    "List knowledge entries with optional metadata filtering and "
+                    "pagination. Unlike distillery_search, this tool does not perform "
+                    "semantic ranking -- results are returned newest first. "
+                    "Returns a list of full entry objects."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of entries to return. Defaults to 20.",
+                        },
+                        "offset": {
+                            "type": "integer",
+                            "description": "Number of entries to skip for pagination. Defaults to 0.",
+                        },
+                        "entry_type": {
+                            "type": "string",
+                            "description": (
+                                "Filter by entry type. One of: "
+                                "session, bookmark, minutes, meeting, reference, idea, inbox."
+                            ),
+                        },
+                        "author": {
+                            "type": "string",
+                            "description": "Filter by author identifier.",
+                        },
+                        "project": {
+                            "type": "string",
+                            "description": "Filter by project name.",
+                        },
+                        "tags": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Filter to entries containing any of the listed tags.",
+                        },
+                        "status": {
+                            "type": "string",
+                            "description": "Filter by lifecycle status: active, pending_review, or archived.",
+                        },
+                        "date_from": {
+                            "type": "string",
+                            "description": "Inclusive lower bound on created_at (ISO 8601 string).",
+                        },
+                        "date_to": {
+                            "type": "string",
+                            "description": "Inclusive upper bound on created_at (ISO 8601 string).",
+                        },
+                    },
+                    "required": [],
+                },
+            ),
         ]
 
     @server.call_tool()
@@ -260,6 +531,24 @@ def create_server(config: DistilleryConfig | None = None) -> Server:
 
         if tool_name == "distillery_status":
             return await _handle_status(store, embedding_provider, cfg)
+
+        if tool_name == "distillery_store":
+            return await _handle_store(store, arguments)
+
+        if tool_name == "distillery_get":
+            return await _handle_get(store, arguments)
+
+        if tool_name == "distillery_update":
+            return await _handle_update(store, arguments)
+
+        if tool_name == "distillery_search":
+            return await _handle_search(store, arguments)
+
+        if tool_name == "distillery_find_similar":
+            return await _handle_find_similar(store, arguments)
+
+        if tool_name == "distillery_list":
+            return await _handle_list(store, arguments)
 
         return error_response("UNKNOWN_TOOL", f"Unknown tool: {tool_name!r}")
 
@@ -357,6 +646,439 @@ def _sync_gather_stats(
         "embedding_dimensions": embedding_dimensions,
         "database_path": db_path,
     }
+
+
+# ---------------------------------------------------------------------------
+# T04.2 tool handlers: store, get, update
+# ---------------------------------------------------------------------------
+
+# Valid entry_type values (mirrors EntryType enum).
+_VALID_ENTRY_TYPES = {
+    "session", "bookmark", "minutes", "meeting", "reference", "idea", "inbox"
+}
+
+# Valid status values (mirrors EntryStatus enum).
+_VALID_STATUSES = {"active", "pending_review", "archived"}
+
+# Fields that callers may never overwrite via distillery_update.
+_IMMUTABLE_FIELDS = {"id", "created_at", "source"}
+
+# Default similarity threshold for deduplication warnings.
+_DEFAULT_DEDUP_THRESHOLD = 0.92
+_DEFAULT_DEDUP_LIMIT = 3
+
+
+async def _handle_store(
+    store: Any,
+    arguments: dict,
+) -> list[types.TextContent]:
+    """Implement the ``distillery_store`` tool.
+
+    Creates a new ``Entry`` from the supplied arguments, persists it via the
+    store, then runs ``find_similar`` to surface any near-duplicate entries
+    that already exist (excluding the just-stored entry).
+
+    Args:
+        store: Initialised ``DuckDBStore``.
+        arguments: Raw MCP tool arguments dict.
+
+    Returns:
+        MCP content list containing ``{"entry_id": ..., "warnings": [...]}``.
+    """
+    from distillery.models import Entry, EntryType, EntrySource
+
+    # --- input validation ---------------------------------------------------
+    err = validate_required(arguments, "content", "entry_type", "author")
+    if err:
+        return error_response("INVALID_INPUT", err)
+
+    entry_type_str = arguments["entry_type"]
+    if entry_type_str not in _VALID_ENTRY_TYPES:
+        return error_response(
+            "INVALID_INPUT",
+            f"Invalid entry_type {entry_type_str!r}. "
+            f"Must be one of: {', '.join(sorted(_VALID_ENTRY_TYPES))}.",
+        )
+
+    tags_err = validate_type(arguments, "tags", list, "list of strings")
+    if tags_err:
+        return error_response("INVALID_INPUT", tags_err)
+
+    metadata_err = validate_type(arguments, "metadata", dict, "object")
+    if metadata_err:
+        return error_response("INVALID_INPUT", metadata_err)
+
+    dedup_threshold = arguments.get("dedup_threshold", _DEFAULT_DEDUP_THRESHOLD)
+    dedup_limit = arguments.get("dedup_limit", _DEFAULT_DEDUP_LIMIT)
+
+    if not isinstance(dedup_threshold, (int, float)):
+        return error_response("INVALID_INPUT", "Field 'dedup_threshold' must be a number")
+    if not isinstance(dedup_limit, int):
+        return error_response("INVALID_INPUT", "Field 'dedup_limit' must be an integer")
+
+    # --- build entry --------------------------------------------------------
+    try:
+        entry = Entry(
+            content=arguments["content"],
+            entry_type=EntryType(entry_type_str),
+            source=EntrySource.CLAUDE_CODE,
+            author=arguments["author"],
+            project=arguments.get("project"),
+            tags=list(arguments.get("tags") or []),
+            metadata=dict(arguments.get("metadata") or {}),
+        )
+    except Exception as exc:  # noqa: BLE001
+        return error_response("INVALID_INPUT", f"Failed to construct entry: {exc}")
+
+    # --- persist ------------------------------------------------------------
+    try:
+        entry_id = await store.store(entry)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error storing entry")
+        return error_response("STORE_ERROR", f"Failed to store entry: {exc}")
+
+    # --- deduplication check ------------------------------------------------
+    warnings: list[dict] = []
+    try:
+        similar = await store.find_similar(
+            content=entry.content,
+            threshold=float(dedup_threshold),
+            limit=dedup_limit + 1,  # +1 because the new entry itself may appear
+        )
+        for result in similar:
+            if result.entry.id != entry_id:
+                warnings.append(
+                    {
+                        "similar_entry_id": result.entry.id,
+                        "score": round(result.score, 4),
+                        "content_preview": result.entry.content[:120],
+                    }
+                )
+                if len(warnings) >= dedup_limit:
+                    break
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("find_similar failed during dedup check: %s", exc)
+        # Non-fatal: still return the stored entry_id.
+
+    response: dict[str, Any] = {"entry_id": entry_id}
+    if warnings:
+        response["warnings"] = warnings
+        response["warning_message"] = (
+            f"Found {len(warnings)} similar existing "
+            f"{'entry' if len(warnings) == 1 else 'entries'}. "
+            "Review before storing to avoid duplicates."
+        )
+    return success_response(response)
+
+
+async def _handle_get(
+    store: Any,
+    arguments: dict,
+) -> list[types.TextContent]:
+    """Implement the ``distillery_get`` tool.
+
+    Args:
+        store: Initialised ``DuckDBStore``.
+        arguments: Raw MCP tool arguments dict (must contain ``entry_id``).
+
+    Returns:
+        MCP content list with the serialised entry or a NOT_FOUND error.
+    """
+    err = validate_required(arguments, "entry_id")
+    if err:
+        return error_response("INVALID_INPUT", err)
+
+    entry_id: str = arguments["entry_id"]
+
+    try:
+        entry = await store.get(entry_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error fetching entry id=%s", entry_id)
+        return error_response("STORE_ERROR", f"Failed to retrieve entry: {exc}")
+
+    if entry is None:
+        return error_response(
+            "NOT_FOUND",
+            f"No entry found with id={entry_id!r}.",
+            details={"entry_id": entry_id},
+        )
+
+    return success_response(entry.to_dict())
+
+
+async def _handle_update(
+    store: Any,
+    arguments: dict,
+) -> list[types.TextContent]:
+    """Implement the ``distillery_update`` tool.
+
+    Args:
+        store: Initialised ``DuckDBStore``.
+        arguments: Raw MCP tool arguments dict (must contain ``entry_id`` plus
+            at least one updatable field).
+
+    Returns:
+        MCP content list with the serialised updated entry or an error.
+    """
+    from distillery.models import EntryType, EntryStatus
+
+    err = validate_required(arguments, "entry_id")
+    if err:
+        return error_response("INVALID_INPUT", err)
+
+    entry_id: str = arguments["entry_id"]
+
+    # Build the updates dict from all keys except entry_id.
+    updatable_keys = {
+        "content", "entry_type", "author", "project", "tags", "status", "metadata"
+    }
+    updates: dict[str, Any] = {}
+    for key in updatable_keys:
+        if key in arguments:
+            updates[key] = arguments[key]
+
+    # Reject attempts to modify immutable fields.
+    bad_keys = _IMMUTABLE_FIELDS & (set(arguments.keys()) - {"entry_id"})
+    if bad_keys:
+        return error_response(
+            "INVALID_INPUT",
+            f"Cannot update immutable field(s): {', '.join(sorted(bad_keys))}.",
+        )
+
+    if not updates:
+        return error_response(
+            "INVALID_INPUT",
+            "No updatable fields provided. Supply at least one of: "
+            + ", ".join(sorted(updatable_keys))
+            + ".",
+        )
+
+    # --- validate individual fields ----------------------------------------
+    if "entry_type" in updates:
+        et_str = updates["entry_type"]
+        if et_str not in _VALID_ENTRY_TYPES:
+            return error_response(
+                "INVALID_INPUT",
+                f"Invalid entry_type {et_str!r}. "
+                f"Must be one of: {', '.join(sorted(_VALID_ENTRY_TYPES))}.",
+            )
+        updates["entry_type"] = EntryType(et_str)
+
+    if "status" in updates:
+        st_str = updates["status"]
+        if st_str not in _VALID_STATUSES:
+            return error_response(
+                "INVALID_INPUT",
+                f"Invalid status {st_str!r}. "
+                f"Must be one of: {', '.join(sorted(_VALID_STATUSES))}.",
+            )
+        updates["status"] = EntryStatus(st_str)
+
+    tags_err = validate_type(updates, "tags", list, "list of strings")
+    if tags_err:
+        return error_response("INVALID_INPUT", tags_err)
+
+    metadata_err = validate_type(updates, "metadata", dict, "object")
+    if metadata_err:
+        return error_response("INVALID_INPUT", metadata_err)
+
+    # --- persist ------------------------------------------------------------
+    try:
+        updated_entry = await store.update(entry_id, updates)
+    except KeyError:
+        return error_response(
+            "NOT_FOUND",
+            f"No entry found with id={entry_id!r}.",
+            details={"entry_id": entry_id},
+        )
+    except ValueError as exc:
+        return error_response("INVALID_INPUT", str(exc))
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error updating entry id=%s", entry_id)
+        return error_response("STORE_ERROR", f"Failed to update entry: {exc}")
+
+    return success_response(updated_entry.to_dict())
+
+
+# ---------------------------------------------------------------------------
+# T04.3 tool handlers: search, find_similar, list
+# ---------------------------------------------------------------------------
+
+
+def _build_filters_from_arguments(arguments: dict) -> dict | None:
+    """Extract known filter keys from *arguments* into a filters dict.
+
+    Keys extracted: ``entry_type``, ``author``, ``project``, ``tags``,
+    ``status``, ``date_from``, ``date_to``.
+
+    Args:
+        arguments: The tool argument dict.
+
+    Returns:
+        A dict of filters, or ``None`` if no filter keys are present.
+    """
+    filter_keys = ("entry_type", "author", "project", "tags", "status", "date_from", "date_to")
+    filters: dict = {}
+    for key in filter_keys:
+        if key in arguments and arguments[key] is not None:
+            filters[key] = arguments[key]
+    return filters if filters else None
+
+
+async def _handle_search(
+    store: Any,
+    arguments: dict,
+) -> list[types.TextContent]:
+    """Implement the ``distillery_search`` tool.
+
+    Embeds the query string via the store's embedding provider and returns
+    entries ranked by cosine similarity descending, with optional metadata
+    filters applied.
+
+    Args:
+        store: Initialised :class:`~distillery.store.duckdb.DuckDBStore`.
+        arguments: Tool argument dict containing at minimum ``query``.
+
+    Returns:
+        MCP content list with a JSON payload of ``results`` and ``count``.
+    """
+    err = validate_required(arguments, "query")
+    if err:
+        return error_response("VALIDATION_ERROR", err)
+
+    query: str = arguments["query"]
+
+    limit_raw = arguments.get("limit", 10)
+    err_limit = validate_type(arguments, "limit", int, "integer")
+    if err_limit:
+        return error_response("VALIDATION_ERROR", err_limit)
+    limit = int(limit_raw) if limit_raw is not None else 10
+    if limit < 1:
+        return error_response("VALIDATION_ERROR", "Field 'limit' must be >= 1")
+    if limit > 200:
+        return error_response("VALIDATION_ERROR", "Field 'limit' must be <= 200")
+
+    filters = _build_filters_from_arguments(arguments)
+
+    try:
+        search_results = await store.search(query=query, filters=filters, limit=limit)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error in distillery_search")
+        return error_response("SEARCH_ERROR", f"Search failed: {exc}")
+
+    results = [
+        {"score": round(sr.score, 6), "entry": sr.entry.to_dict()}
+        for sr in search_results
+    ]
+    return success_response({"results": results, "count": len(results)})
+
+
+async def _handle_find_similar(
+    store: Any,
+    arguments: dict,
+) -> list[types.TextContent]:
+    """Implement the ``distillery_find_similar`` tool.
+
+    Embeds *content* and returns stored entries whose cosine similarity
+    exceeds *threshold*, sorted by descending similarity.
+
+    Args:
+        store: Initialised :class:`~distillery.store.duckdb.DuckDBStore`.
+        arguments: Tool argument dict containing at minimum ``content``.
+
+    Returns:
+        MCP content list with a JSON payload of ``results`` and ``count``.
+    """
+    err = validate_required(arguments, "content")
+    if err:
+        return error_response("VALIDATION_ERROR", err)
+
+    content: str = arguments["content"]
+
+    threshold_raw = arguments.get("threshold", 0.8)
+    err_threshold = validate_type(arguments, "threshold", (int, float), "number")
+    if err_threshold:
+        return error_response("VALIDATION_ERROR", err_threshold)
+    threshold = float(threshold_raw) if threshold_raw is not None else 0.8
+    if not (0.0 <= threshold <= 1.0):
+        return error_response("VALIDATION_ERROR", "Field 'threshold' must be in [0.0, 1.0]")
+
+    limit_raw = arguments.get("limit", 10)
+    err_limit = validate_type(arguments, "limit", int, "integer")
+    if err_limit:
+        return error_response("VALIDATION_ERROR", err_limit)
+    limit = int(limit_raw) if limit_raw is not None else 10
+    if limit < 1:
+        return error_response("VALIDATION_ERROR", "Field 'limit' must be >= 1")
+    if limit > 200:
+        return error_response("VALIDATION_ERROR", "Field 'limit' must be <= 200")
+
+    try:
+        search_results = await store.find_similar(
+            content=content, threshold=threshold, limit=limit
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error in distillery_find_similar")
+        return error_response("FIND_SIMILAR_ERROR", f"find_similar failed: {exc}")
+
+    results = [
+        {"score": round(sr.score, 6), "entry": sr.entry.to_dict()}
+        for sr in search_results
+    ]
+    return success_response({"results": results, "count": len(results), "threshold": threshold})
+
+
+async def _handle_list(
+    store: Any,
+    arguments: dict,
+) -> list[types.TextContent]:
+    """Implement the ``distillery_list`` tool.
+
+    Returns entries with optional metadata filtering and pagination.  Unlike
+    ``distillery_search``, no semantic ranking is performed -- results are
+    ordered by ``created_at`` descending (newest first).
+
+    Args:
+        store: Initialised :class:`~distillery.store.duckdb.DuckDBStore`.
+        arguments: Tool argument dict (all fields optional).
+
+    Returns:
+        MCP content list with a JSON payload of ``entries`` and ``count``.
+    """
+    limit_raw = arguments.get("limit", 20)
+    err_limit = validate_type(arguments, "limit", int, "integer")
+    if err_limit:
+        return error_response("VALIDATION_ERROR", err_limit)
+    limit = int(limit_raw) if limit_raw is not None else 20
+    if limit < 1:
+        return error_response("VALIDATION_ERROR", "Field 'limit' must be >= 1")
+    if limit > 500:
+        return error_response("VALIDATION_ERROR", "Field 'limit' must be <= 500")
+
+    offset_raw = arguments.get("offset", 0)
+    err_offset = validate_type(arguments, "offset", int, "integer")
+    if err_offset:
+        return error_response("VALIDATION_ERROR", err_offset)
+    offset = int(offset_raw) if offset_raw is not None else 0
+    if offset < 0:
+        return error_response("VALIDATION_ERROR", "Field 'offset' must be >= 0")
+
+    filters = _build_filters_from_arguments(arguments)
+
+    try:
+        entries = await store.list_entries(filters=filters, limit=limit, offset=offset)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error in distillery_list")
+        return error_response("LIST_ERROR", f"list_entries failed: {exc}")
+
+    return success_response(
+        {
+            "entries": [entry.to_dict() for entry in entries],
+            "count": len(entries),
+            "limit": limit,
+            "offset": offset,
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
