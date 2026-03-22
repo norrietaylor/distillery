@@ -1,0 +1,27 @@
+Type: file
+Description: Verify distillery.yaml.example file exists and contains required sections
+Command: file existence and content check
+Expected: distillery.yaml.example with documented storage, embedding (jina + openai), team, classification sections
+Timestamp: 2026-03-21T00:00:00Z
+
+=== File Verification ===
+
+File: /Users/norrie/code/distillery/distillery.yaml.example
+
+Sections present:
+  [PASS] 'storage:' section found
+  [PASS] '  backend: duckdb' present
+  [PASS] '  database_path: ~/.distillery/distillery.db' present
+  [PASS] 'embedding:' section found
+  [PASS] '  provider: jina' (Jina option) present
+  [PASS] 'provider: openai' (OpenAI option, commented) present
+  [PASS] '  api_key_env: JINA_API_KEY' present
+  [PASS] '  api_key_env: OPENAI_API_KEY' (commented) present
+  [PASS] 'team:' section found
+  [PASS] 'classification:' section found
+  [PASS] '  confidence_threshold: 0.6' present
+
+YAML validity:
+  [PASS] File parses as valid YAML
+
+Status: PASS

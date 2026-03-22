@@ -1,0 +1,43 @@
+Type: test
+Description: Config defaults and YAML loading verification
+Command: python3 inline test suite for config module
+Expected: All config fields load correctly with defaults and from YAML
+Timestamp: 2026-03-21T00:00:00Z
+
+=== Test Results ===
+
+Test Group 1: Default config values (no YAML file)
+  [PASS] storage.backend: 'duckdb' (expected 'duckdb')
+  [PASS] storage.database_path: '~/.distillery/distillery.db' (expected '~/.distillery/distillery.db')
+  [PASS] embedding.model: 'jina-embeddings-v3' (expected 'jina-embeddings-v3')
+  [PASS] embedding.dimensions: 1024 (expected 1024)
+  [PASS] embedding.provider: '' (expected '')
+  [PASS] embedding.api_key_env: '' (expected '')
+  [PASS] team.name: '' (expected '')
+  [PASS] classification.confidence_threshold: 0.6 (expected 0.6)
+
+Test Group 2: Full YAML config with OpenAI provider
+  [PASS] storage.backend: 'duckdb' (expected 'duckdb')
+  [PASS] storage.database_path: '/tmp/mydb.db' (expected '/tmp/mydb.db')
+  [PASS] embedding.provider: 'openai' (expected 'openai')
+  [PASS] embedding.model: 'text-embedding-3-small' (expected 'text-embedding-3-small')
+  [PASS] embedding.dimensions: 1536 (expected 1536)
+  [PASS] embedding.api_key_env: 'OPENAI_API_KEY' (expected 'OPENAI_API_KEY')
+  [PASS] team.name: 'Platform Engineering' (expected 'Platform Engineering')
+  [PASS] classification.confidence_threshold: 0.75 (expected 0.75)
+
+Test Group 3: DISTILLERY_CONFIG env var override
+  [PASS] DISTILLERY_CONFIG env var override: '/env/override.db'
+
+Test Group 4: Validation - invalid provider raises ValueError
+  [PASS] invalid provider raises ValueError: embedding.provider must be one of ['jina', 'openai'], got: 'invalid_backend'
+
+Test Group 5: FileNotFoundError for explicit missing path
+  [PASS] missing explicit path raises FileNotFoundError: Configuration file not found: /nonexistent/path.yaml
+
+Test Group 6: Import structure
+  [PASS] all config dataclasses importable
+
+Overall: PASS
+
+Status: PASS

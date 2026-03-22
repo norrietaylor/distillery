@@ -1,0 +1,54 @@
+# distillery.yaml.example
+#
+# Copy this file to distillery.yaml and fill in the values for your deployment.
+# You can also override the config file path by setting the DISTILLERY_CONFIG
+# environment variable to an absolute or relative path.
+
+# ---------------------------------------------------------------------------
+# Storage settings
+# ---------------------------------------------------------------------------
+storage:
+  # Backend to use for knowledge storage. Currently only 'duckdb' is supported.
+  backend: duckdb
+
+  # Path to the DuckDB database file. Supports ~ for the home directory.
+  database_path: ~/.distillery/distillery.db
+
+# ---------------------------------------------------------------------------
+# Embedding provider settings
+# ---------------------------------------------------------------------------
+# Choose ONE of the provider configurations below and remove (or comment out)
+# the other.
+
+# --- Option A: Jina AI embeddings (default) ---------------------------------
+embedding:
+  provider: jina
+  model: jina-embeddings-v3
+  dimensions: 1024
+  # Name of the environment variable that holds your Jina API key.
+  # Set it in your shell: export JINA_API_KEY=jina_...
+  api_key_env: JINA_API_KEY
+
+# --- Option B: OpenAI embeddings --------------------------------------------
+# embedding:
+#   provider: openai
+#   model: text-embedding-3-small
+#   dimensions: 1536
+#   # Name of the environment variable that holds your OpenAI API key.
+#   # Set it in your shell: export OPENAI_API_KEY=sk-...
+#   api_key_env: OPENAI_API_KEY
+
+# ---------------------------------------------------------------------------
+# Team settings
+# ---------------------------------------------------------------------------
+team:
+  # Human-readable team name used to label stored knowledge entries.
+  name: My Team
+
+# ---------------------------------------------------------------------------
+# Classification settings
+# ---------------------------------------------------------------------------
+classification:
+  # Minimum confidence score [0.0, 1.0] for an auto-classification to be
+  # accepted. Entries with scores below this threshold remain unclassified.
+  confidence_threshold: 0.6

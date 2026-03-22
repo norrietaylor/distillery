@@ -1,0 +1,22 @@
+Type: cli
+Description: Import and instantiate config module from Python CLI
+Command: python3 -c "from distillery.config import load_config; print(load_config())"
+Expected: DistilleryConfig object with all default values printed
+Timestamp: 2026-03-21T00:00:00Z
+
+=== Output ===
+
+DistilleryConfig(storage=StorageConfig(backend='duckdb', database_path='~/.distillery/distillery.db'), embedding=EmbeddingConfig(provider='', model='jina-embeddings-v3', dimensions=1024, api_key_env=''), team=TeamConfig(name=''), classification=ClassificationConfig(confidence_threshold=0.6))
+
+=== Verification ===
+
+- Module imported successfully: YES
+- load_config() called without arguments: YES
+- Returned DistilleryConfig dataclass: YES
+- storage.backend default 'duckdb': YES
+- storage.database_path default '~/.distillery/distillery.db': YES
+- embedding.model default 'jina-embeddings-v3': YES
+- embedding.dimensions default 1024: YES
+- classification.confidence_threshold default 0.6: YES
+
+Status: PASS
