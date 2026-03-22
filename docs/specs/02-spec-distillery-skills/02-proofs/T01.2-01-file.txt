@@ -1,0 +1,34 @@
+Type: file
+Check: .claude/skills/distill/SKILL.md exists and is non-empty
+Expected: File exists with YAML frontmatter and required sections
+Timestamp: 2026-03-22T16:08:30Z
+
+--- OUTPUT ---
+
+File: .claude/skills/distill/SKILL.md
+
+Size: 5,887 bytes (non-empty)
+
+YAML Frontmatter present:
+  name: distill
+  description: "Captures session knowledge and stores distilled decisions and insights. Triggered by: 'distill', 'capture this', 'save knowledge', 'log learnings', or '/distill [content]'."
+
+Required sections found:
+  [PASS] ## When to Use
+  [PASS] ## Process
+  [PASS] ## Output Format
+  [PASS] ## Rules
+  [PASS] ## Prerequisites
+
+Process steps found (9 steps):
+  [PASS] Step 1: Check MCP Availability
+  [PASS] Step 2: Determine Author
+  [PASS] Step 3: Determine Project
+  [PASS] Step 4: Gather Content
+  [PASS] Step 5: Construct Distilled Summary
+  [PASS] Step 6: Check for Duplicates
+  [PASS] Step 7: Extract Tags
+  [PASS] Step 8: Store Entry
+  [PASS] Step 9: Confirm
+
+Status: PASS

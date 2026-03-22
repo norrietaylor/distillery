@@ -1,0 +1,55 @@
+Type: file
+Check: SKILL.md content satisfies all task requirements from T01.2 description
+Expected: All 9 process steps and duplicate detection flow present
+Timestamp: 2026-03-22T16:08:30Z
+
+--- OUTPUT ---
+
+Requirement: YAML frontmatter with name and description triggers
+  name: distill                    [PASS]
+  description includes triggers:
+    - "distill"                    [PASS]
+    - "capture this"               [PASS]
+    - "save knowledge"             [PASS]
+    - "log learnings"              [PASS]
+
+Requirement: When to Use section
+  End of productive session        [PASS]
+  Explicitly asked to capture      [PASS]
+  Explicit content argument        [PASS]
+
+Requirement: Process steps
+
+  Step 1 - MCP availability check (distillery_status)       [PASS]
+  Step 2 - Author: git config -> DISTILLERY_AUTHOR -> ask   [PASS]
+  Step 3 - Project: git repo name -> --project arg -> ask   [PASS]
+  Step 4 - Content from arg or session context              [PASS]
+  Step 5 - Distilled summary construction with preview      [PASS]
+  Step 6 - distillery_find_similar threshold 0.8            [PASS]
+           Store anyway / Merge / Skip options              [PASS]
+           distillery_update on merge                       [PASS]
+  Step 7 - Tag extraction (auto + explicit #tag syntax)     [PASS]
+  Step 8 - distillery_store with all required fields:
+           content, entry_type="session", author, project,
+           tags, metadata.session_id                        [PASS]
+  Step 9 - Confirm stored entry ID                          [PASS]
+
+Requirement: Output Format
+  Preview before storing                                    [PASS]
+  Confirmation after storing with entry ID and project      [PASS]
+  Duplicate comparison table with similarity scores         [PASS]
+
+Requirement: Rules
+  No raw session dumps                                      [PASS]
+  Always check for duplicates                               [PASS]
+  MCP error display                                         [PASS]
+  Respect user choice (store/merge/skip)                    [PASS]
+
+Requirement: MCP tool signatures consistent with server.py
+  distillery_status    (no args)                            [PASS]
+  distillery_find_similar(content, threshold=0.8)           [PASS]
+  distillery_store(content, entry_type, author, project,
+                   tags, metadata)                          [PASS]
+  distillery_update(entry_id, content)                      [PASS]
+
+Status: PASS
