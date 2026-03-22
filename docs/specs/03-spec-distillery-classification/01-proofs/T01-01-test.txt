@@ -1,0 +1,44 @@
+Type: test
+Command: python3 -m pytest tests/test_classification_engine.py -v --tb=short --no-header
+Expected: All classification engine tests pass
+Timestamp: 2026-03-22T00:00:00Z
+
+============================= test session starts ==============================
+collecting ... collected 32 items
+
+tests/test_classification_engine.py::TestClassificationByType::test_classifies_each_entry_type[session-session] PASSED [  3%]
+tests/test_classification_engine.py::TestClassificationByType::test_classifies_each_entry_type[bookmark-bookmark] PASSED [  6%]
+tests/test_classification_engine.py::TestClassificationByType::test_classifies_each_entry_type[minutes-minutes] PASSED [  9%]
+tests/test_classification_engine.py::TestClassificationByType::test_classifies_each_entry_type[meeting-meeting] PASSED [ 12%]
+tests/test_classification_engine.py::TestClassificationByType::test_classifies_each_entry_type[reference-reference] PASSED [ 15%]
+tests/test_classification_engine.py::TestClassificationByType::test_classifies_each_entry_type[idea-idea] PASSED [ 18%]
+tests/test_classification_engine.py::TestClassificationByType::test_classifies_each_entry_type[inbox-inbox] PASSED [ 21%]
+tests/test_classification_engine.py::TestClassificationByType::test_session_entry_type_with_high_confidence PASSED [ 25%]
+tests/test_classification_engine.py::TestClassificationByType::test_bookmark_entry_type PASSED [ 28%]
+tests/test_classification_engine.py::TestClassificationByType::test_meeting_entry_type PASSED [ 31%]
+tests/test_classification_engine.py::TestConfidenceThresholding::test_below_threshold_sets_pending_review PASSED [ 34%]
+tests/test_classification_engine.py::TestConfidenceThresholding::test_at_threshold_sets_active PASSED [ 37%]
+tests/test_classification_engine.py::TestConfidenceThresholding::test_above_threshold_sets_active PASSED [ 40%]
+tests/test_classification_engine.py::TestConfidenceThresholding::test_high_threshold_with_medium_confidence_sets_pending PASSED [ 43%]
+tests/test_classification_engine.py::TestConfidenceThresholding::test_low_threshold_with_low_confidence_sets_active PASSED [ 46%]
+tests/test_classification_engine.py::TestParseFailure::test_malformed_non_json_returns_inbox_fallback PASSED [ 50%]
+tests/test_classification_engine.py::TestParseFailure::test_empty_string_returns_fallback PASSED [ 53%]
+tests/test_classification_engine.py::TestParseFailure::test_json_missing_entry_type_returns_fallback PASSED [ 56%]
+tests/test_classification_engine.py::TestParseFailure::test_json_missing_confidence_returns_fallback PASSED [ 59%]
+tests/test_classification_engine.py::TestParseFailure::test_unknown_entry_type_defaults_to_inbox PASSED [ 62%]
+tests/test_classification_engine.py::TestParseFailure::test_markdown_code_fence_stripped_correctly PASSED [ 65%]
+tests/test_classification_engine.py::TestParseFailure::test_code_fence_without_language_stripped PASSED [ 68%]
+tests/test_classification_engine.py::TestOptionalFields::test_suggested_project_extracted PASSED [ 71%]
+tests/test_classification_engine.py::TestOptionalFields::test_null_suggested_project_is_none PASSED [ 75%]
+tests/test_classification_engine.py::TestOptionalFields::test_suggested_tags_extracted PASSED [ 78%]
+tests/test_classification_engine.py::TestOptionalFields::test_empty_suggested_tags_is_empty_list PASSED [ 81%]
+tests/test_classification_engine.py::TestOptionalFields::test_reasoning_is_populated PASSED [ 84%]
+tests/test_classification_engine.py::TestPromptBuilding::test_prompt_contains_content PASSED [ 87%]
+tests/test_classification_engine.py::TestPromptBuilding::test_prompt_lists_all_entry_types PASSED [ 90%]
+tests/test_classification_engine.py::TestPromptBuilding::test_prompt_requests_json_format PASSED [ 93%]
+tests/test_classification_engine.py::TestReturnType::test_returns_classification_result_instance PASSED [ 96%]
+tests/test_classification_engine.py::TestReturnType::test_fallback_returns_classification_result_instance PASSED [100%]
+
+============================== 32 passed in 0.04s ==============================
+
+Status: PASS

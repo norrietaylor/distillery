@@ -1,0 +1,13 @@
+Type: file
+Command: ls -la src/distillery/classification/
+Expected: Package files exist: __init__.py, engine.py, dedup.py, models.py
+Timestamp: 2026-03-22T00:00:00Z
+
+src/distillery/classification/__init__.py  -- public exports
+src/distillery/classification/engine.py    -- ClassificationEngine
+src/distillery/classification/dedup.py     -- DeduplicationChecker
+src/distillery/classification/models.py    -- ClassificationResult, DeduplicationResult, DeduplicationAction
+
+All four required files are present.
+
+Status: PASS

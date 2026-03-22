@@ -1,0 +1,37 @@
+Type: test
+Command: python3 -m pytest tests/test_dedup.py -v --tb=short --no-header
+Expected: All deduplication checker tests pass (all four actions: skip/merge/link/create)
+Timestamp: 2026-03-22T00:00:00Z
+
+============================= test session starts ==============================
+collecting ... collected 25 items
+
+tests/test_dedup.py::TestSkipAction::test_score_at_skip_threshold_returns_skip PASSED [  4%]
+tests/test_dedup.py::TestSkipAction::test_score_above_skip_threshold_returns_skip PASSED [  8%]
+tests/test_dedup.py::TestSkipAction::test_skip_reasoning_mentions_duplicate PASSED [ 12%]
+tests/test_dedup.py::TestSkipAction::test_skip_includes_similar_entries PASSED [ 16%]
+tests/test_dedup.py::TestMergeAction::test_score_at_merge_threshold_returns_merge PASSED [ 20%]
+tests/test_dedup.py::TestMergeAction::test_score_between_merge_and_skip_returns_merge PASSED [ 24%]
+tests/test_dedup.py::TestMergeAction::test_merge_reasoning_mentions_merging PASSED [ 28%]
+tests/test_dedup.py::TestMergeAction::test_merge_includes_similar_entries PASSED [ 32%]
+tests/test_dedup.py::TestLinkAction::test_score_at_link_threshold_returns_link PASSED [ 36%]
+tests/test_dedup.py::TestLinkAction::test_score_between_link_and_merge_returns_link PASSED [ 40%]
+tests/test_dedup.py::TestLinkAction::test_link_includes_similar_entries PASSED [ 44%]
+tests/test_dedup.py::TestLinkAction::test_link_reasoning_mentions_linking PASSED [ 48%]
+tests/test_dedup.py::TestCreateAction::test_no_similar_entries_returns_create PASSED [ 52%]
+tests/test_dedup.py::TestCreateAction::test_create_has_empty_similar_entries PASSED [ 56%]
+tests/test_dedup.py::TestCreateAction::test_create_has_zero_highest_score PASSED [ 60%]
+tests/test_dedup.py::TestCreateAction::test_create_has_reasoning PASSED  [ 64%]
+tests/test_dedup.py::TestDedupLimit::test_dedup_limit_passed_to_store PASSED [ 68%]
+tests/test_dedup.py::TestDedupLimit::test_dedup_limit_3_with_10_results_caps_list PASSED [ 72%]
+tests/test_dedup.py::TestDedupLimit::test_default_dedup_limit_is_5 PASSED [ 76%]
+tests/test_dedup.py::TestStoreCalls::test_find_similar_called_with_link_threshold PASSED [ 80%]
+tests/test_dedup.py::TestStoreCalls::test_find_similar_called_with_content PASSED [ 84%]
+tests/test_dedup.py::TestReturnType::test_returns_deduplication_result_instance PASSED [ 88%]
+tests/test_dedup.py::TestReturnType::test_result_with_entries_is_deduplication_result PASSED [ 92%]
+tests/test_dedup.py::TestHighestScore::test_highest_score_is_first_result_score PASSED [ 96%]
+tests/test_dedup.py::TestHighestScore::test_action_determined_by_highest_score PASSED [100%]
+
+============================== 25 passed in 0.04s ==============================
+
+Status: PASS
