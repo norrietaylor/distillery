@@ -3,6 +3,22 @@
 # Copy this file to distillery.yaml and fill in the values for your deployment.
 # You can also override the config file path by setting the DISTILLERY_CONFIG
 # environment variable to an absolute or relative path.
+#
+# Supported embedding providers
+# ==============================
+# - jina   : Jina AI Embeddings API (https://api.jina.ai/)
+#             Supports Matryoshka truncation for configurable output dimensions.
+#             Uses differentiated task types for storage vs. query embeddings.
+#             Requires: JINA_API_KEY environment variable.
+#             Default model: jina-embeddings-v3 (1024 dimensions)
+#
+# - openai : OpenAI Embeddings API (https://platform.openai.com/)
+#             Supports the `dimensions` parameter for dimension reduction.
+#             Requires: OPENAI_API_KEY environment variable.
+#             Default model: text-embedding-3-small (512 dimensions)
+#
+# Both providers implement exponential backoff retry on HTTP 429 (rate limit)
+# and 5xx server errors (up to 3 retries).
 
 # ---------------------------------------------------------------------------
 # Storage settings
@@ -12,6 +28,7 @@ storage:
   backend: duckdb
 
   # Path to the DuckDB database file. Supports ~ for the home directory.
+  # The parent directory will be created automatically if it does not exist.
   database_path: ~/.distillery/distillery.db
 
 # ---------------------------------------------------------------------------
@@ -19,11 +36,20 @@ storage:
 # ---------------------------------------------------------------------------
 # Choose ONE of the provider configurations below and remove (or comment out)
 # the other.
+#
+# IMPORTANT: Once entries have been stored with a particular embedding model,
+# the database records the model name and dimensions in its _meta table.
+# Changing the provider or dimensions after entries exist will raise a
+# RuntimeError to prevent mixing incompatible embeddings.
 
 # --- Option A: Jina AI embeddings (default) ---------------------------------
 embedding:
   provider: jina
+  # Embedding model to use. jina-embeddings-v3 supports Matryoshka truncation.
   model: jina-embeddings-v3
+  # Number of embedding dimensions. Must be positive. Lower values use less
+  # storage but may reduce retrieval quality.
+  # Recommended: 1024 (full), 512 (compact), 256 (small)
   dimensions: 1024
   # Name of the environment variable that holds your Jina API key.
   # Set it in your shell: export JINA_API_KEY=jina_...
@@ -32,8 +58,13 @@ embedding:
 # --- Option B: OpenAI embeddings --------------------------------------------
 # embedding:
 #   provider: openai
+#   # Embedding model to use. text-embedding-3-small is cost-efficient.
+#   # Other option: text-embedding-3-large (3072 dimensions maximum)
 #   model: text-embedding-3-small
-#   dimensions: 1536
+#   # Number of embedding dimensions. OpenAI supports dimension reduction via
+#   # the `dimensions` API parameter.
+#   # Recommended: 512 (default), 256 (compact), 1536 (maximum for 3-small)
+#   dimensions: 512
 #   # Name of the environment variable that holds your OpenAI API key.
 #   # Set it in your shell: export OPENAI_API_KEY=sk-...
 #   api_key_env: OPENAI_API_KEY
