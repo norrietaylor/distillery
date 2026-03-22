@@ -1,0 +1,37 @@
+Type: cli
+Description: Verify that SKILL.md contains all required sections, modes, and MCP tool references
+Command: python3 content-check script (see below)
+Expected: All 25 content checks PASS
+Timestamp: 2026-03-22T00:00:00Z
+
+--- Checks ---
+  [PASS] YAML frontmatter with name: minutes
+  [PASS] YAML frontmatter description
+  [PASS] When to Use section
+  [PASS] Process section
+  [PASS] New Meeting Mode
+  [PASS] Update Mode
+  [PASS] List Mode
+  [PASS] meeting_id format rule
+  [PASS] distillery_store call
+  [PASS] distillery_update call
+  [PASS] distillery_search call
+  [PASS] distillery_list call
+  [PASS] entry_type minutes
+  [PASS] metadata meeting_id
+  [PASS] metadata attendees
+  [PASS] metadata version
+  [PASS] Update heading format
+  [PASS] Output Format section
+  [PASS] Rules section
+  [PASS] MCP unavailability handling
+  [PASS] Error handling
+  [PASS] author determination
+  [PASS] project determination
+  [PASS] slugified title
+  [PASS] YYYY-MM-DD format
+
+Overall: PASS
+File size: 12039 characters, 450 lines
+
+Status: PASS

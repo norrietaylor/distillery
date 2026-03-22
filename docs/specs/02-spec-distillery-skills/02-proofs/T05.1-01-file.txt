@@ -1,0 +1,10 @@
+Type: file
+Description: Verify that .claude/skills/minutes/SKILL.md exists
+Command: test -f .claude/skills/minutes/SKILL.md && echo "EXISTS" || echo "MISSING"
+Expected: File exists at .claude/skills/minutes/SKILL.md
+Timestamp: 2026-03-22T00:00:00Z
+
+--- Output ---
+EXISTS
+
+Status: PASS
