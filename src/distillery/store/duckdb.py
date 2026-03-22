@@ -60,6 +60,13 @@ USING HNSW (embedding)
 WITH (metric = 'cosine');
 """
 
+_CREATE_META_TABLE = """
+CREATE TABLE IF NOT EXISTS _meta (
+    key   VARCHAR PRIMARY KEY,
+    value VARCHAR NOT NULL
+);
+"""
+
 
 class DuckDBStore:
     """DuckDB-backed implementation of the ``DistilleryStore`` protocol.
@@ -147,11 +154,70 @@ class DuckDBStore:
             # Index already exists -- safe to ignore.
             logger.debug("HNSW index already exists, skipping creation")
 
+    def _create_meta_table(self, conn: duckdb.DuckDBPyConnection) -> None:
+        """Create the ``_meta`` table if it does not exist."""
+        conn.execute(_CREATE_META_TABLE)
+
+    def _validate_or_record_meta(self, conn: duckdb.DuckDBPyConnection) -> None:
+        """Validate or record the embedding model metadata.
+
+        On first use the configured model name and dimensions are persisted
+        in the ``_meta`` table.  On subsequent opens the stored values are
+        compared with the configured provider; a mismatch raises
+        ``RuntimeError`` to prevent mixed-model embeddings.
+        """
+        result = conn.execute(
+            "SELECT key, value FROM _meta WHERE key IN "
+            "('embedding_model', 'embedding_dimensions')"
+        )
+        rows = {row[0]: row[1] for row in result.fetchall()}
+
+        model = self._embedding_provider.model_name
+        dims = str(self._embedding_provider.dimensions)
+
+        if not rows:
+            # First use -- record the model metadata.
+            conn.execute(
+                "INSERT INTO _meta (key, value) VALUES (?, ?)",
+                ["embedding_model", model],
+            )
+            conn.execute(
+                "INSERT INTO _meta (key, value) VALUES (?, ?)",
+                ["embedding_dimensions", dims],
+            )
+            logger.info(
+                "Recorded embedding metadata: model=%s, dimensions=%s",
+                model,
+                dims,
+            )
+            return
+
+        stored_model = rows.get("embedding_model")
+        stored_dims = rows.get("embedding_dimensions")
+
+        if stored_model is not None and stored_model != model:
+            raise RuntimeError(
+                f"Embedding model mismatch: database was populated with "
+                f"{stored_model!r} but the configured provider uses "
+                f"{model!r}. Using different models would produce "
+                f"incompatible embeddings."
+            )
+
+        if stored_dims is not None and stored_dims != dims:
+            raise RuntimeError(
+                f"Embedding dimensions mismatch: database was populated with "
+                f"{stored_dims} dimensions but the configured provider uses "
+                f"{dims}. Using different dimensions would produce "
+                f"incompatible embeddings."
+            )
+
     def _sync_initialize(self) -> None:
         """Synchronous initialisation: open connection, create schema."""
         conn = self._open_connection()
         self._setup_vss(conn)
         self._create_schema(conn)
+        self._create_meta_table(conn)
+        self._validate_or_record_meta(conn)
         self._create_index(conn)
         self._conn = conn
         self._initialized = True
@@ -210,10 +276,7 @@ class DuckDBStore:
     def _sync_store(self, entry: "Entry") -> str:
         """Synchronous implementation of store(); called via asyncio.to_thread."""
         conn = self.connection
-        dimensions = self._embedding_provider.dimensions
-        # Placeholder embedding: all zeros until embedding provider is wired
-        # in T03.4.  The column is FLOAT[] so we pass a list of floats.
-        placeholder_embedding = [0.0] * dimensions
+        embedding = self._embedding_provider.embed(entry.content)
 
         sql = (
             "INSERT INTO entries "
@@ -234,7 +297,7 @@ class DuckDBStore:
             entry.created_at,
             entry.updated_at,
             entry.version,
-            placeholder_embedding,
+            embedding,
         ]
         conn.execute(sql, params)
         logger.debug("Stored entry id=%s", entry.id)
@@ -243,8 +306,8 @@ class DuckDBStore:
     async def store(self, entry: "Entry") -> str:
         """Persist a new entry and return its ID.
 
-        The embedding column is populated with a zero-vector placeholder
-        until the embedding provider is integrated in T03.4.
+        The entry's content is embedded via the configured embedding provider
+        before insertion.
 
         Returns:
             The UUID string of the stored entry.
@@ -306,6 +369,12 @@ class DuckDBStore:
                 set_params.append(list(value))
             else:
                 set_params.append(value)
+
+        # Re-embed when content changes.
+        if "content" in updates:
+            new_embedding = self._embedding_provider.embed(updates["content"])
+            set_parts.append("embedding = ?")
+            set_params.append(new_embedding)
 
         # Always increment version and refresh updated_at.
         set_parts.append("version = version + 1")

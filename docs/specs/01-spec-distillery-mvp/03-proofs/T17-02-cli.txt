@@ -1,0 +1,22 @@
+Type: cli
+Command: python3 -c "<meta table integration script>"
+Expected: Meta table records model/dims, mismatch raises RuntimeError, store/update/search/find_similar use real embeddings
+Timestamp: 2026-03-22T00:00:00Z
+Status: PASS
+
+Output:
+Test 1 - Meta recorded: model=mock-model-v1, dims=4
+  PASS
+Test 2 - Mismatch detection: RuntimeError raised
+  Message: Embedding model mismatch: database was populated with 'mock-model-v1' but the configured provider uses 'different-model'. Using different models would produce incompatible embeddings.
+  PASS
+Test 3 - Embedding stored (length=4): first value ~= 0.100000
+  PASS
+Test 4 - Re-embedding on update: length=4, first value ~= 0.100000
+  PASS
+Test 5 - Search returns results: 1 results
+  PASS
+Test 6 - find_similar returns results: 1 results
+  PASS
+
+All T03.4 integration tests PASSED.
