@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import inspect
 
-import pytest
 
 from distillery.store.duckdb import DuckDBStore
 from distillery.store.protocol import DistilleryStore

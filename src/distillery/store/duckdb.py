@@ -29,6 +29,7 @@ from distillery.models import Entry, EntryStatus
 
 if TYPE_CHECKING:
     from distillery.embedding.protocol import EmbeddingProvider
+    from distillery.store.protocol import SearchResult
 
 logger = logging.getLogger(__name__)
 
@@ -335,7 +336,7 @@ class DuckDBStore:
         """
         return await asyncio.to_thread(self._sync_get, entry_id)
 
-    def _sync_update(self, entry_id: str, updates: dict) -> "Entry":
+    def _sync_update(self, entry_id: str, updates: dict[str, Any]) -> "Entry":
         """Synchronous implementation of update(); called via asyncio.to_thread."""
         # Reject attempts to change immutable fields.
         bad_keys = self._IMMUTABLE_FIELDS & updates.keys()
@@ -399,7 +400,7 @@ class DuckDBStore:
             raise KeyError(f"Entry disappeared after update: id={entry_id!r}")
         return self._row_to_entry(row, col_names)
 
-    async def update(self, entry_id: str, updates: dict) -> "Entry":
+    async def update(self, entry_id: str, updates: dict[str, Any]) -> "Entry":
         """Apply a partial update to an existing entry.
 
         Increments ``version`` by 1 and refreshes ``updated_at`` to the
@@ -429,7 +430,8 @@ class DuckDBStore:
             "SELECT COUNT(*) FROM entries WHERE id = ? AND status = ?",
             [entry_id, EntryStatus.ARCHIVED.value],
         )
-        count = count_result.fetchone()[0]
+        count_row = count_result.fetchone()
+        count: int = count_row[0] if count_row is not None else 0
         found = count > 0
         if found:
             logger.debug("Soft-deleted (archived) entry id=%s", entry_id)
@@ -451,7 +453,7 @@ class DuckDBStore:
 
     @staticmethod
     def _build_filter_clauses(
-        filters: dict | None,
+        filters: dict[str, Any] | None,
     ) -> tuple[list[str], list[Any]]:
         """Translate a user-facing filter dict into SQL WHERE fragments.
 
@@ -521,7 +523,7 @@ class DuckDBStore:
 
         return clauses, params
 
-    def _row_to_entry(self, row: tuple, columns: list[str]) -> "Entry":
+    def _row_to_entry(self, row: tuple[Any, ...], columns: list[str]) -> "Entry":
         """Convert a DuckDB result row into an ``Entry`` instance.
 
         Parameters
@@ -561,9 +563,9 @@ class DuckDBStore:
     async def search(
         self,
         query: str,
-        filters: dict | None,
+        filters: dict[str, Any] | None,
         limit: int,
-    ) -> list:
+    ) -> list[SearchResult]:
         """Perform semantic search with optional metadata filters.
 
         Embeds *query* via the configured embedding provider, then uses the
@@ -576,7 +578,7 @@ class DuckDBStore:
 
         embedding = self._embedding_provider.embed(query)
 
-        def _sync() -> list:
+        def _sync() -> list["SearchResult"]:
             conn = self.connection
 
             where_clauses, params = self._build_filter_clauses(filters)
@@ -617,7 +619,7 @@ class DuckDBStore:
         content: str,
         threshold: float,
         limit: int,
-    ) -> list:
+    ) -> list["SearchResult"]:
         """Find entries whose cosine similarity to *content* exceeds *threshold*.
 
         Returns a ``list[SearchResult]`` with ``score >= threshold``, sorted by
@@ -627,7 +629,7 @@ class DuckDBStore:
 
         embedding = self._embedding_provider.embed(content)
 
-        def _sync() -> list:
+        def _sync() -> list["SearchResult"]:
             conn = self.connection
 
             sql = (
@@ -638,7 +640,7 @@ class DuckDBStore:
                 f"ORDER BY score DESC "
                 f"LIMIT ?"
             )
-            params = [embedding, embedding, threshold, limit]
+            params: list[Any] = [embedding, embedding, threshold, limit]
             result = conn.execute(sql, params)
             col_names = [desc[0] for desc in result.description]
 
@@ -658,10 +660,10 @@ class DuckDBStore:
 
     async def list_entries(
         self,
-        filters: dict | None,
+        filters: dict[str, Any] | None,
         limit: int,
         offset: int,
-    ) -> list:
+    ) -> list["Entry"]:
         """List entries with optional metadata filtering and pagination.
 
         Unlike ``search``, this method does **not** perform semantic ranking.
@@ -670,7 +672,7 @@ class DuckDBStore:
         Returns a ``list[Entry]``.
         """
 
-        def _sync() -> list:
+        def _sync() -> list["Entry"]:
             conn = self.connection
 
             where_clauses, params = self._build_filter_clauses(filters)

@@ -5,7 +5,7 @@ to the Distillery MCP server.
 
 ## Prerequisites
 
-- Python 3.8 or later
+- Python 3.11 or later
 - Distillery installed in your Python environment
 - An embedding provider API key (Jina or OpenAI) if you want semantic search
 

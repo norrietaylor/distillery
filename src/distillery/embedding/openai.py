@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Optional
+from typing import Any, Optional
 
 import httpx
 
@@ -152,7 +152,7 @@ class OpenAIEmbeddingProvider:
             _ServerError: On HTTP 5xx.
             RuntimeError: On other non-2xx responses or network errors.
         """
-        payload: dict = {
+        payload: dict[str, Any] = {
             "input": texts,
             "model": self._model,
             "dimensions": self._dimensions,

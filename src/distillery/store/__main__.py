@@ -49,7 +49,7 @@ async def _run_check(db_path: str) -> int:
     Returns 0 on success, 1 on failure.
     """
     # Import here so the module stays importable even without all deps.
-    import duckdb  # type: ignore[import]
+    import duckdb
 
     try:
         conn = duckdb.connect(db_path)
@@ -82,7 +82,7 @@ def _resolve_db_path(explicit_path: str | None) -> str:
 
     # Try to load from config.
     try:
-        from distillery.config import load_config  # type: ignore[import]
+        from distillery.config import load_config
 
         cfg = load_config()
         raw = cfg.storage.database_path

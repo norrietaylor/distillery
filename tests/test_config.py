@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import textwrap
 from pathlib import Path
 
@@ -10,12 +9,7 @@ import pytest
 
 from distillery.config import (
     CONFIG_ENV_VAR,
-    DEFAULT_CONFIG_FILENAME,
-    ClassificationConfig,
     DistilleryConfig,
-    EmbeddingConfig,
-    StorageConfig,
-    TeamConfig,
     load_config,
 )
 

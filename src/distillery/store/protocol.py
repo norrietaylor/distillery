@@ -8,7 +8,7 @@ so any class implementing the required async methods is a valid backend.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from distillery.models import Entry
@@ -69,7 +69,7 @@ class DistilleryStore(Protocol):
         """
         ...
 
-    async def update(self, entry_id: str, updates: dict) -> "Entry":
+    async def update(self, entry_id: str, updates: dict[str, Any]) -> "Entry":
         """Apply a partial update to an existing entry.
 
         Increments ``version`` by 1 and refreshes ``updated_at`` to the
@@ -106,7 +106,7 @@ class DistilleryStore(Protocol):
     async def search(
         self,
         query: str,
-        filters: dict | None,
+        filters: dict[str, Any] | None,
         limit: int,
     ) -> list[SearchResult]:
         """Perform semantic search with optional metadata filters.
@@ -161,7 +161,7 @@ class DistilleryStore(Protocol):
 
     async def list_entries(
         self,
-        filters: dict | None,
+        filters: dict[str, Any] | None,
         limit: int,
         offset: int,
     ) -> list["Entry"]:

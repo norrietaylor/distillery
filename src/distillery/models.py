@@ -11,6 +11,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
+from typing import Any
 
 
 class EntryType(str, Enum):
@@ -137,13 +138,13 @@ class Entry:
     project: str | None = None
     tags: list[str] = field(default_factory=list)
     status: EntryStatus = EntryStatus.ACTIVE
-    metadata: dict = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     # ------------------------------------------------------------------ #
     # Serialisation                                                        #
     # ------------------------------------------------------------------ #
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise this entry to a JSON-compatible dictionary.
 
         All enum values are stored as their string values.  ``datetime``
@@ -168,7 +169,7 @@ class Entry:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Entry":
+    def from_dict(cls, data: dict[str, Any]) -> "Entry":
         """Reconstruct an ``Entry`` from a dictionary produced by :meth:`to_dict`.
 
         Args:

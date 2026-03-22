@@ -33,9 +33,8 @@ from distillery.mcp.server import (
     error_response,
     success_response,
 )
-from distillery.models import Entry, EntrySource, EntryStatus, EntryType
+from distillery.models import Entry, EntrySource, EntryType
 from distillery.store.duckdb import DuckDBStore
-from distillery.store.protocol import SearchResult
 
 
 # ---------------------------------------------------------------------------

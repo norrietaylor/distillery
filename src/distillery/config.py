@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import yaml
 
@@ -130,14 +130,14 @@ def _find_config_path(override: Optional[str] = None) -> Optional[Path]:
     return None
 
 
-def _parse_storage(raw: dict) -> StorageConfig:
+def _parse_storage(raw: dict[str, Any]) -> StorageConfig:
     return StorageConfig(
         backend=str(raw.get("backend", "duckdb")),
         database_path=str(raw.get("database_path", "~/.distillery/distillery.db")),
     )
 
 
-def _parse_embedding(raw: dict) -> EmbeddingConfig:
+def _parse_embedding(raw: dict[str, Any]) -> EmbeddingConfig:
     provider = str(raw.get("provider", ""))
     model = str(raw.get("model", "jina-embeddings-v3"))
 
@@ -159,11 +159,11 @@ def _parse_embedding(raw: dict) -> EmbeddingConfig:
     )
 
 
-def _parse_team(raw: dict) -> TeamConfig:
+def _parse_team(raw: dict[str, Any]) -> TeamConfig:
     return TeamConfig(name=str(raw.get("name", "")))
 
 
-def _parse_classification(raw: dict) -> ClassificationConfig:
+def _parse_classification(raw: dict[str, Any]) -> ClassificationConfig:
     threshold_raw = raw.get("confidence_threshold", 0.6)
     try:
         threshold = float(threshold_raw)
@@ -237,7 +237,7 @@ def load_config(config_path: Optional[str] = None) -> DistilleryConfig:
             raise FileNotFoundError(
                 f"Configuration file not found: {explicit}"
             )
-        resolved = explicit
+        resolved: Path | None = explicit
     else:
         resolved = _find_config_path()
 

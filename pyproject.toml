@@ -7,7 +7,7 @@ name = "distillery"
 version = "0.1.0"
 description = "A configurable embedding system with DuckDB storage and MCP server integration"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.11"
 authors = [
     {name = "Distillery Team"}
 ]
@@ -45,11 +45,9 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 
 [tool.mypy]
-python_version = "3.8"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = false
+python_version = "3.11"
+strict = true
 
 [tool.ruff]
 line-length = 100
-target-version = "py38"
+target-version = "py311"

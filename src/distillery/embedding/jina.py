@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import httpx
 
@@ -207,7 +207,7 @@ class JinaEmbeddingProvider:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _parse_response(data: dict, expected_count: int) -> List[List[float]]:
+    def _parse_response(data: dict[str, Any], expected_count: int) -> List[List[float]]:
         """Parse the Jina API response and extract embedding vectors.
 
         Args:

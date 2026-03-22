@@ -14,7 +14,6 @@ are made.
 from __future__ import annotations
 
 import json
-import time
 from typing import List
 from unittest.mock import MagicMock, patch
 
@@ -23,7 +22,6 @@ import pytest
 
 from distillery.embedding.jina import JinaEmbeddingProvider
 from distillery.embedding.openai import OpenAIEmbeddingProvider
-from distillery.embedding.protocol import EmbeddingProvider
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +73,6 @@ class TestJinaEmbeddingProviderProtocolCompliance:
 
     def test_is_protocol_compatible(self) -> None:
         """JinaEmbeddingProvider must satisfy the EmbeddingProvider protocol."""
-        import inspect
 
         provider = self._provider()
         # Check all required protocol members are present

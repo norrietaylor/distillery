@@ -32,6 +32,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
+from collections.abc import AsyncIterator
 from typing import Any
 
 from mcp.server import Server
@@ -47,7 +48,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def error_response(code: str, message: str, details: dict | None = None) -> list[types.TextContent]:
+def error_response(code: str, message: str, details: dict[str, Any] | None = None) -> list[types.TextContent]:
     """Build a structured error response as MCP content.
 
     Args:
@@ -64,7 +65,7 @@ def error_response(code: str, message: str, details: dict | None = None) -> list
     return [types.TextContent(type="text", text=json.dumps(payload, indent=2))]
 
 
-def success_response(data: dict) -> list[types.TextContent]:
+def success_response(data: dict[str, Any]) -> list[types.TextContent]:
     """Build a structured success response as MCP content.
 
     Args:
@@ -81,7 +82,7 @@ def success_response(data: dict) -> list[types.TextContent]:
 # ---------------------------------------------------------------------------
 
 
-def validate_required(arguments: dict, *fields: str) -> str | None:
+def validate_required(arguments: dict[str, Any], *fields: str) -> str | None:
     """Return an error message if any required field is missing from *arguments*.
 
     Args:
@@ -98,7 +99,7 @@ def validate_required(arguments: dict, *fields: str) -> str | None:
     return None
 
 
-def validate_type(arguments: dict, field: str, expected_type: type, label: str) -> str | None:
+def validate_type(arguments: dict[str, Any], field: str, expected_type: type | tuple[type, ...], label: str) -> str | None:
     """Return an error message if *field* is not of *expected_type*.
 
     Args:
@@ -121,7 +122,7 @@ def validate_type(arguments: dict, field: str, expected_type: type, label: str) 
 # ---------------------------------------------------------------------------
 
 
-def _create_embedding_provider(config: DistilleryConfig):  # type: ignore[return]
+def _create_embedding_provider(config: DistilleryConfig) -> Any:
     """Instantiate an EmbeddingProvider based on config.
 
     Args:
@@ -148,7 +149,7 @@ def _create_embedding_provider(config: DistilleryConfig):  # type: ignore[return
 
         return JinaEmbeddingProvider(
             api_key=api_key,
-            api_key_env=api_key_env or None,
+            api_key_env=api_key_env or "JINA_API_KEY",
             model=model,
             dimensions=dimensions,
         )
@@ -157,7 +158,7 @@ def _create_embedding_provider(config: DistilleryConfig):  # type: ignore[return
 
         return OpenAIEmbeddingProvider(
             api_key=api_key,
-            api_key_env=api_key_env or None,
+            api_key_env=api_key_env or "OPENAI_API_KEY",
             model=model,
             dimensions=dimensions,
         )
@@ -202,7 +203,7 @@ def create_server(config: DistilleryConfig | None = None) -> Server:
     _state: dict[str, Any] = {}
 
     @asynccontextmanager
-    async def _lifespan(server: Server):  # type: ignore[misc]
+    async def _lifespan(server: Server) -> AsyncIterator[None]:
         """Startup / shutdown lifecycle for the Distillery MCP server."""
         logger.info("Distillery MCP server starting up …")
 
@@ -238,7 +239,7 @@ def create_server(config: DistilleryConfig | None = None) -> Server:
     # Tool registry
     # -----------------------------------------------------------------------
 
-    @server.list_tools()
+    @server.list_tools()  # type: ignore[no-untyped-call, untyped-decorator]
     async def _list_tools() -> list[types.Tool]:
         return [
             types.Tool(
@@ -514,9 +515,9 @@ def create_server(config: DistilleryConfig | None = None) -> Server:
             ),
         ]
 
-    @server.call_tool()
+    @server.call_tool()  # type: ignore[untyped-decorator]
     async def _call_tool(
-        tool_name: str, arguments: dict
+        tool_name: str, arguments: dict[str, Any]
     ) -> list[types.TextContent]:
         """Dispatch incoming tool calls to the appropriate handler."""
         store = _state.get("store")
@@ -590,7 +591,7 @@ def _sync_gather_stats(
     store: Any,
     embedding_provider: Any,
     config: DistilleryConfig,
-) -> dict:
+) -> dict[str, Any]:
     """Synchronous helper that queries DuckDB for status statistics.
 
     Runs inside ``asyncio.to_thread`` so that blocking DuckDB calls do not
@@ -670,7 +671,7 @@ _DEFAULT_DEDUP_LIMIT = 3
 
 async def _handle_store(
     store: Any,
-    arguments: dict,
+    arguments: dict[str, Any],
 ) -> list[types.TextContent]:
     """Implement the ``distillery_store`` tool.
 
@@ -738,7 +739,7 @@ async def _handle_store(
         return error_response("STORE_ERROR", f"Failed to store entry: {exc}")
 
     # --- deduplication check ------------------------------------------------
-    warnings: list[dict] = []
+    warnings: list[dict[str, Any]] = []
     try:
         similar = await store.find_similar(
             content=entry.content,
@@ -773,7 +774,7 @@ async def _handle_store(
 
 async def _handle_get(
     store: Any,
-    arguments: dict,
+    arguments: dict[str, Any],
 ) -> list[types.TextContent]:
     """Implement the ``distillery_get`` tool.
 
@@ -808,7 +809,7 @@ async def _handle_get(
 
 async def _handle_update(
     store: Any,
-    arguments: dict,
+    arguments: dict[str, Any],
 ) -> list[types.TextContent]:
     """Implement the ``distillery_update`` tool.
 
@@ -905,7 +906,7 @@ async def _handle_update(
 # ---------------------------------------------------------------------------
 
 
-def _build_filters_from_arguments(arguments: dict) -> dict | None:
+def _build_filters_from_arguments(arguments: dict[str, Any]) -> dict[str, Any] | None:
     """Extract known filter keys from *arguments* into a filters dict.
 
     Keys extracted: ``entry_type``, ``author``, ``project``, ``tags``,
@@ -918,7 +919,7 @@ def _build_filters_from_arguments(arguments: dict) -> dict | None:
         A dict of filters, or ``None`` if no filter keys are present.
     """
     filter_keys = ("entry_type", "author", "project", "tags", "status", "date_from", "date_to")
-    filters: dict = {}
+    filters: dict[str, Any] = {}
     for key in filter_keys:
         if key in arguments and arguments[key] is not None:
             filters[key] = arguments[key]
@@ -927,7 +928,7 @@ def _build_filters_from_arguments(arguments: dict) -> dict | None:
 
 async def _handle_search(
     store: Any,
-    arguments: dict,
+    arguments: dict[str, Any],
 ) -> list[types.TextContent]:
     """Implement the ``distillery_search`` tool.
 
@@ -975,7 +976,7 @@ async def _handle_search(
 
 async def _handle_find_similar(
     store: Any,
-    arguments: dict,
+    arguments: dict[str, Any],
 ) -> list[types.TextContent]:
     """Implement the ``distillery_find_similar`` tool.
 
@@ -1030,7 +1031,7 @@ async def _handle_find_similar(
 
 async def _handle_list(
     store: Any,
-    arguments: dict,
+    arguments: dict[str, Any],
 ) -> list[types.TextContent]:
     """Implement the ``distillery_list`` tool.
 
