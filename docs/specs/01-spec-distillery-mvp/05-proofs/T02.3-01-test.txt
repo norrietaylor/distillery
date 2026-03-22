@@ -1,0 +1,28 @@
+Type: test
+Command: python3 inline CRUD functional test (T02.3)
+Expected: All 15 CRUD assertions pass
+Timestamp: 2026-03-22T06:50:30.287482+00:00
+
+=== OUTPUT ===
+
+Timestamp: 2026-03-22T06:50:30.287482+00:00
+
+Results: 15/15 passed
+
+  [PASS] store() returns entry id (id=9145b6a9-bd2f-42fa-b8f2-2d40d0511bc0)
+  [PASS] get() returns Entry (id=9145b6a9-bd2f-42fa-b8f2-2d40d0511bc0)
+  [PASS] get() content correct
+  [PASS] get() tags correct (tags=['proof', 'T02.3'])
+  [PASS] get() missing returns None
+  [PASS] update() content changed (content='Updated proof')
+  [PASS] update() version incremented (version=2)
+  [PASS] update() updated_at refreshed
+  [PASS] update() id guard (Cannot update immutable field(s): id)
+  [PASS] update() source guard (Cannot update immutable field(s): source)
+  [PASS] update() created_at guard (Cannot update immutable field(s): created_at)
+  [PASS] update() missing KeyError ("No entry found with id='no-such-id'")
+  [PASS] delete() returns True for existing (returned=True)
+  [PASS] delete() sets status=archived (status=EntryStatus.ARCHIVED)
+  [PASS] delete() returns False for missing (returned=False)
+
+Status: PASS

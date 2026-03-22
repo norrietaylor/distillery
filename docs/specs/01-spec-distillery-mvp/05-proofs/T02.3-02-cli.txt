@@ -1,0 +1,13 @@
+Type: cli
+Command: python3 -c "from distillery.store.duckdb import DuckDBStore; import inspect; ..."
+Expected: All 4 CRUD methods confirmed non-stub (NotImplementedError not present)
+Timestamp: 2026-03-22T06:50:31.000000+00:00
+
+=== OUTPUT ===
+
+  store(): stub=False
+  get(): stub=False
+  update(): stub=False
+  delete(): stub=False
+
+Status: PASS
