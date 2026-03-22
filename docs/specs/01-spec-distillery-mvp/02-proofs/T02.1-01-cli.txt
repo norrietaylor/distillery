@@ -1,0 +1,31 @@
+Type: cli
+Command: python3 -c "import sys; sys.path.insert(0,'src'); from distillery.store.protocol import DistilleryStore, SearchResult; from typing import get_protocol_members; print(sorted(get_protocol_members(DistilleryStore)))"
+Expected: All 7 protocol methods present and importable
+Timestamp: 2026-03-21T00:00:00Z
+
+=== DistilleryStore Protocol Verification ===
+
+Protocol class: <class 'distillery.store.protocol.DistilleryStore'>
+Is runtime_checkable: True
+
+Protocol members:
+  async delete(self, entry_id: 'str') -> 'bool'
+  async find_similar(self, content: 'str', threshold: 'float', limit: 'int') -> 'list[SearchResult]'
+  async get(self, entry_id: 'str') -> "'Entry | None'"
+  async list_entries(self, filters: 'dict | None', limit: 'int', offset: 'int') -> "list['Entry']"
+  async search(self, query: 'str', filters: 'dict | None', limit: 'int') -> 'list[SearchResult]'
+  async store(self, entry: "'Entry'") -> 'str'
+  async update(self, entry_id: 'str', updates: 'dict') -> "'Entry'"
+
+SearchResult dataclass:
+  entry: 'Entry'
+  score: float
+
+=== isinstance check with conforming class ===
+isinstance(MockStore(), DistilleryStore): True
+
+=== Store __init__.py exports ===
+DistilleryStore exported: DistilleryStore
+SearchResult exported: SearchResult
+
+Status: PASS

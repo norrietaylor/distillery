@@ -1,0 +1,8 @@
+Type: cli
+Command: ruff check src/distillery/store/protocol.py src/distillery/store/__init__.py
+Expected: All checks passed (zero lint errors)
+Timestamp: 2026-03-21T00:00:00Z
+
+All checks passed!
+
+Status: PASS
