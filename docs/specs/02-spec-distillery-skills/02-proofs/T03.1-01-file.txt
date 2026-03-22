@@ -1,0 +1,10 @@
+Type: file
+Command: ls -la .claude/skills/pour/SKILL.md
+Expected: File exists with YAML frontmatter and complete skill definition
+Timestamp: 2026-03-22T00:00:00Z
+
+--- Output ---
+File exists: .claude/skills/pour/SKILL.md
+Line count: 322 lines
+
+Status: PASS
