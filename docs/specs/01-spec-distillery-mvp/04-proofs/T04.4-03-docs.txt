@@ -1,0 +1,39 @@
+Type: file
+Command: ls docs/mcp-setup.md && wc -l docs/mcp-setup.md
+Expected: docs/mcp-setup.md exists and contains MCP setup instructions with settings.json snippet
+Timestamp: 2026-03-22T00:00:00Z
+
+=== MCP Setup Documentation Verification ===
+
+File: docs/mcp-setup.md
+
+File exists: True
+Line count: 181
+
+Content sections verified:
+  - Prerequisites section: True
+  - Installation instructions: True
+  - distillery.yaml configuration: True
+  - python -m distillery.mcp startup command: True
+  - Claude Code settings.json snippet: True
+  - 7-tool table (distillery_status through distillery_list): True
+  - Embedding provider configuration (Jina, OpenAI, Stub): True
+  - Troubleshooting section: True
+
+settings.json snippet sample (from doc):
+{
+  "mcpServers": {
+    "distillery": {
+      "command": "python",
+      "args": ["-m", "distillery.mcp"],
+      "env": {
+        "JINA_API_KEY": "your-jina-api-key-here",
+        "DISTILLERY_CONFIG": "/path/to/your/distillery.yaml"
+      }
+    }
+  }
+}
+
+ALL ASSERTIONS: PASS
+
+Status: PASS

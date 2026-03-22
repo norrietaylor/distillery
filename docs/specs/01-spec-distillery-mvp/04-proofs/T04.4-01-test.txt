@@ -1,0 +1,61 @@
+Type: test
+Command: python3 -m pytest tests/test_mcp_server.py -v
+Expected: All 50 MCP server tests pass covering all 7 tools and the end-to-end lifecycle flow
+Timestamp: 2026-03-22T00:00:00Z
+
+=== MCP Server Test Suite (T04.4) ===
+
+tests/test_mcp_server.py::TestHelpers::test_error_response_structure PASSED
+tests/test_mcp_server.py::TestHelpers::test_error_response_with_details PASSED
+tests/test_mcp_server.py::TestHelpers::test_success_response_structure PASSED
+tests/test_mcp_server.py::TestEndToEndFlow::test_full_lifecycle PASSED
+tests/test_mcp_server.py::TestStatusTool::test_status_returns_ok PASSED
+tests/test_mcp_server.py::TestStatusTool::test_status_shows_entry_counts PASSED
+tests/test_mcp_server.py::TestStatusTool::test_status_shows_embedding_model PASSED
+tests/test_mcp_server.py::TestStoreTool::test_store_valid_entry PASSED
+tests/test_mcp_server.py::TestStoreTool::test_store_returns_string_id PASSED
+tests/test_mcp_server.py::TestStoreTool::test_store_with_tags_and_project PASSED
+tests/test_mcp_server.py::TestStoreTool::test_store_missing_content_returns_error PASSED
+tests/test_mcp_server.py::TestStoreTool::test_store_missing_author_returns_error PASSED
+tests/test_mcp_server.py::TestStoreTool::test_store_invalid_entry_type_returns_error PASSED
+tests/test_mcp_server.py::TestStoreTool::test_store_all_valid_entry_types PASSED
+tests/test_mcp_server.py::TestStoreTool::test_store_tags_must_be_list PASSED
+tests/test_mcp_server.py::TestStoreTool::test_store_dedup_warning_on_duplicate PASSED
+tests/test_mcp_server.py::TestGetTool::test_get_existing_entry PASSED
+tests/test_mcp_server.py::TestGetTool::test_get_missing_entry_returns_not_found PASSED
+tests/test_mcp_server.py::TestGetTool::test_get_missing_entry_id_arg_returns_error PASSED
+tests/test_mcp_server.py::TestGetTool::test_get_returns_all_fields PASSED
+tests/test_mcp_server.py::TestUpdateTool::test_update_content PASSED
+tests/test_mcp_server.py::TestUpdateTool::test_update_version_increments PASSED
+tests/test_mcp_server.py::TestUpdateTool::test_update_tags PASSED
+tests/test_mcp_server.py::TestUpdateTool::test_update_status PASSED
+tests/test_mcp_server.py::TestUpdateTool::test_update_invalid_status_returns_error PASSED
+tests/test_mcp_server.py::TestUpdateTool::test_update_nonexistent_entry_returns_not_found PASSED
+tests/test_mcp_server.py::TestUpdateTool::test_update_missing_entry_id_returns_error PASSED
+tests/test_mcp_server.py::TestUpdateTool::test_update_no_fields_returns_error PASSED
+tests/test_mcp_server.py::TestUpdateTool::test_update_immutable_field_returns_error PASSED
+tests/test_mcp_server.py::TestSearchTool::test_search_returns_results PASSED
+tests/test_mcp_server.py::TestSearchTool::test_search_results_have_score_and_entry PASSED
+tests/test_mcp_server.py::TestSearchTool::test_search_missing_query_returns_error PASSED
+tests/test_mcp_server.py::TestSearchTool::test_search_respects_limit PASSED
+tests/test_mcp_server.py::TestSearchTool::test_search_invalid_limit_returns_error PASSED
+tests/test_mcp_server.py::TestSearchTool::test_search_filters_by_entry_type PASSED
+tests/test_mcp_server.py::TestFindSimilarTool::test_find_similar_returns_results PASSED
+tests/test_mcp_server.py::TestFindSimilarTool::test_find_similar_missing_content_returns_error PASSED
+tests/test_mcp_server.py::TestFindSimilarTool::test_find_similar_threshold_out_of_range_returns_error PASSED
+tests/test_mcp_server.py::TestFindSimilarTool::test_find_similar_default_threshold_returned_in_response PASSED
+tests/test_mcp_server.py::TestFindSimilarTool::test_find_similar_respects_limit PASSED
+tests/test_mcp_server.py::TestListTool::test_list_returns_entries PASSED
+tests/test_mcp_server.py::TestListTool::test_list_empty_store_returns_empty PASSED
+tests/test_mcp_server.py::TestListTool::test_list_respects_limit PASSED
+tests/test_mcp_server.py::TestListTool::test_list_respects_offset PASSED
+tests/test_mcp_server.py::TestListTool::test_list_filters_by_author PASSED
+tests/test_mcp_server.py::TestListTool::test_list_invalid_limit_returns_error PASSED
+tests/test_mcp_server.py::TestListTool::test_list_invalid_offset_returns_error PASSED
+tests/test_mcp_server.py::TestListTool::test_list_includes_limit_and_offset_in_response PASSED
+tests/test_mcp_server.py::TestCreateServer::test_create_server_returns_server_instance PASSED
+tests/test_mcp_server.py::TestCreateServer::test_server_registers_all_seven_tools PASSED
+
+============================== 50 passed in 1.57s ==============================
+
+Status: PASS
