@@ -1,0 +1,23 @@
+Type: cli
+Command: python3 -c "from distillery.embedding.openai import OpenAIEmbeddingProvider; from distillery.embedding import create_provider, OpenAIEmbeddingProvider; p = OpenAIEmbeddingProvider(api_key='test'); print('model_name:', p.model_name); print('dimensions:', p.dimensions); assert hasattr(p, 'embed') and hasattr(p, 'embed_batch') and hasattr(p, 'dimensions') and hasattr(p, 'model_name'); print('PASS: protocol compliance confirmed')"
+Expected: OpenAIEmbeddingProvider imports successfully, satisfies EmbeddingProvider protocol, and has correct defaults
+Timestamp: 2026-03-21T22:30:00Z
+
+=== Output ===
+
+=== OpenAIEmbeddingProvider Import Test ===
+Class imported successfully: <class 'distillery.embedding.openai.OpenAIEmbeddingProvider'>
+
+model_name: text-embedding-3-small
+dimensions: 512
+
+All required protocol methods/properties present: PASS
+Default model text-embedding-3-small: PASS
+Default dimensions 512: PASS
+Custom model and dimensions: PASS
+Missing key raises ValueError: PASS
+  Error: OpenAI API key not found. Set the 'OPENAI_KEY_NOT_SET_XYZ_999' environment variable or pass api_key explicitly.
+
+=== All checks PASSED ===
+
+Status: PASS

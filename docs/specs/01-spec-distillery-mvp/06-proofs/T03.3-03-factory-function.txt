@@ -1,0 +1,18 @@
+Type: cli
+Command: python3 -c "[provider factory function test]"
+Expected: create_provider() selects OpenAIEmbeddingProvider for 'openai', JinaEmbeddingProvider for 'jina', raises ValueError for unknown providers
+Timestamp: 2026-03-21T22:30:00Z
+
+=== Output ===
+
+=== Provider Factory Test ===
+create_provider(openai) returns: OpenAIEmbeddingProvider
+OpenAI provider created correctly: PASS
+create_provider(jina) returns: JinaEmbeddingProvider
+Jina provider created correctly: PASS
+Unknown provider raises ValueError: PASS
+  Error: Unknown embedding provider: 'unknown-provider'. Supported values are 'openai' and 'jina'.
+
+=== All factory tests PASSED ===
+
+Status: PASS
