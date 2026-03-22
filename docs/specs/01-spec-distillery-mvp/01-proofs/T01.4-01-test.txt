@@ -1,0 +1,106 @@
+Type: test
+Command: python3 -m pytest tests/test_entry.py tests/test_config.py -v --tb=short
+Expected: All 90 tests pass
+Timestamp: 2026-03-21T00:00:00Z
+
+============================= test session starts ==============================
+platform darwin -- Python 3.14.0, pytest-8.4.2, pluggy-1.6.0
+rootdir: /Users/norrie/code/distillery
+configfile: pyproject.toml
+plugins: asyncio-1.2.0, anyio-4.11.0, cov-7.0.0
+asyncio: mode=Mode.AUTO
+
+tests/test_entry.py::TestEntryTypeEnum::test_all_values PASSED
+tests/test_entry.py::TestEntryTypeEnum::test_is_str_subclass PASSED
+tests/test_entry.py::TestEntryTypeEnum::test_from_string PASSED
+tests/test_entry.py::TestEntryTypeEnum::test_invalid_value_raises PASSED
+tests/test_entry.py::TestEntrySourceEnum::test_all_values PASSED
+tests/test_entry.py::TestEntrySourceEnum::test_is_str_subclass PASSED
+tests/test_entry.py::TestEntrySourceEnum::test_from_string PASSED
+tests/test_entry.py::TestEntryStatusEnum::test_all_values PASSED
+tests/test_entry.py::TestEntryStatusEnum::test_is_str_subclass PASSED
+tests/test_entry.py::TestEntryStatusEnum::test_from_string PASSED
+tests/test_entry.py::TestEntryCreation::test_required_fields PASSED
+tests/test_entry.py::TestEntryCreation::test_id_is_valid_uuid PASSED
+tests/test_entry.py::TestEntryCreation::test_id_auto_generated_unique PASSED
+tests/test_entry.py::TestEntryCreation::test_created_at_is_utc_datetime PASSED
+tests/test_entry.py::TestEntryCreation::test_updated_at_is_utc_datetime PASSED
+tests/test_entry.py::TestEntryCreation::test_version_default_is_one PASSED
+tests/test_entry.py::TestEntryCreation::test_status_default_is_active PASSED
+tests/test_entry.py::TestEntryCreation::test_tags_default_is_empty_list PASSED
+tests/test_entry.py::TestEntryCreation::test_metadata_default_is_empty_dict PASSED
+tests/test_entry.py::TestEntryCreation::test_project_default_is_none PASSED
+tests/test_entry.py::TestEntryCreation::test_tags_not_shared_between_instances PASSED
+tests/test_entry.py::TestEntryCreation::test_metadata_not_shared_between_instances PASSED
+tests/test_entry.py::TestTypeSpecificMetadata::test_session_metadata_fields PASSED
+tests/test_entry.py::TestTypeSpecificMetadata::test_session_metadata_cowork PASSED
+tests/test_entry.py::TestTypeSpecificMetadata::test_bookmark_metadata_fields PASSED
+tests/test_entry.py::TestTypeSpecificMetadata::test_minutes_metadata_fields PASSED
+tests/test_entry.py::TestEntryToDict::test_to_dict_returns_dict PASSED
+tests/test_entry.py::TestEntryToDict::test_to_dict_enum_values_are_strings PASSED
+tests/test_entry.py::TestEntryToDict::test_to_dict_contains_all_keys PASSED
+tests/test_entry.py::TestEntryToDict::test_to_dict_datetime_is_isoformat_string PASSED
+tests/test_entry.py::TestEntryToDict::test_to_dict_tags_is_list_copy PASSED
+tests/test_entry.py::TestEntryToDict::test_to_dict_metadata_is_dict_copy PASSED
+tests/test_entry.py::TestEntryToDict::test_to_dict_project_none PASSED
+tests/test_entry.py::TestEntryToDict::test_to_dict_version PASSED
+tests/test_entry.py::TestEntryFromDict::test_roundtrip PASSED
+tests/test_entry.py::TestEntryFromDict::test_from_dict_parses_enums PASSED
+tests/test_entry.py::TestEntryFromDict::test_from_dict_parses_datetime_string PASSED
+tests/test_entry.py::TestEntryFromDict::test_from_dict_naive_datetime_gets_utc PASSED
+tests/test_entry.py::TestEntryFromDict::test_from_dict_missing_required_key_raises PASSED
+tests/test_entry.py::TestEntryFromDict::test_from_dict_invalid_enum_raises PASSED
+tests/test_entry.py::TestEntryFromDict::test_from_dict_optional_tags_defaults_to_empty PASSED
+tests/test_entry.py::TestEntryFromDict::test_from_dict_optional_metadata_defaults_to_empty PASSED
+tests/test_entry.py::TestEntryFromDict::test_from_dict_optional_version_defaults_to_one PASSED
+tests/test_entry.py::TestEntryFromDict::test_from_dict_accepts_datetime_object PASSED
+tests/test_entry.py::TestAllEntryTypesRoundTrip::test_entry_type_roundtrip[session] PASSED
+tests/test_entry.py::TestAllEntryTypesRoundTrip::test_entry_type_roundtrip[bookmark] PASSED
+tests/test_entry.py::TestAllEntryTypesRoundTrip::test_entry_type_roundtrip[minutes] PASSED
+tests/test_entry.py::TestAllEntryTypesRoundTrip::test_entry_type_roundtrip[meeting] PASSED
+tests/test_entry.py::TestAllEntryTypesRoundTrip::test_entry_type_roundtrip[reference] PASSED
+tests/test_entry.py::TestAllEntryTypesRoundTrip::test_entry_type_roundtrip[idea] PASSED
+tests/test_entry.py::TestAllEntryTypesRoundTrip::test_entry_type_roundtrip[inbox] PASSED
+tests/test_entry.py::TestAllEntryTypesRoundTrip::test_source_roundtrip[claude-code] PASSED
+tests/test_entry.py::TestAllEntryTypesRoundTrip::test_source_roundtrip[manual] PASSED
+tests/test_entry.py::TestAllEntryTypesRoundTrip::test_source_roundtrip[import] PASSED
+tests/test_entry.py::TestAllEntryTypesRoundTrip::test_status_roundtrip[active] PASSED
+tests/test_entry.py::TestAllEntryTypesRoundTrip::test_status_roundtrip[pending_review] PASSED
+tests/test_entry.py::TestAllEntryTypesRoundTrip::test_status_roundtrip[archived] PASSED
+tests/test_entry.py::TestSearchResult::test_creation PASSED
+tests/test_entry.py::TestSearchResult::test_score_zero PASSED
+tests/test_entry.py::TestSearchResult::test_score_one PASSED
+tests/test_entry.py::TestSearchResult::test_entry_accessible PASSED
+tests/test_config.py::TestDefaultConfig::test_returns_distillery_config PASSED
+tests/test_config.py::TestDefaultConfig::test_storage_defaults PASSED
+tests/test_config.py::TestDefaultConfig::test_embedding_defaults PASSED
+tests/test_config.py::TestDefaultConfig::test_team_defaults PASSED
+tests/test_config.py::TestDefaultConfig::test_classification_defaults PASSED
+tests/test_config.py::TestYAMLLoading::test_loads_storage PASSED
+tests/test_config.py::TestYAMLLoading::test_loads_embedding PASSED
+tests/test_config.py::TestYAMLLoading::test_loads_team PASSED
+tests/test_config.py::TestYAMLLoading::test_loads_classification PASSED
+tests/test_config.py::TestYAMLLoading::test_openai_provider PASSED
+tests/test_config.py::TestYAMLLoading::test_partial_yaml_uses_defaults PASSED
+tests/test_config.py::TestYAMLLoading::test_empty_yaml_file_uses_defaults PASSED
+tests/test_config.py::TestValidationErrors::test_invalid_provider_raises_value_error PASSED
+tests/test_config.py::TestValidationErrors::test_negative_dimensions_raises_value_error PASSED
+tests/test_config.py::TestValidationErrors::test_zero_dimensions_raises_value_error PASSED
+tests/test_config.py::TestValidationErrors::test_non_integer_dimensions_raises_value_error PASSED
+tests/test_config.py::TestValidationErrors::test_threshold_above_one_raises_value_error PASSED
+tests/test_config.py::TestValidationErrors::test_threshold_below_zero_raises_value_error PASSED
+tests/test_config.py::TestValidationErrors::test_non_numeric_threshold_raises_value_error PASSED
+tests/test_config.py::TestValidationErrors::test_explicit_missing_path_raises_file_not_found PASSED
+tests/test_config.py::TestValidationErrors::test_non_mapping_yaml_raises_value_error PASSED
+tests/test_config.py::TestEnvVarOverride::test_env_var_points_to_custom_yaml PASSED
+tests/test_config.py::TestEnvVarOverride::test_explicit_path_takes_priority_over_env_var PASSED
+tests/test_config.py::TestEnvVarOverride::test_env_var_missing_file_falls_through PASSED
+tests/test_config.py::TestExampleConfigFile::test_example_config_is_valid PASSED
+tests/test_config.py::TestExampleConfigFile::test_example_config_storage_backend PASSED
+tests/test_config.py::TestExampleConfigFile::test_example_config_embedding_provider PASSED
+tests/test_config.py::TestExampleConfigFile::test_example_config_team_name PASSED
+tests/test_config.py::TestExampleConfigFile::test_example_config_classification_threshold PASSED
+
+============================== 90 passed in 0.10s ==============================
+
+Status: PASS
