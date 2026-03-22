@@ -1,0 +1,14 @@
+Type: cli
+Command: ruff check src/distillery/store/duckdb.py
+Expected: All checks passed
+Timestamp: 2026-03-21T00:00:00Z
+
+--- OUTPUT ---
+
+All checks passed!
+
+--- ANALYSIS ---
+
+ruff linter reports zero errors on the DuckDBStore implementation.
+
+Status: PASS
