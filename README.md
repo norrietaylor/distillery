@@ -19,7 +19,8 @@
   <a href="#quick-start">Quick Start</a> &middot;
   <a href="#architecture">Architecture</a> &middot;
   <a href="docs/ROADMAP.md">Roadmap</a> &middot;
-  <a href="docs/mcp-setup.md">MCP Setup</a>
+  <a href="docs/mcp-setup.md">MCP Setup</a> &middot;
+  <a href="https://norrietaylor.github.io/distillery/">Slides</a>
 </p>
 
 ---
