@@ -1,0 +1,6 @@
+title: Distillery
+description: Team Knowledge, Distilled
+baseurl: /distillery
+include:
+  - presentation.html
+  - assets
