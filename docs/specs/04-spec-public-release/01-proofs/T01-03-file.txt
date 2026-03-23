@@ -1,0 +1,13 @@
+Type: file
+Description: README.md references Apache 2.0 and does not reference MIT as project license
+Command: grep -E "Apache 2.0|MIT" README.md
+Timestamp: 2026-03-22T00:00:00Z
+
+--- Output ---
+Apache 2.0 - see [LICENSE](LICENSE) for details.
+
+--- Verification ---
+[x] README references "Apache 2.0"
+[x] MIT no longer present as license reference (grep for "MIT" returns no matches)
+
+Status: PASS
