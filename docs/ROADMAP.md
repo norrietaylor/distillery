@@ -1,0 +1,141 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/distillery-logo-dark-256.png" width="100">
+    <source media="(prefers-color-scheme: light)" srcset="assets/distillery-logo-256.png" width="100">
+    <img alt="Distillery" src="assets/distillery-logo-256.png" width="100">
+  </picture>
+</p>
+
+<h1 align="center">Distillery Roadmap</h1>
+
+---
+
+## Phase 1 — MVP (Complete)
+
+The foundation: storage layer, 6 core skills, classification pipeline.
+
+### Storage Layer & Data Model (Spec 01)
+- [x] `Entry` data model with structured metadata and type-specific extensions
+- [x] `DistilleryStore` protocol — async storage abstraction enabling backend migration
+- [x] DuckDB backend with VSS extension and HNSW index (cosine similarity)
+- [x] Configurable embedding providers (Jina v3 default, OpenAI adapter)
+- [x] Embedding model lock via `_meta` table — prevents mixed-model corruption
+- [x] MCP server with 7 core tools (store, get, update, search, find_similar, list, status)
+- [x] `distillery.yaml` config system with validation
+- [x] 282 tests passing, mypy strict, ruff clean
+
+### Core Skills (Spec 02)
+- [x] `/distill` — session knowledge capture with duplicate detection
+- [x] `/recall` — semantic search with provenance display
+- [x] `/pour` — multi-pass retrieval + structured synthesis with citations
+- [x] `/bookmark` — URL fetch, auto-summarize, store with dedup check
+- [x] `/minutes` — meeting notes with `--update` (append) and `--list` modes
+- [x] Shared `CONVENTIONS.md` — author/project identification, error handling patterns
+
+### Classification Pipeline (Spec 03)
+- [x] `ClassificationEngine` — LLM prompt-based type assignment with confidence scoring
+- [x] `DeduplicationChecker` — skip/merge/link/create at configurable thresholds (0.95/0.80/0.60)
+- [x] 4 new MCP tools: classify, review_queue, resolve_review, check_dedup (11 total)
+- [x] `/classify` skill — classify by ID, batch inbox, review queue triage
+- [x] `/distill` updated with full dedup flow via `distillery_check_dedup`
+- [x] Config extended with dedup threshold fields and ordering validation
+
+### Remaining MVP Items (Not Yet Started)
+- [ ] Deploy for single-user validation — use the system, measure retrieval quality
+- [ ] Establish retrieval quality baseline — precision/recall metrics for `/recall`
+- [ ] Define content lifecycle policy — when entries get archived or expire
+- [ ] Design conflict detection — strategy for contradictory entries on the same topic
+
+---
+
+## Phase 2 — Team Expansion
+
+Scale from single user to team. Six new skills, richer metadata, optional Elasticsearch migration.
+
+### New Skills
+- [ ] `/whois` — evidence-backed expertise map ("Who knows about distributed caching?")
+- [ ] `/investigate` — deep domain context builder (5-phase workflow)
+- [ ] `/digest` — team activity summaries with stale entry detection
+- [ ] `/briefing` — team knowledge dashboard
+- [ ] `/process` — batch classify + digest + stale detection pipeline
+- [ ] `/gh-sync` — GitHub issue/PR knowledge tracking
+
+### Infrastructure
+- [ ] **Elasticsearch migration** — `ElasticsearchStore` backend via `DistilleryStore` protocol
+  - Native `semantic_text` for auto-embedding
+  - Hybrid search (BM25 + kNN + RRF)
+  - ES|QL for temporal queries and aggregations
+  - Triggered when DuckDB hits concurrency or scale ceiling (~10K entries)
+- [ ] **Access control** — team/private visibility flag on entries
+- [ ] **Session capture hooks** — auto-distill on Claude Code session end
+- [ ] **Namespace taxonomy** — hierarchical, validated tag system (`/project/billing-v2/decisions`)
+- [ ] **Provenance tracking** — full version history, source chain, author chain
+- [ ] **Port type schemas** — `person` (expertise profiles), `project`, `digest`, `github` entry types
+
+### Quality
+- [ ] Classification correction tracking — measure how often human review overrides the classifier
+- [ ] Dirty detection — flag entries for re-classification when content is updated
+- [ ] Stale entry detection — projects inactive 14+ days
+- [ ] Retrieval quality feedback loop — use correction data to tune prompts
+
+---
+
+## Phase 3 — Ambient Intelligence
+
+The knowledge base starts watching the world. Feed polling, relevance scoring, proactive insights.
+
+### New Skills
+- [ ] `/radar` — view latest ambient feed digest (what happened that matters to our projects?)
+- [ ] `/watch` — add/remove/list monitored feed sources
+- [ ] `/tune` — adjust relevance thresholds and source trust weights
+
+### Infrastructure
+- [ ] **Feed polling architecture** — scheduler with configurable intervals per source
+- [ ] **Source adapters** — RSS, Slack, GitHub, Hacker News, webhooks
+- [ ] **Relevance scoring pipeline:**
+  1. Embed incoming item
+  2. Compare against active project embeddings
+  3. Score = similarity x priority x tag overlap x recency x source trust
+  4. Above relevance threshold → include in digest
+  5. Above alert threshold → immediate notification
+- [ ] **Cold-start bootstrapping** — seed relevance scoring without feedback data
+- [ ] **Feedback loop** — trust weight adjustment based on user engagement with digest items
+
+### Configuration
+```yaml
+feeds:
+  - name: "Stripe Changelog"
+    type: rss
+    url: "https://stripe.com/blog/feed.xml"
+    poll_interval: "6h"
+    trust_weight: 0.9
+    tags: ["payments", "billing"]
+
+thresholds:
+  relevance: 0.65
+  alert: 0.90
+  max_digest_items: 20
+```
+
+---
+
+## Deferred / Evaluate Later
+
+- [ ] LangGraph evaluation for complex skill orchestration
+- [ ] CODE pipeline formalization for team workflows
+- [ ] Web UI or REST API (all access currently via MCP + Claude Code)
+- [ ] Multi-team support and cross-team knowledge sharing
+- [ ] Re-embedding migration tooling (model upgrade path)
+
+---
+
+## Technology Stack
+
+| Layer | Phase 1 (Current) | Phase 2 | Phase 3 |
+|-------|-------------------|---------|---------|
+| Interface | Claude Code skills | Same | Same |
+| Storage | DuckDB + VSS | Elasticsearch | Same |
+| Embeddings | Jina v3 / OpenAI | ES native or external | Same |
+| Language | Python 3.11+ | Same | Same |
+| Orchestration | Skill invocation | Same | + scheduled polling |
+| Config | `distillery.yaml` | Same | + feed config |

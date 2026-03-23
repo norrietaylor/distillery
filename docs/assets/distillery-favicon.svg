@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Distillery Favicon — heavier strokes for small sizes -->
+  <circle cx="196" cy="320" r="115" fill="none" stroke="#1a1a1a" stroke-width="20"/>
+  <line x1="196" y1="205" x2="196" y2="68" stroke="#1a1a1a" stroke-width="20" stroke-linecap="round"/>
+  <line x1="196" y1="88" x2="252" y2="88" stroke="#1a1a1a" stroke-width="18" stroke-linecap="round"/>
+  <line x1="196" y1="124" x2="240" y2="124" stroke="#1a1a1a" stroke-width="18" stroke-linecap="round"/>
+  <path d="M196,68 Q196,36 228,36 L368,36 Q400,36 400,68 L400,198" fill="none" stroke="#1a1a1a" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M400,226 Q386,252 400,278 Q414,252 400,226 Z" fill="#BA7517"/>
+  <path d="M118,370 Q130,414 196,420 Q262,414 274,370 Q254,342 196,348 Q138,342 118,370 Z" fill="#BA7517"/>
+</svg>
