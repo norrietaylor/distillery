@@ -1,0 +1,53 @@
+Type: file
+Description: Verify .github/workflows/ci.yml created with correct structure
+Command: cat .github/workflows/ci.yml
+Expected: CI workflow with push/PR triggers on main, ubuntu-latest, Python 3.11, lint/typecheck/test steps
+Timestamp: 2026-03-22T00:00:00Z
+
+--- OUTPUT ---
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: ruff check src/ tests/
+
+      - name: Type check (mypy)
+        run: mypy --strict src/
+
+      - name: Test (pytest)
+        run: pytest
+
+--- CHECKS ---
+[PASS] Triggers on push to main
+[PASS] Triggers on PR to main
+[PASS] Runs on ubuntu-latest
+[PASS] Python 3.11
+[PASS] pip install -e ".[dev]"
+[PASS] ruff check lint step
+[PASS] mypy --strict type check step
+[PASS] pytest test step
+
+Status: PASS

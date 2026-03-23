@@ -1,0 +1,10 @@
+Type: cli
+Description: Verify no __pycache__ or .pyc files are tracked in git
+Command: git ls-files | grep -E "(__pycache__|\.pyc)" | wc -l
+Expected: 0 (no binary artifacts tracked)
+Timestamp: 2026-03-22T00:00:00Z
+
+--- OUTPUT ---
+0
+
+Status: PASS
