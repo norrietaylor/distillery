@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Distillery — Team Knowledge, Distilled</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  :root {
+    --bg: #0f0f0f;
+    --surface: #1a1a1a;
+    --surface2: #242424;
+    --text: #e8e8e8;
+    --text-muted: #888;
+    --amber: #EF9F27;
+    --amber-dim: #BA7517;
+    --amber-glow: rgba(239, 159, 39, 0.15);
+    --green: #4ade80;
+    --blue: #60a5fa;
+    --red: #f87171;
+    --purple: #c084fc;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+    height: 100vh;
+  }
+
+  /* Slide system */
+  .slide {
+    display: none;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    padding: 60px 100px;
+    position: relative;
+  }
+  .slide.active { display: flex; }
+  .slide.left { align-items: flex-start; }
+
+  /* Navigation */
+  .nav {
+    position: fixed;
+    bottom: 30px;
+    right: 40px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    z-index: 100;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+  .nav kbd {
+    background: var(--surface2);
+    border: 1px solid #333;
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-family: 'Inter', sans-serif;
+    font-size: 11px;
+  }
+
+  .progress {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 3px;
+    background: var(--amber);
+    transition: width 0.3s ease;
+    z-index: 100;
+  }
+
+  .slide-counter {
+    position: fixed;
+    bottom: 30px;
+    left: 40px;
+    font-size: 13px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Typography */
+  h1 {
+    font-size: 56px;
+    font-weight: 700;
+    letter-spacing: -1.5px;
+    line-height: 1.1;
+    margin-bottom: 20px;
+  }
+  h2 {
+    font-size: 42px;
+    font-weight: 600;
+    letter-spacing: -1px;
+    line-height: 1.2;
+    margin-bottom: 24px;
+  }
+  h3 {
+    font-size: 24px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    color: var(--amber);
+  }
+  p, li {
+    font-size: 22px;
+    line-height: 1.6;
+    color: var(--text);
+  }
+  .subtitle {
+    font-size: 26px;
+    color: var(--text-muted);
+    font-weight: 300;
+    margin-bottom: 12px;
+  }
+  .small { font-size: 16px; color: var(--text-muted); }
+
+  .highlight { color: var(--amber); }
+  .dim { color: var(--text-muted); }
+
+  /* Logo */
+  .logo { margin-bottom: 32px; }
+  .logo img { height: 140px; }
+  .logo-small img { height: 60px; }
+
+  /* Lists */
+  ul { list-style: none; padding: 0; }
+  ul li {
+    padding: 10px 0;
+    padding-left: 28px;
+    position: relative;
+  }
+  ul li::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 18px;
+    width: 10px;
+    height: 10px;
+    background: var(--amber);
+    border-radius: 50%;
+  }
+
+  /* Cards and grids */
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 32px;
+    width: 100%;
+    max-width: 1100px;
+  }
+  .grid-3 {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 24px;
+    width: 100%;
+    max-width: 1100px;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid #2a2a2a;
+    border-radius: 12px;
+    padding: 28px;
+  }
+  .card h3 { font-size: 20px; margin-bottom: 12px; }
+  .card p, .card li { font-size: 17px; }
+  .card ul li { padding: 5px 0; padding-left: 22px; }
+  .card ul li::before { top: 12px; width: 7px; height: 7px; }
+  .card.accent { border-color: var(--amber-dim); background: var(--amber-glow); }
+
+  /* Code blocks */
+  .code-block {
+    background: var(--surface);
+    border: 1px solid #2a2a2a;
+    border-radius: 10px;
+    padding: 24px 28px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 16px;
+    line-height: 1.7;
+    width: 100%;
+    max-width: 900px;
+    white-space: pre;
+    overflow-x: auto;
+  }
+  .code-block .prompt { color: var(--amber); }
+  .code-block .comment { color: var(--text-muted); }
+  .code-block .result { color: var(--green); }
+  .code-block .label { color: var(--blue); }
+  .code-block .warn { color: var(--red); }
+
+  /* Skill table */
+  .skill-table {
+    width: 100%;
+    max-width: 1000px;
+    border-collapse: collapse;
+  }
+  .skill-table td, .skill-table th {
+    padding: 14px 20px;
+    text-align: left;
+    border-bottom: 1px solid #2a2a2a;
+    font-size: 19px;
+  }
+  .skill-table th {
+    color: var(--text-muted);
+    font-weight: 500;
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .skill-table .cmd {
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--amber);
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  /* Flow diagram */
+  .flow {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .flow-box {
+    background: var(--surface);
+    border: 1px solid #2a2a2a;
+    border-radius: 10px;
+    padding: 16px 24px;
+    text-align: center;
+    font-size: 17px;
+    min-width: 140px;
+  }
+  .flow-box.active-box { border-color: var(--amber); background: var(--amber-glow); }
+  .flow-arrow { color: var(--text-muted); font-size: 24px; }
+
+  /* Timeline */
+  .timeline {
+    position: relative;
+    width: 100%;
+    max-width: 1000px;
+  }
+  .timeline::before {
+    content: '';
+    position: absolute;
+    left: 20px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: #333;
+  }
+  .timeline-item {
+    position: relative;
+    padding-left: 56px;
+    padding-bottom: 32px;
+  }
+  .timeline-item::before {
+    content: '';
+    position: absolute;
+    left: 13px;
+    top: 6px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 2px solid var(--amber);
+    background: var(--bg);
+  }
+  .timeline-item.done::before {
+    background: var(--amber);
+  }
+  .timeline-item h3 { font-size: 22px; }
+  .timeline-item p { font-size: 17px; color: var(--text-muted); }
+
+  /* Stats */
+  .stat {
+    text-align: center;
+  }
+  .stat .number {
+    font-size: 56px;
+    font-weight: 700;
+    color: var(--amber);
+    line-height: 1;
+  }
+  .stat .label {
+    font-size: 16px;
+    color: var(--text-muted);
+    margin-top: 8px;
+  }
+
+  /* Architecture diagram */
+  .arch {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 15px;
+    line-height: 1.5;
+    background: var(--surface);
+    border: 1px solid #2a2a2a;
+    border-radius: 12px;
+    padding: 32px;
+    white-space: pre;
+    max-width: 800px;
+    width: 100%;
+  }
+
+  /* Fade-in animation */
+  .slide.active .fade-in {
+    animation: fadeUp 0.5s ease forwards;
+    opacity: 0;
+  }
+  .slide.active .fade-in:nth-child(1) { animation-delay: 0.1s; }
+  .slide.active .fade-in:nth-child(2) { animation-delay: 0.25s; }
+  .slide.active .fade-in:nth-child(3) { animation-delay: 0.4s; }
+  .slide.active .fade-in:nth-child(4) { animation-delay: 0.55s; }
+  .slide.active .fade-in:nth-child(5) { animation-delay: 0.7s; }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+</style>
+</head>
+<body>
+
+<div class="progress" id="progress"></div>
+<div class="slide-counter" id="counter"></div>
+<div class="nav"><kbd>&larr;</kbd> <kbd>&rarr;</kbd> to navigate</div>
+
+<!-- ============================================================ -->
+<!-- SLIDE 1: Title -->
+<!-- ============================================================ -->
+<div class="slide" id="s1">
+  <div class="logo fade-in">
+    <img src="assets/distillery-logo-dark-512.png" alt="Distillery">
+  </div>
+  <h1 class="fade-in">Distillery</h1>
+  <p class="subtitle fade-in">Team Knowledge, Distilled</p>
+  <p class="small fade-in" style="margin-top: 40px;">A team-accessible Second Brain powered by Claude Code</p>
+</div>
+
+<!-- ============================================================ -->
+<!-- SLIDE 2: The Problem -->
+<!-- ============================================================ -->
+<div class="slide left" id="s2">
+  <h2 class="fade-in">Teams create knowledge.<br>Then lose it.</h2>
+  <div style="height: 20px;"></div>
+  <ul>
+    <li class="fade-in">Architecture decisions made in coding sessions &mdash; never written down</li>
+    <li class="fade-in">Meeting outcomes discussed but not recorded anywhere searchable</li>
+    <li class="fade-in">Useful articles shared in Slack &mdash; buried in days</li>
+    <li class="fade-in">New team members start from zero because context evaporated</li>
+  </ul>
+  <p class="fade-in" style="margin-top: 32px; color: var(--amber); font-size: 24px; font-weight: 500;">
+    The problem isn't generating knowledge. It's retaining it.
+  </p>
+</div>
+
+<!-- ============================================================ -->
+<!-- SLIDE 3: The Idea -->
+<!-- ============================================================ -->
+<div class="slide" id="s3">
+  <h2 class="fade-in">What if your AI coding tool<br>was also your team's memory?</h2>
+  <div style="height: 32px;"></div>
+  <div class="grid-3 fade-in">
+    <div class="card">
+      <h3>Capture</h3>
+      <p>Knowledge flows from where work happens &mdash; no context switching</p>
+    </div>
+    <div class="card">
+      <h3>Classify</h3>
+      <p>LLM auto-classifies entries with confidence scoring and team review</p>
+    </div>
+    <div class="card">
+      <h3>Retrieve</h3>
+      <p>Semantic search and multi-entry synthesis &mdash; not keyword matching</p>
+    </div>
+  </div>
+  <p class="small fade-in" style="margin-top: 32px;">
+    Inspired by Tiago Forte's <em>Building a Second Brain</em> &mdash; CODE: Capture, Organize, Distill, Express
+  </p>
+</div>
+
+<!-- ============================================================ -->
+<!-- SLIDE 4: How it works -->
+<!-- ============================================================ -->
+<div class="slide" id="s4">
+  <h2 class="fade-in">How it works</h2>
+  <div style="height: 24px;"></div>
+  <div class="flow fade-in">
+    <div class="flow-box">You work in<br>Claude Code</div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-box active-box"><span class="highlight">/distill</span><br>captures knowledge</div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-box">Dedup check<br><span class="dim" style="font-size: 14px;">skip / merge / link / create</span></div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-box">Classify<br><span class="dim" style="font-size: 14px;">type + confidence</span></div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-box active-box">Stored in KB<br><span class="dim" style="font-size: 14px;">embedded + indexed</span></div>
+  </div>
+  <div style="height: 40px;"></div>
+  <div class="flow fade-in">
+    <div class="flow-box">A question arises</div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-box active-box"><span class="highlight">/recall</span> or <span class="highlight">/pour</span></div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-box">Semantic search<br><span class="dim" style="font-size: 14px;">vector similarity</span></div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-box active-box">Answer with<br>sources + citations</div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- SLIDE 5: The 6 Skills -->
+<!-- ============================================================ -->
+<div class="slide" id="s5">
+  <h2 class="fade-in">6 conversational commands</h2>
+  <div style="height: 16px;"></div>
+  <table class="skill-table fade-in">
+    <tr><th>Skill</th><th>Purpose</th><th>Example</th></tr>
+    <tr>
+      <td class="cmd">/distill</td>
+      <td>Capture session knowledge</td>
+      <td class="dim">/distill "We chose Redis for caching"</td>
+    </tr>
+    <tr>
+      <td class="cmd">/recall</td>
+      <td>Semantic search</td>
+      <td class="dim">/recall distributed caching strategies</td>
+    </tr>
+    <tr>
+      <td class="cmd">/pour</td>
+      <td>Multi-entry synthesis</td>
+      <td class="dim">/pour how does our auth system work?</td>
+    </tr>
+    <tr>
+      <td class="cmd">/bookmark</td>
+      <td>Save URLs with summaries</td>
+      <td class="dim">/bookmark https://... #caching</td>
+    </tr>
+    <tr>
+      <td class="cmd">/minutes</td>
+      <td>Meeting notes + updates</td>
+      <td class="dim">/minutes --update standup-2026-03-22</td>
+    </tr>
+    <tr>
+      <td class="cmd">/classify</td>
+      <td>Classify &amp; triage queue</td>
+      <td class="dim">/classify --inbox</td>
+    </tr>
+  </table>
+</div>
+
+<!-- ============================================================ -->
+<!-- SLIDE 6: /pour deep dive -->
+<!-- ============================================================ -->
+<div class="slide left" id="s6">
+  <h2 class="fade-in">Deep synthesis with <span class="highlight">/pour</span></h2>
+  <p class="subtitle fade-in">Multi-pass retrieval builds the complete picture</p>
+  <div style="height: 16px;"></div>
+  <div class="code-block fade-in"><span class="prompt">&gt;</span> /pour how does our caching strategy work?
+
+<span class="comment"># Pass 1: 8 entries (broad semantic search)</span>
+<span class="comment"># Pass 2: 4 entries (follow-up on "Redis", "CDN")</span>
+<span class="comment"># Pass 3: 2 entries (gap-fill on "Varnish evaluation")</span>
+<span class="result">12 unique entries across 3 passes</span>
+
+<span class="label">## Summary</span>
+The team's caching strategy evolved over the past month.
+Redis was selected for session caching <span class="dim">[Entry abc123]</span>
+after evaluating Memcached <span class="dim">[Entry jkl445]</span>...
+
+<span class="label">## Key Decisions</span>
+<span class="result">+</span> Redis over Memcached for session cache <span class="dim">(norrie, Mar 22)</span>
+<span class="result">+</span> Varnish rejected for API caching <span class="dim">(norrie, Mar 15)</span>
+
+<span class="warn">## Knowledge Gaps</span>
+<span class="warn">-</span> No entries about cache warming strategy
+<span class="warn">-</span> Single perspective on Redis decision</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- SLIDE 7: Dedup -->
+<!-- ============================================================ -->
+<div class="slide" id="s7">
+  <h2 class="fade-in">Semantic deduplication</h2>
+  <p class="subtitle fade-in">Keeps the knowledge base clean as it grows</p>
+  <div style="height: 24px;"></div>
+  <div class="grid-2 fade-in">
+    <div>
+      <div class="card" style="margin-bottom: 16px;">
+        <h3 style="color: var(--red);">Score &ge; 0.95 &mdash; Skip</h3>
+        <p>"This is already captured. Don't store."</p>
+      </div>
+      <div class="card" style="margin-bottom: 16px;">
+        <h3 style="color: var(--amber);">Score 0.80 &ndash; 0.95 &mdash; Merge</h3>
+        <p>"Overlaps with existing entry. Merge new details in?"</p>
+      </div>
+      <div class="card" style="margin-bottom: 16px;">
+        <h3 style="color: var(--blue);">Score 0.60 &ndash; 0.80 &mdash; Link</h3>
+        <p>"Related content exists. Store and cross-reference."</p>
+      </div>
+      <div class="card">
+        <h3 style="color: var(--green);">Score &lt; 0.60 &mdash; Create</h3>
+        <p>"Novel knowledge. Store as new entry."</p>
+      </div>
+    </div>
+    <div class="code-block" style="font-size: 15px; align-self: center;"><span class="prompt">&gt;</span> /distill "We're using Redis for caching"
+
+<span class="warn">Duplicate detected (similarity: 0.97)</span>
+Existing entry abc12345:
+  "Decided to use Redis for session
+   caching..."
+
+Options:
+  <span class="label">1.</span> Skip (don't store)
+  <span class="label">2.</span> Merge new details into existing
+  <span class="label">3.</span> Store anyway as separate entry</div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- SLIDE 8: Classification -->
+<!-- ============================================================ -->
+<div class="slide" id="s8">
+  <h2 class="fade-in">Intelligent classification</h2>
+  <p class="subtitle fade-in">LLM-powered type assignment with team review for low confidence</p>
+  <div style="height: 24px;"></div>
+  <div class="grid-2 fade-in">
+    <div>
+      <div class="card" style="margin-bottom: 20px;">
+        <h3>Auto-classify</h3>
+        <p>Every entry gets a type (session, bookmark, minutes, reference, idea) with a confidence score.</p>
+        <p style="margin-top: 12px;">Confidence &ge; 60% &rarr; <span style="color: var(--green);">Active</span></p>
+        <p>Confidence &lt; 60% &rarr; <span style="color: var(--amber);">Review Queue</span></p>
+      </div>
+      <div class="card">
+        <h3>Team review</h3>
+        <p>Low-confidence entries enter a triage queue. Any team member can approve, reclassify, or archive.</p>
+      </div>
+    </div>
+    <div class="code-block" style="font-size: 15px; align-self: center;"><span class="prompt">&gt;</span> /classify --review
+
+<span class="label">Review Queue (3 entries)</span>
+
+<span class="label">1.</span> "Discussed Stripe webhook retry..."
+   Type: <span class="result">session</span> (54%)
+   <span class="dim">Reason: Contains decisions but also
+   resembles meeting notes</span>
+
+   <span class="prompt">[a]</span>pprove  <span class="prompt">[r]</span>eclassify  <span class="prompt">[x]</span> archive
+
+<span class="prompt">&gt;</span> r
+<span class="prompt">&gt;</span> New type: minutes
+<span class="result">Reclassified and approved.</span>
+
+<span class="label">Summary:</span> 2 approved, 1 reclassified</div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- SLIDE 9: Architecture -->
+<!-- ============================================================ -->
+<div class="slide" id="s9">
+  <h2 class="fade-in">Architecture</h2>
+  <div style="height: 16px;"></div>
+  <div class="arch fade-in">
+<span class="label">  Claude Code (your terminal)</span>
+  +-------------------------------------------------+
+  |  /distill  /recall  /pour  /bookmark            |
+  |  /minutes  /classify                            |
+  |                                                 |
+  |  +-------------------------------------------+  |
+  |  |         <span class="highlight">MCP Server</span> (stdio, 11 tools)     |  |
+  |  +---------------------+---------------------+  |
+  +-----------------------|-------------------------+
+                          |
+          +---------------+---------------+
+          |               |               |
+   +------+------+ +-----+------+ +------+--------+
+   |   <span class="result">DuckDB</span>    | | <span class="result">Embedding</span>  | | <span class="result">Classification</span> |
+   |   + HNSW    | |  Provider  | |    Engine      |
+   |   index     | | Jina/OpenAI| |   + Dedup      |
+   +-------------+ +------------+ +---------------+</div>
+  <div style="height: 20px;"></div>
+  <div class="grid-3 fade-in">
+    <div class="card" style="text-align: center;">
+      <p style="font-size: 15px;"><strong>Skills are markdown</strong><br><span class="dim">SKILL.md files, not code</span></p>
+    </div>
+    <div class="card" style="text-align: center;">
+      <p style="font-size: 15px;"><strong>Storage is swappable</strong><br><span class="dim">DuckDB now, ES later</span></p>
+    </div>
+    <div class="card" style="text-align: center;">
+      <p style="font-size: 15px;"><strong>Embeddings are configurable</strong><br><span class="dim">Jina v3, OpenAI, or stub</span></p>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- SLIDE 10: What we've built -->
+<!-- ============================================================ -->
+<div class="slide" id="s10">
+  <h2 class="fade-in">What we've built <span class="dim">(Phase 1 MVP)</span></h2>
+  <div style="height: 24px;"></div>
+  <div style="display: flex; gap: 64px; justify-content: center;" class="fade-in">
+    <div class="stat">
+      <div class="number">6</div>
+      <div class="label">Claude Code skills</div>
+    </div>
+    <div class="stat">
+      <div class="number">11</div>
+      <div class="label">MCP server tools</div>
+    </div>
+    <div class="stat">
+      <div class="number">339+</div>
+      <div class="label">tests passing</div>
+    </div>
+    <div class="stat">
+      <div class="number">3</div>
+      <div class="label">specs delivered</div>
+    </div>
+  </div>
+  <div style="height: 40px;"></div>
+  <div class="grid-3 fade-in">
+    <div class="card accent">
+      <h3>Spec 01: Storage</h3>
+      <ul>
+        <li>Entry data model</li>
+        <li>DuckDB + HNSW index</li>
+        <li>Embedding providers</li>
+        <li>MCP server (7 tools)</li>
+      </ul>
+    </div>
+    <div class="card accent">
+      <h3>Spec 02: Skills</h3>
+      <ul>
+        <li>/distill, /recall, /pour</li>
+        <li>/bookmark, /minutes</li>
+        <li>Shared conventions</li>
+        <li>Provenance display</li>
+      </ul>
+    </div>
+    <div class="card accent">
+      <h3>Spec 03: Classification</h3>
+      <ul>
+        <li>Classification engine</li>
+        <li>Semantic dedup</li>
+        <li>/classify skill</li>
+        <li>Review queue</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- SLIDE 11: Roadmap -->
+<!-- ============================================================ -->
+<div class="slide left" id="s11">
+  <h2 class="fade-in">What's next</h2>
+  <div style="height: 20px;"></div>
+  <div class="timeline">
+    <div class="timeline-item done fade-in">
+      <h3>Phase 1 &mdash; MVP <span style="color: var(--green); font-size: 16px; font-weight: 400;">Complete</span></h3>
+      <p>Storage layer, 6 core skills, classification pipeline, semantic deduplication.</p>
+    </div>
+    <div class="timeline-item fade-in">
+      <h3>Phase 2 &mdash; Team Expansion</h3>
+      <p>6 new skills: <span style="color: var(--text);">/whois</span> (expertise map), <span style="color: var(--text);">/digest</span> (team summaries), <span style="color: var(--text);">/investigate</span> (deep context), <span style="color: var(--text);">/gh-sync</span> (GitHub tracking), <span style="color: var(--text);">/briefing</span>, <span style="color: var(--text);">/process</span>.<br>
+      Elasticsearch migration. Access control. Session capture hooks. Namespace taxonomy.</p>
+    </div>
+    <div class="timeline-item fade-in">
+      <h3>Phase 3 &mdash; Ambient Intelligence</h3>
+      <p>The knowledge base starts watching the world. <span style="color: var(--text);">/radar</span> (feed digest), <span style="color: var(--text);">/watch</span> (source management), <span style="color: var(--text);">/tune</span> (relevance tuning).<br>
+      Feed polling (RSS, Slack, GitHub, HN). Relevance scoring pipeline. Trust feedback loop.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- SLIDE 12: Phase 2 detail -->
+<!-- ============================================================ -->
+<div class="slide" id="s12">
+  <h2 class="fade-in">Phase 2: Team Expansion</h2>
+  <p class="subtitle fade-in">Scale from single user to team-wide adoption</p>
+  <div style="height: 20px;"></div>
+  <div class="grid-2 fade-in">
+    <div class="card">
+      <h3>New Skills</h3>
+      <table style="width: 100%; font-size: 16px;">
+        <tr><td class="cmd" style="padding: 6px 12px; font-size: 15px;">/whois</td><td style="padding: 6px; color: var(--text-muted);">Who knows about distributed caching?</td></tr>
+        <tr><td class="cmd" style="padding: 6px 12px; font-size: 15px;">/investigate</td><td style="padding: 6px; color: var(--text-muted);">Deep domain context builder</td></tr>
+        <tr><td class="cmd" style="padding: 6px 12px; font-size: 15px;">/digest</td><td style="padding: 6px; color: var(--text-muted);">Team activity summaries</td></tr>
+        <tr><td class="cmd" style="padding: 6px 12px; font-size: 15px;">/briefing</td><td style="padding: 6px; color: var(--text-muted);">Team knowledge dashboard</td></tr>
+        <tr><td class="cmd" style="padding: 6px 12px; font-size: 15px;">/process</td><td style="padding: 6px; color: var(--text-muted);">Batch classify + stale detection</td></tr>
+        <tr><td class="cmd" style="padding: 6px 12px; font-size: 15px;">/gh-sync</td><td style="padding: 6px; color: var(--text-muted);">GitHub issue/PR tracking</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h3>Infrastructure</h3>
+      <ul>
+        <li><strong>Elasticsearch migration</strong><br><span class="dim">Native hybrid search, semantic_text, ES|QL analytics</span></li>
+        <li><strong>Access control</strong><br><span class="dim">Team/private visibility flag</span></li>
+        <li><strong>Session hooks</strong><br><span class="dim">Auto-distill on session end</span></li>
+        <li><strong>Namespace taxonomy</strong><br><span class="dim">/project/billing-v2/decisions</span></li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- SLIDE 13: Phase 3 detail -->
+<!-- ============================================================ -->
+<div class="slide" id="s13">
+  <h2 class="fade-in">Phase 3: Ambient Intelligence</h2>
+  <p class="subtitle fade-in">The knowledge base watches the world for you</p>
+  <div style="height: 20px;"></div>
+  <div class="code-block fade-in" style="max-width: 760px;"><span class="comment"># The relevance scoring pipeline</span>
+
+For each new feed item:
+  <span class="label">1.</span> Embed item (title + summary)
+  <span class="label">2.</span> Compare against active project embeddings
+  <span class="label">3.</span> Score = similarity x priority x tag overlap
+                       x recency x source trust
+  <span class="label">4.</span> score > <span class="result">0.65</span>  &rarr;  include in daily digest
+  <span class="label">5.</span> score > <span class="warn">0.90</span>  &rarr;  immediate alert
+
+<span class="comment"># Feed sources</span>
+  RSS / Slack / GitHub / Hacker News / Webhooks</div>
+  <div style="height: 24px;"></div>
+  <div class="grid-3 fade-in">
+    <div class="card" style="text-align: center;">
+      <h3>/radar</h3>
+      <p style="font-size: 15px;">View latest ambient feed digest</p>
+    </div>
+    <div class="card" style="text-align: center;">
+      <h3>/watch</h3>
+      <p style="font-size: 15px;">Manage monitored sources</p>
+    </div>
+    <div class="card" style="text-align: center;">
+      <h3>/tune</h3>
+      <p style="font-size: 15px;">Adjust relevance thresholds</p>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- SLIDE 14: Differentiators -->
+<!-- ============================================================ -->
+<div class="slide" id="s14">
+  <h2 class="fade-in">Why this is different</h2>
+  <div style="height: 24px;"></div>
+  <div class="grid-2 fade-in">
+    <div class="card">
+      <h3 style="color: var(--text-muted);">Traditional Knowledge Base</h3>
+      <ul>
+        <li>Separate app to switch to</li>
+        <li>Manual categorization</li>
+        <li>Keyword search</li>
+        <li>Flat document list</li>
+        <li>Grows noisy over time</li>
+        <li>Individual silos</li>
+      </ul>
+    </div>
+    <div class="card accent">
+      <h3>Distillery</h3>
+      <ul>
+        <li>Lives in your coding tool</li>
+        <li>LLM auto-classification</li>
+        <li>Semantic vector search</li>
+        <li>Multi-pass synthesis with citations</li>
+        <li>Semantic dedup keeps it clean</li>
+        <li>Team-shared by default</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- SLIDE 15: Close -->
+<!-- ============================================================ -->
+<div class="slide" id="s15">
+  <div class="logo fade-in">
+    <img src="assets/distillery-logo-dark-512.png" alt="Distillery">
+  </div>
+  <h1 class="fade-in">Distillery</h1>
+  <p class="subtitle fade-in">Refine raw information into concentrated team knowledge.</p>
+  <div style="height: 40px;"></div>
+  <div class="grid-3 fade-in" style="max-width: 700px;">
+    <div style="text-align: center;">
+      <p class="small" style="margin-bottom: 4px; color: var(--amber);">Install</p>
+      <p style="font-family: 'JetBrains Mono', monospace; font-size: 15px;">pip install -e .</p>
+    </div>
+    <div style="text-align: center;">
+      <p class="small" style="margin-bottom: 4px; color: var(--amber);">Docs</p>
+      <p style="font-size: 15px;">docs/mcp-setup.md</p>
+    </div>
+    <div style="text-align: center;">
+      <p class="small" style="margin-bottom: 4px; color: var(--amber);">Roadmap</p>
+      <p style="font-size: 15px;">docs/ROADMAP.md</p>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- NAVIGATION SCRIPT -->
+<!-- ============================================================ -->
+<script>
+  const slides = document.querySelectorAll('.slide');
+  let current = 0;
+  const total = slides.length;
+
+  function show(n) {
+    slides[current].classList.remove('active');
+    current = Math.max(0, Math.min(n, total - 1));
+    slides[current].classList.add('active');
+    document.getElementById('progress').style.width = ((current + 1) / total * 100) + '%';
+    document.getElementById('counter').textContent = (current + 1) + ' / ' + total;
+  }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { e.preventDefault(); show(current + 1); }
+    if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); show(current - 1); }
+    if (e.key === 'Home') { e.preventDefault(); show(0); }
+    if (e.key === 'End') { e.preventDefault(); show(total - 1); }
+  });
+
+  // Touch support
+  let touchStartX = 0;
+  document.addEventListener('touchstart', e => { touchStartX = e.touches[0].clientX; });
+  document.addEventListener('touchend', e => {
+    const diff = touchStartX - e.changedTouches[0].clientX;
+    if (Math.abs(diff) > 50) { diff > 0 ? show(current + 1) : show(current - 1); }
+  });
+
+  // Click navigation (left third = back, right two-thirds = forward)
+  document.addEventListener('click', e => {
+    if (e.target.closest('.nav, a, button')) return;
+    e.clientX < window.innerWidth / 3 ? show(current - 1) : show(current + 1);
+  });
+
+  show(0);
+</script>
+
+</body>
+</html>
