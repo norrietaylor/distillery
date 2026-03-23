@@ -291,18 +291,140 @@
     margin-top: 8px;
   }
 
-  /* Architecture diagram */
-  .arch {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 15px;
-    line-height: 1.5;
-    background: var(--surface);
-    border: 1px solid #2a2a2a;
-    border-radius: 12px;
-    padding: 32px;
-    white-space: pre;
-    max-width: 800px;
+  /* Architecture diagram — CSS box model */
+  .arch-diagram {
     width: 100%;
+    max-width: 900px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+  }
+  .arch-layer {
+    width: 100%;
+    border: 2px solid #333;
+    border-radius: 14px;
+    padding: 20px 24px;
+    position: relative;
+  }
+  .arch-layer-label {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+    font-weight: 500;
+  }
+  .arch-skills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .arch-skill {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    color: var(--amber);
+    background: var(--amber-glow);
+    border: 1px solid var(--amber-dim);
+    border-radius: 6px;
+    padding: 5px 12px;
+    font-weight: 500;
+  }
+  .arch-mcp {
+    background: var(--surface2);
+    border: 2px solid var(--amber-dim);
+    border-radius: 10px;
+    padding: 14px 20px;
+    text-align: center;
+  }
+  .arch-mcp-title {
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--amber);
+  }
+  .arch-mcp-sub {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-top: 4px;
+  }
+  .arch-connector {
+    display: flex;
+    justify-content: center;
+    padding: 6px 0;
+  }
+  .arch-connector-line {
+    width: 2px;
+    height: 28px;
+    background: #444;
+  }
+  .arch-connector-fan {
+    display: flex;
+    justify-content: center;
+    align-items: flex-end;
+    gap: 0;
+    height: 28px;
+    position: relative;
+    width: 60%;
+    margin: 0 auto;
+  }
+  .arch-connector-fan::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 50%;
+    width: 2px;
+    height: 12px;
+    background: #444;
+    transform: translateX(-50%);
+  }
+  .arch-connector-fan::after {
+    content: '';
+    position: absolute;
+    top: 12px;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: #444;
+  }
+  .arch-fan-leg {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    position: relative;
+  }
+  .arch-fan-leg::after {
+    content: '';
+    position: absolute;
+    top: 14px;
+    width: 2px;
+    height: 14px;
+    background: #444;
+  }
+  .arch-backends {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 16px;
+    width: 100%;
+    max-width: 900px;
+  }
+  .arch-backend {
+    background: var(--surface);
+    border: 2px solid #333;
+    border-radius: 10px;
+    padding: 16px;
+    text-align: center;
+  }
+  .arch-backend-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--green);
+    margin-bottom: 4px;
+  }
+  .arch-backend-sub {
+    font-size: 13px;
+    color: var(--text-muted);
+    line-height: 1.4;
   }
 
   /* Fade-in animation */
@@ -361,14 +483,18 @@
       max-width: 100%;
     }
 
-    /* Architecture ASCII diagram — scroll on mobile */
-    .arch {
-      font-size: 10px;
-      padding: 16px;
-      overflow-x: auto;
-      white-space: pre;
-      max-width: 100%;
-    }
+    /* Architecture diagram — mobile */
+    .arch-layer { padding: 14px 16px; }
+    .arch-layer-label { font-size: 11px; }
+    .arch-skill { font-size: 12px; padding: 4px 8px; }
+    .arch-mcp-title { font-size: 15px; }
+    .arch-mcp-sub { font-size: 11px; }
+    .arch-backends { grid-template-columns: 1fr; gap: 10px; }
+    .arch-backend { padding: 12px; }
+    .arch-backend-title { font-size: 15px; }
+    .arch-backend-sub { font-size: 12px; }
+    .arch-connector-fan { width: 40%; display: none; }
+    .arch-connector-line { height: 16px; }
 
     /* Skill table */
     .skill-table td, .skill-table th { padding: 8px 10px; font-size: 14px; }
@@ -647,24 +773,46 @@ Options:
 <div class="slide" id="s9">
   <h2 class="fade-in">Architecture</h2>
   <div style="height: 16px;"></div>
-  <div class="arch fade-in">
-<span class="label">  Claude Code (your terminal)</span>
-  +-------------------------------------------------+
-  |  /distill  /recall  /pour  /bookmark            |
-  |  /minutes  /classify                            |
-  |                                                 |
-  |  +-------------------------------------------+  |
-  |  |         <span class="highlight">MCP Server</span> (stdio, 11 tools)     |  |
-  |  +---------------------+---------------------+  |
-  +-----------------------|-------------------------+
-                          |
-          +---------------+---------------+
-          |               |               |
-   +------+------+ +-----+------+ +------+--------+
-   |   <span class="result">DuckDB</span>    | | <span class="result">Embedding</span>  | | <span class="result">Classification</span> |
-   |   + HNSW    | |  Provider  | |    Engine      |
-   |   index     | | Jina/OpenAI| |   + Dedup      |
-   +-------------+ +------------+ +---------------+</div>
+  <div class="arch-diagram fade-in">
+    <div class="arch-layer">
+      <div class="arch-layer-label">Claude Code</div>
+      <div class="arch-skills">
+        <span class="arch-skill">/distill</span>
+        <span class="arch-skill">/recall</span>
+        <span class="arch-skill">/pour</span>
+        <span class="arch-skill">/bookmark</span>
+        <span class="arch-skill">/minutes</span>
+        <span class="arch-skill">/classify</span>
+      </div>
+      <div class="arch-mcp">
+        <div class="arch-mcp-title">MCP Server</div>
+        <div class="arch-mcp-sub">stdio transport &middot; 11 tools</div>
+      </div>
+    </div>
+    <div class="arch-connector">
+      <div class="arch-connector-line"></div>
+    </div>
+    <div class="arch-connector-fan">
+      <div class="arch-fan-leg"></div>
+      <div class="arch-fan-leg"></div>
+      <div class="arch-fan-leg"></div>
+    </div>
+    <div style="height: 4px;"></div>
+    <div class="arch-backends">
+      <div class="arch-backend">
+        <div class="arch-backend-title">DuckDB</div>
+        <div class="arch-backend-sub">+ HNSW index<br>Vector similarity</div>
+      </div>
+      <div class="arch-backend">
+        <div class="arch-backend-title">Embedding</div>
+        <div class="arch-backend-sub">Jina v3 / OpenAI<br>Configurable provider</div>
+      </div>
+      <div class="arch-backend">
+        <div class="arch-backend-title">Classification</div>
+        <div class="arch-backend-sub">LLM engine<br>+ Dedup checker</div>
+      </div>
+    </div>
+  </div>
   <div style="height: 20px;"></div>
   <div class="grid-3 fade-in">
     <div class="card" style="text-align: center;">
