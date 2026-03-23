@@ -12,15 +12,18 @@ authors = [
     {name = "Distillery Contributors"}
 ]
 license = {text = "Apache-2.0"}
-keywords = ["knowledge-base", "embeddings", "mcp", "duckdb", "second-brain", "vector-search"]
+keywords = ["knowledge-base", "second-brain", "embeddings", "mcp", "claude-code", "vector-search", "duckdb"]
 classifiers = [
     "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-    "Intended Audience :: Developers",
-    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
 dependencies = [
