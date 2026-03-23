@@ -27,7 +27,6 @@ from distillery.mcp.server import _handle_check_dedup
 from distillery.models import Entry, EntrySource, EntryType
 from distillery.store.duckdb import DuckDBStore
 
-
 # ---------------------------------------------------------------------------
 # Controlled embedding provider
 # ---------------------------------------------------------------------------
@@ -121,12 +120,12 @@ def _parse_response(content: list) -> dict:
 
 
 def _make_entry(**kwargs) -> Entry:
-    defaults = dict(
-        content="placeholder",
-        entry_type=EntryType.INBOX,
-        source=EntrySource.MANUAL,
-        author="tester",
-    )
+    defaults = {
+        "content": "placeholder",
+        "entry_type": EntryType.INBOX,
+        "source": EntrySource.MANUAL,
+        "author": "tester",
+    }
     defaults.update(kwargs)
     return Entry(**defaults)
 
@@ -151,7 +150,7 @@ def _interpolated_vector(a: list[float], b: list[float], t: float) -> list[float
 
 
 def _cosine(u: list[float], v: list[float]) -> float:
-    return sum(a * b for a, b in zip(u, v))
+    return sum(a * b for a, b in zip(u, v, strict=True))
 
 
 # ---------------------------------------------------------------------------

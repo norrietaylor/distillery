@@ -1,0 +1,11 @@
+Type: cli
+Command: python3 -m pytest --tb=short -q
+Expected: exit code 0, all tests passing
+Timestamp: 2026-03-22T00:00:00Z
+
+--- OUTPUT ---
+384 passed in 5.05s
+
+--- RESULT ---
+Exit code: 0
+Status: PASS

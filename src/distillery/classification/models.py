@@ -8,7 +8,7 @@ This module defines the result dataclasses and action enum used by
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from distillery.store.protocol import SearchResult
 
 
-class DeduplicationAction(str, Enum):
+class DeduplicationAction(StrEnum):
     """The action a caller should take after a deduplication check.
 
     Attributes:
@@ -56,9 +56,9 @@ class ClassificationResult:
         suggested_project: Optional project name extracted from content.
     """
 
-    entry_type: "EntryType"
+    entry_type: EntryType
     confidence: float
-    status: "EntryStatus"
+    status: EntryStatus
     reasoning: str = ""
     suggested_tags: list[str] = field(default_factory=list)
     suggested_project: str | None = None
@@ -78,6 +78,6 @@ class DeduplicationResult:
     """
 
     action: DeduplicationAction
-    similar_entries: list["SearchResult"] = field(default_factory=list)
+    similar_entries: list[SearchResult] = field(default_factory=list)
     highest_score: float = 0.0
     reasoning: str = ""

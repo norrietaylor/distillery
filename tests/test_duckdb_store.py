@@ -8,14 +8,13 @@ deterministic while exercising the real DuckDB query paths.
 from __future__ import annotations
 
 import math
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
 from distillery.models import Entry, EntrySource, EntryStatus, EntryType
 from distillery.store.duckdb import DuckDBStore
 from distillery.store.protocol import SearchResult
-
 
 # ---------------------------------------------------------------------------
 # Mock embedding provider
@@ -66,12 +65,12 @@ class _MockEmbeddingProvider:
 
 def _make_entry(**kwargs) -> Entry:
     """Return a minimal valid Entry, optionally overriding fields."""
-    defaults = dict(
-        content="Default content",
-        entry_type=EntryType.INBOX,
-        source=EntrySource.MANUAL,
-        author="tester",
-    )
+    defaults = {
+        "content": "Default content",
+        "entry_type": EntryType.INBOX,
+        "source": EntrySource.MANUAL,
+        "author": "tester",
+    }
     defaults.update(kwargs)
     return Entry(**defaults)
 
@@ -284,7 +283,7 @@ class TestUpdate:
         entry = _make_entry()
         await store.store(entry)
         with pytest.raises(ValueError, match="created_at"):
-            await store.update(entry.id, {"created_at": datetime.now(tz=timezone.utc)})
+            await store.update(entry.id, {"created_at": datetime.now(tz=UTC)})
 
     async def test_update_rejects_source_field(self, store: DuckDBStore) -> None:
         entry = _make_entry()
@@ -471,7 +470,7 @@ class TestSearch:
         await store.store(entry)
         # Use a date in the past so our entry is included.
         from datetime import timedelta
-        past = datetime.now(tz=timezone.utc) - timedelta(hours=1)
+        past = datetime.now(tz=UTC) - timedelta(hours=1)
         results = await store.search(
             "dated content",
             filters={"date_from": past.isoformat()},

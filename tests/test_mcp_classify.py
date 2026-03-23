@@ -31,7 +31,6 @@ from distillery.mcp.server import (
 from distillery.models import Entry, EntrySource, EntryStatus, EntryType
 from distillery.store.duckdb import DuckDBStore
 
-
 # ---------------------------------------------------------------------------
 # Mock embedding provider
 # ---------------------------------------------------------------------------
@@ -101,12 +100,12 @@ def config() -> DistilleryConfig:
 
 def _make_entry(**kwargs) -> Entry:
     """Return a minimal valid Entry with optional overrides."""
-    defaults = dict(
-        content="Default test content",
-        entry_type=EntryType.INBOX,
-        source=EntrySource.MANUAL,
-        author="test-author",
-    )
+    defaults = {
+        "content": "Default test content",
+        "entry_type": EntryType.INBOX,
+        "source": EntrySource.MANUAL,
+        "author": "test-author",
+    }
     defaults.update(kwargs)
     return Entry(**defaults)
 

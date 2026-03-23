@@ -16,7 +16,6 @@ from distillery.models import Entry, EntrySource, EntryStatus, EntryType
 from distillery.store.duckdb import DuckDBStore
 from distillery.store.protocol import SearchResult
 
-
 # ---------------------------------------------------------------------------
 # Deterministic mock embedding provider
 # ---------------------------------------------------------------------------
@@ -74,12 +73,12 @@ class _DeterministicEmbeddingProvider:
 
 def _make_entry(**kwargs) -> Entry:
     """Return a minimal valid Entry, optionally overriding fields."""
-    defaults = dict(
-        content="Default content",
-        entry_type=EntryType.INBOX,
-        source=EntrySource.MANUAL,
-        author="integration-test",
-    )
+    defaults = {
+        "content": "Default content",
+        "entry_type": EntryType.INBOX,
+        "source": EntrySource.MANUAL,
+        "author": "integration-test",
+    }
     defaults.update(kwargs)
     return Entry(**defaults)
 
@@ -520,8 +519,8 @@ class TestMetaTableIntegration:
 
     async def test_model_mismatch_raises_on_reopen(self) -> None:
         """Re-opening a DB with a different model raises RuntimeError."""
-        import tempfile
         import os
+        import tempfile
 
         # Use a temp directory and construct a path that doesn't exist yet
         # (NamedTemporaryFile creates the file, but DuckDB can't open existing

@@ -19,7 +19,7 @@ import asyncio
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -100,7 +100,7 @@ class DuckDBStore:
     def __init__(
         self,
         db_path: str,
-        embedding_provider: "EmbeddingProvider",
+        embedding_provider: EmbeddingProvider,
     ) -> None:
         self._db_path = db_path
         self._embedding_provider = embedding_provider
@@ -263,7 +263,7 @@ class DuckDBStore:
         return self._conn
 
     @property
-    def embedding_provider(self) -> "EmbeddingProvider":
+    def embedding_provider(self) -> EmbeddingProvider:
         """Return the configured embedding provider."""
         return self._embedding_provider
 
@@ -274,7 +274,7 @@ class DuckDBStore:
     # Fields that callers may never overwrite via update().
     _IMMUTABLE_FIELDS = frozenset({"id", "created_at", "source"})
 
-    def _sync_store(self, entry: "Entry") -> str:
+    def _sync_store(self, entry: Entry) -> str:
         """Synchronous implementation of store(); called via asyncio.to_thread."""
         conn = self.connection
         embedding = self._embedding_provider.embed(entry.content)
@@ -304,7 +304,7 @@ class DuckDBStore:
         logger.debug("Stored entry id=%s", entry.id)
         return entry.id
 
-    async def store(self, entry: "Entry") -> str:
+    async def store(self, entry: Entry) -> str:
         """Persist a new entry and return its ID.
 
         The entry's content is embedded via the configured embedding provider
@@ -315,7 +315,7 @@ class DuckDBStore:
         """
         return await asyncio.to_thread(self._sync_store, entry)
 
-    def _sync_get(self, entry_id: str) -> "Entry | None":
+    def _sync_get(self, entry_id: str) -> Entry | None:
         """Synchronous implementation of get(); called via asyncio.to_thread."""
         conn = self.connection
         sql = (
@@ -328,7 +328,7 @@ class DuckDBStore:
             return None
         return self._row_to_entry(row, col_names)
 
-    async def get(self, entry_id: str) -> "Entry | None":
+    async def get(self, entry_id: str) -> Entry | None:
         """Retrieve an entry by its ID.
 
         Returns:
@@ -336,7 +336,7 @@ class DuckDBStore:
         """
         return await asyncio.to_thread(self._sync_get, entry_id)
 
-    def _sync_update(self, entry_id: str, updates: dict[str, Any]) -> "Entry":
+    def _sync_update(self, entry_id: str, updates: dict[str, Any]) -> Entry:
         """Synchronous implementation of update(); called via asyncio.to_thread."""
         # Reject attempts to change immutable fields.
         bad_keys = self._IMMUTABLE_FIELDS & updates.keys()
@@ -353,7 +353,7 @@ class DuckDBStore:
         if check_result.fetchone() is None:
             raise KeyError(f"No entry found with id={entry_id!r}")
 
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
 
         # Build SET clause from the caller-supplied updates plus system fields.
         set_parts: list[str] = []
@@ -400,7 +400,7 @@ class DuckDBStore:
             raise KeyError(f"Entry disappeared after update: id={entry_id!r}")
         return self._row_to_entry(row, col_names)
 
-    async def update(self, entry_id: str, updates: dict[str, Any]) -> "Entry":
+    async def update(self, entry_id: str, updates: dict[str, Any]) -> Entry:
         """Apply a partial update to an existing entry.
 
         Increments ``version`` by 1 and refreshes ``updated_at`` to the
@@ -419,7 +419,7 @@ class DuckDBStore:
     def _sync_delete(self, entry_id: str) -> bool:
         """Synchronous implementation of delete(); called via asyncio.to_thread."""
         conn = self.connection
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         sql = (
             "UPDATE entries SET status = ?, updated_at = ? WHERE id = ?"
         )
@@ -523,7 +523,7 @@ class DuckDBStore:
 
         return clauses, params
 
-    def _row_to_entry(self, row: tuple[Any, ...], columns: list[str]) -> "Entry":
+    def _row_to_entry(self, row: tuple[Any, ...], columns: list[str]) -> Entry:
         """Convert a DuckDB result row into an ``Entry`` instance.
 
         Parameters
@@ -535,7 +535,7 @@ class DuckDBStore:
         """
         from distillery.models import Entry
 
-        data: dict[str, Any] = dict(zip(columns, row))
+        data: dict[str, Any] = dict(zip(columns, row, strict=True))
 
         # Tags come back as a Python list from DuckDB VARCHAR[].
         if data.get("tags") is None:
@@ -578,7 +578,7 @@ class DuckDBStore:
 
         embedding = self._embedding_provider.embed(query)
 
-        def _sync() -> list["SearchResult"]:
+        def _sync() -> list[SearchResult]:
             conn = self.connection
 
             where_clauses, params = self._build_filter_clauses(filters)
@@ -603,7 +603,7 @@ class DuckDBStore:
             rows = result.fetchall()
             results: list[SearchResult] = []
             for row in rows:
-                row_dict = dict(zip(col_names, row))
+                row_dict = dict(zip(col_names, row, strict=True))
                 score = float(row_dict.pop("score"))
                 entry = self._row_to_entry(
                     tuple(row_dict.values()),
@@ -619,7 +619,7 @@ class DuckDBStore:
         content: str,
         threshold: float,
         limit: int,
-    ) -> list["SearchResult"]:
+    ) -> list[SearchResult]:
         """Find entries whose cosine similarity to *content* exceeds *threshold*.
 
         Returns a ``list[SearchResult]`` with ``score >= threshold``, sorted by
@@ -629,7 +629,7 @@ class DuckDBStore:
 
         embedding = self._embedding_provider.embed(content)
 
-        def _sync() -> list["SearchResult"]:
+        def _sync() -> list[SearchResult]:
             conn = self.connection
 
             sql = (
@@ -647,7 +647,7 @@ class DuckDBStore:
             rows = result.fetchall()
             results: list[SearchResult] = []
             for row in rows:
-                row_dict = dict(zip(col_names, row))
+                row_dict = dict(zip(col_names, row, strict=True))
                 score = float(row_dict.pop("score"))
                 entry = self._row_to_entry(
                     tuple(row_dict.values()),
@@ -663,7 +663,7 @@ class DuckDBStore:
         filters: dict[str, Any] | None,
         limit: int,
         offset: int,
-    ) -> list["Entry"]:
+    ) -> list[Entry]:
         """List entries with optional metadata filtering and pagination.
 
         Unlike ``search``, this method does **not** perform semantic ranking.
@@ -672,7 +672,7 @@ class DuckDBStore:
         Returns a ``list[Entry]``.
         """
 
-        def _sync() -> list["Entry"]:
+        def _sync() -> list[Entry]:
             conn = self.connection
 
             where_clauses, params = self._build_filter_clauses(filters)

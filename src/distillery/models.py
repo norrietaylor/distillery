@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any
 
 
-class EntryType(str, Enum):
+class EntryType(StrEnum):
     """The semantic category of a knowledge entry.
 
     Attributes:
@@ -36,7 +36,7 @@ class EntryType(str, Enum):
     INBOX = "inbox"
 
 
-class EntrySource(str, Enum):
+class EntrySource(StrEnum):
     """The origin of an entry in the system.
 
     Attributes:
@@ -50,7 +50,7 @@ class EntrySource(str, Enum):
     IMPORT = "import"
 
 
-class EntryStatus(str, Enum):
+class EntryStatus(StrEnum):
     """The lifecycle state of an entry.
 
     Attributes:
@@ -66,7 +66,7 @@ class EntryStatus(str, Enum):
 
 def _utcnow() -> datetime:
     """Return the current UTC datetime with timezone info."""
-    return datetime.now(tz=timezone.utc)
+    return datetime.now(tz=UTC)
 
 
 def _new_uuid() -> str:
@@ -169,7 +169,7 @@ class Entry:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Entry":
+    def from_dict(cls, data: dict[str, Any]) -> Entry:
         """Reconstruct an ``Entry`` from a dictionary produced by :meth:`to_dict`.
 
         Args:
@@ -190,7 +190,7 @@ class Entry:
                 return value
             dt = datetime.fromisoformat(value)
             if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
+                dt = dt.replace(tzinfo=UTC)
             return dt
 
         return cls(

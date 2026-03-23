@@ -20,7 +20,7 @@ import math
 
 import pytest
 
-from distillery.config import DistilleryConfig, StorageConfig, EmbeddingConfig
+from distillery.config import DistilleryConfig, EmbeddingConfig, StorageConfig
 from distillery.mcp.server import (
     _handle_find_similar,
     _handle_get,
@@ -35,7 +35,6 @@ from distillery.mcp.server import (
 )
 from distillery.models import Entry, EntrySource, EntryType
 from distillery.store.duckdb import DuckDBStore
-
 
 # ---------------------------------------------------------------------------
 # Mock embedding provider
@@ -101,12 +100,12 @@ async def store(
 
 def _make_entry(**kwargs) -> Entry:
     """Return a minimal valid Entry with optional overrides."""
-    defaults = dict(
-        content="Default test content",
-        entry_type=EntryType.INBOX,
-        source=EntrySource.MANUAL,
-        author="test-author",
-    )
+    defaults = {
+        "content": "Default test content",
+        "entry_type": EntryType.INBOX,
+        "source": EntrySource.MANUAL,
+        "author": "test-author",
+    }
     defaults.update(kwargs)
     return Entry(**defaults)
 

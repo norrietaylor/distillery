@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from typing import Any, List, Optional
+from typing import Any
 
 import httpx
 
@@ -57,15 +57,12 @@ class JinaEmbeddingProvider:
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         api_key_env: str = "JINA_API_KEY",
         model: str = _DEFAULT_MODEL,
         dimensions: int = _DEFAULT_DIMENSIONS,
     ) -> None:
-        if api_key:
-            resolved_key = api_key
-        else:
-            resolved_key = os.environ.get(api_key_env, "")
+        resolved_key = api_key or os.environ.get(api_key_env, "")
 
         if not resolved_key:
             raise ValueError(
@@ -91,7 +88,7 @@ class JinaEmbeddingProvider:
         """Return the Jina embedding model identifier."""
         return self._model
 
-    def embed(self, text: str, task_type: str = "retrieval.passage") -> List[float]:
+    def embed(self, text: str, task_type: str = "retrieval.passage") -> list[float]:
         """Embed a single text string.
 
         Args:
@@ -111,8 +108,8 @@ class JinaEmbeddingProvider:
         return results[0]
 
     def embed_batch(
-        self, texts: List[str], task_type: str = "retrieval.passage"
-    ) -> List[List[float]]:
+        self, texts: list[str], task_type: str = "retrieval.passage"
+    ) -> list[list[float]]:
         """Embed multiple texts using the Jina batch embeddings endpoint.
 
         Implements exponential backoff retry on HTTP 429 (rate limit) and
@@ -147,7 +144,7 @@ class JinaEmbeddingProvider:
             "Content-Type": "application/json",
         }
 
-        last_error: Optional[Exception] = None
+        last_error: Exception | None = None
         backoff = _INITIAL_BACKOFF
 
         for attempt in range(_MAX_RETRIES):
@@ -207,7 +204,7 @@ class JinaEmbeddingProvider:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _parse_response(data: dict[str, Any], expected_count: int) -> List[List[float]]:
+    def _parse_response(data: dict[str, Any], expected_count: int) -> list[list[float]]:
         """Parse the Jina API response and extract embedding vectors.
 
         Args:
@@ -237,7 +234,7 @@ class JinaEmbeddingProvider:
                 f"Jina API returned {len(items)} embeddings, expected {expected_count}."
             )
 
-        embeddings: List[List[float]] = []
+        embeddings: list[list[float]] = []
         for i, item in enumerate(items):
             if "embedding" not in item:
                 raise RuntimeError(

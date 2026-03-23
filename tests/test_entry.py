@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -14,7 +14,6 @@ from distillery.models import (
     EntryType,
     SearchResult,
 )
-
 
 # ---------------------------------------------------------------------------
 # Enum tests
@@ -76,12 +75,12 @@ class TestEntryStatusEnum:
 
 def make_entry(**kwargs) -> Entry:
     """Return a minimal valid Entry, optionally overriding fields."""
-    defaults = dict(
-        content="Test content",
-        entry_type=EntryType.INBOX,
-        source=EntrySource.MANUAL,
-        author="tester",
-    )
+    defaults = {
+        "content": "Test content",
+        "entry_type": EntryType.INBOX,
+        "source": EntrySource.MANUAL,
+        "author": "tester",
+    }
     defaults.update(kwargs)
     return Entry(**defaults)
 
@@ -108,7 +107,7 @@ class TestEntryCreation:
         e = make_entry()
         assert isinstance(e.created_at, datetime)
         assert e.created_at.tzinfo is not None
-        assert e.created_at.tzinfo == timezone.utc
+        assert e.created_at.tzinfo == UTC
 
     def test_updated_at_is_utc_datetime(self) -> None:
         e = make_entry()

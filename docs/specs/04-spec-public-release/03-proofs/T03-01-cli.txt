@@ -1,0 +1,11 @@
+Type: cli
+Command: python3 -m ruff check src/ tests/
+Expected: exit code 0, zero lint errors
+Timestamp: 2026-03-22T00:00:00Z
+
+--- OUTPUT ---
+All checks passed!
+
+--- RESULT ---
+Exit code: 0
+Status: PASS

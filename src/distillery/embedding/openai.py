@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import time
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 
@@ -33,7 +34,7 @@ class OpenAIEmbeddingProvider:
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         model: str = "text-embedding-3-small",
         dimensions: int = 512,
         api_key_env: str = "OPENAI_API_KEY",
@@ -99,7 +100,7 @@ class OpenAIEmbeddingProvider:
         Raises:
             RuntimeError: If the API request fails after all retries.
         """
-        last_error: Optional[Exception] = None
+        last_error: Exception | None = None
         for attempt in range(self._MAX_RETRIES):
             try:
                 return self._request(texts)
@@ -190,10 +191,8 @@ class OpenAIEmbeddingProvider:
 
     def __del__(self) -> None:
         """Close the httpx client when the provider is garbage-collected."""
-        try:
+        with contextlib.suppress(Exception):
             self._client.close()
-        except Exception:
-            pass
 
 
 class _RateLimitError(Exception):
