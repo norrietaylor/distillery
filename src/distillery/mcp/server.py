@@ -40,16 +40,17 @@ import asyncio
 import json
 import logging
 import os
-from contextlib import asynccontextmanager
-from pathlib import Path
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from datetime import UTC
+from pathlib import Path
 from typing import Any
 
+from mcp import types
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp import types
 
-from distillery.config import load_config, DistilleryConfig
+from distillery.config import DistilleryConfig, load_config
 
 logger = logging.getLogger(__name__)
 
@@ -832,7 +833,7 @@ async def _handle_store(
     Returns:
         MCP content list containing ``{"entry_id": ..., "warnings": [...]}``.
     """
-    from distillery.models import Entry, EntryType, EntrySource
+    from distillery.models import Entry, EntrySource, EntryType
 
     # --- input validation ---------------------------------------------------
     err = validate_required(arguments, "content", "entry_type", "author")
@@ -967,7 +968,7 @@ async def _handle_update(
     Returns:
         MCP content list with the serialised updated entry or an error.
     """
-    from distillery.models import EntryType, EntryStatus
+    from distillery.models import EntryStatus, EntryType
 
     err = validate_required(arguments, "entry_id")
     if err:
@@ -1255,8 +1256,9 @@ async def _handle_classify(
     Returns:
         MCP content list with the serialised updated entry or an error.
     """
-    from datetime import datetime, timezone
-    from distillery.models import EntryType, EntryStatus
+    from datetime import datetime
+
+    from distillery.models import EntryStatus, EntryType
 
     # --- input validation ---------------------------------------------------
     err = validate_required(arguments, "entry_id", "entry_type", "confidence")
@@ -1313,7 +1315,7 @@ async def _handle_classify(
     if "classified_at" in new_metadata:
         new_metadata["reclassified_from"] = entry.entry_type.value
 
-    classified_at = datetime.now(tz=timezone.utc).isoformat()
+    classified_at = datetime.now(tz=UTC).isoformat()
     new_metadata["confidence"] = confidence
     new_metadata["classified_at"] = classified_at
     if "reasoning" in arguments:
@@ -1429,8 +1431,9 @@ async def _handle_resolve_review(
     Returns:
         MCP content list with the serialised updated entry or an error.
     """
-    from datetime import datetime, timezone
-    from distillery.models import EntryType, EntryStatus
+    from datetime import datetime
+
+    from distillery.models import EntryStatus, EntryType
 
     # --- input validation ---------------------------------------------------
     err = validate_required(arguments, "entry_id", "action")
@@ -1461,7 +1464,7 @@ async def _handle_resolve_review(
         )
 
     # --- build updates per action -------------------------------------------
-    now = datetime.now(tz=timezone.utc).isoformat()
+    now = datetime.now(tz=UTC).isoformat()
     reviewer: str | None = arguments.get("reviewer")
     new_metadata: dict[str, Any] = dict(entry.metadata)
 

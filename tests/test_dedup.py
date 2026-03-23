@@ -19,7 +19,6 @@ from distillery.classification import (
 from distillery.models import Entry, EntrySource, EntryType
 from distillery.store.protocol import SearchResult
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

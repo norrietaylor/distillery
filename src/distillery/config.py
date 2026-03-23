@@ -9,10 +9,9 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
-
 
 # Default configuration file name looked up relative to cwd.
 DEFAULT_CONFIG_FILENAME = "distillery.yaml"
@@ -111,7 +110,7 @@ class DistilleryConfig:
 # ---------------------------------------------------------------------------
 
 
-def _find_config_path(override: Optional[str] = None) -> Optional[Path]:
+def _find_config_path(override: str | None = None) -> Path | None:
     """Locate the configuration file.
 
     Resolution order:
@@ -290,7 +289,7 @@ def _validate(config: DistilleryConfig) -> None:
         )
 
 
-def load_config(config_path: Optional[str] = None) -> DistilleryConfig:
+def load_config(config_path: str | None = None) -> DistilleryConfig:
     """Load and validate configuration from a YAML file.
 
     If no configuration file is found the function returns a
@@ -331,7 +330,7 @@ def load_config(config_path: Optional[str] = None) -> DistilleryConfig:
         _validate(config)
         return config
 
-    with open(resolved, "r", encoding="utf-8") as fh:
+    with open(resolved, encoding="utf-8") as fh:
         raw = yaml.safe_load(fh)
 
     if raw is None:

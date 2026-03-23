@@ -14,7 +14,6 @@ are made.
 from __future__ import annotations
 
 import json
-from typing import List
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -23,13 +22,12 @@ import pytest
 from distillery.embedding.jina import JinaEmbeddingProvider
 from distillery.embedding.openai import OpenAIEmbeddingProvider
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def _make_jina_response(embeddings: List[List[float]]) -> dict:
+def _make_jina_response(embeddings: list[list[float]]) -> dict:
     """Build a dict that mimics the Jina API response payload."""
     return {
         "data": [
@@ -39,7 +37,7 @@ def _make_jina_response(embeddings: List[List[float]]) -> dict:
     }
 
 
-def _make_openai_response(embeddings: List[List[float]]) -> dict:
+def _make_openai_response(embeddings: list[list[float]]) -> dict:
     """Build a dict that mimics the OpenAI API response payload."""
     return {
         "data": [

@@ -8,10 +8,8 @@ from __future__ import annotations
 
 import inspect
 
-
 from distillery.store.duckdb import DuckDBStore
 from distillery.store.protocol import DistilleryStore
-
 
 # ---------------------------------------------------------------------------
 # Mock embedding provider for protocol compliance tests

@@ -74,7 +74,7 @@ class DeduplicationChecker:
 
     def __init__(
         self,
-        store: "DistilleryStore",
+        store: DistilleryStore,
         *,
         skip_threshold: float = _DEFAULT_SKIP_THRESHOLD,
         merge_threshold: float = _DEFAULT_MERGE_THRESHOLD,

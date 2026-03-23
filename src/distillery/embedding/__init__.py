@@ -9,7 +9,7 @@ from .protocol import EmbeddingProvider
 __all__ = ["EmbeddingProvider", "JinaEmbeddingProvider", "OpenAIEmbeddingProvider", "create_provider"]
 
 
-def create_provider(config: object) -> "EmbeddingProvider":
+def create_provider(config: object) -> EmbeddingProvider:
     """Create an embedding provider based on configuration.
 
     Selects the provider implementation based on the ``embedding.provider``

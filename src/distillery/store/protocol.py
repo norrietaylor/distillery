@@ -25,7 +25,7 @@ class SearchResult:
             the caller-supplied threshold.
     """
 
-    entry: "Entry"
+    entry: Entry
     score: float
 
 
@@ -44,7 +44,7 @@ class DistilleryStore(Protocol):
         result = await store.get(entry_id)
     """
 
-    async def store(self, entry: "Entry") -> str:
+    async def store(self, entry: Entry) -> str:
         """Persist a new entry and return its ID.
 
         Args:
@@ -57,7 +57,7 @@ class DistilleryStore(Protocol):
         """
         ...
 
-    async def get(self, entry_id: str) -> "Entry | None":
+    async def get(self, entry_id: str) -> Entry | None:
         """Retrieve an entry by its ID.
 
         Args:
@@ -69,7 +69,7 @@ class DistilleryStore(Protocol):
         """
         ...
 
-    async def update(self, entry_id: str, updates: dict[str, Any]) -> "Entry":
+    async def update(self, entry_id: str, updates: dict[str, Any]) -> Entry:
         """Apply a partial update to an existing entry.
 
         Increments ``version`` by 1 and refreshes ``updated_at`` to the
@@ -164,7 +164,7 @@ class DistilleryStore(Protocol):
         filters: dict[str, Any] | None,
         limit: int,
         offset: int,
-    ) -> list["Entry"]:
+    ) -> list[Entry]:
         """List entries with optional metadata filtering and pagination.
 
         Unlike ``search``, this method does not perform semantic ranking -- it

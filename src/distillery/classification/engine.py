@@ -84,7 +84,7 @@ class ClassificationEngine:
         result = engine.parse_response(llm_output)
     """
 
-    def __init__(self, config: "ClassificationConfig") -> None:
+    def __init__(self, config: ClassificationConfig) -> None:
         self._confidence_threshold = config.confidence_threshold
 
     # ------------------------------------------------------------------

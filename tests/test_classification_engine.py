@@ -14,7 +14,6 @@ from distillery.classification import ClassificationEngine, ClassificationResult
 from distillery.config import ClassificationConfig
 from distillery.models import EntryStatus, EntryType
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
