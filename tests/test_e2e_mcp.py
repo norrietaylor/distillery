@@ -524,5 +524,6 @@ class TestCallToolDispatcher:
             "distillery_resolve_review",
             "distillery_check_dedup",
             "distillery_metrics",
+            "distillery_check_conflicts",
         }
         assert expected == tool_names, f"Missing tools: {expected - tool_names}"

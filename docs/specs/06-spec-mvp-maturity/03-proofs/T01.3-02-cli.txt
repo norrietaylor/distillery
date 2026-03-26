@@ -1,0 +1,11 @@
+Type: cli
+Command: python -c 'integration test of implicit feedback'
+Expected: search populates recent_searches, get triggers feedback, feedback_log records positive signal
+Timestamp: 2026-03-26T19:27:21Z
+
+[PASS] Search populates recent_searches with entry_ids
+[PASS] Get triggers implicit feedback (feedback_log count=1)
+[PASS] Feedback signal is positive
+[PASS] Get for non-searched entry does not create feedback
+
+Status: PASS

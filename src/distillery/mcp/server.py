@@ -51,7 +51,7 @@ import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import UTC
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -239,6 +239,9 @@ def create_server(config: DistilleryConfig | None = None) -> Server:
         store = DuckDBStore(db_path=db_path, embedding_provider=embedding_provider)
         await store.initialize()
         _state["store"] = store
+        # In-memory list of recent search events for implicit feedback correlation.
+        # Each element is a dict with keys: search_id, entry_ids (set[str]), timestamp (datetime).
+        _state["recent_searches"] = []
 
         logger.info(
             "Distillery MCP server ready (db=%s, embedding=%s)",
@@ -741,13 +744,15 @@ def create_server(config: DistilleryConfig | None = None) -> Server:
             return await _handle_store(store, arguments, cfg)
 
         if tool_name == "distillery_get":
-            return await _handle_get(store, arguments)
+            recent_searches: list[dict[str, Any]] = _state.get("recent_searches", [])
+            return await _handle_get(store, arguments, recent_searches, cfg)
 
         if tool_name == "distillery_update":
             return await _handle_update(store, arguments)
 
         if tool_name == "distillery_search":
-            return await _handle_search(store, arguments)
+            recent_searches = _state.get("recent_searches", [])
+            return await _handle_search(store, arguments, recent_searches)
 
         if tool_name == "distillery_find_similar":
             return await _handle_find_similar(store, arguments)
@@ -1052,12 +1057,28 @@ async def _handle_store(
 async def _handle_get(
     store: Any,
     arguments: dict[str, Any],
+    recent_searches: list[dict[str, Any]] | None = None,
+    config: DistilleryConfig | None = None,
 ) -> list[types.TextContent]:
     """Implement the ``distillery_get`` tool.
+
+    Before returning the entry, checks *recent_searches* for any search within
+    the configured ``feedback_window_minutes`` that included this entry.  If
+    found, records a positive implicit feedback signal via
+    ``store.log_feedback()``.  Expired entries are pruned from
+    *recent_searches* on each call.
 
     Args:
         store: Initialised ``DuckDBStore``.
         arguments: Raw MCP tool arguments dict (must contain ``entry_id``).
+        recent_searches: Shared in-memory list of recent search events used
+            for implicit feedback correlation.  Each element is a dict with
+            keys ``search_id`` (str), ``entry_ids`` (set[str]), and
+            ``timestamp`` (datetime).  When ``None`` (e.g. in unit tests),
+            feedback recording is skipped.
+        config: Loaded :class:`~distillery.config.DistilleryConfig` used to
+            read ``classification.feedback_window_minutes``.  Defaults to
+            5 minutes when ``None``.
 
     Returns:
         MCP content list with the serialised entry or a NOT_FOUND error.
@@ -1080,6 +1101,40 @@ async def _handle_get(
             f"No entry found with id={entry_id!r}.",
             details={"entry_id": entry_id},
         )
+
+    # Implicit feedback: if this get follows a recent search that returned this
+    # entry, record a positive feedback signal.
+    if recent_searches is not None:
+        feedback_window_minutes: int = 5
+        if config is not None:
+            feedback_window_minutes = config.classification.feedback_window_minutes
+
+        now = datetime.now(UTC)
+        cutoff_seconds = feedback_window_minutes * 60
+
+        # Prune expired entries and collect matching searches in a single pass.
+        alive: list[dict[str, Any]] = []
+        for record in recent_searches:
+            age_seconds = (now - record["timestamp"]).total_seconds()
+            if age_seconds <= cutoff_seconds:
+                alive.append(record)
+                if entry_id in record["entry_ids"]:
+                    try:
+                        await store.log_feedback(
+                            search_id=record["search_id"],
+                            entry_id=entry_id,
+                            signal="positive",
+                        )
+                    except Exception:  # noqa: BLE001
+                        logger.exception(
+                            "Failed to log implicit feedback for entry_id=%s search_id=%s",
+                            entry_id,
+                            record["search_id"],
+                        )
+
+        # Replace the list contents in-place so callers sharing the reference
+        # also see the pruned version.
+        recent_searches[:] = alive
 
     return success_response(entry.to_dict())
 
@@ -1206,6 +1261,7 @@ def _build_filters_from_arguments(arguments: dict[str, Any]) -> dict[str, Any] |
 async def _handle_search(
     store: Any,
     arguments: dict[str, Any],
+    recent_searches: list[dict[str, Any]] | None = None,
 ) -> list[types.TextContent]:
     """Implement the ``distillery_search`` tool.
 
@@ -1213,9 +1269,17 @@ async def _handle_search(
     entries ranked by cosine similarity descending, with optional metadata
     filters applied.
 
+    After returning results, logs the search event via ``store.log_search()``
+    and appends a record to *recent_searches* for implicit feedback correlation.
+
     Args:
         store: Initialised :class:`~distillery.store.duckdb.DuckDBStore`.
         arguments: Tool argument dict containing at minimum ``query``.
+        recent_searches: Shared in-memory list of recent search events used
+            for implicit feedback correlation.  Each element is a dict with
+            keys ``search_id`` (str), ``entry_ids`` (set[str]), and
+            ``timestamp`` (datetime).  When ``None`` (e.g. in unit tests),
+            search logging is skipped.
 
     Returns:
         MCP content list with a JSON payload of ``results`` and ``count``.
@@ -1248,6 +1312,27 @@ async def _handle_search(
         {"score": round(sr.score, 6), "entry": sr.entry.to_dict()}
         for sr in search_results
     ]
+
+    # Log the search event and record it for implicit feedback correlation.
+    if recent_searches is not None and search_results:
+        result_entry_ids = [sr.entry.id for sr in search_results]
+        result_scores = [sr.score for sr in search_results]
+        try:
+            search_id = await store.log_search(
+                query=query,
+                result_entry_ids=result_entry_ids,
+                result_scores=result_scores,
+            )
+            recent_searches.append(
+                {
+                    "search_id": search_id,
+                    "entry_ids": set(result_entry_ids),
+                    "timestamp": datetime.now(UTC),
+                }
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to log search event; continuing without feedback tracking")
+
     return success_response({"results": results, "count": len(results)})
 
 
