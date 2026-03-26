@@ -720,6 +720,28 @@ def create_server(config: DistilleryConfig | None = None) -> Server:
                     "required": ["content"],
                 },
             ),
+            types.Tool(
+                name="distillery_quality",
+                description=(
+                    "Return search quality metrics for the Distillery knowledge base. "
+                    "Reports total searches, total implicit feedback events, positive "
+                    "feedback rate, and average result count per search. Optionally "
+                    "filters metrics by entry type to show per-type quality breakdown."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "entry_type": {
+                            "type": "string",
+                            "description": (
+                                "Optional entry type filter. When provided, adds a "
+                                "per_type_breakdown section filtered to that type."
+                            ),
+                        },
+                    },
+                    "required": [],
+                },
+            ),
         ]
 
     @server.call_tool()  # type: ignore[untyped-decorator]
@@ -777,6 +799,9 @@ def create_server(config: DistilleryConfig | None = None) -> Server:
 
         if tool_name == "distillery_check_conflicts":
             return await _handle_check_conflicts(store, cfg, arguments)
+
+        if tool_name == "distillery_quality":
+            return await _handle_quality(store, arguments)
 
         return error_response("UNKNOWN_TOOL", f"Unknown tool: {tool_name!r}")
 
@@ -2100,6 +2125,148 @@ def _sync_gather_metrics(
         "quality": quality_section,
         "staleness": staleness_section,
         "storage": storage_section,
+    }
+
+
+# ---------------------------------------------------------------------------
+# T01.4 tool handler: distillery_quality
+# ---------------------------------------------------------------------------
+
+
+async def _handle_quality(
+    store: Any,
+    arguments: dict[str, Any],
+) -> list[types.TextContent]:
+    """Implement the ``distillery_quality`` tool.
+
+    Aggregates search quality signals from ``search_log`` and ``feedback_log``
+    and returns them as a JSON payload.  All queries are read-only.
+
+    Args:
+        store: Initialised :class:`~distillery.store.duckdb.DuckDBStore`.
+        arguments: Tool argument dict.  Accepts optional ``entry_type`` (str).
+
+    Returns:
+        MCP content list with a single JSON ``TextContent`` block containing:
+        ``total_searches``, ``total_feedback``, ``positive_rate``,
+        ``avg_result_count``, and ``per_type_breakdown``.
+    """
+    entry_type_filter: str | None = arguments.get("entry_type")
+
+    try:
+        result = await asyncio.to_thread(_sync_gather_quality, store, entry_type_filter)
+        return success_response(result)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error gathering quality metrics")
+        return error_response("QUALITY_ERROR", f"Failed to gather quality metrics: {exc}")
+
+
+def _sync_gather_quality(
+    store: Any,
+    entry_type_filter: str | None,
+) -> dict[str, Any]:
+    """Synchronous helper that queries DuckDB for quality metrics.
+
+    Runs inside ``asyncio.to_thread`` so that blocking DuckDB calls do not
+    stall the event loop.  Handles missing ``search_log`` and
+    ``feedback_log`` tables gracefully by returning zero counts.
+
+    Args:
+        store: Initialised ``DuckDBStore`` whose ``connection`` property is
+            available.
+        entry_type_filter: Optional entry-type string for per-type breakdown.
+
+    Returns:
+        A dict with keys: total_searches, total_feedback, positive_rate,
+        avg_result_count, per_type_breakdown.
+    """
+    conn = store.connection
+
+    total_searches = 0
+    total_feedback = 0
+    positive_count = 0
+    avg_result_count = 0.0
+
+    try:
+        sl_exists = conn.execute(
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_name = 'search_log'"
+        ).fetchone()
+        if sl_exists and sl_exists[0] > 0:
+            row = conn.execute("SELECT COUNT(*) FROM search_log").fetchone()
+            total_searches = row[0] if row else 0
+
+            avg_row = conn.execute(
+                "SELECT AVG(array_length(result_entry_ids)) FROM search_log"
+            ).fetchone()
+            avg_result_count = (
+                float(avg_row[0]) if avg_row and avg_row[0] is not None else 0.0
+            )
+    except Exception:  # noqa: BLE001
+        pass
+
+    try:
+        fl_exists = conn.execute(
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_name = 'feedback_log'"
+        ).fetchone()
+        if fl_exists and fl_exists[0] > 0:
+            row = conn.execute("SELECT COUNT(*) FROM feedback_log").fetchone()
+            total_feedback = row[0] if row else 0
+
+            pos_row = conn.execute(
+                "SELECT COUNT(*) FROM feedback_log WHERE signal = 'positive'"
+            ).fetchone()
+            positive_count = pos_row[0] if pos_row else 0
+    except Exception:  # noqa: BLE001
+        pass
+
+    positive_rate = (positive_count / total_feedback) if total_feedback > 0 else 0.0
+
+    # Per-type breakdown: join feedback_log -> search_log -> entries
+    per_type_breakdown: dict[str, Any] = {}
+    if entry_type_filter is not None:
+        try:
+            sl_exists2 = conn.execute(
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_name = 'search_log'"
+            ).fetchone()
+            fl_exists2 = conn.execute(
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_name = 'feedback_log'"
+            ).fetchone()
+            if (sl_exists2 and sl_exists2[0] > 0) and (fl_exists2 and fl_exists2[0] > 0):
+                type_fb_row = conn.execute(
+                    "SELECT COUNT(*) FROM feedback_log fl "
+                    "JOIN entries e ON fl.entry_id = e.id "
+                    "WHERE e.entry_type = ?",
+                    [entry_type_filter],
+                ).fetchone()
+                type_fb = type_fb_row[0] if type_fb_row else 0
+
+                type_pos_row = conn.execute(
+                    "SELECT COUNT(*) FROM feedback_log fl "
+                    "JOIN entries e ON fl.entry_id = e.id "
+                    "WHERE e.entry_type = ? AND fl.signal = 'positive'",
+                    [entry_type_filter],
+                ).fetchone()
+                type_pos = type_pos_row[0] if type_pos_row else 0
+
+                type_rate = (type_pos / type_fb) if type_fb > 0 else 0.0
+                per_type_breakdown[entry_type_filter] = {
+                    "total_feedback": type_fb,
+                    "positive_count": type_pos,
+                    "positive_rate": round(type_rate, 4),
+                }
+        except Exception:  # noqa: BLE001
+            pass
+
+    return {
+        "total_searches": total_searches,
+        "total_feedback": total_feedback,
+        "positive_rate": round(positive_rate, 4),
+        "avg_result_count": round(avg_result_count, 4),
+        "per_type_breakdown": per_type_breakdown,
     }
 
 
