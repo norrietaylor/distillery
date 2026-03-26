@@ -68,6 +68,27 @@ CREATE TABLE IF NOT EXISTS _meta (
 );
 """
 
+_CREATE_SEARCH_LOG_TABLE = """
+CREATE TABLE IF NOT EXISTS search_log (
+    id                 VARCHAR PRIMARY KEY,
+    query              VARCHAR NOT NULL,
+    result_entry_ids   VARCHAR[],
+    result_scores      FLOAT[],
+    timestamp          TIMESTAMP NOT NULL DEFAULT current_timestamp,
+    session_id         VARCHAR
+);
+"""
+
+_CREATE_FEEDBACK_LOG_TABLE = """
+CREATE TABLE IF NOT EXISTS feedback_log (
+    id          VARCHAR PRIMARY KEY,
+    search_id   VARCHAR NOT NULL REFERENCES search_log(id),
+    entry_id    VARCHAR NOT NULL,
+    signal      VARCHAR NOT NULL,
+    timestamp   TIMESTAMP NOT NULL DEFAULT current_timestamp
+);
+"""
+
 
 class DuckDBStore:
     """DuckDB-backed implementation of the ``DistilleryStore`` protocol.
@@ -159,6 +180,12 @@ class DuckDBStore:
         """Create the ``_meta`` table if it does not exist."""
         conn.execute(_CREATE_META_TABLE)
 
+    def _create_log_tables(self, conn: duckdb.DuckDBPyConnection) -> None:
+        """Create the ``search_log`` and ``feedback_log`` tables if they don't exist."""
+        conn.execute(_CREATE_SEARCH_LOG_TABLE)
+        conn.execute(_CREATE_FEEDBACK_LOG_TABLE)
+        logger.info("search_log and feedback_log tables ready")
+
     def _validate_or_record_meta(self, conn: duckdb.DuckDBPyConnection) -> None:
         """Validate or record the embedding model metadata.
 
@@ -217,6 +244,7 @@ class DuckDBStore:
         conn = self._open_connection()
         self._setup_vss(conn)
         self._create_schema(conn)
+        self._create_log_tables(conn)
         self._create_meta_table(conn)
         self._validate_or_record_meta(conn)
         self._create_index(conn)

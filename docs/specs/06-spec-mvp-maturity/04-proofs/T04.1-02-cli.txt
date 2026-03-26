@@ -1,0 +1,60 @@
+Type: cli
+Command: python /tmp/test_metrics_proof.py (direct handler invocation with stub DB)
+Expected: All response keys present, zero counts on empty DB, validation errors on invalid params
+Timestamp: 2026-03-26T00:00:00Z
+Status: PASS
+---
+=== distillery_metrics response (empty DB) ===
+{
+  "entries": {
+    "total": 0,
+    "by_type": {},
+    "by_status": {},
+    "by_source": {}
+  },
+  "activity": {
+    "created_7d": 0,
+    "created_30d": 0,
+    "created_90d": 0,
+    "updated_7d": 0,
+    "updated_30d": 0,
+    "updated_90d": 0
+  },
+  "search": {
+    "total_searches": 0,
+    "searches_7d": 0,
+    "searches_30d": 0,
+    "avg_results_per_search": 0.0
+  },
+  "quality": {
+    "total_feedback": 0,
+    "feedback_30d": 0,
+    "positive_rate": 0.0
+  },
+  "staleness": {
+    "stale_count": 0,
+    "stale_days": 30,
+    "by_type": {}
+  },
+  "storage": {
+    "db_file_size": null,
+    "embedding_model": "stub",
+    "embedding_dimensions": 4
+  }
+}
+
+=== Verified ===
+- All 6 top-level keys present: entries, activity, search, quality, staleness, storage
+- entries.total = 0 (empty DB)
+- entries.by_type, by_status, by_source all present
+- activity contains created_7d, created_30d, created_90d, updated_7d, updated_30d, updated_90d
+- search.total_searches = 0 (no search_log table -- graceful fallback)
+- quality.total_feedback = 0 (no feedback_log table -- graceful fallback)
+- quality.positive_rate = 0.0
+- staleness.stale_count = 0
+- storage.embedding_model = "stub"
+- storage.embedding_dimensions = 4
+- period_days=7 returns correct keys (searches_7d in search section)
+- period_days=0 returns VALIDATION_ERROR
+
+=== All assertions PASSED ===

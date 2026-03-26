@@ -79,6 +79,14 @@ class ClassificationConfig:
             entries. Default ``0.60``.
         dedup_limit: Maximum number of similar entries to retrieve from the
             store during deduplication checks. Default ``5``.
+        feedback_window_minutes: Number of minutes after a search during which
+            a retrieval action is attributed as implicit positive feedback.
+            Default ``5``.
+        stale_days: Number of days without access after which an entry is
+            considered stale. Default ``30``.
+        conflict_threshold: Similarity score at or above which two entries in
+            different projects are flagged as potential conflicts. Default
+            ``0.60``.
     """
 
     confidence_threshold: float = 0.6
@@ -86,6 +94,9 @@ class ClassificationConfig:
     dedup_merge_threshold: float = 0.80
     dedup_link_threshold: float = 0.60
     dedup_limit: int = 5
+    feedback_window_minutes: int = 5
+    stale_days: int = 30
+    conflict_threshold: float = 0.60
 
 
 @dataclass
@@ -223,12 +234,35 @@ def _parse_classification(raw: dict[str, Any]) -> ClassificationConfig:
             f"classification.dedup_limit must be an integer, got: {limit_raw!r}"
         ) from exc
 
+    feedback_window_raw = raw.get("feedback_window_minutes", 5)
+    try:
+        feedback_window_minutes = int(feedback_window_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"classification.feedback_window_minutes must be an integer, got: {feedback_window_raw!r}"
+        ) from exc
+
+    stale_days_raw = raw.get("stale_days", 30)
+    try:
+        stale_days = int(stale_days_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"classification.stale_days must be an integer, got: {stale_days_raw!r}"
+        ) from exc
+
+    conflict_threshold = _parse_float_field(
+        raw, "conflict_threshold", 0.60, "classification.conflict_threshold"
+    )
+
     return ClassificationConfig(
         confidence_threshold=threshold,
         dedup_skip_threshold=skip,
         dedup_merge_threshold=merge,
         dedup_link_threshold=link,
         dedup_limit=limit,
+        feedback_window_minutes=feedback_window_minutes,
+        stale_days=stale_days,
+        conflict_threshold=conflict_threshold,
     )
 
 
@@ -286,6 +320,25 @@ def _validate(config: DistilleryConfig) -> None:
         raise ValueError(
             "classification.dedup_limit must be a positive integer, "
             f"got: {config.classification.dedup_limit}"
+        )
+
+    if config.classification.feedback_window_minutes <= 0:
+        raise ValueError(
+            "classification.feedback_window_minutes must be a positive integer, "
+            f"got: {config.classification.feedback_window_minutes}"
+        )
+
+    if config.classification.stale_days <= 0:
+        raise ValueError(
+            "classification.stale_days must be a positive integer, "
+            f"got: {config.classification.stale_days}"
+        )
+
+    conflict = config.classification.conflict_threshold
+    if not (0.0 <= conflict <= 1.0):
+        raise ValueError(
+            "classification.conflict_threshold must be between 0.0 and 1.0, "
+            f"got: {conflict}"
         )
 
 

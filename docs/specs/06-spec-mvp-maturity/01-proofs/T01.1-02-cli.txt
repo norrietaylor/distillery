@@ -1,0 +1,37 @@
+Type: cli
+Command: python3.12 -c "import asyncio; from distillery.store.duckdb import DuckDBStore; ..."
+Expected: DuckDB initializes with search_log and feedback_log tables present alongside entries and _meta
+Timestamp: 2026-03-26T00:00:00Z
+
+Tables found:
+  _meta
+  entries
+  feedback_log
+  search_log
+
+search_log columns:
+  id VARCHAR
+  query VARCHAR
+  result_entry_ids VARCHAR[]
+  result_scores FLOAT[]
+  timestamp TIMESTAMP
+  session_id VARCHAR
+
+feedback_log columns:
+  id VARCHAR
+  search_id VARCHAR
+  entry_id VARCHAR
+  signal VARCHAR
+  timestamp TIMESTAMP
+
+New config fields (ClassificationConfig defaults):
+  feedback_window_minutes: 5
+  stale_days: 30
+  conflict_threshold: 0.6
+
+load_config() values (no YAML file):
+  feedback_window_minutes: 5
+  stale_days: 30
+  conflict_threshold: 0.6
+
+Status: PASS

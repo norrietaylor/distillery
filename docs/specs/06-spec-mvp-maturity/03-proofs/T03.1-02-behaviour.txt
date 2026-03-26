@@ -1,0 +1,36 @@
+Type: cli
+Command: python -c "... behavioural tests using unittest.mock ..."
+Expected: 7 behavioural tests covering build_prompt, parse_response (valid JSON, invalid JSON), and check() (no similar, llm_responses=None, with conflicts, configurable threshold)
+Timestamp: 2026-03-26T00:00:00Z
+
+=== OUTPUT ===
+
+ConflictChecker: failed to parse LLM response: Expecting value: line 1 column 1 (char 0)
+Test 1 PASS: build_prompt contains both content blocks and expected JSON keys
+Test 2 PASS: parse_response parses valid JSON correctly
+Test 3 PASS: parse_response returns (False, "") on parse failure
+Test 4 PASS: check() returns empty ConflictResult when no similar entries
+Test 5 PASS: check() with llm_responses=None returns empty conflicts
+Test 6 PASS: check() with llm_responses returns ConflictEntry correctly
+Test 7 PASS: check() passes configured threshold to find_similar
+
+ALL BEHAVIOURAL TESTS PASSED
+
+=== NOTE ===
+
+The warning on "Test 3" is expected: ConflictChecker.parse_response() intentionally
+logs a warning via logger.warning() when parsing fails, then gracefully returns
+(False, ""). This validates the graceful-failure path described in the task spec.
+
+=== VERIFICATION ===
+
+Tests covered:
+1. build_prompt() includes new_content, existing_content, and expected JSON keys in output
+2. parse_response() correctly parses {"is_conflict": true, "reasoning": "..."}
+3. parse_response() returns (False, "") on malformed input (graceful failure)
+4. check() returns empty ConflictResult when store returns no similar entries
+5. check() with llm_responses=None returns empty conflicts (LLM evaluation pending)
+6. check() with llm_responses containing conflict builds correct ConflictEntry
+7. check() passes the configured threshold value to store.find_similar()
+
+Status: PASS

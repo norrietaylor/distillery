@@ -648,6 +648,29 @@ def create_server(config: DistilleryConfig | None = None) -> Server:
                     "required": ["content"],
                 },
             ),
+            types.Tool(
+                name="distillery_metrics",
+                description=(
+                    "Return comprehensive usage statistics for the Distillery knowledge base. "
+                    "Aggregates entry counts (by type, status, source), activity windows "
+                    "(7/30/90 day creation and update counts), search log statistics, "
+                    "feedback quality signals, staleness counts, and storage details. "
+                    "All queries are read-only and do not modify any data."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "period_days": {
+                            "type": "integer",
+                            "description": (
+                                "Adjusts the 'recent' window (in days) for activity and "
+                                "search metrics. Defaults to 30."
+                            ),
+                        },
+                    },
+                    "required": [],
+                },
+            ),
         ]
 
     @server.call_tool()  # type: ignore[untyped-decorator]
@@ -697,6 +720,9 @@ def create_server(config: DistilleryConfig | None = None) -> Server:
 
         if tool_name == "distillery_check_dedup":
             return await _handle_check_dedup(store, cfg, arguments)
+
+        if tool_name == "distillery_metrics":
+            return await _handle_metrics(store, cfg, embedding_provider, arguments)
 
         return error_response("UNKNOWN_TOOL", f"Unknown tool: {tool_name!r}")
 
@@ -1593,6 +1619,299 @@ async def _handle_check_dedup(
             "similar_entries": similar_entries_serialised,
         }
     )
+
+
+# ---------------------------------------------------------------------------
+# T04.1 tool handler: metrics
+# ---------------------------------------------------------------------------
+
+# Default stale threshold: entries not accessed in this many days are "stale".
+_DEFAULT_STALE_DAYS = 30
+
+
+async def _handle_metrics(
+    store: Any,
+    config: DistilleryConfig,
+    embedding_provider: Any,
+    arguments: dict[str, Any],
+) -> list[types.TextContent]:
+    """Implement the ``distillery_metrics`` tool.
+
+    Aggregates usage statistics from the DuckDB store and returns them as a
+    JSON payload.  All queries are read-only.
+
+    Args:
+        store: Initialised :class:`~distillery.store.duckdb.DuckDBStore`.
+        config: The loaded Distillery configuration.
+        embedding_provider: The active embedding provider instance.
+        arguments: Tool argument dict.  Accepts optional ``period_days`` (int).
+
+    Returns:
+        MCP content list with a single JSON ``TextContent`` block.
+    """
+    # --- validate period_days -----------------------------------------------
+    period_days_raw = arguments.get("period_days", 30)
+    err_period = validate_type(arguments, "period_days", int, "integer")
+    if err_period:
+        return error_response("VALIDATION_ERROR", err_period)
+    period_days = int(period_days_raw) if period_days_raw is not None else 30
+    if period_days < 1:
+        return error_response("VALIDATION_ERROR", "Field 'period_days' must be >= 1")
+
+    try:
+        metrics = await asyncio.to_thread(
+            _sync_gather_metrics, store, config, embedding_provider, period_days
+        )
+        return success_response(metrics)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error gathering metrics")
+        return error_response("METRICS_ERROR", f"Failed to gather metrics: {exc}")
+
+
+def _sync_gather_metrics(
+    store: Any,
+    config: DistilleryConfig,
+    embedding_provider: Any,
+    period_days: int,
+) -> dict[str, Any]:
+    """Synchronous helper that queries DuckDB for all metrics.
+
+    Runs inside ``asyncio.to_thread`` so that blocking DuckDB calls do not
+    stall the event loop.  Handles missing ``search_log`` and
+    ``feedback_log`` tables gracefully by returning zero counts.
+
+    Args:
+        store: Initialised ``DuckDBStore`` whose ``connection`` property is
+            available.
+        config: Loaded ``DistilleryConfig``.
+        embedding_provider: Active embedding provider (for model metadata).
+        period_days: The "recent" window in days used for activity/search
+            period metrics.
+
+    Returns:
+        A dict suitable for JSON serialisation with keys: entries, activity,
+        search, quality, staleness, storage.
+    """
+    conn = store.connection
+
+    # ------------------------------------------------------------------ #
+    # entries section                                                      #
+    # ------------------------------------------------------------------ #
+    total_row = conn.execute(
+        "SELECT COUNT(*) FROM entries WHERE status != 'archived'"
+    ).fetchone()
+    total_entries: int = total_row[0] if total_row else 0
+
+    type_rows = conn.execute(
+        "SELECT entry_type, COUNT(*) AS cnt FROM entries "
+        "WHERE status != 'archived' GROUP BY entry_type ORDER BY cnt DESC"
+    ).fetchall()
+    by_type = {row[0]: row[1] for row in type_rows}
+
+    status_rows = conn.execute(
+        "SELECT status, COUNT(*) AS cnt FROM entries GROUP BY status ORDER BY cnt DESC"
+    ).fetchall()
+    by_status = {row[0]: row[1] for row in status_rows}
+
+    source_rows = conn.execute(
+        "SELECT source, COUNT(*) AS cnt FROM entries "
+        "WHERE status != 'archived' GROUP BY source ORDER BY cnt DESC"
+    ).fetchall()
+    by_source = {row[0]: row[1] for row in source_rows}
+
+    entries_section: dict[str, Any] = {
+        "total": total_entries,
+        "by_type": by_type,
+        "by_status": by_status,
+        "by_source": by_source,
+    }
+
+    # ------------------------------------------------------------------ #
+    # activity section                                                     #
+    # ------------------------------------------------------------------ #
+    def _count_where(column: str, days: int) -> int:
+        row = conn.execute(
+            f"SELECT COUNT(*) FROM entries "
+            f"WHERE {column} > CURRENT_TIMESTAMP - INTERVAL '{days} days'"
+        ).fetchone()
+        return row[0] if row else 0
+
+    activity_section: dict[str, Any] = {
+        "created_7d": _count_where("created_at", 7),
+        "created_30d": _count_where("created_at", 30),
+        "created_90d": _count_where("created_at", 90),
+        "updated_7d": _count_where("updated_at", 7),
+        "updated_30d": _count_where("updated_at", 30),
+        "updated_90d": _count_where("updated_at", 90),
+        f"created_{period_days}d": _count_where("created_at", period_days),
+        f"updated_{period_days}d": _count_where("updated_at", period_days),
+    }
+
+    # ------------------------------------------------------------------ #
+    # search section (search_log table may not exist yet)                 #
+    # ------------------------------------------------------------------ #
+    search_section: dict[str, Any] = {
+        "total_searches": 0,
+        "searches_7d": 0,
+        "searches_30d": 0,
+        f"searches_{period_days}d": 0,
+        "avg_results_per_search": 0.0,
+    }
+    try:
+        _table_exists = conn.execute(
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_name = 'search_log'"
+        ).fetchone()
+        if _table_exists and _table_exists[0] > 0:
+            total_searches_row = conn.execute(
+                "SELECT COUNT(*) FROM search_log"
+            ).fetchone()
+            total_searches: int = total_searches_row[0] if total_searches_row else 0
+
+            def _count_searches(days: int) -> int:
+                r = conn.execute(
+                    f"SELECT COUNT(*) FROM search_log "
+                    f"WHERE timestamp > CURRENT_TIMESTAMP - INTERVAL '{days} days'"
+                ).fetchone()
+                return r[0] if r else 0
+
+            avg_row = conn.execute(
+                "SELECT AVG(array_length(result_entry_ids)) FROM search_log"
+            ).fetchone()
+            avg_results = float(avg_row[0]) if avg_row and avg_row[0] is not None else 0.0
+
+            search_section = {
+                "total_searches": total_searches,
+                "searches_7d": _count_searches(7),
+                "searches_30d": _count_searches(30),
+                f"searches_{period_days}d": _count_searches(period_days),
+                "avg_results_per_search": round(avg_results, 4),
+            }
+    except Exception:  # noqa: BLE001
+        # Table doesn't exist or is not accessible; return zeros.
+        pass
+
+    # ------------------------------------------------------------------ #
+    # quality section (feedback_log table may not exist yet)              #
+    # ------------------------------------------------------------------ #
+    quality_section: dict[str, Any] = {
+        "total_feedback": 0,
+        "feedback_30d": 0,
+        "positive_rate": 0.0,
+    }
+    try:
+        _fb_exists = conn.execute(
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_name = 'feedback_log'"
+        ).fetchone()
+        if _fb_exists and _fb_exists[0] > 0:
+            total_fb_row = conn.execute(
+                "SELECT COUNT(*) FROM feedback_log"
+            ).fetchone()
+            total_fb: int = total_fb_row[0] if total_fb_row else 0
+
+            positive_row = conn.execute(
+                "SELECT COUNT(*) FROM feedback_log WHERE signal = 'positive'"
+            ).fetchone()
+            positive_count: int = positive_row[0] if positive_row else 0
+
+            fb_30d_row = conn.execute(
+                "SELECT COUNT(*) FROM feedback_log "
+                "WHERE timestamp > CURRENT_TIMESTAMP - INTERVAL '30 days'"
+            ).fetchone()
+            fb_30d: int = fb_30d_row[0] if fb_30d_row else 0
+
+            positive_rate = (positive_count / total_fb) if total_fb > 0 else 0.0
+
+            quality_section = {
+                "total_feedback": total_fb,
+                "feedback_30d": fb_30d,
+                "positive_rate": round(positive_rate, 4),
+            }
+    except Exception:  # noqa: BLE001
+        # Table doesn't exist or is not accessible; return zeros.
+        pass
+
+    # ------------------------------------------------------------------ #
+    # staleness section                                                    #
+    # ------------------------------------------------------------------ #
+    stale_days = _DEFAULT_STALE_DAYS
+
+    # accessed_at column may not exist yet (added by T02.1).
+    # Fall back to updated_at if the column is absent.
+    stale_count = 0
+    stale_by_type: dict[str, int] = {}
+    try:
+        stale_row = conn.execute(
+            f"SELECT COUNT(*) FROM entries "
+            f"WHERE status != 'archived' "
+            f"AND COALESCE(accessed_at, updated_at) < "
+            f"CURRENT_TIMESTAMP - INTERVAL '{stale_days} days'"
+        ).fetchone()
+        stale_count = stale_row[0] if stale_row else 0
+
+        stale_type_rows = conn.execute(
+            f"SELECT entry_type, COUNT(*) AS cnt FROM entries "
+            f"WHERE status != 'archived' "
+            f"AND COALESCE(accessed_at, updated_at) < "
+            f"CURRENT_TIMESTAMP - INTERVAL '{stale_days} days' "
+            f"GROUP BY entry_type ORDER BY cnt DESC"
+        ).fetchall()
+        stale_by_type = {row[0]: row[1] for row in stale_type_rows}
+    except Exception:  # noqa: BLE001
+        # If accessed_at column doesn't exist, try without it.
+        try:
+            stale_row = conn.execute(
+                f"SELECT COUNT(*) FROM entries "
+                f"WHERE status != 'archived' "
+                f"AND updated_at < CURRENT_TIMESTAMP - INTERVAL '{stale_days} days'"
+            ).fetchone()
+            stale_count = stale_row[0] if stale_row else 0
+
+            stale_type_rows = conn.execute(
+                f"SELECT entry_type, COUNT(*) AS cnt FROM entries "
+                f"WHERE status != 'archived' "
+                f"AND updated_at < CURRENT_TIMESTAMP - INTERVAL '{stale_days} days' "
+                f"GROUP BY entry_type ORDER BY cnt DESC"
+            ).fetchall()
+            stale_by_type = {row[0]: row[1] for row in stale_type_rows}
+        except Exception:  # noqa: BLE001
+            pass
+
+    staleness_section: dict[str, Any] = {
+        "stale_count": stale_count,
+        "stale_days": stale_days,
+        "by_type": stale_by_type,
+    }
+
+    # ------------------------------------------------------------------ #
+    # storage section                                                      #
+    # ------------------------------------------------------------------ #
+    db_path = os.path.expanduser(config.storage.database_path)
+    db_file_size: int | None = None
+    if db_path != ":memory:":
+        try:
+            db_file_size = Path(db_path).stat().st_size
+        except OSError:
+            db_file_size = None
+
+    model_name = getattr(embedding_provider, "model_name", "unknown")
+    embedding_dimensions = getattr(embedding_provider, "dimensions", None)
+
+    storage_section: dict[str, Any] = {
+        "db_file_size": db_file_size,
+        "embedding_model": model_name,
+        "embedding_dimensions": embedding_dimensions,
+    }
+
+    return {
+        "entries": entries_section,
+        "activity": activity_section,
+        "search": search_section,
+        "quality": quality_section,
+        "staleness": staleness_section,
+        "storage": storage_section,
+    }
 
 
 # ---------------------------------------------------------------------------

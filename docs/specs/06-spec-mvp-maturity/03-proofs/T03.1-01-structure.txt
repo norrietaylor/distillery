@@ -1,0 +1,28 @@
+Type: cli
+Command: python -c "from distillery.classification import ConflictChecker, ConflictEntry, ConflictResult; ..."
+Expected: All dataclass fields present, async check method, build_prompt and parse_response methods
+Timestamp: 2026-03-26T00:00:00Z
+
+=== OUTPUT ===
+
+ConflictEntry fields OK: ['entry_id', 'content_preview', 'similarity_score', 'conflict_reasoning']
+ConflictResult fields OK: ['has_conflicts', 'conflicts']
+ConflictChecker public methods: ['build_prompt', 'check', 'parse_response']
+build_prompt params: ['self', 'new_content', 'existing_content']
+parse_response params: ['self', 'llm_response']
+check params: ['self', 'content', 'llm_responses']
+
+ALL STRUCTURE CHECKS PASSED
+
+=== VERIFICATION ===
+
+Checks performed:
+- ConflictEntry is a dataclass with fields: entry_id (str), content_preview (str), similarity_score (float), conflict_reasoning (str)
+- ConflictResult is a dataclass with fields: has_conflicts (bool), conflicts (list[ConflictEntry])
+- ConflictChecker exposes public methods: build_prompt, parse_response, check
+- build_prompt(self, new_content, existing_content) -> str
+- parse_response(self, llm_response) -> tuple[bool, str]
+- check(self, content, llm_responses) -> ConflictResult  [async coroutine]
+- All three classes importable from distillery.classification (top-level __init__.py)
+
+Status: PASS
