@@ -1,0 +1,36 @@
+Type: file
+Description: Implementation file src/distillery/cli.py exists with required content
+Expected: File exists with main(), status, health, --version, --config, --format
+Timestamp: 2026-03-25T00:00:00Z
+
+--- VERIFICATION ---
+
+File: src/distillery/cli.py
+Status: EXISTS
+
+Exported symbols verified:
+  - main(argv: list[str] | None = None) -> None  [entry point]
+  - _build_parser() -> argparse.ArgumentParser    [builds CLI parser]
+  - _resolve_args(parser, argv) -> Namespace      [parses args]
+  - _query_status(db_path: str) -> dict[str, Any] [DB stats query]
+  - _check_health(db_path: str) -> bool           [connectivity check]
+  - _cmd_status(config_path, fmt) -> int          [status subcommand]
+  - _cmd_health(config_path, fmt) -> int          [health subcommand]
+
+Subcommands implemented:
+  - status: outputs total_entries, entries_by_type, entries_by_status,
+            database_path, embedding_model
+  - health: outputs OK/FAIL, exit code 0 or 1
+
+Global options implemented:
+  - --version: prints "distillery 0.1.0"
+  - --config PATH: overrides config file path
+  - --format {text,json}: selects output format
+
+Environment variable support:
+  - DISTILLERY_CONFIG: respected via load_config() delegation
+
+No-subcommand behaviour:
+  - Prints help, exits 0
+
+Status: PASS

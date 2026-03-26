@@ -8,33 +8,12 @@ from __future__ import annotations
 
 import inspect
 
+import pytest
+
 from distillery.store.duckdb import DuckDBStore
 from distillery.store.protocol import DistilleryStore
 
-# ---------------------------------------------------------------------------
-# Mock embedding provider for protocol compliance tests
-# ---------------------------------------------------------------------------
-
-
-class _MockEmbeddingProvider:
-    """Returns a deterministic zero-vector for any text."""
-
-    _dims = 4
-
-    def embed(self, text: str) -> list[float]:  # noqa: ARG002
-        return [0.0] * self._dims
-
-    def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        return [[0.0] * self._dims for _ in texts]
-
-    @property
-    def dimensions(self) -> int:
-        return self._dims
-
-    @property
-    def model_name(self) -> str:
-        return "mock"
-
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Protocol structural compliance
@@ -44,62 +23,57 @@ class _MockEmbeddingProvider:
 class TestDistilleryStoreProtocolCompliance:
     """Verify that DuckDBStore satisfies the DistilleryStore protocol."""
 
-    def test_duckdb_store_is_instance_of_protocol(self) -> None:
+    def test_duckdb_store_is_instance_of_protocol(
+        self, mock_embedding_provider
+    ) -> None:
         """isinstance check against @runtime_checkable Protocol passes."""
-        provider = _MockEmbeddingProvider()
-        store = DuckDBStore(db_path=":memory:", embedding_provider=provider)
+        store = DuckDBStore(db_path=":memory:", embedding_provider=mock_embedding_provider)
         assert isinstance(store, DistilleryStore)
 
-    def test_store_method_exists(self) -> None:
-        provider = _MockEmbeddingProvider()
-        store = DuckDBStore(db_path=":memory:", embedding_provider=provider)
+    def test_store_method_exists(self, mock_embedding_provider) -> None:
+        store = DuckDBStore(db_path=":memory:", embedding_provider=mock_embedding_provider)
         assert hasattr(store, "store")
         assert callable(store.store)
 
-    def test_get_method_exists(self) -> None:
-        provider = _MockEmbeddingProvider()
-        store = DuckDBStore(db_path=":memory:", embedding_provider=provider)
+    def test_get_method_exists(self, mock_embedding_provider) -> None:
+        store = DuckDBStore(db_path=":memory:", embedding_provider=mock_embedding_provider)
         assert hasattr(store, "get")
         assert callable(store.get)
 
-    def test_update_method_exists(self) -> None:
-        provider = _MockEmbeddingProvider()
-        store = DuckDBStore(db_path=":memory:", embedding_provider=provider)
+    def test_update_method_exists(self, mock_embedding_provider) -> None:
+        store = DuckDBStore(db_path=":memory:", embedding_provider=mock_embedding_provider)
         assert hasattr(store, "update")
         assert callable(store.update)
 
-    def test_delete_method_exists(self) -> None:
-        provider = _MockEmbeddingProvider()
-        store = DuckDBStore(db_path=":memory:", embedding_provider=provider)
+    def test_delete_method_exists(self, mock_embedding_provider) -> None:
+        store = DuckDBStore(db_path=":memory:", embedding_provider=mock_embedding_provider)
         assert hasattr(store, "delete")
         assert callable(store.delete)
 
-    def test_search_method_exists(self) -> None:
-        provider = _MockEmbeddingProvider()
-        store = DuckDBStore(db_path=":memory:", embedding_provider=provider)
+    def test_search_method_exists(self, mock_embedding_provider) -> None:
+        store = DuckDBStore(db_path=":memory:", embedding_provider=mock_embedding_provider)
         assert hasattr(store, "search")
         assert callable(store.search)
 
-    def test_find_similar_method_exists(self) -> None:
-        provider = _MockEmbeddingProvider()
-        store = DuckDBStore(db_path=":memory:", embedding_provider=provider)
+    def test_find_similar_method_exists(self, mock_embedding_provider) -> None:
+        store = DuckDBStore(db_path=":memory:", embedding_provider=mock_embedding_provider)
         assert hasattr(store, "find_similar")
         assert callable(store.find_similar)
 
-    def test_list_entries_method_exists(self) -> None:
-        provider = _MockEmbeddingProvider()
-        store = DuckDBStore(db_path=":memory:", embedding_provider=provider)
+    def test_list_entries_method_exists(self, mock_embedding_provider) -> None:
+        store = DuckDBStore(db_path=":memory:", embedding_provider=mock_embedding_provider)
         assert hasattr(store, "list_entries")
         assert callable(store.list_entries)
 
-    def test_all_protocol_methods_are_coroutines(self) -> None:
+    def test_all_protocol_methods_are_coroutines(
+        self, mock_embedding_provider
+    ) -> None:
         """Every required method must be an async coroutine function."""
         method_names = [
             "store", "get", "update", "delete",
             "search", "find_similar", "list_entries",
         ]
-        provider = _MockEmbeddingProvider()
-        store = DuckDBStore(db_path=":memory:", embedding_provider=provider)
+        store = DuckDBStore(db_path=":memory:", embedding_provider=mock_embedding_provider)
         for name in method_names:
             method = getattr(store, name)
             assert inspect.iscoroutinefunction(method), (

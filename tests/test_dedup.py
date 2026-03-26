@@ -16,27 +16,26 @@ from distillery.classification import (
     DeduplicationChecker,
     DeduplicationResult,
 )
-from distillery.models import Entry, EntrySource, EntryType
+from distillery.models import EntrySource, EntryType
 from distillery.store.protocol import SearchResult
+from tests.conftest import make_entry
+
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def _make_entry(content: str = "Sample entry content") -> Entry:
-    """Return a minimal Entry for use in SearchResult fixtures."""
-    return Entry(
+def _make_search_result(score: float, content: str = "Sample entry content") -> SearchResult:
+    """Return a SearchResult with the given similarity score."""
+    entry = make_entry(
         content=content,
         entry_type=EntryType.SESSION,
         source=EntrySource.CLAUDE_CODE,
         author="test-user",
     )
-
-
-def _make_search_result(score: float, content: str = "Sample entry content") -> SearchResult:
-    """Return a SearchResult with the given similarity score."""
-    return SearchResult(entry=_make_entry(content), score=score)
+    return SearchResult(entry=entry, score=score)
 
 
 def _make_mock_store(results: list[SearchResult]) -> Any:

@@ -31,10 +31,6 @@ dependencies = [
     "pyyaml>=6.0",
     "httpx>=0.24.0",
     "mcp>=0.1.0",
-    "pytest>=7.0",
-    "pytest-asyncio>=0.21.0",
-    "mypy>=1.0",
-    "ruff>=0.1.0",
 ]
 
 [project.optional-dependencies]
@@ -82,3 +78,14 @@ ignore = ["E501"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["distillery"]
+
+[tool.coverage.run]
+source = ["src/distillery"]
+omit = [
+    "src/distillery/mcp/__main__.py",
+    "src/distillery/store/__main__.py",
+]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true

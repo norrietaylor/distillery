@@ -1,0 +1,46 @@
+Type: cli
+Command: .venv/bin/pytest tests/test_e2e_mcp.py -m integration -v --tb=short
+Expected: All 12 integration-marked E2E tests pass
+Timestamp: 2026-03-25T00:00:00Z
+
+Verifies:
+  - All 12 test classes are decorated with @pytest.mark.integration
+  - Tests exercise 9+ distinct scenarios through the MCP server
+  - Each scenario calls 2+ tools in sequence
+  - Uses StubEmbeddingProvider (no API keys required)
+  - Uses in-memory DuckDB (no external storage)
+
+Test scenarios covered:
+  1. TestStoreGetRoundTrip          - store -> get
+  2. TestStoreSearchRoundTrip       - store (x3) -> search
+  3. TestStoreFindSimilarRoundTrip  - store -> find_similar
+  4. TestClassifyReviewResolveRoundTrip - store -> classify -> review_queue -> resolve_review
+  5. TestStoreCheckDedupRoundTrip   - store -> check_dedup
+  6. TestStoreUpdateGetRoundTrip    - store -> update -> get
+  7. TestStoreListPagination        - store (x5) -> list (page 1) -> list (page 2)
+  8. TestStatusReflectsEntries      - status (empty) -> store (x3) -> status (populated)
+  9. TestErrorPathNotFound          - get with non-existent ID -> NOT_FOUND error
+  10. TestErrorPathInvalidInput     - store with missing fields -> INVALID_INPUT error
+  11. TestCallToolDispatcher        - store + status; create_server registers all 11 tools
+
+Output:
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+collected 12 items
+
+tests/test_e2e_mcp.py::TestStoreGetRoundTrip::test_store_then_get PASSED
+tests/test_e2e_mcp.py::TestStoreSearchRoundTrip::test_store_then_search PASSED
+tests/test_e2e_mcp.py::TestStoreFindSimilarRoundTrip::test_store_then_find_similar PASSED
+tests/test_e2e_mcp.py::TestClassifyReviewResolveRoundTrip::test_classify_review_resolve PASSED
+tests/test_e2e_mcp.py::TestStoreCheckDedupRoundTrip::test_store_then_check_dedup PASSED
+tests/test_e2e_mcp.py::TestStoreUpdateGetRoundTrip::test_store_update_get PASSED
+tests/test_e2e_mcp.py::TestStoreListPagination::test_list_pagination PASSED
+tests/test_e2e_mcp.py::TestStatusReflectsEntries::test_status_empty_then_populated PASSED
+tests/test_e2e_mcp.py::TestErrorPathNotFound::test_get_nonexistent_returns_not_found PASSED
+tests/test_e2e_mcp.py::TestErrorPathInvalidInput::test_store_missing_required_fields PASSED
+tests/test_e2e_mcp.py::TestCallToolDispatcher::test_call_tool_dispatches_store_and_status PASSED
+tests/test_e2e_mcp.py::TestCallToolDispatcher::test_create_server_registers_all_tools PASSED
+
+============================== 12 passed in 0.37s ==============================
+
+Status: PASS

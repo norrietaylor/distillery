@@ -8,90 +8,28 @@ retrieval, search ranking, and similarity detection.
 
 from __future__ import annotations
 
-import math
-
 import pytest
 
-from distillery.models import Entry, EntrySource, EntryStatus, EntryType
+from distillery.models import EntryStatus, EntryType
 from distillery.store.duckdb import DuckDBStore
 from distillery.store.protocol import SearchResult
+from tests.conftest import DeterministicEmbeddingProvider, make_entry
+
+pytestmark = pytest.mark.integration
 
 # ---------------------------------------------------------------------------
-# Deterministic mock embedding provider
+# Fixtures
 # ---------------------------------------------------------------------------
-
-
-class _DeterministicEmbeddingProvider:
-    """Embedding provider with predictable, controlled vectors.
-
-    The key insight: we can pre-program per-text embeddings so that we know
-    exactly which entries should appear as similar and which should not.
-
-    Texts not found in the registry fall back to a hash-based unit vector.
-    """
-
-    _DIMS = 4
-
-    def __init__(self) -> None:
-        # Maps text -> fixed unit vector
-        self._registry: dict[str, list[float]] = {}
-
-    def register(self, text: str, vector: list[float]) -> None:
-        """Register a deterministic vector for a specific text."""
-        mag = math.sqrt(sum(x * x for x in vector))
-        self._registry[text] = [x / mag for x in vector]
-
-    def _vector_for(self, text: str) -> list[float]:
-        if text in self._registry:
-            return self._registry[text]
-        # Hash-based fallback for texts without explicit registration
-        h = hash(text) & 0xFFFFFFFF
-        parts = [(h >> (8 * i)) & 0xFF for i in range(self._DIMS)]
-        floats = [float(p) + 1.0 for p in parts]
-        magnitude = math.sqrt(sum(x * x for x in floats))
-        return [x / magnitude for x in floats]
-
-    def embed(self, text: str) -> list[float]:
-        return self._vector_for(text)
-
-    def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        return [self._vector_for(t) for t in texts]
-
-    @property
-    def dimensions(self) -> int:
-        return self._DIMS
-
-    @property
-    def model_name(self) -> str:
-        return "deterministic-4d"
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _make_entry(**kwargs) -> Entry:
-    """Return a minimal valid Entry, optionally overriding fields."""
-    defaults = {
-        "content": "Default content",
-        "entry_type": EntryType.INBOX,
-        "source": EntrySource.MANUAL,
-        "author": "integration-test",
-    }
-    defaults.update(kwargs)
-    return Entry(**defaults)
 
 
 @pytest.fixture
-async def embedding_provider() -> _DeterministicEmbeddingProvider:
-    return _DeterministicEmbeddingProvider()
+def embedding_provider(deterministic_embedding_provider):
+    """Alias for deterministic_embedding_provider (register + hash fallback, 4D)."""
+    return deterministic_embedding_provider
 
 
 @pytest.fixture
-async def store(
-    embedding_provider: _DeterministicEmbeddingProvider,
-) -> DuckDBStore:  # type: ignore[return]
+async def store(embedding_provider) -> DuckDBStore:  # type: ignore[return]
     """Initialised in-memory DuckDBStore, yielded for test use, then closed."""
     s = DuckDBStore(db_path=":memory:", embedding_provider=embedding_provider)
     await s.initialize()
@@ -108,7 +46,7 @@ class TestStoreGetRoundTrip:
     async def test_store_and_retrieve_preserves_content(
         self, store: DuckDBStore
     ) -> None:
-        entry = _make_entry(content="integration test content")
+        entry = make_entry(content="integration test content")
         entry_id = await store.store(entry)
         fetched = await store.get(entry_id)
         assert fetched is not None
@@ -117,7 +55,7 @@ class TestStoreGetRoundTrip:
     async def test_store_and_retrieve_preserves_metadata(
         self, store: DuckDBStore
     ) -> None:
-        entry = _make_entry(
+        entry = make_entry(
             content="entry with metadata",
             metadata={"source_url": "https://example.com", "priority": "high"},
         )
@@ -130,7 +68,7 @@ class TestStoreGetRoundTrip:
     async def test_store_and_retrieve_preserves_tags(
         self, store: DuckDBStore
     ) -> None:
-        entry = _make_entry(content="tagged entry", tags=["integration", "test", "alpha"])
+        entry = make_entry(content="tagged entry", tags=["integration", "test", "alpha"])
         await store.store(entry)
         fetched = await store.get(entry.id)
         assert fetched is not None
@@ -139,7 +77,7 @@ class TestStoreGetRoundTrip:
     async def test_store_and_retrieve_preserves_type(
         self, store: DuckDBStore
     ) -> None:
-        entry = _make_entry(content="session entry", entry_type=EntryType.SESSION)
+        entry = make_entry(content="session entry", entry_type=EntryType.SESSION)
         await store.store(entry)
         fetched = await store.get(entry.id)
         assert fetched is not None
@@ -148,7 +86,7 @@ class TestStoreGetRoundTrip:
     async def test_multiple_entries_independent(self, store: DuckDBStore) -> None:
         """Storing multiple entries does not corrupt individual records."""
         entries = [
-            _make_entry(content=f"entry number {i}", author=f"user-{i}")
+            make_entry(content=f"entry number {i}", author=f"user-{i}")
             for i in range(10)
         ]
         for entry in entries:
@@ -170,7 +108,7 @@ class TestStoreSearchFlow:
     async def test_search_returns_stored_entry(
         self,
         store: DuckDBStore,
-        embedding_provider: _DeterministicEmbeddingProvider,
+        embedding_provider: DeterministicEmbeddingProvider,
     ) -> None:
         """A stored entry is retrievable via semantic search."""
         query = "machine learning"
@@ -179,7 +117,7 @@ class TestStoreSearchFlow:
         embedding_provider.register("machine learning knowledge", vec)
         embedding_provider.register(query, vec)
 
-        entry = _make_entry(content="machine learning knowledge")
+        entry = make_entry(content="machine learning knowledge")
         await store.store(entry)
 
         results = await store.search(query, filters=None, limit=10)
@@ -193,7 +131,7 @@ class TestStoreSearchFlow:
         store: DuckDBStore,
     ) -> None:
         """SearchResult objects must have float scores."""
-        entry = _make_entry(content="scored search result")
+        entry = make_entry(content="scored search result")
         await store.store(entry)
 
         results = await store.search("scored search result", filters=None, limit=5)
@@ -204,7 +142,7 @@ class TestStoreSearchFlow:
     async def test_search_ranks_similar_content_higher(
         self,
         store: DuckDBStore,
-        embedding_provider: _DeterministicEmbeddingProvider,
+        embedding_provider: DeterministicEmbeddingProvider,
     ) -> None:
         """Content similar to the query should rank above dissimilar content."""
         # "related" content gets a vector close to the query vector
@@ -217,8 +155,8 @@ class TestStoreSearchFlow:
         embedding_provider.register("related content to query", related_vec)
         embedding_provider.register("completely different topic", unrelated_vec)
 
-        related_entry = _make_entry(content="related content to query")
-        unrelated_entry = _make_entry(content="completely different topic")
+        related_entry = make_entry(content="related content to query")
+        unrelated_entry = make_entry(content="completely different topic")
         await store.store(related_entry)
         await store.store(unrelated_entry)
 
@@ -237,11 +175,11 @@ class TestStoreSearchFlow:
         self, store: DuckDBStore
     ) -> None:
         """search() with entry_type filter only returns matching entries."""
-        bookmark = _make_entry(
+        bookmark = make_entry(
             content="bookmark entry content",
             entry_type=EntryType.BOOKMARK,
         )
-        idea = _make_entry(
+        idea = make_entry(
             content="idea entry content",
             entry_type=EntryType.IDEA,
         )
@@ -258,8 +196,8 @@ class TestStoreSearchFlow:
 
     async def test_search_with_author_filter(self, store: DuckDBStore) -> None:
         """search() filters by author correctly."""
-        alice_entry = _make_entry(content="alice wrote this", author="alice")
-        bob_entry = _make_entry(content="bob wrote this", author="bob")
+        alice_entry = make_entry(content="alice wrote this", author="alice")
+        bob_entry = make_entry(content="bob wrote this", author="bob")
         await store.store(alice_entry)
         await store.store(bob_entry)
 
@@ -272,7 +210,7 @@ class TestStoreSearchFlow:
     async def test_search_respects_limit(self, store: DuckDBStore) -> None:
         """search() never returns more entries than the limit."""
         for i in range(10):
-            await store.store(_make_entry(content=f"limit test entry {i}"))
+            await store.store(make_entry(content=f"limit test entry {i}"))
 
         results = await store.search("limit test entry", filters=None, limit=3)
         assert len(results) <= 3
@@ -287,7 +225,7 @@ class TestFindSimilarIntegration:
     async def test_find_similar_identifies_duplicate_content(
         self,
         store: DuckDBStore,
-        embedding_provider: _DeterministicEmbeddingProvider,
+        embedding_provider: DeterministicEmbeddingProvider,
     ) -> None:
         """find_similar correctly identifies entries with identical content."""
         # Register the same vector for both the original and the duplicate text
@@ -298,7 +236,7 @@ class TestFindSimilarIntegration:
         embedding_provider.register(original_text, duplicate_vec)
         embedding_provider.register(duplicate_text, duplicate_vec)
 
-        original_entry = _make_entry(content=original_text)
+        original_entry = make_entry(content=original_text)
         await store.store(original_entry)
 
         # Query with the same content: cosine similarity should be ~1.0
@@ -312,7 +250,7 @@ class TestFindSimilarIntegration:
     async def test_find_similar_threshold_filters_dissimilar(
         self,
         store: DuckDBStore,
-        embedding_provider: _DeterministicEmbeddingProvider,
+        embedding_provider: DeterministicEmbeddingProvider,
     ) -> None:
         """Entries below the similarity threshold are excluded from results."""
         similar_vec = [1.0, 0.0, 0.0, 0.0]
@@ -323,8 +261,8 @@ class TestFindSimilarIntegration:
         embedding_provider.register("very similar content", similar_vec)
         embedding_provider.register("completely unrelated content", dissimilar_vec)
 
-        similar_entry = _make_entry(content="very similar content")
-        dissimilar_entry = _make_entry(content="completely unrelated content")
+        similar_entry = make_entry(content="very similar content")
+        dissimilar_entry = make_entry(content="completely unrelated content")
         await store.store(similar_entry)
         await store.store(dissimilar_entry)
 
@@ -341,7 +279,7 @@ class TestFindSimilarIntegration:
     ) -> None:
         """Every result from find_similar must have score >= threshold."""
         for i in range(5):
-            await store.store(_make_entry(content=f"similarity test content {i}"))
+            await store.store(make_entry(content=f"similarity test content {i}"))
 
         threshold = 0.5
         results = await store.find_similar(
@@ -355,7 +293,7 @@ class TestFindSimilarIntegration:
     async def test_find_similar_orders_by_score_descending(
         self,
         store: DuckDBStore,
-        embedding_provider: _DeterministicEmbeddingProvider,
+        embedding_provider: DeterministicEmbeddingProvider,
     ) -> None:
         """find_similar results are ordered by descending similarity score."""
         # Register vectors with different cosine similarities to query
@@ -367,8 +305,8 @@ class TestFindSimilarIntegration:
         embedding_provider.register("high similarity text", high_sim_vec)
         embedding_provider.register("lower similarity text", low_sim_vec)
 
-        high_entry = _make_entry(content="high similarity text")
-        low_entry = _make_entry(content="lower similarity text")
+        high_entry = make_entry(content="high similarity text")
+        low_entry = make_entry(content="lower similarity text")
         await store.store(high_entry)
         await store.store(low_entry)
 
@@ -393,7 +331,7 @@ class TestFindSimilarIntegration:
     async def test_find_similar_with_limit(self, store: DuckDBStore) -> None:
         """find_similar respects the limit parameter."""
         for i in range(10):
-            await store.store(_make_entry(content=f"similar item {i}"))
+            await store.store(make_entry(content=f"similar item {i}"))
 
         results = await store.find_similar(
             "similar item", threshold=0.0, limit=3
@@ -410,7 +348,7 @@ class TestUpdateEmbeddingRefresh:
     async def test_update_content_refreshes_embedding(
         self,
         store: DuckDBStore,
-        embedding_provider: _DeterministicEmbeddingProvider,
+        embedding_provider: DeterministicEmbeddingProvider,
     ) -> None:
         """After update(content=...), search uses the new embedding vector."""
         original_vec = [1.0, 0.0, 0.0, 0.0]
@@ -423,7 +361,7 @@ class TestUpdateEmbeddingRefresh:
         embedding_provider.register("search for updated", updated_query_vec)
         embedding_provider.register("search for original", original_query_vec)
 
-        entry = _make_entry(content="original content here")
+        entry = make_entry(content="original content here")
         await store.store(entry)
 
         # Update with content that gets a very different vector
@@ -440,7 +378,7 @@ class TestUpdateEmbeddingRefresh:
         self, store: DuckDBStore
     ) -> None:
         """get() after update() returns the updated content."""
-        entry = _make_entry(content="before update")
+        entry = make_entry(content="before update")
         await store.store(entry)
         await store.update(entry.id, {"content": "after update"})
         fetched = await store.get(entry.id)
@@ -449,7 +387,7 @@ class TestUpdateEmbeddingRefresh:
 
     async def test_update_version_increments(self, store: DuckDBStore) -> None:
         """Each update increments the version counter."""
-        entry = _make_entry(content="initial content")
+        entry = make_entry(content="initial content")
         await store.store(entry)
         updated1 = await store.update(entry.id, {"content": "update 1"})
         assert updated1.version == 2
@@ -467,7 +405,7 @@ class TestDeleteIntegration:
         self, store: DuckDBStore
     ) -> None:
         """Deleted (soft-deleted) entries remain in DB with archived status."""
-        entry = _make_entry(content="to be deleted")
+        entry = make_entry(content="to be deleted")
         await store.store(entry)
         result = await store.delete(entry.id)
         assert result is True
@@ -482,7 +420,7 @@ class TestDeleteIntegration:
         self, store: DuckDBStore
     ) -> None:
         """Active entries show up in list_entries with no filter."""
-        active_entry = _make_entry(content="active entry", status=EntryStatus.ACTIVE)
+        active_entry = make_entry(content="active entry", status=EntryStatus.ACTIVE)
         await store.store(active_entry)
 
         entries = await store.list_entries(filters=None, limit=10, offset=0)
@@ -529,13 +467,13 @@ class TestMetaTableIntegration:
             db_path = os.path.join(tmpdir, "test_mismatch.db")
 
             # First open with provider A
-            provider_a = _DeterministicEmbeddingProvider()
+            provider_a = DeterministicEmbeddingProvider()
             store_a = DuckDBStore(db_path=db_path, embedding_provider=provider_a)
             await store_a.initialize()
             await store_a.close()
 
             # Second open with provider B (different model name)
-            class _DifferentProvider(_DeterministicEmbeddingProvider):
+            class _DifferentProvider(DeterministicEmbeddingProvider):
                 @property
                 def model_name(self) -> str:
                     return "different-model-name"

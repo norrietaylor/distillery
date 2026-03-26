@@ -1,0 +1,18 @@
+Type: cli
+Command: grep -rn "_make_entry|def _parse_response|class _MockEmbed|class _DeterministicEmbed|class _ControlledEmbed" tests/
+Expected: No output (no duplicate helpers outside conftest.py)
+Timestamp: 2026-03-25T22:06:00Z
+Status: PASS
+
+No duplicate _make_entry, _parse_response, or embedding provider classes found outside conftest.py
+conftest.py contents check:
+-rw-r--r--@ 1 norrie  staff  7213 Mar 25 22:06 /Users/norrie/code/distillery/tests/conftest.py
+28:def make_entry(**kwargs: Any) -> Entry:
+52:def parse_mcp_response(content: list) -> dict:  # type: ignore[type-arg]
+70:class MockEmbeddingProvider:
+102:class DeterministicEmbeddingProvider:
+144:class ControlledEmbeddingProvider:
+193:def mock_embedding_provider() -> MockEmbeddingProvider:
+199:def deterministic_embedding_provider() -> DeterministicEmbeddingProvider:
+205:def controlled_embedding_provider() -> ControlledEmbeddingProvider:
+211:async def store(
