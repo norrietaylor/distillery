@@ -15,9 +15,6 @@ registered and the lifespan context initialises state correctly.
 
 from __future__ import annotations
 
-import json
-import math
-
 import pytest
 
 from distillery.config import DistilleryConfig, EmbeddingConfig, StorageConfig
@@ -33,49 +30,9 @@ from distillery.mcp.server import (
     error_response,
     success_response,
 )
-from distillery.models import Entry, EntrySource, EntryType
+from distillery.models import EntryType
 from distillery.store.duckdb import DuckDBStore
-
-# ---------------------------------------------------------------------------
-# Mock embedding provider
-# ---------------------------------------------------------------------------
-
-
-class _DeterministicEmbeddingProvider:
-    """4-dimensional deterministic embedding provider for tests."""
-
-    _DIMS = 4
-
-    def __init__(self) -> None:
-        self._registry: dict[str, list[float]] = {}
-
-    def register(self, text: str, vector: list[float]) -> None:
-        mag = math.sqrt(sum(x * x for x in vector))
-        self._registry[text] = [x / mag for x in vector]
-
-    def _vector_for(self, text: str) -> list[float]:
-        if text in self._registry:
-            return self._registry[text]
-        h = hash(text) & 0xFFFFFFFF
-        parts = [(h >> (8 * i)) & 0xFF for i in range(self._DIMS)]
-        floats = [float(p) + 1.0 for p in parts]
-        magnitude = math.sqrt(sum(x * x for x in floats))
-        return [x / magnitude for x in floats]
-
-    def embed(self, text: str) -> list[float]:
-        return self._vector_for(text)
-
-    def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        return [self._vector_for(t) for t in texts]
-
-    @property
-    def dimensions(self) -> int:
-        return self._DIMS
-
-    @property
-    def model_name(self) -> str:
-        return "deterministic-4d"
-
+from tests.conftest import DeterministicEmbeddingProvider, make_entry, parse_mcp_response
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -83,37 +40,18 @@ class _DeterministicEmbeddingProvider:
 
 
 @pytest.fixture
-def embedding_provider() -> _DeterministicEmbeddingProvider:
-    return _DeterministicEmbeddingProvider()
+def embedding_provider(deterministic_embedding_provider):
+    """Alias for deterministic_embedding_provider used by _handle_status tests."""
+    return deterministic_embedding_provider
 
 
 @pytest.fixture
-async def store(
-    embedding_provider: _DeterministicEmbeddingProvider,
-) -> DuckDBStore:
-    """Initialised in-memory DuckDBStore, closed after each test."""
+async def store(embedding_provider) -> DuckDBStore:  # type: ignore[return]
+    """Initialised in-memory DuckDBStore using the deterministic provider."""
     s = DuckDBStore(db_path=":memory:", embedding_provider=embedding_provider)
     await s.initialize()
     yield s
     await s.close()
-
-
-def _make_entry(**kwargs) -> Entry:
-    """Return a minimal valid Entry with optional overrides."""
-    defaults = {
-        "content": "Default test content",
-        "entry_type": EntryType.INBOX,
-        "source": EntrySource.MANUAL,
-        "author": "test-author",
-    }
-    defaults.update(kwargs)
-    return Entry(**defaults)
-
-
-def _parse_response(content: list) -> dict:
-    """Parse the JSON text from an MCP tool response."""
-    assert len(content) == 1, f"Expected 1 content item, got {len(content)}"
-    return json.loads(content[0].text)
 
 
 # ---------------------------------------------------------------------------
@@ -124,19 +62,19 @@ def _parse_response(content: list) -> dict:
 class TestHelpers:
     def test_error_response_structure(self) -> None:
         result = error_response("NOT_FOUND", "Item missing")
-        parsed = _parse_response(result)
+        parsed = parse_mcp_response(result)
         assert parsed["error"] is True
         assert parsed["code"] == "NOT_FOUND"
         assert parsed["message"] == "Item missing"
 
     def test_error_response_with_details(self) -> None:
         result = error_response("NOT_FOUND", "missing", details={"id": "abc"})
-        parsed = _parse_response(result)
+        parsed = parse_mcp_response(result)
         assert parsed["details"] == {"id": "abc"}
 
     def test_success_response_structure(self) -> None:
         result = success_response({"key": "value"})
-        parsed = _parse_response(result)
+        parsed = parse_mcp_response(result)
         assert parsed["key"] == "value"
         assert "error" not in parsed
 
@@ -152,7 +90,7 @@ class TestEndToEndFlow:
     async def test_full_lifecycle(
         self,
         store: DuckDBStore,
-        embedding_provider: _DeterministicEmbeddingProvider,
+        embedding_provider: DeterministicEmbeddingProvider,
     ) -> None:
         """store -> search -> get -> update -> find_similar -> list -> status."""
         from distillery.config import DistilleryConfig
@@ -170,7 +108,7 @@ class TestEndToEndFlow:
                 "project": "research",
             },
         )
-        store_data = _parse_response(store_response)
+        store_data = parse_mcp_response(store_response)
         assert "entry_id" in store_data
         assert "error" not in store_data
         entry_id = store_data["entry_id"]
@@ -179,7 +117,7 @@ class TestEndToEndFlow:
         # Step 2: distillery_search                                           #
         # ------------------------------------------------------------------ #
         search_response = await _handle_search(store, {"query": "machine learning"})
-        search_data = _parse_response(search_response)
+        search_data = parse_mcp_response(search_response)
         assert "results" in search_data
         assert isinstance(search_data["results"], list)
         assert search_data["count"] == len(search_data["results"])
@@ -188,7 +126,7 @@ class TestEndToEndFlow:
         # Step 3: distillery_get                                              #
         # ------------------------------------------------------------------ #
         get_response = await _handle_get(store, {"entry_id": entry_id})
-        get_data = _parse_response(get_response)
+        get_data = parse_mcp_response(get_response)
         assert "error" not in get_data
         assert get_data["id"] == entry_id
         assert get_data["content"] == "Machine learning fundamentals"
@@ -206,7 +144,7 @@ class TestEndToEndFlow:
                 "tags": ["ml", "advanced", "techniques"],
             },
         )
-        update_data = _parse_response(update_response)
+        update_data = parse_mcp_response(update_response)
         assert "error" not in update_data
         assert update_data["content"] == "Advanced machine learning techniques"
         assert "advanced" in update_data["tags"]
@@ -218,7 +156,7 @@ class TestEndToEndFlow:
             store,
             {"content": "Advanced machine learning techniques", "threshold": 0.0},
         )
-        find_data = _parse_response(find_response)
+        find_data = parse_mcp_response(find_response)
         assert "results" in find_data
         assert "count" in find_data
         assert "threshold" in find_data
@@ -229,7 +167,7 @@ class TestEndToEndFlow:
         # Step 6: distillery_list                                             #
         # ------------------------------------------------------------------ #
         list_response = await _handle_list(store, {})
-        list_data = _parse_response(list_response)
+        list_data = parse_mcp_response(list_response)
         assert "entries" in list_data
         assert "count" in list_data
         assert list_data["count"] >= 1
@@ -242,7 +180,7 @@ class TestEndToEndFlow:
         # Build a minimal config object for status
         config = DistilleryConfig(storage=StorageConfig(database_path=":memory:"))
         status_response = await _handle_status(store, embedding_provider, config)
-        status_data = _parse_response(status_response)
+        status_data = parse_mcp_response(status_response)
         assert status_data.get("status") == "ok"
         assert "total_entries" in status_data
         assert status_data["total_entries"] >= 1
@@ -257,32 +195,32 @@ class TestEndToEndFlow:
 
 class TestStatusTool:
     async def test_status_returns_ok(
-        self, store: DuckDBStore, embedding_provider: _DeterministicEmbeddingProvider
+        self, store: DuckDBStore, embedding_provider: DeterministicEmbeddingProvider
     ) -> None:
         config = DistilleryConfig(storage=StorageConfig(database_path=":memory:"))
         response = await _handle_status(store, embedding_provider, config)
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert data["status"] == "ok"
 
     async def test_status_shows_entry_counts(
-        self, store: DuckDBStore, embedding_provider: _DeterministicEmbeddingProvider
+        self, store: DuckDBStore, embedding_provider: DeterministicEmbeddingProvider
     ) -> None:
         config = DistilleryConfig(storage=StorageConfig(database_path=":memory:"))
-        entry = _make_entry(content="status test", entry_type=EntryType.IDEA)
+        entry = make_entry(content="status test", entry_type=EntryType.IDEA)
         await store.store(entry)
 
         response = await _handle_status(store, embedding_provider, config)
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert data["total_entries"] >= 1
         assert "entries_by_type" in data
         assert "entries_by_status" in data
 
     async def test_status_shows_embedding_model(
-        self, store: DuckDBStore, embedding_provider: _DeterministicEmbeddingProvider
+        self, store: DuckDBStore, embedding_provider: DeterministicEmbeddingProvider
     ) -> None:
         config = DistilleryConfig(storage=StorageConfig(database_path=":memory:"))
         response = await _handle_status(store, embedding_provider, config)
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert data["embedding_model"] == "deterministic-4d"
         assert data["embedding_dimensions"] == 4
 
@@ -298,7 +236,7 @@ class TestStoreTool:
             store,
             {"content": "Test knowledge entry", "entry_type": "inbox", "author": "bob"},
         )
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert "entry_id" in data
         assert "error" not in data
 
@@ -307,7 +245,7 @@ class TestStoreTool:
             store,
             {"content": "Entry for ID check", "entry_type": "idea", "author": "alice"},
         )
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert isinstance(data["entry_id"], str)
         assert len(data["entry_id"]) > 0
 
@@ -322,7 +260,7 @@ class TestStoreTool:
                 "project": "my-project",
             },
         )
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert "entry_id" in data
 
     async def test_store_missing_content_returns_error(self, store: DuckDBStore) -> None:
@@ -330,7 +268,7 @@ class TestStoreTool:
             store,
             {"entry_type": "inbox", "author": "alice"},
         )
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert data["error"] is True
         assert data["code"] == "INVALID_INPUT"
 
@@ -339,7 +277,7 @@ class TestStoreTool:
             store,
             {"content": "No author entry", "entry_type": "inbox"},
         )
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert data["error"] is True
         assert data["code"] == "INVALID_INPUT"
 
@@ -348,7 +286,7 @@ class TestStoreTool:
             store,
             {"content": "Bad type", "entry_type": "not_a_real_type", "author": "alice"},
         )
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert data["error"] is True
         assert data["code"] == "INVALID_INPUT"
 
@@ -360,7 +298,7 @@ class TestStoreTool:
                 store,
                 {"content": f"Entry of type {et}", "entry_type": et, "author": "tester"},
             )
-            data = _parse_response(response)
+            data = parse_mcp_response(response)
             assert "entry_id" in data, f"Failed for entry_type={et!r}"
 
     async def test_store_tags_must_be_list(self, store: DuckDBStore) -> None:
@@ -373,14 +311,14 @@ class TestStoreTool:
                 "tags": "not-a-list",
             },
         )
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert data["error"] is True
         assert data["code"] == "INVALID_INPUT"
 
     async def test_store_dedup_warning_on_duplicate(
         self,
         store: DuckDBStore,
-        embedding_provider: _DeterministicEmbeddingProvider,
+        embedding_provider: DeterministicEmbeddingProvider,
     ) -> None:
         """Storing content identical to an existing entry triggers dedup warning."""
         duplicate_vec = [1.0, 0.0, 0.0, 0.0]
@@ -402,7 +340,7 @@ class TestStoreTool:
                 "dedup_threshold": 0.5,
             },
         )
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert "entry_id" in data
         # A warning may or may not appear depending on search threshold;
         # the key contract is that the store always returns entry_id.
@@ -415,27 +353,27 @@ class TestStoreTool:
 
 class TestGetTool:
     async def test_get_existing_entry(self, store: DuckDBStore) -> None:
-        entry = _make_entry(content="Get me by ID")
+        entry = make_entry(content="Get me by ID")
         await store.store(entry)
         response = await _handle_get(store, {"entry_id": entry.id})
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert data["id"] == entry.id
         assert data["content"] == "Get me by ID"
 
     async def test_get_missing_entry_returns_not_found(self, store: DuckDBStore) -> None:
         response = await _handle_get(store, {"entry_id": "nonexistent-uuid"})
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert data["error"] is True
         assert data["code"] == "NOT_FOUND"
 
     async def test_get_missing_entry_id_arg_returns_error(self, store: DuckDBStore) -> None:
         response = await _handle_get(store, {})
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert data["error"] is True
         assert data["code"] == "INVALID_INPUT"
 
     async def test_get_returns_all_fields(self, store: DuckDBStore) -> None:
-        entry = _make_entry(
+        entry = make_entry(
             content="Full field entry",
             entry_type=EntryType.SESSION,
             author="full-author",
@@ -445,7 +383,7 @@ class TestGetTool:
         )
         await store.store(entry)
         response = await _handle_get(store, {"entry_id": entry.id})
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert data["author"] == "full-author"
         assert data["project"] == "full-project"
         assert set(data["tags"]) == {"a", "b"}
@@ -459,49 +397,49 @@ class TestGetTool:
 
 class TestUpdateTool:
     async def test_update_content(self, store: DuckDBStore) -> None:
-        entry = _make_entry(content="Before update")
+        entry = make_entry(content="Before update")
         await store.store(entry)
         response = await _handle_update(
             store, {"entry_id": entry.id, "content": "After update"}
         )
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert "error" not in data
         assert data["content"] == "After update"
 
     async def test_update_version_increments(self, store: DuckDBStore) -> None:
-        entry = _make_entry(content="Versioned content")
+        entry = make_entry(content="Versioned content")
         await store.store(entry)
         response = await _handle_update(
             store, {"entry_id": entry.id, "content": "Version 2"}
         )
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert data["version"] == 2
 
     async def test_update_tags(self, store: DuckDBStore) -> None:
-        entry = _make_entry(content="Tag test")
+        entry = make_entry(content="Tag test")
         await store.store(entry)
         response = await _handle_update(
             store, {"entry_id": entry.id, "tags": ["new-tag"]}
         )
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert "new-tag" in data["tags"]
 
     async def test_update_status(self, store: DuckDBStore) -> None:
-        entry = _make_entry(content="Status test")
+        entry = make_entry(content="Status test")
         await store.store(entry)
         response = await _handle_update(
             store, {"entry_id": entry.id, "status": "archived"}
         )
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert data["status"] == "archived"
 
     async def test_update_invalid_status_returns_error(self, store: DuckDBStore) -> None:
-        entry = _make_entry(content="Bad status test")
+        entry = make_entry(content="Bad status test")
         await store.store(entry)
         response = await _handle_update(
             store, {"entry_id": entry.id, "status": "not_a_real_status"}
         )
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert data["error"] is True
         assert data["code"] == "INVALID_INPUT"
 
@@ -511,31 +449,31 @@ class TestUpdateTool:
         response = await _handle_update(
             store, {"entry_id": "nonexistent-id", "content": "Updated"}
         )
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert data["error"] is True
         assert data["code"] == "NOT_FOUND"
 
     async def test_update_missing_entry_id_returns_error(self, store: DuckDBStore) -> None:
         response = await _handle_update(store, {"content": "No entry_id"})
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert data["error"] is True
         assert data["code"] == "INVALID_INPUT"
 
     async def test_update_no_fields_returns_error(self, store: DuckDBStore) -> None:
-        entry = _make_entry(content="No updates provided")
+        entry = make_entry(content="No updates provided")
         await store.store(entry)
         response = await _handle_update(store, {"entry_id": entry.id})
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert data["error"] is True
         assert data["code"] == "INVALID_INPUT"
 
     async def test_update_immutable_field_returns_error(self, store: DuckDBStore) -> None:
-        entry = _make_entry(content="Immutable test")
+        entry = make_entry(content="Immutable test")
         await store.store(entry)
         response = await _handle_update(
             store, {"entry_id": entry.id, "id": "new-id"}
         )
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert data["error"] is True
         assert data["code"] == "INVALID_INPUT"
 
@@ -547,19 +485,19 @@ class TestUpdateTool:
 
 class TestSearchTool:
     async def test_search_returns_results(self, store: DuckDBStore) -> None:
-        entry = _make_entry(content="Searchable knowledge content")
+        entry = make_entry(content="Searchable knowledge content")
         await store.store(entry)
         response = await _handle_search(store, {"query": "knowledge content"})
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert "results" in data
         assert "count" in data
         assert isinstance(data["results"], list)
 
     async def test_search_results_have_score_and_entry(self, store: DuckDBStore) -> None:
-        entry = _make_entry(content="Score and entry check")
+        entry = make_entry(content="Score and entry check")
         await store.store(entry)
         response = await _handle_search(store, {"query": "score and entry"})
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         for result in data["results"]:
             assert "score" in result
             assert "entry" in result
@@ -567,29 +505,29 @@ class TestSearchTool:
 
     async def test_search_missing_query_returns_error(self, store: DuckDBStore) -> None:
         response = await _handle_search(store, {})
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert data["error"] is True
         assert data["code"] == "VALIDATION_ERROR"
 
     async def test_search_respects_limit(self, store: DuckDBStore) -> None:
         for i in range(10):
-            await store.store(_make_entry(content=f"Search limit entry {i}"))
+            await store.store(make_entry(content=f"Search limit entry {i}"))
         response = await _handle_search(store, {"query": "search limit entry", "limit": 3})
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert len(data["results"]) <= 3
 
     async def test_search_invalid_limit_returns_error(self, store: DuckDBStore) -> None:
         response = await _handle_search(store, {"query": "test", "limit": "not-an-int"})
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert data["error"] is True
 
     async def test_search_filters_by_entry_type(self, store: DuckDBStore) -> None:
-        await store.store(_make_entry(content="Idea entry", entry_type=EntryType.IDEA))
-        await store.store(_make_entry(content="Inbox entry", entry_type=EntryType.INBOX))
+        await store.store(make_entry(content="Idea entry", entry_type=EntryType.IDEA))
+        await store.store(make_entry(content="Inbox entry", entry_type=EntryType.INBOX))
         response = await _handle_search(
             store, {"query": "entry", "entry_type": "idea"}
         )
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         for result in data["results"]:
             assert result["entry"]["entry_type"] == "idea"
 
@@ -601,12 +539,12 @@ class TestSearchTool:
 
 class TestFindSimilarTool:
     async def test_find_similar_returns_results(self, store: DuckDBStore) -> None:
-        entry = _make_entry(content="Similar content for finding")
+        entry = make_entry(content="Similar content for finding")
         await store.store(entry)
         response = await _handle_find_similar(
             store, {"content": "Similar content for finding", "threshold": 0.0}
         )
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert "results" in data
         assert "count" in data
         assert "threshold" in data
@@ -615,7 +553,7 @@ class TestFindSimilarTool:
         self, store: DuckDBStore
     ) -> None:
         response = await _handle_find_similar(store, {})
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert data["error"] is True
         assert data["code"] == "VALIDATION_ERROR"
 
@@ -625,25 +563,25 @@ class TestFindSimilarTool:
         response = await _handle_find_similar(
             store, {"content": "test", "threshold": 1.5}
         )
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert data["error"] is True
         assert data["code"] == "VALIDATION_ERROR"
 
     async def test_find_similar_default_threshold_returned_in_response(
         self, store: DuckDBStore
     ) -> None:
-        await store.store(_make_entry(content="Threshold echo test"))
+        await store.store(make_entry(content="Threshold echo test"))
         response = await _handle_find_similar(store, {"content": "Threshold echo test"})
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert data["threshold"] == 0.8  # default
 
     async def test_find_similar_respects_limit(self, store: DuckDBStore) -> None:
         for i in range(10):
-            await store.store(_make_entry(content=f"Similar item {i}"))
+            await store.store(make_entry(content=f"Similar item {i}"))
         response = await _handle_find_similar(
             store, {"content": "Similar item", "threshold": 0.0, "limit": 3}
         )
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert len(data["results"]) <= 3
 
 
@@ -654,9 +592,9 @@ class TestFindSimilarTool:
 
 class TestListTool:
     async def test_list_returns_entries(self, store: DuckDBStore) -> None:
-        await store.store(_make_entry(content="List entry"))
+        await store.store(make_entry(content="List entry"))
         response = await _handle_list(store, {})
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert "entries" in data
         assert "count" in data
         assert isinstance(data["entries"], list)
@@ -664,43 +602,43 @@ class TestListTool:
 
     async def test_list_empty_store_returns_empty(self, store: DuckDBStore) -> None:
         response = await _handle_list(store, {})
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert data["count"] == 0
         assert data["entries"] == []
 
     async def test_list_respects_limit(self, store: DuckDBStore) -> None:
         for i in range(10):
-            await store.store(_make_entry(content=f"List limit entry {i}"))
+            await store.store(make_entry(content=f"List limit entry {i}"))
         response = await _handle_list(store, {"limit": 3})
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert len(data["entries"]) <= 3
 
     async def test_list_respects_offset(self, store: DuckDBStore) -> None:
         for i in range(5):
-            await store.store(_make_entry(content=f"Offset entry {i}"))
+            await store.store(make_entry(content=f"Offset entry {i}"))
         all_response = await _handle_list(store, {"limit": 100})
         offset_response = await _handle_list(store, {"limit": 100, "offset": 2})
-        all_data = _parse_response(all_response)
-        offset_data = _parse_response(offset_response)
+        all_data = parse_mcp_response(all_response)
+        offset_data = parse_mcp_response(offset_response)
         assert offset_data["count"] == all_data["count"] - 2
 
     async def test_list_filters_by_author(self, store: DuckDBStore) -> None:
-        await store.store(_make_entry(content="Alice entry", author="alice"))
-        await store.store(_make_entry(content="Bob entry", author="bob"))
+        await store.store(make_entry(content="Alice entry", author="alice"))
+        await store.store(make_entry(content="Bob entry", author="bob"))
         response = await _handle_list(store, {"author": "alice"})
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         for entry in data["entries"]:
             assert entry["author"] == "alice"
 
     async def test_list_invalid_limit_returns_error(self, store: DuckDBStore) -> None:
         response = await _handle_list(store, {"limit": -1})
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert data["error"] is True
         assert data["code"] == "VALIDATION_ERROR"
 
     async def test_list_invalid_offset_returns_error(self, store: DuckDBStore) -> None:
         response = await _handle_list(store, {"offset": -5})
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert data["error"] is True
         assert data["code"] == "VALIDATION_ERROR"
 
@@ -708,7 +646,7 @@ class TestListTool:
         self, store: DuckDBStore
     ) -> None:
         response = await _handle_list(store, {"limit": 5, "offset": 2})
-        data = _parse_response(response)
+        data = parse_mcp_response(response)
         assert data["limit"] == 5
         assert data["offset"] == 2
 
