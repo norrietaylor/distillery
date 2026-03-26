@@ -32,6 +32,15 @@ Tools added in T02 (classification extensions):
     created_at, and classification_reasoning.
   - distillery_resolve_review: Accept entry_id and action
     (approve/reclassify/archive); update entry accordingly.
+
+Tools added in T03.2 (conflict detection):
+  - distillery_check_conflicts: Accept content and optional llm_responses
+    mapping.  First pass (no llm_responses) returns conflict_candidates with
+    prompts for LLM evaluation.  Second pass (with llm_responses) processes
+    evaluated responses and returns has_conflicts + conflict list.
+  - distillery_store also returns conflict_candidates on the response when
+    similar entries exceed the conflict_threshold, enabling the calling LLM
+    to evaluate conflicts without a separate tool call.
 """
 
 from __future__ import annotations
@@ -671,6 +680,43 @@ def create_server(config: DistilleryConfig | None = None) -> Server:
                     "required": [],
                 },
             ),
+            types.Tool(
+                name="distillery_check_conflicts",
+                description=(
+                    "Explicitly check whether a piece of content conflicts with existing "
+                    "knowledge entries.  First call (without llm_responses) returns "
+                    "conflict_candidates with prompts for each similar entry.  Second call "
+                    "(with llm_responses) processes the LLM-evaluated responses and returns "
+                    "a ConflictResult indicating detected conflicts."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "content": {
+                            "type": "string",
+                            "description": "The raw text content to check for conflicts.",
+                        },
+                        "llm_responses": {
+                            "type": "object",
+                            "description": (
+                                "Optional mapping from entry_id to an object with "
+                                "'is_conflict' (bool) and 'reasoning' (str). "
+                                "When provided, the handler processes these responses "
+                                "and returns the final ConflictResult."
+                            ),
+                            "additionalProperties": {
+                                "type": "object",
+                                "properties": {
+                                    "is_conflict": {"type": "boolean"},
+                                    "reasoning": {"type": "string"},
+                                },
+                                "required": ["is_conflict"],
+                            },
+                        },
+                    },
+                    "required": ["content"],
+                },
+            ),
         ]
 
     @server.call_tool()  # type: ignore[untyped-decorator]
@@ -692,7 +738,7 @@ def create_server(config: DistilleryConfig | None = None) -> Server:
             return await _handle_status(store, embedding_provider, cfg)
 
         if tool_name == "distillery_store":
-            return await _handle_store(store, arguments)
+            return await _handle_store(store, arguments, cfg)
 
         if tool_name == "distillery_get":
             return await _handle_get(store, arguments)
@@ -723,6 +769,9 @@ def create_server(config: DistilleryConfig | None = None) -> Server:
 
         if tool_name == "distillery_metrics":
             return await _handle_metrics(store, cfg, embedding_provider, arguments)
+
+        if tool_name == "distillery_check_conflicts":
+            return await _handle_check_conflicts(store, cfg, arguments)
 
         return error_response("UNKNOWN_TOOL", f"Unknown tool: {tool_name!r}")
 
@@ -845,16 +894,21 @@ _DEFAULT_DEDUP_LIMIT = 3
 async def _handle_store(
     store: Any,
     arguments: dict[str, Any],
+    cfg: DistilleryConfig | None = None,
 ) -> list[types.TextContent]:
     """Implement the ``distillery_store`` tool.
 
     Creates a new ``Entry`` from the supplied arguments, persists it via the
     store, then runs ``find_similar`` to surface any near-duplicate entries
-    that already exist (excluding the just-stored entry).
+    that already exist (excluding the just-stored entry).  Also performs a
+    non-fatal conflict check and returns ``conflict_candidates`` when similar
+    entries are found above the configured ``conflict_threshold``.
 
     Args:
         store: Initialised ``DuckDBStore``.
         arguments: Raw MCP tool arguments dict.
+        cfg: Loaded :class:`~distillery.config.DistilleryConfig`.  When
+            ``None`` a default config is used.
 
     Returns:
         MCP content list containing ``{"entry_id": ..., "warnings": [...]}``.
@@ -933,6 +987,56 @@ async def _handle_store(
     except Exception as exc:  # noqa: BLE001
         logger.warning("find_similar failed during dedup check: %s", exc)
         # Non-fatal: still return the stored entry_id.
+
+    # --- conflict check -------------------------------------------------------
+    # Non-fatal: wrap in try/except so a conflict-checker failure never blocks
+    # the store operation.  We return conflict_candidates (similar entries with
+    # their content) so the calling LLM can evaluate them without us making an
+    # LLM call ourselves.
+    try:
+        from distillery.classification.conflict import ConflictChecker
+
+        conflict_threshold = float(cfg.classification.conflict_threshold if cfg is not None else 0.60)
+        conflict_checker = ConflictChecker(store=store, threshold=conflict_threshold)
+        conflict_similar = await store.find_similar(
+            content=entry.content,
+            threshold=conflict_threshold,
+            limit=5,
+        )
+        if conflict_similar:
+            conflict_candidates = []
+            for result in conflict_similar:
+                if result.entry.id == entry_id:
+                    continue
+                preview = result.entry.content.splitlines()[0][:120]
+                prompt = conflict_checker.build_prompt(entry.content, result.entry.content)
+                conflict_candidates.append(
+                    {
+                        "entry_id": result.entry.id,
+                        "content_preview": preview,
+                        "similarity_score": round(result.score, 4),
+                        "conflict_prompt": prompt,
+                    }
+                )
+            if conflict_candidates:
+                response_data: dict[str, Any] = {"entry_id": entry_id}
+                if warnings:
+                    response_data["warnings"] = warnings
+                    response_data["warning_message"] = (
+                        f"Found {len(warnings)} similar existing "
+                        f"{'entry' if len(warnings) == 1 else 'entries'}. "
+                        "Review before storing to avoid duplicates."
+                    )
+                response_data["conflict_candidates"] = conflict_candidates
+                response_data["conflict_message"] = (
+                    f"Found {len(conflict_candidates)} potential conflict "
+                    f"{'candidate' if len(conflict_candidates) == 1 else 'candidates'}. "
+                    "Use distillery_check_conflicts with LLM responses to confirm conflicts."
+                )
+                return success_response(response_data)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Conflict check failed during store: %s", exc)
+        # Non-fatal: fall through and return the entry_id without conflict info.
 
     response: dict[str, Any] = {"entry_id": entry_id}
     if warnings:
@@ -1912,6 +2016,158 @@ def _sync_gather_metrics(
         "staleness": staleness_section,
         "storage": storage_section,
     }
+
+
+# ---------------------------------------------------------------------------
+# T03.2 tool handler: check_conflicts
+# ---------------------------------------------------------------------------
+
+
+async def _handle_check_conflicts(
+    store: Any,
+    config: DistilleryConfig,
+    arguments: dict[str, Any],
+) -> list[types.TextContent]:
+    """Implement the ``distillery_check_conflicts`` tool.
+
+    Supports a two-pass workflow:
+
+    **First pass** (``llm_responses`` absent or ``None``):
+    - Calls :class:`~distillery.classification.conflict.ConflictChecker` with
+      ``llm_responses=None`` to discover candidate entry IDs.
+    - Returns ``conflict_candidates`` with a prompt for each candidate pair so
+      the calling LLM can evaluate them.
+
+    **Second pass** (``llm_responses`` provided):
+    - Converts the supplied ``{entry_id: {is_conflict, reasoning}}`` dict to
+      the ``(bool, str)`` tuple format expected by
+      :meth:`~distillery.classification.conflict.ConflictChecker.check`.
+    - Returns the serialised :class:`~distillery.classification.conflict.ConflictResult`.
+
+    Args:
+        store: Initialised store with a ``find_similar`` method.
+        config: Loaded :class:`~distillery.config.DistilleryConfig` (conflict
+            threshold is read from ``config.classification.conflict_threshold``).
+        arguments: Tool argument dict.  Must contain ``"content"`` (str).
+            Optionally contains ``"llm_responses"`` (dict).
+
+    Returns:
+        MCP content list with a single JSON ``TextContent`` block.
+    """
+    from distillery.classification.conflict import ConflictChecker
+
+    # --- validate input -----------------------------------------------------
+    err = validate_required(arguments, "content")
+    if err:
+        return error_response("INVALID_INPUT", err)
+
+    content = str(arguments["content"])
+
+    llm_responses_raw: dict[str, Any] | None = arguments.get("llm_responses")
+    if llm_responses_raw is not None and not isinstance(llm_responses_raw, dict):
+        return error_response("INVALID_INPUT", "Field 'llm_responses' must be an object")
+
+    # --- build checker -------------------------------------------------------
+    threshold = config.classification.conflict_threshold
+    checker = ConflictChecker(store=store, threshold=threshold)
+
+    # --- first pass: discover candidates (no llm_responses) ------------------
+    if not llm_responses_raw:
+        try:
+            # Call check with no LLM responses to find similar entries.
+            await checker.check(content, llm_responses=None)
+
+            # Retrieve similar entries to build prompts for the caller.
+            from distillery.classification.conflict import _DEFAULT_CONFLICT_LIMIT
+
+            similar = await store.find_similar(
+                content=content,
+                threshold=threshold,
+                limit=_DEFAULT_CONFLICT_LIMIT,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Error during conflict discovery pass")
+            return error_response("CONFLICT_ERROR", f"Conflict check failed: {exc}")
+
+        if not similar:
+            return success_response(
+                {
+                    "has_conflicts": False,
+                    "conflicts": [],
+                    "conflict_candidates": [],
+                    "message": "No similar entries found above the conflict threshold.",
+                }
+            )
+
+        candidates = []
+        for result in similar:
+            preview = result.entry.content.splitlines()[0][:120]
+            prompt = checker.build_prompt(content, result.entry.content)
+            candidates.append(
+                {
+                    "entry_id": result.entry.id,
+                    "content_preview": preview,
+                    "similarity_score": round(result.score, 4),
+                    "conflict_prompt": prompt,
+                }
+            )
+
+        return success_response(
+            {
+                "has_conflicts": False,
+                "conflicts": [],
+                "conflict_candidates": candidates,
+                "message": (
+                    f"Found {len(candidates)} conflict "
+                    f"{'candidate' if len(candidates) == 1 else 'candidates'}. "
+                    "Evaluate each conflict_prompt with an LLM and call "
+                    "distillery_check_conflicts again with llm_responses."
+                ),
+            }
+        )
+
+    # --- second pass: process LLM responses ----------------------------------
+    # Convert {entry_id: {is_conflict: bool, reasoning: str}} ->
+    #         {entry_id: (bool, str)}
+    llm_responses: dict[str, tuple[bool, str]] = {}
+    for entry_id, response_obj in llm_responses_raw.items():
+        if not isinstance(response_obj, dict):
+            return error_response(
+                "INVALID_INPUT",
+                f"llm_responses[{entry_id!r}] must be an object with 'is_conflict' and 'reasoning'.",
+            )
+        is_conflict_raw = response_obj.get("is_conflict")
+        if is_conflict_raw is None:
+            return error_response(
+                "INVALID_INPUT",
+                f"llm_responses[{entry_id!r}] is missing required field 'is_conflict'.",
+            )
+        reasoning = str(response_obj.get("reasoning", ""))
+        llm_responses[str(entry_id)] = (bool(is_conflict_raw), reasoning)
+
+    try:
+        result = await checker.check(content, llm_responses=llm_responses)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error during conflict evaluation pass")
+        return error_response("CONFLICT_ERROR", f"Conflict check failed: {exc}")
+
+    # Serialise ConflictResult.
+    conflicts_serialised = [
+        {
+            "entry_id": conflict.entry_id,
+            "content_preview": conflict.content_preview,
+            "similarity_score": round(conflict.similarity_score, 4),
+            "conflict_reasoning": conflict.conflict_reasoning,
+        }
+        for conflict in result.conflicts
+    ]
+
+    return success_response(
+        {
+            "has_conflicts": result.has_conflicts,
+            "conflicts": conflicts_serialised,
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
