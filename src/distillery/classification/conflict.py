@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from distillery.store.protocol import DistilleryStore
@@ -276,7 +276,7 @@ class ConflictChecker:
             lines = text.splitlines()
             text = "\n".join(lines[1:-1]).strip()
 
-        data: dict = json.loads(text)
+        data: dict[str, Any] = json.loads(text)
 
         is_conflict = bool(data["is_conflict"])
         reasoning = str(data.get("reasoning", ""))

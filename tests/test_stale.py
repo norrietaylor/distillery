@@ -16,8 +16,7 @@ the tests are deterministic regardless of when they run.
 
 from __future__ import annotations
 
-import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -28,7 +27,7 @@ from distillery.config import (
     StorageConfig,
 )
 from distillery.mcp.server import _handle_stale
-from distillery.models import EntrySource, EntryStatus, EntryType
+from distillery.models import EntryType
 from distillery.store.duckdb import DuckDBStore
 from tests.conftest import MockEmbeddingProvider, make_entry, parse_mcp_response
 
@@ -38,7 +37,7 @@ pytestmark = pytest.mark.integration
 # Helpers
 # ---------------------------------------------------------------------------
 
-_UTC = timezone.utc
+_UTC = UTC
 
 
 def _ts(days_ago: float) -> str:

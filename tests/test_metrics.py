@@ -18,7 +18,7 @@ the tests are deterministic regardless of when they run.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -39,7 +39,7 @@ pytestmark = pytest.mark.integration
 # Helpers
 # ---------------------------------------------------------------------------
 
-_UTC = timezone.utc
+_UTC = UTC
 
 
 def _ts(days_ago: float) -> str:
@@ -233,7 +233,7 @@ class TestEntryMetrics:
         embedding_provider: MockEmbeddingProvider,
     ) -> None:
         """Archived entries must not count toward total."""
-        active_id = await store.store(
+        await store.store(
             make_entry(content="Keep me", entry_type=EntryType.INBOX)
         )
         archived_id = await store.store(

@@ -22,15 +22,12 @@ Covers:
 from __future__ import annotations
 
 import math
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from distillery.classification.conflict import (
     ConflictChecker,
-    ConflictEntry,
-    ConflictResult,
 )
 from distillery.config import (
     ClassificationConfig,

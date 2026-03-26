@@ -214,7 +214,7 @@ class TestEntryToDict:
         expected_keys = {
             "id", "content", "entry_type", "source", "author",
             "project", "tags", "status", "created_at", "updated_at",
-            "version", "metadata",
+            "version", "metadata", "accessed_at",
         }
         assert set(d.keys()) == expected_keys
 

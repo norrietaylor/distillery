@@ -2575,13 +2575,13 @@ def _sync_gather_stale(
         content_preview = (content or "")[:200]
         # Calculate days since access
         if last_accessed is not None:
-            from datetime import datetime, timezone as tz
+            from datetime import datetime
 
             if hasattr(last_accessed, "tzinfo") and last_accessed.tzinfo is None:
-                last_accessed_aware = last_accessed.replace(tzinfo=tz.utc)
+                last_accessed_aware = last_accessed.replace(tzinfo=UTC)
             else:
                 last_accessed_aware = last_accessed
-            now = datetime.now(tz.utc)
+            now = datetime.now(UTC)
             days_since = (now - last_accessed_aware).days
             last_accessed_iso = last_accessed_aware.isoformat()
         else:
