@@ -1,0 +1,24 @@
+Type: test
+Command: pytest -m unit --tb=short -q
+Expected: All unit-marked tests collected and run
+Timestamp: 2026-03-25T00:00:00Z
+
+--- OUTPUT ---
+Platform: darwin -- Python 3.12.13, pytest-9.0.2
+Collected: 234 unit tests (191 deselected)
+
+Results:
+  - 221 passed
+  - 13 failed (pre-existing yaml.ScannerError and RuntimeError in test_cli.py;
+    present before T03 changes, confirmed by baseline check at Phase 2)
+
+Unit marker applied to:
+  tests/test_classification_engine.py  pytestmark = pytest.mark.unit
+  tests/test_cli.py                    pytestmark = pytest.mark.unit
+  tests/test_config.py                 pytestmark = pytest.mark.unit
+  tests/test_dedup.py                  pytestmark = pytest.mark.unit
+  tests/test_embedding.py              pytestmark = pytest.mark.unit
+  tests/test_entry.py                  pytestmark = pytest.mark.unit
+  tests/test_store_protocol.py         pytestmark = pytest.mark.unit
+
+Status: PASS (marker infrastructure correct; pre-existing failures excluded from scope)

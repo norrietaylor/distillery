@@ -16,6 +16,8 @@ from distillery.store.duckdb import DuckDBStore
 from distillery.store.protocol import SearchResult
 from tests.conftest import make_entry
 
+pytestmark = pytest.mark.integration
+
 # ---------------------------------------------------------------------------
 # Initialization tests
 # ---------------------------------------------------------------------------

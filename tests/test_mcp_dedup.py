@@ -26,6 +26,8 @@ from distillery.mcp.server import _handle_check_dedup
 from distillery.store.duckdb import DuckDBStore
 from tests.conftest import ControlledEmbeddingProvider, make_entry, parse_mcp_response
 
+pytestmark = pytest.mark.integration
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

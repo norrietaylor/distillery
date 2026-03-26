@@ -22,6 +22,8 @@ import pytest
 from distillery.embedding.jina import JinaEmbeddingProvider
 from distillery.embedding.openai import OpenAIEmbeddingProvider
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

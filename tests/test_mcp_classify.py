@@ -29,6 +29,8 @@ from distillery.models import EntryStatus, EntryType
 from distillery.store.duckdb import DuckDBStore
 from tests.conftest import make_entry, parse_mcp_response
 
+pytestmark = pytest.mark.integration
+
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------

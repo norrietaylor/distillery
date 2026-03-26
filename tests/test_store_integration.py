@@ -15,6 +15,8 @@ from distillery.store.duckdb import DuckDBStore
 from distillery.store.protocol import SearchResult
 from tests.conftest import DeterministicEmbeddingProvider, make_entry
 
+pytestmark = pytest.mark.integration
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

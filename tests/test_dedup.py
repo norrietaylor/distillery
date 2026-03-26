@@ -20,6 +20,8 @@ from distillery.models import EntrySource, EntryType
 from distillery.store.protocol import SearchResult
 from tests.conftest import make_entry
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

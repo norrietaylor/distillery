@@ -5,13 +5,13 @@ from __future__ import annotations
 import json
 import textwrap
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
 from distillery import __version__
 from distillery.cli import _check_health, _cmd_health, _cmd_status, _query_status, main
 
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Helpers

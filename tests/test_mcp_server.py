@@ -34,6 +34,8 @@ from distillery.models import EntryType
 from distillery.store.duckdb import DuckDBStore
 from tests.conftest import DeterministicEmbeddingProvider, make_entry, parse_mcp_response
 
+pytestmark = pytest.mark.integration
+
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------

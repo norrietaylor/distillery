@@ -78,3 +78,14 @@ ignore = ["E501"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["distillery"]
+
+[tool.coverage.run]
+source = ["src/distillery"]
+omit = [
+    "src/distillery/mcp/__main__.py",
+    "src/distillery/store/__main__.py",
+]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
