@@ -725,3 +725,92 @@ class DuckDBStore:
             ]
 
         return await asyncio.to_thread(_sync)
+
+    # ------------------------------------------------------------------
+    # Feedback logging (T01.2)
+    # ------------------------------------------------------------------
+
+    def _sync_log_search(
+        self,
+        query: str,
+        result_entry_ids: list[str],
+        result_scores: list[float],
+        session_id: str | None,
+    ) -> str:
+        """Synchronous implementation of log_search(); called via asyncio.to_thread."""
+        import uuid
+
+        search_id = str(uuid.uuid4())
+        conn = self.connection
+        sql = (
+            "INSERT INTO search_log "
+            "(id, query, result_entry_ids, result_scores, session_id) "
+            "VALUES (?, ?, ?, ?, ?)"
+        )
+        conn.execute(sql, [search_id, query, result_entry_ids, result_scores, session_id])
+        logger.debug("Logged search id=%s query=%r", search_id, query)
+        return search_id
+
+    async def log_search(
+        self,
+        query: str,
+        result_entry_ids: list[str],
+        result_scores: list[float],
+        session_id: str | None = None,
+    ) -> str:
+        """Record a search event and return its generated ID.
+
+        Appends a row to the ``search_log`` table capturing the query,
+        the IDs and similarity scores of returned entries, and an optional
+        session identifier for grouping related searches.
+
+        Returns:
+            The UUID string of the newly created ``search_log`` row.
+        """
+        return await asyncio.to_thread(
+            self._sync_log_search, query, result_entry_ids, result_scores, session_id
+        )
+
+    def _sync_log_feedback(
+        self,
+        search_id: str,
+        entry_id: str,
+        signal: str,
+    ) -> str:
+        """Synchronous implementation of log_feedback(); called via asyncio.to_thread."""
+        import uuid
+
+        feedback_id = str(uuid.uuid4())
+        conn = self.connection
+        sql = (
+            "INSERT INTO feedback_log "
+            "(id, search_id, entry_id, signal) "
+            "VALUES (?, ?, ?, ?)"
+        )
+        conn.execute(sql, [feedback_id, search_id, entry_id, signal])
+        logger.debug(
+            "Logged feedback id=%s search_id=%s entry_id=%s signal=%r",
+            feedback_id,
+            search_id,
+            entry_id,
+            signal,
+        )
+        return feedback_id
+
+    async def log_feedback(
+        self,
+        search_id: str,
+        entry_id: str,
+        signal: str,
+    ) -> str:
+        """Record implicit feedback for a search result and return its ID.
+
+        Appends a row to the ``feedback_log`` table linking a specific
+        search event to the entry the user interacted with.
+
+        Returns:
+            The UUID string of the newly created ``feedback_log`` row.
+        """
+        return await asyncio.to_thread(
+            self._sync_log_feedback, search_id, entry_id, signal
+        )

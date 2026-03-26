@@ -182,3 +182,53 @@ class DistilleryStore(Protocol):
             List of ``Entry`` objects matching the filters.
         """
         ...
+
+    async def log_search(
+        self,
+        query: str,
+        result_entry_ids: list[str],
+        result_scores: list[float],
+        session_id: str | None = None,
+    ) -> str:
+        """Record a search event and return its generated ID.
+
+        Appends a row to the ``search_log`` table capturing the query,
+        the IDs and similarity scores of returned entries, and an optional
+        session identifier for grouping related searches.
+
+        Args:
+            query: The natural-language query string that was searched.
+            result_entry_ids: Ordered list of entry UUIDs returned by the
+                search (same order as *result_scores*).
+            result_scores: Ordered list of similarity scores corresponding
+                to *result_entry_ids*.
+            session_id: Optional opaque string that groups searches from
+                the same user session.
+
+        Returns:
+            The UUID string of the newly created ``search_log`` row.
+        """
+        ...
+
+    async def log_feedback(
+        self,
+        search_id: str,
+        entry_id: str,
+        signal: str,
+    ) -> str:
+        """Record implicit feedback for a search result and return its ID.
+
+        Appends a row to the ``feedback_log`` table linking a specific
+        search event to the entry the user interacted with.
+
+        Args:
+            search_id: UUID of the ``search_log`` row this feedback relates
+                to.
+            entry_id: UUID of the ``entries`` row the user interacted with.
+            signal: The type of interaction signal (e.g. ``"retrieved"``,
+                ``"applied"``, ``"ignored"``).
+
+        Returns:
+            The UUID string of the newly created ``feedback_log`` row.
+        """
+        ...

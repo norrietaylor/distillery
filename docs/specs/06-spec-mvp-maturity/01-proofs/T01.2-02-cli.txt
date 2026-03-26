@@ -1,0 +1,22 @@
+Type: cli
+Command: python3 integration test for log_search() and log_feedback()
+Expected: UUIDs returned, rows verified in search_log and feedback_log tables
+Timestamp: 2026-03-26T00:00:00Z
+
+--- Output ---
+log_search returned: 96c8cff8-d5f8-4fbd-85b7-a40717bb4ab2
+search_log row verified: id=96c8cff8-d5f8-4fbd-85b7-a40717bb4ab2, query='test query', session_id='sess-abc'
+log_feedback returned: fece4d60-9bb7-4c3c-8562-d9e67b491c8c
+feedback_log row verified: id=fece4d60-9bb7-4c3c-8562-d9e67b491c8c, signal='retrieved'
+log_search without session_id: session_id is None as expected
+ALL ASSERTIONS PASSED
+
+Verified:
+- log_search returns a valid UUID string (length 36)
+- search_log row contains correct query, session_id
+- log_feedback returns a valid UUID string (length 36)
+- feedback_log row contains correct search_id, entry_id, signal
+- log_search without session_id stores NULL as expected
+- DuckDB FK constraint (search_log.id -> feedback_log.search_id) satisfied
+
+Status: PASS
