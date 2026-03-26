@@ -139,6 +139,7 @@ class Entry:
     tags: list[str] = field(default_factory=list)
     status: EntryStatus = EntryStatus.ACTIVE
     metadata: dict[str, Any] = field(default_factory=dict)
+    accessed_at: datetime | None = None
 
     # ------------------------------------------------------------------ #
     # Serialisation                                                        #
@@ -166,6 +167,7 @@ class Entry:
             "updated_at": self.updated_at.isoformat(),
             "version": self.version,
             "metadata": dict(self.metadata),
+            "accessed_at": self.accessed_at.isoformat() if self.accessed_at is not None else None,
         }
 
     @classmethod
@@ -193,6 +195,9 @@ class Entry:
                 dt = dt.replace(tzinfo=UTC)
             return dt
 
+        accessed_at_raw = data.get("accessed_at")
+        accessed_at = _parse_dt(accessed_at_raw) if accessed_at_raw is not None else None
+
         return cls(
             id=data["id"],
             content=data["content"],
@@ -206,6 +211,7 @@ class Entry:
             updated_at=_parse_dt(data["updated_at"]),
             version=int(data.get("version", 1)),
             metadata=dict(data.get("metadata", {})),
+            accessed_at=accessed_at,
         )
 
 

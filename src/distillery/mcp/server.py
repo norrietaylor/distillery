@@ -742,6 +742,38 @@ def create_server(config: DistilleryConfig | None = None) -> Server:
                     "required": [],
                 },
             ),
+            types.Tool(
+                name="distillery_stale",
+                description=(
+                    "Return entries that have not been accessed recently. "
+                    "An entry is considered stale when its last access time "
+                    "(COALESCE(accessed_at, updated_at)) is older than the configured "
+                    "threshold. Only non-archived entries are included. Results are "
+                    "ordered stalest-first and include a preview of each entry's content."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "days": {
+                            "type": "integer",
+                            "description": (
+                                "Number of days without access after which an entry is "
+                                "considered stale. Defaults to classification.stale_days "
+                                "from config (typically 30)."
+                            ),
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of stale entries to return. Defaults to 20.",
+                        },
+                        "entry_type": {
+                            "type": "string",
+                            "description": "Optional filter to only return entries of a given type.",
+                        },
+                    },
+                    "required": [],
+                },
+            ),
         ]
 
     @server.call_tool()  # type: ignore[untyped-decorator]
@@ -802,6 +834,9 @@ def create_server(config: DistilleryConfig | None = None) -> Server:
 
         if tool_name == "distillery_quality":
             return await _handle_quality(store, arguments)
+
+        if tool_name == "distillery_stale":
+            return await _handle_stale(store, cfg, arguments)
 
         return error_response("UNKNOWN_TOOL", f"Unknown tool: {tool_name!r}")
 
@@ -2420,6 +2455,152 @@ async def _handle_check_conflicts(
             "conflicts": conflicts_serialised,
         }
     )
+
+
+# ---------------------------------------------------------------------------
+# T02.2 tool handler: distillery_stale
+# ---------------------------------------------------------------------------
+
+
+async def _handle_stale(
+    store: Any,
+    config: DistilleryConfig,
+    arguments: dict[str, Any],
+) -> list[types.TextContent]:
+    """Implement the ``distillery_stale`` tool.
+
+    Returns entries that have not been accessed within the configured
+    staleness window.  An entry's last access time is determined by
+    ``COALESCE(accessed_at, updated_at)`` so that entries without an
+    explicit access timestamp fall back to their last modification time.
+
+    Args:
+        store: Initialised :class:`~distillery.store.duckdb.DuckDBStore`.
+        config: The loaded Distillery configuration.
+        arguments: Tool argument dict.  Accepts optional ``days`` (int),
+            ``limit`` (int), and ``entry_type`` (str).
+
+    Returns:
+        MCP content list with a single JSON ``TextContent`` block.
+    """
+    # --- validate days -------------------------------------------------------
+    err_days = validate_type(arguments, "days", int, "integer")
+    if err_days:
+        return error_response("VALIDATION_ERROR", err_days)
+    days_raw = arguments.get("days")
+    days: int = int(days_raw) if days_raw is not None else config.classification.stale_days
+    if days < 1:
+        return error_response("VALIDATION_ERROR", "Field 'days' must be >= 1")
+
+    # --- validate limit -------------------------------------------------------
+    err_limit = validate_type(arguments, "limit", int, "integer")
+    if err_limit:
+        return error_response("VALIDATION_ERROR", err_limit)
+    limit_raw = arguments.get("limit")
+    limit: int = int(limit_raw) if limit_raw is not None else 20
+    if limit < 1:
+        return error_response("VALIDATION_ERROR", "Field 'limit' must be >= 1")
+
+    # --- validate entry_type -------------------------------------------------
+    entry_type_filter: str | None = arguments.get("entry_type")
+    if entry_type_filter is not None and not isinstance(entry_type_filter, str):
+        return error_response("VALIDATION_ERROR", "Field 'entry_type' must be a string")
+
+    try:
+        stale_entries = await asyncio.to_thread(
+            _sync_gather_stale, store, days, limit, entry_type_filter
+        )
+        return success_response(
+            {
+                "days_threshold": days,
+                "entry_type_filter": entry_type_filter,
+                "stale_count": len(stale_entries),
+                "entries": stale_entries,
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error gathering stale entries")
+        return error_response("STALE_ERROR", f"Failed to gather stale entries: {exc}")
+
+
+def _sync_gather_stale(
+    store: Any,
+    days: int,
+    limit: int,
+    entry_type_filter: str | None,
+) -> list[dict[str, Any]]:
+    """Synchronous helper that queries DuckDB for stale entries.
+
+    Runs inside ``asyncio.to_thread`` to avoid blocking the event loop.
+
+    Args:
+        store: Initialised ``DuckDBStore``.
+        days: Number of days since last access for staleness cutoff.
+        limit: Maximum number of results to return.
+        entry_type_filter: Optional entry type to filter by.
+
+    Returns:
+        List of dicts describing stale entries, ordered stalest-first.
+    """
+    conn = store.connection
+
+    params: list[Any] = [days]
+    type_clause = ""
+    if entry_type_filter is not None:
+        type_clause = " AND entry_type = ?"
+        params.append(entry_type_filter)
+    params.append(limit)
+
+    sql = f"""
+        SELECT
+            id,
+            content,
+            entry_type,
+            author,
+            project,
+            COALESCE(accessed_at, updated_at) AS last_accessed
+        FROM entries
+        WHERE status != 'archived'
+          AND COALESCE(accessed_at, updated_at) < NOW() - INTERVAL (CAST(? AS INT)) DAYS
+          {type_clause}
+        ORDER BY last_accessed ASC
+        LIMIT ?
+    """
+
+    rows = conn.execute(sql, params).fetchall()
+
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        entry_id, content, entry_type, author, project, last_accessed = row
+        content_preview = (content or "")[:200]
+        # Calculate days since access
+        if last_accessed is not None:
+            from datetime import datetime, timezone as tz
+
+            if hasattr(last_accessed, "tzinfo") and last_accessed.tzinfo is None:
+                last_accessed_aware = last_accessed.replace(tzinfo=tz.utc)
+            else:
+                last_accessed_aware = last_accessed
+            now = datetime.now(tz.utc)
+            days_since = (now - last_accessed_aware).days
+            last_accessed_iso = last_accessed_aware.isoformat()
+        else:
+            days_since = None
+            last_accessed_iso = None
+
+        result.append(
+            {
+                "id": entry_id,
+                "content_preview": content_preview,
+                "entry_type": entry_type,
+                "author": author,
+                "project": project,
+                "last_accessed": last_accessed_iso,
+                "days_since_access": days_since,
+            }
+        )
+
+    return result
 
 
 # ---------------------------------------------------------------------------

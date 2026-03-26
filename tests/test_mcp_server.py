@@ -670,7 +670,7 @@ class TestCreateServer:
         assert isinstance(server, Server)
 
     async def test_server_registers_all_twelve_tools(self) -> None:
-        """list_tools() must return all 13 tool names."""
+        """list_tools() must return all 15 tool names."""
         import mcp.types as mcp_types
 
         config = DistilleryConfig(
@@ -698,5 +698,7 @@ class TestCreateServer:
             "distillery_check_dedup",
             "distillery_metrics",
             "distillery_check_conflicts",
+            "distillery_quality",
+            "distillery_stale",
         }
         assert expected == tool_names, f"Missing tools: {expected - tool_names}"

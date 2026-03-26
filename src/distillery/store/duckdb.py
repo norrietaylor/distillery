@@ -68,6 +68,10 @@ CREATE TABLE IF NOT EXISTS _meta (
 );
 """
 
+_ADD_ACCESSED_AT_COLUMN = """
+ALTER TABLE entries ADD COLUMN IF NOT EXISTS accessed_at TIMESTAMP;
+"""
+
 _CREATE_SEARCH_LOG_TABLE = """
 CREATE TABLE IF NOT EXISTS search_log (
     id                 VARCHAR PRIMARY KEY,
@@ -239,11 +243,17 @@ class DuckDBStore:
                 f"incompatible embeddings."
             )
 
+    def _add_accessed_at_column(self, conn: duckdb.DuckDBPyConnection) -> None:
+        """Add the ``accessed_at`` column to ``entries`` if it does not exist."""
+        conn.execute(_ADD_ACCESSED_AT_COLUMN)
+        logger.debug("accessed_at column ready on entries table")
+
     def _sync_initialize(self) -> None:
         """Synchronous initialisation: open connection, create schema."""
         conn = self._open_connection()
         self._setup_vss(conn)
         self._create_schema(conn)
+        self._add_accessed_at_column(conn)
         self._create_log_tables(conn)
         self._create_meta_table(conn)
         self._validate_or_record_meta(conn)
@@ -354,6 +364,14 @@ class DuckDBStore:
         row = result.fetchone()
         if row is None:
             return None
+        # Fire-and-forget: update accessed_at, entry still returned on failure.
+        try:
+            conn.execute(
+                "UPDATE entries SET accessed_at = current_timestamp WHERE id = ?",
+                [entry_id],
+            )
+        except Exception:  # pragma: no cover
+            logger.debug("accessed_at update failed for id=%s (ignored)", entry_id)
         return self._row_to_entry(row, col_names)
 
     async def get(self, entry_id: str) -> Entry | None:
@@ -405,9 +423,11 @@ class DuckDBStore:
             set_parts.append("embedding = ?")
             set_params.append(new_embedding)
 
-        # Always increment version and refresh updated_at.
+        # Always increment version and refresh updated_at and accessed_at.
         set_parts.append("version = version + 1")
         set_parts.append("updated_at = ?")
+        set_params.append(now)
+        set_parts.append("accessed_at = ?")
         set_params.append(now)
 
         set_sql = ", ".join(set_parts)
@@ -581,7 +601,7 @@ class DuckDBStore:
     # Column list used by search / find_similar (excludes ``embedding``).
     _ENTRY_COLUMNS = (
         "id, content, entry_type, source, author, project, "
-        "tags, status, metadata, created_at, updated_at, version"
+        "tags, status, metadata, created_at, updated_at, version, accessed_at"
     )
 
     # ------------------------------------------------------------------
@@ -630,6 +650,7 @@ class DuckDBStore:
 
             rows = result.fetchall()
             results: list[SearchResult] = []
+            returned_ids: list[str] = []
             for row in rows:
                 row_dict = dict(zip(col_names, row, strict=True))
                 score = float(row_dict.pop("score"))
@@ -638,6 +659,20 @@ class DuckDBStore:
                     list(row_dict.keys()),
                 )
                 results.append(SearchResult(entry=entry, score=score))
+                returned_ids.append(entry.id)
+
+            # Update accessed_at for all returned entries (fire-and-forget).
+            if returned_ids:
+                try:
+                    placeholders = ", ".join("?" for _ in returned_ids)
+                    conn.execute(
+                        f"UPDATE entries SET accessed_at = current_timestamp "
+                        f"WHERE id IN ({placeholders})",
+                        returned_ids,
+                    )
+                except Exception:  # pragma: no cover
+                    logger.debug("accessed_at bulk update failed (ignored)")
+
             return results
 
         return await asyncio.to_thread(_sync)

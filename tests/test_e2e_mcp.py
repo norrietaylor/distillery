@@ -503,7 +503,7 @@ class TestCallToolDispatcher:
         assert status_data["total_entries"] >= 1
 
     async def test_create_server_registers_all_tools(self) -> None:
-        """create_server() must register all 12 expected tools."""
+        """create_server() must register all 15 expected tools."""
         config = _make_config()
         server = create_server(config)
 
@@ -525,5 +525,7 @@ class TestCallToolDispatcher:
             "distillery_check_dedup",
             "distillery_metrics",
             "distillery_check_conflicts",
+            "distillery_quality",
+            "distillery_stale",
         }
         assert expected == tool_names, f"Missing tools: {expected - tool_names}"
