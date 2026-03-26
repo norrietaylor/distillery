@@ -113,7 +113,8 @@ def _query_status(db_path: str) -> dict[str, Any]:
         raise RuntimeError("duckdb is not installed") from exc
 
     try:
-        conn = duckdb.connect(db_path, read_only=True)
+        read_only = db_path != ":memory:"
+        conn = duckdb.connect(db_path, read_only=read_only)
     except Exception as exc:
         raise RuntimeError(f"Cannot open database at {db_path!r}: {exc}") from exc
 

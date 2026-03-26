@@ -30,10 +30,9 @@ def write_config(tmp_path: Path, db_path: str) -> Path:
         f"""\
         storage:
           backend: duckdb
-          database_path: {db_path}
+          database_path: "{db_path}"
         embedding:
-          provider: jina
-          model: jina-embeddings-v3
+          provider: ""
         """,
     )
 
