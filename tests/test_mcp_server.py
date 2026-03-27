@@ -669,7 +669,7 @@ class TestCreateServer:
         server = create_server(config)
         assert isinstance(server, Server)
 
-    async def test_server_registers_all_twelve_tools(self) -> None:
+    async def test_server_registers_all_fifteen_tools(self) -> None:
         """list_tools() must return all 15 tool names."""
         import mcp.types as mcp_types
 

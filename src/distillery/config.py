@@ -212,6 +212,23 @@ def _parse_float_field(raw: dict[str, Any], key: str, default: float, label: str
         ) from exc
 
 
+def _parse_strict_int(value: Any, label: str) -> int:
+    """Parse *value* as a strict integer.
+
+    Accepts native ``int`` (but not ``bool``) and string representations
+    consisting solely of an optional leading minus sign followed by digits.
+    Everything else raises :class:`ValueError`.
+    """
+    if type(value) is int:  # noqa: E721 – reject bool subclass
+        return value
+    if isinstance(value, str):
+        stripped = value.strip()
+        candidate = stripped.lstrip("-")
+        if candidate.isdigit() and (len(candidate) == len(stripped) or stripped.startswith("-")):
+            return int(stripped)
+    raise ValueError(f"{label} must be an integer, got: {value!r}")
+
+
 def _parse_classification(raw: dict[str, Any]) -> ClassificationConfig:
     threshold = _parse_float_field(
         raw, "confidence_threshold", 0.6, "classification.confidence_threshold"
@@ -235,20 +252,12 @@ def _parse_classification(raw: dict[str, Any]) -> ClassificationConfig:
         ) from exc
 
     feedback_window_raw = raw.get("feedback_window_minutes", 5)
-    try:
-        feedback_window_minutes = int(feedback_window_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"classification.feedback_window_minutes must be an integer, got: {feedback_window_raw!r}"
-        ) from exc
+    feedback_window_minutes = _parse_strict_int(
+        feedback_window_raw, "classification.feedback_window_minutes"
+    )
 
     stale_days_raw = raw.get("stale_days", 30)
-    try:
-        stale_days = int(stale_days_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"classification.stale_days must be an integer, got: {stale_days_raw!r}"
-        ) from exc
+    stale_days = _parse_strict_int(stale_days_raw, "classification.stale_days")
 
     conflict_threshold = _parse_float_field(
         raw, "conflict_threshold", 0.60, "classification.conflict_threshold"

@@ -227,6 +227,14 @@ class TestEntryToDict:
         parsed = datetime.fromisoformat(d["created_at"])
         assert parsed == e.created_at
 
+    def test_accessed_at_roundtrip(self) -> None:
+        accessed = datetime(2025, 6, 15, 12, 0, 0, tzinfo=UTC)
+        e = make_entry(accessed_at=accessed)
+        d = e.to_dict()
+        assert d["accessed_at"] == accessed.isoformat()
+        restored = Entry.from_dict(d)
+        assert restored.accessed_at == accessed
+
     def test_to_dict_tags_is_list_copy(self) -> None:
         e = make_entry(tags=["a", "b"])
         d = e.to_dict()

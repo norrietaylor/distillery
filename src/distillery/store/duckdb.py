@@ -19,6 +19,7 @@ import asyncio
 import json
 import logging
 import os
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -773,8 +774,6 @@ class DuckDBStore:
         session_id: str | None,
     ) -> str:
         """Synchronous implementation of log_search(); called via asyncio.to_thread."""
-        import uuid
-
         search_id = str(uuid.uuid4())
         conn = self.connection
         sql = (
@@ -813,8 +812,6 @@ class DuckDBStore:
         signal: str,
     ) -> str:
         """Synchronous implementation of log_feedback(); called via asyncio.to_thread."""
-        import uuid
-
         feedback_id = str(uuid.uuid4())
         conn = self.connection
         sql = (

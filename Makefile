@@ -6,7 +6,7 @@ PYTEST ?= $(shell command -v pytest 2>/dev/null || echo .venv/bin/pytest)
 RUFF   ?= $(shell command -v ruff 2>/dev/null || echo .venv/bin/ruff)
 MYPY   ?= $(shell command -v mypy 2>/dev/null || echo .venv/bin/mypy)
 
-.PHONY: install test lint typecheck check ci clean
+.PHONY: install test test-unit test-integration test-cov lint format typecheck check ci clean
 
 ## Install in editable mode with dev dependencies
 install:

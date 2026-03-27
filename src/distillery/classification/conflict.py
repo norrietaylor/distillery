@@ -251,7 +251,8 @@ class ConflictChecker:
             is_conflict, reasoning = llm_responses[entry_id]
             if not is_conflict:
                 continue
-            preview = result.entry.content.splitlines()[0][:120]
+            lines = result.entry.content.splitlines()
+            preview = lines[0][:120] if lines else result.entry.content[:120]
             conflicts.append(
                 ConflictEntry(
                     entry_id=entry_id,
@@ -270,11 +271,12 @@ class ConflictChecker:
     def _parse(self, llm_response: str) -> tuple[bool, str]:
         """Attempt to parse *llm_response* as JSON and extract fields."""
         import json
+        import re
 
         text = llm_response.strip()
-        if text.startswith("```"):
-            lines = text.splitlines()
-            text = "\n".join(lines[1:-1]).strip()
+        fence_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
+        if fence_match:
+            text = fence_match.group(1).strip()
 
         data: dict[str, Any] = json.loads(text)
 

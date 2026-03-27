@@ -32,7 +32,6 @@ from tests.conftest import MockEmbeddingProvider, make_entry, parse_mcp_response
 
 pytestmark = pytest.mark.integration
 
-_UTC = UTC
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -127,8 +126,6 @@ class TestSearchLogging:
     async def test_search_log_row_created(
         self,
         store: DuckDBStore,
-        config: DistilleryConfig,
-        embedding_provider: MockEmbeddingProvider,
     ) -> None:
         """A row must appear in search_log after distillery_search succeeds."""
         entry = make_entry(content="searchable knowledge")
@@ -146,8 +143,6 @@ class TestSearchLogging:
     async def test_search_log_records_result_ids(
         self,
         store: DuckDBStore,
-        config: DistilleryConfig,
-        embedding_provider: MockEmbeddingProvider,
     ) -> None:
         """search_log row must store the entry IDs returned by the search."""
         entry = make_entry(content="unique knowledge fragment")
@@ -247,7 +242,7 @@ class TestImplicitFeedbackWithinWindow:
             {
                 "search_id": search_id,
                 "entry_ids": {entry_id},
-                "timestamp": datetime.now(_UTC),  # within window
+                "timestamp": datetime.now(UTC),  # within window
             }
         ]
 
@@ -282,7 +277,7 @@ class TestImplicitFeedbackWithinWindow:
             {
                 "search_id": search_id,
                 "entry_ids": {entry_id},
-                "timestamp": datetime.now(_UTC),
+                "timestamp": datetime.now(UTC),
             }
         ]
         await _handle_get(store, {"entry_id": entry_id}, recent_searches, config)
@@ -339,7 +334,7 @@ class TestImplicitFeedbackWindowExpiry:
         )
 
         # Simulate an expired search record: timestamp 10 minutes ago with 5 min window.
-        expired_timestamp = datetime.now(_UTC) - timedelta(minutes=10)
+        expired_timestamp = datetime.now(UTC) - timedelta(minutes=10)
         recent_searches: list[dict] = [
             {
                 "search_id": search_id,
@@ -372,7 +367,7 @@ class TestImplicitFeedbackWindowExpiry:
             [search_id, [entry_id]],
         )
 
-        expired_timestamp = datetime.now(_UTC) - timedelta(minutes=10)
+        expired_timestamp = datetime.now(UTC) - timedelta(minutes=10)
         recent_searches: list[dict] = [
             {
                 "search_id": search_id,
@@ -407,7 +402,7 @@ class TestImplicitFeedbackWindowExpiry:
             {
                 "search_id": search_id,
                 "entry_ids": {id_a},
-                "timestamp": datetime.now(_UTC),
+                "timestamp": datetime.now(UTC),
             }
         ]
 

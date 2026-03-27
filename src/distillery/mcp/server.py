@@ -1069,21 +1069,22 @@ async def _handle_store(
             limit=5,
         )
         if conflict_similar:
-            conflict_candidates = []
+            conflicts = []
             for result in conflict_similar:
                 if result.entry.id == entry_id:
                     continue
-                preview = result.entry.content.splitlines()[0][:120]
+                lines = result.entry.content.splitlines()
+                preview = lines[0][:120] if lines else result.entry.content[:120]
                 prompt = conflict_checker.build_prompt(entry.content, result.entry.content)
-                conflict_candidates.append(
+                conflicts.append(
                     {
                         "entry_id": result.entry.id,
                         "content_preview": preview,
                         "similarity_score": round(result.score, 4),
-                        "conflict_prompt": prompt,
+                        "conflict_reasoning": prompt,
                     }
                 )
-            if conflict_candidates:
+            if conflicts:
                 response_data: dict[str, Any] = {"entry_id": entry_id}
                 if warnings:
                     response_data["warnings"] = warnings
@@ -1092,10 +1093,10 @@ async def _handle_store(
                         f"{'entry' if len(warnings) == 1 else 'entries'}. "
                         "Review before storing to avoid duplicates."
                     )
-                response_data["conflict_candidates"] = conflict_candidates
+                response_data["conflicts"] = conflicts
                 response_data["conflict_message"] = (
-                    f"Found {len(conflict_candidates)} potential conflict "
-                    f"{'candidate' if len(conflict_candidates) == 1 else 'candidates'}. "
+                    f"Found {len(conflicts)} potential conflict "
+                    f"{'candidate' if len(conflicts) == 1 else 'candidates'}. "
                     "Use distillery_check_conflicts with LLM responses to confirm conflicts."
                 )
                 return success_response(response_data)
@@ -1174,17 +1175,20 @@ async def _handle_get(
 
         # Prune expired entries and collect matching searches in a single pass.
         alive: list[dict[str, Any]] = []
+        logged_pairs: set[tuple[str, str]] = set()
         for record in recent_searches:
             age_seconds = (now - record["timestamp"]).total_seconds()
             if age_seconds <= cutoff_seconds:
                 alive.append(record)
-                if entry_id in record["entry_ids"]:
+                pair = (record["search_id"], entry_id)
+                if entry_id in record["entry_ids"] and pair not in logged_pairs:
                     try:
                         await store.log_feedback(
                             search_id=record["search_id"],
                             entry_id=entry_id,
                             signal="positive",
                         )
+                        logged_pairs.add(pair)
                     except Exception:  # noqa: BLE001
                         logger.exception(
                             "Failed to log implicit feedback for entry_id=%s search_id=%s",
@@ -1390,6 +1394,10 @@ async def _handle_search(
                     "timestamp": datetime.now(UTC),
                 }
             )
+            # Cap the in-memory list to prevent unbounded growth.
+            recent_searches_max = 1000
+            if len(recent_searches) > recent_searches_max:
+                recent_searches[:] = recent_searches[-recent_searches_max:]
         except Exception:  # noqa: BLE001
             logger.exception("Failed to log search event; continuing without feedback tracking")
 
@@ -1981,7 +1989,8 @@ def _sync_gather_metrics(
     def _count_where(column: str, days: int) -> int:
         row = conn.execute(
             f"SELECT COUNT(*) FROM entries "
-            f"WHERE {column} > CURRENT_TIMESTAMP - INTERVAL '{days} days'"
+            f"WHERE {column} > CURRENT_TIMESTAMP - (? * INTERVAL '1 day')",
+            [days],
         ).fetchone()
         return row[0] if row else 0
 

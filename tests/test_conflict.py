@@ -290,15 +290,15 @@ class TestConflictCheckerCheck:
 
 
 class TestMCPStoreConflictDetection:
-    """distillery_store returns conflict_candidates when similar entries exist."""
+    """distillery_store returns conflicts when similar entries exist."""
 
-    async def test_store_returns_conflict_candidates_when_similar(
+    async def test_store_returns_conflicts_when_similar(
         self,
         store: DuckDBStore,
         embedding_provider: ControlledEmbeddingProvider,
     ) -> None:
         """When an existing entry has cosine similarity above conflict_threshold,
-        distillery_store returns conflict_candidates in the response."""
+        distillery_store returns conflicts in the response."""
         existing_text = "Cats are nocturnal animals that hunt at night"
         new_text = "Cats are diurnal animals that are active during the day"
 
@@ -322,21 +322,21 @@ class TestMCPStoreConflictDetection:
         data = parse_mcp_response(response)
 
         assert "entry_id" in data
-        assert "conflict_candidates" in data
-        assert len(data["conflict_candidates"]) >= 1
-        # Each candidate must have required fields
-        candidate = data["conflict_candidates"][0]
-        assert "entry_id" in candidate
-        assert "content_preview" in candidate
-        assert "similarity_score" in candidate
-        assert "conflict_prompt" in candidate
+        assert "conflicts" in data
+        assert len(data["conflicts"]) >= 1
+        # Each conflict entry must have required fields
+        conflict = data["conflicts"][0]
+        assert "entry_id" in conflict
+        assert "content_preview" in conflict
+        assert "similarity_score" in conflict
+        assert "conflict_reasoning" in conflict
 
-    async def test_store_no_conflict_candidates_when_no_similar(
+    async def test_store_no_conflicts_when_no_similar(
         self,
         store: DuckDBStore,
         embedding_provider: ControlledEmbeddingProvider,
     ) -> None:
-        """When no similar entries exist, distillery_store response has no conflict_candidates."""
+        """When no similar entries exist, distillery_store response has no conflicts."""
         new_text = "A completely new and unique piece of knowledge"
         embedding_provider.register(new_text, _UNIT_A)
 
@@ -353,8 +353,8 @@ class TestMCPStoreConflictDetection:
         data = parse_mcp_response(response)
 
         assert "entry_id" in data
-        # No conflict_candidates key - or empty list - when nothing is similar
-        assert data.get("conflict_candidates", []) == []
+        # No conflicts key - or empty list - when nothing is similar
+        assert data.get("conflicts", []) == []
 
     async def test_store_succeeds_even_when_conflict_check_raises(
         self,
