@@ -1,0 +1,13 @@
+Type: cli
+Command: python3 -c "from distillery.mcp.server import create_server; ..."
+Expected: 5 core CRUD tools registered (distillery_status, distillery_store, distillery_get, distillery_update, distillery_list)
+Timestamp: 2026-03-27T00:00:00Z
+Status: PASS
+---
+Registered tools: 5
+ - distillery_get
+ - distillery_list
+ - distillery_status
+ - distillery_store
+ - distillery_update
+PASS: All 5 core CRUD tools registered

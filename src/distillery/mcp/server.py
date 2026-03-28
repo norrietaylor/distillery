@@ -256,6 +256,172 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
 
     server = FastMCP("distillery", lifespan=lifespan)
 
+    # -----------------------------------------------------------------------
+    # T02.1 tool wrappers: distillery_status, distillery_store,
+    # distillery_get, distillery_update, distillery_list
+    # -----------------------------------------------------------------------
+
+    @server.tool
+    async def distillery_status(ctx: Context) -> list[types.TextContent]:
+        """Return database statistics for the Distillery knowledge store.
+
+        Returns aggregate counts (total entries, by type, by status), database
+        file size, and the active embedding model name and dimension count.
+        """
+        lc = ctx.lifespan_context
+        return await _handle_status(
+            store=lc["store"],
+            embedding_provider=lc["embedding_provider"],
+            config=lc["config"],
+        )
+
+    @server.tool
+    async def distillery_store(  # noqa: PLR0913
+        ctx: Context,
+        content: str,
+        entry_type: str,
+        author: str,
+        project: str | None = None,
+        tags: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        dedup_threshold: float = _DEFAULT_DEDUP_THRESHOLD,
+        dedup_limit: int = _DEFAULT_DEDUP_LIMIT,
+    ) -> list[types.TextContent]:
+        """Store a new knowledge entry in the Distillery store.
+
+        Creates a new entry from the supplied content and metadata, persists it,
+        then runs a deduplication check against similar existing entries.  Returns
+        the new entry ID plus any near-duplicate warnings and conflict candidates.
+
+        entry_type must be one of: session, bookmark, minutes, meeting,
+        reference, idea, inbox.
+        """
+        lc = ctx.lifespan_context
+        arguments: dict[str, Any] = {
+            "content": content,
+            "entry_type": entry_type,
+            "author": author,
+        }
+        if project is not None:
+            arguments["project"] = project
+        if tags is not None:
+            arguments["tags"] = tags
+        if metadata is not None:
+            arguments["metadata"] = metadata
+        arguments["dedup_threshold"] = dedup_threshold
+        arguments["dedup_limit"] = dedup_limit
+        return await _handle_store(
+            store=lc["store"],
+            arguments=arguments,
+            cfg=lc["config"],
+        )
+
+    @server.tool
+    async def distillery_get(
+        ctx: Context,
+        entry_id: str,
+    ) -> list[types.TextContent]:
+        """Retrieve a single knowledge entry by its ID.
+
+        Looks up the entry with the given ID and returns its full content and
+        metadata.  Also records an implicit positive feedback signal if this
+        retrieval follows a recent search that returned this entry.
+
+        Returns a NOT_FOUND error if no entry exists with the given ID.
+        """
+        lc = ctx.lifespan_context
+        return await _handle_get(
+            store=lc["store"],
+            arguments={"entry_id": entry_id},
+            recent_searches=lc["recent_searches"],
+            config=lc["config"],
+        )
+
+    @server.tool
+    async def distillery_update(  # noqa: PLR0913
+        ctx: Context,
+        entry_id: str,
+        content: str | None = None,
+        entry_type: str | None = None,
+        author: str | None = None,
+        project: str | None = None,
+        tags: list[str] | None = None,
+        status: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[types.TextContent]:
+        """Update one or more fields on an existing knowledge entry.
+
+        At least one of content, entry_type, author, project, tags, status, or
+        metadata must be supplied.  Immutable fields (id, created_at, source)
+        are rejected.
+
+        status must be one of: active, pending_review, archived.
+        entry_type must be one of: session, bookmark, minutes, meeting,
+        reference, idea, inbox.
+        """
+        lc = ctx.lifespan_context
+        arguments: dict[str, Any] = {"entry_id": entry_id}
+        if content is not None:
+            arguments["content"] = content
+        if entry_type is not None:
+            arguments["entry_type"] = entry_type
+        if author is not None:
+            arguments["author"] = author
+        if project is not None:
+            arguments["project"] = project
+        if tags is not None:
+            arguments["tags"] = tags
+        if status is not None:
+            arguments["status"] = status
+        if metadata is not None:
+            arguments["metadata"] = metadata
+        return await _handle_update(
+            store=lc["store"],
+            arguments=arguments,
+        )
+
+    @server.tool
+    async def distillery_list(  # noqa: PLR0913
+        ctx: Context,
+        entry_type: str | None = None,
+        author: str | None = None,
+        project: str | None = None,
+        tags: list[str] | None = None,
+        status: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[types.TextContent]:
+        """List knowledge entries with optional filters and pagination.
+
+        Returns entries ordered by creation time (newest first) without
+        semantic ranking.  Use distillery_search for similarity-ranked results.
+
+        All filter parameters are optional.  date_from and date_to accept
+        ISO 8601 date strings (e.g. "2024-01-15").
+        """
+        lc = ctx.lifespan_context
+        arguments: dict[str, Any] = {"limit": limit, "offset": offset}
+        if entry_type is not None:
+            arguments["entry_type"] = entry_type
+        if author is not None:
+            arguments["author"] = author
+        if project is not None:
+            arguments["project"] = project
+        if tags is not None:
+            arguments["tags"] = tags
+        if status is not None:
+            arguments["status"] = status
+        if date_from is not None:
+            arguments["date_from"] = date_from
+        if date_to is not None:
+            arguments["date_to"] = date_to
+        return await _handle_list(
+            store=lc["store"],
+            arguments=arguments,
+        )
+
     return server
 
 

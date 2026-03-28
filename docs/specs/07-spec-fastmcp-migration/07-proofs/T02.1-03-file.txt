@@ -1,0 +1,11 @@
+Type: file
+Command: grep -n "@server.tool" src/distillery/mcp/server.py
+Expected: 5 @server.tool decorator occurrences (one per core CRUD tool)
+Timestamp: 2026-03-27T00:00:00Z
+Status: PASS
+---
+264:    @server.tool
+278:    @server.tool
+319:    @server.tool
+340:    @server.tool
+383:    @server.tool
