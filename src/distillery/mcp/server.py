@@ -256,7 +256,7 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
                 db_path = os.path.expanduser(raw_db_path)
 
             # Apply MotherDuck token from the configured env var name if set.
-            if config.storage.motherduck_token_env:
+            if db_path.startswith("md:"):
                 token = os.environ.get(config.storage.motherduck_token_env)
                 if token:
                     os.environ["MOTHERDUCK_TOKEN"] = token
