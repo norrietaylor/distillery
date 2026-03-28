@@ -1,0 +1,66 @@
+# Eval scenarios for the /tune skill.
+
+- name: tune-show-thresholds
+  skill: tune
+  description: "Claude should display current feed relevance thresholds without making changes"
+  prompt: "/tune"
+  seed_entries: []
+  expected_tools:
+    - distillery_status
+  response_must_contain:
+    - Alert
+    - Digest
+  max_latency_ms: 30000
+  max_total_tokens: 5000
+
+- name: tune-set-alert-threshold
+  skill: tune
+  description: "Claude should display a preview and ask for confirmation when --alert is provided"
+  prompt: "/tune --alert 0.90"
+  seed_entries: []
+  expected_tools:
+    - distillery_status
+  response_must_contain:
+    - "0.90"
+  max_latency_ms: 30000
+  max_total_tokens: 5000
+
+- name: tune-set-both-thresholds
+  skill: tune
+  description: "Claude should validate and preview changes when both --alert and --digest are provided"
+  prompt: "/tune --alert 0.88 --digest 0.55"
+  seed_entries: []
+  expected_tools:
+    - distillery_status
+  response_must_contain:
+    - "0.88"
+    - "0.55"
+  max_latency_ms: 30000
+  max_total_tokens: 5000
+
+- name: tune-reset-thresholds
+  skill: tune
+  description: "Claude should reset thresholds to defaults (alert=0.85, digest=0.60) when --reset is provided"
+  prompt: "/tune --reset"
+  seed_entries: []
+  expected_tools:
+    - distillery_status
+  response_must_contain:
+    - "0.85"
+    - "0.60"
+  max_latency_ms: 30000
+  max_total_tokens: 5000
+
+- name: tune-invalid-threshold-order
+  skill: tune
+  description: "Claude should reject invalid threshold where digest >= alert"
+  prompt: "/tune --alert 0.50 --digest 0.80"
+  seed_entries: []
+  expected_tools:
+    - distillery_status
+  response_must_contain:
+    - alert
+  response_must_not_contain:
+    - distillery.yaml
+  max_latency_ms: 30000
+  max_total_tokens: 5000

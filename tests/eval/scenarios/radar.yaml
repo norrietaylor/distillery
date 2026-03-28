@@ -1,0 +1,115 @@
+# Eval scenarios for the /radar skill.
+
+- name: radar-digest-with-entries
+  skill: radar
+  description: "Claude should retrieve recent feed entries and synthesize a digest"
+  prompt: "/radar"
+  seed_entries:
+    - content: "New release: Python 3.13 ships with experimental free-threaded mode (PEP 703) disabled by default. Benchmark shows 10% throughput improvement on IO-heavy workloads."
+      entry_type: feed
+      author: eval-seed
+      tags: [python, release, feed]
+      project: distillery
+    - content: "OpenAI releases GPT-4o mini with 8x lower cost than GPT-4o. Context window: 128k tokens. Strong performance on coding benchmarks."
+      entry_type: feed
+      author: eval-seed
+      tags: [llm, openai, release, feed]
+      project: distillery
+    - content: "Rust 1.78 stabilises the #[diagnostic::on_unimplemented] attribute, improving error messages for trait bounds."
+      entry_type: feed
+      author: eval-seed
+      tags: [rust, release, feed]
+      project: distillery
+  expected_tools:
+    - distillery_status
+    - distillery_list
+  response_must_contain:
+    - Digest
+  min_entries_retrieved: 1
+  max_latency_ms: 60000
+  max_total_tokens: 10000
+
+- name: radar-no-feed-entries
+  skill: radar
+  description: "Claude should report no feed entries and suggest polling when the store has no feed items"
+  prompt: "/radar"
+  seed_entries: []
+  expected_tools:
+    - distillery_status
+    - distillery_list
+  response_must_contain:
+    - No feed entries
+  max_latency_ms: 60000
+  max_total_tokens: 8000
+
+- name: radar-suggest-flag
+  skill: radar
+  description: "With --suggest flag, Claude should call distillery_suggest_sources and include suggestions section"
+  prompt: "/radar --suggest"
+  seed_entries:
+    - content: "FastAPI 0.111 released. New dependency injection improvements and better OpenAPI schema generation."
+      entry_type: feed
+      author: eval-seed
+      tags: [python, fastapi, release, feed]
+    - content: "Anthropic publishes Claude 3.5 Sonnet evaluation results. Improved coding and reasoning over Claude 3 Sonnet."
+      entry_type: feed
+      author: eval-seed
+      tags: [llm, anthropic, release, feed]
+    - content: "DuckDB 0.10 ships with Arrow IPC streaming and improved ASOF join performance."
+      entry_type: feed
+      author: eval-seed
+      tags: [duckdb, release, feed]
+  expected_tools:
+    - distillery_status
+    - distillery_list
+    - distillery_suggest_sources
+  max_latency_ms: 60000
+  max_total_tokens: 10000
+
+- name: radar-no-store-flag
+  skill: radar
+  description: "With --no-store flag, Claude should display digest but not call distillery_store"
+  prompt: "/radar --no-store"
+  seed_entries:
+    - content: "TypeScript 5.5 beta adds inferred type predicates. Array.filter() now correctly narrows types."
+      entry_type: feed
+      author: eval-seed
+      tags: [typescript, release, feed]
+    - content: "Bun 1.1 lands with Windows support and improved Node.js compatibility."
+      entry_type: feed
+      author: eval-seed
+      tags: [javascript, bun, release, feed]
+    - content: "Go 1.22 ships with improved loop variable semantics (each iteration gets its own variable)."
+      entry_type: feed
+      author: eval-seed
+      tags: [go, release, feed]
+  expected_tools:
+    - distillery_status
+    - distillery_list
+  response_must_not_contain:
+    - "Digest stored:"
+  max_latency_ms: 60000
+  max_total_tokens: 10000
+
+- name: radar-days-filter
+  skill: radar
+  description: "Claude should pass date_from when --days flag is specified"
+  prompt: "/radar --days 3"
+  seed_entries:
+    - content: "Kubernetes 1.30 released: new features include improved pod scheduling and sidecar container support."
+      entry_type: feed
+      author: eval-seed
+      tags: [kubernetes, release, feed]
+    - content: "GitHub Copilot now supports Claude 3.5 Sonnet as an alternative model."
+      entry_type: feed
+      author: eval-seed
+      tags: [github, copilot, llm, feed]
+    - content: "Terraform 1.8 adds provider-defined functions for custom validation logic."
+      entry_type: feed
+      author: eval-seed
+      tags: [terraform, release, feed]
+  expected_tools:
+    - distillery_status
+    - distillery_list
+  max_latency_ms: 60000
+  max_total_tokens: 10000
