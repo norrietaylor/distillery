@@ -239,30 +239,12 @@ distillery-mcp --transport http --host 127.0.0.1 --port 8000
 Warning: This mode allows unauthenticated access. Binding to `127.0.0.1` ensures
 the server is only reachable from localhost. Use only for local development.
 
-### Production with MotherDuck
+### Production with S3 storage (recommended for hosted deployments)
 
-```yaml
-server:
-  auth:
-    provider: github
-    client_id_env: GITHUB_CLIENT_ID
-    client_secret_env: GITHUB_CLIENT_SECRET
-
-storage:
-  backend: motherduck
-  database_path: md:distillery
-```
-
-Set environment variables:
-```bash
-export GITHUB_CLIENT_ID="github_oauth_client_id"
-export GITHUB_CLIENT_SECRET="github_oauth_client_secret"
-export DISTILLERY_BASE_URL="https://distillery.myteam.com"
-export MOTHERDUCK_TOKEN="your_motherduck_token"
-export JINA_API_KEY="your_jina_api_key"
-```
-
-### Production with S3 storage
+S3-backed DuckDB is the recommended storage backend for hosted deployments (FastMCP Cloud,
+containers, PaaS). It uses standard DuckDB with the `httpfs` extension, so the VSS extension
+and HNSW vector indexes work normally. The database file persists on S3 across container
+restarts and cold starts.
 
 ```yaml
 server:
@@ -277,7 +259,49 @@ storage:
   s3_region: us-east-1
 ```
 
-S3 credentials are resolved from AWS environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`) or IAM roles.
+Set environment variables:
+```bash
+export GITHUB_CLIENT_ID="github_oauth_client_id"
+export GITHUB_CLIENT_SECRET="github_oauth_client_secret"
+export DISTILLERY_BASE_URL="https://distillery.myteam.com"
+export AWS_ACCESS_KEY_ID="your_aws_access_key"
+export AWS_SECRET_ACCESS_KEY="your_aws_secret_key"
+export JINA_API_KEY="your_jina_api_key"
+```
+
+S3 credentials can also be resolved from IAM roles when running on AWS infrastructure
+(no env vars needed).
+
+GCS is also supported via the S3-compatible API:
+
+```yaml
+storage:
+  backend: duckdb
+  database_path: gs://my-bucket/distillery/distillery.db
+  s3_endpoint: https://storage.googleapis.com
+```
+
+GCS authentication uses HMAC keys (`GCS_ACCESS_KEY_ID` + `GCS_SECRET`).
+
+### MotherDuck (not recommended for hosted deployments)
+
+> **Known limitation:** MotherDuck does not support the DuckDB VSS extension. HNSW vector
+> index creation will fail with `Unknown index type: HNSW`. This means semantic search
+> (which relies on vector similarity) will not work on MotherDuck. Use S3-backed DuckDB
+> instead for hosted deployments that require search.
+
+MotherDuck can still be used if you do not need vector search (e.g., for simple CRUD
+operations with `distillery_store`, `distillery_get`, `distillery_list`):
+
+```yaml
+storage:
+  backend: motherduck
+  database_path: md:distillery
+```
+
+```bash
+export MOTHERDUCK_TOKEN="your_motherduck_token"
+```
 
 ## Scaling and High Availability
 
@@ -285,11 +309,11 @@ S3 credentials are resolved from AWS environment variables (`AWS_ACCESS_KEY_ID`,
 
 - Distillery HTTP server runs as a single-worker process (stateless)
 - Suitable for teams up to ~100 active users per instance
-- All storage operations delegate to the backend (MotherDuck or S3), which scales independently
+- All storage operations delegate to the backend (S3 or MotherDuck), which scales independently
 
 ### Multi-instance deployment (future)
 
-For larger teams, deploy multiple Distillery instances behind a load balancer, all pointing to the same MotherDuck or S3 backend. This is supported architecturally but requires operational setup (reverse proxy, SSL termination).
+For larger teams, deploy multiple Distillery instances behind a load balancer, all pointing to the same S3 backend. This is supported architecturally but requires operational setup (reverse proxy, SSL termination).
 
 ### Load balancer configuration
 
@@ -304,7 +328,7 @@ For larger teams, deploy multiple Distillery instances behind a load balancer, a
       Distillery  Distillery  Distillery
       (instance)  (instance)  (instance)
            |        |         |
-          \_________MotherDuck DB_________/
+          \_________ S3 DuckDB ________/
 ```
 
 ## Monitoring and Troubleshooting
