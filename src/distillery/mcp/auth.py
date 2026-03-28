@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+from urllib.parse import urlparse
 
 from fastmcp.server.auth.providers.github import GitHubProvider
 
@@ -34,8 +35,8 @@ def build_github_auth(config: DistilleryConfig) -> GitHubProvider:
             variable is missing or empty.
     """
     auth = config.server.auth
-    client_id = os.environ.get(auth.client_id_env, "")
-    client_secret = os.environ.get(auth.client_secret_env, "")
+    client_id = os.environ.get(auth.client_id_env, "").strip()
+    client_secret = os.environ.get(auth.client_secret_env, "").strip()
 
     if not client_id:
         raise ValueError(
@@ -49,12 +50,18 @@ def build_github_auth(config: DistilleryConfig) -> GitHubProvider:
             "Set the environment variable before starting the server."
         )
 
-    base_url = os.environ.get("DISTILLERY_BASE_URL", "")
+    base_url = os.environ.get("DISTILLERY_BASE_URL", "").strip()
     if not base_url:
         raise ValueError(
             "DISTILLERY_BASE_URL env var is required when server.auth.provider is 'github'. "
             "Set it to the publicly accessible URL of the server "
             "(e.g. 'https://distillery.example.com')."
+        )
+    parsed = urlparse(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError(
+            f"DISTILLERY_BASE_URL must be a valid absolute http(s) URL, got: {base_url!r}. "
+            "Example: 'https://distillery.example.com'."
         )
 
     # Log that auth is being configured, but NEVER log secret values.

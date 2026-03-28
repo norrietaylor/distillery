@@ -107,9 +107,13 @@ def main(argv: list[str] | None = None) -> int:
         config = load_config()
 
         if args.transport == "http":
-            host = args.host or os.environ.get("DISTILLERY_HOST", "0.0.0.0")
+            host = (
+                args.host
+                if args.host is not None
+                else os.environ.get("DISTILLERY_HOST", "0.0.0.0")
+            )
             port_env = os.environ.get("DISTILLERY_PORT")
-            port = args.port or (int(port_env) if port_env else 8000)
+            port = args.port if args.port is not None else (int(port_env) if port_env else 8000)
 
             auth = None
             if config.server.auth.provider == "github":

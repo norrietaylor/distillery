@@ -214,7 +214,9 @@ If you don't see all fields, check that environment variables and `distillery.ya
 # Check that the server is responding
 curl -I https://distillery.myteam.com/mcp
 
-# Expected: HTTP 200 or 405 (expected for MCP)
+# Expected: HTTP 200, 401, or 405
+# (401 is expected on auth-enabled deployments before login;
+#  405 is normal for MCP endpoints that only accept POST)
 ```
 
 ### Test from a client machine
@@ -320,7 +322,7 @@ For larger teams, deploy multiple Distillery instances behind a load balancer, a
 curl -I https://distillery.myteam.com/mcp
 ```
 
-Expected: HTTP 200 or 405
+Expected: HTTP 200, 401, or 405 (401 is normal on auth-enabled deployments)
 
 ### Check authentication
 

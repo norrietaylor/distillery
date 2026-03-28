@@ -681,3 +681,45 @@ class TestServerAuthInvalidProvider:
         p = write_yaml(tmp_path, yaml_content)
         with pytest.raises(ValueError, match="server.auth.provider"):
             load_config(str(p))
+
+
+class TestServerMalformedValues:
+    """Malformed server/auth values must raise, not silently coerce to defaults."""
+
+    def test_server_as_list_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        yaml_content = """\
+            server: []
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="server must be a YAML mapping"):
+            load_config(str(p))
+
+    def test_server_auth_as_list_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        yaml_content = """\
+            server:
+              auth: []
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="server.auth must be a YAML mapping"):
+            load_config(str(p))
+
+    def test_server_auth_as_string_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        yaml_content = """\
+            server:
+              auth: "github"
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="server.auth must be a YAML mapping"):
+            load_config(str(p))

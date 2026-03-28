@@ -91,7 +91,7 @@ The codebase is architecturally ready: the lifespan context manager (`server.py:
 - The `GitHubProvider` constructor shall receive:
   - `client_id`: value from the env var
   - `client_secret`: value from the env var
-  - `base_url`: constructed from host/port or a `DISTILLERY_BASE_URL` env var (required in HTTP+auth mode)
+  - `base_url`: from the `DISTILLERY_BASE_URL` env var (required when `server.auth.provider` is `github`)
 
 **Proof Artifacts:**
 
@@ -217,5 +217,7 @@ The following items are explicitly deferred to subsequent specs and should be ex
 
 ## Open Questions
 
-1. **FastMCP version availability** — Is `fastmcp>=2.12.0` released on PyPI with `GitHubProvider`? If not, what is the minimum version that includes it? (To be resolved during task planning)
-2. **`base_url` for local development** — When running `--transport http` locally without a public URL, should `base_url` default to `http://localhost:{port}` or require explicit `DISTILLERY_BASE_URL`? (Recommend: default to localhost, require env var only when `server.auth.provider != "none"`)
+No open questions remain. All were resolved during implementation:
+
+1. **FastMCP version** — Resolved: fastmcp 3.1.1 is available on PyPI with full `GitHubProvider` support. Dependency set to `>=2.12.0`.
+2. **`base_url` contract** — Resolved: `DISTILLERY_BASE_URL` is required when `server.auth.provider` is `github`. Not needed for `provider: none` (local testing). No host/port derivation — explicit URL required for OAuth callback correctness.

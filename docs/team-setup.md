@@ -116,7 +116,8 @@ This is normal if the knowledge base is empty. The connection is still working. 
    ```bash
    curl -I https://distillery.myteam.com/mcp
    ```
-   If successful, you'll see `HTTP 200` or `HTTP 405` (expected, as it's an MCP endpoint)
+   If successful, you'll see `HTTP 200`, `HTTP 401`, or `HTTP 405`
+   (`401` is expected on auth-enabled deployments before you complete login)
 
 3. **Restart Claude Code** — After updating `settings.json`, restart Claude Code or reload MCP servers:
    - In Claude Code, look for "Reload MCP Servers" option in the settings

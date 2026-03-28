@@ -193,7 +193,7 @@ class TestStatelessHttpSingleton:
                         "params": {"name": "distillery_status", "arguments": {}},
                     },
                 )
-                # Second request: call distillery_list to confirm store is shared.
+                # Second request: call distillery_status again to confirm store is shared.
                 r2 = await client.post(
                     base_url,
                     headers=MCP_HEADERS,

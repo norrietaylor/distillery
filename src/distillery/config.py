@@ -417,7 +417,9 @@ def _parse_server(raw: dict[str, Any]) -> ServerConfig:
     if not isinstance(raw, dict):
         raise ValueError(f"server must be a YAML mapping, got: {type(raw).__name__}")
 
-    auth_raw = raw.get("auth", {}) or {}
+    auth_raw = raw.get("auth", {})
+    if auth_raw is None:
+        auth_raw = {}
     if not isinstance(auth_raw, dict):
         raise ValueError(f"server.auth must be a YAML mapping, got: {type(auth_raw).__name__}")
 
@@ -605,7 +607,9 @@ def load_config(config_path: str | None = None) -> DistilleryConfig:
     team_raw = raw.get("team", {}) or {}
     classification_raw = raw.get("classification", {}) or {}
     tags_raw = raw.get("tags", {}) or {}
-    server_raw = raw.get("server", {}) or {}
+    server_raw = raw.get("server", {})
+    if server_raw is None:
+        server_raw = {}
 
     config = DistilleryConfig(
         storage=_parse_storage(storage_raw),
