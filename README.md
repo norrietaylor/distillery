@@ -18,6 +18,7 @@
   <a href="#skills">Skills</a> &middot;
   <a href="#quick-start">Quick Start</a> &middot;
   <a href="#architecture">Architecture</a> &middot;
+  <a href="#team-access">Team Access</a> &middot;
   <a href="docs/ROADMAP.md">Roadmap</a> &middot;
   <a href="docs/mcp-setup.md">MCP Setup</a> &middot;
   <a href="https://norrietaylor.github.io/distillery/">Slides</a>
@@ -27,7 +28,7 @@
 
 ## What is Distillery?
 
-Distillery is a team knowledge base accessed through Claude Code skills. It refines raw information from working sessions, meetings, bookmarks, and conversations into concentrated, searchable knowledge — stored as vector embeddings in a local database and retrieved through natural language.
+Distillery is a team knowledge base accessed through Claude Code skills. It refines raw information from working sessions, meetings, bookmarks, and conversations into concentrated, searchable knowledge — stored as vector embeddings in DuckDB and retrieved through natural language. Runs locally over stdio or as a hosted HTTP service with GitHub OAuth for team access.
 
 Inspired by Tiago Forte's **Building a Second Brain** methodology (CODE: Capture, Organize, Distill, Express), Distillery maps the "Distill" step — the highest-value transformation from noise to signal — into a tool the whole team can use.
 
@@ -124,6 +125,29 @@ distillery_status
 
 See [docs/mcp-setup.md](docs/mcp-setup.md) for detailed setup instructions.
 
+## Team Access
+
+Distillery supports remote team access via streamable-HTTP transport with GitHub OAuth authentication. Team members connect from their Claude Code installation — no local server needed.
+
+```bash
+# Operator: start the HTTP server
+distillery-mcp --transport http --port 8000
+```
+
+```json
+// Team member: ~/.claude/settings.json
+{
+  "mcpServers": {
+    "distillery": {
+      "url": "https://your-distillery-host.example.com/mcp",
+      "transport": "http"
+    }
+  }
+}
+```
+
+On first use, Claude Code opens a browser for GitHub OAuth login. See [docs/team-setup.md](docs/team-setup.md) for the team member guide and [docs/deployment.md](docs/deployment.md) for operator deployment instructions.
+
 ## Architecture
 
 <picture>
@@ -133,7 +157,7 @@ See [docs/mcp-setup.md](docs/mcp-setup.md) for detailed setup instructions.
 ### Key design decisions
 
 - **Skills are SKILL.md files**, not Python code — portable, version-controlled, team-shareable
-- **MCP server is the sole runtime interface** — all storage access goes through the protocol
+- **MCP server is the sole runtime interface** — all storage access goes through the protocol, over stdio (local) or HTTP (team)
 - **Storage abstraction** via `DistilleryStore` protocol — enables future migration to Elasticsearch without rewriting skills
 - **Configurable embedding providers** — swap between Jina v3, OpenAI, or a zero-vector stub for testing
 - **Semantic deduplication** — prevents knowledge base pollution with configurable skip/merge/link/create thresholds
@@ -166,8 +190,10 @@ distillery/
 │   │   ├── engine.py        # ClassificationEngine
 │   │   └── dedup.py         # DeduplicationChecker
 │   └── mcp/
-│       └── server.py        # MCP server (17 tools, FastMCP 2.x/3.x)
-├── tests/                   # 267 tests
+│       ├── server.py        # MCP server (17 tools, FastMCP 2.x/3.x)
+│       ├── auth.py          # GitHub OAuth via FastMCP GitHubProvider
+│       └── __main__.py      # CLI: --transport stdio|http, --host, --port
+├── tests/                   # 860+ tests
 ├── docs/
 │   ├── mcp-setup.md
 │   ├── ROADMAP.md

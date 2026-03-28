@@ -107,9 +107,34 @@ working directory, then falls back to built-in defaults.
 
 ---
 
-### Transport B — Hosted HTTP/SSE
+### Transport B — Team HTTP (GitHub OAuth)
 
-Connect to the hosted Distillery instance.  No local installation or API key required.
+Connect to a team-hosted Distillery instance secured with GitHub OAuth.  No local
+installation or API key required — authentication uses your GitHub account.
+
+**Add to `~/.claude/settings.json`:**
+
+```json
+{
+  "mcpServers": {
+    "distillery": {
+      "transport": "http",
+      "url": "https://your-distillery-host.example.com/mcp"
+    }
+  }
+}
+```
+
+On first use, Claude Code opens a browser for GitHub OAuth login.  After
+authorization, all 17 MCP tools are available through the remote server.
+
+See [team-setup.md](team-setup.md) for the full team member guide and
+[deployment.md](deployment.md) for operator setup (GitHub OAuth App
+registration, environment variables, server configuration).
+
+### Transport C — Hosted demo (unauthenticated)
+
+Connect to the shared demonstration server.  No local installation or API key required.
 
 **Add to `~/.claude/settings.json`:**
 
@@ -182,5 +207,7 @@ and solutions.
 ## Further Reading
 
 - [MCP Server Setup](mcp-setup.md) — full MCP configuration reference
+- [Team Setup](team-setup.md) — connecting to a hosted Distillery instance
+- [Deployment Guide](deployment.md) — running Distillery as a team HTTP service with GitHub OAuth
 - [Skills README](./../.claude/skills/README.md) — skill authoring and conventions
 - [CONVENTIONS.md](./../.claude/skills/CONVENTIONS.md) — shared patterns across all skills

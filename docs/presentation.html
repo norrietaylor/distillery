@@ -964,10 +964,46 @@ Options:
 </div>
 
 <!-- ============================================================ -->
-<!-- SLIDE 10: What we've built -->
+<!-- SLIDE 10: Team Access -->
 <!-- ============================================================ -->
 <div class="slide" id="s10">
-  <h2 class="fade-in">What we've built <span class="dim">(Phase 1 MVP)</span></h2>
+  <h2 class="fade-in">Team Access <span class="dim">(Spec 10)</span></h2>
+  <p class="subtitle fade-in">Connect your team via HTTP + GitHub OAuth</p>
+  <div style="height: 20px;"></div>
+  <div class="code-block fade-in" style="max-width: 760px;"><span class="comment"># Operator: start the HTTP server</span>
+$ distillery-mcp --transport http --port 8000
+
+<span class="comment"># Team member: add to ~/.claude/settings.json</span>
+{
+  "mcpServers": {
+    "distillery": {
+      "url": "https://your-host.example.com/mcp",
+      "transport": "http"
+    }
+  }
+}
+
+<span class="comment"># First use opens GitHub OAuth in browser</span>
+<span class="result">Authenticated as @alice via GitHub</span></div>
+  <div style="height: 24px;"></div>
+  <div class="grid-3 fade-in">
+    <div class="card" style="text-align: center;">
+      <p style="font-size: 15px;"><strong>GitHub OAuth</strong><br><span class="dim">FastMCP GitHubProvider<br>OAuth 2.1 + PKCE</span></p>
+    </div>
+    <div class="card" style="text-align: center;">
+      <p style="font-size: 15px;"><strong>Shared storage</strong><br><span class="dim">MotherDuck (md:)<br>or S3-backed DuckDB</span></p>
+    </div>
+    <div class="card" style="text-align: center;">
+      <p style="font-size: 15px;"><strong>stdio unchanged</strong><br><span class="dim">Local mode works<br>exactly as before</span></p>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- SLIDE 11: What we've built -->
+<!-- ============================================================ -->
+<div class="slide" id="s11">
+  <h2 class="fade-in">What we've built</h2>
   <div style="height: 24px;"></div>
   <div style="display: flex; gap: 64px; justify-content: center;" class="fade-in">
     <div class="stat">
@@ -975,15 +1011,15 @@ Options:
       <div class="label">Claude Code skills</div>
     </div>
     <div class="stat">
-      <div class="number">11</div>
+      <div class="number">17</div>
       <div class="label">MCP server tools</div>
     </div>
     <div class="stat">
-      <div class="number">339+</div>
+      <div class="number">860+</div>
       <div class="label">tests passing</div>
     </div>
     <div class="stat">
-      <div class="number">3</div>
+      <div class="number">10</div>
       <div class="label">specs delivered</div>
     </div>
   </div>
@@ -1020,9 +1056,9 @@ Options:
 </div>
 
 <!-- ============================================================ -->
-<!-- SLIDE 11: Roadmap -->
+<!-- SLIDE 12: Roadmap -->
 <!-- ============================================================ -->
-<div class="slide left" id="s11">
+<div class="slide left" id="s12">
   <h2 class="fade-in">What's next</h2>
   <div style="height: 20px;"></div>
   <div class="timeline">
@@ -1044,9 +1080,9 @@ Options:
 </div>
 
 <!-- ============================================================ -->
-<!-- SLIDE 12: Phase 2 detail -->
+<!-- SLIDE 13: Phase 2 detail -->
 <!-- ============================================================ -->
-<div class="slide" id="s12">
+<div class="slide" id="s13">
   <h2 class="fade-in">Phase 2: Team Expansion</h2>
   <p class="subtitle fade-in">Scale from single user to team-wide adoption</p>
   <div style="height: 20px;"></div>
@@ -1065,19 +1101,19 @@ Options:
     <div class="card">
       <h3>Infrastructure</h3>
       <ul>
-        <li><strong>Elasticsearch migration</strong><br><span class="dim">Native hybrid search, semantic_text, ES|QL analytics</span></li>
+        <li style="color: var(--green);"><strong>HTTP transport + GitHub OAuth</strong><br><span class="dim">Streamable-HTTP, FastMCP GitHubProvider</span></li>
+        <li style="color: var(--green);"><strong>Namespace taxonomy</strong><br><span class="dim">/project/billing-v2/decisions</span></li>
         <li><strong>Access control</strong><br><span class="dim">Team/private visibility flag</span></li>
-        <li><strong>Session hooks</strong><br><span class="dim">Auto-distill on session end</span></li>
-        <li><strong>Namespace taxonomy</strong><br><span class="dim">/project/billing-v2/decisions</span></li>
+        <li><strong>Elasticsearch migration</strong><br><span class="dim">Native hybrid search, ES|QL analytics</span></li>
       </ul>
     </div>
   </div>
 </div>
 
 <!-- ============================================================ -->
-<!-- SLIDE 13: Phase 3 detail -->
+<!-- SLIDE 14: Phase 3 detail -->
 <!-- ============================================================ -->
-<div class="slide" id="s13">
+<div class="slide" id="s14">
   <h2 class="fade-in">Phase 3: Ambient Intelligence</h2>
   <p class="subtitle fade-in">The knowledge base watches the world for you</p>
   <div style="height: 20px;"></div>
@@ -1111,9 +1147,9 @@ For each new feed item:
 </div>
 
 <!-- ============================================================ -->
-<!-- SLIDE 14: Differentiators -->
+<!-- SLIDE 15: Differentiators -->
 <!-- ============================================================ -->
-<div class="slide" id="s14">
+<div class="slide" id="s15">
   <h2 class="fade-in">Why this is different</h2>
   <div style="height: 24px;"></div>
   <div class="grid-2 fade-in">
@@ -1143,9 +1179,9 @@ For each new feed item:
 </div>
 
 <!-- ============================================================ -->
-<!-- SLIDE 15: Close -->
+<!-- SLIDE 16: Close -->
 <!-- ============================================================ -->
-<div class="slide" id="s15">
+<div class="slide" id="s16">
   <div class="logo fade-in">
     <img src="assets/distillery-logo-dark-512.png" alt="Distillery">
   </div>
