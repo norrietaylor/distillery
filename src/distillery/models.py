@@ -30,6 +30,7 @@ class EntryType(StrEnum):
         PROJECT: A project or repository record.
         DIGEST: A periodic digest or summary covering a date range.
         GITHUB: A GitHub artifact reference (issue, PR, discussion, release).
+        FEED: An ambient feed item captured from a monitored source.
     """
 
     SESSION = "session"
@@ -43,6 +44,7 @@ class EntryType(StrEnum):
     PROJECT = "project"
     DIGEST = "digest"
     GITHUB = "github"
+    FEED = "feed"
 
 
 class EntrySource(StrEnum):
@@ -179,6 +181,21 @@ TYPE_METADATA_SCHEMAS: dict[str, dict[str, Any]] = {
         },
         "constraints": {
             "ref_type": ["issue", "pr", "discussion", "release"],
+        },
+    },
+    "feed": {
+        "required": {
+            "source_url": "str",
+            "source_type": "str",
+        },
+        "optional": {
+            "title": "str",
+            "item_url": "str",
+            "published_at": "str",
+            "relevance_score": "float",
+        },
+        "constraints": {
+            "source_type": ["rss", "github", "hackernews", "webhook"],
         },
     },
 }

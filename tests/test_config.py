@@ -10,6 +10,9 @@ import pytest
 from distillery.config import (
     CONFIG_ENV_VAR,
     DistilleryConfig,
+    FeedsConfig,
+    FeedSourceConfig,
+    FeedsThresholdsConfig,
     TagsConfig,
     load_config,
 )
@@ -508,3 +511,186 @@ class TestTagsConfig:
         cfg = load_config(str(p))
         assert cfg.tags.enforce_namespaces is False
         assert "system" in cfg.tags.reserved_prefixes
+
+
+# ---------------------------------------------------------------------------
+# FeedsConfig: dataclass defaults and loading
+# ---------------------------------------------------------------------------
+
+
+class TestFeedsConfigDefaults:
+    def test_feeds_defaults_no_sources(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        cfg = load_config()
+        assert isinstance(cfg.feeds, FeedsConfig)
+        assert cfg.feeds.sources == []
+
+    def test_feeds_thresholds_defaults(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        cfg = load_config()
+        assert cfg.feeds.thresholds.alert == pytest.approx(0.85)
+        assert cfg.feeds.thresholds.digest == pytest.approx(0.60)
+
+    def test_feeds_source_config_defaults(self) -> None:
+        src = FeedSourceConfig(url="https://example.com/rss", source_type="rss")
+        assert src.label == ""
+        assert src.poll_interval_minutes == 60
+        assert src.trust_weight == pytest.approx(1.0)
+
+
+class TestFeedsConfigYAML:
+    def test_loads_feeds_section_with_sources(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            feeds:
+              thresholds:
+                alert: 0.90
+                digest: 0.65
+              sources:
+                - url: https://news.ycombinator.com/rss
+                  source_type: rss
+                  label: Hacker News
+                  poll_interval_minutes: 30
+                  trust_weight: 0.8
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert len(cfg.feeds.sources) == 1
+        src = cfg.feeds.sources[0]
+        assert src.url == "https://news.ycombinator.com/rss"
+        assert src.source_type == "rss"
+        assert src.label == "Hacker News"
+        assert src.poll_interval_minutes == 30
+        assert src.trust_weight == pytest.approx(0.8)
+
+    def test_loads_feeds_thresholds(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            feeds:
+              thresholds:
+                alert: 0.90
+                digest: 0.70
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.feeds.thresholds.alert == pytest.approx(0.90)
+        assert cfg.feeds.thresholds.digest == pytest.approx(0.70)
+
+    def test_empty_feeds_section_uses_defaults(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            feeds: {}
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.feeds.sources == []
+        assert cfg.feeds.thresholds.alert == pytest.approx(0.85)
+
+    def test_multiple_sources_loaded(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            feeds:
+              sources:
+                - url: https://example.com/rss
+                  source_type: rss
+                - url: org/repo
+                  source_type: github
+                  label: Example Repo
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert len(cfg.feeds.sources) == 2
+        assert cfg.feeds.sources[0].source_type == "rss"
+        assert cfg.feeds.sources[1].source_type == "github"
+
+    def test_github_source_type_accepted(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            feeds:
+              sources:
+                - url: org/repo
+                  source_type: github
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.feeds.sources[0].source_type == "github"
+
+    def test_invalid_source_type_raises(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            feeds:
+              sources:
+                - url: https://example.com
+                  source_type: invalid-type
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="source_type"):
+            load_config(str(p))
+
+    def test_missing_url_raises(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            feeds:
+              sources:
+                - source_type: rss
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="url"):
+            load_config(str(p))
+
+    def test_negative_poll_interval_raises(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            feeds:
+              sources:
+                - url: https://example.com/rss
+                  source_type: rss
+                  poll_interval_minutes: -1
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="poll_interval_minutes"):
+            load_config(str(p))
+
+    def test_trust_weight_out_of_range_raises(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            feeds:
+              sources:
+                - url: https://example.com/rss
+                  source_type: rss
+                  trust_weight: 1.5
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="trust_weight"):
+            load_config(str(p))
+
+    def test_feeds_alert_below_digest_raises(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            feeds:
+              thresholds:
+                alert: 0.50
+                digest: 0.80
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="digest.*alert|alert.*digest"):
+            load_config(str(p))
+
+    def test_feeds_alert_out_of_range_raises(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            feeds:
+              thresholds:
+                alert: 1.5
+                digest: 0.60
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="feeds.thresholds.alert"):
+            load_config(str(p))
+
+
+# ---------------------------------------------------------------------------
+# FeedsThresholdsConfig dataclass
+# ---------------------------------------------------------------------------
+
+
+class TestFeedsThresholdsConfig:
+    def test_dataclass_defaults(self) -> None:
+        t = FeedsThresholdsConfig()
+        assert t.alert == pytest.approx(0.85)
+        assert t.digest == pytest.approx(0.60)

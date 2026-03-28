@@ -149,6 +149,44 @@ classification:
   dedup_limit: 5
 
 # ---------------------------------------------------------------------------
+# Ambient feed monitoring settings
+# ---------------------------------------------------------------------------
+#
+# The feeds section configures sources to monitor for relevant content.
+# Feed items are ingested as 'feed' entries and scored against your stored
+# knowledge. Items above the alert threshold trigger immediate alerts;
+# items above the digest threshold are included in the next /radar digest.
+#
+# Supported source_type values:
+#   - rss        : Atom/RSS feed at the given URL
+#   - github     : GitHub repository (issues, PRs, releases) — url = "org/repo"
+#   - hackernews : Hacker News (url is ignored; top stories are fetched)
+#   - webhook    : Incoming webhook (url is the receiving endpoint path)
+#
+# feeds:
+#   thresholds:
+#     # Cosine similarity at or above which a feed item triggers an alert.
+#     alert: 0.85
+#     # Cosine similarity at or above which an item is included in the digest.
+#     digest: 0.60
+#   sources:
+#     - url: https://news.ycombinator.com/rss
+#       source_type: rss
+#       label: Hacker News RSS
+#       poll_interval_minutes: 60   # How often to poll (default: 60)
+#       trust_weight: 1.0           # Relevance multiplier [0.0-1.0] (default: 1.0)
+#     - url: openai/openai-python
+#       source_type: github
+#       label: OpenAI Python SDK
+#       poll_interval_minutes: 120
+#       trust_weight: 0.8
+feeds:
+  thresholds:
+    alert: 0.85
+    digest: 0.60
+  sources: []
+
+# ---------------------------------------------------------------------------
 # Tag namespace settings
 # ---------------------------------------------------------------------------
 tags:

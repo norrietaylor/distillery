@@ -132,6 +132,57 @@ class TagsConfig:
 
 
 @dataclass
+class FeedSourceConfig:
+    """Configuration for a single monitored feed source.
+
+    Attributes:
+        url: The URL of the feed (e.g. RSS feed URL or GitHub repo URL).
+        source_type: Adapter type.  One of ``'rss'``, ``'github'``,
+            ``'hackernews'``, or ``'webhook'``.
+        label: Optional human-readable label for the source.
+        poll_interval_minutes: How often to poll this source.  Defaults to
+            ``60`` minutes.
+        trust_weight: Relevance trust multiplier in the range ``[0.0, 1.0]``.
+            Higher values amplify relevance scores from this source.  Defaults
+            to ``1.0``.
+    """
+
+    url: str = ""
+    source_type: str = "rss"
+    label: str = ""
+    poll_interval_minutes: int = 60
+    trust_weight: float = 1.0
+
+
+@dataclass
+class FeedsThresholdsConfig:
+    """Relevance thresholds used when scoring incoming feed items.
+
+    Attributes:
+        alert: Cosine similarity score at or above which a feed item triggers
+            an immediate alert.  Default ``0.85``.
+        digest: Cosine similarity score at or above which (but below *alert*)
+            a feed item is included in the next digest.  Default ``0.60``.
+    """
+
+    alert: float = 0.85
+    digest: float = 0.60
+
+
+@dataclass
+class FeedsConfig:
+    """Ambient feed monitoring configuration.
+
+    Attributes:
+        sources: Ordered list of feed sources to monitor.
+        thresholds: Relevance score thresholds for alert vs. digest inclusion.
+    """
+
+    sources: list[FeedSourceConfig] = field(default_factory=list)
+    thresholds: FeedsThresholdsConfig = field(default_factory=FeedsThresholdsConfig)
+
+
+@dataclass
 class DistilleryConfig:
     """Top-level configuration container for a Distillery deployment.
 
@@ -141,6 +192,7 @@ class DistilleryConfig:
         team: Team-level metadata settings.
         classification: Classification threshold settings.
         tags: Tag namespace enforcement settings.
+        feeds: Ambient feed monitoring settings.
     """
 
     storage: StorageConfig = field(default_factory=StorageConfig)
@@ -148,6 +200,7 @@ class DistilleryConfig:
     team: TeamConfig = field(default_factory=TeamConfig)
     classification: ClassificationConfig = field(default_factory=ClassificationConfig)
     tags: TagsConfig = field(default_factory=TagsConfig)
+    feeds: FeedsConfig = field(default_factory=FeedsConfig)
 
 
 # ---------------------------------------------------------------------------
@@ -373,6 +426,109 @@ def _parse_tags(raw: dict[str, Any]) -> TagsConfig:
     )
 
 
+def _parse_feed_source(raw: dict[str, Any], index: int) -> FeedSourceConfig:
+    """Parse a single feed source entry from a raw YAML mapping.
+
+    Args:
+        raw: Mapping describing one feed source.
+        index: Zero-based position in the sources list (used in error messages).
+
+    Returns:
+        A populated :class:`FeedSourceConfig` instance.
+
+    Raises:
+        ValueError: If ``url`` is missing, ``source_type`` is not a valid
+            adapter type, ``poll_interval_minutes`` is not a positive integer,
+            or ``trust_weight`` is not in ``[0.0, 1.0]``.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"feeds.sources[{index}] must be a YAML mapping, got: {type(raw).__name__}"
+        )
+
+    url = str(raw.get("url", "")).strip()
+    if not url:
+        raise ValueError(f"feeds.sources[{index}].url is required and must be non-empty")
+
+    valid_source_types = {"rss", "github", "hackernews", "webhook"}
+    source_type = str(raw.get("source_type", "rss"))
+    if source_type not in valid_source_types:
+        raise ValueError(
+            f"feeds.sources[{index}].source_type must be one of "
+            f"{sorted(valid_source_types)}, got: {source_type!r}"
+        )
+
+    label = str(raw.get("label", ""))
+
+    poll_interval_raw = raw.get("poll_interval_minutes", 60)
+    poll_interval = _parse_strict_int(
+        poll_interval_raw, f"feeds.sources[{index}].poll_interval_minutes"
+    )
+    if poll_interval <= 0:
+        raise ValueError(
+            f"feeds.sources[{index}].poll_interval_minutes must be a positive integer, "
+            f"got: {poll_interval}"
+        )
+
+    trust_weight_raw = raw.get("trust_weight", 1.0)
+    try:
+        trust_weight = float(trust_weight_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"feeds.sources[{index}].trust_weight must be a float, got: {trust_weight_raw!r}"
+        ) from exc
+    if not (0.0 <= trust_weight <= 1.0):
+        raise ValueError(
+            f"feeds.sources[{index}].trust_weight must be between 0.0 and 1.0, got: {trust_weight}"
+        )
+
+    return FeedSourceConfig(
+        url=url,
+        source_type=source_type,
+        label=label,
+        poll_interval_minutes=poll_interval,
+        trust_weight=trust_weight,
+    )
+
+
+def _parse_feeds(raw: dict[str, Any]) -> FeedsConfig:
+    """Parse the ``feeds`` section from a raw YAML mapping.
+
+    Args:
+        raw: Mapping (typically from YAML) containing any of the following keys:
+            - ``sources`` (list of feed source mappings, default ``[]``)
+            - ``thresholds`` (mapping with ``alert`` and ``digest`` keys)
+
+    Returns:
+        A populated :class:`FeedsConfig` instance.
+
+    Raises:
+        ValueError: If ``sources`` is not a list, any source entry is invalid,
+            or threshold values are out of range.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError(f"feeds must be a YAML mapping, got: {type(raw).__name__}")
+
+    sources_raw = raw.get("sources", [])
+    if not isinstance(sources_raw, list):
+        raise ValueError(f"feeds.sources must be a list, got: {type(sources_raw).__name__}")
+    sources = [_parse_feed_source(s, i) for i, s in enumerate(sources_raw)]
+
+    thresholds_raw = raw.get("thresholds", {}) or {}
+    if not isinstance(thresholds_raw, dict):
+        raise ValueError(
+            f"feeds.thresholds must be a YAML mapping, got: {type(thresholds_raw).__name__}"
+        )
+
+    alert = _parse_float_field(thresholds_raw, "alert", 0.85, "feeds.thresholds.alert")
+    digest = _parse_float_field(thresholds_raw, "digest", 0.60, "feeds.thresholds.digest")
+
+    return FeedsConfig(
+        sources=sources,
+        thresholds=FeedsThresholdsConfig(alert=alert, digest=digest),
+    )
+
+
 def _validate(config: DistilleryConfig) -> None:
     """
     Validate a DistilleryConfig instance and raise a ValueError for any invalid setting.
@@ -394,6 +550,9 @@ def _validate(config: DistilleryConfig) -> None:
             - classification.stale_days is not greater than 0.
             - classification.conflict_threshold is not between 0.0 and 1.0.
             - Any entry in tags.reserved_prefixes is not a valid tag segment.
+            - feeds.thresholds.alert is not between 0.0 and 1.0.
+            - feeds.thresholds.digest is not between 0.0 and 1.0.
+            - feeds.thresholds.digest exceeds feeds.thresholds.alert.
     """
     valid_backends = {"duckdb", "motherduck"}
     if config.storage.backend not in valid_backends:
@@ -473,6 +632,18 @@ def _validate(config: DistilleryConfig) -> None:
                 "(lowercase alphanumeric plus internal hyphens only)."
             )
 
+    # Validate feeds thresholds.
+    alert = config.feeds.thresholds.alert
+    digest = config.feeds.thresholds.digest
+    if not (0.0 <= alert <= 1.0):
+        raise ValueError(f"feeds.thresholds.alert must be between 0.0 and 1.0, got: {alert}")
+    if not (0.0 <= digest <= 1.0):
+        raise ValueError(f"feeds.thresholds.digest must be between 0.0 and 1.0, got: {digest}")
+    if digest > alert:
+        raise ValueError(
+            f"feeds.thresholds.digest ({digest}) must not exceed feeds.thresholds.alert ({alert})"
+        )
+
 
 def load_config(config_path: str | None = None) -> DistilleryConfig:
     """Load and validate configuration from a YAML file.
@@ -527,6 +698,7 @@ def load_config(config_path: str | None = None) -> DistilleryConfig:
     team_raw = raw.get("team", {}) or {}
     classification_raw = raw.get("classification", {}) or {}
     tags_raw = raw.get("tags", {}) or {}
+    feeds_raw = raw.get("feeds", {}) or {}
 
     config = DistilleryConfig(
         storage=_parse_storage(storage_raw),
@@ -534,6 +706,7 @@ def load_config(config_path: str | None = None) -> DistilleryConfig:
         team=_parse_team(team_raw),
         classification=_parse_classification(classification_raw),
         tags=_parse_tags(tags_raw),
+        feeds=_parse_feeds(feeds_raw),
     )
 
     _validate(config)

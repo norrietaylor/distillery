@@ -58,7 +58,7 @@ from typing import Any, cast
 from fastmcp import Context, FastMCP  # noqa: F401  # Context used by tool wrappers added in T02
 from mcp import types
 
-from distillery.config import DistilleryConfig, load_config
+from distillery.config import DistilleryConfig, FeedSourceConfig, load_config
 
 logger = logging.getLogger(__name__)
 
@@ -918,6 +918,75 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
             ``constraints``).
         """
         return await _handle_type_schemas()
+
+    @server.tool
+    async def distillery_watch(  # noqa: PLR0913
+        ctx: Context,
+        action: str,
+        url: str | None = None,
+        source_type: str | None = None,
+        label: str | None = None,
+        poll_interval_minutes: int | None = None,
+        trust_weight: float | None = None,
+    ) -> list[types.TextContent]:
+        """Manage monitored feed sources in the Distillery source registry.
+
+        Supports three actions:
+
+        - ``list``: Return all currently configured feed sources with their
+          settings (url, source_type, label, poll_interval_minutes,
+          trust_weight).
+        - ``add``: Register a new feed source.  Requires ``url`` and
+          ``source_type``.  Optional fields: ``label``,
+          ``poll_interval_minutes`` (default 60), ``trust_weight``
+          (default 1.0).  Accepted source types: ``rss``, ``github``,
+          ``hackernews``, ``webhook``.
+        - ``remove``: Remove a feed source by exact URL match.  Requires
+          ``url``.
+
+        Changes made via ``add`` and ``remove`` are applied to the in-memory
+        configuration for the current server session.  To persist changes
+        across restarts, update the ``feeds.sources`` section of
+        ``distillery.yaml``.
+
+        Parameters:
+            action (str): One of ``'list'``, ``'add'``, ``'remove'``.
+            url (str | None): Source URL.  Required for ``add`` and ``remove``.
+            source_type (str | None): Adapter type for ``add``.  One of
+                ``'rss'``, ``'github'``, ``'hackernews'``, ``'webhook'``.
+            label (str | None): Human-readable label for the source (optional).
+            poll_interval_minutes (int | None): Poll frequency in minutes for
+                ``add``.  Defaults to ``60``.
+            trust_weight (float | None): Trust multiplier in ``[0.0, 1.0]``
+                for ``add``.  Defaults to ``1.0``.
+
+        Returns:
+            list[types.TextContent]: A single MCP TextContent block containing
+            a JSON object.  On success the object contains:
+              - For ``list``: ``sources`` (list of source dicts) and
+                ``count`` (number of sources).
+              - For ``add``: ``added`` (the new source dict) and
+                ``sources`` (updated full list).
+              - For ``remove``: ``removed_url``, ``removed`` (bool), and
+                ``sources`` (updated full list).
+            On error: ``error``, ``code``, and ``message``.
+        """
+        lc = _get_lifespan_context(ctx)
+        arguments: dict[str, Any] = {"action": action}
+        if url is not None:
+            arguments["url"] = url
+        if source_type is not None:
+            arguments["source_type"] = source_type
+        if label is not None:
+            arguments["label"] = label
+        if poll_interval_minutes is not None:
+            arguments["poll_interval_minutes"] = poll_interval_minutes
+        if trust_weight is not None:
+            arguments["trust_weight"] = trust_weight
+        return await _handle_watch(
+            config=lc["config"],
+            arguments=arguments,
+        )
 
     return server
 
@@ -2863,3 +2932,142 @@ def _sync_gather_stale(
         )
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# distillery_watch handler
+# ---------------------------------------------------------------------------
+
+_VALID_SOURCE_TYPES = {"rss", "github", "hackernews", "webhook"}
+
+
+def _feed_source_to_dict(source: FeedSourceConfig) -> dict[str, Any]:
+    """Serialise a :class:`~distillery.config.FeedSourceConfig` to a plain dict."""
+    return {
+        "url": source.url,
+        "source_type": source.source_type,
+        "label": source.label,
+        "poll_interval_minutes": source.poll_interval_minutes,
+        "trust_weight": source.trust_weight,
+    }
+
+
+async def _handle_watch(
+    config: DistilleryConfig,
+    arguments: dict[str, Any],
+) -> list[types.TextContent]:
+    """Handle the ``distillery_watch`` tool.
+
+    Supports ``list``, ``add``, and ``remove`` actions against the in-memory
+    ``config.feeds.sources`` list.
+
+    Args:
+        config: The current :class:`~distillery.config.DistilleryConfig`
+            (mutations are applied in-place to ``config.feeds.sources``).
+        arguments: Parsed tool arguments dict.
+
+    Returns:
+        A structured MCP success or error response.
+    """
+    action = str(arguments.get("action", "")).strip().lower()
+
+    if action not in ("list", "add", "remove"):
+        return error_response(
+            "INVALID_ACTION",
+            f"action must be one of 'list', 'add', 'remove'; got: {action!r}",
+        )
+
+    sources = config.feeds.sources
+
+    if action == "list":
+        return success_response(
+            {
+                "sources": [_feed_source_to_dict(s) for s in sources],
+                "count": len(sources),
+            }
+        )
+
+    if action == "add":
+        url = str(arguments.get("url", "")).strip()
+        if not url:
+            return error_response("MISSING_FIELD", "url is required for action='add'")
+
+        source_type = str(arguments.get("source_type", "")).strip()
+        if not source_type:
+            return error_response("MISSING_FIELD", "source_type is required for action='add'")
+        if source_type not in _VALID_SOURCE_TYPES:
+            return error_response(
+                "INVALID_SOURCE_TYPE",
+                f"source_type must be one of {sorted(_VALID_SOURCE_TYPES)}, got: {source_type!r}",
+            )
+
+        label = str(arguments.get("label", ""))
+
+        poll_interval_raw = arguments.get("poll_interval_minutes", 60)
+        try:
+            poll_interval = int(poll_interval_raw)
+        except (TypeError, ValueError):
+            return error_response(
+                "INVALID_FIELD",
+                f"poll_interval_minutes must be an integer, got: {poll_interval_raw!r}",
+            )
+        if poll_interval <= 0:
+            return error_response(
+                "INVALID_FIELD",
+                f"poll_interval_minutes must be a positive integer, got: {poll_interval}",
+            )
+
+        trust_weight_raw = arguments.get("trust_weight", 1.0)
+        try:
+            trust_weight = float(trust_weight_raw)
+        except (TypeError, ValueError):
+            return error_response(
+                "INVALID_FIELD",
+                f"trust_weight must be a float, got: {trust_weight_raw!r}",
+            )
+        if not (0.0 <= trust_weight <= 1.0):
+            return error_response(
+                "INVALID_FIELD",
+                f"trust_weight must be between 0.0 and 1.0, got: {trust_weight}",
+            )
+
+        new_source = FeedSourceConfig(
+            url=url,
+            source_type=source_type,
+            label=label,
+            poll_interval_minutes=poll_interval,
+            trust_weight=trust_weight,
+        )
+        sources.append(new_source)
+
+        return success_response(
+            {
+                "added": _feed_source_to_dict(new_source),
+                "sources": [_feed_source_to_dict(s) for s in sources],
+                "note": (
+                    "Source added to the in-memory registry. "
+                    "To persist across restarts, update feeds.sources in distillery.yaml."
+                ),
+            }
+        )
+
+    # action == "remove"
+    url = str(arguments.get("url", "")).strip()
+    if not url:
+        return error_response("MISSING_FIELD", "url is required for action='remove'")
+
+    original_count = len(sources)
+    config.feeds.sources = [s for s in sources if s.url != url]
+    removed = len(config.feeds.sources) < original_count
+
+    return success_response(
+        {
+            "removed_url": url,
+            "removed": removed,
+            "sources": [_feed_source_to_dict(s) for s in config.feeds.sources],
+            "note": (
+                "Source removed from the in-memory registry. "
+                "To persist across restarts, update feeds.sources in distillery.yaml."
+            ),
+        }
+    )
