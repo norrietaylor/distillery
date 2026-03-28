@@ -148,11 +148,11 @@ graph TD
         classify["Classification Engine\n+ Dedup + Conflicts"]
     end
 
-    style skills fill:#e8f0fe,stroke:#4285f4
-    style mcp fill:#fef7e0,stroke:#f9ab00
-    style store fill:#e6f4ea,stroke:#34a853
-    style embed fill:#e6f4ea,stroke:#34a853
-    style classify fill:#e6f4ea,stroke:#34a853
+    style skills fill:#fdf4e7,stroke:#BA7517,color:#1a1a1a
+    style mcp fill:#BA7517,stroke:#1a1a1a,color:#fff
+    style store fill:#f5e6cc,stroke:#BA7517,color:#1a1a1a
+    style embed fill:#f5e6cc,stroke:#BA7517,color:#1a1a1a
+    style classify fill:#f5e6cc,stroke:#BA7517,color:#1a1a1a
 ```
 
 ### Key design decisions
