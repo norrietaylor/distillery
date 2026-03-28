@@ -167,14 +167,14 @@ class DistilleryStore(Protocol):
     ) -> list[Entry]:
         """
         List entries filtered by metadata with pagination.
-        
+
         Returns entries in insertion order (sorted by descending `created_at`) and does not perform semantic ranking.
-        
+
         Parameters:
             filters (dict[str, Any] | None): Optional metadata constraints. Supported keys: `entry_type`, `author`, `project`, `tags` (matches any tag), `status`, `date_from`, `date_to`.
             limit (int): Maximum number of entries to return.
             offset (int): Number of entries to skip for pagination.
-        
+
         Returns:
             list[Entry]: Entries matching the filters, ordered by descending `created_at`.
         """
@@ -189,15 +189,15 @@ class DistilleryStore(Protocol):
     ) -> str:
         """
         Record a search event in the search_log and return the created log row ID.
-        
+
         Records the query text, the ordered list of returned entry IDs with their corresponding similarity scores, and an optional session identifier for grouping related searches. The order of result_entry_ids must match the order of result_scores.
-        
+
         Parameters:
             query (str): The natural-language query string.
             result_entry_ids (list[str]): Ordered list of entry UUIDs returned by the search.
             result_scores (list[float]): Ordered list of similarity scores corresponding to result_entry_ids.
             session_id (str | None): Optional opaque string that groups searches from the same user session.
-        
+
         Returns:
             str: The UUID string of the newly created search_log row.
         """

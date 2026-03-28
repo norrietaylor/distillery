@@ -160,7 +160,7 @@ class ConflictChecker:
     ) -> None:
         """
         Initialize a ConflictChecker with a similarity store and threshold.
-        
+
         Parameters:
             store (DistilleryStore): Store used to retrieve semantically similar entries for conflict checks.
             threshold (float): Minimum similarity score (inclusive) required for a stored entry to be considered a candidate.
@@ -175,11 +175,11 @@ class ConflictChecker:
     def build_prompt(self, new_content: str, existing_content: str) -> str:
         """
         Builds an LLM prompt that asks whether the provided new content contradicts the provided existing content.
-        
+
         Parameters:
             new_content (str): Raw text of the candidate new entry.
             existing_content (str): Raw text of the existing knowledge-base entry to compare against.
-        
+
         Returns:
             str: Prompt string with the conflict-checking instructions and the provided contents embedded.
         """
@@ -191,12 +191,12 @@ class ConflictChecker:
     def parse_response(self, llm_response: str) -> tuple[bool, str]:
         """
         Parse the LLM's JSON response for a conflict decision and extract its result.
-        
+
         Parses `llm_response`, extracting the keys `is_conflict` and `reasoning` from the returned JSON. If parsing fails for any reason, returns a safe fallback of `(False, "")` and logs a warning.
-        
+
         Parameters:
             llm_response (str): The raw string returned by the LLM, possibly containing a fenced code block.
-        
+
         Returns:
             tuple[bool, str]: `is_conflict` is `True` if the LLM indicates the new content contradicts the existing content, `False` otherwise; `reasoning` is the LLM-provided explanation (empty string on parse failure).
         """
@@ -213,13 +213,13 @@ class ConflictChecker:
     ) -> ConflictResult:
         """
         Determine whether the given content conflicts with entries in the knowledge base.
-        
+
         Queries the configured store for entries similar to `content` and, when `llm_responses` is provided, uses each mapping value `(is_conflict, reasoning)` to mark similar entries as conflicts. If no similar entries are found or `llm_responses` is `None`, returns an empty result. Conflicting entries include a short content preview (first line truncated to 120 characters), the similarity score, and the LLM-provided reasoning.
-        
+
         Parameters:
             content (str): The raw text of the candidate new entry.
             llm_responses (dict[str, tuple[bool, str]] | None): Optional mapping from existing `entry_id` to a parsed LLM evaluation `(is_conflict, reasoning)`. Entries not present in this mapping are skipped.
-        
+
         Returns:
             ConflictResult: Object with `has_conflicts` set to `True` if any conflicts were detected, and `conflicts` containing a list of `ConflictEntry` items for each detected conflict.
         """
@@ -264,10 +264,10 @@ class ConflictChecker:
     def _parse(self, llm_response: str) -> tuple[bool, str]:
         """
         Parse an LLM response (optionally wrapped in a fenced code block) and extract the conflict decision.
-        
+
         Parameters:
             llm_response (str): Text returned by an LLM containing JSON (either raw JSON or inside a ```json```/``` ``` fenced code block) with keys `is_conflict` and optional `reasoning`.
-        
+
         Returns:
             tuple[bool, str]: `is_conflict` is `True` if the JSON `is_conflict` value is truthy, `False` otherwise; `reasoning` is the `reasoning` field as a string (empty string if missing).
         """

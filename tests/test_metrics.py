@@ -45,10 +45,10 @@ _UTC = UTC
 def _ts(days_ago: float) -> str:
     """
     Generate a UTC timestamp string for the current time minus the given number of days.
-    
+
     Parameters:
         days_ago (float): Number of days to subtract from the current UTC time. Use fractional values for partial days.
-    
+
     Returns:
         str: Timestamp formatted as "YYYY-MM-DD HH:MM:SS" in UTC.
     """
@@ -59,10 +59,10 @@ def _ts(days_ago: float) -> str:
 def _make_config(db_path: str = ":memory:") -> DistilleryConfig:
     """
     Builds a DistilleryConfig prepopulated for tests with a mock embedding and configurable database path.
-    
+
     Parameters:
         db_path (str): Path to the database file; use ":memory:" (default) for an in-memory database.
-    
+
     Returns:
         DistilleryConfig: Configuration with storage.database_path set to `db_path`, embedding.provider set to an empty string, embedding.model set to "mock-hash-4d", embedding.dimensions set to 4, and classification.confidence_threshold set to 0.6.
     """
@@ -82,7 +82,7 @@ def _make_config(db_path: str = ":memory:") -> DistilleryConfig:
 def embedding_provider() -> MockEmbeddingProvider:
     """
     Provide a mock embedding provider for tests.
-    
+
     Returns:
         MockEmbeddingProvider: A new MockEmbeddingProvider instance configured for use in test cases.
     """
@@ -93,10 +93,10 @@ def embedding_provider() -> MockEmbeddingProvider:
 async def store(embedding_provider: MockEmbeddingProvider) -> DuckDBStore:  # type: ignore[return]
     """
     Provide an initialized in-memory DuckDBStore configured with the given embedding provider.
-    
+
     Parameters:
         embedding_provider (MockEmbeddingProvider): Embedding provider used to configure the store.
-    
+
     Returns:
         DuckDBStore: An initialized in-memory DuckDBStore instance. The store is closed by the fixture after the caller finishes using it.
     """
@@ -110,9 +110,9 @@ async def store(embedding_provider: MockEmbeddingProvider) -> DuckDBStore:  # ty
 def config() -> DistilleryConfig:
     """
     Builds a DistilleryConfig populated with the default test settings.
-    
+
     Defaults: storage.database_path=":memory:", embedding.model="mock-hash-4d", embedding.dimensions=4, embedding.provider="", classification.confidence_threshold=0.6.
-    
+
     Returns:
         DistilleryConfig: Configuration configured for tests using an in-memory database and mock embedding settings.
     """
@@ -133,10 +133,10 @@ async def _metrics(
 ) -> dict:
     """
     Retrieve metrics for the given store using the specified recent-period window and return the parsed MCP response.
-    
+
     Parameters:
         period_days (int): Number of days used as the "recent" window for metrics (e.g., created_{n}d, searches_{n}d). Defaults to 30.
-    
+
     Returns:
         dict: Parsed MCP response containing top-level sections such as `entries`, `activity`, `search`, `quality`, `staleness`, and `storage`.
     """
@@ -189,7 +189,7 @@ class TestEmptyDatabase:
     ) -> None:
         """
         Verify activity metrics are zero when the database contains no entries.
-        
+
         Asserts that `created_7d`, `created_30d`, `created_90d`, and `updated_7d` are all 0.
         """
         data = await _metrics(store, config, embedding_provider)
@@ -207,7 +207,7 @@ class TestEmptyDatabase:
     ) -> None:
         """
         Verify search metrics return zeroed values when the database contains no search logs.
-        
+
         Asserts that `total_searches` is 0, `searches_7d` is 0, and `avg_results_per_search` is 0.0.
         """
         data = await _metrics(store, config, embedding_provider)
@@ -381,13 +381,13 @@ class TestSearchMetrics:
     ) -> str:
         """
         Insert a search record into the store's search_log and return the new record id.
-        
+
         Parameters:
             store (DuckDBStore): Database store to insert into.
             query (str): Search query text to record.
             result_ids (list[str] | None): List of result entry IDs to store; empty list if None.
             days_ago (float): Age of the timestamp in days relative to now.
-        
+
         Returns:
             row_id (str): UUID string of the inserted search record.
         """
@@ -449,10 +449,10 @@ class TestQualityMetrics:
     def _insert_search(self, store: DuckDBStore) -> str:
         """
         Insert a row into `search_log` with query `'q'`, empty result arrays, and the current timestamp.
-        
+
         Parameters:
             store (DuckDBStore): Database store whose connection will be used to perform the insert.
-        
+
         Returns:
             row_id (str): UUID string of the newly inserted search row.
         """
@@ -475,7 +475,7 @@ class TestQualityMetrics:
     ) -> None:
         """
         Insert a feedback record into the store's feedback_log table.
-        
+
         Parameters:
             store (DuckDBStore): Target database store where the feedback row will be inserted.
             search_id (str): Identifier of the related search.
@@ -604,7 +604,7 @@ class TestPeriodDaysParameter:
     def _insert_search(self, store: DuckDBStore, *, days_ago: float) -> None:
         """
         Insert a search record into the store's search_log with a timestamp offset by the given number of days.
-        
+
         Parameters:
             store (DuckDBStore): Target database store where the search row will be inserted.
             days_ago (float): Number of days to subtract from now to set the search `timestamp`.

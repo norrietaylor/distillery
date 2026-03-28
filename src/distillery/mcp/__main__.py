@@ -34,7 +34,7 @@ def _configure_logging() -> None:
 def main() -> int:
     """
     Start the Distillery MCP server over stdio and run it until completion or interruption.
-    
+
     Returns:
         Exit code: `0` on successful exit or interruption, `1` on unexpected error.
     """

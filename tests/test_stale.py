@@ -43,10 +43,10 @@ _UTC = UTC
 def _ts(days_ago: float) -> str:
     """
     Produce a UTC timestamp string representing the time days_ago days before now.
-    
+
     Parameters:
         days_ago (float): Number of days to subtract from the current UTC time; may be fractional.
-    
+
     Returns:
         str: UTC timestamp formatted as "YYYY-MM-DD HH:MM:SS".
     """
@@ -57,10 +57,10 @@ def _ts(days_ago: float) -> str:
 def _make_config(stale_days: int = 30) -> DistilleryConfig:
     """
     Create a DistilleryConfig preconfigured for in-memory testing.
-    
+
     Parameters:
         stale_days (int): Number of days after which an entry is considered stale; used to set the classification stale_days threshold.
-    
+
     Returns:
         DistilleryConfig: Configuration using in-memory storage, a mock embedding provider, and a classification config with confidence_threshold 0.6 and the specified stale_days.
     """
@@ -83,7 +83,7 @@ def _make_config(stale_days: int = 30) -> DistilleryConfig:
 def embedding_provider() -> MockEmbeddingProvider:
     """
     Provide a fresh MockEmbeddingProvider for tests.
-    
+
     Returns:
         MockEmbeddingProvider: A new mock embedding provider instance.
     """
@@ -94,10 +94,10 @@ def embedding_provider() -> MockEmbeddingProvider:
 async def store(embedding_provider: MockEmbeddingProvider) -> DuckDBStore:  # type: ignore[return]
     """
     Provide an initialized DuckDBStore backed by an in-memory database and ensure it is closed when the fixture is torn down.
-    
+
     Parameters:
         embedding_provider (MockEmbeddingProvider): Embedding provider to attach to the store.
-    
+
     Returns:
         DuckDBStore: An initialized store instance connected to an in-memory DuckDB and ready for use.
     """
@@ -111,7 +111,7 @@ async def store(embedding_provider: MockEmbeddingProvider) -> DuckDBStore:  # ty
 def config() -> DistilleryConfig:
     """
     Create a DistilleryConfig using the test defaults.
-    
+
     Returns:
         DistilleryConfig: Configuration with in-memory DuckDB storage, a mock embedding provider,
         classification confidence_threshold of 0.6, and the default stale_days (30).
@@ -134,14 +134,14 @@ async def _stale(
 ) -> dict:
     """
     Request stale entries from the stale MCP handler and return the parsed response.
-    
+
     Parameters:
-    	days (int | None): Optional override for the staleness threshold in days.
-    	limit (int | None): Optional maximum number of entries to return.
-    	entry_type (str | None): Optional entry type filter (e.g., "reference", "idea").
-    
+        days (int | None): Optional override for the staleness threshold in days.
+        limit (int | None): Optional maximum number of entries to return.
+        entry_type (str | None): Optional entry type filter (e.g., "reference", "idea").
+
     Returns:
-    	dict: Parsed MCP response containing keys such as `stale_count`, `entries`, `days_threshold`, and any validation `error` information.
+        dict: Parsed MCP response containing keys such as `stale_count`, `entries`, `days_threshold`, and any validation `error` information.
     """
     args: dict = {}
     if days is not None:
@@ -164,9 +164,9 @@ def _force_timestamps(
 ) -> None:
     """
     Set an entry's `updated_at` and/or `accessed_at` timestamp fields directly in the database.
-    
+
     This helper mutates the `entries` table using the store's raw connection. Provide ISO-like UTC timestamp strings formatted as "%Y-%m-%d %H:%M:%S" for `updated_at` and `accessed_at`. If `clear_accessed_at` is True, `accessed_at` will be set to NULL regardless of `accessed_at` value.
-    
+
     Parameters:
         store (DuckDBStore): Store whose database connection will be used.
         entry_id (str): ID of the entry to update.
@@ -202,7 +202,7 @@ class TestEmptyDatabase:
     ) -> None:
         """
         Verify that requesting stale entries from an empty store returns no entries.
-        
+
         Asserts the response contains no "error" key, `stale_count` is 0, and `entries` is an empty list.
         """
         data = await _stale(store, config)

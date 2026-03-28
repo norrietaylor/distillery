@@ -148,9 +148,9 @@ class Entry:
     def to_dict(self) -> dict[str, Any]:
         """
         Serialize this entry to a JSON-compatible flat dictionary.
-        
+
         Enum fields (`entry_type`, `source`, `status`) are stored as their string values. Datetime fields (`created_at`, `updated_at`, `accessed_at`) are stored as ISO 8601 strings with UTC offset; `accessed_at` is `None` if unset. `tags` and `metadata` are shallow copies to avoid mutating internal state.
-        
+
         Returns:
             dict: A flat dictionary suitable for JSON or YAML serialization.
         """
@@ -174,17 +174,17 @@ class Entry:
     def from_dict(cls, data: dict[str, Any]) -> Entry:
         """
         Create an Entry instance from a dictionary representation.
-        
+
         Parameters:
             data (dict[str, Any]): Dictionary containing entry fields. Enum fields
                 (`entry_type`, `source`, `status`) may be provided as enum members or
                 their string values. Datetime fields (`created_at`, `updated_at`,
                 `accessed_at`) may be ISO 8601 strings or datetime objects; naive
                 datetimes are treated as UTC.
-        
+
         Returns:
             Entry: A fully initialized Entry instance.
-        
+
         Raises:
             KeyError: If a required key (e.g., `id`, `content`, `entry_type`,
                 `source`, `created_at`, `updated_at`, `author`) is missing.
@@ -194,10 +194,10 @@ class Entry:
         def _parse_dt(value: str | datetime) -> datetime:
             """
             Parse an ISO 8601 datetime string or return the given datetime, ensuring the result is timezone-aware (UTC if no timezone is present).
-            
+
             Parameters:
                 value (str | datetime): An ISO 8601 datetime string or a datetime object.
-            
+
             Returns:
                 datetime: A timezone-aware datetime; if `value` was a naive datetime or a string without timezone, the returned datetime will have its timezone set to UTC.
             """

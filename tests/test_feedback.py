@@ -41,10 +41,10 @@ pytestmark = pytest.mark.integration
 def _make_config(feedback_window_minutes: int = 5) -> DistilleryConfig:
     """
     Builds a DistilleryConfig preconfigured for in-memory tests.
-    
+
     Parameters:
         feedback_window_minutes (int): Maximum age, in minutes, for considering searches as recent for implicit feedback.
-    
+
     Returns:
         DistilleryConfig: Configuration using in-memory DuckDB storage, a mock embedding provider (model "mock-hash-4d", 4 dimensions), and classification settings with a 0.6 confidence threshold and the provided feedback window.
     """
@@ -67,7 +67,7 @@ def _make_config(feedback_window_minutes: int = 5) -> DistilleryConfig:
 def embedding_provider() -> MockEmbeddingProvider:
     """
     Create and return a new MockEmbeddingProvider instance for tests.
-    
+
     Returns:
         MockEmbeddingProvider: a fresh mock embedding provider.
     """
@@ -78,10 +78,10 @@ def embedding_provider() -> MockEmbeddingProvider:
 async def store(embedding_provider: MockEmbeddingProvider) -> DuckDBStore:  # type: ignore[return]
     """
     Provide an initialized in-memory DuckDBStore for tests and ensure it is closed after use.
-    
+
     Parameters:
         embedding_provider (MockEmbeddingProvider): Embedding provider to attach to the store.
-    
+
     Returns:
         DuckDBStore: An initialized DuckDBStore using an in-memory database (":memory:") configured with the given embedding provider.
     """
@@ -95,7 +95,7 @@ async def store(embedding_provider: MockEmbeddingProvider) -> DuckDBStore:  # ty
 def config() -> DistilleryConfig:
     """
     Builds the default DistilleryConfig used by the tests.
-    
+
     Returns:
         DistilleryConfig: Configuration using an in-memory DuckDB store (":memory:"), a mock embedding provider,
         and classification settings with `confidence_threshold=0.6` and the default feedback window (5 minutes).
@@ -115,10 +115,10 @@ async def _quality(
 ) -> dict:
     """
     Compute aggregated quality metrics for searches and feedback, optionally filtered by entry type.
-    
+
     Parameters:
         entry_type (str | None): If provided, restrict metrics to feedback/searches for the given entry type.
-    
+
     Returns:
         dict: Aggregated metrics with the following keys:
             - total_searches (int): Total number of recorded searches.
