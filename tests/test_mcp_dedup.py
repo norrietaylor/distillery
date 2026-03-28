@@ -207,6 +207,8 @@ class TestCheckDedupMergeAction:
         cos_sim = _cosine(interp, existing_vec)
         # Adjust skip threshold so this score falls between merge and skip
         assert cos_sim < 1.0
+        # Scores are returned normalized to [0, 1]: (raw + 1) / 2
+        norm_sim = (cos_sim + 1.0) / 2.0
 
         existing_text = "Merge existing content"
         new_text = "Merge query content"
@@ -216,8 +218,8 @@ class TestCheckDedupMergeAction:
         entry = make_entry(content=existing_text)
         await store.store(entry)
 
-        # Set thresholds so that cos_sim is between merge and skip
-        config = _make_config(skip=cos_sim + 0.01, merge=cos_sim - 0.01, link=0.0)
+        # Set thresholds so that norm_sim is between merge and skip
+        config = _make_config(skip=norm_sim + 0.01, merge=norm_sim - 0.01, link=0.0)
         response = await _handle_check_dedup(store, config, {"content": new_text})
         data = parse_mcp_response(response)
 
@@ -240,6 +242,8 @@ class TestCheckDedupLinkAction:
         interp = _interpolated_vector(_UNIT_A, _UNIT_B, 0.7)
         cos_sim = _cosine(interp, existing_vec)
         assert cos_sim < 1.0
+        # Scores are returned normalized to [0, 1]: (raw + 1) / 2
+        norm_sim = (cos_sim + 1.0) / 2.0
 
         existing_text = "Link existing content"
         new_text = "Link query content"
@@ -249,8 +253,8 @@ class TestCheckDedupLinkAction:
         entry = make_entry(content=existing_text)
         await store.store(entry)
 
-        # Set thresholds so that cos_sim is between link and merge
-        config = _make_config(skip=0.99, merge=cos_sim + 0.01, link=cos_sim - 0.01)
+        # Set thresholds so that norm_sim is between link and merge
+        config = _make_config(skip=0.99, merge=norm_sim + 0.01, link=norm_sim - 0.01)
         response = await _handle_check_dedup(store, config, {"content": new_text})
         data = parse_mcp_response(response)
 

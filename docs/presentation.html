@@ -724,7 +724,7 @@
 <!-- SLIDE 5: The 6 Skills -->
 <!-- ============================================================ -->
 <div class="slide" id="s5">
-  <h2 class="fade-in">6 conversational commands</h2>
+  <h2 class="fade-in">9 conversational commands</h2>
   <div style="height: 16px;"></div>
   <table class="skill-table fade-in">
     <tr><th>Skill</th><th>Purpose</th><th>Example</th></tr>
@@ -757,6 +757,21 @@
       <td class="cmd">/classify</td>
       <td>Classify &amp; triage queue</td>
       <td class="dim">/classify --inbox</td>
+    </tr>
+    <tr>
+      <td class="cmd">/watch</td>
+      <td>Manage feed sources</td>
+      <td class="dim">/watch add github:duckdb/duckdb</td>
+    </tr>
+    <tr>
+      <td class="cmd">/radar</td>
+      <td>Ambient digest + suggestions</td>
+      <td class="dim">/radar --days 7</td>
+    </tr>
+    <tr>
+      <td class="cmd">/tune</td>
+      <td>Adjust relevance thresholds</td>
+      <td class="dim">/tune relevance 0.4</td>
     </tr>
   </table>
 </div>
@@ -919,10 +934,13 @@ Options:
         <span class="arch-skill">/bookmark</span>
         <span class="arch-skill">/minutes</span>
         <span class="arch-skill">/classify</span>
+        <span class="arch-skill">/watch</span>
+        <span class="arch-skill">/radar</span>
+        <span class="arch-skill">/tune</span>
       </div>
       <div class="arch-mcp">
         <div class="arch-mcp-title">MCP Server</div>
-        <div class="arch-mcp-sub">FastMCP 2.x/3.x &middot; stdio + HTTP &middot; 17 tools</div>
+        <div class="arch-mcp-sub">FastMCP 2.x/3.x &middot; stdio + HTTP &middot; 21 tools</div>
       </div>
     </div>
     <div class="arch-connector">
@@ -1031,7 +1049,7 @@ $ distillery-mcp --transport http --port 8000
         <li>Entry data model</li>
         <li>DuckDB + HNSW index</li>
         <li>Embedding providers</li>
-        <li>MCP server (7 tools)</li>
+        <li>MCP server (21 tools)</li>
       </ul>
     </div>
     <div class="card accent">

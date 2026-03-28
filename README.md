@@ -221,10 +221,16 @@ distillery/
 │   │   ├── engine.py        # ClassificationEngine
 │   │   └── dedup.py         # DeduplicationChecker
 │   └── mcp/
-│       ├── server.py        # MCP server (17 tools, FastMCP 2.x/3.x)
+│       ├── server.py        # MCP server (21 tools, FastMCP 2.x/3.x)
 │       ├── auth.py          # GitHub OAuth via FastMCP GitHubProvider
 │       └── __main__.py      # CLI: --transport stdio|http, --host, --port
-├── tests/                   # 860+ tests
+│   └── feeds/
+│       ├── github.py        # GitHub event adapter
+│       ├── rss.py           # RSS/Atom feed adapter
+│       ├── scorer.py        # Embedding-based relevance scorer
+│       ├── poller.py        # Background feed poller
+│       └── interests.py     # Interest extractor for source suggestions
+├── tests/                   # 1000+ tests
 ├── docs/
 │   ├── mcp-setup.md
 │   ├── ROADMAP.md

@@ -1,0 +1,14 @@
+Type: cli
+Command: python -c "from distillery.feeds import FeedItem, GitHubAdapter, RSSAdapter; ..."
+Expected: All classes importable, FeedItem/GitHubAdapter/RSSAdapter instantiate correctly
+Timestamp: 2026-03-27T00:00:00Z
+
+FeedItem: FeedItem
+GitHubAdapter: GitHubAdapter
+RSSAdapter: RSSAdapter
+FeedItem instance: Test / source_type: rss
+GitHubAdapter owner: owner / repo: repo / last_polled_at: None
+RSSAdapter url: https://example.com/feed.xml / last_polled_at: None
+All imports and instantiation OK
+
+Status: PASS

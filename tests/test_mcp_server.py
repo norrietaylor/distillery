@@ -677,5 +677,9 @@ class TestCreateServer:
             "distillery_stale",
             "distillery_tag_tree",
             "distillery_type_schemas",
+            "distillery_watch",
+            "distillery_interests",
+            "distillery_suggest_sources",
+            "distillery_poll",
         }
         assert expected == tool_names, f"Missing tools: {expected - tool_names}"

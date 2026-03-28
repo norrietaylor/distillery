@@ -1,0 +1,54 @@
+# Eval scenarios for the /watch skill.
+
+- name: watch-list-empty
+  skill: watch
+  description: "Claude should list feed sources and report none are configured when the registry is empty"
+  prompt: "/watch list"
+  seed_entries: []
+  expected_tools:
+    - distillery_status
+    - distillery_watch
+  max_latency_ms: 30000
+  max_total_tokens: 5000
+
+- name: watch-add-rss-source
+  skill: watch
+  description: "Claude should add a new RSS feed source via distillery_watch"
+  prompt: "/watch add https://news.ycombinator.com/rss --type rss --label 'Hacker News'"
+  seed_entries: []
+  expected_tools:
+    - distillery_status
+    - distillery_watch
+  max_latency_ms: 30000
+  max_total_tokens: 5000
+
+- name: watch-add-github-source
+  skill: watch
+  description: "Claude should add a GitHub source and use source_type=github"
+  prompt: "/watch add openai/openai-python --type github --label 'OpenAI Python SDK' --interval 120"
+  seed_entries: []
+  expected_tools:
+    - distillery_watch
+  max_latency_ms: 30000
+  max_total_tokens: 5000
+
+- name: watch-remove-source
+  skill: watch
+  description: "Claude should remove a feed source by URL via distillery_watch remove action"
+  prompt: "/watch remove https://news.ycombinator.com/rss"
+  seed_entries: []
+  expected_tools:
+    - distillery_status
+    - distillery_watch
+  max_latency_ms: 30000
+  max_total_tokens: 5000
+
+- name: watch-default-list
+  skill: watch
+  description: "Invoking /watch with no arguments should default to listing sources"
+  prompt: "/watch"
+  seed_entries: []
+  expected_tools:
+    - distillery_watch
+  max_latency_ms: 30000
+  max_total_tokens: 5000

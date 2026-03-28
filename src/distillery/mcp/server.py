@@ -58,7 +58,7 @@ from typing import Any, cast
 from fastmcp import Context, FastMCP  # noqa: F401  # Context used by tool wrappers added in T02
 from mcp import types
 
-from distillery.config import DistilleryConfig, load_config
+from distillery.config import DistilleryConfig, FeedSourceConfig, load_config
 
 logger = logging.getLogger(__name__)
 
@@ -924,6 +924,212 @@ def create_server(
         """
         return await _handle_type_schemas()
 
+    @server.tool
+    async def distillery_watch(  # noqa: PLR0913
+        ctx: Context,
+        action: str,
+        url: str | None = None,
+        source_type: str | None = None,
+        label: str | None = None,
+        poll_interval_minutes: int | None = None,
+        trust_weight: float | None = None,
+    ) -> list[types.TextContent]:
+        """Manage monitored feed sources in the Distillery source registry.
+
+        Supports three actions:
+
+        - ``list``: Return all currently configured feed sources with their
+          settings (url, source_type, label, poll_interval_minutes,
+          trust_weight).
+        - ``add``: Register a new feed source.  Requires ``url`` and
+          ``source_type``.  Optional fields: ``label``,
+          ``poll_interval_minutes`` (default 60), ``trust_weight``
+          (default 1.0).  Accepted source types: ``rss``, ``github``.
+        - ``remove``: Remove a feed source by exact URL match.  Requires
+          ``url``.
+
+        Changes made via ``add`` and ``remove`` are applied to the in-memory
+        configuration for the current server session.  To persist changes
+        across restarts, update the ``feeds.sources`` section of
+        ``distillery.yaml``.
+
+        Parameters:
+            action (str): One of ``'list'``, ``'add'``, ``'remove'``.
+            url (str | None): Source URL.  Required for ``add`` and ``remove``.
+            source_type (str | None): Adapter type for ``add``.  One of
+                ``'rss'``, ``'github'``.
+            label (str | None): Human-readable label for the source (optional).
+            poll_interval_minutes (int | None): Poll frequency in minutes for
+                ``add``.  Defaults to ``60``.
+            trust_weight (float | None): Trust multiplier in ``[0.0, 1.0]``
+                for ``add``.  Defaults to ``1.0``.
+
+        Returns:
+            list[types.TextContent]: A single MCP TextContent block containing
+            a JSON object.  On success the object contains:
+              - For ``list``: ``sources`` (list of source dicts) and
+                ``count`` (number of sources).
+              - For ``add``: ``added`` (the new source dict) and
+                ``sources`` (updated full list).
+              - For ``remove``: ``removed_url``, ``removed`` (bool), and
+                ``sources`` (updated full list).
+            On error: ``error``, ``code``, and ``message``.
+        """
+        lc = _get_lifespan_context(ctx)
+        arguments: dict[str, Any] = {"action": action}
+        if url is not None:
+            arguments["url"] = url
+        if source_type is not None:
+            arguments["source_type"] = source_type
+        if label is not None:
+            arguments["label"] = label
+        if poll_interval_minutes is not None:
+            arguments["poll_interval_minutes"] = poll_interval_minutes
+        if trust_weight is not None:
+            arguments["trust_weight"] = trust_weight
+        return await _handle_watch(
+            config=lc["config"],
+            arguments=arguments,
+        )
+
+    @server.tool
+    async def distillery_interests(
+        ctx: Context,
+        recency_days: int = 90,
+        top_n: int = 20,
+    ) -> list[types.TextContent]:
+        """Extract an interest profile from the knowledge base.
+
+        Mines all active entries to produce a weighted summary of the user's
+        topics of interest.  The result includes top tags (recency-weighted),
+        bookmark domains, tracked GitHub repositories, expertise areas, and
+        the list of sources already being watched (for exclusion from new
+        suggestions).
+
+        Parameters:
+            recency_days (int): Number of days used as the recency window.
+                Entries within this window receive full weight; older entries
+                decay linearly.  Default ``90``.
+            top_n (int): Maximum number of tags to include in the response.
+                Default ``20``.
+
+        Returns:
+            list[types.TextContent]: A single MCP TextContent block containing
+            a JSON object with keys:
+              - ``top_tags``: list of ``[tag, weight]`` pairs, descending.
+              - ``bookmark_domains``: list of domain strings.
+              - ``tracked_repos``: list of ``owner/repo`` strings.
+              - ``expertise_areas``: list of topic strings.
+              - ``watched_sources``: list of watched source URLs.
+              - ``suggestion_context``: prose paragraph for LLM prompting.
+              - ``entry_count``: number of entries analysed.
+              - ``generated_at``: ISO 8601 timestamp.
+            On error: ``error``, ``code``, and ``message``.
+        """
+        lc = _get_lifespan_context(ctx)
+        return await _handle_interests(
+            store=lc["store"],
+            config=lc["config"],
+            arguments={"recency_days": recency_days, "top_n": top_n},
+        )
+
+    @server.tool
+    async def distillery_suggest_sources(  # noqa: PLR0913
+        ctx: Context,
+        max_suggestions: int = 5,
+        source_types: list[str] | None = None,
+        recency_days: int = 90,
+        top_n: int = 20,
+    ) -> list[types.TextContent]:
+        """Suggest new feed sources to monitor based on the user's interests.
+
+        Builds an :class:`~distillery.feeds.interests.InterestProfile` from
+        the knowledge base and returns a structured prompt fragment plus a
+        list of illustrative source suggestions inferred from the profile.
+        The suggestions are heuristic (pattern-matched from tracked repos and
+        bookmark domains) and are intended as a starting point; callers can
+        pass ``suggestion_context`` to an LLM for richer recommendations.
+
+        Parameters:
+            max_suggestions (int): Maximum number of source suggestions to
+                return.  Default ``5``.
+            source_types (list[str] | None): Filter suggestions to these
+                adapter types.  Accepted values: ``'rss'``, ``'github'``.
+                ``None`` means no filter.
+            recency_days (int): Recency window passed to
+                :class:`~distillery.feeds.interests.InterestExtractor`.
+                Default ``90``.
+            top_n (int): Top-tags count passed to the extractor.  Default
+                ``20``.
+
+        Returns:
+            list[types.TextContent]: A single MCP TextContent block containing
+            a JSON object with keys:
+              - ``suggestions``: list of dicts, each with ``url``,
+                ``source_type``, ``label``, and ``rationale``.
+              - ``suggestion_context``: full prose paragraph for LLM prompting.
+              - ``watched_sources``: list of currently-watched source URLs
+                (already excluded from suggestions).
+              - ``entry_count``: number of entries analysed.
+            On error: ``error``, ``code``, and ``message``.
+        """
+        lc = _get_lifespan_context(ctx)
+        arguments: dict[str, Any] = {
+            "max_suggestions": max_suggestions,
+            "recency_days": recency_days,
+            "top_n": top_n,
+        }
+        if source_types is not None:
+            arguments["source_types"] = source_types
+        return await _handle_suggest_sources(
+            store=lc["store"],
+            config=lc["config"],
+            arguments=arguments,
+        )
+
+    @server.tool
+    async def distillery_poll(
+        ctx: Context,
+        source_url: str | None = None,
+    ) -> list[types.TextContent]:
+        """Poll configured feed sources and store relevant items.
+
+        Runs a poll cycle over all (or one) configured feed sources.  For
+        each source, the appropriate adapter is called to fetch new items.
+        Each item is scored against the knowledge base via cosine similarity;
+        items that are near-duplicates of existing entries are skipped, and
+        items whose relevance score meets the configured digest threshold are
+        stored as ``feed`` entries.
+
+        Parameters:
+            source_url (str | None): When provided, poll only the source
+                whose URL matches this value exactly.  When ``None`` (the
+                default), all configured sources are polled.
+
+        Returns:
+            list[types.TextContent]: A single MCP TextContent block containing
+            a JSON object with keys:
+              - ``sources_polled``: number of sources processed.
+              - ``sources_errored``: number of sources that reported errors.
+              - ``total_fetched``: total number of raw items fetched.
+              - ``total_stored``: number of items stored in the knowledge base.
+              - ``total_skipped_dedup``: items skipped as near-duplicates.
+              - ``total_below_threshold``: items below the relevance threshold.
+              - ``results``: per-source breakdown (see :class:`PollResult`).
+              - ``started_at``: ISO 8601 timestamp.
+              - ``finished_at``: ISO 8601 timestamp.
+            On error: ``error``, ``code``, and ``message``.
+        """
+        lc = _get_lifespan_context(ctx)
+        arguments: dict[str, Any] = {}
+        if source_url is not None:
+            arguments["source_url"] = source_url
+        return await _handle_poll(
+            store=lc["store"],
+            config=lc["config"],
+            arguments=arguments,
+        )
+
     return server
 
 
@@ -1054,6 +1260,7 @@ _VALID_ENTRY_TYPES = {
     "project",
     "digest",
     "github",
+    "feed",
 }
 
 # Valid status values (mirrors EntryStatus enum).
@@ -2868,3 +3075,558 @@ def _sync_gather_stale(
         )
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# distillery_watch handler
+# ---------------------------------------------------------------------------
+
+_VALID_SOURCE_TYPES = {"rss", "github"}
+
+
+def _feed_source_to_dict(source: FeedSourceConfig) -> dict[str, Any]:
+    """Serialise a :class:`~distillery.config.FeedSourceConfig` to a plain dict."""
+    return {
+        "url": source.url,
+        "source_type": source.source_type,
+        "label": source.label,
+        "poll_interval_minutes": source.poll_interval_minutes,
+        "trust_weight": source.trust_weight,
+    }
+
+
+# Lock protecting mutations to the shared ``config.feeds.sources`` list.
+# In stateless HTTP mode every request shares the same config object, so
+# concurrent ``/watch add`` / ``/watch remove`` calls must be serialised.
+_watch_lock = asyncio.Lock()
+
+
+async def _handle_watch(
+    config: DistilleryConfig,
+    arguments: dict[str, Any],
+) -> list[types.TextContent]:
+    """Handle the ``distillery_watch`` tool.
+
+    Supports ``list``, ``add``, and ``remove`` actions against the in-memory
+    ``config.feeds.sources`` list.  Mutations are serialised via
+    ``_watch_lock`` to prevent concurrent request clobbering.
+
+    Args:
+        config: The current :class:`~distillery.config.DistilleryConfig`
+            (mutations are applied in-place to ``config.feeds.sources``).
+        arguments: Parsed tool arguments dict.
+
+    Returns:
+        A structured MCP success or error response.
+    """
+    action_raw = arguments.get("action")
+    if action_raw is None or not isinstance(action_raw, str):
+        return error_response(
+            "INVALID_ACTION",
+            f"action must be a non-null string, got: {action_raw!r}",
+        )
+    action = action_raw.strip().lower()
+
+    if action not in ("list", "add", "remove"):
+        return error_response(
+            "INVALID_ACTION",
+            f"action must be one of 'list', 'add', 'remove'; got: {action!r}",
+        )
+
+    sources = config.feeds.sources
+
+    if action == "list":
+        return success_response(
+            {
+                "sources": [_feed_source_to_dict(s) for s in sources],
+                "count": len(sources),
+            }
+        )
+
+    if action == "add":
+        url_raw = arguments.get("url")
+        if url_raw is not None and not isinstance(url_raw, str):
+            return error_response(
+                "INVALID_FIELD", f"url must be a string, got: {type(url_raw).__name__}"
+            )
+        url = str(url_raw or "").strip()
+        if not url:
+            return error_response("MISSING_FIELD", "url is required for action='add'")
+
+        source_type_raw = arguments.get("source_type")
+        if source_type_raw is not None and not isinstance(source_type_raw, str):
+            return error_response(
+                "INVALID_FIELD",
+                f"source_type must be a string, got: {type(source_type_raw).__name__}",
+            )
+        source_type = str(source_type_raw or "").strip()
+        if not source_type:
+            return error_response("MISSING_FIELD", "source_type is required for action='add'")
+        if source_type not in _VALID_SOURCE_TYPES:
+            return error_response(
+                "INVALID_SOURCE_TYPE",
+                f"source_type must be one of {sorted(_VALID_SOURCE_TYPES)}, got: {source_type!r}",
+            )
+
+        label = str(arguments.get("label", ""))
+
+        poll_interval_raw = arguments.get("poll_interval_minutes", 60)
+        try:
+            poll_interval = int(poll_interval_raw)
+        except (TypeError, ValueError):
+            return error_response(
+                "INVALID_FIELD",
+                f"poll_interval_minutes must be an integer, got: {poll_interval_raw!r}",
+            )
+        if poll_interval <= 0:
+            return error_response(
+                "INVALID_FIELD",
+                f"poll_interval_minutes must be a positive integer, got: {poll_interval}",
+            )
+
+        trust_weight_raw = arguments.get("trust_weight", 1.0)
+        try:
+            trust_weight = float(trust_weight_raw)
+        except (TypeError, ValueError):
+            return error_response(
+                "INVALID_FIELD",
+                f"trust_weight must be a float, got: {trust_weight_raw!r}",
+            )
+        if not (0.0 <= trust_weight <= 1.0):
+            return error_response(
+                "INVALID_FIELD",
+                f"trust_weight must be between 0.0 and 1.0, got: {trust_weight}",
+            )
+
+        new_source = FeedSourceConfig(
+            url=url,
+            source_type=source_type,
+            label=label,
+            poll_interval_minutes=poll_interval,
+            trust_weight=trust_weight,
+        )
+        async with _watch_lock:
+            # Duplicate check inside lock to prevent TOCTOU race.
+            if any(s.url == url for s in sources):
+                return error_response(
+                    "DUPLICATE_SOURCE",
+                    f"Source with URL {url!r} is already registered.",
+                )
+            sources.append(new_source)
+
+        return success_response(
+            {
+                "added": _feed_source_to_dict(new_source),
+                "sources": [_feed_source_to_dict(s) for s in sources],
+                "note": (
+                    "Source added to the in-memory registry. "
+                    "To persist across restarts, update feeds.sources in distillery.yaml."
+                ),
+            }
+        )
+
+    # action == "remove"
+    url = str(arguments.get("url", "")).strip()
+    if not url:
+        return error_response("MISSING_FIELD", "url is required for action='remove'")
+
+    async with _watch_lock:
+        original_count = len(sources)
+        config.feeds.sources = [s for s in sources if s.url != url]
+        removed = len(config.feeds.sources) < original_count
+
+    return success_response(
+        {
+            "removed_url": url,
+            "removed": removed,
+            "sources": [_feed_source_to_dict(s) for s in config.feeds.sources],
+            "note": (
+                "Source removed from the in-memory registry. "
+                "To persist across restarts, update feeds.sources in distillery.yaml."
+            ),
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
+# distillery_interests handler
+# ---------------------------------------------------------------------------
+
+
+async def _handle_interests(
+    store: Any,
+    config: DistilleryConfig,
+    arguments: dict[str, Any],
+) -> list[types.TextContent]:
+    """Handle the ``distillery_interests`` tool.
+
+    Builds an :class:`~distillery.feeds.interests.InterestProfile` by mining
+    the active entries in *store* and returns it as a JSON payload.
+
+    Args:
+        store: An initialised storage backend.
+        config: The current :class:`~distillery.config.DistilleryConfig`.
+        arguments: Parsed tool arguments dict (``recency_days``, ``top_n``).
+
+    Returns:
+        A structured MCP success or error response.
+    """
+    from distillery.feeds.interests import InterestExtractor
+
+    recency_days_raw = arguments.get("recency_days", 90)
+    try:
+        recency_days = int(recency_days_raw)
+    except (TypeError, ValueError):
+        return error_response(
+            "INVALID_FIELD",
+            f"recency_days must be an integer, got: {recency_days_raw!r}",
+        )
+    if recency_days <= 0:
+        return error_response(
+            "INVALID_FIELD",
+            f"recency_days must be a positive integer, got: {recency_days}",
+        )
+
+    top_n_raw = arguments.get("top_n", 20)
+    try:
+        top_n = int(top_n_raw)
+    except (TypeError, ValueError):
+        return error_response(
+            "INVALID_FIELD",
+            f"top_n must be an integer, got: {top_n_raw!r}",
+        )
+    if top_n <= 0:
+        return error_response(
+            "INVALID_FIELD",
+            f"top_n must be a positive integer, got: {top_n}",
+        )
+
+    extractor = InterestExtractor(
+        store=store,
+        feeds_config=config.feeds,
+        recency_days=recency_days,
+        top_n=top_n,
+    )
+    try:
+        profile = await extractor.extract()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("distillery_interests: extraction failed")
+        return error_response("EXTRACTION_ERROR", f"Interest extraction failed: {exc}")
+
+    return success_response(
+        {
+            "top_tags": [[tag, weight] for tag, weight in profile.top_tags],
+            "bookmark_domains": profile.bookmark_domains,
+            "tracked_repos": profile.tracked_repos,
+            "expertise_areas": profile.expertise_areas,
+            "watched_sources": profile.watched_sources,
+            "suggestion_context": profile.suggestion_context,
+            "entry_count": profile.entry_count,
+            "generated_at": profile.generated_at.isoformat(),
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
+# distillery_suggest_sources handler
+# ---------------------------------------------------------------------------
+
+_VALID_SUGGEST_SOURCE_TYPES = {"rss", "github"}
+
+
+async def _handle_suggest_sources(
+    store: Any,
+    config: DistilleryConfig,
+    arguments: dict[str, Any],
+) -> list[types.TextContent]:
+    """Handle the ``distillery_suggest_sources`` tool.
+
+    Extracts an interest profile from the store and derives heuristic source
+    suggestions from tracked repos and bookmark domains.  The ``suggestion_context``
+    field in the response can be forwarded to an LLM for richer recommendations.
+
+    Args:
+        store: An initialised storage backend.
+        config: The current :class:`~distillery.config.DistilleryConfig`.
+        arguments: Parsed tool arguments dict (``max_suggestions``,
+            ``source_types``, ``recency_days``, ``top_n``).
+
+    Returns:
+        A structured MCP success or error response.
+    """
+    from distillery.feeds.interests import InterestExtractor
+
+    max_suggestions_raw = arguments.get("max_suggestions", 5)
+    try:
+        max_suggestions = int(max_suggestions_raw)
+    except (TypeError, ValueError):
+        return error_response(
+            "INVALID_FIELD",
+            f"max_suggestions must be an integer, got: {max_suggestions_raw!r}",
+        )
+    if max_suggestions <= 0:
+        return error_response(
+            "INVALID_FIELD",
+            f"max_suggestions must be a positive integer, got: {max_suggestions}",
+        )
+
+    source_types_raw = arguments.get("source_types")
+    source_type_filter: set[str] | None = None
+    if source_types_raw is not None:
+        if not isinstance(source_types_raw, list):
+            return error_response(
+                "INVALID_FIELD",
+                f"source_types must be a list, got: {type(source_types_raw).__name__}",
+            )
+        invalid = [t for t in source_types_raw if t not in _VALID_SUGGEST_SOURCE_TYPES]
+        if invalid:
+            return error_response(
+                "INVALID_SOURCE_TYPE",
+                f"Invalid source_types: {invalid}. "
+                f"Must be one of {sorted(_VALID_SUGGEST_SOURCE_TYPES)}.",
+            )
+        source_type_filter = set(source_types_raw)
+
+    recency_days_raw = arguments.get("recency_days", 90)
+    try:
+        recency_days = int(recency_days_raw)
+    except (TypeError, ValueError):
+        return error_response(
+            "INVALID_FIELD",
+            f"recency_days must be an integer, got: {recency_days_raw!r}",
+        )
+    if recency_days <= 0:
+        return error_response(
+            "INVALID_FIELD",
+            f"recency_days must be a positive integer, got: {recency_days}",
+        )
+
+    top_n_raw = arguments.get("top_n", 20)
+    try:
+        top_n = int(top_n_raw)
+    except (TypeError, ValueError):
+        return error_response(
+            "INVALID_FIELD",
+            f"top_n must be an integer, got: {top_n_raw!r}",
+        )
+    if top_n <= 0:
+        return error_response(
+            "INVALID_FIELD",
+            f"top_n must be a positive integer, got: {top_n}",
+        )
+
+    extractor = InterestExtractor(
+        store=store,
+        feeds_config=config.feeds,
+        recency_days=recency_days,
+        top_n=top_n,
+    )
+    try:
+        profile = await extractor.extract()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("distillery_suggest_sources: extraction failed")
+        return error_response("EXTRACTION_ERROR", f"Interest extraction failed: {exc}")
+
+    watched_set = _normalise_watched_set(profile.watched_sources)
+    suggestions = _derive_suggestions(
+        profile=profile,
+        watched_set=watched_set,
+        source_type_filter=source_type_filter,
+        max_suggestions=max_suggestions,
+    )
+
+    return success_response(
+        {
+            "suggestions": suggestions,
+            "suggestion_context": profile.suggestion_context,
+            "watched_sources": profile.watched_sources,
+            "entry_count": profile.entry_count,
+        }
+    )
+
+
+def _normalise_watched_set(watched_sources: list[str]) -> set[str]:
+    """Build a normalised set of watched source identifiers.
+
+    For each URL, also includes the ``owner/repo`` slug when the URL
+    points to GitHub.  This ensures that a GitHub source stored as
+    ``https://github.com/owner/repo`` is matched against a suggestion
+    that uses the short ``owner/repo`` form.
+
+    Args:
+        watched_sources: Raw list of watched source URLs from the profile.
+
+    Returns:
+        A set of normalised identifiers for exclusion checks.
+    """
+    import re
+
+    normalised: set[str] = set()
+    for url in watched_sources:
+        normalised.add(url)
+        # Extract owner/repo slug from GitHub URLs
+        match = re.search(r"github\.com/([a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+)", url)
+        if match:
+            normalised.add(match.group(1))
+        # Also handle bare owner/repo slugs
+        stripped = url.strip().rstrip("/")
+        if re.match(r"^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$", stripped):
+            normalised.add(f"https://github.com/{stripped}")
+    return normalised
+
+
+def _derive_suggestions(
+    profile: Any,
+    watched_set: set[str],
+    source_type_filter: set[str] | None,
+    max_suggestions: int,
+) -> list[dict[str, Any]]:
+    """Build heuristic source suggestions from a profile.
+
+    Derives candidate sources from tracked repositories (GitHub releases/
+    activity feeds) and bookmark domains (RSS feeds), filtering out sources
+    already in *watched_set* and applying *source_type_filter*.
+
+    Args:
+        profile: An :class:`~distillery.feeds.interests.InterestProfile`.
+        watched_set: Set of already-watched source URLs.
+        source_type_filter: When non-None, only include suggestions of these
+            source types.
+        max_suggestions: Maximum number of suggestions to return.
+
+    Returns:
+        A list of suggestion dicts, each with ``url``, ``source_type``,
+        ``label``, and ``rationale``.
+    """
+    candidates: list[dict[str, Any]] = []
+
+    # GitHub suggestions from tracked repos
+    if source_type_filter is None or "github" in source_type_filter:
+        for repo in profile.tracked_repos:
+            candidate_url = repo  # owner/repo slug used by GitHub adapter
+            if candidate_url not in watched_set:
+                candidates.append(
+                    {
+                        "url": candidate_url,
+                        "source_type": "github",
+                        "label": repo,
+                        "rationale": (
+                            f"You have referenced the {repo!r} repository in your "
+                            "knowledge base. Monitoring it will surface new releases, "
+                            "issues, and pull requests."
+                        ),
+                    }
+                )
+
+    # RSS suggestions from bookmark domains
+    if source_type_filter is None or "rss" in source_type_filter:
+        for domain in profile.bookmark_domains:
+            candidate_url = f"https://{domain}/rss"
+            if candidate_url not in watched_set and len(domain) > 3 and "." in domain:
+                candidates.append(
+                    {
+                        "url": candidate_url,
+                        "source_type": "rss",
+                        "label": domain,
+                        "rationale": (
+                            f"You frequently bookmark content from {domain!r}. "
+                            "An RSS feed from this domain would surface new content "
+                            "automatically."
+                        ),
+                    }
+                )
+
+    return candidates[:max_suggestions]
+
+
+# ---------------------------------------------------------------------------
+# distillery_poll handler
+# ---------------------------------------------------------------------------
+
+
+def _poll_result_to_dict(result: Any) -> dict[str, Any]:
+    """Serialise a :class:`~distillery.feeds.poller.PollResult` to a plain dict."""
+    return {
+        "source_url": result.source_url,
+        "source_type": result.source_type,
+        "items_fetched": result.items_fetched,
+        "items_stored": result.items_stored,
+        "items_skipped_dedup": result.items_skipped_dedup,
+        "items_below_threshold": result.items_below_threshold,
+        "errors": result.errors,
+        "polled_at": result.polled_at.isoformat(),
+    }
+
+
+async def _handle_poll(
+    store: Any,
+    config: DistilleryConfig,
+    arguments: dict[str, Any],
+) -> list[types.TextContent]:
+    """Handle the ``distillery_poll`` tool.
+
+    Creates a :class:`~distillery.feeds.poller.FeedPoller`, optionally filters
+    to a single source, and runs a poll cycle.
+
+    Args:
+        store: An initialised storage backend.
+        config: The current :class:`~distillery.config.DistilleryConfig`.
+        arguments: Parsed tool arguments dict (``source_url`` optional).
+
+    Returns:
+        A structured MCP success or error response.
+    """
+    from distillery.config import DistilleryConfig as _DistilleryConfig
+    from distillery.feeds.poller import FeedPoller
+
+    source_url: str | None = arguments.get("source_url")
+
+    # When a specific source_url is requested, temporarily narrow the config
+    # so the poller only touches that one source.
+    if source_url is not None:
+        matching = [s for s in config.feeds.sources if s.url == source_url]
+        if not matching:
+            return error_response(
+                "NOT_FOUND",
+                f"No configured source found with url {source_url!r}. "
+                "Use distillery_watch(action='list') to see available sources.",
+            )
+        # Build a shallow config copy restricted to the matching source.
+        from distillery.config import FeedsConfig
+
+        narrowed_feeds = FeedsConfig(
+            sources=matching,
+            thresholds=config.feeds.thresholds,
+        )
+        poll_config = _DistilleryConfig(
+            storage=config.storage,
+            embedding=config.embedding,
+            team=config.team,
+            classification=config.classification,
+            tags=config.tags,
+            feeds=narrowed_feeds,
+        )
+    else:
+        poll_config = config
+
+    poller = FeedPoller(store=store, config=poll_config)
+
+    try:
+        summary = await poller.poll()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("distillery_poll: unexpected error during poll cycle")
+        return error_response("POLL_ERROR", f"Poll cycle failed: {exc}")
+
+    return success_response(
+        {
+            "sources_polled": summary.sources_polled,
+            "sources_errored": summary.sources_errored,
+            "total_fetched": summary.total_fetched,
+            "total_stored": summary.total_stored,
+            "total_skipped_dedup": summary.total_skipped_dedup,
+            "total_below_threshold": summary.total_below_threshold,
+            "results": [_poll_result_to_dict(r) for r in summary.results],
+            "started_at": summary.started_at.isoformat(),
+            "finished_at": summary.finished_at.isoformat(),
+        }
+    )

@@ -1,0 +1,56 @@
+Type: test
+Command: uv run pytest tests/test_interests.py -v
+Expected: All 43 tests pass
+Timestamp: 2026-03-28T19:10:00Z
+Status: PASS
+
+Output:
+============================= test session starts ==============================
+platform linux -- Python 3.13.7, pytest-9.0.2, pluggy-1.6.0
+asyncio: mode=Mode.AUTO
+
+tests/test_interests.py::TestInterestProfile::test_defaults PASSED
+tests/test_interests.py::TestInterestProfile::test_entry_count_default_zero PASSED
+tests/test_interests.py::TestInterestProfile::test_generated_at_is_utc PASSED
+tests/test_interests.py::TestRecencyWeight::test_recent_entry_gets_full_weight PASSED
+tests/test_interests.py::TestRecencyWeight::test_old_entry_gets_min_weight PASSED
+tests/test_interests.py::TestRecencyWeight::test_middle_entry_gets_intermediate_weight PASSED
+tests/test_interests.py::TestRecencyWeight::test_exactly_at_recency_boundary PASSED
+tests/test_interests.py::TestExtractDomain::test_url_from_metadata PASSED
+tests/test_interests.py::TestExtractDomain::test_www_prefix_stripped PASSED
+tests/test_interests.py::TestExtractDomain::test_url_from_content_fallback PASSED
+tests/test_interests.py::TestExtractDomain::test_no_url_returns_none PASSED
+tests/test_interests.py::TestExtractDomain::test_invalid_metadata_type PASSED
+tests/test_interests.py::TestExtractRepos::test_github_entry_extracts_repo PASSED
+tests/test_interests.py::TestExtractRepos::test_feed_entry_slug_source_url PASSED
+tests/test_interests.py::TestExtractRepos::test_feed_entry_github_url PASSED
+tests/test_interests.py::TestExtractRepos::test_non_github_entry_does_nothing PASSED
+tests/test_interests.py::TestNormaliseTopN::test_empty_scores_returns_empty PASSED
+tests/test_interests.py::TestNormaliseTopN::test_single_tag_gets_weight_one PASSED
+tests/test_interests.py::TestNormaliseTopN::test_relative_weights PASSED
+tests/test_interests.py::TestNormaliseTopN::test_top_n_limit PASSED
+tests/test_interests.py::TestInterestExtractorExtract::test_empty_store_returns_empty_profile PASSED
+tests/test_interests.py::TestInterestExtractorExtract::test_tags_accumulated PASSED
+tests/test_interests.py::TestInterestExtractorExtract::test_python_tag_has_highest_weight PASSED
+tests/test_interests.py::TestInterestExtractorExtract::test_bookmark_domain_extracted PASSED
+tests/test_interests.py::TestInterestExtractorExtract::test_github_entry_adds_repo PASSED
+tests/test_interests.py::TestInterestExtractorExtract::test_person_entry_adds_expertise PASSED
+tests/test_interests.py::TestInterestExtractorExtract::test_watched_sources_populated_from_config PASSED
+tests/test_interests.py::TestInterestExtractorExtract::test_entry_count_reflects_analysed_entries PASSED
+tests/test_interests.py::TestInterestExtractorExtract::test_very_old_entries_excluded PASSED
+tests/test_interests.py::TestInterestExtractorExtract::test_suggestion_context_contains_tags PASSED
+tests/test_interests.py::TestInterestExtractorExtract::test_suggestion_context_mentions_exclusion PASSED
+tests/test_interests.py::TestHandleInterests::test_returns_profile_fields PASSED
+tests/test_interests.py::TestHandleInterests::test_invalid_recency_days_returns_error PASSED
+tests/test_interests.py::TestHandleInterests::test_invalid_top_n_returns_error PASSED
+tests/test_interests.py::TestHandleInterests::test_top_tags_are_serialised_as_pairs PASSED
+tests/test_interests.py::TestHandleInterests::test_custom_recency_days PASSED
+tests/test_interests.py::TestHandleSuggestSources::test_returns_suggestions_field PASSED
+tests/test_interests.py::TestHandleSuggestSources::test_suggestions_have_expected_fields PASSED
+tests/test_interests.py::TestHandleSuggestSources::test_invalid_max_suggestions_returns_error PASSED
+tests/test_interests.py::TestHandleSuggestSources::test_invalid_source_type_filter_returns_error PASSED
+tests/test_interests.py::TestHandleSuggestSources::test_watched_sources_excluded_from_suggestions PASSED
+tests/test_interests.py::TestHandleSuggestSources::test_github_filter_only_returns_github_suggestions PASSED
+tests/test_interests.py::TestHandleSuggestSources::test_max_suggestions_limits_results PASSED
+
+============================== 43 passed in 0.34s ==============================

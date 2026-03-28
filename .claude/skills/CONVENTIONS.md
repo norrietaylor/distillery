@@ -198,12 +198,15 @@ All skills use one or more of these tools:
 | Tool | Used By | Purpose |
 |------|---------|---------|
 | `distillery_status` | All | Check server availability and database stats |
-| `distillery_store` | distill, bookmark, minutes | Store a new entry |
+| `distillery_store` | distill, bookmark, minutes, radar | Store a new entry |
 | `distillery_search` | recall, pour | Semantic search for entries |
 | `distillery_find_similar` | distill, bookmark | Find duplicate/similar entries |
 | `distillery_get` | (used for verification) | Retrieve a single entry by ID |
 | `distillery_update` | minutes | Partially update an existing entry |
-| `distillery_list` | minutes | List entries with filtering |
+| `distillery_list` | minutes, radar | List entries with filtering |
+| `distillery_suggest_sources` | radar | Suggest new feed sources based on interests |
+| `distillery_watch` | watch | Manage monitored feed source registry |
+| `distillery_poll` | (background) | Poll configured feed sources for new items |
 
 **Error Response Format:**
 
@@ -315,8 +318,24 @@ Skills are tested via manual invocation in Claude Code with the Distillery MCP s
 - Test: Manual invocation and verification of stored/retrieved entries
 - Screenshots or text output showing successful execution
 
+## Skills Registry
+
+The following skills are available in `.claude/skills/`:
+
+| Skill | Directory | Primary MCP Tools | Purpose |
+|-------|-----------|-------------------|---------|
+| `/distill` | `distill/` | distillery_store, distillery_find_similar | Capture knowledge from conversations |
+| `/recall` | `recall/` | distillery_search | Semantic search over the knowledge base |
+| `/pour` | `pour/` | distillery_search | Multi-entry synthesis with citations |
+| `/bookmark` | `bookmark/` | distillery_store, distillery_find_similar | Save and annotate URLs |
+| `/minutes` | `minutes/` | distillery_store, distillery_update, distillery_list | Record and update meeting notes |
+| `/classify` | `classify/` | distillery_classify, distillery_review_queue, distillery_resolve_review | Classify and review entries |
+| `/watch` | `watch/` | distillery_watch | Manage monitored feed sources |
+| `/radar` | `radar/` | distillery_list, distillery_suggest_sources, distillery_store | Ambient feed digest and source suggestions |
+| `/tune` | `tune/` | distillery_status | Display and adjust feed relevance thresholds |
+
 ---
 
-**Document Version:** 1.0
-**Last Updated:** 2026-03-22
+**Document Version:** 1.1
+**Last Updated:** 2026-03-27
 **Applies To:** All Distillery skills in `.claude/skills/<skill-name>/SKILL.md`

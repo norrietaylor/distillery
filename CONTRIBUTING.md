@@ -137,7 +137,7 @@ feat(embedding): implement JinaEmbeddingProvider with task types
 chore: update ruff to v0.4 and fix new lint warnings
 ```
 
-Scope values: `store`, `mcp`, `embedding`, `classification`, `config`, `skills`, `cli`
+Scope values: `store`, `mcp`, `embedding`, `classification`, `config`, `skills`, `cli`, `auth`, `feeds`
 
 ---
 
@@ -184,8 +184,8 @@ DuckDB (local persistent storage)
 
 | Layer | Description | Key types |
 |-------|-------------|-----------|
-| **Skills** | `/distill`, `/recall`, `/pour`, `/bookmark`, `/minutes`, `/classify` — CLAUDE.md files that orchestrate MCP tool calls | — |
-| **MCP Server** | FastMCP server exposing 17 tools over stdio transport | `mcp/server.py` |
+| **Skills** | `/distill`, `/recall`, `/pour`, `/bookmark`, `/minutes`, `/classify`, `/watch`, `/radar`, `/tune` — SKILL.md files that orchestrate MCP tool calls | — |
+| **MCP Server** | FastMCP server exposing 21 tools over stdio/HTTP transport | `mcp/server.py` |
 | **Core protocols** | `DistilleryStore`, `EmbeddingProvider`, `ClassificationEngine` — typed `Protocol` interfaces | `store/protocol.py`, `embedding/protocol.py`, `classification/engine.py` |
 | **DuckDB backend** | `DuckDBStore` implements `DistilleryStore`; vector similarity search via VSS extension | `store/duckdb.py` |
 
