@@ -784,7 +784,7 @@
     </div>
     <div class="demo-buttons">
       <button class="demo-btn" id="demo-btn-status">distillery_status()</button>
-      <button class="demo-btn" id="demo-btn-search">distillery_search("caching")</button>
+      <button class="demo-btn" id="demo-btn-search">distillery_search("caching strategy")</button>
       <button class="demo-btn" id="demo-btn-recent">distillery_list(limit=5)</button>
     </div>
     <div class="demo-input-row">
@@ -1256,9 +1256,9 @@ For each new feed item:
       ['plain',  ''],
       ['label',  'Recent entries (5):'],
       ['plain',  ''],
-      ['plain',  '  [session]    We chose DuckDB for local storage...     norrie  today'],
-      ['plain',  '  [bookmark]   FastMCP deployment patterns...           norrie  today'],
-      ['plain',  '  [minutes]    Standup 2026-03-27: sprint planning...   alice   yesterday'],
+      ['plain',  '  [session]    We chose DuckDB for local storage...     norrie  2026-03-28'],
+      ['plain',  '  [bookmark]   FastMCP deployment patterns...           norrie  2026-03-28'],
+      ['plain',  '  [minutes]    Standup 2026-03-27: sprint planning...   alice   2026-03-27'],
       ['plain',  '  [session]    Decided on HNSW index for VSS...         norrie  2026-03-26'],
       ['plain',  '  [reference]  MCP protocol 2024-11-05 spec overview    norrie  2026-03-25'],
       ['plain',  ''],
@@ -1292,26 +1292,20 @@ For each new feed item:
 
   /* --- MCP HTTP/SSE transport ---------------------------------------- */
   function postMCP(body) {
+    var controller = new AbortController();
+    var timeoutId = setTimeout(function () { controller.abort(); }, 5000);
     var headers = {
       'Content-Type': 'application/json',
-      'Accept': 'application/json, text/event-stream',
+      'Accept': 'application/json',
     };
     if (sessionId) headers['mcp-session-id'] = sessionId;
-    return fetch(MCP_URL, { method: 'POST', headers: headers, body: JSON.stringify(body) })
+    return fetch(MCP_URL, { method: 'POST', headers: headers, body: JSON.stringify(body), signal: controller.signal })
+      .finally(function () { clearTimeout(timeoutId); })
       .then(function (resp) {
         var sid = resp.headers.get('mcp-session-id');
         if (sid) sessionId = sid;
-        var ct = resp.headers.get('content-type') || '';
-        if (ct.indexOf('text/event-stream') !== -1) {
-          return resp.text().then(function (text) {
-            var lines = text.split('\n');
-            for (var i = 0; i < lines.length; i++) {
-              if (lines[i].indexOf('data: ') === 0) {
-                try { return JSON.parse(lines[i].slice(6)); } catch (_) { /* skip */ }
-              }
-            }
-            return null;
-          });
+        if (resp.status === 204 || resp.headers.get('content-length') === '0') {
+          return null;
         }
         return resp.json();
       });
@@ -1324,9 +1318,8 @@ For each new feed item:
       params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'distillery-slides', version: '1.0' } },
     }).then(function (r) {
       if (r && r.result) {
-        initialized = true;
-        /* fire-and-forget initialized notification */
-        postMCP({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} }).catch(function () {});
+        return postMCP({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} })
+          .then(function () { initialized = true; });
       } else {
         throw new Error('MCP init failed');
       }
