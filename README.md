@@ -130,12 +130,14 @@ See [docs/mcp-setup.md](docs/mcp-setup.md) for detailed setup instructions.
 Distillery supports remote team access via streamable-HTTP transport with GitHub OAuth authentication. Team members connect from their Claude Code installation — no local server needed.
 
 ```bash
-# Operator: start the HTTP server
+# Operator: start the HTTP server (--transport http enables HTTP;
+# GitHub OAuth is configured separately in distillery.yaml server.auth)
 distillery-mcp --transport http --port 8000
 ```
 
+Team member `~/.claude/settings.json`:
+
 ```json
-// Team member: ~/.claude/settings.json
 {
   "mcpServers": {
     "distillery": {

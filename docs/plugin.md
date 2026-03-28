@@ -48,7 +48,7 @@ ln -s ~/.claude/distillery/.claude/skills/classify  ~/.claude/skills/classify
 
 ## MCP Configuration
 
-The skills require the Distillery MCP server.  Choose one of the two transport options:
+The skills require the Distillery MCP server.  Choose one of the three transport options:
 
 ### Transport A — Local stdio (recommended)
 

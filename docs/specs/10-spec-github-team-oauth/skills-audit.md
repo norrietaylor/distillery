@@ -10,7 +10,7 @@ All 6 core skills (distill, recall, bookmark, pour, minutes, classify) are **COM
 
 Key findings:
 - ✅ All skills use the MCP tool interface (`distillery_*` calls) which is transport-agnostic
-- ✅ All skills respect HTTP mode constraints (no direct file I/O, no local process execution)
+- ✅ All skills respect HTTP mode constraints (no direct file I/O outside MCP)
 - ✅ Authentication (GitHub OAuth) is transparent to skill implementations
 - ✅ Author/project identification patterns work with both local and remote servers
 - ✅ No documentation issues found that require follow-up

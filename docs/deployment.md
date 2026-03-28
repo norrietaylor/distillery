@@ -148,6 +148,8 @@ Distillery validates configuration at startup to catch errors early:
 
 2. **GitHub OAuth validation** — If `server.auth.provider == "github"`:
    - Both `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` must be set and non-empty
+     (these are the default env var names; customize them via `client_id_env` and
+     `client_secret_env` in `distillery.yaml`)
    - `DISTILLERY_BASE_URL` must be set and valid
 
    If validation fails, the server will print an error and exit.
@@ -180,7 +182,7 @@ distillery-mcp --transport http
 
 ### CLI flags reference
 
-```
+```text
 distillery-mcp --help
 
 Usage: distillery-mcp [OPTIONS]
@@ -194,7 +196,7 @@ Options:
 
 ### Expected startup output
 
-```
+```text
 Starting Distillery MCP server in HTTP mode
 Host: 0.0.0.0
 Port: 8000
@@ -241,10 +243,11 @@ storage:
 
 Start with:
 ```bash
-distillery-mcp --transport http --port 8000
+distillery-mcp --transport http --host 127.0.0.1 --port 8000
 ```
 
-Warning: This mode allows unauthenticated access. Use only for local development.
+Warning: This mode allows unauthenticated access. Binding to `127.0.0.1` ensures
+the server is only reachable from localhost. Use only for local development.
 
 ### Production with MotherDuck
 
@@ -300,7 +303,7 @@ For larger teams, deploy multiple Distillery instances behind a load balancer, a
 
 ### Load balancer configuration
 
-```
+```text
                   Internet
                      |
               Load Balancer (SSL)

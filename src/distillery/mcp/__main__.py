@@ -116,15 +116,20 @@ def main(argv: list[str] | None = None) -> int:
             port = args.port if args.port is not None else (int(port_env) if port_env else 8000)
 
             auth = None
-            if config.server.auth.provider == "github":
+            provider_name = config.server.auth.provider
+            if provider_name == "github":
                 from distillery.mcp.auth import build_github_auth
 
                 auth = build_github_auth(config)
-            else:
+            elif provider_name == "none":
                 logger.warning(
                     "HTTP server running without authentication "
-                    "(server.auth.provider is %r)",
-                    config.server.auth.provider,
+                    "(server.auth.provider is 'none')",
+                )
+            else:
+                raise ValueError(
+                    f"Unknown auth provider {provider_name!r} for HTTP transport. "
+                    f"Supported values: 'github', 'none'."
                 )
 
             server = create_server(config=config, auth=auth)

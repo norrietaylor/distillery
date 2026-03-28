@@ -23,7 +23,7 @@ The codebase is architecturally ready: the lifespan context manager (`server.py:
 - As a **team member**, I want to connect my Claude Code to a hosted Distillery instance so that I can access shared team knowledge without running the server locally.
 - As a **team member**, I want to authenticate with my GitHub account so that I don't need separate credentials for Distillery.
 - As an **operator**, I want to start the MCP server in HTTP mode with `--transport http` so that I can deploy it as a persistent endpoint.
-- As an **operator**, I want the server to refuse to start in HTTP mode without GitHub OAuth credentials so that I can't accidentally deploy an unauthenticated endpoint.
+- As an **operator**, I want the server to refuse to start in HTTP mode when `server.auth.provider` is `github` but OAuth credentials are missing, so that I can't accidentally deploy an unauthenticated endpoint. (When `provider` is `none`, the server starts without credentials intentionally.)
 - As an **operator**, I want MotherDuck configuration validated at startup so that misconfigured shared storage fails fast with a clear error.
 - As a **contributor**, I want auth configuration in `distillery.yaml` so that future multi-team features (org-based access, team mapping) can extend it without restructuring.
 

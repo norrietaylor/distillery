@@ -214,15 +214,16 @@ class TestStatelessHttpSingleton:
             assert "result" in d1, f"Request 1 error: {d1}"
             assert "result" in d2, f"Request 2 error: {d2}"
 
-            # Both responses should report the same total_entries count,
-            # confirming they share the same store instance.
-            def _total_entries(resp_data: dict) -> int:  # type: ignore[type-arg]
+            # Compare database_path from both responses to prove they
+            # reference the same store instance (not two empty stores
+            # that happen to have the same total_entries=0).
+            def _database_path(resp_data: dict) -> str:  # type: ignore[type-arg]
                 content = resp_data["result"]["content"]
                 payload = json.loads(content[0]["text"])
-                return int(payload["total_entries"])
+                return str(payload["database_path"])
 
-            assert _total_entries(d1) == _total_entries(d2), (
-                "Two requests returned different total_entries — singleton not shared"
+            assert _database_path(d1) == _database_path(d2), (
+                "Two requests returned different database_path — singleton not shared"
             )
         finally:
             uv_server.should_exit = True
@@ -338,6 +339,13 @@ class TestHttpAuthIdentityVisibleToTools:
                 data = _parse_sse_data(auth_resp.text)
                 assert "result" in data, f"Expected result in: {data}"
                 assert data["result"]["protocolVersion"] == "2024-11-05"
+
+                # NOTE: This test only verifies that authenticated requests reach
+                # the initialize handler.  It does NOT verify that tool handlers
+                # can see the caller's identity, because FastMCP does not expose
+                # auth context to tool handlers during initialize-only flows.
+                # A full identity-propagation test would require a real OAuth
+                # flow with a valid GitHub token.
         finally:
             uv_server.should_exit = True
             await task
