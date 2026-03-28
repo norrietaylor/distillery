@@ -1,0 +1,77 @@
+{
+  "$schema": "https://claude.ai/schemas/plugin/v1",
+  "name": "distillery",
+  "version": "0.1.0",
+  "description": "Knowledge base skills for Claude Code — capture, search, and synthesize project knowledge",
+  "author": "norrietaylor",
+  "homepage": "https://github.com/norrietaylor/distillery",
+  "repository": "https://github.com/norrietaylor/distillery",
+  "keywords": ["knowledge-base", "second-brain", "mcp", "embeddings", "distillery"],
+  "skills": [
+    {
+      "name": "distill",
+      "description": "Captures session knowledge and stores distilled decisions and insights. Triggered by: 'distill', 'capture this', 'save knowledge', 'log learnings', or '/distill [content]'.",
+      "path": ".claude/skills/distill/SKILL.md"
+    },
+    {
+      "name": "recall",
+      "description": "Performs semantic search over the Distillery knowledge base. Triggered by: 'recall', 'search knowledge', 'what do we know about', 'find in knowledge base', or '/recall <query>'.",
+      "path": ".claude/skills/recall/SKILL.md"
+    },
+    {
+      "name": "pour",
+      "description": "Synthesizes knowledge from multiple entries into a cohesive narrative with citations. Triggered by: 'pour', 'synthesize', 'what's the full picture on', 'deep dive into', or '/pour <topic>'.",
+      "path": ".claude/skills/pour/SKILL.md"
+    },
+    {
+      "name": "bookmark",
+      "description": "Saves a URL and its auto-generated summary to the knowledge base. Triggered by: 'bookmark', 'save this link', 'store this URL', 'remember this page', or '/bookmark <url> [#tags]'.",
+      "path": ".claude/skills/bookmark/SKILL.md"
+    },
+    {
+      "name": "minutes",
+      "description": "Captures and manages meeting notes in the knowledge base. Triggered by: 'minutes', 'meeting notes', 'capture meeting', 'log meeting', '/minutes', '/minutes --update <meeting_id>', or '/minutes --list'.",
+      "path": ".claude/skills/minutes/SKILL.md"
+    },
+    {
+      "name": "classify",
+      "description": "Classifies knowledge entries and manages the manual review queue. Triggered by: 'classify', 'classify entry', 'review queue', 'triage inbox', or '/classify [entry_id|--inbox|--review]'.",
+      "path": ".claude/skills/classify/SKILL.md"
+    }
+  ],
+  "mcpServers": {
+    "distillery": {
+      "description": "Distillery knowledge base MCP server — stores, searches, and classifies knowledge entries using DuckDB with vector similarity search",
+      "required": true,
+      "setup": {
+        "message": "The Distillery MCP server must be configured before using these skills. Choose a transport below and add the configuration to your Claude Code settings.",
+        "docs": "https://github.com/norrietaylor/distillery/blob/main/docs/mcp-setup.md"
+      },
+      "transports": [
+        {
+          "type": "stdio",
+          "id": "local",
+          "label": "Local (stdio)",
+          "description": "Run the MCP server locally via the installed distillery-mcp command. Requires Python 3.11+ and pip install.",
+          "command": "distillery-mcp",
+          "env": {
+            "JINA_API_KEY": "${JINA_API_KEY}",
+            "DISTILLERY_CONFIG": "${DISTILLERY_CONFIG:-~/.distillery/distillery.yaml}"
+          },
+          "install": {
+            "command": "pip install distillery",
+            "docs": "https://github.com/norrietaylor/distillery/blob/main/docs/mcp-setup.md#installation"
+          }
+        },
+        {
+          "type": "http",
+          "id": "hosted",
+          "label": "Hosted (HTTP/SSE)",
+          "description": "Connect to the hosted Distillery MCP server. No local installation required.",
+          "url": "https://able-red-cougar.fastmcp.app/mcp"
+        }
+      ],
+      "default_transport": "local"
+    }
+  }
+}
