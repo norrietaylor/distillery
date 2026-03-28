@@ -220,54 +220,61 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
     if config is None:
         config = load_config()
 
+    # Shared singleton state for the store, embedding provider, and recent
+    # searches.  In stateless HTTP mode (FastMCP Cloud / Prefect Horizon)
+    # every request spawns a new lifespan.  DuckDB does not allow multiple
+    # connections to the same file from the same process, so we initialise
+    # once and reuse across all sessions.
+    _shared: dict[str, Any] = {}
+
     @asynccontextmanager
     async def lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
         """
         Manage the startup and shutdown lifecycle for the Distillery MCP server.
 
+        On first invocation the store, embedding provider, and config are
+        initialised and cached in ``_shared``.  Subsequent invocations (from
+        stateless HTTP sessions) reuse the same objects so DuckDB doesn't
+        raise file-handle conflicts.
+
         Yields:
             A lifespan context dict with:
-              - "store": an initialized DuckDBStore instance connected to the configured database.
-              - "config": the Distillery configuration used to construct shared components.
-              - "embedding_provider": the instantiated embedding provider.
-              - "recent_searches": an in-memory list used to track recent search events for implicit feedback correlation.
-
-        Notes:
-            On exit, the store is closed to release resources.
+              - "store": an initialized DuckDBStore instance.
+              - "config": the Distillery configuration.
+              - "embedding_provider": the embedding provider instance.
+              - "recent_searches": an in-memory list for implicit feedback.
         """
-        logger.info("Distillery MCP server starting up …")
+        if not _shared:
+            logger.info("Distillery MCP server starting up …")
 
-        # Build embedding provider and store.
-        embedding_provider = _create_embedding_provider(config)
+            embedding_provider = _create_embedding_provider(config)
+            db_path = os.path.expanduser(config.storage.database_path)
 
-        db_path = os.path.expanduser(config.storage.database_path)
+            from distillery.store.duckdb import DuckDBStore
 
-        from distillery.store.duckdb import DuckDBStore
+            store = DuckDBStore(db_path=db_path, embedding_provider=embedding_provider)
+            await store.initialize()
 
-        store = DuckDBStore(db_path=db_path, embedding_provider=embedding_provider)
-        await store.initialize()
+            _shared["store"] = store
+            _shared["config"] = config
+            _shared["embedding_provider"] = embedding_provider
+            _shared["recent_searches"] = []
 
-        # In-memory list of recent search events for implicit feedback correlation.
-        # Each element is a dict with keys: search_id, entry_ids (set[str]), timestamp (datetime).
-        recent_searches: list[dict[str, Any]] = []
-
-        logger.info(
-            "Distillery MCP server ready (db=%s, embedding=%s)",
-            db_path,
-            getattr(embedding_provider, "model_name", "unknown"),
-        )
+            logger.info(
+                "Distillery MCP server ready (db=%s, embedding=%s)",
+                db_path,
+                getattr(embedding_provider, "model_name", "unknown"),
+            )
+        else:
+            logger.debug("Reusing existing Distillery store (stateless session)")
 
         try:
-            yield {
-                "store": store,
-                "config": config,
-                "embedding_provider": embedding_provider,
-                "recent_searches": recent_searches,
-            }
+            yield dict(_shared)
         finally:
-            logger.info("Distillery MCP server shutting down …")
-            await store.close()
-            logger.info("Distillery MCP server shutdown complete")
+            # In stateless mode many sessions share the store — only the
+            # process-level shutdown should close it.  For stdio mode (single
+            # session) this runs once at exit and is fine.
+            pass
 
     server = FastMCP("distillery", lifespan=lifespan)
 
