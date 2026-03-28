@@ -1,0 +1,37 @@
+Type: file
+File: docs/team-setup.md
+Expected: File exists with sections: connection setup, authentication, verification, troubleshooting
+Timestamp: 2026-03-28T12:37:00Z
+
+VERIFICATION:
+============
+
+1. File exists at docs/team-setup.md
+   Status: ✅ PASS
+
+2. File has required sections:
+   - Connection Setup (Step 1: Add the Server to Claude Code Settings): ✅ PASS
+   - Authentication (Step 2: Authenticate with GitHub): ✅ PASS
+   - Verification (Step 3: Verify the Connection Works): ✅ PASS
+   - Troubleshooting (Troubleshooting section): ✅ PASS
+
+3. Content covers key topics:
+   - Adding remote server to Claude Code: ✅ PASS
+   - First-time GitHub OAuth login flow: ✅ PASS
+   - Verifying connection works: ✅ PASS
+   - Troubleshooting auth failure: ✅ PASS
+   - Troubleshooting connection timeout: ✅ PASS
+   - Troubleshooting wrong URL: ✅ PASS
+   - Troubleshooting expired token: ✅ PASS
+
+4. Documentation quality:
+   - Clear step-by-step instructions: ✅ PASS
+   - Code examples provided: ✅ PASS
+   - Settings.json configuration shown: ✅ PASS
+   - Links to GitHub settings included: ✅ PASS
+   - Troubleshooting diagnosis steps: ✅ PASS
+   - Security notes included: ✅ PASS
+
+SUMMARY: docs/team-setup.md is complete and meets all requirements.
+
+Status: PASS

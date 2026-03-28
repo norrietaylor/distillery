@@ -1,0 +1,64 @@
+Type: file
+File: distillery.yaml.example
+Expected: File contains server: section with auth config and comments
+Timestamp: 2026-03-28T12:37:00Z
+
+VERIFICATION:
+============
+
+1. File exists at distillery.yaml.example
+   Status: ✅ PASS
+
+2. File contains server: section
+   Location: Before storage section (lines 27-47 in updated file)
+   Status: ✅ PASS
+
+3. Server section content:
+   - Commented out (# prefix on server:): ✅ PASS
+   - Contains auth subsection: ✅ PASS
+   - auth.provider field documented: ✅ PASS
+   - client_id_env field documented: ✅ PASS
+   - client_secret_env field documented: ✅ PASS
+
+4. Explanatory notes included:
+   - Header comments explaining purpose: ✅ PASS
+   - Transport mode explanation: ✅ PASS
+   - Auth provider options documented (github | none): ✅ PASS
+   - References to env var naming: ✅ PASS
+   - Environment variable names explained: ✅ PASS
+   - Note about storing env var names, not secrets: ✅ PASS
+
+5. Context provided:
+   - stdio vs http mode distinction: ✅ PASS
+   - How to enable the section: ✅ PASS
+   - Link to GitHub OAuth setup: ✅ PASS
+
+EXCERPT FROM FILE:
+==================
+
+# ---------------------------------------------------------------------------
+# Server settings (HTTP transport + authentication)
+# ---------------------------------------------------------------------------
+#
+# This section configures remote access and authentication when running
+# distillery-mcp in HTTP mode (distillery-mcp --transport http).
+# Stdio mode (default) ignores this section.
+#
+# Transport mode is controlled by CLI flags:
+#   distillery-mcp --transport http --port 8000  (HTTP remote access)
+#   distillery-mcp                               (stdio local access, default)
+#
+# Authentication providers:
+#   - github: GitHub OAuth via FastMCP's GitHubProvider
+#             Requires: GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, DISTILLERY_BASE_URL env vars
+#   - none:   No authentication (development only, logs a warning)
+
+# server:
+#   auth:
+#     provider: github
+#     client_id_env: GITHUB_CLIENT_ID
+#     client_secret_env: GITHUB_CLIENT_SECRET
+
+SUMMARY: distillery.yaml.example has been updated with proper server section.
+
+Status: PASS

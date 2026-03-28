@@ -1,0 +1,54 @@
+Type: file
+File: docs/specs/10-spec-github-team-oauth/skills-audit.md
+Expected: Skills audited for stdio-specific assumptions, findings documented
+Timestamp: 2026-03-28T12:37:00Z
+
+VERIFICATION:
+============
+
+1. File exists at docs/specs/10-spec-github-team-oauth/skills-audit.md
+   Status: ✅ PASS
+
+2. All 6 core skills reviewed:
+   - distill: ✅ PASS (compatible, no changes needed)
+   - recall: ✅ PASS (compatible, no changes needed)
+   - bookmark: ✅ PASS (compatible, no changes needed)
+   - pour: ✅ PASS (compatible, no changes needed)
+   - minutes: ✅ PASS (compatible, no changes needed)
+   - classify: ✅ PASS (compatible, no changes needed)
+
+3. Audit methodology:
+   - File I/O patterns reviewed: ✅ PASS
+   - MCP tool interface usage verified: ✅ PASS
+   - Auth handling assessed: ✅ PASS
+   - Transport assumptions checked: ✅ PASS
+   - Author/project identification verified: ✅ PASS
+   - Documentation references validated: ✅ PASS
+
+4. Key findings documented:
+   - All skills are transport-agnostic: ✅ PASS
+   - All skills use MCP tool interface (not direct I/O): ✅ PASS
+   - No process control or file access patterns: ✅ PASS
+   - Auth is transparent to skills: ✅ PASS
+   - Author/project patterns work with HTTP: ✅ PASS
+
+5. GitHub issues status:
+   - No blocking issues found: ✅ PASS
+   - No follow-up issues filed: ✅ PASS (per spec: only file if needed)
+   - All findings documented: ✅ PASS
+
+6. Deliverables in audit:
+   - Summary table: ✅ PASS
+   - Detailed skill-by-skill analysis: ✅ PASS
+   - Findings section: ✅ PASS
+   - Recommendations (team members, operators, contributors): ✅ PASS
+   - GitHub issues summary: ✅ PASS
+   - Verification checklist: ✅ PASS
+   - Conclusion: ✅ PASS
+
+CONCLUSION:
+===========
+All 6 Distillery skills are ready for HTTP transport. No code changes required.
+Skills are transport-agnostic by design, using the MCP tool interface exclusively.
+
+Status: PASS
