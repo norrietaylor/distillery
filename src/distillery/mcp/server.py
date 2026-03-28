@@ -248,11 +248,21 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
             logger.info("Distillery MCP server starting up …")
 
             embedding_provider = _create_embedding_provider(config)
-            db_path = os.path.expanduser(config.storage.database_path)
+            raw_db_path = config.storage.database_path
+            # Expand ~ only for local filesystem paths; leave S3/MotherDuck URIs intact.
+            if raw_db_path.startswith("s3://") or raw_db_path.startswith("md:"):
+                db_path = raw_db_path
+            else:
+                db_path = os.path.expanduser(raw_db_path)
 
             from distillery.store.duckdb import DuckDBStore
 
-            store = DuckDBStore(db_path=db_path, embedding_provider=embedding_provider)
+            store = DuckDBStore(
+                db_path=db_path,
+                embedding_provider=embedding_provider,
+                s3_region=config.storage.s3_region,
+                s3_endpoint=config.storage.s3_endpoint,
+            )
             await store.initialize()
 
             _shared["store"] = store

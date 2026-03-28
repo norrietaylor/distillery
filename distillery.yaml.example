@@ -23,13 +23,55 @@
 # ---------------------------------------------------------------------------
 # Storage settings
 # ---------------------------------------------------------------------------
+#
+# Three storage modes are supported:
+#
+# 1. Local file (default)
+#    backend: duckdb
+#    database_path: ~/.distillery/distillery.db
+#
+# 2. S3-backed DuckDB (persistent across container restarts on FastMCP Cloud)
+#    Uses DuckDB's httpfs extension. AWS credentials are resolved automatically
+#    from environment variables (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY) or
+#    an IAM role when running on AWS infrastructure.
+#
+#    backend: duckdb
+#    database_path: s3://my-bucket/distillery/distillery.db
+#    s3_region: us-east-1
+#    # Optional: custom endpoint for S3-compatible services (MinIO, Cloudflare R2, etc.)
+#    # s3_endpoint: https://my-minio.example.com
+#
+# 3. MotherDuck (DuckDB cloud service)
+#    Requires a MotherDuck token in the MOTHERDUCK_TOKEN environment variable
+#    (or the env var named by motherduck_token_env below).
+#
+#    backend: motherduck
+#    database_path: md:distillery
+#    # motherduck_token_env: MOTHERDUCK_TOKEN  # default
+
 storage:
-  # Backend to use for knowledge storage. Currently only 'duckdb' is supported.
+  # Backend: 'duckdb' (local or S3-backed) or 'motherduck'.
   backend: duckdb
 
-  # Path to the DuckDB database file. Supports ~ for the home directory.
-  # The parent directory will be created automatically if it does not exist.
+  # Path to the DuckDB database file. Supports ~ for the home directory,
+  # s3:// prefix for S3-backed storage, and md: prefix for MotherDuck.
+  # The parent directory is created automatically for local paths.
   database_path: ~/.distillery/distillery.db
+
+  # --- S3 storage options (only used when database_path starts with s3://) ---
+
+  # AWS region for the S3 bucket. Defaults to the AWS_DEFAULT_REGION /
+  # AWS_REGION environment variable when not set here.
+  # s3_region: us-east-1
+
+  # Custom S3-compatible endpoint URL (MinIO, Cloudflare R2, etc.).
+  # When set, path-style URL access is enabled automatically.
+  # s3_endpoint: https://my-minio.example.com
+
+  # --- MotherDuck options (only used when backend is 'motherduck') ----------
+
+  # Name of the environment variable that holds the MotherDuck token.
+  # motherduck_token_env: MOTHERDUCK_TOKEN
 
 # ---------------------------------------------------------------------------
 # Embedding provider settings
