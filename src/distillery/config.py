@@ -26,12 +26,25 @@ class StorageConfig:
     """Storage backend configuration.
 
     Attributes:
-        backend: Storage backend identifier. Currently only 'duckdb' is supported.
-        database_path: Path to the DuckDB database file. Supports ``~`` expansion.
+        backend: Storage backend identifier. One of ``'duckdb'`` or ``'motherduck'``.
+        database_path: Path to the DuckDB database file. Supports ``~`` expansion
+            for local paths, ``s3://`` prefix for S3-backed storage, and ``md:``
+            prefix for MotherDuck cloud databases.
+        s3_region: AWS region for S3 storage (e.g. ``'us-east-1'``). Falls back to
+            ``AWS_DEFAULT_REGION`` / ``AWS_REGION`` environment variables when
+            ``None``.
+        s3_endpoint: Custom S3-compatible endpoint URL for non-AWS services such as
+            MinIO or Cloudflare R2 (e.g. ``'https://my-minio.example.com'``).
+            When set, path-style URL access is enabled automatically.
+        motherduck_token_env: Name of the environment variable that holds the
+            MotherDuck token.  Defaults to ``'MOTHERDUCK_TOKEN'``.
     """
 
     backend: str = "duckdb"
     database_path: str = "~/.distillery/distillery.db"
+    s3_region: str | None = None
+    s3_endpoint: str | None = None
+    motherduck_token_env: str = "MOTHERDUCK_TOKEN"
 
 
 @dataclass
@@ -177,9 +190,14 @@ def _find_config_path(override: str | None = None) -> Path | None:
 
 
 def _parse_storage(raw: dict[str, Any]) -> StorageConfig:
+    s3_region_raw = raw.get("s3_region")
+    s3_endpoint_raw = raw.get("s3_endpoint")
     return StorageConfig(
         backend=str(raw.get("backend", "duckdb")),
         database_path=str(raw.get("database_path", "~/.distillery/distillery.db")),
+        s3_region=str(s3_region_raw) if s3_region_raw is not None else None,
+        s3_endpoint=str(s3_endpoint_raw) if s3_endpoint_raw is not None else None,
+        motherduck_token_env=str(raw.get("motherduck_token_env", "MOTHERDUCK_TOKEN")),
     )
 
 
@@ -377,6 +395,13 @@ def _validate(config: DistilleryConfig) -> None:
             - classification.conflict_threshold is not between 0.0 and 1.0.
             - Any entry in tags.reserved_prefixes is not a valid tag segment.
     """
+    valid_backends = {"duckdb", "motherduck"}
+    if config.storage.backend not in valid_backends:
+        raise ValueError(
+            f"storage.backend must be one of {sorted(valid_backends)}, "
+            f"got: {config.storage.backend!r}"
+        )
+
     valid_providers = {"jina", "openai"}
     if config.embedding.provider and config.embedding.provider not in valid_providers:
         raise ValueError(
