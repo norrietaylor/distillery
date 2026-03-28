@@ -851,6 +851,23 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
     return server
 
 
+def __getattr__(name: str) -> FastMCP:
+    """Lazy module-level attribute for FastMCP auto-discovery.
+
+    ``fastmcp run src/distillery/mcp/server.py`` looks for a top-level
+    variable named ``mcp``, ``server``, or ``app``.  Because tool handler
+    closures reference module-level constants defined below
+    ``create_server``, we cannot call it at import time.  Instead we use
+    the module ``__getattr__`` hook (PEP 562) to build the server on first
+    access and cache it in the module globals for subsequent lookups.
+    """
+    if name in ("mcp", "server", "app"):
+        instance = create_server()
+        globals()[name] = instance
+        return instance
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 # ---------------------------------------------------------------------------
 # Tool handlers
 # ---------------------------------------------------------------------------
