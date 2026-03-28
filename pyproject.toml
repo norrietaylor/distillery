@@ -81,11 +81,9 @@ disable_error_code = ["untyped-decorator"]
 
 [[tool.mypy.overrides]]
 # The eval module has optional dependencies (anthropic) that are not installed
-# in the base dev environment. Suppress import-not-found and any resulting
-# unused-ignore warnings for the eval sub-package.
+# in the base dev environment. Suppress import-not-found for the eval sub-package.
 module = "distillery.eval.*"
 ignore_missing_imports = true
-disable_error_code = ["unused-ignore"]
 
 [tool.ruff]
 line-length = 100

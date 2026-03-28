@@ -10,6 +10,7 @@ Set ``ANTHROPIC_API_KEY`` in the environment (or pass ``api_key`` directly).
 
 from __future__ import annotations
 
+import importlib
 import json
 import logging
 import os
@@ -81,7 +82,7 @@ class ClaudeEvalRunner:
         skills_dir: Path | None = None,
     ) -> None:
         try:
-            import anthropic  # noqa: F401  # type: ignore[import-not-found]
+            importlib.import_module("anthropic")
         except ImportError as exc:
             raise ImportError(
                 "The 'anthropic' package is required for eval runs. "
@@ -97,8 +98,7 @@ class ClaudeEvalRunner:
         self._skills_dir = skills_dir
 
     def _get_client(self) -> Any:
-        import anthropic  # type: ignore[import-not-found]
-
+        anthropic = importlib.import_module("anthropic")
         return anthropic.Anthropic(api_key=self._api_key)
 
     def _get_skill_prompt(self, skill_name: str) -> str:
