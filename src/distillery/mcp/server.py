@@ -1083,6 +1083,49 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
             arguments=arguments,
         )
 
+    @server.tool
+    async def distillery_poll(
+        ctx: Context,
+        source_url: str | None = None,
+    ) -> list[types.TextContent]:
+        """Poll configured feed sources and store relevant items.
+
+        Runs a poll cycle over all (or one) configured feed sources.  For
+        each source, the appropriate adapter is called to fetch new items.
+        Each item is scored against the knowledge base via cosine similarity;
+        items that are near-duplicates of existing entries are skipped, and
+        items whose relevance score meets the configured digest threshold are
+        stored as ``feed`` entries.
+
+        Parameters:
+            source_url (str | None): When provided, poll only the source
+                whose URL matches this value exactly.  When ``None`` (the
+                default), all configured sources are polled.
+
+        Returns:
+            list[types.TextContent]: A single MCP TextContent block containing
+            a JSON object with keys:
+              - ``sources_polled``: number of sources processed.
+              - ``sources_errored``: number of sources that reported errors.
+              - ``total_fetched``: total number of raw items fetched.
+              - ``total_stored``: number of items stored in the knowledge base.
+              - ``total_skipped_dedup``: items skipped as near-duplicates.
+              - ``total_below_threshold``: items below the relevance threshold.
+              - ``results``: per-source breakdown (see :class:`PollResult`).
+              - ``started_at``: ISO 8601 timestamp.
+              - ``finished_at``: ISO 8601 timestamp.
+            On error: ``error``, ``code``, and ``message``.
+        """
+        lc = _get_lifespan_context(ctx)
+        arguments: dict[str, Any] = {}
+        if source_url is not None:
+            arguments["source_url"] = source_url
+        return await _handle_poll(
+            store=lc["store"],
+            config=lc["config"],
+            arguments=arguments,
+        )
+
     return server
 
 
@@ -3419,3 +3462,96 @@ def _derive_suggestions(
                     )
 
     return candidates[:max_suggestions]
+
+
+# ---------------------------------------------------------------------------
+# distillery_poll handler
+# ---------------------------------------------------------------------------
+
+
+def _poll_result_to_dict(result: Any) -> dict[str, Any]:
+    """Serialise a :class:`~distillery.feeds.poller.PollResult` to a plain dict."""
+    return {
+        "source_url": result.source_url,
+        "source_type": result.source_type,
+        "items_fetched": result.items_fetched,
+        "items_stored": result.items_stored,
+        "items_skipped_dedup": result.items_skipped_dedup,
+        "items_below_threshold": result.items_below_threshold,
+        "errors": result.errors,
+        "polled_at": result.polled_at.isoformat(),
+    }
+
+
+async def _handle_poll(
+    store: Any,
+    config: DistilleryConfig,
+    arguments: dict[str, Any],
+) -> list[types.TextContent]:
+    """Handle the ``distillery_poll`` tool.
+
+    Creates a :class:`~distillery.feeds.poller.FeedPoller`, optionally filters
+    to a single source, and runs a poll cycle.
+
+    Args:
+        store: An initialised storage backend.
+        config: The current :class:`~distillery.config.DistilleryConfig`.
+        arguments: Parsed tool arguments dict (``source_url`` optional).
+
+    Returns:
+        A structured MCP success or error response.
+    """
+    from distillery.config import DistilleryConfig as _DistilleryConfig
+    from distillery.feeds.poller import FeedPoller
+
+    source_url: str | None = arguments.get("source_url")
+
+    # When a specific source_url is requested, temporarily narrow the config
+    # so the poller only touches that one source.
+    if source_url is not None:
+        matching = [s for s in config.feeds.sources if s.url == source_url]
+        if not matching:
+            return error_response(
+                "NOT_FOUND",
+                f"No configured source found with url {source_url!r}. "
+                "Use distillery_watch(action='list') to see available sources.",
+            )
+        # Build a shallow config copy restricted to the matching source.
+        from distillery.config import FeedsConfig
+
+        narrowed_feeds = FeedsConfig(
+            sources=matching,
+            thresholds=config.feeds.thresholds,
+        )
+        poll_config = _DistilleryConfig(
+            storage=config.storage,
+            embedding=config.embedding,
+            team=config.team,
+            classification=config.classification,
+            tags=config.tags,
+            feeds=narrowed_feeds,
+        )
+    else:
+        poll_config = config
+
+    poller = FeedPoller(store=store, config=poll_config)
+
+    try:
+        summary = await poller.poll()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("distillery_poll: unexpected error during poll cycle")
+        return error_response("POLL_ERROR", f"Poll cycle failed: {exc}")
+
+    return success_response(
+        {
+            "sources_polled": summary.sources_polled,
+            "sources_errored": summary.sources_errored,
+            "total_fetched": summary.total_fetched,
+            "total_stored": summary.total_stored,
+            "total_skipped_dedup": summary.total_skipped_dedup,
+            "total_below_threshold": summary.total_below_threshold,
+            "results": [_poll_result_to_dict(r) for r in summary.results],
+            "started_at": summary.started_at.isoformat(),
+            "finished_at": summary.finished_at.isoformat(),
+        }
+    )

@@ -1,0 +1,44 @@
+Type: test
+Command: .venv/bin/pytest tests/test_poller.py -v
+Expected: All 28 tests pass
+Timestamp: 2026-03-27T00:00:00Z
+
+============================= test session starts ==============================
+platform linux -- Python 3.13.7, pytest-9.0.2, pluggy-1.6.0
+rootdir: /home/norrie.guest/code/distillery
+configfile: pyproject.toml
+plugins: asyncio-1.3.0, anyio-4.13.0, cov-7.1.0
+asyncio: mode=Mode.AUTO, debug=False
+
+tests/test_poller.py::TestRelevanceScorer::test_empty_text_returns_zero PASSED
+tests/test_poller.py::TestRelevanceScorer::test_returns_max_similarity PASSED
+tests/test_poller.py::TestRelevanceScorer::test_no_results_returns_zero PASSED
+tests/test_poller.py::TestRelevanceScorer::test_passes_threshold_to_store PASSED
+tests/test_poller.py::TestRelevanceScorer::test_exception_returns_zero PASSED
+tests/test_poller.py::TestRelevanceScorer::test_single_result_returns_that_score PASSED
+tests/test_poller.py::TestItemText::test_title_and_content PASSED
+tests/test_poller.py::TestItemText::test_title_only PASSED
+tests/test_poller.py::TestItemText::test_content_only PASSED
+tests/test_poller.py::TestItemText::test_both_none PASSED
+tests/test_poller.py::TestFeedPollerEmptySources::test_empty_sources_returns_empty_summary PASSED
+tests/test_poller.py::TestFeedPollerRSS::test_items_above_threshold_are_stored PASSED
+tests/test_poller.py::TestFeedPollerRSS::test_items_below_threshold_not_stored PASSED
+tests/test_poller.py::TestFeedPollerRSS::test_duplicate_items_are_skipped PASSED
+tests/test_poller.py::TestFeedPollerRSS::test_adapter_fetch_error_recorded PASSED
+tests/test_poller.py::TestFeedPollerRSS::test_unsupported_source_type_records_error PASSED
+tests/test_poller.py::TestFeedPollerRSS::test_trust_weight_applied_to_score PASSED
+tests/test_poller.py::TestFeedPollerRSS::test_item_with_no_text_skipped PASSED
+tests/test_poller.py::TestFeedPollerMultipleSources::test_aggregates_across_sources PASSED
+tests/test_poller.py::TestHandlePoll::test_no_sources_returns_empty_summary PASSED
+tests/test_poller.py::TestHandlePoll::test_source_url_filter_not_found_returns_error PASSED
+tests/test_poller.py::TestHandlePoll::test_source_url_filter_narrows_poll PASSED
+tests/test_poller.py::TestHandlePoll::test_returns_all_expected_fields PASSED
+tests/test_poller.py::TestCLIPollSubcommand::test_no_sources_exits_zero PASSED
+tests/test_poller.py::TestCLIPollSubcommand::test_source_not_found_exits_one PASSED
+tests/test_poller.py::TestCLIPollSubcommand::test_poll_runs_and_exits_zero_on_no_errors PASSED
+tests/test_poller.py::TestCLIPollSubcommand::test_poll_json_format_accepted PASSED
+tests/test_poller.py::TestCLIPollSubcommand::test_poll_source_flag PASSED
+
+============================== 28 passed in 0.37s ==============================
+
+Status: PASS
