@@ -81,7 +81,7 @@ class ClaudeEvalRunner:
         skills_dir: Path | None = None,
     ) -> None:
         try:
-            import anthropic  # noqa: F401
+            import anthropic  # noqa: F401  # type: ignore[import-not-found]
         except ImportError as exc:
             raise ImportError(
                 "The 'anthropic' package is required for eval runs. "
@@ -97,7 +97,7 @@ class ClaudeEvalRunner:
         self._skills_dir = skills_dir
 
     def _get_client(self) -> Any:
-        import anthropic
+        import anthropic  # type: ignore[import-not-found]
 
         return anthropic.Anthropic(api_key=self._api_key)
 
@@ -193,7 +193,7 @@ class ClaudeEvalRunner:
                 model=scenario.model,
                 max_tokens=scenario.max_tokens,
                 system=system_prompt,
-                tools=tool_schemas,  # type: ignore[arg-type]
+                tools=tool_schemas,
                 messages=messages,
             )
 
