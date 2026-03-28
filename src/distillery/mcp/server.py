@@ -99,6 +99,23 @@ def success_response(data: dict[str, Any]) -> list[types.TextContent]:
 
 
 # ---------------------------------------------------------------------------
+# Storage path helpers
+# ---------------------------------------------------------------------------
+
+
+def _is_remote_db_path(path: str) -> bool:
+    """Return True for S3 or MotherDuck URIs that should not be treated as local paths."""
+    return path.startswith("s3://") or path.startswith("md:")
+
+
+def _normalize_db_path(raw: str) -> str:
+    """Expand ``~`` for local paths; leave cloud URIs (S3/MotherDuck) untouched."""
+    if _is_remote_db_path(raw):
+        return raw
+    return os.path.expanduser(raw)
+
+
+# ---------------------------------------------------------------------------
 # Input validation helpers
 # ---------------------------------------------------------------------------
 
@@ -248,12 +265,7 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
             logger.info("Distillery MCP server starting up …")
 
             embedding_provider = _create_embedding_provider(config)
-            raw_db_path = config.storage.database_path
-            # Expand ~ only for local filesystem paths; leave S3/MotherDuck URIs intact.
-            if raw_db_path.startswith("s3://") or raw_db_path.startswith("md:"):
-                db_path = raw_db_path
-            else:
-                db_path = os.path.expanduser(raw_db_path)
+            db_path = _normalize_db_path(config.storage.database_path)
 
             # Apply MotherDuck token from the configured env var name if set.
             if db_path.startswith("md:"):
@@ -989,13 +1001,9 @@ def _sync_gather_stats(
     entries_by_status = {row[0]: row[1] for row in status_rows}
 
     # Database file size.
-    _raw_db_path = config.storage.database_path
-    if _raw_db_path.startswith("s3://") or _raw_db_path.startswith("md:"):
-        db_path = _raw_db_path
-    else:
-        db_path = os.path.expanduser(_raw_db_path)
+    db_path = _normalize_db_path(config.storage.database_path)
     database_size_bytes: int | None = None
-    if db_path != ":memory:" and not db_path.startswith("s3://") and not db_path.startswith("md:"):
+    if db_path != ":memory:" and not _is_remote_db_path(db_path):
         try:
             database_size_bytes = Path(db_path).stat().st_size
         except OSError:
@@ -2377,13 +2385,9 @@ def _sync_gather_metrics(
     # ------------------------------------------------------------------ #
     # storage section                                                      #
     # ------------------------------------------------------------------ #
-    _raw_db_path = config.storage.database_path
-    if _raw_db_path.startswith("s3://") or _raw_db_path.startswith("md:"):
-        db_path = _raw_db_path
-    else:
-        db_path = os.path.expanduser(_raw_db_path)
+    db_path = _normalize_db_path(config.storage.database_path)
     db_file_size: int | None = None
-    if db_path != ":memory:" and not db_path.startswith("s3://") and not db_path.startswith("md:"):
+    if db_path != ":memory:" and not _is_remote_db_path(db_path):
         try:
             db_file_size = Path(db_path).stat().st_size
         except OSError:
