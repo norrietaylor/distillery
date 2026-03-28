@@ -53,7 +53,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from fastmcp import Context, FastMCP  # noqa: F401  # Context used by tool wrappers added in T02
 from mcp import types
@@ -279,15 +279,17 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
         """
         # FastMCP 3.x exposes a top-level property.
         try:
-            return ctx.lifespan_context  # type: ignore[return-value]
+            lc = ctx.lifespan_context
+            if isinstance(lc, dict):
+                return lc
         except AttributeError:
             pass
         # FastMCP 2.x: traverse through request_context.
         rc = getattr(ctx, "request_context", None)
         if rc is not None:
-            lc = getattr(rc, "lifespan_context", None)
-            if lc is not None:
-                return lc  # type: ignore[return-value]
+            lc_v2 = getattr(rc, "lifespan_context", None)
+            if lc_v2 is not None and isinstance(lc_v2, dict):
+                return cast(dict[str, Any], lc_v2)
         raise RuntimeError(
             "Cannot access lifespan context — verify FastMCP version compatibility."
         )
