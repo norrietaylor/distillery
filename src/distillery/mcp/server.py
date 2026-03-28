@@ -1255,6 +1255,7 @@ _VALID_ENTRY_TYPES = {
     "project",
     "digest",
     "github",
+    "feed",
 }
 
 # Valid status values (mirrors EntryStatus enum).
