@@ -101,14 +101,29 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
 
     try:
+        from distillery.config import load_config
         from distillery.mcp.server import create_server
+
+        config = load_config()
 
         if args.transport == "http":
             host = args.host or os.environ.get("DISTILLERY_HOST", "0.0.0.0")
             port_env = os.environ.get("DISTILLERY_PORT")
             port = args.port or (int(port_env) if port_env else 8000)
 
-            server = create_server()
+            auth = None
+            if config.server.auth.provider == "github":
+                from distillery.mcp.auth import build_github_auth
+
+                auth = build_github_auth(config)
+            else:
+                logger.warning(
+                    "HTTP server running without authentication "
+                    "(server.auth.provider is %r)",
+                    config.server.auth.provider,
+                )
+
+            server = create_server(config=config, auth=auth)
             server.run(
                 transport="streamable-http",
                 host=host,
@@ -117,7 +132,7 @@ def main(argv: list[str] | None = None) -> int:
                 stateless_http=True,
             )
         else:
-            server = create_server()
+            server = create_server(config=config)
             asyncio.run(server.run_stdio_async(show_banner=False))
 
         return 0

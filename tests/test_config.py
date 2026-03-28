@@ -10,6 +10,8 @@ import pytest
 from distillery.config import (
     CONFIG_ENV_VAR,
     DistilleryConfig,
+    ServerAuthConfig,
+    ServerConfig,
     TagsConfig,
     load_config,
 )
@@ -602,3 +604,80 @@ class TestMotherDuckValidation:
         p = write_yaml(tmp_path, yaml_content)
         cfg = load_config(str(p))
         assert cfg.storage.backend == "duckdb"
+
+
+# ---------------------------------------------------------------------------
+# Server auth configuration
+# ---------------------------------------------------------------------------
+
+
+class TestServerAuthConfigParsing:
+    def test_server_auth_config_parsing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """YAML server.auth section parses correctly."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        yaml_content = """\
+            server:
+              auth:
+                provider: github
+                client_id_env: MY_GH_CLIENT_ID
+                client_secret_env: MY_GH_CLIENT_SECRET
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.server.auth.provider == "github"
+        assert cfg.server.auth.client_id_env == "MY_GH_CLIENT_ID"
+        assert cfg.server.auth.client_secret_env == "MY_GH_CLIENT_SECRET"
+
+    def test_server_auth_defaults(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """When no server section is present, defaults are applied."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        cfg = load_config()
+        assert cfg.server.auth.provider == "none"
+        assert cfg.server.auth.client_id_env == "GITHUB_CLIENT_ID"
+        assert cfg.server.auth.client_secret_env == "GITHUB_CLIENT_SECRET"
+
+    def test_server_auth_provider_none(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """provider: none is valid."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        yaml_content = """\
+            server:
+              auth:
+                provider: none
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.server.auth.provider == "none"
+
+    def test_server_config_dataclass_defaults(self) -> None:
+        """ServerConfig and ServerAuthConfig have correct defaults."""
+        sc = ServerConfig()
+        assert isinstance(sc.auth, ServerAuthConfig)
+        assert sc.auth.provider == "none"
+        assert sc.auth.client_id_env == "GITHUB_CLIENT_ID"
+        assert sc.auth.client_secret_env == "GITHUB_CLIENT_SECRET"
+
+
+class TestServerAuthInvalidProvider:
+    def test_server_auth_invalid_provider(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Invalid provider raises ValueError."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        yaml_content = """\
+            server:
+              auth:
+                provider: google
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="server.auth.provider"):
+            load_config(str(p))

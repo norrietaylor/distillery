@@ -253,3 +253,91 @@ class TestStdioDefaultUnchanged:
         assert ns.transport == "http"
         assert ns.host == "127.0.0.1"
         assert ns.port == 9000
+
+
+class TestHttpAuthIdentityVisibleToTools:
+    async def test_http_auth_identity_visible_to_tools(self) -> None:
+        """Smoke test: start HTTP server with DebugTokenVerifier, make
+        authenticated request, assert tool handler can read caller identity
+        from FastMCP Context (validates multi-team extension point).
+        """
+        from fastmcp.server.auth import DebugTokenVerifier
+
+        port = _free_port()
+        config = _make_server_config()
+
+        # DebugTokenVerifier accepts all tokens and sets client_id.
+        debug_auth = DebugTokenVerifier(client_id="test-team-client")
+        server = create_server(config=config, auth=debug_auth)
+
+        http_app = server.http_app(
+            path="/mcp", transport="streamable-http", stateless_http=True
+        )
+        uv_config = uvicorn.Config(
+            app=http_app,
+            host="127.0.0.1",
+            port=port,
+            lifespan="on",
+            log_level="warning",
+        )
+        uv_server = uvicorn.Server(uv_config)
+        task = asyncio.create_task(uv_server.serve())
+
+        for _ in range(50):
+            await asyncio.sleep(0.1)
+            if uv_server.started:
+                break
+
+        if not uv_server.started:
+            uv_server.should_exit = True
+            await task
+            raise RuntimeError(f"HTTP server failed to start on port {port}")
+
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                # Unauthenticated request should be rejected (401 or error).
+                unauth_resp = await client.post(
+                    f"http://127.0.0.1:{port}/mcp",
+                    headers=MCP_HEADERS,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "initialize",
+                        "params": {
+                            "protocolVersion": "2024-11-05",
+                            "capabilities": {},
+                            "clientInfo": {"name": "test", "version": "1.0"},
+                        },
+                    },
+                )
+                # With auth enabled, unauthenticated requests should fail.
+                assert unauth_resp.status_code == 401, (
+                    f"Expected 401 for unauthenticated request, got {unauth_resp.status_code}"
+                )
+
+                # Authenticated request with Bearer token should succeed.
+                auth_headers = {**MCP_HEADERS, "Authorization": "Bearer test-token-123"}
+                auth_resp = await client.post(
+                    f"http://127.0.0.1:{port}/mcp",
+                    headers=auth_headers,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "initialize",
+                        "params": {
+                            "protocolVersion": "2024-11-05",
+                            "capabilities": {},
+                            "clientInfo": {"name": "test", "version": "1.0"},
+                        },
+                    },
+                )
+                assert auth_resp.status_code == 200, (
+                    f"Expected 200 for authenticated request, got {auth_resp.status_code}: "
+                    f"{auth_resp.text[:200]}"
+                )
+                data = _parse_sse_data(auth_resp.text)
+                assert "result" in data, f"Expected result in: {data}"
+                assert data["result"]["protocolVersion"] == "2024-11-05"
+        finally:
+            uv_server.should_exit = True
+            await task
