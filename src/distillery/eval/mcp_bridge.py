@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 from typing import Any
 
 from mcp import types as mcp_types
@@ -50,6 +49,7 @@ from distillery.mcp.server import (
     _handle_type_schemas,
     _handle_update,
 )
+from distillery.mcp._stub_embedding import HashEmbeddingProvider
 from distillery.store.duckdb import DuckDBStore
 
 logger = logging.getLogger(__name__)
@@ -297,42 +297,11 @@ DISTILLERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
 ]
 
 
-class _MockEmbeddingProvider:
-    """Hash-based 4-dimensional embedding provider — no API calls needed.
-
-    Used by :class:`MCPBridge` to give the in-memory DuckDB store a fully
-    functional embedding backend without requiring any API keys.
-    """
-
-    _DIMS: int = 4
-
-    def _vector_for(self, text: str) -> list[float]:
-        h = hash(text) & 0xFFFFFFFF
-        parts = [(h >> (8 * i)) & 0xFF for i in range(self._DIMS)]
-        floats = [float(p) + 1.0 for p in parts]
-        mag = math.sqrt(sum(x * x for x in floats))
-        return [x / mag for x in floats]
-
-    def embed(self, text: str) -> list[float]:
-        return self._vector_for(text)
-
-    def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        return [self._vector_for(t) for t in texts]
-
-    @property
-    def dimensions(self) -> int:
-        return self._DIMS
-
-    @property
-    def model_name(self) -> str:
-        return "mock-hash"
-
-
 def _make_test_config() -> DistilleryConfig:
     """Return a minimal DistilleryConfig suitable for in-memory eval testing."""
     return DistilleryConfig(
         storage=StorageConfig(backend="duckdb", database_path=":memory:"),
-        embedding=EmbeddingConfig(provider="", model="mock-hash", dimensions=4),
+        embedding=EmbeddingConfig(provider="mock", model="mock-hash", dimensions=4),
         team=TeamConfig(),
         classification=ClassificationConfig(),
     )
@@ -367,7 +336,7 @@ class MCPBridge:
         Returns:
             Initialised :class:`MCPBridge` instance.
         """
-        provider = _MockEmbeddingProvider()
+        provider = HashEmbeddingProvider(dimensions=4)
         config = _make_test_config()
         store = DuckDBStore(db_path=":memory:", embedding_provider=provider)
         await store.initialize()
@@ -506,15 +475,7 @@ async def seed_file_store(
     """
     from distillery.models import Entry, EntrySource, EntryType
 
-    provider = _MockEmbeddingProvider()
-    # Override dimensions if caller requests non-default.
-    if dimensions != provider._DIMS:
-        provider = type(
-            "_DynMockProvider",
-            (_MockEmbeddingProvider,),
-            {"_DIMS": dimensions},
-        )()
-
+    provider = HashEmbeddingProvider(dimensions=dimensions)
     store = DuckDBStore(db_path=db_path, embedding_provider=provider)
     await store.initialize()
 
