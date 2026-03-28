@@ -208,13 +208,15 @@ class DuckDBStore:
         dims = str(self._embedding_provider.dimensions)
 
         if not rows:
-            # First use -- record the model metadata.
+            # First use -- record the model metadata.  Use INSERT OR IGNORE
+            # so concurrent sessions racing through this path don't fail on
+            # a primary-key conflict.
             conn.execute(
-                "INSERT INTO _meta (key, value) VALUES (?, ?)",
+                "INSERT OR IGNORE INTO _meta (key, value) VALUES (?, ?)",
                 ["embedding_model", model],
             )
             conn.execute(
-                "INSERT INTO _meta (key, value) VALUES (?, ?)",
+                "INSERT OR IGNORE INTO _meta (key, value) VALUES (?, ?)",
                 ["embedding_dimensions", dims],
             )
             logger.info(
@@ -247,7 +249,8 @@ class DuckDBStore:
         """
         Ensure the `entries` table has an `accessed_at` TIMESTAMP column.
 
-        If the column already exists this is a no-op; otherwise the table schema is altered to add `accessed_at`.
+        If the column already exists this is a no-op; otherwise the table
+        schema is altered to add ``accessed_at``.
         """
         conn.execute(_ADD_ACCESSED_AT_COLUMN)
         logger.debug("accessed_at column ready on entries table")
@@ -256,16 +259,43 @@ class DuckDBStore:
         """
         Initialize the DuckDB connection and ensure the database is ready for use.
 
-        Opens or creates the DuckDB database, loads and configures the VSS extension, creates or migrates the schema (entries, logs, and metadata), validates or records embedding model metadata, and ensures the HNSW index and accessed_at column exist. On success, stores the active connection on the instance and marks the store as initialized.
+        Opens or creates the DuckDB database, loads and configures the VSS
+        extension, creates or migrates the schema (entries, logs, and metadata),
+        validates or records embedding model metadata, and ensures the HNSW
+        index and ``accessed_at`` column exist.
+
+        Write-write conflicts (common when multiple stateless HTTP sessions
+        start concurrently) are retried automatically by wrapping the entire
+        initialization write path in a retry loop.
         """
+        import time
+
         conn = self._open_connection()
         self._setup_vss(conn)
-        self._create_schema(conn)
-        self._add_accessed_at_column(conn)
-        self._create_log_tables(conn)
-        self._create_meta_table(conn)
-        self._validate_or_record_meta(conn)
-        self._create_index(conn)
+
+        # Wrap the entire initialization write path in a retry loop to handle
+        # write-write conflicts during concurrent initialization. All the wrapped
+        # operations use CREATE IF NOT EXISTS or transactional upsert patterns,
+        # making retries safe.
+        for attempt in range(3):
+            try:
+                self._create_schema(conn)
+                self._add_accessed_at_column(conn)
+                self._create_log_tables(conn)
+                self._create_meta_table(conn)
+                self._validate_or_record_meta(conn)
+                self._create_index(conn)
+                break  # Success - exit retry loop
+            except duckdb.TransactionException:
+                if attempt < 2:
+                    logger.warning(
+                        "Write-write conflict during initialization (attempt %d/3), retrying…",
+                        attempt + 1,
+                    )
+                    time.sleep(0.1 * (attempt + 1))
+                else:
+                    raise
+
         self._conn = conn
         self._initialized = True
         logger.info("DuckDBStore initialized at %s", self._db_path)
