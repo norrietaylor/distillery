@@ -1,0 +1,190 @@
+# Golden dataset: 25 seed entries covering all EntryType values.
+# Used by multiple eval scenarios to pre-populate the knowledge base.
+
+entries:
+  # session (5)
+  - content: "Decided to use DuckDB for local storage because it requires no separate server process, supports SQL queries natively, and has excellent Python bindings. SQLite was considered but lacks columnar storage benefits needed for embedding queries."
+    entry_type: session
+    author: alice
+    tags: [architecture, storage, duckdb]
+    project: distillery
+
+  - content: "Implemented HNSW vector similarity search using DuckDB VSS extension. Chose cosine similarity over L2 distance after benchmarking on 10k entries — cosine was 15% more accurate for semantic search queries."
+    entry_type: session
+    author: alice
+    tags: [architecture, search, embeddings]
+    project: distillery
+
+  - content: "Decided to use FastMCP for the MCP server layer. Provides clean decorator-based tool registration and handles stdio transport automatically. Rejected raw MCP SDK as too verbose."
+    entry_type: session
+    author: bob
+    tags: [architecture, mcp, fastmcp]
+    project: distillery
+
+  - content: "Refactored embedding pipeline to support multiple providers (Jina, OpenAI) via a Protocol interface. This decouples storage from embedding so we can swap providers without changing the store layer."
+    entry_type: session
+    author: alice
+    tags: [refactor, embedding, architecture]
+    project: distillery
+
+  - content: "Added deduplication checker with three thresholds: skip (0.95 similarity), merge (0.80), link (0.60). Prevents knowledge base bloat while allowing related but distinct entries to coexist."
+    entry_type: session
+    author: bob
+    tags: [deduplication, classification]
+    project: distillery
+
+  # bookmark (4)
+  - content: "DuckDB VSS extension documentation — covers HNSW index creation, cosine similarity queries, and persistence. Essential reference for the vector search implementation."
+    entry_type: bookmark
+    author: alice
+    tags: [reference, duckdb, vector-search]
+    project: distillery
+    metadata:
+      url: "https://duckdb.org/docs/extensions/vss"
+      summary: "Official DuckDB VSS extension docs"
+
+  - content: "FastMCP GitHub repository — source code and examples for building MCP servers with Python decorators. Includes stdio transport and tool registration patterns."
+    entry_type: bookmark
+    author: bob
+    tags: [reference, mcp, fastmcp]
+    project: distillery
+    metadata:
+      url: "https://github.com/jlowin/fastmcp"
+      summary: "FastMCP Python library"
+
+  - content: "Anthropic tool use documentation — describes the messages API tool_use and tool_result blocks, including parallel tool calls and error handling patterns."
+    entry_type: bookmark
+    author: alice
+    tags: [reference, anthropic, tool-use]
+    metadata:
+      url: "https://docs.anthropic.com/en/docs/tool-use"
+      summary: "Anthropic tool use API reference"
+
+  - content: "Jina AI embeddings v3 model card — 1024-dimensional multilingual embeddings, 8192 token context, strong performance on semantic similarity benchmarks."
+    entry_type: bookmark
+    author: alice
+    tags: [reference, embeddings, jina]
+    project: distillery
+    metadata:
+      url: "https://jina.ai/embeddings/"
+      summary: "Jina embeddings v3 model overview"
+
+  # minutes (3)
+  - content: "Architecture review meeting 2026-03-10. Attendees: Alice, Bob, Carol. Decided: (1) DuckDB is the storage backend, no alternatives considered going forward. (2) Embedding dimensions fixed at 1024 for production. (3) MCP server uses stdio transport only in v1."
+    entry_type: minutes
+    author: carol
+    tags: [meeting, architecture]
+    project: distillery
+    metadata:
+      meeting_id: "arch-2026-03-10"
+
+  - content: "Sprint planning 2026-03-17. Team: Alice, Bob. Stories: implement dedup checker (3pts), add classification engine (5pts), write skill eval framework (8pts). Velocity: 13pts last sprint."
+    entry_type: minutes
+    author: bob
+    tags: [meeting, planning, sprint]
+    project: distillery
+    metadata:
+      meeting_id: "sprint-2026-03-17"
+
+  - content: "1:1 Alice and Bob 2026-03-20. Discussed: embedding provider abstraction is blocking the eval framework. Action: Alice to finish Protocol interface by EOD. Bob to start scenario YAML format design."
+    entry_type: minutes
+    author: alice
+    tags: [meeting, action-items]
+    project: distillery
+    metadata:
+      meeting_id: "1on1-2026-03-20"
+
+  # reference (3)
+  - content: "Python Protocol (PEP 544) enables structural subtyping without explicit inheritance. Used throughout Distillery for EmbeddingProvider and DistilleryStore protocols. Key benefit: test doubles can be simple classes that satisfy the interface without importing from src."
+    entry_type: reference
+    author: alice
+    tags: [python, protocols, testing]
+    project: distillery
+
+  - content: "Conventional Commits format: type(scope): description. Types: feat, fix, docs, test, refactor, chore. Scopes for Distillery: store, mcp, embedding, classification, config, skills, cli."
+    entry_type: reference
+    author: bob
+    tags: [conventions, git, commits]
+    project: distillery
+
+  - content: "pytest-asyncio auto mode: all async test functions are automatically detected as coroutines without @pytest.mark.asyncio decoration. Configured via asyncio_mode = 'auto' in pyproject.toml."
+    entry_type: reference
+    author: alice
+    tags: [testing, pytest, async]
+    project: distillery
+
+  # idea (2)
+  - content: "Idea: add an LLM-powered conflict detection pass — when storing a new entry, check for factual contradictions with similar existing entries. Could use a lightweight haiku call with a focused prompt."
+    entry_type: idea
+    author: bob
+    tags: [ideas, llm, conflict-detection]
+    project: distillery
+
+  - content: "Idea: stream skill eval results to a dashboard so you can watch tool calls happen in real time. Would help debug why a skill chose the wrong tool sequence."
+    entry_type: idea
+    author: alice
+    tags: [ideas, eval, ui]
+    project: distillery
+
+  # inbox (2)
+  - content: "Check if DuckDB 0.10+ changed the HNSW index API — the VSS extension had breaking changes in the 0.9→0.10 migration that may affect our persistence layer."
+    entry_type: inbox
+    author: bob
+    tags: [todo, duckdb]
+    project: distillery
+
+  - content: "Evaluate whether to support pgvector as an alternative backend. Would enable cloud-hosted deployments but adds operational complexity."
+    entry_type: inbox
+    author: alice
+    tags: [todo, storage, pgvector]
+
+  # person (1)
+  - content: "Alice Smith — lead engineer on Distillery. Deep expertise in Python, DuckDB, and vector search. Owns the storage and embedding layers."
+    entry_type: person
+    author: carol
+    tags: [team]
+    project: distillery
+    metadata:
+      expertise: [python, duckdb, vector-search, embeddings]
+      github_username: alice-smith
+      role: lead-engineer
+
+  # project (1)
+  - content: "Distillery — a knowledge-base system for Claude Code. Stores, searches, and classifies knowledge entries using DuckDB with vector similarity search. Exposes 17 MCP tools over stdio."
+    entry_type: project
+    author: alice
+    tags: [project, distillery]
+    metadata:
+      repo: norrietaylor/distillery
+      status: active
+      language: python
+
+  # digest (1)
+  - content: "Weekly digest 2026-03-24. Completed: dedup checker, classification engine, conflict detection. In progress: eval framework. Blocked: nothing. Velocity: 16pts. Key decision: use haiku model for eval runs to keep costs low."
+    entry_type: digest
+    author: alice
+    tags: [digest, weekly]
+    project: distillery
+    metadata:
+      period_start: "2026-03-18"
+      period_end: "2026-03-24"
+
+  # github (1)
+  - content: "GitHub issue #17: feat(testing): build a skill evaluation framework. Proposes eval scenarios in YAML, a runner harness, scoring metrics, golden dataset, and distillery eval CLI command."
+    entry_type: github
+    author: bot
+    tags: [github, issue, eval]
+    project: distillery
+    metadata:
+      repo: norrietaylor/distillery
+      ref_type: issue
+      ref_number: 17
+      title: "feat(testing): build a skill evaluation framework"
+      state: open
+
+  # meeting (1)
+  - content: "Quarterly roadmap review 2026-Q1. Present: full team. Decided: (1) public release targeting Q2. (2) eval framework is a blocker for v1.0. (3) add OpenAI embedding provider before release."
+    entry_type: meeting
+    author: carol
+    tags: [meeting, roadmap, quarterly]
+    project: distillery

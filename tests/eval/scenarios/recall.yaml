@@ -1,0 +1,129 @@
+# Eval scenarios for the /recall skill.
+# Each scenario exercises a different aspect of semantic search behavior.
+
+- name: recall-finds-storage-decision
+  skill: recall
+  description: "Claude should search for the DuckDB storage decision and return it"
+  prompt: "what storage engine do we use and why did we choose it?"
+  seed_entries:
+    - content: "Decided to use DuckDB for local storage because it requires no separate server process, supports SQL queries natively, and has excellent Python bindings."
+      entry_type: session
+      author: alice
+      tags: [architecture, storage, duckdb]
+      project: distillery
+    - content: "Evaluated PostgreSQL as a storage backend but rejected it — too heavy for local developer tooling."
+      entry_type: session
+      author: alice
+      tags: [architecture, storage]
+  expected_tools:
+    - distillery_status
+    - distillery_search
+  response_must_contain:
+    - DuckDB
+  min_entries_retrieved: 1
+  max_latency_ms: 60000
+  max_total_tokens: 8000
+
+- name: recall-empty-store
+  skill: recall
+  description: "Claude should gracefully report no results when the store is empty"
+  prompt: "what do we know about caching strategies?"
+  seed_entries: []
+  expected_tools:
+    - distillery_status
+    - distillery_search
+  response_must_contain:
+    - No results
+  min_entries_retrieved: 0
+  max_latency_ms: 60000
+  max_total_tokens: 8000
+
+- name: recall-type-filter
+  skill: recall
+  description: "Claude should apply the --type filter when asked to search only bookmarks"
+  prompt: "/recall DuckDB documentation --type bookmark"
+  seed_entries:
+    - content: "DuckDB VSS extension documentation — covers HNSW index creation and cosine similarity queries."
+      entry_type: bookmark
+      author: alice
+      tags: [reference, duckdb]
+      metadata:
+        url: "https://duckdb.org/docs/extensions/vss"
+    - content: "Decided to use DuckDB for local storage."
+      entry_type: session
+      author: alice
+      tags: [architecture, duckdb]
+  expected_tools:
+    - distillery_status
+    - distillery_search
+  min_entries_retrieved: 1
+  max_latency_ms: 60000
+  max_total_tokens: 8000
+
+- name: recall-shows-provenance
+  skill: recall
+  description: "Claude's response must include entry ID and author provenance"
+  prompt: "find anything about the MCP server implementation"
+  seed_entries:
+    - content: "Decided to use FastMCP for the MCP server layer. Provides clean decorator-based tool registration."
+      entry_type: session
+      author: bob
+      tags: [architecture, mcp]
+      project: distillery
+  expected_tools:
+    - distillery_search
+  response_must_contain:
+    - bob
+  min_entries_retrieved: 1
+  max_latency_ms: 60000
+  max_total_tokens: 8000
+
+- name: recall-limit-flag
+  skill: recall
+  description: "Claude should respect the --limit flag and pass it to distillery_search"
+  prompt: "/recall embedding --limit 3"
+  seed_entries:
+    - content: "Implemented HNSW vector similarity search using DuckDB VSS extension."
+      entry_type: session
+      author: alice
+      tags: [search, embeddings]
+    - content: "Refactored embedding pipeline to support multiple providers via a Protocol interface."
+      entry_type: session
+      author: alice
+      tags: [embedding]
+    - content: "Jina AI embeddings v3 model card — 1024-dimensional multilingual embeddings."
+      entry_type: bookmark
+      author: alice
+      tags: [embeddings]
+    - content: "Added OpenAI embedding provider as an alternative to Jina."
+      entry_type: session
+      author: bob
+      tags: [embedding]
+  expected_tools:
+    - distillery_search
+  min_entries_retrieved: 1
+  max_latency_ms: 60000
+  max_total_tokens: 8000
+
+- name: recall-multi-result-display
+  skill: recall
+  description: "Claude should display multiple results with similarity scores and full content"
+  prompt: "what architectural decisions did we make about the storage layer?"
+  seed_entries:
+    - content: "Decided to use DuckDB for local storage — no server process needed."
+      entry_type: session
+      author: alice
+      tags: [architecture, storage]
+    - content: "Chose cosine similarity over L2 distance for vector search after benchmarking."
+      entry_type: session
+      author: alice
+      tags: [architecture, search]
+    - content: "Embedding dimensions fixed at 1024 for production based on benchmark results."
+      entry_type: session
+      author: bob
+      tags: [architecture, embeddings]
+  expected_tools:
+    - distillery_search
+  min_entries_retrieved: 1
+  max_latency_ms: 60000
+  max_total_tokens: 10000

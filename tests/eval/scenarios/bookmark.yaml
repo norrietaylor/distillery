@@ -1,0 +1,91 @@
+# Eval scenarios for the /bookmark skill.
+
+- name: bookmark-stores-url
+  skill: bookmark
+  description: "Claude should store a bookmark entry with the provided URL"
+  prompt: '/bookmark https://duckdb.org/docs/extensions/vss "DuckDB VSS extension docs — HNSW index creation and cosine similarity"'
+  seed_entries: []
+  expected_tools:
+    - distillery_status
+    - distillery_store
+  min_entries_stored: 1
+  max_latency_ms: 90000
+  max_total_tokens: 10000
+
+- name: bookmark-entry-type-is-bookmark
+  skill: bookmark
+  description: "The stored entry should have entry_type=bookmark"
+  prompt: '/bookmark https://jina.ai/embeddings/ "Jina embeddings v3 — multilingual 1024-dim model"'
+  seed_entries: []
+  expected_tools:
+    - distillery_store
+  min_entries_stored: 1
+  max_latency_ms: 90000
+  max_total_tokens: 10000
+
+- name: bookmark-dedup-check
+  skill: bookmark
+  description: "Claude should check for duplicates before storing a bookmark"
+  prompt: '/bookmark https://duckdb.org/docs/extensions/vss "DuckDB vector similarity search extension"'
+  seed_entries:
+    - content: "DuckDB VSS extension documentation — covers HNSW index creation, cosine similarity queries, and persistence."
+      entry_type: bookmark
+      author: alice
+      tags: [reference, duckdb]
+      metadata:
+        url: "https://duckdb.org/docs/extensions/vss"
+  expected_tools:
+    - distillery_status
+    - distillery_check_dedup
+  max_latency_ms: 90000
+  max_total_tokens: 10000
+
+- name: bookmark-with-tags
+  skill: bookmark
+  description: "Claude should extract or apply tags to the bookmark"
+  prompt: '/bookmark https://docs.anthropic.com/en/docs/tool-use "Anthropic tool use API reference" #anthropic #mcp'
+  seed_entries: []
+  expected_tools:
+    - distillery_store
+  min_entries_stored: 1
+  max_latency_ms: 90000
+  max_total_tokens: 10000
+
+- name: bookmark-search-by-topic
+  skill: bookmark
+  description: "Claude should search existing bookmarks when asked to find one by topic"
+  prompt: "/recall vector search --type bookmark"
+  seed_entries:
+    - content: "DuckDB VSS extension — HNSW index for vector similarity search"
+      entry_type: bookmark
+      author: alice
+      tags: [duckdb, vector-search]
+      metadata:
+        url: "https://duckdb.org/docs/extensions/vss"
+    - content: "Pinecone vector database documentation — hosted vector search"
+      entry_type: bookmark
+      author: bob
+      tags: [vector-search]
+  expected_tools:
+    - distillery_search
+  min_entries_retrieved: 1
+  max_latency_ms: 60000
+  max_total_tokens: 8000
+
+- name: bookmark-list-all
+  skill: bookmark
+  description: "Claude should list stored bookmarks when asked"
+  prompt: "list all my saved bookmarks"
+  seed_entries:
+    - content: "DuckDB VSS extension documentation"
+      entry_type: bookmark
+      author: alice
+      tags: [duckdb]
+    - content: "FastMCP GitHub repository"
+      entry_type: bookmark
+      author: bob
+      tags: [mcp]
+  expected_tools:
+    - distillery_list
+  max_latency_ms: 60000
+  max_total_tokens: 8000
