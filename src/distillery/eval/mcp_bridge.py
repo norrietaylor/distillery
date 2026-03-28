@@ -30,6 +30,7 @@ from distillery.config import (
     TeamConfig,
 )
 from distillery.eval.models import SeedEntry
+from distillery.mcp._stub_embedding import HashEmbeddingProvider
 from distillery.mcp.server import (
     _handle_check_conflicts,
     _handle_check_dedup,
@@ -49,7 +50,6 @@ from distillery.mcp.server import (
     _handle_type_schemas,
     _handle_update,
 )
-from distillery.mcp._stub_embedding import HashEmbeddingProvider
 from distillery.store.duckdb import DuckDBStore
 
 logger = logging.getLogger(__name__)
