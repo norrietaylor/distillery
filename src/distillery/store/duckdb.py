@@ -186,29 +186,10 @@ class DuckDBStore:
         conn.execute(_CREATE_META_TABLE)
 
     def _create_log_tables(self, conn: duckdb.DuckDBPyConnection) -> None:
-        """Create the ``search_log`` and ``feedback_log`` tables if they don't exist.
-
-        Retries on DuckDB ``TransactionException`` to handle write-write
-        conflicts that occur when multiple stateless HTTP sessions initialise
-        concurrently against the same database file.
-        """
-        import time
-
-        for attempt in range(3):
-            try:
-                conn.execute(_CREATE_SEARCH_LOG_TABLE)
-                conn.execute(_CREATE_FEEDBACK_LOG_TABLE)
-                logger.info("search_log and feedback_log tables ready")
-                return
-            except duckdb.TransactionException:
-                if attempt < 2:
-                    logger.warning(
-                        "Write-write conflict creating log tables (attempt %d/3), retrying…",
-                        attempt + 1,
-                    )
-                    time.sleep(0.1 * (attempt + 1))
-                else:
-                    raise
+        """Create the ``search_log`` and ``feedback_log`` tables if they don't exist."""
+        conn.execute(_CREATE_SEARCH_LOG_TABLE)
+        conn.execute(_CREATE_FEEDBACK_LOG_TABLE)
+        logger.info("search_log and feedback_log tables ready")
 
     def _validate_or_record_meta(self, conn: duckdb.DuckDBPyConnection) -> None:
         """Validate or record the embedding model metadata.
@@ -267,25 +248,10 @@ class DuckDBStore:
         Ensure the `entries` table has an `accessed_at` TIMESTAMP column.
 
         If the column already exists this is a no-op; otherwise the table
-        schema is altered to add ``accessed_at``.  Retries on write-write
-        conflicts from concurrent stateless sessions.
+        schema is altered to add ``accessed_at``.
         """
-        import time
-
-        for attempt in range(3):
-            try:
-                conn.execute(_ADD_ACCESSED_AT_COLUMN)
-                logger.debug("accessed_at column ready on entries table")
-                return
-            except duckdb.TransactionException:
-                if attempt < 2:
-                    logger.warning(
-                        "Write-write conflict adding accessed_at column (attempt %d/3), retrying…",
-                        attempt + 1,
-                    )
-                    time.sleep(0.1 * (attempt + 1))
-                else:
-                    raise
+        conn.execute(_ADD_ACCESSED_AT_COLUMN)
+        logger.debug("accessed_at column ready on entries table")
 
     def _sync_initialize(self) -> None:
         """
@@ -297,17 +263,37 @@ class DuckDBStore:
         index and ``accessed_at`` column exist.
 
         Write-write conflicts (common when multiple stateless HTTP sessions
-        start concurrently) are retried automatically in the individual
-        ``_create_*`` helpers.
+        start concurrently) are retried automatically by wrapping the entire
+        initialization write path in a retry loop.
         """
+        import time
+
         conn = self._open_connection()
         self._setup_vss(conn)
-        self._create_schema(conn)
-        self._add_accessed_at_column(conn)
-        self._create_log_tables(conn)
-        self._create_meta_table(conn)
-        self._validate_or_record_meta(conn)
-        self._create_index(conn)
+
+        # Wrap the entire initialization write path in a retry loop to handle
+        # write-write conflicts during concurrent initialization. All the wrapped
+        # operations use CREATE IF NOT EXISTS or transactional upsert patterns,
+        # making retries safe.
+        for attempt in range(3):
+            try:
+                self._create_schema(conn)
+                self._add_accessed_at_column(conn)
+                self._create_log_tables(conn)
+                self._create_meta_table(conn)
+                self._validate_or_record_meta(conn)
+                self._create_index(conn)
+                break  # Success - exit retry loop
+            except duckdb.TransactionException:
+                if attempt < 2:
+                    logger.warning(
+                        "Write-write conflict during initialization (attempt %d/3), retrying…",
+                        attempt + 1,
+                    )
+                    time.sleep(0.1 * (attempt + 1))
+                else:
+                    raise
+
         self._conn = conn
         self._initialized = True
         logger.info("DuckDBStore initialized at %s", self._db_path)

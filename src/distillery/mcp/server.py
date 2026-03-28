@@ -290,9 +290,7 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
             lc_v2 = getattr(rc, "lifespan_context", None)
             if lc_v2 is not None and isinstance(lc_v2, dict):
                 return cast(dict[str, Any], lc_v2)
-        raise RuntimeError(
-            "Cannot access lifespan context — verify FastMCP version compatibility."
-        )
+        raise RuntimeError("Cannot access lifespan context — verify FastMCP version compatibility.")
 
     # -----------------------------------------------------------------------
     # T02.1 tool wrappers: distillery_status, distillery_store,
@@ -1617,8 +1615,7 @@ async def _handle_tag_tree(
         if prefix is not None:
             prefix_slash = prefix + "/"
             all_tags = [
-                (t, idx) for t, idx in all_tags
-                if t == prefix or t.startswith(prefix_slash)
+                (t, idx) for t, idx in all_tags if t == prefix or t.startswith(prefix_slash)
             ]
             # Strip the prefix (and its trailing slash) from the remaining tags
             # so that the returned tree is rooted at the prefix.
@@ -1628,7 +1625,7 @@ async def _handle_tag_tree(
                     # The tag is exactly the prefix -- represents the root node.
                     stripped.append(("", idx))
                 else:
-                    stripped.append((t[len(prefix_slash):], idx))
+                    stripped.append((t[len(prefix_slash) :], idx))
             all_tags = stripped
 
         # Build the tree from path segments.
