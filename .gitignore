@@ -56,4 +56,4 @@ Thumbs.db
 # Environment variables
 .env
 .env.local
-distillery.yaml
+distillery.yaml.local

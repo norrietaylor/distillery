@@ -1,0 +1,23 @@
+storage:
+  backend: duckdb
+  database_path: ~/.distillery/distillery.db
+
+embedding:
+  provider: jina
+  model: jina-embeddings-v3
+  dimensions: 1024
+  api_key_env: JINA_API_KEY
+
+team:
+  name: ""
+
+classification:
+  confidence_threshold: 0.6
+  dedup_skip_threshold: 0.95
+  dedup_merge_threshold: 0.80
+  dedup_link_threshold: 0.60
+  dedup_limit: 5
+
+tags:
+  enforce_namespaces: false
+  reserved_prefixes: []
