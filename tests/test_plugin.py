@@ -185,6 +185,11 @@ class TestPluginSkills:
                 f"Skill '{skill['name']}' has unexpected path '{skill['path']}'; "
                 f"expected '{expected_path}'"
             )
+            skill_file = REPO_ROOT / skill["path"]
+            assert skill_file.exists(), f"Declared skill file missing: {skill_file}"
+            assert skill_file.read_text(encoding="utf-8").lstrip().startswith("---"), (
+                f"Skill file missing YAML frontmatter: {skill_file}"
+            )
 
     def test_skill_descriptions_are_non_empty(self) -> None:
         """Each skill description must be a non-empty string."""
@@ -301,7 +306,8 @@ class TestPluginMCPServers:
         """The stdio transport must have 'command' and 'env' fields."""
         manifest = load_plugin_manifest()
         transports = manifest["mcpServers"]["distillery"]["transports"]
-        stdio = next(t for t in transports if t["type"] == "stdio")
+        stdio = next((t for t in transports if t["type"] == "stdio"), None)
+        assert stdio is not None, "stdio transport not found"
         assert "command" in stdio, "stdio transport missing 'command'"
         assert "env" in stdio, "stdio transport missing 'env'"
 
@@ -309,28 +315,32 @@ class TestPluginMCPServers:
         """The stdio transport command must be 'distillery-mcp'."""
         manifest = load_plugin_manifest()
         transports = manifest["mcpServers"]["distillery"]["transports"]
-        stdio = next(t for t in transports if t["type"] == "stdio")
+        stdio = next((t for t in transports if t["type"] == "stdio"), None)
+        assert stdio is not None, "stdio transport not found"
         assert stdio["command"] == "distillery-mcp"
 
     def test_stdio_transport_env_has_jina_api_key(self) -> None:
         """The stdio transport env must declare JINA_API_KEY."""
         manifest = load_plugin_manifest()
         transports = manifest["mcpServers"]["distillery"]["transports"]
-        stdio = next(t for t in transports if t["type"] == "stdio")
+        stdio = next((t for t in transports if t["type"] == "stdio"), None)
+        assert stdio is not None, "stdio transport not found"
         assert "JINA_API_KEY" in stdio["env"]
 
     def test_stdio_transport_env_has_distillery_config(self) -> None:
         """The stdio transport env must declare DISTILLERY_CONFIG."""
         manifest = load_plugin_manifest()
         transports = manifest["mcpServers"]["distillery"]["transports"]
-        stdio = next(t for t in transports if t["type"] == "stdio")
+        stdio = next((t for t in transports if t["type"] == "stdio"), None)
+        assert stdio is not None, "stdio transport not found"
         assert "DISTILLERY_CONFIG" in stdio["env"]
 
     def test_stdio_transport_has_install_section(self) -> None:
         """The stdio transport must include an install guidance section."""
         manifest = load_plugin_manifest()
         transports = manifest["mcpServers"]["distillery"]["transports"]
-        stdio = next(t for t in transports if t["type"] == "stdio")
+        stdio = next((t for t in transports if t["type"] == "stdio"), None)
+        assert stdio is not None, "stdio transport not found"
         assert "install" in stdio
         assert "command" in stdio["install"]
 
@@ -338,14 +348,16 @@ class TestPluginMCPServers:
         """The stdio transport install command must be pip-based."""
         manifest = load_plugin_manifest()
         transports = manifest["mcpServers"]["distillery"]["transports"]
-        stdio = next(t for t in transports if t["type"] == "stdio")
+        stdio = next((t for t in transports if t["type"] == "stdio"), None)
+        assert stdio is not None, "stdio transport not found"
         assert "pip" in stdio["install"]["command"]
 
     def test_http_transport_has_url(self) -> None:
         """The http transport must have a 'url' field."""
         manifest = load_plugin_manifest()
         transports = manifest["mcpServers"]["distillery"]["transports"]
-        http = next(t for t in transports if t["type"] == "http")
+        http = next((t for t in transports if t["type"] == "http"), None)
+        assert http is not None, "http transport not found"
         assert "url" in http
         assert http["url"].startswith("https://")
 
@@ -368,7 +380,8 @@ class TestPluginMCPServers:
         """The stdio transport must have id='local' and label='Local (stdio)'."""
         manifest = load_plugin_manifest()
         transports = manifest["mcpServers"]["distillery"]["transports"]
-        stdio = next(t for t in transports if t["type"] == "stdio")
+        stdio = next((t for t in transports if t["type"] == "stdio"), None)
+        assert stdio is not None, "stdio transport not found"
         assert stdio["id"] == "local"
         assert stdio["label"] == "Local (stdio)"
 
@@ -376,7 +389,8 @@ class TestPluginMCPServers:
         """The http transport must have id='hosted' and label='Hosted (HTTP/SSE)'."""
         manifest = load_plugin_manifest()
         transports = manifest["mcpServers"]["distillery"]["transports"]
-        http = next(t for t in transports if t["type"] == "http")
+        http = next((t for t in transports if t["type"] == "http"), None)
+        assert http is not None, "http transport not found"
         assert http["id"] == "hosted"
         assert http["label"] == "Hosted (HTTP/SSE)"
 
