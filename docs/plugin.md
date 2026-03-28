@@ -30,7 +30,8 @@ Copy the skills directory into any project that should have access to the skills
 
 ```bash
 # From inside the target project
-cp -r /path/to/distillery/.claude/skills ~/.claude/skills
+mkdir -p ~/.claude/skills
+cp -r /path/to/distillery/.claude/skills/* ~/.claude/skills/
 ```
 
 Or clone this repo and symlink:
@@ -133,7 +134,7 @@ Connect to the hosted Distillery instance.  No local installation or API key req
 After saving the settings file, restart Claude Code or reload MCP servers.
 Then check that Distillery is connected:
 
-```
+```text
 distillery_status
 ```
 
@@ -160,7 +161,7 @@ distillery health
 
 If the MCP server is not configured or not running, each skill displays:
 
-```
+```text
 Warning: Distillery MCP Server Not Available
 
 The Distillery MCP server is not configured or not running.

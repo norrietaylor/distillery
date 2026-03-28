@@ -56,7 +56,7 @@
           "command": "distillery-mcp",
           "env": {
             "JINA_API_KEY": "${JINA_API_KEY}",
-            "DISTILLERY_CONFIG": "${DISTILLERY_CONFIG:-~/.distillery/distillery.yaml}"
+            "DISTILLERY_CONFIG": "${DISTILLERY_CONFIG}"
           },
           "install": {
             "command": "pip install distillery",
