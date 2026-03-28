@@ -357,7 +357,7 @@ class MCPBridge:
         self._embedding_provider = embedding_provider
 
     @classmethod
-    async def create(cls, seed_entries: list[SeedEntry] | None = None) -> "MCPBridge":
+    async def create(cls, seed_entries: list[SeedEntry] | None = None) -> MCPBridge:
         """Create and initialise a bridge with an optional set of seed entries.
 
         Args:

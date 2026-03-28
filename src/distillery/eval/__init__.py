@@ -16,8 +16,8 @@ Usage::
 """
 
 from distillery.eval.models import (
-    EvalScenario,
     EffectivenessScore,
+    EvalScenario,
     PerformanceMetrics,
     ScenarioResult,
     SeedEntry,
