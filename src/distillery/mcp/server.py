@@ -3205,14 +3205,13 @@ async def _handle_watch(
             poll_interval_minutes=poll_interval,
             trust_weight=trust_weight,
         )
-        # Reject duplicates (same URL already registered).
-        if any(s.url == url for s in sources):
-            return error_response(
-                "DUPLICATE_SOURCE",
-                f"Source with URL {url!r} is already registered.",
-            )
-
         async with _watch_lock:
+            # Duplicate check inside lock to prevent TOCTOU race.
+            if any(s.url == url for s in sources):
+                return error_response(
+                    "DUPLICATE_SOURCE",
+                    f"Source with URL {url!r} is already registered.",
+                )
             sources.append(new_source)
 
         return success_response(
