@@ -1,0 +1,26 @@
+Type: test
+Command: pytest tests/ -x -q (full suite)
+Expected: All tests pass, no regressions
+Timestamp: 2026-03-28T23:00:15Z
+Status: PASS
+---
+tests/test_resilience.py ........                                        [ 84%]
+tests/test_stale.py .........................                            [ 87%]
+tests/test_store_integration.py .........................                [ 89%]
+tests/test_store_protocol.py ..........                                  [ 90%]
+tests/test_tags.py .............................                         [ 92%]
+tests/test_type_schemas.py ............................................. [ 96%]
+                                                                         [ 96%]
+tests/test_watch.py ..................................                   [100%]
+
+=============================== warnings summary ===============================
+tests/test_mcp_http_transport.py::TestHttpServerStarts::test_http_server_starts
+  /home/norrie.guest/code/distillery/.worktrees/feature-git-hub-team-oauth/.venv/lib/python3.13/site-packages/websockets/legacy/__init__.py:6: DeprecationWarning: websockets.legacy is deprecated; see https://websockets.readthedocs.io/en/stable/howto/upgrade.html for upgrade instructions
+    warnings.warn(  # deprecated in 14.0 - 2024-11-09
+
+tests/test_mcp_http_transport.py::TestHttpServerStarts::test_http_server_starts
+  /home/norrie.guest/code/distillery/.worktrees/feature-git-hub-team-oauth/.venv/lib/python3.13/site-packages/uvicorn/protocols/websockets/websockets_impl.py:17: DeprecationWarning: websockets.server.WebSocketServerProtocol is deprecated
+    from websockets.server import WebSocketServerProtocol
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================ 1057 passed, 51 skipped, 2 warnings in 13.00s =================
