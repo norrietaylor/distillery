@@ -99,6 +99,23 @@ def success_response(data: dict[str, Any]) -> list[types.TextContent]:
 
 
 # ---------------------------------------------------------------------------
+# Storage path helpers
+# ---------------------------------------------------------------------------
+
+
+def _is_remote_db_path(path: str) -> bool:
+    """Return True for S3 or MotherDuck URIs that should not be treated as local paths."""
+    return path.startswith("s3://") or path.startswith("md:")
+
+
+def _normalize_db_path(raw: str) -> str:
+    """Expand ``~`` for local paths; leave cloud URIs (S3/MotherDuck) untouched."""
+    if _is_remote_db_path(raw):
+        return raw
+    return os.path.expanduser(raw)
+
+
+# ---------------------------------------------------------------------------
 # Input validation helpers
 # ---------------------------------------------------------------------------
 
@@ -248,11 +265,27 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
             logger.info("Distillery MCP server starting up …")
 
             embedding_provider = _create_embedding_provider(config)
-            db_path = os.path.expanduser(config.storage.database_path)
+            db_path = _normalize_db_path(config.storage.database_path)
+
+            # Apply MotherDuck token from the configured env var name if set.
+            if db_path.startswith("md:"):
+                token = os.environ.get(config.storage.motherduck_token_env)
+                if token:
+                    os.environ["MOTHERDUCK_TOKEN"] = token
+                else:
+                    logger.warning(
+                        "motherduck_token_env is set to %r but the environment variable is not set",
+                        config.storage.motherduck_token_env,
+                    )
 
             from distillery.store.duckdb import DuckDBStore
 
-            store = DuckDBStore(db_path=db_path, embedding_provider=embedding_provider)
+            store = DuckDBStore(
+                db_path=db_path,
+                embedding_provider=embedding_provider,
+                s3_region=config.storage.s3_region,
+                s3_endpoint=config.storage.s3_endpoint,
+            )
             await store.initialize()
 
             _shared["store"] = store
@@ -968,9 +1001,9 @@ def _sync_gather_stats(
     entries_by_status = {row[0]: row[1] for row in status_rows}
 
     # Database file size.
-    db_path = os.path.expanduser(config.storage.database_path)
+    db_path = _normalize_db_path(config.storage.database_path)
     database_size_bytes: int | None = None
-    if db_path != ":memory:":
+    if db_path != ":memory:" and not _is_remote_db_path(db_path):
         try:
             database_size_bytes = Path(db_path).stat().st_size
         except OSError:
@@ -2352,9 +2385,9 @@ def _sync_gather_metrics(
     # ------------------------------------------------------------------ #
     # storage section                                                      #
     # ------------------------------------------------------------------ #
-    db_path = os.path.expanduser(config.storage.database_path)
+    db_path = _normalize_db_path(config.storage.database_path)
     db_file_size: int | None = None
-    if db_path != ":memory:":
+    if db_path != ":memory:" and not _is_remote_db_path(db_path):
         try:
             db_file_size = Path(db_path).stat().st_size
         except OSError:

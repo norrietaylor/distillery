@@ -34,6 +34,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+def _sql_escape(value: str) -> str:
+    """Escape a string value for safe embedding in a SQL literal.
+
+    Doubles any single-quote characters so the value can be safely placed
+    inside a SQL single-quoted string (e.g. ``SET s3_region = 'us-east-1'``).
+    """
+    return value.replace("'", "''")
+
+
 # SQL for the entries table.  The ``embedding`` column uses a fixed-size
 # FLOAT array whose length is set at runtime based on the configured
 # embedding dimensions.
@@ -100,9 +110,19 @@ class DuckDBStore:
 
     The constructor accepts a database path and an embedding provider.  On
     first call to :meth:`initialize`, the database file is created (with
-    ``0600`` permissions), the ``entries`` table is defined, the ``vss``
-    extension is loaded, and an HNSW index is built on the ``embedding``
-    column.
+    ``0600`` permissions for local files), the ``entries`` table is defined,
+    the ``vss`` extension is loaded, and an HNSW index is built on the
+    ``embedding`` column.
+
+    S3-backed storage is supported by passing an ``s3://`` path as
+    ``db_path``.  The ``httpfs`` extension is loaded and AWS credentials
+    are resolved from environment variables (``AWS_ACCESS_KEY_ID``,
+    ``AWS_SECRET_ACCESS_KEY``, ``AWS_SESSION_TOKEN``) or an IAM role when
+    running on AWS infrastructure.
+
+    MotherDuck cloud databases are supported by passing an ``md:`` path
+    (e.g. ``md:distillery``).  DuckDB automatically reads the
+    ``MOTHERDUCK_TOKEN`` environment variable.
 
     All public methods are ``async`` -- they wrap synchronous DuckDB calls
     via :func:`asyncio.to_thread` to keep the event loop responsive.
@@ -110,13 +130,20 @@ class DuckDBStore:
     Parameters
     ----------
     db_path:
-        Filesystem path to the DuckDB database file.  The parent directory
-        must exist.  Pass ``":memory:"`` for an ephemeral in-memory store
-        (useful for tests).
+        Filesystem path to the DuckDB database file, an S3 URI
+        (``s3://bucket/path/distillery.db``), a MotherDuck URI
+        (``md:database_name``), or ``":memory:"`` for an ephemeral
+        in-memory store (useful for tests).
     embedding_provider:
         An object satisfying the ``EmbeddingProvider`` protocol.  Its
         ``dimensions`` property determines the width of the ``embedding``
         column.
+    s3_region:
+        AWS region for S3 storage.  Falls back to the ``AWS_DEFAULT_REGION``
+        / ``AWS_REGION`` environment variables when ``None``.
+    s3_endpoint:
+        Custom S3-compatible endpoint URL (e.g. MinIO, Cloudflare R2).
+        When set, path-style URL access is enabled automatically.
     """
 
     # ------------------------------------------------------------------
@@ -127,19 +154,42 @@ class DuckDBStore:
         self,
         db_path: str,
         embedding_provider: EmbeddingProvider,
+        s3_region: str | None = None,
+        s3_endpoint: str | None = None,
     ) -> None:
         self._db_path = db_path
         self._embedding_provider = embedding_provider
+        self._s3_region = s3_region
+        self._s3_endpoint = s3_endpoint
         self._conn: duckdb.DuckDBPyConnection | None = None
         self._initialized: bool = False
+
+    # ------------------------------------------------------------------
+    # Cloud path helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _is_s3_path(db_path: str) -> bool:
+        """Return ``True`` if *db_path* is an S3 URI (``s3://`` prefix)."""
+        return db_path.startswith("s3://")
+
+    @staticmethod
+    def _is_motherduck_path(db_path: str) -> bool:
+        """Return ``True`` if *db_path* is a MotherDuck URI (``md:`` prefix)."""
+        return db_path.startswith("md:")
 
     # ------------------------------------------------------------------
     # Connection helpers (sync -- called inside asyncio.to_thread)
     # ------------------------------------------------------------------
 
     def _ensure_parent_dir(self) -> None:
-        """Create the parent directory for the database file if needed."""
+        """Create the parent directory for the database file if needed.
+
+        No-op for in-memory, S3, and MotherDuck paths.
+        """
         if self._db_path == ":memory:":
+            return
+        if self._is_s3_path(self._db_path) or self._is_motherduck_path(self._db_path):
             return
         parent = Path(self._db_path).parent
         parent.mkdir(parents=True, exist_ok=True)
@@ -149,8 +199,13 @@ class DuckDBStore:
         self._ensure_parent_dir()
         conn = duckdb.connect(self._db_path)
 
-        # If we just created the file, lock down permissions.
-        if self._db_path != ":memory:" and Path(self._db_path).exists():
+        # Lock down permissions only for local files that exist on disk.
+        is_local = (
+            self._db_path != ":memory:"
+            and not self._is_s3_path(self._db_path)
+            and not self._is_motherduck_path(self._db_path)
+        )
+        if is_local and Path(self._db_path).exists():
             os.chmod(self._db_path, 0o600)
 
         return conn
@@ -161,6 +216,61 @@ class DuckDBStore:
         conn.execute("LOAD vss;")
         conn.execute("SET hnsw_enable_experimental_persistence = true;")
         logger.info("VSS extension loaded with HNSW persistence enabled")
+
+    def _setup_httpfs(self, conn: duckdb.DuckDBPyConnection) -> None:
+        """Install and load the httpfs extension, then configure S3 credentials.
+
+        Credential resolution order:
+        1. ``AWS_ACCESS_KEY_ID`` / ``AWS_SECRET_ACCESS_KEY`` environment variables
+        2. IAM role / instance metadata (when running on AWS infrastructure and
+           no explicit env vars are present -- DuckDB httpfs performs its own
+           credential-chain lookup in that case)
+
+        ``AWS_SESSION_TOKEN`` is forwarded when present (required for temporary
+        STS credentials).
+
+        ``AWS_DEFAULT_REGION`` / ``AWS_REGION`` environment variables are used
+        as the region fallback when ``s3_region`` is not set in config.
+
+        For non-AWS S3-compatible endpoints (MinIO, Cloudflare R2, etc.) the
+        ``s3_endpoint`` config field should be set; path-style URL access is
+        enabled automatically.
+        """
+        conn.execute("INSTALL httpfs;")
+        conn.execute("LOAD httpfs;")
+
+        # Region: config > AWS_DEFAULT_REGION > AWS_REGION
+        region = (
+            self._s3_region
+            or os.environ.get("AWS_DEFAULT_REGION")
+            or os.environ.get("AWS_REGION")
+        )
+        if region:
+            conn.execute(f"SET s3_region = '{_sql_escape(region)}';")
+
+        # Custom endpoint for S3-compatible services
+        if self._s3_endpoint:
+            conn.execute(f"SET s3_endpoint = '{_sql_escape(self._s3_endpoint)}';")
+            conn.execute("SET s3_url_style = 'path';")
+
+        # Explicit AWS credentials from environment (optional; IAM role used as fallback)
+        access_key = os.environ.get("AWS_ACCESS_KEY_ID")
+        secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
+        if access_key:
+            conn.execute(f"SET s3_access_key_id = '{_sql_escape(access_key)}';")
+        if secret_key:
+            conn.execute(f"SET s3_secret_access_key = '{_sql_escape(secret_key)}';")
+
+        session_token = os.environ.get("AWS_SESSION_TOKEN")
+        if session_token:
+            conn.execute(f"SET s3_session_token = '{_sql_escape(session_token)}';")
+
+        logger.info(
+            "httpfs extension loaded (region=%s, endpoint=%s, explicit_creds=%s)",
+            region or "auto",
+            self._s3_endpoint or "default",
+            bool(access_key),
+        )
 
     def _create_schema(self, conn: duckdb.DuckDBPyConnection) -> None:
         """Create the ``entries`` table and HNSW index if they don't exist."""
@@ -271,6 +381,11 @@ class DuckDBStore:
         import time
 
         conn = self._open_connection()
+
+        # httpfs must be loaded before vss when using S3 storage.
+        if self._is_s3_path(self._db_path):
+            self._setup_httpfs(conn)
+
         self._setup_vss(conn)
 
         # Wrap the entire initialization write path in a retry loop to handle
