@@ -68,6 +68,13 @@ module = "tests.*"
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
 
+[[tool.mypy.overrides]]
+# FastMCP's @server.tool decorator doesn't preserve function signatures in its
+# type stubs (returns FunctionTool, not the original callable type). Suppress
+# the resulting untyped-decorator noise for the MCP server module only.
+module = "distillery.mcp.server"
+disable_error_code = ["untyped-decorator"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
