@@ -660,29 +660,26 @@ class TestListTool:
 
 class TestCreateServer:
     def test_create_server_returns_server_instance(self) -> None:
-        from mcp.server import Server
+        from fastmcp import FastMCP
 
         config = DistilleryConfig(
             storage=StorageConfig(database_path=":memory:"),
             embedding=EmbeddingConfig(provider="", model="stub", dimensions=4),
         )
         server = create_server(config)
-        assert isinstance(server, Server)
+        assert isinstance(server, FastMCP)
 
     async def test_server_registers_all_fifteen_tools(self) -> None:
         """list_tools() must return all 15 tool names."""
-        import mcp.types as mcp_types
-
         config = DistilleryConfig(
             storage=StorageConfig(database_path=":memory:"),
             embedding=EmbeddingConfig(provider="", model="stub", dimensions=4),
         )
         server = create_server(config)
 
-        # Invoke the registered ListToolsRequest handler directly.
-        handler = server.request_handlers[mcp_types.ListToolsRequest]
-        result = await handler(mcp_types.ListToolsRequest())
-        tool_names = {t.name for t in result.root.tools}
+        # Use FastMCP's list_tools() async method.
+        tools = await server.list_tools()
+        tool_names = {t.name for t in tools}
 
         expected = {
             "distillery_status",

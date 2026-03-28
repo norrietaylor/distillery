@@ -55,9 +55,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from fastmcp import Context, FastMCP  # noqa: F401  # Context used by tool wrappers added in T02
 from mcp import types
-from mcp.server import Server
-from mcp.server.stdio import stdio_server
 
 from distillery.config import DistilleryConfig, load_config
 
@@ -200,8 +199,8 @@ def _create_embedding_provider(config: DistilleryConfig) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def create_server(config: DistilleryConfig | None = None) -> Server:
-    """Build and return the configured MCP :class:`~mcp.server.Server`.
+def create_server(config: DistilleryConfig | None = None) -> FastMCP:
+    """Build and return the configured :class:`~fastmcp.FastMCP` server.
 
     The server is stateless at construction time -- the store and embedding
     provider are initialised during the lifespan context manager when the
@@ -213,24 +212,18 @@ def create_server(config: DistilleryConfig | None = None) -> Server:
             ``distillery.yaml`` in the cwd).
 
     Returns:
-        A fully decorated :class:`~mcp.server.Server` ready to run.
+        A fully decorated :class:`~fastmcp.FastMCP` instance ready to run.
     """
     if config is None:
         config = load_config()
 
-    # We use a mutable container so that the inner handlers can reference the
-    # store and embedding provider that are set up during lifespan.
-    _state: dict[str, Any] = {}
-
     @asynccontextmanager
-    async def _lifespan(server: Server) -> AsyncIterator[None]:
+    async def lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
         """Startup / shutdown lifecycle for the Distillery MCP server."""
         logger.info("Distillery MCP server starting up …")
 
         # Build embedding provider and store.
         embedding_provider = _create_embedding_provider(config)
-        _state["embedding_provider"] = embedding_provider
-        _state["config"] = config
 
         db_path = os.path.expanduser(config.storage.database_path)
 
@@ -238,10 +231,10 @@ def create_server(config: DistilleryConfig | None = None) -> Server:
 
         store = DuckDBStore(db_path=db_path, embedding_provider=embedding_provider)
         await store.initialize()
-        _state["store"] = store
+
         # In-memory list of recent search events for implicit feedback correlation.
         # Each element is a dict with keys: search_id, entry_ids (set[str]), timestamp (datetime).
-        _state["recent_searches"] = []
+        recent_searches: list[dict[str, Any]] = []
 
         logger.info(
             "Distillery MCP server ready (db=%s, embedding=%s)",
@@ -250,595 +243,18 @@ def create_server(config: DistilleryConfig | None = None) -> Server:
         )
 
         try:
-            yield
+            yield {
+                "store": store,
+                "config": config,
+                "embedding_provider": embedding_provider,
+                "recent_searches": recent_searches,
+            }
         finally:
             logger.info("Distillery MCP server shutting down …")
             await store.close()
             logger.info("Distillery MCP server shutdown complete")
 
-    server = Server("distillery", lifespan=_lifespan)
-
-    # -----------------------------------------------------------------------
-    # Tool registry
-    # -----------------------------------------------------------------------
-
-    @server.list_tools()  # type: ignore[no-untyped-call, untyped-decorator]
-    async def _list_tools() -> list[types.Tool]:
-        return [
-            types.Tool(
-                name="distillery_status",
-                description=(
-                    "Return runtime statistics for the Distillery knowledge base: "
-                    "total entries, counts broken down by entry type and status, "
-                    "database file size on disk, and the embedding model in use."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {},
-                    "required": [],
-                },
-            ),
-            types.Tool(
-                name="distillery_store",
-                description=(
-                    "Store a new knowledge entry in the Distillery knowledge base. "
-                    "Automatically checks for similar existing entries and returns "
-                    "deduplication warnings when similar content is found. "
-                    "Returns the new entry ID and any similarity warnings."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "content": {
-                            "type": "string",
-                            "description": "The full text content of the knowledge entry.",
-                        },
-                        "entry_type": {
-                            "type": "string",
-                            "description": (
-                                "Semantic category of the entry. One of: "
-                                "session, bookmark, minutes, meeting, reference, idea, inbox."
-                            ),
-                        },
-                        "author": {
-                            "type": "string",
-                            "description": "Creator identifier (e.g. a GitHub username).",
-                        },
-                        "project": {
-                            "type": "string",
-                            "description": "Optional project or repository name for scoping.",
-                        },
-                        "tags": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Optional list of string labels for faceted retrieval.",
-                        },
-                        "metadata": {
-                            "type": "object",
-                            "description": "Optional type-specific extension fields.",
-                        },
-                        "dedup_threshold": {
-                            "type": "number",
-                            "description": (
-                                "Cosine similarity threshold for deduplication warnings. "
-                                "Defaults to 0.92. Set to 1.0 to disable."
-                            ),
-                        },
-                        "dedup_limit": {
-                            "type": "integer",
-                            "description": "Maximum number of similar entries to report. Defaults to 3.",
-                        },
-                    },
-                    "required": ["content", "entry_type", "author"],
-                },
-            ),
-            types.Tool(
-                name="distillery_get",
-                description=(
-                    "Retrieve a single knowledge entry by its UUID. "
-                    "Returns the full entry fields or a structured NOT_FOUND error."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "entry_id": {
-                            "type": "string",
-                            "description": "The UUID of the entry to retrieve.",
-                        },
-                    },
-                    "required": ["entry_id"],
-                },
-            ),
-            types.Tool(
-                name="distillery_update",
-                description=(
-                    "Apply a partial update to an existing knowledge entry. "
-                    "Immutable fields (id, created_at, source) cannot be changed. "
-                    "Returns the updated entry or a structured error."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "entry_id": {
-                            "type": "string",
-                            "description": "The UUID of the entry to update.",
-                        },
-                        "content": {
-                            "type": "string",
-                            "description": "New text content (triggers re-embedding).",
-                        },
-                        "entry_type": {
-                            "type": "string",
-                            "description": "New entry type.",
-                        },
-                        "author": {
-                            "type": "string",
-                            "description": "New author identifier.",
-                        },
-                        "project": {
-                            "type": "string",
-                            "description": "New project name.",
-                        },
-                        "tags": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Replacement tag list.",
-                        },
-                        "status": {
-                            "type": "string",
-                            "description": "New lifecycle status: active, pending_review, or archived.",
-                        },
-                        "metadata": {
-                            "type": "object",
-                            "description": "Replacement metadata dict.",
-                        },
-                    },
-                    "required": ["entry_id"],
-                },
-            ),
-            types.Tool(
-                name="distillery_search",
-                description=(
-                    "Perform semantic search over the Distillery knowledge base. "
-                    "Embeds the query string and returns entries ranked by cosine "
-                    "similarity. Optional metadata filters narrow the result set. "
-                    "Returns a list of entries with their similarity scores."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "Natural-language query string to embed and search.",
-                        },
-                        "limit": {
-                            "type": "integer",
-                            "description": "Maximum number of results to return. Defaults to 10.",
-                        },
-                        "entry_type": {
-                            "type": "string",
-                            "description": (
-                                "Filter by entry type. One of: "
-                                "session, bookmark, minutes, meeting, reference, idea, inbox."
-                            ),
-                        },
-                        "author": {
-                            "type": "string",
-                            "description": "Filter by author identifier.",
-                        },
-                        "project": {
-                            "type": "string",
-                            "description": "Filter by project name.",
-                        },
-                        "tags": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Filter to entries containing any of the listed tags.",
-                        },
-                        "status": {
-                            "type": "string",
-                            "description": "Filter by lifecycle status: active, pending_review, or archived.",
-                        },
-                        "date_from": {
-                            "type": "string",
-                            "description": "Inclusive lower bound on created_at (ISO 8601 string).",
-                        },
-                        "date_to": {
-                            "type": "string",
-                            "description": "Inclusive upper bound on created_at (ISO 8601 string).",
-                        },
-                    },
-                    "required": ["query"],
-                },
-            ),
-            types.Tool(
-                name="distillery_find_similar",
-                description=(
-                    "Find knowledge entries similar to a given piece of content. "
-                    "Intended for deduplication checks before storing new content. "
-                    "Returns entries whose cosine similarity to the input exceeds "
-                    "the specified threshold, along with their scores."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "content": {
-                            "type": "string",
-                            "description": "Raw text content to compare against the stored corpus.",
-                        },
-                        "threshold": {
-                            "type": "number",
-                            "description": (
-                                "Minimum cosine similarity (inclusive) for a result to be returned. "
-                                "Defaults to 0.8. Use 0.95 for high-confidence duplicate detection."
-                            ),
-                        },
-                        "limit": {
-                            "type": "integer",
-                            "description": "Maximum number of results to return. Defaults to 10.",
-                        },
-                    },
-                    "required": ["content"],
-                },
-            ),
-            types.Tool(
-                name="distillery_list",
-                description=(
-                    "List knowledge entries with optional metadata filtering and "
-                    "pagination. Unlike distillery_search, this tool does not perform "
-                    "semantic ranking -- results are returned newest first. "
-                    "Returns a list of full entry objects."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "limit": {
-                            "type": "integer",
-                            "description": "Maximum number of entries to return. Defaults to 20.",
-                        },
-                        "offset": {
-                            "type": "integer",
-                            "description": "Number of entries to skip for pagination. Defaults to 0.",
-                        },
-                        "entry_type": {
-                            "type": "string",
-                            "description": (
-                                "Filter by entry type. One of: "
-                                "session, bookmark, minutes, meeting, reference, idea, inbox."
-                            ),
-                        },
-                        "author": {
-                            "type": "string",
-                            "description": "Filter by author identifier.",
-                        },
-                        "project": {
-                            "type": "string",
-                            "description": "Filter by project name.",
-                        },
-                        "tags": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Filter to entries containing any of the listed tags.",
-                        },
-                        "status": {
-                            "type": "string",
-                            "description": "Filter by lifecycle status: active, pending_review, or archived.",
-                        },
-                        "date_from": {
-                            "type": "string",
-                            "description": "Inclusive lower bound on created_at (ISO 8601 string).",
-                        },
-                        "date_to": {
-                            "type": "string",
-                            "description": "Inclusive upper bound on created_at (ISO 8601 string).",
-                        },
-                    },
-                    "required": [],
-                },
-            ),
-            types.Tool(
-                name="distillery_classify",
-                description=(
-                    "Store a pre-computed classification result on an existing entry. "
-                    "Updates the entry's type, status (based on confidence vs. the "
-                    "configured threshold), and classification metadata fields. "
-                    "Handles reclassification of already-classified entries. "
-                    "Returns the updated entry or a structured error."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "entry_id": {
-                            "type": "string",
-                            "description": "The UUID of the entry to classify.",
-                        },
-                        "entry_type": {
-                            "type": "string",
-                            "description": (
-                                "Predicted semantic category. One of: "
-                                "session, bookmark, minutes, meeting, reference, idea, inbox."
-                            ),
-                        },
-                        "confidence": {
-                            "type": "number",
-                            "description": "Classification confidence score in [0.0, 1.0].",
-                        },
-                        "reasoning": {
-                            "type": "string",
-                            "description": "Human-readable explanation of the classification.",
-                        },
-                        "suggested_tags": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Tags suggested by the classifier (merged with existing tags).",
-                        },
-                        "suggested_project": {
-                            "type": "string",
-                            "description": "Project name suggested by the classifier.",
-                        },
-                    },
-                    "required": ["entry_id", "entry_type", "confidence"],
-                },
-            ),
-            types.Tool(
-                name="distillery_review_queue",
-                description=(
-                    "Return entries that are pending manual review, sorted newest first. "
-                    "Each result includes a content preview, entry_type, confidence, "
-                    "author, created_at, and classification_reasoning. "
-                    "Supports optional filtering by entry_type and a result limit."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "limit": {
-                            "type": "integer",
-                            "description": "Maximum number of entries to return. Defaults to 20.",
-                        },
-                        "entry_type": {
-                            "type": "string",
-                            "description": (
-                                "Filter by entry type. One of: "
-                                "session, bookmark, minutes, meeting, reference, idea, inbox."
-                            ),
-                        },
-                    },
-                    "required": [],
-                },
-            ),
-            types.Tool(
-                name="distillery_resolve_review",
-                description=(
-                    "Resolve a pending-review entry by approving, reclassifying, or archiving it. "
-                    "approve: sets status to active and records reviewed_at/reviewed_by metadata. "
-                    "reclassify: updates entry_type (requires new_entry_type) and sets reclassified_from. "
-                    "archive: soft-deletes the entry by setting status to archived. "
-                    "Returns the updated entry or a structured error."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "entry_id": {
-                            "type": "string",
-                            "description": "The UUID of the entry to resolve.",
-                        },
-                        "action": {
-                            "type": "string",
-                            "description": "Resolution action: approve, reclassify, or archive.",
-                        },
-                        "new_entry_type": {
-                            "type": "string",
-                            "description": (
-                                "Required when action=reclassify. New entry type to assign. "
-                                "One of: session, bookmark, minutes, meeting, reference, idea, inbox."
-                            ),
-                        },
-                        "reviewer": {
-                            "type": "string",
-                            "description": "Identifier of the person performing the review.",
-                        },
-                    },
-                    "required": ["entry_id", "action"],
-                },
-            ),
-            types.Tool(
-                name="distillery_check_dedup",
-                description=(
-                    "Check whether a piece of content duplicates existing knowledge entries. "
-                    "Returns a recommended action (skip, merge, link, or create), the most "
-                    "similar entries found, the highest similarity score, and a human-readable "
-                    "reasoning string. Uses the dedup thresholds configured in distillery.yaml."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "content": {
-                            "type": "string",
-                            "description": "Raw text content to check for duplication.",
-                        },
-                    },
-                    "required": ["content"],
-                },
-            ),
-            types.Tool(
-                name="distillery_metrics",
-                description=(
-                    "Return comprehensive usage statistics for the Distillery knowledge base. "
-                    "Aggregates entry counts (by type, status, source), activity windows "
-                    "(7/30/90 day creation and update counts), search log statistics, "
-                    "feedback quality signals, staleness counts, and storage details. "
-                    "All queries are read-only and do not modify any data."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "period_days": {
-                            "type": "integer",
-                            "description": (
-                                "Adjusts the 'recent' window (in days) for activity and "
-                                "search metrics. Defaults to 30."
-                            ),
-                        },
-                    },
-                    "required": [],
-                },
-            ),
-            types.Tool(
-                name="distillery_check_conflicts",
-                description=(
-                    "Explicitly check whether a piece of content conflicts with existing "
-                    "knowledge entries.  First call (without llm_responses) returns "
-                    "conflict_candidates with prompts for each similar entry.  Second call "
-                    "(with llm_responses) processes the LLM-evaluated responses and returns "
-                    "a ConflictResult indicating detected conflicts."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "content": {
-                            "type": "string",
-                            "description": "The raw text content to check for conflicts.",
-                        },
-                        "llm_responses": {
-                            "type": "object",
-                            "description": (
-                                "Optional mapping from entry_id to an object with "
-                                "'is_conflict' (bool) and 'reasoning' (str). "
-                                "When provided, the handler processes these responses "
-                                "and returns the final ConflictResult."
-                            ),
-                            "additionalProperties": {
-                                "type": "object",
-                                "properties": {
-                                    "is_conflict": {"type": "boolean"},
-                                    "reasoning": {"type": "string"},
-                                },
-                                "required": ["is_conflict"],
-                            },
-                        },
-                    },
-                    "required": ["content"],
-                },
-            ),
-            types.Tool(
-                name="distillery_quality",
-                description=(
-                    "Return search quality metrics for the Distillery knowledge base. "
-                    "Reports total searches, total implicit feedback events, positive "
-                    "feedback rate, and average result count per search. Optionally "
-                    "filters metrics by entry type to show per-type quality breakdown."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "entry_type": {
-                            "type": "string",
-                            "description": (
-                                "Optional entry type filter. When provided, adds a "
-                                "per_type_breakdown section filtered to that type."
-                            ),
-                        },
-                    },
-                    "required": [],
-                },
-            ),
-            types.Tool(
-                name="distillery_stale",
-                description=(
-                    "Return entries that have not been accessed recently. "
-                    "An entry is considered stale when its last access time "
-                    "(COALESCE(accessed_at, updated_at)) is older than the configured "
-                    "threshold. Only non-archived entries are included. Results are "
-                    "ordered stalest-first and include a preview of each entry's content."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "days": {
-                            "type": "integer",
-                            "description": (
-                                "Number of days without access after which an entry is "
-                                "considered stale. Defaults to classification.stale_days "
-                                "from config (typically 30)."
-                            ),
-                        },
-                        "limit": {
-                            "type": "integer",
-                            "description": "Maximum number of stale entries to return. Defaults to 20.",
-                        },
-                        "entry_type": {
-                            "type": "string",
-                            "description": "Optional filter to only return entries of a given type.",
-                        },
-                    },
-                    "required": [],
-                },
-            ),
-        ]
-
-    @server.call_tool()  # type: ignore[untyped-decorator]
-    async def _call_tool(
-        tool_name: str, arguments: dict[str, Any]
-    ) -> list[types.TextContent]:
-        """Dispatch incoming tool calls to the appropriate handler."""
-        store = _state.get("store")
-        embedding_provider = _state.get("embedding_provider")
-        cfg: DistilleryConfig = _state.get("config", config)
-
-        if store is None:
-            return error_response(
-                "SERVER_ERROR",
-                "Server is not fully initialised. Please retry.",
-            )
-
-        if tool_name == "distillery_status":
-            return await _handle_status(store, embedding_provider, cfg)
-
-        if tool_name == "distillery_store":
-            return await _handle_store(store, arguments, cfg)
-
-        if tool_name == "distillery_get":
-            recent_searches: list[dict[str, Any]] = _state.get("recent_searches", [])
-            return await _handle_get(store, arguments, recent_searches, cfg)
-
-        if tool_name == "distillery_update":
-            return await _handle_update(store, arguments)
-
-        if tool_name == "distillery_search":
-            recent_searches = _state.get("recent_searches", [])
-            return await _handle_search(store, arguments, recent_searches)
-
-        if tool_name == "distillery_find_similar":
-            return await _handle_find_similar(store, arguments)
-
-        if tool_name == "distillery_list":
-            return await _handle_list(store, arguments)
-
-        if tool_name == "distillery_classify":
-            return await _handle_classify(store, cfg, arguments)
-
-        if tool_name == "distillery_review_queue":
-            return await _handle_review_queue(store, arguments)
-
-        if tool_name == "distillery_resolve_review":
-            return await _handle_resolve_review(store, arguments)
-
-        if tool_name == "distillery_check_dedup":
-            return await _handle_check_dedup(store, cfg, arguments)
-
-        if tool_name == "distillery_metrics":
-            return await _handle_metrics(store, cfg, embedding_provider, arguments)
-
-        if tool_name == "distillery_check_conflicts":
-            return await _handle_check_conflicts(store, cfg, arguments)
-
-        if tool_name == "distillery_quality":
-            return await _handle_quality(store, arguments)
-
-        if tool_name == "distillery_stale":
-            return await _handle_stale(store, cfg, arguments)
-
-        return error_response("UNKNOWN_TOOL", f"Unknown tool: {tool_name!r}")
+    server = FastMCP("distillery", lifespan=lifespan)
 
     return server
 
@@ -2626,7 +2042,4 @@ async def run_server(config: DistilleryConfig | None = None) -> None:
         config: Optional pre-loaded config.  Defaults to auto-discovery.
     """
     server = create_server(config)
-    init_options = server.create_initialization_options()
-
-    async with stdio_server() as (read_stream, write_stream):
-        await server.run(read_stream, write_stream, init_options)
+    await server.run_stdio_async(show_banner=False)
