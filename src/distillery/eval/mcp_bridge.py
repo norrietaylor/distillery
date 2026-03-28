@@ -325,7 +325,7 @@ class _MockEmbeddingProvider:
 
     @property
     def model_name(self) -> str:
-        return "mock-hash-4d"
+        return "mock-hash"
 
 
 def _make_test_config() -> DistilleryConfig:
