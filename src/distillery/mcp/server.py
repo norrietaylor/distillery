@@ -1050,6 +1050,13 @@ async def _handle_store(
     entry_source_str: str = str(arguments.get("source", EntrySource.CLAUDE_CODE.value))
     if cfg is not None and cfg.tags.reserved_prefixes:
         tags_to_check: list[str] = list(arguments.get("tags") or [])
+        # Validate that all tags are strings before using split
+        for tag in tags_to_check:
+            if not isinstance(tag, str):
+                return error_response(
+                    "INVALID_INPUT",
+                    f"All tags must be strings, got {type(tag).__name__}: {tag!r}",
+                )
         if entry_source_str not in _reserved_allowed_sources:
             for tag in tags_to_check:
                 top = tag.split("/")[0]
@@ -1576,44 +1583,57 @@ async def _handle_tag_tree(
         result = conn.execute("SELECT tags FROM entries WHERE status != 'archived'")
         rows = result.fetchall()
 
-        # Collect all individual tag strings.
-        all_tags: list[str] = []
-        for (tags_col,) in rows:
-            if tags_col:
-                all_tags.extend(tags_col)
-
-        # Filter by prefix when requested.  A tag matches a prefix when it
-        # either equals the prefix exactly or starts with "prefix/".
-        if prefix is not None:
-            prefix_slash = prefix + "/"
-            all_tags = [t for t in all_tags if t == prefix or t.startswith(prefix_slash)]
-            # Strip the prefix (and its trailing slash) from the remaining tags
-            # so that the returned tree is rooted at the prefix.
-            stripped: list[str] = []
-            for t in all_tags:
-                if t == prefix:
-                    # The tag is exactly the prefix -- represents the root node.
-                    stripped.append("")
-                else:
-                    stripped.append(t[len(prefix_slash) :])
-            all_tags = stripped
-
         # Build the tree from path segments.
         # Each node: {"count": int, "children": {segment: node}}
         root: dict[str, Any] = {"count": 0, "children": {}}
 
-        for tag in all_tags:
-            if not tag:
-                # This tag exactly matched the prefix — count it at the root.
-                root["count"] += 1
+        # Process each entry's tags to ensure nodes count entries, not tags.
+        for (tags_col,) in rows:
+            if not tags_col:
                 continue
-            segments = tag.split("/")
-            node = root
-            for seg in segments:
-                if seg not in node["children"]:
-                    node["children"][seg] = {"count": 0, "children": {}}
-                node = node["children"][seg]
-                node["count"] += 1
+
+            # Build the set of relevant tag paths for this single entry.
+            entry_tags: list[str] = []
+            for t in tags_col:
+                # Filter by prefix when requested.  A tag matches a prefix when it
+                # either equals the prefix exactly or starts with "prefix/".
+                if prefix is not None:
+                    prefix_slash = prefix + "/"
+                    if t == prefix:
+                        # The tag is exactly the prefix -- represents the root node.
+                        entry_tags.append("")
+                    elif t.startswith(prefix_slash):
+                        # Strip the prefix (and its trailing slash) from the tag
+                        # so that the returned tree is rooted at the prefix.
+                        entry_tags.append(t[len(prefix_slash) :])
+                else:
+                    entry_tags.append(t)
+
+            # For this entry, dedupe paths that would hit the same tree nodes.
+            # Track which nodes have been incremented for this entry.
+            visited_nodes: set[tuple[str, ...]] = set()
+
+            for tag in entry_tags:
+                if not tag:
+                    # This tag exactly matched the prefix — count it at the root.
+                    if () not in visited_nodes:
+                        root["count"] += 1
+                        visited_nodes.add(())
+                    continue
+
+                segments = tag.split("/")
+                node = root
+                # Track the path to each node to avoid incrementing the same node twice
+                # for this entry.
+                for i, seg in enumerate(segments):
+                    if seg not in node["children"]:
+                        node["children"][seg] = {"count": 0, "children": {}}
+                    node = node["children"][seg]
+                    # Build a path tuple representing this node's position in the tree.
+                    node_path = tuple(segments[: i + 1])
+                    if node_path not in visited_nodes:
+                        node["count"] += 1
+                        visited_nodes.add(node_path)
 
         return root
 
@@ -1739,6 +1759,10 @@ async def _handle_classify(
     suggested_tags_raw: list[str] = list(arguments.get("suggested_tags") or [])
     suggested_tags: list[str] = []
     for t in suggested_tags_raw:
+        # First check if the tag is a string to avoid passing non-strings to validate_tag
+        if not isinstance(t, str):
+            logger.warning("Dropping non-string LLM-suggested tag: %r", t)
+            continue
         try:
             validate_tag(t)
             suggested_tags.append(t)
