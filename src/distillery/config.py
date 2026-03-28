@@ -402,7 +402,7 @@ def _validate(config: DistilleryConfig) -> None:
             f"got: {config.storage.backend!r}"
         )
 
-    valid_providers = {"jina", "openai"}
+    valid_providers = {"jina", "openai", "mock"}
     if config.embedding.provider and config.embedding.provider not in valid_providers:
         raise ValueError(
             f"embedding.provider must be one of {sorted(valid_providers)}, "

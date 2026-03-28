@@ -1,0 +1,3 @@
+2
+# - mock   : Hash-based mock provider (no API calls, no key required)
+#             Default model: mock-hash (4 dimensions)
