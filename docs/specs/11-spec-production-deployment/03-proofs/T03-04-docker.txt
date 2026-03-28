@@ -1,0 +1,15 @@
+Type: cli (docker build)
+Command: docker build -t distillery-mcp .
+Expected: Build exits with code 0; image appears in docker image list
+Timestamp: 2026-03-28T00:00:00Z
+
+Output:
+Docker daemon is not available in this CI/dev environment.
+docker: command not found
+
+Status: BLOCKED
+Reason: Docker not installed or not accessible in current environment.
+Workaround: Run "docker build -t distillery-mcp ." from the repository root
+            on a machine with Docker installed to verify the image builds.
+            The Dockerfile uses public.ecr.aws/lambda/python:3.12 as base,
+            installs the package via pip, and sets the Lambda CMD entrypoint.

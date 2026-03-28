@@ -1,0 +1,38 @@
+# Distillery configuration for Lambda / container deployment.
+#
+# All secret values reference environment variable names — no credentials
+# are embedded in this file.  The actual values are injected via Lambda
+# environment variables or AWS Secrets Manager at runtime.
+
+storage:
+  backend: duckdb
+  # Use S3 path when AWS_S3_BUCKET env var is set; fall back to /tmp for
+  # smoke-testing without storage.  Override this path via the
+  # DISTILLERY_DB_PATH env var at runtime if needed.
+  database_path: /tmp/distillery.duckdb
+
+embedding:
+  provider: jina
+  model: jina-embeddings-v3
+  dimensions: 1024
+  api_key_env: JINA_API_KEY
+
+server:
+  auth:
+    provider: github
+    client_id_env: GITHUB_CLIENT_ID
+    client_secret_env: GITHUB_CLIENT_SECRET
+
+team:
+  name: ""
+
+classification:
+  confidence_threshold: 0.6
+  dedup_skip_threshold: 0.95
+  dedup_merge_threshold: 0.80
+  dedup_link_threshold: 0.60
+  dedup_limit: 5
+
+tags:
+  enforce_namespaces: false
+  reserved_prefixes: []
