@@ -447,7 +447,9 @@ class DuckDBStore:
         )
 
         # Validate metadata against the effective entry type schema.
-        # Run validation if metadata is changing OR if entry_type is changing.
+        # Trigger validation when metadata OR entry_type changes — changing
+        # the type without supplying new metadata could leave required fields
+        # missing for the target type.
         if "metadata" in updates or "entry_type" in updates:
             raw_type = updates.get("entry_type", existing_entry_type)
             effective_entry_type = raw_type.value if hasattr(raw_type, "value") else str(raw_type)
@@ -608,15 +610,14 @@ class DuckDBStore:
             clauses.append("status = ?")
             params.append(str(filters["status"]))
 
-        if "tag_prefix" in filters:
+        if "tag_prefix" in filters and filters["tag_prefix"]:
             prefix = filters["tag_prefix"]
-            if prefix:
-                # Match entries where any tag equals the prefix exactly or starts with
-                # "prefix/" to avoid partial-segment matches (e.g. "project/billing"
-                # must not match "project/billing-v2/api").
-                clauses.append("len(list_filter(tags, t -> t = ? OR starts_with(t, ?))) > 0")
-                params.append(prefix)
-                params.append(prefix + "/")
+            # Match entries where any tag equals the prefix exactly or starts with
+            # "prefix/" to avoid partial-segment matches (e.g. "project/billing"
+            # must not match "project/billing-v2/api").
+            clauses.append("len(list_filter(tags, t -> t = ? OR starts_with(t, ?))) > 0")
+            params.append(prefix)
+            params.append(prefix + "/")
 
         if "date_from" in filters:
             val = filters["date_from"]

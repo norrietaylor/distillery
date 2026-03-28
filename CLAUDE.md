@@ -45,7 +45,7 @@ distillery-mcp
 
 Four-layer design:
 
-```
+```text
 Skills (.claude/skills/<name>/SKILL.md)  →  slash commands users invoke
     ↓
 MCP Server (src/distillery/mcp/server.py)  →  17 tools over stdio (FastMCP 2.x)

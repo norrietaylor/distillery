@@ -1049,7 +1049,13 @@ async def _handle_store(
     _reserved_allowed_sources: set[str] = {EntrySource.IMPORT.value}
     entry_source_str: str = str(arguments.get("source", EntrySource.CLAUDE_CODE.value))
     if cfg is not None and cfg.tags.reserved_prefixes:
-        tags_to_check: list[str] = list(arguments.get("tags") or [])
+        tags_raw = list(arguments.get("tags") or [])
+        for tag in tags_raw:
+            if not isinstance(tag, str):
+                return error_response(
+                    "INVALID_INPUT", f"Each tag must be a string, got: {type(tag).__name__}"
+                )
+        tags_to_check: list[str] = tags_raw
         if entry_source_str not in _reserved_allowed_sources:
             for tag in tags_to_check:
                 top = tag.split("/")[0]
@@ -1062,8 +1068,7 @@ async def _handle_store(
 
     # --- build entry --------------------------------------------------------
     try:
-        # Determine EntrySource from arguments (supports internal callers passing
-        # a non-default source value, e.g. "distillery-core").
+        # Determine EntrySource from arguments.
         try:
             resolved_source = EntrySource(entry_source_str)
         except ValueError:
@@ -1576,44 +1581,59 @@ async def _handle_tag_tree(
         result = conn.execute("SELECT tags FROM entries WHERE status != 'archived'")
         rows = result.fetchall()
 
-        # Collect all individual tag strings.
-        all_tags: list[str] = []
-        for (tags_col,) in rows:
+        # Collect all individual tag strings paired with a row index so we
+        # can count distinct entries (not tag occurrences) per tree node.
+        all_tags: list[tuple[str, int]] = []
+        for idx, (tags_col,) in enumerate(rows):
             if tags_col:
-                all_tags.extend(tags_col)
+                for t in tags_col:
+                    all_tags.append((t, idx))
 
         # Filter by prefix when requested.  A tag matches a prefix when it
         # either equals the prefix exactly or starts with "prefix/".
         if prefix is not None:
             prefix_slash = prefix + "/"
-            all_tags = [t for t in all_tags if t == prefix or t.startswith(prefix_slash)]
+            all_tags = [
+                (t, idx) for t, idx in all_tags
+                if t == prefix or t.startswith(prefix_slash)
+            ]
             # Strip the prefix (and its trailing slash) from the remaining tags
             # so that the returned tree is rooted at the prefix.
-            stripped: list[str] = []
-            for t in all_tags:
+            stripped: list[tuple[str, int]] = []
+            for t, idx in all_tags:
                 if t == prefix:
                     # The tag is exactly the prefix -- represents the root node.
-                    stripped.append("")
+                    stripped.append(("", idx))
                 else:
-                    stripped.append(t[len(prefix_slash) :])
+                    stripped.append((t[len(prefix_slash):], idx))
             all_tags = stripped
 
         # Build the tree from path segments.
-        # Each node: {"count": int, "children": {segment: node}}
-        root: dict[str, Any] = {"count": 0, "children": {}}
+        # Each node: {"count": int, "children": {segment: node}, "_entry_ids": set}
+        # _entry_ids tracks distinct entries to avoid overcounting when one
+        # entry has multiple tags under the same namespace.
+        root: dict[str, Any] = {"count": 0, "children": {}, "_entry_ids": set()}
 
-        for tag in all_tags:
+        for tag, idx in all_tags:
             if not tag:
                 # This tag exactly matched the prefix — count it at the root.
-                root["count"] += 1
+                root["_entry_ids"].add(idx)
                 continue
             segments = tag.split("/")
             node = root
             for seg in segments:
                 if seg not in node["children"]:
-                    node["children"][seg] = {"count": 0, "children": {}}
+                    node["children"][seg] = {"count": 0, "children": {}, "_entry_ids": set()}
                 node = node["children"][seg]
-                node["count"] += 1
+                node["_entry_ids"].add(idx)
+
+        # Convert _entry_ids sets to counts and strip the internal sets.
+        def _finalize(n: dict[str, Any]) -> None:
+            n["count"] = len(n.pop("_entry_ids"))
+            for child in n["children"].values():
+                _finalize(child)
+
+        _finalize(root)
 
         return root
 
@@ -1736,9 +1756,12 @@ async def _handle_classify(
 
     # Merge suggested tags with existing tags (de-duplicate, preserve order).
     # Filter out invalid tags from LLM suggestions to prevent validation failures.
-    suggested_tags_raw: list[str] = list(arguments.get("suggested_tags") or [])
+    suggested_tags_raw = list(arguments.get("suggested_tags") or [])
     suggested_tags: list[str] = []
     for t in suggested_tags_raw:
+        if not isinstance(t, str):
+            logger.warning("Dropping non-string LLM-suggested tag: %r", t)
+            continue
         try:
             validate_tag(t)
             suggested_tags.append(t)
