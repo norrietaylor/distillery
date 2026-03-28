@@ -2027,19 +2027,3 @@ def _sync_gather_stale(
 
     return result
 
-
-# ---------------------------------------------------------------------------
-# Main entry point
-# ---------------------------------------------------------------------------
-
-
-async def run_server(config: DistilleryConfig | None = None) -> None:
-    """Run the Distillery MCP server over stdio.
-
-    This is the top-level coroutine launched by ``__main__.py``.
-
-    Args:
-        config: Optional pre-loaded config.  Defaults to auto-discovery.
-    """
-    server = create_server(config)
-    await server.run_stdio_async(show_banner=False)

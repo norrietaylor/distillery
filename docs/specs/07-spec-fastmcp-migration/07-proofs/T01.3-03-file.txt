@@ -1,0 +1,28 @@
+Type: File
+File: src/distillery/mcp/__main__.py
+Description: Verify that __main__.py now calls create_server() directly and uses server.run_stdio_async()
+Expected: __main__.py imports create_server and calls server.run_stdio_async(show_banner=False)
+Timestamp: 2026-03-27T17:44:35Z
+
+Changes Made:
+- Updated main() function to import create_server instead of run_server
+- Changed to call create_server() to instantiate the server
+- Call server.run_stdio_async(show_banner=False) directly instead of through run_server()
+
+File: src/distillery/mcp/server.py
+Description: Verify that run_server() function has been removed
+Expected: run_server() function no longer exists in server.py
+Timestamp: 2026-03-27T17:44:35Z
+
+Changes Made:
+- Removed the run_server() async function that was previously located at the end of server.py
+- Removed the "Main entry point" section comment
+
+Verification:
+- Command: grep "def run_server" src/distillery/mcp/server.py
+- Output: (no matches - function successfully removed)
+
+- Command: grep "def main" src/distillery/mcp/__main__.py
+- Output: Contains updated main() that calls create_server() and server.run_stdio_async()
+
+Status: PASS
