@@ -16,11 +16,11 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
-from distillery.config import DistilleryConfig, FeedSourceConfig, FeedsConfig
+from distillery.config import DistilleryConfig, FeedsConfig, FeedSourceConfig
 from distillery.feeds.interests import InterestExtractor, InterestProfile
 from distillery.models import Entry, EntrySource, EntryType
 

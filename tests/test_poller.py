@@ -11,19 +11,18 @@ Covers:
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from distillery.config import (
     DistilleryConfig,
-    FeedSourceConfig,
     FeedsConfig,
+    FeedSourceConfig,
     FeedsThresholdsConfig,
 )
 from distillery.feeds.models import FeedItem
-from distillery.feeds.poller import FeedPoller, PollerSummary, PollResult, _item_text
+from distillery.feeds.poller import FeedPoller, _item_text
 from distillery.feeds.scorer import RelevanceScorer
 from distillery.store.protocol import SearchResult
 

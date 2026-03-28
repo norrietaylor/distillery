@@ -97,20 +97,20 @@ Scale from single user to team. Six new skills, richer metadata, optional Elasti
 
 The knowledge base starts watching the world. Feed polling, relevance scoring, proactive insights.
 
-### New Skills
-- [ ] `/radar` — view latest ambient feed digest (what happened that matters to our projects?)
-- [ ] `/watch` — add/remove/list monitored feed sources
-- [ ] `/tune` — adjust relevance thresholds and source trust weights
+### Skills (Spec 10)
+- [x] `/radar` — view latest ambient feed digest with AI source suggestions
+- [x] `/watch` — add/remove/list monitored feed sources
+- [x] `/tune` — adjust relevance thresholds and source trust weights
 
-### Infrastructure
-- [ ] **Feed polling architecture** — scheduler with configurable intervals per source
-- [ ] **Source adapters** — RSS, Slack, GitHub, Hacker News, webhooks
-- [ ] **Relevance scoring pipeline:**
-  1. Embed incoming item
-  2. Compare against active project embeddings
-  3. Score = similarity x priority x tag overlap x recency x source trust
-  4. Above relevance threshold → include in digest
-  5. Above alert threshold → immediate notification
+### Infrastructure (Spec 10)
+- [x] **Feed polling architecture** — `FeedPoller` with configurable intervals, `distillery poll` CLI
+- [x] **Source adapters** — GitHub events (REST API) and RSS/Atom (stdlib ElementTree)
+- [x] **Relevance scoring pipeline** — embedding-based cosine similarity (no LLM in poller)
+- [x] **Interest extractor** — mines entries for tags, domains, repos, expertise; feeds source suggestions
+- [x] 4 new MCP tools: `distillery_watch`, `distillery_poll`, `distillery_interests`, `distillery_suggest_sources`
+
+### Remaining Phase 3 Items
+- [ ] **Slack, Hacker News, webhook adapters** — only GitHub + RSS implemented so far
 - [ ] **Cold-start bootstrapping** — seed relevance scoring without feedback data
 - [ ] **Feedback loop** — trust weight adjustment based on user engagement with digest items
 

@@ -49,6 +49,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated `/distill` and `/bookmark` skills with hierarchical tag suggestions
 - 17 MCP tools total, 600+ tests
 
+### Spec 09 — CLI Eval Runner
+
+- Rewrote eval framework to use Claude Code CLI (`claude -p`) instead of Anthropic Python SDK
+- `HashEmbeddingProvider` — deterministic mock embedding provider (`embedding.provider: "mock"`)
+- Authenticates via `CLAUDE_CODE_OAUTH_TOKEN` — no `ANTHROPIC_API_KEY` needed
+- Stream-json parsing for tool calls, tokens, timing from CLI output
+- `seed_file_store()` for pre-seeding eval scenario databases
+- Nightly eval workflow with Node.js + Claude CLI in CI
+
+### Spec 10 — Ambient Intelligence (Phase 3)
+
+- `/watch` skill — manage monitored feed sources (add, remove, list)
+- `/radar` skill — ambient digest with AI-generated source suggestions via calling Claude instance
+- `/tune` skill — display and adjust feed relevance thresholds
+- `feeds/` package: `GitHubAdapter` (polls repo events), `RSSAdapter` (parses RSS 2.0 + Atom)
+- `RelevanceScorer` — embedding-based relevance scoring (no LLM in background poller)
+- `FeedPoller` — iterates sources, scores items, stores above threshold with dedup
+- `InterestExtractor` — mines existing entries for tag frequencies, domains, repos, expertise
+- 4 new MCP tools: `distillery_watch`, `distillery_poll`, `distillery_interests`, `distillery_suggest_sources`
+- `distillery poll` CLI command for cron-based scheduling
+- `FeedsConfig` in `distillery.yaml` with sources, thresholds, and trust weights
+- MotherDuck backend (`md:distillery`) for persistent storage across container restarts
+- 21 MCP tools total, 1000+ tests
+
 ---
 
 ## [v0.1.0] - 2026-03-22
