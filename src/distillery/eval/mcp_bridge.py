@@ -325,14 +325,14 @@ class _MockEmbeddingProvider:
 
     @property
     def model_name(self) -> str:
-        return "mock-hash-4d"
+        return "mock-hash"
 
 
 def _make_test_config() -> DistilleryConfig:
     """Return a minimal DistilleryConfig suitable for in-memory eval testing."""
     return DistilleryConfig(
         storage=StorageConfig(backend="duckdb", database_path=":memory:"),
-        embedding=EmbeddingConfig(provider="", model="mock-4d", dimensions=4),
+        embedding=EmbeddingConfig(provider="", model="mock-hash", dimensions=4),
         team=TeamConfig(),
         classification=ClassificationConfig(),
     )
