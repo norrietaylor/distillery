@@ -402,6 +402,19 @@ def _validate(config: DistilleryConfig) -> None:
             f"got: {config.storage.backend!r}"
         )
 
+    if config.storage.backend == "motherduck":
+        if not config.storage.database_path.startswith("md:"):
+            raise ValueError(
+                "storage.database_path must start with 'md:' when backend is 'motherduck', "
+                f"got: {config.storage.database_path!r}"
+            )
+        token_env = config.storage.motherduck_token_env
+        if not os.environ.get(token_env):
+            raise ValueError(
+                f"MotherDuck token env var {token_env!r} is not set. "
+                "Set the environment variable before starting the server."
+            )
+
     valid_providers = {"jina", "openai", "mock"}
     if config.embedding.provider and config.embedding.provider not in valid_providers:
         raise ValueError(

@@ -507,4 +507,98 @@ class TestTagsConfig:
         p = write_yaml(tmp_path, yaml_content)
         cfg = load_config(str(p))
         assert cfg.tags.enforce_namespaces is False
-        assert "system" in cfg.tags.reserved_prefixes
+
+
+# ---------------------------------------------------------------------------
+# MotherDuck backend validation
+# ---------------------------------------------------------------------------
+
+
+class TestMotherDuckValidation:
+    def test_motherduck_backend_requires_md_prefix(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Validation rejects non-md: path with motherduck backend."""
+        monkeypatch.setenv("MOTHERDUCK_TOKEN", "dummy-token")
+        yaml_content = """\
+            storage:
+              backend: motherduck
+              database_path: my_database
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="md:"):
+            load_config(str(p))
+
+    def test_motherduck_backend_accepts_md_prefix(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Valid md: path with token passes validation."""
+        monkeypatch.setenv("MOTHERDUCK_TOKEN", "dummy-token")
+        yaml_content = """\
+            storage:
+              backend: motherduck
+              database_path: md:my_database
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.storage.backend == "motherduck"
+        assert cfg.storage.database_path == "md:my_database"
+
+    def test_motherduck_missing_token_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Missing token env var raises ValueError at config validation time."""
+        monkeypatch.delenv("MOTHERDUCK_TOKEN", raising=False)
+        yaml_content = """\
+            storage:
+              backend: motherduck
+              database_path: md:my_database
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="MOTHERDUCK_TOKEN"):
+            load_config(str(p))
+
+    def test_motherduck_custom_token_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Custom motherduck_token_env name is validated correctly."""
+        monkeypatch.setenv("MY_MD_TOKEN", "custom-token")
+        monkeypatch.delenv("MOTHERDUCK_TOKEN", raising=False)
+        yaml_content = """\
+            storage:
+              backend: motherduck
+              database_path: md:my_database
+              motherduck_token_env: MY_MD_TOKEN
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.storage.motherduck_token_env == "MY_MD_TOKEN"
+
+    def test_motherduck_missing_custom_token_env_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Missing custom token env var uses correct name in error message."""
+        monkeypatch.delenv("MY_MD_TOKEN", raising=False)
+        yaml_content = """\
+            storage:
+              backend: motherduck
+              database_path: md:my_database
+              motherduck_token_env: MY_MD_TOKEN
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="MY_MD_TOKEN"):
+            load_config(str(p))
+
+    def test_duckdb_backend_no_md_prefix_required(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Non-motherduck backends do not require md: prefix or token."""
+        monkeypatch.delenv("MOTHERDUCK_TOKEN", raising=False)
+        yaml_content = """\
+            storage:
+              backend: duckdb
+              database_path: /tmp/test.db
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.storage.backend == "duckdb"

@@ -1,0 +1,9 @@
+Type: test
+Command: .venv/bin/pytest --tb=short (full suite regression check)
+Expected: All existing tests continue to pass (855 passed, 36 skipped)
+Timestamp: 2026-03-28T12:20:00Z
+
+Output:
+================= 855 passed, 36 skipped, 2 warnings in 12.56s =================
+
+Status: PASS
