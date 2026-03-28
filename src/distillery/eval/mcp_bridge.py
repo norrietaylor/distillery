@@ -3,11 +3,12 @@
 Creates a fresh in-memory DuckDB store, seeds it with scenario entries, then
 exposes:
 
-- ``get_tool_schemas()`` — Anthropic-compatible tool definition list.
-- ``call_tool(name, arguments)`` — calls the actual ``_handle_*`` function and
+- ``get_tool_schemas()`` -- Anthropic-compatible tool definition list.
+- ``call_tool(name, arguments)`` -- calls the actual ``_handle_*`` function and
   returns the parsed JSON response dict.
-- ``count_stored_entries()`` — returns the number of entries currently in the
+- ``count_stored_entries()`` -- returns the number of entries currently in the
   store (for effectiveness scoring).
+- ``seed_file_store()`` -- seeds a file-backed DuckDB with entries for CLI eval.
 
 This allows the eval runner to test the real tool implementations end-to-end
 without starting a subprocess or stdio transport.
@@ -482,3 +483,54 @@ class MCPBridge:
                 text=json.dumps({"error": True, "code": "UNKNOWN_TOOL", "message": f"No handler for {name}"}),
             )
         ]
+
+
+async def seed_file_store(
+    db_path: str,
+    seed_entries: list[SeedEntry],
+    dimensions: int = 4,
+) -> int:
+    """Create (or open) a file-backed DuckDB and seed it with entries.
+
+    Used by :class:`ClaudeEvalRunner` to prepare a temporary DuckDB file that
+    the MCP server subprocess will open.  Returns the number of entries
+    successfully stored so the caller can compute ``entries_stored`` later.
+
+    Args:
+        db_path: Path to the DuckDB database file.
+        seed_entries: Entries to pre-load.
+        dimensions: Embedding vector dimensionality (default 4).
+
+    Returns:
+        Number of entries seeded.
+    """
+    from distillery.models import Entry, EntrySource, EntryType
+
+    provider = _MockEmbeddingProvider()
+    # Override dimensions if caller requests non-default.
+    if dimensions != provider._DIMS:
+        provider = type(
+            "_DynMockProvider",
+            (_MockEmbeddingProvider,),
+            {"_DIMS": dimensions},
+        )()
+
+    store = DuckDBStore(db_path=db_path, embedding_provider=provider)
+    await store.initialize()
+
+    count = 0
+    for seed in seed_entries:
+        entry = Entry(
+            content=seed.content,
+            entry_type=EntryType(seed.entry_type),
+            source=EntrySource.MANUAL,
+            author=seed.author,
+            tags=seed.tags,
+            project=seed.project,
+            metadata=seed.metadata,
+        )
+        await store.store(entry)
+        count += 1
+
+    await store.close()
+    return count

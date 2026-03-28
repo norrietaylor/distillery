@@ -42,9 +42,7 @@ dev = [
     "pytest-cov>=4.0",
     "types-PyYAML>=6.0",
 ]
-eval = [
-    "anthropic>=0.40.0",
-]
+eval = []
 
 [project.scripts]
 distillery = "distillery.cli:main"
@@ -60,7 +58,7 @@ addopts = ["-v", "--strict-markers", "--tb=short"]
 markers = [
     "unit: unit tests",
     "integration: integration tests",
-    "eval: Claude-powered skill evaluation tests (requires ANTHROPIC_API_KEY)",
+    "eval: Claude-powered skill evaluation tests (requires claude CLI)",
 ]
 
 [tool.mypy]

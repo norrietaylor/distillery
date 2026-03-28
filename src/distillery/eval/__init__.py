@@ -1,8 +1,8 @@
 """Skill evaluation framework for Distillery.
 
-Drives real Claude API calls against an in-process MCP server to evaluate
-skill correctness, performance (latency, token usage), and effectiveness
-(did Claude do the right things?).
+Drives the Claude Code CLI against a temporary MCP server subprocess to
+evaluate skill correctness, performance (latency, token usage, cost), and
+effectiveness (did Claude do the right things?).
 
 Usage::
 

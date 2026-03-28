@@ -1,0 +1,26 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.7, pytest-9.0.2, pluggy-1.6.0 -- /home/norrie.guest/code/distillery/.venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/norrie.guest/code/distillery
+configfile: pyproject.toml
+plugins: asyncio-1.3.0, anyio-4.13.0, cov-7.1.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 15 items
+
+tests/test_eval_unit.py::TestParseStreamEvents::test_empty_input PASSED  [  6%]
+tests/test_eval_unit.py::TestParseStreamEvents::test_text_only_response PASSED [ 13%]
+tests/test_eval_unit.py::TestParseStreamEvents::test_tool_use_and_result PASSED [ 20%]
+tests/test_eval_unit.py::TestParseStreamEvents::test_multiple_tool_calls PASSED [ 26%]
+tests/test_eval_unit.py::TestParseStreamEvents::test_tool_error_response PASSED [ 33%]
+tests/test_eval_unit.py::TestParseStreamEvents::test_ignores_invalid_json_lines PASSED [ 40%]
+tests/test_eval_unit.py::TestParseStreamEvents::test_missing_result_event_defaults PASSED [ 46%]
+tests/test_eval_unit.py::TestParseStreamEvents::test_total_cost_usd_absent_defaults_to_zero PASSED [ 53%]
+tests/test_eval_unit.py::TestClaudeEvalRunnerInit::test_raises_file_not_found_when_cli_missing PASSED [ 60%]
+tests/test_eval_unit.py::TestClaudeEvalRunnerInit::test_no_anthropic_api_key_required PASSED [ 66%]
+tests/test_eval_unit.py::TestSeedFileStore::test_seeds_entries_and_returns_count PASSED [ 73%]
+tests/test_eval_unit.py::TestSeedFileStore::test_seeds_zero_entries PASSED [ 80%]
+tests/test_eval_unit.py::TestSeedFileStore::test_creates_readable_db_file PASSED [ 86%]
+tests/test_eval_unit.py::TestPerformanceMetrics::test_total_cost_usd_default_zero PASSED [ 93%]
+tests/test_eval_unit.py::TestPerformanceMetrics::test_total_cost_usd_explicit PASSED [100%]
+
+============================== 15 passed in 0.47s ==============================

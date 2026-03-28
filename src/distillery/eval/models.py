@@ -106,6 +106,7 @@ class PerformanceMetrics:
     api_call_count: int
     tool_call_count: int
     tool_latencies_ms: list[float] = field(default_factory=list)
+    total_cost_usd: float = 0.0
 
     @property
     def avg_tool_latency_ms(self) -> float:

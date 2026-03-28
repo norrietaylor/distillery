@@ -1,24 +1,28 @@
-"""Claude-powered eval runner.
+"""Claude CLI-powered eval runner.
 
-Drives the actual Claude API against an in-process MCP bridge to execute skill
-scenarios end-to-end.  Records performance (latency, token usage) and delegates
-effectiveness scoring to :mod:`distillery.eval.scorer`.
+Drives the Claude Code CLI (``claude -p``) against a temporary MCP server
+subprocess to execute skill scenarios end-to-end.  Records performance
+(latency, token usage, cost) and delegates effectiveness scoring to
+:mod:`distillery.eval.scorer`.
 
-Requires the ``anthropic`` package (``pip install distillery[eval]``).
-Set ``ANTHROPIC_API_KEY`` in the environment (or pass ``api_key`` directly).
+Requires the ``claude`` CLI binary on ``PATH`` (install with
+``npm install -g @anthropic-ai/claude-code``).  Authenticates via
+``CLAUDE_CODE_OAUTH_TOKEN`` (no Anthropic API key needed).
 """
 
 from __future__ import annotations
 
-import importlib
+import asyncio
 import json
 import logging
 import os
-import time
+import shutil
+import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
-from distillery.eval.mcp_bridge import MCPBridge
+from distillery.eval.mcp_bridge import seed_file_store
 from distillery.eval.models import (
     EffectivenessScore,
     EvalScenario,
@@ -56,50 +60,184 @@ def _load_skill_prompt(skill_name: str) -> str:
                 return parts[2].strip()
         return raw.strip()
 
-    logger.warning("SKILL.md not found at %s — using fallback prompt", skill_path)
+    logger.warning("SKILL.md not found at %s -- using fallback prompt", skill_path)
     return (
         f"You are a helpful assistant with access to the Distillery knowledge base tools. "
         f"Execute the '{skill_name}' skill based on the user's request."
     )
 
 
-class ClaudeEvalRunner:
-    """Runs :class:`~distillery.eval.models.EvalScenario` instances against Claude.
+def _parse_stream_events(
+    lines: list[str],
+) -> tuple[list[ToolCallRecord], str, PerformanceMetrics]:
+    """Parse ``--output-format stream-json`` lines from the Claude CLI.
 
-    Each call to :meth:`run` creates a fresh in-memory store, seeds it,
-    then drives a real Claude API conversation using the skill's SKILL.md
-    as the system prompt.  All MCP tool calls are intercepted and routed
-    to in-process handlers — no subprocess or stdio transport needed.
+    Each non-empty line is a JSON object. The function extracts:
+
+    - ``ToolCallRecord`` instances from ``tool_use`` content blocks in assistant
+      messages and their corresponding ``tool_result`` blocks.
+    - Final text response from the last assistant message's text blocks.
+    - Aggregate metrics from the ``result`` event.
 
     Args:
-        api_key: Anthropic API key.  Defaults to ``ANTHROPIC_API_KEY`` env var.
+        lines: Raw stdout lines from the CLI subprocess.
+
+    Returns:
+        Tuple of (tool_calls, final_response, performance_metrics).
+    """
+    tool_calls: list[ToolCallRecord] = []
+    final_text_parts: list[str] = []
+    total_latency_ms: float = 0.0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    api_call_count: int = 0
+    total_cost_usd: float = 0.0
+
+    # Collect pending tool_use blocks awaiting their results.
+    pending_tool_uses: dict[str, dict[str, Any]] = {}
+    # Track tool results by tool_use_id.
+    tool_results: dict[str, Any] = {}
+
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+
+        event_type = event.get("type", "")
+
+        if event_type == "assistant":
+            # Assistant message: extract text blocks and tool_use blocks.
+            message = event.get("message", {})
+            content_blocks: list[dict[str, Any]] = message.get("content", [])
+            text_parts: list[str] = []
+            for block in content_blocks:
+                block_type = block.get("type", "")
+                if block_type == "text":
+                    text_parts.append(block.get("text", ""))
+                elif block_type == "tool_use":
+                    tool_id = block.get("id", "")
+                    pending_tool_uses[tool_id] = {
+                        "tool_name": block.get("name", ""),
+                        "arguments": block.get("input", {}),
+                    }
+            # Always update final text from the latest assistant message.
+            if text_parts:
+                final_text_parts = text_parts
+
+        elif event_type == "content_block_start":
+            block = event.get("content_block", {})
+            if block.get("type") == "tool_use":
+                tool_id = block.get("id", "")
+                pending_tool_uses[tool_id] = {
+                    "tool_name": block.get("name", ""),
+                    "arguments": block.get("input", {}),
+                }
+            elif block.get("type") == "text":
+                pass  # Text accumulated via content_block_delta or assistant event
+
+        elif event_type == "content_block_delta":
+            # Accumulate tool input JSON deltas if needed.
+            pass
+
+        elif event_type == "content_block_stop":
+            pass
+
+        elif event_type == "tool_result":
+            # Tool result: pair with the pending tool_use.
+            tool_use_id = event.get("tool_use_id", "")
+            content = event.get("content", "")
+            if isinstance(content, str):
+                try:
+                    parsed: Any = json.loads(content)
+                except json.JSONDecodeError:
+                    parsed = {"text": content}
+            elif isinstance(content, list) and content:
+                # Content blocks array -- extract text.
+                text_parts_result = []
+                for cb in content:
+                    if isinstance(cb, dict) and cb.get("type") == "text":
+                        text_parts_result.append(cb.get("text", ""))
+                raw_text = "".join(text_parts_result)
+                try:
+                    parsed = json.loads(raw_text)
+                except json.JSONDecodeError:
+                    parsed = {"text": raw_text}
+            else:
+                parsed = {"text": str(content)}
+            tool_results[tool_use_id] = parsed
+
+        elif event_type == "result":
+            # Aggregate metrics from the result event.
+            total_latency_ms = float(event.get("duration_ms", 0))
+            usage = event.get("usage", {})
+            input_tokens = int(usage.get("input_tokens", 0))
+            output_tokens = int(usage.get("output_tokens", 0))
+            api_call_count = int(event.get("num_turns", 0))
+            total_cost_usd = float(event.get("total_cost_usd", 0.0))
+
+    # Build ToolCallRecords by matching pending tool_uses with their results.
+    for tool_id, tool_info in pending_tool_uses.items():
+        response = tool_results.get(tool_id, {})
+        error_val: str | None = None
+        if isinstance(response, dict) and response.get("error"):
+            error_val = str(response.get("message", "unknown error"))
+
+        tool_calls.append(
+            ToolCallRecord(
+                tool_name=tool_info["tool_name"],
+                arguments=tool_info["arguments"],
+                response=response if isinstance(response, dict) else {"text": str(response)},
+                latency_ms=0.0,  # CLI does not expose per-tool timing.
+                error=error_val,
+            )
+        )
+
+    tool_call_count = len(tool_calls)
+    final_response = "".join(final_text_parts)
+
+    performance = PerformanceMetrics(
+        total_latency_ms=total_latency_ms,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        api_call_count=api_call_count,
+        tool_call_count=tool_call_count,
+        tool_latencies_ms=[0.0] * tool_call_count,
+        total_cost_usd=total_cost_usd,
+    )
+
+    return tool_calls, final_response, performance
+
+
+class ClaudeEvalRunner:
+    """Runs :class:`~distillery.eval.models.EvalScenario` instances via the Claude CLI.
+
+    Each call to :meth:`run` creates a temporary directory with a DuckDB file,
+    a ``distillery.yaml`` config, and an MCP config JSON file, then invokes the
+    ``claude`` CLI subprocess.  The CLI spawns its own MCP server subprocess via
+    the ``--mcp-config`` file.
+
+    Args:
+        claude_cli: Path or name of the Claude CLI binary (default ``"claude"``).
         skills_dir: Override the path to the ``.claude/skills/`` directory.
     """
 
     def __init__(
         self,
-        api_key: str | None = None,
+        claude_cli: str = "claude",
         skills_dir: Path | None = None,
     ) -> None:
-        try:
-            importlib.import_module("anthropic")
-        except ImportError as exc:
-            raise ImportError(
-                "The 'anthropic' package is required for eval runs. "
-                "Install it with: pip install 'distillery[eval]'"
-            ) from exc
-
-        self._api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-        if not self._api_key:
-            raise ValueError(
-                "Anthropic API key not found. "
-                "Set ANTHROPIC_API_KEY or pass api_key= to ClaudeEvalRunner."
+        resolved = shutil.which(claude_cli)
+        if resolved is None:
+            raise FileNotFoundError(
+                f"Claude CLI binary not found: {claude_cli!r}. "
+                "Install with: npm install -g @anthropic-ai/claude-code"
             )
+        self._claude_cli = resolved
         self._skills_dir = skills_dir
-
-    def _get_client(self) -> Any:
-        anthropic = importlib.import_module("anthropic")
-        return anthropic.Anthropic(api_key=self._api_key)
 
     def _get_skill_prompt(self, skill_name: str) -> str:
         if self._skills_dir is not None:
@@ -123,11 +261,8 @@ class ClaudeEvalRunner:
             :class:`~distillery.eval.models.ScenarioResult` with performance
             and effectiveness data.
         """
-        bridge = await MCPBridge.create(seed_entries=scenario.seed_entries)
-        seed_count = await bridge.count_stored_entries()
-
         try:
-            result = await self._execute(scenario, bridge, seed_count)
+            result = await self._execute(scenario)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Eval runner error for scenario %r", scenario.name)
             perf = PerformanceMetrics(
@@ -159,126 +294,130 @@ class ClaudeEvalRunner:
                 final_response="",
                 error=str(exc),
             )
-        finally:
-            await bridge.close()
 
         return result
 
-    async def _execute(
-        self,
-        scenario: EvalScenario,
-        bridge: MCPBridge,
-        seed_count: int,
-    ) -> ScenarioResult:
-        """Inner execution loop."""
-        client = self._get_client()
-        system_prompt = self._get_skill_prompt(scenario.skill)
-        tool_schemas = bridge.get_tool_schemas()
+    async def _execute(self, scenario: EvalScenario) -> ScenarioResult:
+        """Inner execution: create temp env, run CLI, parse results."""
+        with tempfile.TemporaryDirectory(prefix="distillery-eval-") as tmpdir:
+            tmp_path = Path(tmpdir)
 
-        messages: list[dict[str, Any]] = [{"role": "user", "content": scenario.prompt}]
-        tool_calls: list[ToolCallRecord] = []
-        total_input_tokens = 0
-        total_output_tokens = 0
-        api_call_count = 0
-        tool_latencies: list[float] = []
-        last_search_count = 0
-        last_response_content: list[Any] = []
-
-        run_start = time.perf_counter()
-        max_iterations = 20  # Guard against infinite tool-use loops.
-
-        while api_call_count < max_iterations:
-            api_call_count += 1
-            response = client.messages.create(
-                model=scenario.model,
-                max_tokens=scenario.max_tokens,
-                system=system_prompt,
-                tools=tool_schemas,
-                messages=messages,
+            # 1. Create DuckDB file and seed it.
+            db_path = str(tmp_path / "eval.db")
+            seed_count = await seed_file_store(
+                db_path=db_path,
+                seed_entries=scenario.seed_entries,
+                dimensions=4,
             )
 
-            total_input_tokens += response.usage.input_tokens
-            total_output_tokens += response.usage.output_tokens
-            last_response_content = list(response.content)
+            # 2. Write distillery.yaml config pointing at the temp DB.
+            config_path = tmp_path / "distillery.yaml"
+            config_path.write_text(
+                "storage:\n"
+                f"  backend: duckdb\n"
+                f"  database_path: {db_path}\n"
+                "embedding:\n"
+                "  provider: mock\n"
+                "  model: mock-hash-4d\n"
+                "  dimensions: 4\n",
+                encoding="utf-8",
+            )
 
-            # Append the assistant turn (may include text + tool_use blocks).
-            messages.append({"role": "assistant", "content": response.content})
-
-            if response.stop_reason != "tool_use":
-                break
-
-            # Process all tool_use blocks in this turn.
-            tool_results: list[dict[str, Any]] = []
-            for block in response.content:
-                if block.type != "tool_use":
-                    continue
-
-                call_start = time.perf_counter()
-                tool_resp = await bridge.call_tool(block.name, block.input)
-                call_latency_ms = (time.perf_counter() - call_start) * 1000
-                tool_latencies.append(call_latency_ms)
-
-                error_val: str | None = None
-                if isinstance(tool_resp, dict) and tool_resp.get("error"):
-                    error_val = str(tool_resp.get("message", "unknown error"))
-
-                # Track search results count for effectiveness scoring.
-                if block.name == "distillery_search" and isinstance(tool_resp, dict):
-                    last_search_count = tool_resp.get("count", 0)
-
-                tool_calls.append(
-                    ToolCallRecord(
-                        tool_name=block.name,
-                        arguments=dict(block.input),
-                        response=tool_resp,
-                        latency_ms=call_latency_ms,
-                        error=error_val,
-                    )
-                )
-
-                tool_results.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": json.dumps(tool_resp),
+            # 3. Write MCP config JSON.
+            mcp_config_path = tmp_path / "mcp-config.json"
+            mcp_config: dict[str, Any] = {
+                "mcpServers": {
+                    "distillery": {
+                        "command": sys.executable,
+                        "args": ["-m", "distillery.mcp"],
+                        "env": {"DISTILLERY_CONFIG": str(config_path)},
                     }
+                }
+            }
+            mcp_config_path.write_text(
+                json.dumps(mcp_config, indent=2), encoding="utf-8"
+            )
+
+            # 4. Build CLI command.
+            system_prompt = self._get_skill_prompt(scenario.skill)
+            cmd = [
+                self._claude_cli,
+                "-p",
+                scenario.prompt,
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--bare",
+                "--model",
+                scenario.model,
+                "--mcp-config",
+                str(mcp_config_path),
+                "--dangerously-skip-permissions",
+                "--system-prompt",
+                system_prompt,
+                "--allowedTools",
+                "mcp__distillery__*",
+            ]
+
+            # 5. Run the CLI subprocess.
+            env = os.environ.copy()
+            env["DISTILLERY_CONFIG"] = str(config_path)
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
+            )
+            stdout_bytes, stderr_bytes = await proc.communicate()
+            stdout_text = stdout_bytes.decode("utf-8", errors="replace")
+            stderr_text = stderr_bytes.decode("utf-8", errors="replace")
+
+            if proc.returncode != 0:
+                logger.warning(
+                    "Claude CLI exited with code %d for scenario %r: %s",
+                    proc.returncode,
+                    scenario.name,
+                    stderr_text[:500],
                 )
 
-            messages.append({"role": "user", "content": tool_results})
+            # 6. Parse stream-json output.
+            lines = stdout_text.splitlines()
+            tool_calls, final_response, performance = _parse_stream_events(lines)
 
-        total_latency_ms = (time.perf_counter() - run_start) * 1000
+            # 7. Reopen DuckDB to count entries stored since seeding.
+            from distillery.mcp._stub_embedding import HashEmbeddingProvider
+            from distillery.store.duckdb import DuckDBStore
 
-        # Extract final text response from the last assistant turn.
-        final_response = ""
-        for block in last_response_content:
-            if hasattr(block, "text"):
-                final_response += block.text
+            provider = HashEmbeddingProvider(dimensions=4)
+            store = DuckDBStore(db_path=db_path, embedding_provider=provider)
+            await store.initialize()
+            results = await store.list_entries(filters=None, limit=2147483647, offset=0)
+            entries_stored = max(0, len(results) - seed_count)
 
-        performance = PerformanceMetrics(
-            total_latency_ms=total_latency_ms,
-            input_tokens=total_input_tokens,
-            output_tokens=total_output_tokens,
-            api_call_count=api_call_count,
-            tool_call_count=len(tool_calls),
-            tool_latencies_ms=tool_latencies,
-        )
+            # Count search results from tool calls.
+            last_search_count = 0
+            for tc in tool_calls:
+                if tc.tool_name == "distillery_search" and isinstance(tc.response, dict):
+                    last_search_count = tc.response.get("count", 0)
 
-        entries_stored = await bridge.count_entries_since_seed(seed_count)
-        effectiveness = score_effectiveness(
-            scenario=scenario,
-            tool_calls=tool_calls,
-            final_response=final_response,
-            entries_stored=entries_stored,
-            entries_retrieved=last_search_count,
-            performance=performance,
-        )
+            await store.close()
 
-        return ScenarioResult(
-            scenario_name=scenario.name,
-            skill=scenario.skill,
-            passed=effectiveness.passed,
-            performance=performance,
-            effectiveness=effectiveness,
-            tool_calls=tool_calls,
-            final_response=final_response,
-        )
+            # 8. Score effectiveness.
+            effectiveness = score_effectiveness(
+                scenario=scenario,
+                tool_calls=tool_calls,
+                final_response=final_response,
+                entries_stored=entries_stored,
+                entries_retrieved=last_search_count,
+                performance=performance,
+            )
+
+            return ScenarioResult(
+                scenario_name=scenario.name,
+                skill=scenario.skill,
+                passed=effectiveness.passed,
+                performance=performance,
+                effectiveness=effectiveness,
+                tool_calls=tool_calls,
+                final_response=final_response,
+            )

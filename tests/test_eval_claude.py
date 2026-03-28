@@ -1,11 +1,12 @@
-"""Claude-powered skill evaluation tests.
+"""Claude CLI-powered skill evaluation tests.
 
-These tests drive real Claude API calls against an in-process Distillery MCP
-server to evaluate skill correctness, performance, and effectiveness end-to-end.
+These tests drive the Claude Code CLI against a temporary Distillery MCP
+server subprocess to evaluate skill correctness, performance, and
+effectiveness end-to-end.
 
 Requirements:
-  - ``ANTHROPIC_API_KEY`` env var must be set
-  - ``pip install 'distillery[eval]'`` (adds the ``anthropic`` package)
+  - ``claude`` CLI binary on ``PATH`` (``npm install -g @anthropic-ai/claude-code``)
+  - ``CLAUDE_CODE_OAUTH_TOKEN`` env var must be set
 
 Run selectively::
 
@@ -13,13 +14,14 @@ Run selectively::
     pytest -m eval -k recall               # only recall scenarios
     pytest tests/test_eval_claude.py -v    # with verbose output
 
-All eval tests are skipped automatically if ANTHROPIC_API_KEY is not set.
+All eval tests are skipped automatically if the ``claude`` CLI is not found.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -33,20 +35,14 @@ from distillery.eval.scenarios import load_scenarios_from_dir
 
 pytestmark = pytest.mark.eval
 
-_HAS_API_KEY = bool(os.environ.get("ANTHROPIC_API_KEY"))
-_HAS_ANTHROPIC = False
-try:
-    import anthropic  # noqa: F401
-
-    _HAS_ANTHROPIC = True
-except ImportError:
-    pass
+_HAS_CLI = shutil.which("claude") is not None
+_HAS_TOKEN = bool(os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"))
 
 _SKIP_REASON = (
-    "ANTHROPIC_API_KEY not set or 'anthropic' package not installed — "
-    "install with: pip install 'distillery[eval]'"
+    "Claude CLI not found or CLAUDE_CODE_OAUTH_TOKEN not set -- "
+    "install with: npm install -g @anthropic-ai/claude-code"
 )
-_SHOULD_SKIP = not (_HAS_API_KEY and _HAS_ANTHROPIC)
+_SHOULD_SKIP = not (_HAS_CLI and _HAS_TOKEN)
 
 # ---------------------------------------------------------------------------
 # Scenario discovery
@@ -72,7 +68,7 @@ _SCENARIO_IDS = [s.name for s in _ALL_SCENARIOS]
 
 @pytest.fixture(scope="module")
 def eval_runner():
-    """Return a ClaudeEvalRunner (module-scoped to reuse the HTTP client)."""
+    """Return a ClaudeEvalRunner (module-scoped to reuse config)."""
     if _SHOULD_SKIP:
         pytest.skip(_SKIP_REASON)
     from distillery.eval.runner import ClaudeEvalRunner
@@ -111,7 +107,7 @@ async def test_eval_scenario(scenario: EvalScenario, eval_runner) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Structural tests (no API key required)
+# Structural tests (no CLI required)
 # ---------------------------------------------------------------------------
 
 
@@ -180,7 +176,7 @@ def test_skill_coverage() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Aggregate report (optional, runs if API key present)
+# Aggregate report (optional, runs if CLI present)
 # ---------------------------------------------------------------------------
 
 
@@ -189,7 +185,7 @@ def test_skill_coverage() -> None:
 async def test_eval_aggregate_pass_rate(eval_runner) -> None:
     """At least 80% of scenarios must pass.
 
-    This is a soft aggregate check — individual scenario tests catch
+    This is a soft aggregate check -- individual scenario tests catch
     regressions, but this ensures the suite doesn't silently degrade.
     """
     results = []
@@ -255,7 +251,7 @@ async def test_eval_save_baseline(eval_runner, tmp_path) -> None:
     """
     baseline_path = os.environ.get("EVAL_BASELINE_PATH")
     if not baseline_path:
-        pytest.skip("EVAL_BASELINE_PATH not set — skipping baseline save")
+        pytest.skip("EVAL_BASELINE_PATH not set -- skipping baseline save")
 
     results = []
     for scenario in _ALL_SCENARIOS:
@@ -284,7 +280,7 @@ async def test_eval_regression_check(eval_runner) -> None:
     """
     baseline_path = os.environ.get("EVAL_BASELINE_PATH")
     if not baseline_path or not Path(baseline_path).exists():
-        pytest.skip("EVAL_BASELINE_PATH not set or file not found — skipping regression check")
+        pytest.skip("EVAL_BASELINE_PATH not set or file not found -- skipping regression check")
 
     baseline = json.loads(Path(baseline_path).read_text(encoding="utf-8"))
     baseline_by_name = {entry["name"]: entry for entry in baseline}
@@ -298,7 +294,7 @@ async def test_eval_regression_check(eval_runner) -> None:
 
         if baseline_entry["passed"] and not result.passed:
             regressions.append(
-                f"{scenario.name}: was passing, now failing — "
+                f"{scenario.name}: was passing, now failing -- "
                 + "; ".join(result.effectiveness.failure_reasons)
             )
 
@@ -307,7 +303,7 @@ async def test_eval_regression_check(eval_runner) -> None:
             if latency_ratio > 1.5:
                 regressions.append(
                     f"{scenario.name}: latency regressed "
-                    f"{baseline_entry['latency_ms']:.0f}ms → "
+                    f"{baseline_entry['latency_ms']:.0f}ms -> "
                     f"{result.performance.total_latency_ms:.0f}ms "
                     f"({latency_ratio:.1f}x)"
                 )

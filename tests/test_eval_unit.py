@@ -167,6 +167,21 @@ class TestPerformanceMetrics:
         p = _make_perf(total_latency_ms=-1.0, output_tokens=100)
         assert p.tokens_per_second == 0.0
 
+    def test_total_cost_usd_default_zero(self) -> None:
+        p = _make_perf()
+        assert p.total_cost_usd == 0.0
+
+    def test_total_cost_usd_explicit(self) -> None:
+        p = PerformanceMetrics(
+            total_latency_ms=1000.0,
+            input_tokens=100,
+            output_tokens=200,
+            api_call_count=1,
+            tool_call_count=0,
+            total_cost_usd=0.0042,
+        )
+        assert p.total_cost_usd == pytest.approx(0.0042)
+
 
 @pytest.mark.unit
 class TestEffectivenessScore:
@@ -958,3 +973,332 @@ class TestLoadSkillPrompt:
         prompt = runner._load_skill_prompt("myskill")
         # Only 2 parts after split on ---, so fallback to full content
         assert "---" in prompt or "Missing close" in prompt
+
+
+# ===========================================================================
+# runner.py -- ClaudeEvalRunner.__init__
+# ===========================================================================
+
+
+@pytest.mark.unit
+class TestClaudeEvalRunnerInit:
+    """Tests for ClaudeEvalRunner constructor validation."""
+
+    def test_raises_file_not_found_when_cli_missing(self) -> None:
+        from distillery.eval.runner import ClaudeEvalRunner
+
+        with pytest.raises(FileNotFoundError, match="not found"):
+            ClaudeEvalRunner(claude_cli="nonexistent-claude-binary-xyz-99")
+
+    def test_no_anthropic_api_key_required(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """ClaudeEvalRunner no longer requires ANTHROPIC_API_KEY."""
+        from distillery.eval.runner import ClaudeEvalRunner
+
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        # Should NOT raise -- just needs `claude` CLI on PATH.
+        # We use a real binary that exists (`python3`) to satisfy shutil.which.
+        runner = ClaudeEvalRunner(claude_cli="python3")
+        assert runner._claude_cli is not None
+
+
+# ===========================================================================
+# runner.py -- _parse_stream_events
+# ===========================================================================
+
+
+@pytest.mark.unit
+class TestParseStreamEvents:
+    """Tests for the stream-json parser used by the CLI-based eval runner."""
+
+    def test_empty_input(self) -> None:
+        from distillery.eval.runner import _parse_stream_events
+
+        tool_calls, final_response, perf = _parse_stream_events([])
+        assert tool_calls == []
+        assert final_response == ""
+        assert perf.total_latency_ms == 0.0
+        assert perf.input_tokens == 0
+        assert perf.output_tokens == 0
+
+    def test_text_only_response(self) -> None:
+        import json
+
+        from distillery.eval.runner import _parse_stream_events
+
+        lines = [
+            json.dumps({
+                "type": "assistant",
+                "message": {
+                    "content": [{"type": "text", "text": "Hello, world!"}],
+                },
+            }),
+            json.dumps({
+                "type": "result",
+                "duration_ms": 1500,
+                "usage": {"input_tokens": 50, "output_tokens": 25},
+                "num_turns": 1,
+                "total_cost_usd": 0.001,
+            }),
+        ]
+        tool_calls, final_response, perf = _parse_stream_events(lines)
+        assert tool_calls == []
+        assert final_response == "Hello, world!"
+        assert perf.total_latency_ms == 1500.0
+        assert perf.input_tokens == 50
+        assert perf.output_tokens == 25
+        assert perf.api_call_count == 1
+        assert perf.total_cost_usd == pytest.approx(0.001)
+
+    def test_tool_use_and_result(self) -> None:
+        import json
+
+        from distillery.eval.runner import _parse_stream_events
+
+        lines = [
+            # Assistant message with tool_use block
+            json.dumps({
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "tu_001",
+                            "name": "distillery_store",
+                            "input": {"content": "test entry", "entry_type": "session", "author": "eval"},
+                        }
+                    ],
+                },
+            }),
+            # Tool result
+            json.dumps({
+                "type": "tool_result",
+                "tool_use_id": "tu_001",
+                "content": json.dumps({"id": "abc-123", "status": "created"}),
+            }),
+            # Final assistant text
+            json.dumps({
+                "type": "assistant",
+                "message": {
+                    "content": [{"type": "text", "text": "Entry stored successfully."}],
+                },
+            }),
+            # Result event
+            json.dumps({
+                "type": "result",
+                "duration_ms": 3200,
+                "usage": {"input_tokens": 200, "output_tokens": 80},
+                "num_turns": 2,
+                "total_cost_usd": 0.005,
+            }),
+        ]
+        tool_calls, final_response, perf = _parse_stream_events(lines)
+        assert len(tool_calls) == 1
+        assert tool_calls[0].tool_name == "distillery_store"
+        assert tool_calls[0].arguments["content"] == "test entry"
+        assert tool_calls[0].response["id"] == "abc-123"
+        assert tool_calls[0].latency_ms == 0.0  # CLI doesn't expose per-tool timing
+        assert tool_calls[0].error is None
+        assert final_response == "Entry stored successfully."
+        assert perf.tool_call_count == 1
+        assert perf.api_call_count == 2
+        assert perf.total_latency_ms == 3200.0
+        assert perf.total_cost_usd == pytest.approx(0.005)
+
+    def test_multiple_tool_calls(self) -> None:
+        import json
+
+        from distillery.eval.runner import _parse_stream_events
+
+        lines = [
+            json.dumps({
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "tu_001",
+                            "name": "distillery_status",
+                            "input": {},
+                        },
+                        {
+                            "type": "tool_use",
+                            "id": "tu_002",
+                            "name": "distillery_search",
+                            "input": {"query": "python testing"},
+                        },
+                    ],
+                },
+            }),
+            json.dumps({
+                "type": "tool_result",
+                "tool_use_id": "tu_001",
+                "content": json.dumps({"status": "ok", "entries": 42}),
+            }),
+            json.dumps({
+                "type": "tool_result",
+                "tool_use_id": "tu_002",
+                "content": json.dumps({"count": 3, "entries": []}),
+            }),
+            json.dumps({
+                "type": "assistant",
+                "message": {
+                    "content": [{"type": "text", "text": "Found 3 results."}],
+                },
+            }),
+            json.dumps({
+                "type": "result",
+                "duration_ms": 5000,
+                "usage": {"input_tokens": 500, "output_tokens": 150},
+                "num_turns": 2,
+            }),
+        ]
+        tool_calls, final_response, perf = _parse_stream_events(lines)
+        assert len(tool_calls) == 2
+        assert tool_calls[0].tool_name == "distillery_status"
+        assert tool_calls[1].tool_name == "distillery_search"
+        assert perf.tool_call_count == 2
+        assert perf.tool_latencies_ms == [0.0, 0.0]
+        assert final_response == "Found 3 results."
+
+    def test_tool_error_response(self) -> None:
+        import json
+
+        from distillery.eval.runner import _parse_stream_events
+
+        lines = [
+            json.dumps({
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "tu_err",
+                            "name": "distillery_get",
+                            "input": {"entry_id": "bad-id"},
+                        }
+                    ],
+                },
+            }),
+            json.dumps({
+                "type": "tool_result",
+                "tool_use_id": "tu_err",
+                "content": json.dumps({"error": True, "message": "Entry not found"}),
+            }),
+            json.dumps({
+                "type": "result",
+                "duration_ms": 800,
+                "usage": {"input_tokens": 100, "output_tokens": 30},
+                "num_turns": 1,
+            }),
+        ]
+        tool_calls, final_response, perf = _parse_stream_events(lines)
+        assert len(tool_calls) == 1
+        assert tool_calls[0].error == "Entry not found"
+
+    def test_ignores_invalid_json_lines(self) -> None:
+        import json
+
+        from distillery.eval.runner import _parse_stream_events
+
+        lines = [
+            "not valid json",
+            "",
+            json.dumps({
+                "type": "result",
+                "duration_ms": 100,
+                "usage": {"input_tokens": 10, "output_tokens": 5},
+                "num_turns": 1,
+            }),
+        ]
+        tool_calls, final_response, perf = _parse_stream_events(lines)
+        assert tool_calls == []
+        assert perf.total_latency_ms == 100.0
+
+    def test_missing_result_event_defaults(self) -> None:
+        """If no result event is present, metrics default to zero."""
+        import json
+
+        from distillery.eval.runner import _parse_stream_events
+
+        lines = [
+            json.dumps({
+                "type": "assistant",
+                "message": {
+                    "content": [{"type": "text", "text": "Partial output"}],
+                },
+            }),
+        ]
+        tool_calls, final_response, perf = _parse_stream_events(lines)
+        assert final_response == "Partial output"
+        assert perf.total_latency_ms == 0.0
+        assert perf.input_tokens == 0
+        assert perf.api_call_count == 0
+
+    def test_total_cost_usd_absent_defaults_to_zero(self) -> None:
+        import json
+
+        from distillery.eval.runner import _parse_stream_events
+
+        lines = [
+            json.dumps({
+                "type": "result",
+                "duration_ms": 500,
+                "usage": {"input_tokens": 20, "output_tokens": 10},
+                "num_turns": 1,
+            }),
+        ]
+        _, _, perf = _parse_stream_events(lines)
+        assert perf.total_cost_usd == 0.0
+
+
+# ===========================================================================
+# mcp_bridge.py -- seed_file_store
+# ===========================================================================
+
+
+@pytest.mark.unit
+class TestSeedFileStore:
+    """Tests for the seed_file_store async function."""
+
+    @pytest.mark.asyncio
+    async def test_seeds_entries_and_returns_count(self, tmp_path: Path) -> None:
+        from distillery.eval.mcp_bridge import seed_file_store
+
+        db_path = str(tmp_path / "test.db")
+        seeds = [
+            SeedEntry(content="first entry", entry_type="session"),
+            SeedEntry(content="second entry", entry_type="bookmark", author="alice"),
+            SeedEntry(content="third entry", entry_type="session"),
+        ]
+        count = await seed_file_store(db_path=db_path, seed_entries=seeds)
+        assert count == 3
+
+    @pytest.mark.asyncio
+    async def test_seeds_zero_entries(self, tmp_path: Path) -> None:
+        from distillery.eval.mcp_bridge import seed_file_store
+
+        db_path = str(tmp_path / "empty.db")
+        count = await seed_file_store(db_path=db_path, seed_entries=[])
+        assert count == 0
+
+    @pytest.mark.asyncio
+    async def test_creates_readable_db_file(self, tmp_path: Path) -> None:
+        """The seeded DB should be openable and contain the expected entries."""
+        from distillery.eval.mcp_bridge import _MockEmbeddingProvider, seed_file_store
+        from distillery.store.duckdb import DuckDBStore
+
+        db_path = str(tmp_path / "readable.db")
+        seeds = [
+            SeedEntry(content="knowledge entry alpha", entry_type="session"),
+            SeedEntry(content="knowledge entry beta", entry_type="reference"),
+        ]
+        count = await seed_file_store(db_path=db_path, seed_entries=seeds)
+        assert count == 2
+
+        # Reopen and verify.
+        provider = _MockEmbeddingProvider()
+        store = DuckDBStore(db_path=db_path, embedding_provider=provider)
+        await store.initialize()
+        results = await store.list_entries(filters=None, limit=100, offset=0)
+        assert len(results) == 2
+        await store.close()
