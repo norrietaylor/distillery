@@ -1,0 +1,50 @@
+Type: file
+Command: verify .github/workflows/deploy.yml exists with correct trigger and steps
+Expected: deploy.yml exists, triggers on workflow_run of CI on main and workflow_dispatch, contains test/build/push/deploy/smoke-test steps
+Timestamp: 2026-03-28T23:12:17Z
+
+--- File exists check ---
+PASS: .github/workflows/deploy.yml exists
+
+--- Trigger check ---
+6:  workflow_run:
+7:    workflows: ["CI"]
+13:  workflow_dispatch:
+30:      github.event_name == 'workflow_dispatch' ||
+31:      github.event.workflow_run.conclusion == 'success'
+
+--- Job names ---
+6:  workflow_run:
+13:  workflow_dispatch:
+21:  contents: read
+22:  id-token: write  # Required for AWS OIDC authentication
+26:  check-ci:
+40:  test:
+61:  deploy:
+
+--- Key steps ---
+1:name: CD — Deploy to AWS Lambda
+27:    name: Check CI Status
+35:      - name: Confirm deploy should proceed
+41:    name: Test Suite
+46:      - name: Checkout repository
+49:      - name: Set up Python 3.12
+55:      - name: Install dependencies
+58:      - name: Run test suite (coverage threshold 80%)
+62:    name: Build, Push & Deploy
+73:      - name: Checkout repository
+77:      - name: Configure AWS credentials (OIDC)
+83:      - name: Log in to Amazon ECR
+87:      - name: Set image tag
+96:      - name: Build Docker image
+106:      - name: Push Docker image to ECR
+111:      - name: Update Lambda function to new image
+121:      - name: Wait for Lambda update to complete
+129:      - name: Wait for provisioned concurrency to stabilize
+149:      - name: Smoke test — /health endpoint
+163:      - name: Smoke test — MCP initialize handshake
+191:      - name: Smoke test — tools/list returns 21 tools
+220:      - name: Write deployment summary
+247:      - name: Notify on failure
+
+Status: PASS
