@@ -221,6 +221,70 @@ def _create_embedding_provider(config: DistilleryConfig) -> Any:
         )
 
 
+async def _create_elasticsearch_store(config: DistilleryConfig, embedding_provider: Any) -> Any:
+    """Instantiate and initialize an ElasticsearchStore from config.
+
+    Reads the API key and optional Cloud ID from environment variables named
+    in the config, then constructs the ``AsyncElasticsearch`` client and an
+    :class:`~distillery.store.elasticsearch.ElasticsearchStore`.
+
+    Args:
+        config: Loaded :class:`~distillery.config.DistilleryConfig` with
+            ``storage.backend == "elasticsearch"``.
+        embedding_provider: Active embedding provider instance.
+
+    Returns:
+        An initialized :class:`~distillery.store.elasticsearch.ElasticsearchStore`.
+
+    Raises:
+        RuntimeError: If the ``elasticsearch`` package is not installed.
+        ValueError: If required environment variables are missing.
+    """
+    try:
+        from elasticsearch import AsyncElasticsearch
+    except ImportError as exc:
+        raise RuntimeError(
+            "The 'elasticsearch' package is required for the elasticsearch backend. "
+            "Install it with: pip install 'distillery[elasticsearch]'"
+        ) from exc
+
+    from distillery.store.elasticsearch import ElasticsearchStore
+
+    storage = config.storage
+
+    # Resolve API key.
+    api_key: str | None = None
+    if storage.api_key_env:
+        api_key = os.environ.get(storage.api_key_env)
+        if not api_key:
+            raise ValueError(
+                f"Elasticsearch API key environment variable {storage.api_key_env!r} is not set"
+            )
+
+    # Resolve connection: cloud_id takes precedence over url.
+    cloud_id: str | None = None
+    if storage.cloud_id_env:
+        cloud_id = os.environ.get(storage.cloud_id_env)
+
+    if cloud_id:
+        client = AsyncElasticsearch(cloud_id=cloud_id, api_key=api_key)
+    elif storage.url:
+        client = AsyncElasticsearch(storage.url, api_key=api_key)
+    else:
+        raise ValueError(
+            "Elasticsearch backend requires either 'url' or 'cloud_id_env' in config"
+        )
+
+    es_store = ElasticsearchStore(
+        client=client,
+        embedding_provider=embedding_provider,
+        index_prefix=storage.index_prefix,
+        embedding_mode=storage.embedding_mode,
+    )
+    await es_store.initialize()
+    return es_store
+
+
 # ---------------------------------------------------------------------------
 # Server factory
 # ---------------------------------------------------------------------------
@@ -277,49 +341,64 @@ def create_server(
             logger.info("Distillery MCP server starting up …")
 
             embedding_provider = _create_embedding_provider(config)
-            db_path = _normalize_db_path(config.storage.database_path)
 
-            # Apply MotherDuck token from the configured env var name if set.
-            if db_path.startswith("md:"):
-                token = os.environ.get(config.storage.motherduck_token_env)
-                if token:
-                    os.environ["MOTHERDUCK_TOKEN"] = token
-                else:
-                    logger.warning(
-                        "motherduck_token_env is set to %r but the environment variable is not set",
-                        config.storage.motherduck_token_env,
-                    )
+            if config.storage.backend == "elasticsearch":
+                store = await _create_elasticsearch_store(config, embedding_provider)
+                _shared["es_client"] = store.client
+                logger.info(
+                    "Distillery MCP server ready (backend=elasticsearch, embedding=%s)",
+                    getattr(embedding_provider, "model_name", "unknown"),
+                )
+            else:
+                db_path = _normalize_db_path(config.storage.database_path)
 
-            from distillery.store.duckdb import DuckDBStore
+                # Apply MotherDuck token from the configured env var name if set.
+                if db_path.startswith("md:"):
+                    token = os.environ.get(config.storage.motherduck_token_env)
+                    if token:
+                        os.environ["MOTHERDUCK_TOKEN"] = token
+                    else:
+                        logger.warning(
+                            "motherduck_token_env is set to %r but the environment variable is not set",
+                            config.storage.motherduck_token_env,
+                        )
 
-            store = DuckDBStore(
-                db_path=db_path,
-                embedding_provider=embedding_provider,
-                s3_region=config.storage.s3_region,
-                s3_endpoint=config.storage.s3_endpoint,
-            )
-            await store.initialize()
+                from distillery.store.duckdb import DuckDBStore
+
+                store = DuckDBStore(
+                    db_path=db_path,
+                    embedding_provider=embedding_provider,
+                    s3_region=config.storage.s3_region,
+                    s3_endpoint=config.storage.s3_endpoint,
+                )
+                await store.initialize()
+                logger.info(
+                    "Distillery MCP server ready (db=%s, embedding=%s)",
+                    db_path,
+                    getattr(embedding_provider, "model_name", "unknown"),
+                )
 
             _shared["store"] = store
             _shared["config"] = config
             _shared["embedding_provider"] = embedding_provider
             _shared["recent_searches"] = []
-
-            logger.info(
-                "Distillery MCP server ready (db=%s, embedding=%s)",
-                db_path,
-                getattr(embedding_provider, "model_name", "unknown"),
-            )
         else:
             logger.debug("Reusing existing Distillery store (stateless session)")
 
         try:
             yield dict(_shared)
         finally:
-            # In stateless mode many sessions share the store — only the
-            # process-level shutdown should close it.  For stdio mode (single
-            # session) this runs once at exit and is fine.
-            pass
+            # Close the async ES client on shutdown (stdio mode: runs once at exit).
+            # In stateless HTTP mode many sessions share the store — skip close.
+            es_client = _shared.get("es_client")
+            if es_client is not None and not _shared.get("_es_closed", False):
+                try:
+                    await es_client.close()
+                    _shared["_es_closed"] = True
+                    logger.info("Elasticsearch client closed on MCP server shutdown")
+                except Exception:
+                    logger.debug("Error closing ES client on shutdown (ignored)")
+
 
     server = FastMCP("distillery", lifespan=lifespan, auth=auth)
 
@@ -1162,11 +1241,13 @@ async def _handle_status(
 ) -> list[types.TextContent]:
     """Implement the ``distillery_status`` tool.
 
-    Queries the DuckDB store for aggregate statistics and returns them as a
-    JSON payload.
+    Queries the store for aggregate statistics and returns them as a JSON
+    payload.  When the configured backend is ``elasticsearch``, gathers
+    index-level document counts and sizes asynchronously.  Otherwise falls
+    back to the synchronous DuckDB path.
 
     Args:
-        store: Initialised :class:`~distillery.store.duckdb.DuckDBStore`.
+        store: Initialised store instance (DuckDBStore or ElasticsearchStore).
         embedding_provider: The active embedding provider instance.
         config: The loaded Distillery configuration.
 
@@ -1174,7 +1255,10 @@ async def _handle_status(
         MCP content list with a single JSON ``TextContent`` block.
     """
     try:
-        stats = await asyncio.to_thread(_sync_gather_stats, store, embedding_provider, config)
+        if config.storage.backend == "elasticsearch":
+            stats = await _async_gather_es_stats(store, embedding_provider, config)
+        else:
+            stats = await asyncio.to_thread(_sync_gather_stats, store, embedding_provider, config)
         return success_response(stats)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error gathering status stats")
@@ -1240,6 +1324,61 @@ def _sync_gather_stats(
         "embedding_model": model_name,
         "embedding_dimensions": embedding_dimensions,
         "database_path": db_path,
+    }
+
+
+async def _async_gather_es_stats(
+    store: Any,
+    embedding_provider: Any,
+    config: DistilleryConfig,
+) -> dict[str, Any]:
+    """Gather status statistics for the Elasticsearch backend.
+
+    Issues ``/_cat/indices`` queries against the three Distillery indices
+    (entries, search_log, feedback_log) to retrieve document counts and
+    store sizes.
+
+    Args:
+        store: Initialised ``ElasticsearchStore`` instance.
+        embedding_provider: Active embedding provider (for model metadata).
+        config: Loaded ``DistilleryConfig``.
+
+    Returns:
+        A dict suitable for JSON serialisation.
+    """
+    model_name = getattr(embedding_provider, "model_name", "unknown")
+    embedding_dimensions = getattr(embedding_provider, "dimensions", None)
+
+    index_prefix = config.storage.index_prefix
+    index_stats: dict[str, dict[str, Any]] = {}
+
+    # Use the ES indices.stats API to retrieve doc counts and store size.
+    for suffix in ("entries", "search_log", "feedback_log"):
+        index_name = f"{index_prefix}_{suffix}"
+        try:
+            resp = await store.client.indices.stats(index=index_name, metric="docs,store")
+            idx_info = resp.get("indices", {})
+            # The key may be the alias or the versioned name.
+            stats_data: dict[str, Any] = idx_info.get(index_name) or next(iter(idx_info.values()), {})
+            primaries = stats_data.get("primaries", {})
+            index_stats[index_name] = {
+                "doc_count": primaries.get("docs", {}).get("count", 0),
+                "store_size_bytes": primaries.get("store", {}).get("size_in_bytes", 0),
+            }
+        except Exception:
+            index_stats[index_name] = {"doc_count": None, "store_size_bytes": None}
+
+    entries_index = f"{index_prefix}_entries"
+    total_entries = (index_stats.get(entries_index) or {}).get("doc_count", 0)
+
+    return {
+        "status": "ok",
+        "backend": "elasticsearch",
+        "total_entries": total_entries,
+        "index_stats": index_stats,
+        "embedding_model": model_name,
+        "embedding_dimensions": embedding_dimensions,
+        "embedding_mode": getattr(store, "effective_embedding_mode", config.storage.embedding_mode),
     }
 
 

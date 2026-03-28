@@ -1,0 +1,26 @@
+Type: test
+Command: pytest tests/test_elasticsearch_store.py::TestLogSearchAndFeedback -v
+Expected: All 9 tests pass covering log_search() and log_feedback() implementations
+Timestamp: 2026-03-28T00:00:00Z
+
+============================= test session starts ==============================
+platform linux -- Python 3.13.7, pytest-9.0.2, pluggy-1.6.0
+rootdir: /home/norrie.guest/code/distillery/.worktrees/feature-elastic-backend
+configfile: pyproject.toml
+plugins: asyncio-1.3.0, anyio-4.13.0, cov-7.1.0
+
+collected 9 items
+
+tests/test_elasticsearch_store.py::TestLogSearchAndFeedback::test_log_search_indexes_document PASSED
+tests/test_elasticsearch_store.py::TestLogSearchAndFeedback::test_log_search_empty_results PASSED
+tests/test_elasticsearch_store.py::TestLogSearchAndFeedback::test_log_search_no_session_id PASSED
+tests/test_elasticsearch_store.py::TestLogSearchAndFeedback::test_log_search_returns_unique_ids PASSED
+tests/test_elasticsearch_store.py::TestLogSearchAndFeedback::test_log_feedback_indexes_document PASSED
+tests/test_elasticsearch_store.py::TestLogSearchAndFeedback::test_log_feedback_different_signals PASSED
+tests/test_elasticsearch_store.py::TestLogSearchAndFeedback::test_log_feedback_returns_unique_ids PASSED
+tests/test_elasticsearch_store.py::TestLogSearchAndFeedback::test_log_search_uses_index_prefix PASSED
+tests/test_elasticsearch_store.py::TestLogSearchAndFeedback::test_log_feedback_uses_index_prefix PASSED
+
+============================== 9 passed in 0.02s ==============================
+
+Status: PASS

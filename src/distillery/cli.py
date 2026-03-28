@@ -288,6 +288,10 @@ def _cmd_status(config_path: str | None, fmt: str) -> int:
 def _cmd_health(config_path: str | None, fmt: str) -> int:
     """Implement the ``health`` subcommand.
 
+    For the DuckDB backend, verifies that the database file is reachable.
+    For the Elasticsearch backend, calls ``client.info()`` to verify
+    connectivity and reports cluster information.
+
     Returns:
         Exit code (0 on success, 1 on failure).
     """
@@ -296,6 +300,9 @@ def _cmd_health(config_path: str | None, fmt: str) -> int:
     except (FileNotFoundError, ValueError) as exc:
         print(f"Error loading configuration: {exc}", file=sys.stderr)
         return 1
+
+    if cfg.storage.backend == "elasticsearch":
+        return asyncio.run(_cmd_health_elasticsearch(cfg, fmt))
 
     db_path = str(Path(cfg.storage.database_path).expanduser())
     ok = _check_health(db_path)
@@ -308,6 +315,88 @@ def _cmd_health(config_path: str | None, fmt: str) -> int:
         print(f"database_path: {db_path}")
 
     return 0 if ok else 1
+
+
+async def _cmd_health_elasticsearch(cfg: Any, fmt: str) -> int:
+    """Check Elasticsearch connectivity via ``client.info()``.
+
+    Args:
+        cfg: Loaded :class:`~distillery.config.DistilleryConfig` with
+            ``storage.backend == "elasticsearch"``.
+        fmt: Output format — ``"text"`` or ``"json"``.
+
+    Returns:
+        Exit code (0 on healthy, 1 on failure).
+    """
+    import os
+
+    try:
+        from elasticsearch import AsyncElasticsearch
+    except ImportError:
+        msg = "elasticsearch package not installed. Run: pip install 'distillery[elasticsearch]'"
+        if fmt == "json":
+            print(json.dumps({"status": "FAIL", "error": msg}))
+        else:
+            print(f"status: FAIL\nerror: {msg}")
+        return 1
+
+    storage = cfg.storage
+
+    api_key: str | None = None
+    if storage.api_key_env:
+        api_key = os.environ.get(storage.api_key_env)
+
+    cloud_id: str | None = None
+    if storage.cloud_id_env:
+        cloud_id = os.environ.get(storage.cloud_id_env)
+
+    try:
+        if cloud_id:
+            client: AsyncElasticsearch = AsyncElasticsearch(
+                cloud_id=cloud_id, api_key=api_key
+            )
+        elif storage.url:
+            client = AsyncElasticsearch(storage.url, api_key=api_key)
+        else:
+            raise ValueError(
+                "Elasticsearch backend requires either 'url' or 'cloud_id_env' in config"
+            )
+
+        try:
+            info = await client.info()
+            cluster_name = info.get("cluster_name", "unknown")
+            version_info = info.get("version", {})
+            cluster_version = version_info.get("number", "unknown")
+            status_str = "OK"
+            if fmt == "json":
+                print(
+                    json.dumps(
+                        {
+                            "status": status_str,
+                            "backend": "elasticsearch",
+                            "cluster_name": cluster_name,
+                            "version": cluster_version,
+                        }
+                    )
+                )
+            else:
+                print(f"status: {status_str}")
+                print("backend: elasticsearch")
+                print(f"cluster_name: {cluster_name}")
+                print(f"version: {cluster_version}")
+            return 0
+        finally:
+            await client.close()
+    except Exception as exc:
+        status_str = "FAIL"
+        error_msg = str(exc)
+        if fmt == "json":
+            print(json.dumps({"status": status_str, "backend": "elasticsearch", "error": error_msg}))
+        else:
+            print(f"status: {status_str}")
+            print("backend: elasticsearch")
+            print(f"error: {error_msg}")
+        return 1
 
 
 # ---------------------------------------------------------------------------

@@ -767,8 +767,47 @@ class ElasticsearchStore:
         result_scores: list[float],
         session_id: str | None = None,
     ) -> str:
-        """Log a search event (implemented in T03)."""
-        raise NotImplementedError("log_search() will be implemented in T03")
+        """Log a search event in the search_log index.
+
+        Indexes a document in ``{prefix}_search_log`` capturing the query,
+        the ordered list of returned entry IDs with their scores, an optional
+        session identifier, and a UTC timestamp.
+
+        Args:
+            query: The natural-language query string that was searched.
+            result_entry_ids: Ordered list of entry IDs returned by the search.
+            result_scores: Ordered list of similarity scores corresponding to
+                ``result_entry_ids``.
+            session_id: Optional opaque string grouping related searches from
+                the same user session.
+
+        Returns:
+            The document ID of the newly created search_log document.
+        """
+        import uuid
+
+        search_id = str(uuid.uuid4())
+        doc: dict[str, Any] = {
+            "query": query,
+            "result_entry_ids": result_entry_ids,
+            "result_scores": result_scores,
+            "session_id": session_id,
+            "timestamp": datetime.now(tz=UTC).isoformat(),
+        }
+
+        await self._client.index(
+            index=self._alias_name("search_log"),
+            id=search_id,
+            document=doc,
+            refresh="wait_for",
+        )
+        logger.debug(
+            "Logged search id=%s query=%r results=%d",
+            search_id,
+            query,
+            len(result_entry_ids),
+        )
+        return search_id
 
     async def log_feedback(
         self,
@@ -776,5 +815,42 @@ class ElasticsearchStore:
         entry_id: str,
         signal: str,
     ) -> str:
-        """Log feedback (implemented in T03)."""
-        raise NotImplementedError("log_feedback() will be implemented in T03")
+        """Log feedback in the feedback_log index.
+
+        Indexes a document in ``{prefix}_feedback_log`` linking a specific
+        search event to the entry the user interacted with.
+
+        Args:
+            search_id: The ID of the search_log document this feedback relates
+                to.
+            entry_id: The ID of the entry the user interacted with.
+            signal: The type of interaction signal (e.g. ``"relevant"``,
+                ``"not_relevant"``, ``"partial"``).
+
+        Returns:
+            The document ID of the newly created feedback_log document.
+        """
+        import uuid
+
+        feedback_id = str(uuid.uuid4())
+        doc: dict[str, Any] = {
+            "search_id": search_id,
+            "entry_id": entry_id,
+            "signal": signal,
+            "timestamp": datetime.now(tz=UTC).isoformat(),
+        }
+
+        await self._client.index(
+            index=self._alias_name("feedback_log"),
+            id=feedback_id,
+            document=doc,
+            refresh="wait_for",
+        )
+        logger.debug(
+            "Logged feedback id=%s search_id=%s entry_id=%s signal=%r",
+            feedback_id,
+            search_id,
+            entry_id,
+            signal,
+        )
+        return feedback_id

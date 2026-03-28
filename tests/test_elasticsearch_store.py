@@ -1365,3 +1365,158 @@ class TestBuildFilterClauses:
             {"entry_type": "session", "author": "alice", "status": "active"}
         )
         assert len(clauses) == 3
+
+
+# ---------------------------------------------------------------------------
+# Search logging and feedback tests (T03)
+# ---------------------------------------------------------------------------
+
+
+class TestLogSearchAndFeedback:
+    """Tests for log_search() and log_feedback() (T03)."""
+
+    @pytest.mark.unit
+    async def test_log_search_indexes_document(
+        self, es_store: ElasticsearchStore, es_client: AsyncMock
+    ) -> None:
+        """log_search indexes a document in the search_log index."""
+        search_id = await es_store.log_search(
+            query="async patterns",
+            result_entry_ids=["id-1", "id-2"],
+            result_scores=[0.92, 0.85],
+            session_id="sess-abc",
+        )
+
+        assert search_id  # non-empty string
+        es_client.index.assert_called()
+        call_kwargs = es_client.index.call_args.kwargs
+        assert call_kwargs["index"] == "distillery_search_log"
+        assert call_kwargs["id"] == search_id
+        doc = call_kwargs["document"]
+        assert doc["query"] == "async patterns"
+        assert doc["result_entry_ids"] == ["id-1", "id-2"]
+        assert doc["result_scores"] == [0.92, 0.85]
+        assert doc["session_id"] == "sess-abc"
+        assert "timestamp" in doc
+
+    @pytest.mark.unit
+    async def test_log_search_empty_results(
+        self, es_store: ElasticsearchStore, es_client: AsyncMock
+    ) -> None:
+        """log_search with empty results indexes an empty lists document."""
+        search_id = await es_store.log_search(
+            query="obscure topic",
+            result_entry_ids=[],
+            result_scores=[],
+            session_id="sess-xyz",
+        )
+
+        assert search_id
+        call_kwargs = es_client.index.call_args.kwargs
+        doc = call_kwargs["document"]
+        assert doc["result_entry_ids"] == []
+        assert doc["result_scores"] == []
+
+    @pytest.mark.unit
+    async def test_log_search_no_session_id(
+        self, es_store: ElasticsearchStore, es_client: AsyncMock
+    ) -> None:
+        """log_search without session_id stores None."""
+        search_id = await es_store.log_search(
+            query="some query",
+            result_entry_ids=["id-1"],
+            result_scores=[0.75],
+        )
+
+        assert search_id
+        call_kwargs = es_client.index.call_args.kwargs
+        assert call_kwargs["document"]["session_id"] is None
+
+    @pytest.mark.unit
+    async def test_log_search_returns_unique_ids(
+        self, es_store: ElasticsearchStore
+    ) -> None:
+        """Each log_search call returns a distinct UUID."""
+        id1 = await es_store.log_search("q1", ["a"], [0.9])
+        id2 = await es_store.log_search("q2", ["b"], [0.8])
+        assert id1 != id2
+
+    @pytest.mark.unit
+    async def test_log_feedback_indexes_document(
+        self, es_store: ElasticsearchStore, es_client: AsyncMock
+    ) -> None:
+        """log_feedback indexes a document in the feedback_log index."""
+        feedback_id = await es_store.log_feedback(
+            search_id="search-1",
+            entry_id="entry-1",
+            signal="relevant",
+        )
+
+        assert feedback_id
+        # The last index call should be the feedback document.
+        call_kwargs = es_client.index.call_args.kwargs
+        assert call_kwargs["index"] == "distillery_feedback_log"
+        assert call_kwargs["id"] == feedback_id
+        doc = call_kwargs["document"]
+        assert doc["search_id"] == "search-1"
+        assert doc["entry_id"] == "entry-1"
+        assert doc["signal"] == "relevant"
+        assert "timestamp" in doc
+
+    @pytest.mark.unit
+    async def test_log_feedback_different_signals(
+        self, es_store: ElasticsearchStore, es_client: AsyncMock
+    ) -> None:
+        """log_feedback accepts any signal string value."""
+        for signal in ("relevant", "not_relevant", "partial"):
+            feedback_id = await es_store.log_feedback(
+                search_id="s1", entry_id="e1", signal=signal
+            )
+            assert feedback_id
+            call_kwargs = es_client.index.call_args.kwargs
+            assert call_kwargs["document"]["signal"] == signal
+
+    @pytest.mark.unit
+    async def test_log_feedback_returns_unique_ids(
+        self, es_store: ElasticsearchStore
+    ) -> None:
+        """Each log_feedback call returns a distinct UUID."""
+        id1 = await es_store.log_feedback("s1", "e1", "relevant")
+        id2 = await es_store.log_feedback("s2", "e2", "not_relevant")
+        assert id1 != id2
+
+    @pytest.mark.unit
+    async def test_log_search_uses_index_prefix(
+        self, es_client: AsyncMock, embedding_provider: MockEmbeddingProvider
+    ) -> None:
+        """log_search uses the configured index_prefix."""
+        store = ElasticsearchStore(
+            client=es_client,
+            embedding_provider=embedding_provider,
+            index_prefix="myteam",
+        )
+        await store.initialize()
+        es_client.index.reset_mock()
+
+        await store.log_search("query", ["id-1"], [0.9])
+
+        call_kwargs = es_client.index.call_args.kwargs
+        assert call_kwargs["index"] == "myteam_search_log"
+
+    @pytest.mark.unit
+    async def test_log_feedback_uses_index_prefix(
+        self, es_client: AsyncMock, embedding_provider: MockEmbeddingProvider
+    ) -> None:
+        """log_feedback uses the configured index_prefix."""
+        store = ElasticsearchStore(
+            client=es_client,
+            embedding_provider=embedding_provider,
+            index_prefix="myteam",
+        )
+        await store.initialize()
+        es_client.index.reset_mock()
+
+        await store.log_feedback("s1", "e1", "relevant")
+
+        call_kwargs = es_client.index.call_args.kwargs
+        assert call_kwargs["index"] == "myteam_feedback_log"
