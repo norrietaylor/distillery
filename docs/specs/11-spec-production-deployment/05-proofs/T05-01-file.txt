@@ -1,0 +1,11 @@
+Type: file
+Description: Verify scripts/smoke-test.sh exists and is executable
+Command: test -x scripts/smoke-test.sh && ls -lh scripts/smoke-test.sh
+Expected: File is executable with rwx permissions
+Timestamp: 2026-03-28T16:15:00Z
+
+--- Output ---
+-rwxrwxr-x 1 norrie norrie 6.9K Mar 28 16:15 scripts/smoke-test.sh
+
+Status: PASS
+The script exists and has executable permissions (755).
