@@ -135,9 +135,11 @@ See [docs/mcp-setup.md](docs/mcp-setup.md) for detailed setup instructions.
 │      │        │       │        │         │       │
 │  ┌───┴────────┴───────┴────────┴─────────┴───┐   │
 │  │          MCP Server (stdio)                │   │
-│  │  11 tools: store, get, update, search,     │   │
-│  │  find_similar, list, status, classify,     │   │
-│  │  review_queue, resolve_review, check_dedup │   │
+│  │  17 tools: store, get, update, search,      │   │
+│  │  find_similar, list, status, classify,      │   │
+│  │  review_queue, resolve_review, check_dedup, │   │
+│  │  check_conflicts, metrics, quality, stale,  │   │
+│  │  tag_tree, type_schemas                     │   │
 │  └──────────────┬────────────────────────────┘   │
 └─────────────────┼────────────────────────────────┘
                   │
@@ -186,8 +188,8 @@ distillery/
 │   │   ├── engine.py        # ClassificationEngine
 │   │   └── dedup.py         # DeduplicationChecker
 │   └── mcp/
-│       └── server.py        # MCP server (11 tools)
-├── tests/                   # 339+ tests
+│       └── server.py        # MCP server (17 tools, FastMCP 2.x/3.x)
+├── tests/                   # 600+ tests
 ├── docs/
 │   ├── mcp-setup.md
 │   ├── ROADMAP.md
