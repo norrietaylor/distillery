@@ -1,0 +1,38 @@
+Type: file
+Description: Verify /tune SKILL.md exists and has correct structure
+Command: test -f .claude/skills/tune/SKILL.md && grep -c "^###" .claude/skills/tune/SKILL.md
+Expected: File exists, contains multiple Step sections and threshold management logic
+Timestamp: 2026-03-27T00:00:00Z
+
+--- RESULT ---
+
+File check: .claude/skills/tune/SKILL.md
+$ ls -la .claude/skills/tune/SKILL.md
+-rw-r--r-- 1 norrie.guest norrie.guest 5012 .claude/skills/tune/SKILL.md
+
+YAML frontmatter check:
+name: tune
+description: "Displays and adjusts Distillery feed relevance thresholds. Triggered by: 'tune', '/tune', 'adjust thresholds', 'change alert threshold', 'set digest threshold', 'tune my feed', 'show thresholds'."
+
+Sections found:
+- ## Prerequisites
+- ## When to Use
+- ## Process (with 5 steps)
+- ## Output Format
+- ## Rules
+
+Threshold flags documented:
+- --alert N  (set alert threshold, float in [0.0, 1.0])
+- --digest N (set digest threshold, float in [0.0, 1.0])
+- --max N    (set max items per poll cycle)
+- --reset    (reset to defaults: alert=0.85, digest=0.60)
+
+Validation rules documented:
+- Both values must be floats in [0.0, 1.0]
+- alert must be > digest
+- Confirmation required before applying changes
+
+MCP tools referenced:
+- distillery_status (Steps 1 and 3)
+
+Status: PASS

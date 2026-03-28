@@ -1,0 +1,34 @@
+Type: file
+Description: Verify CONVENTIONS.md updated with new skills (radar, tune) and new MCP tools
+Command: grep -c "radar\|tune\|distillery_suggest_sources\|distillery_watch\|distillery_poll" .claude/skills/CONVENTIONS.md
+Expected: CONVENTIONS.md references radar, tune skills and new MCP tools
+Timestamp: 2026-03-27T00:00:00Z
+
+--- RESULT ---
+
+File check: .claude/skills/CONVENTIONS.md
+
+Skill registry table found with all 9 skills:
+| /distill  | distill/   | distillery_store, distillery_find_similar | Capture knowledge from conversations |
+| /recall   | recall/    | distillery_search                         | Semantic search over the knowledge base |
+| /pour     | pour/      | distillery_search                         | Multi-entry synthesis with citations |
+| /bookmark | bookmark/  | distillery_store, distillery_find_similar | Save and annotate URLs |
+| /minutes  | minutes/   | distillery_store, distillery_update, ...  | Record and update meeting notes |
+| /classify | classify/  | distillery_classify, ...                  | Classify and review entries |
+| /watch    | watch/     | distillery_watch                          | Manage monitored feed sources |
+| /radar    | radar/     | distillery_list, distillery_suggest_sources, distillery_store | Ambient feed digest |
+| /tune     | tune/      | distillery_status                         | Display and adjust feed relevance thresholds |
+
+New MCP tools added to "Common MCP Tools Used by Skills" table:
+- distillery_suggest_sources | radar | Suggest new feed sources based on interests
+- distillery_watch           | watch | Manage monitored feed source registry
+- distillery_poll            | (background) | Poll configured feed sources for new items
+
+Updated rows:
+- distillery_store now lists: distill, bookmark, minutes, radar
+- distillery_list  now lists: minutes, radar
+
+Document version updated: 1.0 -> 1.1
+Last Updated: 2026-03-27
+
+Status: PASS
