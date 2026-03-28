@@ -1,0 +1,21 @@
+Type: cli
+Command: cd terraform && terraform plan -var="endpoint_type=function_url"
+Expected: Exit code 0, plan includes aws_lambda_function, aws_lambda_function_url, aws_s3_bucket, aws_ecr_repository, aws_secretsmanager_secret
+Timestamp: 2026-03-28T21:00:00Z
+Status: BLOCKED
+
+Reason: terraform CLI is not installed in the execution environment.
+
+Resources defined in main.tf and endpoint.tf for function_url mode:
+- aws_s3_bucket.storage (with versioning, encryption, lifecycle)
+- aws_ecr_repository.app (with image scanning)
+- aws_secretsmanager_secret.app_secrets
+- aws_iam_role.lambda_execution (with S3, SecretsManager, ECR, CloudWatch policies)
+- aws_lambda_function.mcp_server (container image, 2048MB, 300s timeout)
+- aws_lambda_function_url.mcp_server (count=1 when endpoint_type="function_url")
+- aws_lambda_alias.live + provisioned concurrency config
+
+Workaround: Run the following on a machine with terraform + AWS credentials:
+  cd terraform
+  terraform init -backend=false
+  terraform plan -var="endpoint_type=function_url"
