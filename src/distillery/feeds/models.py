@@ -21,8 +21,7 @@ class FeedItem:
 
     Attributes:
         source_url: The canonical URL of the feed itself (not the item).
-        source_type: Adapter type.  One of ``'rss'``, ``'github'``,
-            ``'hackernews'``, or ``'webhook'``.
+        source_type: Adapter type.  One of ``'rss'`` or ``'github'``.
         item_id: A stable identifier for this item within the source (e.g.
             GitHub event id, RSS ``<guid>`` value).  Used to detect duplicates
             across polls.

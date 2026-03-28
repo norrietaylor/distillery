@@ -83,9 +83,9 @@ class RelevanceScorer:
                 threshold=self._min_score,
                 limit=self._limit,
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.exception("RelevanceScorer: find_similar failed for text %r", text[:80])
-            return 0.0
+            raise
 
         if not results:
             return 0.0

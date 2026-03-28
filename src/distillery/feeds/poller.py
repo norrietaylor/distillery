@@ -179,6 +179,13 @@ class FeedPoller:
     against the knowledge base, and stores items that pass both the dedup check
     and the relevance threshold.
 
+    .. note::
+
+       ``FeedSourceConfig.poll_interval_minutes`` is **not** consulted by this
+       class.  Scheduling is the caller's responsibility (e.g. the MCP
+       ``distillery_poll`` tool or an external cron job).  The field exists in
+       configuration for documentation and future use by an external scheduler.
+
     Parameters
     ----------
     store:
@@ -297,13 +304,30 @@ class FeedPoller:
                 result.items_below_threshold += 1
                 continue
 
-            # Dedup check: skip if a near-duplicate already exists
+            # Fast dedup: check external_id before expensive semantic search
+            if await self._has_external_id(item.item_id):
+                result.items_skipped_dedup += 1
+                continue
+
+            # Semantic dedup: skip if a near-duplicate already exists
             if await self._is_duplicate(item, text):
                 result.items_skipped_dedup += 1
                 continue
 
             # Score
-            score = await scorer.score(text)
+            try:
+                score = await scorer.score(text)
+            except Exception as exc:  # noqa: BLE001
+                result.errors.append(
+                    f"Scoring failed for item {item.item_id!r}: {exc}"
+                )
+                logger.warning(
+                    "FeedPoller: scoring failed for item %r from %s: %s",
+                    item.item_id,
+                    source.url,
+                    exc,
+                )
+                continue
             adjusted_score = score * source.trust_weight
 
             if adjusted_score < self._threshold:
@@ -337,6 +361,32 @@ class FeedPoller:
                 )
 
         return result
+
+    async def _has_external_id(self, external_id: str) -> bool:
+        """Return ``True`` if any stored entry already carries *external_id*.
+
+        Uses ``list_entries`` with a metadata filter rather than a full
+        similarity search, making this a cheap pre-check before scoring.
+
+        Args:
+            external_id: The feed-item identifier to look for.
+
+        Returns:
+            ``True`` if a matching entry exists.
+        """
+        try:
+            results = await self._store.list_entries(
+                filters={"metadata.external_id": external_id},
+                limit=1,
+                offset=0,
+            )
+            return bool(results)
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "FeedPoller: external_id lookup failed for %r — falling through",
+                external_id,
+            )
+            return False
 
     async def _is_duplicate(self, item: FeedItem, text: str) -> bool:
         """Return ``True`` if *item* is a near-duplicate of an existing entry.

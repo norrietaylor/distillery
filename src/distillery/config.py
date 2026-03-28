@@ -137,8 +137,7 @@ class FeedSourceConfig:
 
     Attributes:
         url: The URL of the feed (e.g. RSS feed URL or GitHub repo URL).
-        source_type: Adapter type.  One of ``'rss'``, ``'github'``,
-            ``'hackernews'``, or ``'webhook'``.
+        source_type: Adapter type.  One of ``'rss'`` or ``'github'``.
         label: Optional human-readable label for the source.
         poll_interval_minutes: How often to poll this source.  Defaults to
             ``60`` minutes.
@@ -450,7 +449,7 @@ def _parse_feed_source(raw: dict[str, Any], index: int) -> FeedSourceConfig:
     if not url:
         raise ValueError(f"feeds.sources[{index}].url is required and must be non-empty")
 
-    valid_source_types = {"rss", "github", "hackernews", "webhook"}
+    valid_source_types = {"rss", "github"}
     source_type = str(raw.get("source_type", "rss"))
     if source_type not in valid_source_types:
         raise ValueError(

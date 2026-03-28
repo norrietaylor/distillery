@@ -120,12 +120,17 @@ First determine the author:
 - Try `DISTILLERY_AUTHOR` environment variable
 - If neither is set, ask: "What is your name (for author attribution)?"
 
+Then determine the project:
+- Try the basename of the current git repository (`basename $(git rev-parse --show-toplevel)`)
+- Try `DISTILLERY_PROJECT` environment variable
+- If neither is set, ask: "What is the project name?"
+
 Call `distillery_store` with the full digest content:
 
 ```
 distillery_store(
   content="<full digest markdown text>",
-  entry_type="feed",
+  entry_type="digest",
   author="<author>",
   tags=["digest", "radar", "ambient"]
 )

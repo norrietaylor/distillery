@@ -49,7 +49,7 @@ class TestFeedEntryType:
         schema = TYPE_METADATA_SCHEMAS["feed"]
         constraints = schema.get("constraints", {})
         assert "source_type" in constraints
-        assert set(constraints["source_type"]) == {"rss", "github", "hackernews", "webhook"}
+        assert set(constraints["source_type"]) == {"rss", "github"}
 
 
 class TestFeedMetadataValidation:

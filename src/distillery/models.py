@@ -195,7 +195,7 @@ TYPE_METADATA_SCHEMAS: dict[str, dict[str, Any]] = {
             "relevance_score": "float",
         },
         "constraints": {
-            "source_type": ["rss", "github", "hackernews", "webhook"],
+            "source_type": ["rss", "github"],
         },
     },
 }

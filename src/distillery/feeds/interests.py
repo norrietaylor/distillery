@@ -160,6 +160,7 @@ class InterestExtractor:
             if not batch:
                 break
 
+            all_past_cutoff = True
             for entry in batch:
                 if total >= self._max_entries:
                     break
@@ -169,8 +170,9 @@ class InterestExtractor:
                 if created.tzinfo is None:
                     created = created.replace(tzinfo=UTC)
                 if created < cutoff_hard:
-                    # Skip very old entries to keep computation bounded
+                    # Skip very old entries to keep computation bounded.
                     continue
+                all_past_cutoff = False
 
                 weight = self._recency_weight(created, now)
 
@@ -198,6 +200,10 @@ class InterestExtractor:
                 total += 1
 
             offset += len(batch)
+            # If every entry in this batch was older than the hard cutoff,
+            # subsequent pages will only be older — stop paginating.
+            if all_past_cutoff:
+                break
             if len(batch) < self._page_size:
                 break
 

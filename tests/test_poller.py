@@ -68,6 +68,7 @@ def _make_store(
 ) -> AsyncMock:
     store = AsyncMock()
     store.find_similar.return_value = find_similar_results or []
+    store.list_entries.return_value = []  # default: no external_id matches
     store.store.return_value = "new-entry-id"
     return store
 
@@ -122,12 +123,12 @@ class TestRelevanceScorer:
         call_kwargs = store.find_similar.call_args.kwargs
         assert call_kwargs["threshold"] == 0.5
 
-    async def test_exception_returns_zero(self) -> None:
+    async def test_exception_propagates(self) -> None:
         store = AsyncMock()
         store.find_similar.side_effect = RuntimeError("db error")
         scorer = RelevanceScorer(store=store)
-        score = await scorer.score("test text")
-        assert score == 0.0
+        with pytest.raises(RuntimeError, match="db error"):
+            await scorer.score("test text")
 
     async def test_single_result_returns_that_score(self) -> None:
         store = _make_store(find_similar_results=[_make_search_result(score=0.75)])
@@ -286,7 +287,7 @@ class TestFeedPollerRSS:
     async def test_unsupported_source_type_records_error(self) -> None:
         source = FeedSourceConfig(
             url="https://webhooks.example.com",
-            source_type="webhook",
+            source_type="hackernews",
         )
         store = _make_store()
         cfg = _make_config(sources=[source])
@@ -360,6 +361,7 @@ class TestFeedPollerMultipleSources:
 
         store = AsyncMock()
         store.store.return_value = "eid"
+        store.list_entries.return_value = []  # no external_id matches
 
         source_items_map = {
             "https://a.com/rss": items_a,

@@ -939,8 +939,7 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
         - ``add``: Register a new feed source.  Requires ``url`` and
           ``source_type``.  Optional fields: ``label``,
           ``poll_interval_minutes`` (default 60), ``trust_weight``
-          (default 1.0).  Accepted source types: ``rss``, ``github``,
-          ``hackernews``, ``webhook``.
+          (default 1.0).  Accepted source types: ``rss``, ``github``.
         - ``remove``: Remove a feed source by exact URL match.  Requires
           ``url``.
 
@@ -953,7 +952,7 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
             action (str): One of ``'list'``, ``'add'``, ``'remove'``.
             url (str | None): Source URL.  Required for ``add`` and ``remove``.
             source_type (str | None): Adapter type for ``add``.  One of
-                ``'rss'``, ``'github'``, ``'hackernews'``, ``'webhook'``.
+                ``'rss'``, ``'github'``.
             label (str | None): Human-readable label for the source (optional).
             poll_interval_minutes (int | None): Poll frequency in minutes for
                 ``add``.  Defaults to ``60``.
@@ -1050,8 +1049,8 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
             max_suggestions (int): Maximum number of source suggestions to
                 return.  Default ``5``.
             source_types (list[str] | None): Filter suggestions to these
-                adapter types.  Accepted values: ``'rss'``, ``'github'``,
-                ``'hackernews'``, ``'webhook'``.  ``None`` means no filter.
+                adapter types.  Accepted values: ``'rss'``, ``'github'``.
+                ``None`` means no filter.
             recency_days (int): Recency window passed to
                 :class:`~distillery.feeds.interests.InterestExtractor`.
                 Default ``90``.
@@ -3076,7 +3075,7 @@ def _sync_gather_stale(
 # distillery_watch handler
 # ---------------------------------------------------------------------------
 
-_VALID_SOURCE_TYPES = {"rss", "github", "hackernews", "webhook"}
+_VALID_SOURCE_TYPES = {"rss", "github"}
 
 
 def _feed_source_to_dict(source: FeedSourceConfig) -> dict[str, Any]:
@@ -3107,7 +3106,13 @@ async def _handle_watch(
     Returns:
         A structured MCP success or error response.
     """
-    action = str(arguments.get("action", "")).strip().lower()
+    action_raw = arguments.get("action")
+    if action_raw is None or not isinstance(action_raw, str):
+        return error_response(
+            "INVALID_ACTION",
+            f"action must be a non-null string, got: {action_raw!r}",
+        )
+    action = action_raw.strip().lower()
 
     if action not in ("list", "add", "remove"):
         return error_response(
@@ -3126,11 +3131,22 @@ async def _handle_watch(
         )
 
     if action == "add":
-        url = str(arguments.get("url", "")).strip()
+        url_raw = arguments.get("url")
+        if url_raw is not None and not isinstance(url_raw, str):
+            return error_response(
+                "INVALID_FIELD", f"url must be a string, got: {type(url_raw).__name__}"
+            )
+        url = str(url_raw or "").strip()
         if not url:
             return error_response("MISSING_FIELD", "url is required for action='add'")
 
-        source_type = str(arguments.get("source_type", "")).strip()
+        source_type_raw = arguments.get("source_type")
+        if source_type_raw is not None and not isinstance(source_type_raw, str):
+            return error_response(
+                "INVALID_FIELD",
+                f"source_type must be a string, got: {type(source_type_raw).__name__}",
+            )
+        source_type = str(source_type_raw or "").strip()
         if not source_type:
             return error_response("MISSING_FIELD", "source_type is required for action='add'")
         if source_type not in _VALID_SOURCE_TYPES:
@@ -3270,7 +3286,11 @@ async def _handle_interests(
         recency_days=recency_days,
         top_n=top_n,
     )
-    profile = await extractor.extract()
+    try:
+        profile = await extractor.extract()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("distillery_interests: extraction failed")
+        return error_response("EXTRACTION_ERROR", f"Interest extraction failed: {exc}")
 
     return success_response(
         {
@@ -3290,7 +3310,7 @@ async def _handle_interests(
 # distillery_suggest_sources handler
 # ---------------------------------------------------------------------------
 
-_VALID_SUGGEST_SOURCE_TYPES = {"rss", "github", "hackernews", "webhook"}
+_VALID_SUGGEST_SOURCE_TYPES = {"rss", "github"}
 
 
 async def _handle_suggest_sources(
@@ -3380,9 +3400,13 @@ async def _handle_suggest_sources(
         recency_days=recency_days,
         top_n=top_n,
     )
-    profile = await extractor.extract()
+    try:
+        profile = await extractor.extract()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("distillery_suggest_sources: extraction failed")
+        return error_response("EXTRACTION_ERROR", f"Interest extraction failed: {exc}")
 
-    watched_set = set(profile.watched_sources)
+    watched_set = _normalise_watched_set(profile.watched_sources)
     suggestions = _derive_suggestions(
         profile=profile,
         watched_set=watched_set,
@@ -3398,6 +3422,36 @@ async def _handle_suggest_sources(
             "entry_count": profile.entry_count,
         }
     )
+
+
+def _normalise_watched_set(watched_sources: list[str]) -> set[str]:
+    """Build a normalised set of watched source identifiers.
+
+    For each URL, also includes the ``owner/repo`` slug when the URL
+    points to GitHub.  This ensures that a GitHub source stored as
+    ``https://github.com/owner/repo`` is matched against a suggestion
+    that uses the short ``owner/repo`` form.
+
+    Args:
+        watched_sources: Raw list of watched source URLs from the profile.
+
+    Returns:
+        A set of normalised identifiers for exclusion checks.
+    """
+    import re
+
+    normalised: set[str] = set()
+    for url in watched_sources:
+        normalised.add(url)
+        # Extract owner/repo slug from GitHub URLs
+        match = re.search(r"github\.com/([a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+)", url)
+        if match:
+            normalised.add(match.group(1))
+        # Also handle bare owner/repo slugs
+        stripped = url.strip().rstrip("/")
+        if re.match(r"^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$", stripped):
+            normalised.add(f"https://github.com/{stripped}")
+    return normalised
 
 
 def _derive_suggestions(

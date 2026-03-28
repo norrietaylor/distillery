@@ -83,8 +83,9 @@ If the status response does not include feeds configuration, fall back to displa
 If `--reset` was specified, set the target values to defaults:
 - alert: 0.85
 - digest: 0.60
+- max: (unchanged, reset does not affect max)
 
-Otherwise use the values from `--alert` and/or `--digest`.
+Otherwise use the values from `--alert`, `--digest`, and/or `--max`.
 
 If threshold changes are requested, display a preview and ask for confirmation:
 
@@ -92,6 +93,7 @@ If threshold changes are requested, display a preview and ask for confirmation:
 Proposed threshold changes:
   Alert:  <current> -> <new>
   Digest: <current> -> <new>
+  Max items per poll: <current> -> <new>   (shown only if --max was provided)
 
 Apply these changes? (yes/no)
 ```
@@ -115,18 +117,14 @@ feeds:
   thresholds:
     alert: <new_alert_value>
     digest: <new_digest_value>
+  max_items_per_poll: <new_max_value>   # include only if --max was provided
 
 The MCP server must be restarted for changes to take effect.
 ```
 
 Display the full path to distillery.yaml if it can be determined from the environment.
 
-**Alternatively**, if the user wants to apply changes for the current session only, note:
-
-```
-Note: These threshold values apply to the current session only.
-Restart the MCP server to revert to the configured values in distillery.yaml.
-```
+**Note:** There is no live write mechanism for thresholds. All changes must be persisted via `distillery.yaml` and require an MCP server restart to take effect.
 
 ### Step 5: Display Results
 

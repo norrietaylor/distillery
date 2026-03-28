@@ -266,8 +266,18 @@ def parse_feed_xml(xml_bytes: bytes, source_url: str) -> list[FeedItem]:
 
     Raises:
         ET.ParseError: If *xml_bytes* is not valid XML.
+        ValueError: If the XML contains a DOCTYPE declaration (potential XXE).
     """
-    root = ET.fromstring(xml_bytes)  # noqa: S314 – stdlib, not lxml
+    # Mitigate XXE attacks: reject XML that contains a DOCTYPE declaration.
+    # Entity expansion and external entity loading both require a DOCTYPE.
+    # This is a stdlib-only safeguard (no defusedxml dependency required).
+    header = xml_bytes[:1024].lower()
+    if b"<!doctype" in header or b"<!entity" in header:
+        raise ValueError(
+            "XML contains a DOCTYPE or ENTITY declaration; "
+            "rejecting to prevent XML External Entity (XXE) attacks."
+        )
+    root = ET.fromstring(xml_bytes)  # noqa: S314 – stdlib, mitigated above
 
     items: list[FeedItem] = []
 

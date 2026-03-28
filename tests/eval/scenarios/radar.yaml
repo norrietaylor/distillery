@@ -63,6 +63,8 @@
     - distillery_status
     - distillery_list
     - distillery_suggest_sources
+  response_must_contain:
+    - Suggest
   max_latency_ms: 60000
   max_total_tokens: 10000
 
