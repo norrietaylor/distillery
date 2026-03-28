@@ -422,6 +422,222 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
             arguments=arguments,
         )
 
+    # -----------------------------------------------------------------------
+    # T02.2 tool wrappers: distillery_search, distillery_find_similar,
+    # distillery_classify, distillery_review_queue, distillery_resolve_review,
+    # distillery_check_dedup, distillery_check_conflicts
+    # -----------------------------------------------------------------------
+
+    @server.tool
+    async def distillery_search(  # noqa: PLR0913
+        ctx: Context,
+        query: str,
+        entry_type: str | None = None,
+        author: str | None = None,
+        project: str | None = None,
+        tags: list[str] | None = None,
+        status: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        limit: int = 10,
+    ) -> list[types.TextContent]:
+        """Search the knowledge store using semantic similarity.
+
+        Embeds the query and returns entries ranked by cosine similarity
+        descending, with optional metadata filters applied.  After returning
+        results the search event is logged for implicit feedback correlation.
+
+        All filter parameters are optional.  date_from and date_to accept
+        ISO 8601 date strings (e.g. "2024-01-15").
+        limit must be between 1 and 200 (default 10).
+        """
+        lc = ctx.lifespan_context
+        arguments: dict[str, Any] = {"query": query, "limit": limit}
+        if entry_type is not None:
+            arguments["entry_type"] = entry_type
+        if author is not None:
+            arguments["author"] = author
+        if project is not None:
+            arguments["project"] = project
+        if tags is not None:
+            arguments["tags"] = tags
+        if status is not None:
+            arguments["status"] = status
+        if date_from is not None:
+            arguments["date_from"] = date_from
+        if date_to is not None:
+            arguments["date_to"] = date_to
+        return await _handle_search(
+            store=lc["store"],
+            arguments=arguments,
+            recent_searches=lc["recent_searches"],
+        )
+
+    @server.tool
+    async def distillery_find_similar(
+        ctx: Context,
+        content: str,
+        threshold: float = 0.8,
+        limit: int = 10,
+    ) -> list[types.TextContent]:
+        """Find entries similar to the provided content for deduplication.
+
+        Embeds the content string and returns stored entries whose cosine
+        similarity exceeds the threshold, sorted by descending similarity.
+
+        threshold must be in [0.0, 1.0] (default 0.8).
+        limit must be between 1 and 200 (default 10).
+        """
+        lc = ctx.lifespan_context
+        return await _handle_find_similar(
+            store=lc["store"],
+            arguments={"content": content, "threshold": threshold, "limit": limit},
+        )
+
+    @server.tool
+    async def distillery_classify(  # noqa: PLR0913
+        ctx: Context,
+        entry_id: str,
+        entry_type: str,
+        confidence: float,
+        reasoning: str | None = None,
+        suggested_tags: list[str] | None = None,
+        suggested_project: str | None = None,
+    ) -> list[types.TextContent]:
+        """Persist a pre-computed classification result onto an existing entry.
+
+        Stores the classification result fields onto the entry and updates its
+        status based on the confidence threshold from config.  If confidence
+        meets the threshold the entry becomes active, otherwise pending_review.
+        Handles reclassification of already-classified entries.
+
+        entry_type must be one of: session, bookmark, minutes, meeting,
+        reference, idea, inbox.
+        confidence must be in [0.0, 1.0].
+        """
+        lc = ctx.lifespan_context
+        arguments: dict[str, Any] = {
+            "entry_id": entry_id,
+            "entry_type": entry_type,
+            "confidence": confidence,
+        }
+        if reasoning is not None:
+            arguments["reasoning"] = reasoning
+        if suggested_tags is not None:
+            arguments["suggested_tags"] = suggested_tags
+        if suggested_project is not None:
+            arguments["suggested_project"] = suggested_project
+        return await _handle_classify(
+            store=lc["store"],
+            config=lc["config"],
+            arguments=arguments,
+        )
+
+    @server.tool
+    async def distillery_review_queue(
+        ctx: Context,
+        entry_type: str | None = None,
+        limit: int = 20,
+    ) -> list[types.TextContent]:
+        """Return entries awaiting human review after classification.
+
+        Returns pending_review entries sorted by created_at descending with id,
+        content preview, entry_type, confidence, author, created_at, and
+        classification_reasoning.
+
+        entry_type optionally filters to a specific type.
+        limit must be between 1 and 500 (default 20).
+        """
+        lc = ctx.lifespan_context
+        arguments: dict[str, Any] = {"limit": limit}
+        if entry_type is not None:
+            arguments["entry_type"] = entry_type
+        return await _handle_review_queue(
+            store=lc["store"],
+            arguments=arguments,
+        )
+
+    @server.tool
+    async def distillery_resolve_review(  # noqa: PLR0913
+        ctx: Context,
+        entry_id: str,
+        action: str,
+        new_entry_type: str | None = None,
+        reviewer: str | None = None,
+    ) -> list[types.TextContent]:
+        """Resolve a pending-review entry by approving, reclassifying, or archiving.
+
+        action must be one of:
+          approve     - sets status=active, records reviewed_at in metadata.
+          reclassify  - updates entry_type (requires new_entry_type), records
+                        reclassified_from in metadata.
+          archive     - soft-deletes the entry by setting status=archived.
+
+        new_entry_type is required when action='reclassify'.
+        new_entry_type must be one of: session, bookmark, minutes, meeting,
+        reference, idea, inbox.
+        """
+        lc = ctx.lifespan_context
+        arguments: dict[str, Any] = {"entry_id": entry_id, "action": action}
+        if new_entry_type is not None:
+            arguments["new_entry_type"] = new_entry_type
+        if reviewer is not None:
+            arguments["reviewer"] = reviewer
+        return await _handle_resolve_review(
+            store=lc["store"],
+            arguments=arguments,
+        )
+
+    @server.tool
+    async def distillery_check_dedup(
+        ctx: Context,
+        content: str,
+    ) -> list[types.TextContent]:
+        """Run a deduplication check against the knowledge store.
+
+        Runs the DeduplicationChecker against the store using thresholds from
+        config and returns the deduplication result including action
+        (store/skip/merge/link), highest similarity score, reasoning, and
+        list of similar entries.
+        """
+        lc = ctx.lifespan_context
+        return await _handle_check_dedup(
+            store=lc["store"],
+            config=lc["config"],
+            arguments={"content": content},
+        )
+
+    @server.tool
+    async def distillery_check_conflicts(
+        ctx: Context,
+        content: str,
+        llm_responses: dict[str, Any] | None = None,
+    ) -> list[types.TextContent]:
+        """Check for conflicting information in the knowledge store.
+
+        Supports a two-pass workflow:
+
+        First pass (llm_responses absent or None):
+          Returns conflict_candidates with a conflict_prompt for each similar
+          entry so the calling LLM can evaluate them.
+
+        Second pass (llm_responses provided):
+          Accepts a mapping of {entry_id: {is_conflict: bool, reasoning: str}}
+          and returns has_conflicts plus the list of confirmed conflicts.
+
+        Call this tool once without llm_responses to get candidates, evaluate
+        each conflict_prompt, then call again with llm_responses to confirm.
+        """
+        lc = ctx.lifespan_context
+        arguments: dict[str, Any] = {"content": content}
+        if llm_responses is not None:
+            arguments["llm_responses"] = llm_responses
+        return await _handle_check_conflicts(
+            store=lc["store"],
+            config=lc["config"],
+            arguments=arguments,
+        )
+
     return server
 
 
