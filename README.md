@@ -35,7 +35,7 @@ Inspired by Tiago Forte's **Building a Second Brain** methodology (CODE: Capture
 
 ## Skills
 
-Distillery provides 6 Claude Code slash commands:
+Distillery provides 9 Claude Code slash commands:
 
 | Skill | Purpose | Example |
 |-------|---------|---------|
@@ -45,6 +45,9 @@ Distillery provides 6 Claude Code slash commands:
 | `/bookmark` | Store URLs with auto-generated summaries | `/bookmark https://example.com/article #caching` |
 | `/minutes` | Meeting notes with append updates | `/minutes --update standup-2026-03-22` |
 | `/classify` | Classify entries and triage review queue | `/classify --inbox` |
+| `/watch` | Manage monitored feed sources | `/watch add github:duckdb/duckdb` |
+| `/radar` | Ambient feed digest with source suggestions | `/radar --days 7` |
+| `/tune` | Adjust feed relevance thresholds | `/tune relevance 0.4` |
 
 ### How `/pour` works
 
@@ -65,7 +68,7 @@ claude plugin install https://github.com/norrietaylor/distillery
 ```
 
 This reads [`plugin.json`](plugin.json) and:
-1. Copies all six skills to `~/.claude/skills/distillery/` (available in every project)
+1. Copies all nine skills to `~/.claude/skills/distillery/` (available in every project)
 2. Prompts you to configure the MCP server in `~/.claude/settings.json`
 3. Guides you through setting up your API key
 
