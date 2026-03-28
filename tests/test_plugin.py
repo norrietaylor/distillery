@@ -547,8 +547,8 @@ class TestPluginDocumentationContent:
     def test_mentions_both_transport_options(self) -> None:
         """docs/plugin.md must describe both stdio and HTTP transport options."""
         content = load_plugin_doc()
-        assert "stdio" in content.lower() or "Transport A" in content
-        assert "http" in content.lower() or "Transport B" in content
+        assert "stdio" in content.lower(), "docs/plugin.md must mention stdio transport"
+        assert "http" in content.lower(), "docs/plugin.md must mention http transport"
 
     def test_hosted_url_present(self) -> None:
         """docs/plugin.md must include the hosted MCP server URL."""
