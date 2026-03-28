@@ -32,6 +32,15 @@ Tools added in T02 (classification extensions):
     created_at, and classification_reasoning.
   - distillery_resolve_review: Accept entry_id and action
     (approve/reclassify/archive); update entry accordingly.
+
+Tools added in T03.2 (conflict detection):
+  - distillery_check_conflicts: Accept content and optional llm_responses
+    mapping.  First pass (no llm_responses) returns conflict_candidates with
+    prompts for LLM evaluation.  Second pass (with llm_responses) processes
+    evaluated responses and returns has_conflicts + conflict list.
+  - distillery_store also returns conflict_candidates on the response when
+    similar entries exceed the conflict_threshold, enabling the calling LLM
+    to evaluate conflicts without a separate tool call.
 """
 
 from __future__ import annotations
@@ -42,13 +51,12 @@ import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import UTC
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from fastmcp import Context, FastMCP  # noqa: F401  # Context used by tool wrappers added in T02
 from mcp import types
-from mcp.server import Server
-from mcp.server.stdio import stdio_server
 
 from distillery.config import DistilleryConfig, load_config
 
@@ -191,8 +199,8 @@ def _create_embedding_provider(config: DistilleryConfig) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def create_server(config: DistilleryConfig | None = None) -> Server:
-    """Build and return the configured MCP :class:`~mcp.server.Server`.
+def create_server(config: DistilleryConfig | None = None) -> FastMCP:
+    """Build and return the configured :class:`~fastmcp.FastMCP` server.
 
     The server is stateless at construction time -- the store and embedding
     provider are initialised during the lifespan context manager when the
@@ -204,24 +212,30 @@ def create_server(config: DistilleryConfig | None = None) -> Server:
             ``distillery.yaml`` in the cwd).
 
     Returns:
-        A fully decorated :class:`~mcp.server.Server` ready to run.
+        A fully decorated :class:`~fastmcp.FastMCP` instance ready to run.
     """
     if config is None:
         config = load_config()
 
-    # We use a mutable container so that the inner handlers can reference the
-    # store and embedding provider that are set up during lifespan.
-    _state: dict[str, Any] = {}
-
     @asynccontextmanager
-    async def _lifespan(server: Server) -> AsyncIterator[None]:
-        """Startup / shutdown lifecycle for the Distillery MCP server."""
+    async def lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
+        """
+        Manage the startup and shutdown lifecycle for the Distillery MCP server.
+
+        Yields:
+            A lifespan context dict with:
+              - "store": an initialized DuckDBStore instance connected to the configured database.
+              - "config": the Distillery configuration used to construct shared components.
+              - "embedding_provider": the instantiated embedding provider.
+              - "recent_searches": an in-memory list used to track recent search events for implicit feedback correlation.
+
+        Notes:
+            On exit, the store is closed to release resources.
+        """
         logger.info("Distillery MCP server starting up …")
 
         # Build embedding provider and store.
         embedding_provider = _create_embedding_provider(config)
-        _state["embedding_provider"] = embedding_provider
-        _state["config"] = config
 
         db_path = os.path.expanduser(config.storage.database_path)
 
@@ -229,7 +243,10 @@ def create_server(config: DistilleryConfig | None = None) -> Server:
 
         store = DuckDBStore(db_path=db_path, embedding_provider=embedding_provider)
         await store.initialize()
-        _state["store"] = store
+
+        # In-memory list of recent search events for implicit feedback correlation.
+        # Each element is a dict with keys: search_id, entry_ids (set[str]), timestamp (datetime).
+        recent_searches: list[dict[str, Any]] = []
 
         logger.info(
             "Distillery MCP server ready (db=%s, embedding=%s)",
@@ -238,467 +255,539 @@ def create_server(config: DistilleryConfig | None = None) -> Server:
         )
 
         try:
-            yield
+            yield {
+                "store": store,
+                "config": config,
+                "embedding_provider": embedding_provider,
+                "recent_searches": recent_searches,
+            }
         finally:
             logger.info("Distillery MCP server shutting down …")
             await store.close()
             logger.info("Distillery MCP server shutdown complete")
 
-    server = Server("distillery", lifespan=_lifespan)
+    server = FastMCP("distillery", lifespan=lifespan)
 
     # -----------------------------------------------------------------------
-    # Tool registry
+    # T02.1 tool wrappers: distillery_status, distillery_store,
+    # distillery_get, distillery_update, distillery_list
     # -----------------------------------------------------------------------
 
-    @server.list_tools()  # type: ignore[no-untyped-call, untyped-decorator]
-    async def _list_tools() -> list[types.Tool]:
-        return [
-            types.Tool(
-                name="distillery_status",
-                description=(
-                    "Return runtime statistics for the Distillery knowledge base: "
-                    "total entries, counts broken down by entry type and status, "
-                    "database file size on disk, and the embedding model in use."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {},
-                    "required": [],
-                },
-            ),
-            types.Tool(
-                name="distillery_store",
-                description=(
-                    "Store a new knowledge entry in the Distillery knowledge base. "
-                    "Automatically checks for similar existing entries and returns "
-                    "deduplication warnings when similar content is found. "
-                    "Returns the new entry ID and any similarity warnings."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "content": {
-                            "type": "string",
-                            "description": "The full text content of the knowledge entry.",
-                        },
-                        "entry_type": {
-                            "type": "string",
-                            "description": (
-                                "Semantic category of the entry. One of: "
-                                "session, bookmark, minutes, meeting, reference, idea, inbox."
-                            ),
-                        },
-                        "author": {
-                            "type": "string",
-                            "description": "Creator identifier (e.g. a GitHub username).",
-                        },
-                        "project": {
-                            "type": "string",
-                            "description": "Optional project or repository name for scoping.",
-                        },
-                        "tags": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Optional list of string labels for faceted retrieval.",
-                        },
-                        "metadata": {
-                            "type": "object",
-                            "description": "Optional type-specific extension fields.",
-                        },
-                        "dedup_threshold": {
-                            "type": "number",
-                            "description": (
-                                "Cosine similarity threshold for deduplication warnings. "
-                                "Defaults to 0.92. Set to 1.0 to disable."
-                            ),
-                        },
-                        "dedup_limit": {
-                            "type": "integer",
-                            "description": "Maximum number of similar entries to report. Defaults to 3.",
-                        },
-                    },
-                    "required": ["content", "entry_type", "author"],
-                },
-            ),
-            types.Tool(
-                name="distillery_get",
-                description=(
-                    "Retrieve a single knowledge entry by its UUID. "
-                    "Returns the full entry fields or a structured NOT_FOUND error."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "entry_id": {
-                            "type": "string",
-                            "description": "The UUID of the entry to retrieve.",
-                        },
-                    },
-                    "required": ["entry_id"],
-                },
-            ),
-            types.Tool(
-                name="distillery_update",
-                description=(
-                    "Apply a partial update to an existing knowledge entry. "
-                    "Immutable fields (id, created_at, source) cannot be changed. "
-                    "Returns the updated entry or a structured error."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "entry_id": {
-                            "type": "string",
-                            "description": "The UUID of the entry to update.",
-                        },
-                        "content": {
-                            "type": "string",
-                            "description": "New text content (triggers re-embedding).",
-                        },
-                        "entry_type": {
-                            "type": "string",
-                            "description": "New entry type.",
-                        },
-                        "author": {
-                            "type": "string",
-                            "description": "New author identifier.",
-                        },
-                        "project": {
-                            "type": "string",
-                            "description": "New project name.",
-                        },
-                        "tags": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Replacement tag list.",
-                        },
-                        "status": {
-                            "type": "string",
-                            "description": "New lifecycle status: active, pending_review, or archived.",
-                        },
-                        "metadata": {
-                            "type": "object",
-                            "description": "Replacement metadata dict.",
-                        },
-                    },
-                    "required": ["entry_id"],
-                },
-            ),
-            types.Tool(
-                name="distillery_search",
-                description=(
-                    "Perform semantic search over the Distillery knowledge base. "
-                    "Embeds the query string and returns entries ranked by cosine "
-                    "similarity. Optional metadata filters narrow the result set. "
-                    "Returns a list of entries with their similarity scores."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "Natural-language query string to embed and search.",
-                        },
-                        "limit": {
-                            "type": "integer",
-                            "description": "Maximum number of results to return. Defaults to 10.",
-                        },
-                        "entry_type": {
-                            "type": "string",
-                            "description": (
-                                "Filter by entry type. One of: "
-                                "session, bookmark, minutes, meeting, reference, idea, inbox."
-                            ),
-                        },
-                        "author": {
-                            "type": "string",
-                            "description": "Filter by author identifier.",
-                        },
-                        "project": {
-                            "type": "string",
-                            "description": "Filter by project name.",
-                        },
-                        "tags": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Filter to entries containing any of the listed tags.",
-                        },
-                        "status": {
-                            "type": "string",
-                            "description": "Filter by lifecycle status: active, pending_review, or archived.",
-                        },
-                        "date_from": {
-                            "type": "string",
-                            "description": "Inclusive lower bound on created_at (ISO 8601 string).",
-                        },
-                        "date_to": {
-                            "type": "string",
-                            "description": "Inclusive upper bound on created_at (ISO 8601 string).",
-                        },
-                    },
-                    "required": ["query"],
-                },
-            ),
-            types.Tool(
-                name="distillery_find_similar",
-                description=(
-                    "Find knowledge entries similar to a given piece of content. "
-                    "Intended for deduplication checks before storing new content. "
-                    "Returns entries whose cosine similarity to the input exceeds "
-                    "the specified threshold, along with their scores."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "content": {
-                            "type": "string",
-                            "description": "Raw text content to compare against the stored corpus.",
-                        },
-                        "threshold": {
-                            "type": "number",
-                            "description": (
-                                "Minimum cosine similarity (inclusive) for a result to be returned. "
-                                "Defaults to 0.8. Use 0.95 for high-confidence duplicate detection."
-                            ),
-                        },
-                        "limit": {
-                            "type": "integer",
-                            "description": "Maximum number of results to return. Defaults to 10.",
-                        },
-                    },
-                    "required": ["content"],
-                },
-            ),
-            types.Tool(
-                name="distillery_list",
-                description=(
-                    "List knowledge entries with optional metadata filtering and "
-                    "pagination. Unlike distillery_search, this tool does not perform "
-                    "semantic ranking -- results are returned newest first. "
-                    "Returns a list of full entry objects."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "limit": {
-                            "type": "integer",
-                            "description": "Maximum number of entries to return. Defaults to 20.",
-                        },
-                        "offset": {
-                            "type": "integer",
-                            "description": "Number of entries to skip for pagination. Defaults to 0.",
-                        },
-                        "entry_type": {
-                            "type": "string",
-                            "description": (
-                                "Filter by entry type. One of: "
-                                "session, bookmark, minutes, meeting, reference, idea, inbox."
-                            ),
-                        },
-                        "author": {
-                            "type": "string",
-                            "description": "Filter by author identifier.",
-                        },
-                        "project": {
-                            "type": "string",
-                            "description": "Filter by project name.",
-                        },
-                        "tags": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Filter to entries containing any of the listed tags.",
-                        },
-                        "status": {
-                            "type": "string",
-                            "description": "Filter by lifecycle status: active, pending_review, or archived.",
-                        },
-                        "date_from": {
-                            "type": "string",
-                            "description": "Inclusive lower bound on created_at (ISO 8601 string).",
-                        },
-                        "date_to": {
-                            "type": "string",
-                            "description": "Inclusive upper bound on created_at (ISO 8601 string).",
-                        },
-                    },
-                    "required": [],
-                },
-            ),
-            types.Tool(
-                name="distillery_classify",
-                description=(
-                    "Store a pre-computed classification result on an existing entry. "
-                    "Updates the entry's type, status (based on confidence vs. the "
-                    "configured threshold), and classification metadata fields. "
-                    "Handles reclassification of already-classified entries. "
-                    "Returns the updated entry or a structured error."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "entry_id": {
-                            "type": "string",
-                            "description": "The UUID of the entry to classify.",
-                        },
-                        "entry_type": {
-                            "type": "string",
-                            "description": (
-                                "Predicted semantic category. One of: "
-                                "session, bookmark, minutes, meeting, reference, idea, inbox."
-                            ),
-                        },
-                        "confidence": {
-                            "type": "number",
-                            "description": "Classification confidence score in [0.0, 1.0].",
-                        },
-                        "reasoning": {
-                            "type": "string",
-                            "description": "Human-readable explanation of the classification.",
-                        },
-                        "suggested_tags": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Tags suggested by the classifier (merged with existing tags).",
-                        },
-                        "suggested_project": {
-                            "type": "string",
-                            "description": "Project name suggested by the classifier.",
-                        },
-                    },
-                    "required": ["entry_id", "entry_type", "confidence"],
-                },
-            ),
-            types.Tool(
-                name="distillery_review_queue",
-                description=(
-                    "Return entries that are pending manual review, sorted newest first. "
-                    "Each result includes a content preview, entry_type, confidence, "
-                    "author, created_at, and classification_reasoning. "
-                    "Supports optional filtering by entry_type and a result limit."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "limit": {
-                            "type": "integer",
-                            "description": "Maximum number of entries to return. Defaults to 20.",
-                        },
-                        "entry_type": {
-                            "type": "string",
-                            "description": (
-                                "Filter by entry type. One of: "
-                                "session, bookmark, minutes, meeting, reference, idea, inbox."
-                            ),
-                        },
-                    },
-                    "required": [],
-                },
-            ),
-            types.Tool(
-                name="distillery_resolve_review",
-                description=(
-                    "Resolve a pending-review entry by approving, reclassifying, or archiving it. "
-                    "approve: sets status to active and records reviewed_at/reviewed_by metadata. "
-                    "reclassify: updates entry_type (requires new_entry_type) and sets reclassified_from. "
-                    "archive: soft-deletes the entry by setting status to archived. "
-                    "Returns the updated entry or a structured error."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "entry_id": {
-                            "type": "string",
-                            "description": "The UUID of the entry to resolve.",
-                        },
-                        "action": {
-                            "type": "string",
-                            "description": "Resolution action: approve, reclassify, or archive.",
-                        },
-                        "new_entry_type": {
-                            "type": "string",
-                            "description": (
-                                "Required when action=reclassify. New entry type to assign. "
-                                "One of: session, bookmark, minutes, meeting, reference, idea, inbox."
-                            ),
-                        },
-                        "reviewer": {
-                            "type": "string",
-                            "description": "Identifier of the person performing the review.",
-                        },
-                    },
-                    "required": ["entry_id", "action"],
-                },
-            ),
-            types.Tool(
-                name="distillery_check_dedup",
-                description=(
-                    "Check whether a piece of content duplicates existing knowledge entries. "
-                    "Returns a recommended action (skip, merge, link, or create), the most "
-                    "similar entries found, the highest similarity score, and a human-readable "
-                    "reasoning string. Uses the dedup thresholds configured in distillery.yaml."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "content": {
-                            "type": "string",
-                            "description": "Raw text content to check for duplication.",
-                        },
-                    },
-                    "required": ["content"],
-                },
-            ),
-        ]
+    @server.tool
+    async def distillery_status(ctx: Context) -> list[types.TextContent]:
+        """
+        Retrieve database and embedding model statistics for the Distillery store.
 
-    @server.call_tool()  # type: ignore[untyped-decorator]
-    async def _call_tool(
-        tool_name: str, arguments: dict[str, Any]
+        Returns aggregate counts (total entries, counts by type and status), database file size (or `None` for in-memory DBs), and embedding model metadata (model name and dimensions).
+
+        Returns:
+            list[types.TextContent]: A single-element list containing a TextContent block with a JSON-serializable dictionary of statistics (e.g., `entries`, `entries_by_type`, `entries_by_status`, `db_size_bytes`, `embedding_model`, and `status`).
+        """
+        lc = ctx.lifespan_context
+        return await _handle_status(
+            store=lc["store"],
+            embedding_provider=lc["embedding_provider"],
+            config=lc["config"],
+        )
+
+    @server.tool
+    async def distillery_store(  # noqa: PLR0913
+        ctx: Context,
+        content: str,
+        entry_type: str,
+        author: str,
+        project: str | None = None,
+        tags: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        dedup_threshold: float = _DEFAULT_DEDUP_THRESHOLD,
+        dedup_limit: int = _DEFAULT_DEDUP_LIMIT,
     ) -> list[types.TextContent]:
-        """Dispatch incoming tool calls to the appropriate handler."""
-        store = _state.get("store")
-        embedding_provider = _state.get("embedding_provider")
-        cfg: DistilleryConfig = _state.get("config", config)
+        """
+        Store a new knowledge entry and return the created entry ID with optional deduplication and conflict information.
 
-        if store is None:
-            return error_response(
-                "SERVER_ERROR",
-                "Server is not fully initialised. Please retry.",
-            )
+        Creates and persists an entry from the provided content and metadata, performs non-fatal deduplication and conflict checks, and returns a single MCP TextContent block containing a JSON-serializable response.
 
-        if tool_name == "distillery_status":
-            return await _handle_status(store, embedding_provider, cfg)
+        Parameters:
+            entry_type (str): One of: "session", "bookmark", "minutes", "meeting", "reference", "idea", "inbox".
+            dedup_threshold (float): Similarity threshold (0.0–1.0) used to surface near-duplicate warnings.
+            dedup_limit (int): Maximum number of deduplication warnings to include.
 
-        if tool_name == "distillery_store":
-            return await _handle_store(store, arguments)
+        Returns:
+            list[types.TextContent]: A one-element list with a TextContent block whose JSON object contains:
+                - On success: "entry_id" and optionally "warnings" (list), "warning_message", and conflict-related keys
+                  such as "conflict_message" and "conflict_candidates".
+                - On validation or persistence failures: an error object with "error", "code", and "message".
+        """
+        lc = ctx.lifespan_context
+        arguments: dict[str, Any] = {
+            "content": content,
+            "entry_type": entry_type,
+            "author": author,
+        }
+        if project is not None:
+            arguments["project"] = project
+        if tags is not None:
+            arguments["tags"] = tags
+        if metadata is not None:
+            arguments["metadata"] = metadata
+        arguments["dedup_threshold"] = dedup_threshold
+        arguments["dedup_limit"] = dedup_limit
+        return await _handle_store(
+            store=lc["store"],
+            arguments=arguments,
+            cfg=lc["config"],
+        )
 
-        if tool_name == "distillery_get":
-            return await _handle_get(store, arguments)
+    @server.tool
+    async def distillery_get(
+        ctx: Context,
+        entry_id: str,
+    ) -> list[types.TextContent]:
+        """
+        Retrieve a knowledge entry by ID.
 
-        if tool_name == "distillery_update":
-            return await _handle_update(store, arguments)
+        If the entry is found, returns a single TextContent block containing the entry's serialized dictionary. If this retrieval follows a recent search that returned the entry, an implicit positive feedback event is recorded. If no entry exists with the given ID, an error block with code "NOT_FOUND" is returned.
 
-        if tool_name == "distillery_search":
-            return await _handle_search(store, arguments)
+        Parameters:
+            entry_id (str): The identifier of the entry to retrieve.
 
-        if tool_name == "distillery_find_similar":
-            return await _handle_find_similar(store, arguments)
+        Returns:
+            list[types.TextContent]: A one-element list containing either the serialized entry dict on success or an error object with code `"NOT_FOUND"` if the entry is missing.
+        """
+        lc = ctx.lifespan_context
+        return await _handle_get(
+            store=lc["store"],
+            arguments={"entry_id": entry_id},
+            recent_searches=lc["recent_searches"],
+            config=lc["config"],
+        )
 
-        if tool_name == "distillery_list":
-            return await _handle_list(store, arguments)
+    @server.tool
+    async def distillery_update(  # noqa: PLR0913
+        ctx: Context,
+        entry_id: str,
+        content: str | None = None,
+        entry_type: str | None = None,
+        author: str | None = None,
+        project: str | None = None,
+        tags: list[str] | None = None,
+        status: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[types.TextContent]:
+        """Update one or more fields on an existing knowledge entry.
 
-        if tool_name == "distillery_classify":
-            return await _handle_classify(store, cfg, arguments)
+        At least one of content, entry_type, author, project, tags, status, or
+        metadata must be supplied.  Immutable fields (id, created_at, source)
+        are rejected.
 
-        if tool_name == "distillery_review_queue":
-            return await _handle_review_queue(store, arguments)
+        status must be one of: active, pending_review, archived.
+        entry_type must be one of: session, bookmark, minutes, meeting,
+        reference, idea, inbox.
+        """
+        lc = ctx.lifespan_context
+        arguments: dict[str, Any] = {"entry_id": entry_id}
+        if content is not None:
+            arguments["content"] = content
+        if entry_type is not None:
+            arguments["entry_type"] = entry_type
+        if author is not None:
+            arguments["author"] = author
+        if project is not None:
+            arguments["project"] = project
+        if tags is not None:
+            arguments["tags"] = tags
+        if status is not None:
+            arguments["status"] = status
+        if metadata is not None:
+            arguments["metadata"] = metadata
+        return await _handle_update(
+            store=lc["store"],
+            arguments=arguments,
+        )
 
-        if tool_name == "distillery_resolve_review":
-            return await _handle_resolve_review(store, arguments)
+    @server.tool
+    async def distillery_list(  # noqa: PLR0913
+        ctx: Context,
+        entry_type: str | None = None,
+        author: str | None = None,
+        project: str | None = None,
+        tags: list[str] | None = None,
+        status: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[types.TextContent]:
+        """
+        List knowledge entries with optional filters and pagination.
 
-        if tool_name == "distillery_check_dedup":
-            return await _handle_check_dedup(store, cfg, arguments)
+        Returns entries ordered by creation time (newest first). Filtering is exact-match for
+        string fields; `tags` should be a list of tag strings. `date_from` and `date_to`
+        accept ISO 8601 date strings (e.g. "2024-01-15") and are used to filter by
+        creation date (inclusive).
 
-        return error_response("UNKNOWN_TOOL", f"Unknown tool: {tool_name!r}")
+        Parameters:
+            date_from (str | None): ISO 8601 start date to include (inclusive).
+            date_to (str | None): ISO 8601 end date to include (inclusive).
+            tags (list[str] | None): List of tag strings to filter by.
+
+        Returns:
+            list[types.TextContent]: MCP TextContent blocks containing a JSON object with
+            keys "entries" (list of entry dicts), "count" (total matching entries),
+            "limit", and "offset".
+        """
+        lc = ctx.lifespan_context
+        arguments: dict[str, Any] = {"limit": limit, "offset": offset}
+        if entry_type is not None:
+            arguments["entry_type"] = entry_type
+        if author is not None:
+            arguments["author"] = author
+        if project is not None:
+            arguments["project"] = project
+        if tags is not None:
+            arguments["tags"] = tags
+        if status is not None:
+            arguments["status"] = status
+        if date_from is not None:
+            arguments["date_from"] = date_from
+        if date_to is not None:
+            arguments["date_to"] = date_to
+        return await _handle_list(
+            store=lc["store"],
+            arguments=arguments,
+        )
+
+    # -----------------------------------------------------------------------
+    # T02.2 tool wrappers: distillery_search, distillery_find_similar,
+    # distillery_classify, distillery_review_queue, distillery_resolve_review,
+    # distillery_check_dedup, distillery_check_conflicts
+    # -----------------------------------------------------------------------
+
+    @server.tool
+    async def distillery_search(  # noqa: PLR0913
+        ctx: Context,
+        query: str,
+        entry_type: str | None = None,
+        author: str | None = None,
+        project: str | None = None,
+        tags: list[str] | None = None,
+        status: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        limit: int = 10,
+    ) -> list[types.TextContent]:
+        """Search the knowledge store using semantic similarity.
+
+        Embeds the query and returns entries ranked by cosine similarity
+        descending, with optional metadata filters applied.  After returning
+        results the search event is logged for implicit feedback correlation.
+
+        All filter parameters are optional.  date_from and date_to accept
+        ISO 8601 date strings (e.g. "2024-01-15").
+        limit must be between 1 and 200 (default 10).
+        """
+        lc = ctx.lifespan_context
+        arguments: dict[str, Any] = {"query": query, "limit": limit}
+        if entry_type is not None:
+            arguments["entry_type"] = entry_type
+        if author is not None:
+            arguments["author"] = author
+        if project is not None:
+            arguments["project"] = project
+        if tags is not None:
+            arguments["tags"] = tags
+        if status is not None:
+            arguments["status"] = status
+        if date_from is not None:
+            arguments["date_from"] = date_from
+        if date_to is not None:
+            arguments["date_to"] = date_to
+        return await _handle_search(
+            store=lc["store"],
+            arguments=arguments,
+            recent_searches=lc["recent_searches"],
+        )
+
+    @server.tool
+    async def distillery_find_similar(
+        ctx: Context,
+        content: str,
+        threshold: float = 0.8,
+        limit: int = 10,
+    ) -> list[types.TextContent]:
+        """
+        Find stored entries whose content is similar to the provided text.
+
+        Parameters:
+            ctx (Context): MCP invocation context (provides lifespan state).
+            content (str): Text to compare against stored entries.
+            threshold (float): Similarity cutoff in the range 0.0 to 1.0 (default 0.8).
+            limit (int): Maximum number of results to return, between 1 and 200 (default 10).
+
+        Returns:
+            list[types.TextContent]: A single MCP TextContent block containing a JSON object with keys:
+                - `results`: list of `{score, entry}` objects (scores rounded, entries serialized),
+                - `count`: total number of matches returned,
+                - `threshold`: the similarity threshold used.
+        """
+        lc = ctx.lifespan_context
+        return await _handle_find_similar(
+            store=lc["store"],
+            arguments={"content": content, "threshold": threshold, "limit": limit},
+        )
+
+    @server.tool
+    async def distillery_classify(  # noqa: PLR0913
+        ctx: Context,
+        entry_id: str,
+        entry_type: str,
+        confidence: float,
+        reasoning: str | None = None,
+        suggested_tags: list[str] | None = None,
+        suggested_project: str | None = None,
+    ) -> list[types.TextContent]:
+        """
+        Apply a pre-computed classification to an existing entry and persist the resulting updates.
+
+        Parameters:
+            entry_type (str): New entry type; must be one of: "session", "bookmark", "minutes", "meeting", "reference", "idea", "inbox".
+            confidence (float): Classification confidence between 0.0 and 1.0 inclusive; used to determine the updated entry status.
+
+        Returns:
+            list[types.TextContent]: A single MCP TextContent block containing the serialized updated entry or an error payload.
+        """
+        lc = ctx.lifespan_context
+        arguments: dict[str, Any] = {
+            "entry_id": entry_id,
+            "entry_type": entry_type,
+            "confidence": confidence,
+        }
+        if reasoning is not None:
+            arguments["reasoning"] = reasoning
+        if suggested_tags is not None:
+            arguments["suggested_tags"] = suggested_tags
+        if suggested_project is not None:
+            arguments["suggested_project"] = suggested_project
+        return await _handle_classify(
+            store=lc["store"],
+            config=lc["config"],
+            arguments=arguments,
+        )
+
+    @server.tool
+    async def distillery_review_queue(
+        ctx: Context,
+        entry_type: str | None = None,
+        limit: int = 20,
+    ) -> list[types.TextContent]:
+        """
+        List entries awaiting human review after classification.
+
+        Parameters:
+            entry_type (str | None): If provided, filter results to this entry type.
+            limit (int): Maximum number of entries to return; must be between 1 and 500.
+
+        Returns:
+            list[types.TextContent]: A single-element MCP text content payload containing a JSON object with:
+                - entries: list of review items each containing `id`, `content_preview` (first 200 chars),
+                  `entry_type`, `confidence` (from metadata), `author`, `created_at` (ISO string),
+                  and `classification_reasoning` (if present).
+                - count: total number of entries returned.
+        """
+        lc = ctx.lifespan_context
+        arguments: dict[str, Any] = {"limit": limit}
+        if entry_type is not None:
+            arguments["entry_type"] = entry_type
+        return await _handle_review_queue(
+            store=lc["store"],
+            arguments=arguments,
+        )
+
+    @server.tool
+    async def distillery_resolve_review(  # noqa: PLR0913
+        ctx: Context,
+        entry_id: str,
+        action: str,
+        new_entry_type: str | None = None,
+        reviewer: str | None = None,
+    ) -> list[types.TextContent]:
+        """
+        Resolve a pending-review entry by approving, reclassifying, or archiving.
+
+        Performs one of three actions on the entry identified by `entry_id`:
+        - "approve": sets status to active and records `reviewed_at` (and `reviewed_by` if `reviewer` provided) in metadata.
+        - "reclassify": requires `new_entry_type`; updates the entry's type, records `reclassified_from` and `reviewed_at` (and `reviewed_by` if provided) in metadata.
+        - "archive": sets status to archived and records archival metadata.
+
+        Parameters:
+            entry_id (str): ID of the entry to update.
+            action (str): One of "approve", "reclassify", or "archive".
+            new_entry_type (str | None): Required when `action` is "reclassify". Must be one of: "session", "bookmark", "minutes", "meeting", "reference", "idea", "inbox".
+            reviewer (str | None): Optional identifier of the reviewer to record as `reviewed_by`.
+
+        Returns:
+            list[types.TextContent]: A one-element MCP TextContent list containing the updated entry as a JSON-serializable object on success, or an error payload on failure.
+        """
+        lc = ctx.lifespan_context
+        arguments: dict[str, Any] = {"entry_id": entry_id, "action": action}
+        if new_entry_type is not None:
+            arguments["new_entry_type"] = new_entry_type
+        if reviewer is not None:
+            arguments["reviewer"] = reviewer
+        return await _handle_resolve_review(
+            store=lc["store"],
+            arguments=arguments,
+        )
+
+    @server.tool
+    async def distillery_check_dedup(
+        ctx: Context,
+        content: str,
+    ) -> list[types.TextContent]:
+        """
+        Perform a deduplication check of the given content against the store.
+
+        Runs the configured deduplication logic and returns a serialized response describing the recommended action and matching entries.
+
+        Parameters:
+            content (str): The text to check for duplicates.
+
+        Returns:
+            list[types.TextContent]: A single-element list whose JSON payload contains:
+                - action (str): One of `store`, `skip`, `merge`, or `link`.
+                - highest_score (float): Highest similarity score found.
+                - reasoning (str): Human-readable explanation for the chosen action.
+                - similar_entries (list): List of matches; each item is a dict with
+                  `id`, `score` (float), `content_preview` (str, up to 120 chars),
+                  `entry_type`, `author`, `project`, and `created_at` (ISO string or None).
+        """
+        lc = ctx.lifespan_context
+        return await _handle_check_dedup(
+            store=lc["store"],
+            config=lc["config"],
+            arguments={"content": content},
+        )
+
+    @server.tool
+    async def distillery_check_conflicts(
+        ctx: Context,
+        content: str,
+        llm_responses: dict[str, Any] | None = None,
+    ) -> list[types.TextContent]:
+        """
+        Check for potential conflicts between the provided content and existing knowledge-store entries.
+
+        Supports a two-pass workflow:
+        - First pass (no `llm_responses`): returns `conflict_candidates` with a `conflict_prompt` for each similar entry so an external LLM can evaluate whether it is a conflict.
+        - Second pass (with `llm_responses`): accepts a mapping `{entry_id: {"is_conflict": bool, "reasoning": str}}` and returns `has_conflicts` plus a list of confirmed `conflicts` with reasoning.
+
+        Parameters:
+            content (str): The content to check for conflicts against stored entries.
+            llm_responses (dict[str, Any] | None): Optional mapping of LLM evaluations for candidates (present only in the second pass).
+
+        Returns:
+            list[types.TextContent]: A single MCP `TextContent` block containing a JSON-serializable payload. In the first pass the payload includes `conflict_candidates` (and guidance); in the second pass it includes `has_conflicts` and `conflicts` (confirmed items with reasoning).
+        """
+        lc = ctx.lifespan_context
+        arguments: dict[str, Any] = {"content": content}
+        if llm_responses is not None:
+            arguments["llm_responses"] = llm_responses
+        return await _handle_check_conflicts(
+            store=lc["store"],
+            config=lc["config"],
+            arguments=arguments,
+        )
+
+    # -----------------------------------------------------------------------
+    # T02.3 tool wrappers: distillery_metrics, distillery_quality,
+    # distillery_stale
+    # -----------------------------------------------------------------------
+
+    @server.tool
+    async def distillery_metrics(
+        ctx: Context,
+        period_days: int = 30,
+    ) -> list[types.TextContent]:
+        """
+        Provide usage metrics and statistics for the Distillery knowledge store.
+
+        Aggregates entry counts, activity windows, search and feedback summaries, staleness and storage information for the past `period_days`.
+
+        Parameters:
+            period_days (int): Number of days to include in period-specific metrics; must be >= 1.
+
+        Returns:
+            list[types.TextContent]: A one-element list containing a TextContent block with a JSON-serializable dict of metrics (keys include `entries`, `activity`, `search`, `quality`, `staleness`, and `storage`).
+        """
+        lc = ctx.lifespan_context
+        return await _handle_metrics(
+            store=lc["store"],
+            config=lc["config"],
+            embedding_provider=lc["embedding_provider"],
+            arguments={"period_days": period_days},
+        )
+
+    @server.tool
+    async def distillery_quality(
+        ctx: Context,
+        entry_type: str | None = None,
+    ) -> list[types.TextContent]:
+        """
+        Retrieve aggregated search-quality metrics from the Distillery store.
+
+        Aggregates counts from `search_log` and `feedback_log` and computes totals and rates such as total searches, total feedback, positive feedback rate, and average result count. When `entry_type` is provided, metrics are filtered to that entry type if supported.
+
+        Parameters:
+            entry_type (str | None): Optional entry type to filter metrics by.
+
+        Returns:
+            list[types.TextContent]: A one-element MCP `TextContent` list containing a JSON-serializable object with metrics (totals, rates, and optional per-type breakdown).
+        """
+        lc = ctx.lifespan_context
+        arguments: dict[str, Any] = {}
+        if entry_type is not None:
+            arguments["entry_type"] = entry_type
+        return await _handle_quality(
+            store=lc["store"],
+            arguments=arguments,
+        )
+
+    @server.tool
+    async def distillery_stale(
+        ctx: Context,
+        days: int | None = None,
+        limit: int = 20,
+        entry_type: str | None = None,
+    ) -> list[types.TextContent]:
+        """
+        Return a list of entries that are considered stale based on last access time.
+
+        If `days` is omitted, the server configuration's `classification.stale_days` is used. `limit` must be >= 1 and bounds the number of returned entries. When provided, `entry_type` restricts results to that entry type.
+
+        Parameters:
+            ctx (Context): MCP request context providing lifespan state.
+            days (int | None): Age threshold in days; entries with COALESCE(accessed_at, updated_at) older than this are stale.
+            limit (int): Maximum number of stale entries to return.
+            entry_type (str | None): Optional entry type filter.
+
+        Returns:
+            list[types.TextContent]: A single TextContent block containing a JSON object with keys:
+                - days_threshold: the days cutoff used
+                - entry_type_filter: the entry_type filter or null
+                - stale_count: total number of matching stale entries (may exceed returned list)
+                - entries: array of stale entry summaries (id, content_preview, entry_type, author, project, last_accessed, days_since)
+        """
+        lc = ctx.lifespan_context
+        arguments: dict[str, Any] = {"limit": limit}
+        if days is not None:
+            arguments["days"] = days
+        if entry_type is not None:
+            arguments["entry_type"] = entry_type
+        return await _handle_stale(
+            store=lc["store"],
+            config=lc["config"],
+            arguments=arguments,
+        )
 
     return server
 
@@ -819,19 +908,21 @@ _DEFAULT_DEDUP_LIMIT = 3
 async def _handle_store(
     store: Any,
     arguments: dict[str, Any],
+    cfg: DistilleryConfig | None = None,
 ) -> list[types.TextContent]:
-    """Implement the ``distillery_store`` tool.
+    """
+    Create and persist a new Entry from the provided arguments, run deduplication and a non-fatal conflict check, and return the stored entry id along with any warnings or conflict candidates.
 
-    Creates a new ``Entry`` from the supplied arguments, persists it via the
-    store, then runs ``find_similar`` to surface any near-duplicate entries
-    that already exist (excluding the just-stored entry).
-
-    Args:
-        store: Initialised ``DuckDBStore``.
-        arguments: Raw MCP tool arguments dict.
+    Parameters:
+        arguments (dict): MCP tool arguments. Required keys: `content`, `entry_type`, `author`. Optional keys: `project`, `tags` (list), `metadata` (dict), `dedup_threshold` (number), `dedup_limit` (int).
+        cfg (DistilleryConfig | None): Optional configuration used to derive classification/conflict thresholds; when omitted a default conflict threshold of 0.60 is used.
 
     Returns:
-        MCP content list containing ``{"entry_id": ..., "warnings": [...]}``.
+        list[types.TextContent]: MCP content list containing a JSON-serializable object with at least `entry_id`. May also include:
+          - `warnings`: list of similar-entry summaries (id, score, content_preview) when near-duplicates were found,
+          - `warning_message`: human-readable summary of warnings,
+          - `conflicts`: list of conflict candidate objects (entry_id, content_preview, similarity_score, conflict_reasoning),
+          - `conflict_message`: guidance message when conflict candidates are returned.
     """
     from distillery.models import Entry, EntrySource, EntryType
 
@@ -908,6 +999,57 @@ async def _handle_store(
         logger.warning("find_similar failed during dedup check: %s", exc)
         # Non-fatal: still return the stored entry_id.
 
+    # --- conflict check -------------------------------------------------------
+    # Non-fatal: wrap in try/except so a conflict-checker failure never blocks
+    # the store operation.  We return conflict_candidates (similar entries with
+    # their content) so the calling LLM can evaluate them without us making an
+    # LLM call ourselves.
+    try:
+        from distillery.classification.conflict import ConflictChecker
+
+        conflict_threshold = float(cfg.classification.conflict_threshold if cfg is not None else 0.60)
+        conflict_checker = ConflictChecker(store=store, threshold=conflict_threshold)
+        conflict_similar = await store.find_similar(
+            content=entry.content,
+            threshold=conflict_threshold,
+            limit=5,
+        )
+        if conflict_similar:
+            conflicts = []
+            for result in conflict_similar:
+                if result.entry.id == entry_id:
+                    continue
+                lines = result.entry.content.splitlines()
+                preview = lines[0][:120] if lines else result.entry.content[:120]
+                prompt = conflict_checker.build_prompt(entry.content, result.entry.content)
+                conflicts.append(
+                    {
+                        "entry_id": result.entry.id,
+                        "content_preview": preview,
+                        "similarity_score": round(result.score, 4),
+                        "conflict_reasoning": prompt,
+                    }
+                )
+            if conflicts:
+                response_data: dict[str, Any] = {"entry_id": entry_id}
+                if warnings:
+                    response_data["warnings"] = warnings
+                    response_data["warning_message"] = (
+                        f"Found {len(warnings)} similar existing "
+                        f"{'entry' if len(warnings) == 1 else 'entries'}. "
+                        "Review before storing to avoid duplicates."
+                    )
+                response_data["conflicts"] = conflicts
+                response_data["conflict_message"] = (
+                    f"Found {len(conflicts)} potential conflict "
+                    f"{'candidate' if len(conflicts) == 1 else 'candidates'}. "
+                    "Use distillery_check_conflicts with LLM responses to confirm conflicts."
+                )
+                return success_response(response_data)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Conflict check failed during store: %s", exc)
+        # Non-fatal: fall through and return the entry_id without conflict info.
+
     response: dict[str, Any] = {"entry_id": entry_id}
     if warnings:
         response["warnings"] = warnings
@@ -922,15 +1064,20 @@ async def _handle_store(
 async def _handle_get(
     store: Any,
     arguments: dict[str, Any],
+    recent_searches: list[dict[str, Any]] | None = None,
+    config: DistilleryConfig | None = None,
 ) -> list[types.TextContent]:
-    """Implement the ``distillery_get`` tool.
+    """
+    Retrieve an entry by its ID and, when applicable, record implicit positive feedback.
 
-    Args:
-        store: Initialised ``DuckDBStore``.
-        arguments: Raw MCP tool arguments dict (must contain ``entry_id``).
+    Validates presence of `entry_id`, fetches the entry from `store`, and returns the serialized entry. If `recent_searches` is provided, prunes expired search records (based on `config.classification.feedback_window_minutes`, or 5 minutes when `config` is None) and logs a single implicit positive feedback event per (search_id, entry_id) pair for any recent search that included this entry. Failures to log feedback are caught and do not prevent returning the entry.
+
+    Parameters:
+        recent_searches (list[dict]): Optional shared in-memory list of recent search events; each element must contain `search_id` (str), `entry_ids` (set[str]), and `timestamp` (datetime). When `None`, implicit feedback recording is skipped.
+        config (DistilleryConfig | None): Optional configuration used to read `classification.feedback_window_minutes`; defaults to 5 minutes when `None`.
 
     Returns:
-        MCP content list with the serialised entry or a NOT_FOUND error.
+        list[types.TextContent]: MCP content list containing the serialized entry on success, or an error response (e.g., `NOT_FOUND`, `INVALID_INPUT`, `STORE_ERROR`).
     """
     err = validate_required(arguments, "entry_id")
     if err:
@@ -950,6 +1097,43 @@ async def _handle_get(
             f"No entry found with id={entry_id!r}.",
             details={"entry_id": entry_id},
         )
+
+    # Implicit feedback: if this get follows a recent search that returned this
+    # entry, record a positive feedback signal.
+    if recent_searches is not None:
+        feedback_window_minutes: int = 5
+        if config is not None:
+            feedback_window_minutes = config.classification.feedback_window_minutes
+
+        now = datetime.now(UTC)
+        cutoff_seconds = feedback_window_minutes * 60
+
+        # Prune expired entries and collect matching searches in a single pass.
+        alive: list[dict[str, Any]] = []
+        logged_pairs: set[tuple[str, str]] = set()
+        for record in recent_searches:
+            age_seconds = (now - record["timestamp"]).total_seconds()
+            if age_seconds <= cutoff_seconds:
+                alive.append(record)
+                pair = (record["search_id"], entry_id)
+                if entry_id in record["entry_ids"] and pair not in logged_pairs:
+                    try:
+                        await store.log_feedback(
+                            search_id=record["search_id"],
+                            entry_id=entry_id,
+                            signal="positive",
+                        )
+                        logged_pairs.add(pair)
+                    except Exception:  # noqa: BLE001
+                        logger.exception(
+                            "Failed to log implicit feedback for entry_id=%s search_id=%s",
+                            entry_id,
+                            record["search_id"],
+                        )
+
+        # Replace the list contents in-place so callers sharing the reference
+        # also see the pruned version.
+        recent_searches[:] = alive
 
     return success_response(entry.to_dict())
 
@@ -1076,19 +1260,19 @@ def _build_filters_from_arguments(arguments: dict[str, Any]) -> dict[str, Any] |
 async def _handle_search(
     store: Any,
     arguments: dict[str, Any],
+    recent_searches: list[dict[str, Any]] | None = None,
 ) -> list[types.TextContent]:
-    """Implement the ``distillery_search`` tool.
+    """
+    Search stored entries for a text query and return matching entries ranked by similarity.
 
-    Embeds the query string via the store's embedding provider and returns
-    entries ranked by cosine similarity descending, with optional metadata
-    filters applied.
+    Performs validation on `query` and `limit`, applies optional filters from `arguments`, and returns search hits ordered by descending similarity. When `recent_searches` is provided and results are non-empty, logs the search via the store and appends a compact record to `recent_searches` for later implicit-feedback correlation; failures to log do not affect the returned results.
 
-    Args:
-        store: Initialised :class:`~distillery.store.duckdb.DuckDBStore`.
-        arguments: Tool argument dict containing at minimum ``query``.
+    Parameters:
+        arguments: Dictionary containing at minimum the key `query` (str). May include optional filter keys (e.g., `entry_type`, `author`, `project`, `tags`, `status`, `date_from`, `date_to`) and `limit` (int).
+        recent_searches: Optional shared in-memory list used for implicit feedback correlation. When provided, a record with keys `search_id` (str), `entry_ids` (set[str]), and `timestamp` (datetime) will be appended for logged searches. If `None`, search logging and in-memory tracking are skipped.
 
     Returns:
-        MCP content list with a JSON payload of ``results`` and ``count``.
+        MCP content list containing a single JSON object with `results` (list of objects each with `score` and `entry`) and `count` (int) describing the number of results returned.
     """
     err = validate_required(arguments, "query")
     if err:
@@ -1118,6 +1302,31 @@ async def _handle_search(
         {"score": round(sr.score, 6), "entry": sr.entry.to_dict()}
         for sr in search_results
     ]
+
+    # Log the search event and record it for implicit feedback correlation.
+    if recent_searches is not None and search_results:
+        result_entry_ids = [sr.entry.id for sr in search_results]
+        result_scores = [sr.score for sr in search_results]
+        try:
+            search_id = await store.log_search(
+                query=query,
+                result_entry_ids=result_entry_ids,
+                result_scores=result_scores,
+            )
+            recent_searches.append(
+                {
+                    "search_id": search_id,
+                    "entry_ids": set(result_entry_ids),
+                    "timestamp": datetime.now(UTC),
+                }
+            )
+            # Cap the in-memory list to prevent unbounded growth.
+            recent_searches_max = 1000
+            if len(recent_searches) > recent_searches_max:
+                recent_searches[:] = recent_searches[-recent_searches_max:]
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to log search event; continuing without feedback tracking")
+
     return success_response({"results": results, "count": len(results)})
 
 
@@ -1596,20 +1805,756 @@ async def _handle_check_dedup(
 
 
 # ---------------------------------------------------------------------------
-# Main entry point
+# T04.1 tool handler: metrics
+# ---------------------------------------------------------------------------
+
+# Default stale threshold: entries not accessed in this many days are "stale".
+_DEFAULT_STALE_DAYS = 30
+
+
+async def _handle_metrics(
+    store: Any,
+    config: DistilleryConfig,
+    embedding_provider: Any,
+    arguments: dict[str, Any],
+) -> list[types.TextContent]:
+    """
+    Aggregate usage and quality metrics from the DuckDB store for the Distillery instance.
+
+    Parameters:
+        arguments (dict): Tool arguments; supports optional `period_days` (int) specifying the lookback window in days (must be >= 1). Other parameters are ignored.
+
+    Returns:
+        list[types.TextContent]: A single MCP `TextContent` block containing a JSON-serializable dict with aggregated metrics (entries, activity, search, quality, staleness, and storage sections).
+    """
+    # --- validate period_days -----------------------------------------------
+    period_days_raw = arguments.get("period_days", 30)
+    err_period = validate_type(arguments, "period_days", int, "integer")
+    if err_period:
+        return error_response("VALIDATION_ERROR", err_period)
+    period_days = int(period_days_raw) if period_days_raw is not None else 30
+    if period_days < 1:
+        return error_response("VALIDATION_ERROR", "Field 'period_days' must be >= 1")
+
+    try:
+        metrics = await asyncio.to_thread(
+            _sync_gather_metrics, store, config, embedding_provider, period_days
+        )
+        return success_response(metrics)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error gathering metrics")
+        return error_response("METRICS_ERROR", f"Failed to gather metrics: {exc}")
+
+
+def _sync_gather_metrics(
+    store: Any,
+    config: DistilleryConfig,
+    embedding_provider: Any,
+    period_days: int,
+) -> dict[str, Any]:
+    """
+    Gather comprehensive DuckDB-backed metrics for Distillery.
+
+    Collects entry counts, activity windows, search statistics (if available), feedback quality (if available), staleness estimates, and storage/embedding metadata; missing auxiliary tables yield zeroed metrics.
+
+    Parameters:
+        store: Initialized DuckDBStore exposing a live `connection`.
+        config: Loaded DistilleryConfig (used for storage path resolution).
+        embedding_provider: Active embedding provider (used to report model metadata).
+        period_days: Number of days for the "recent" activity/search window.
+
+    Returns:
+        A JSON-serializable dict with keys: `entries`, `activity`, `search`, `quality`, `staleness`, and `storage`, each containing aggregated metrics described by their section names.
+    """
+    conn = store.connection
+
+    # ------------------------------------------------------------------ #
+    # entries section                                                      #
+    # ------------------------------------------------------------------ #
+    total_row = conn.execute(
+        "SELECT COUNT(*) FROM entries WHERE status != 'archived'"
+    ).fetchone()
+    total_entries: int = total_row[0] if total_row else 0
+
+    type_rows = conn.execute(
+        "SELECT entry_type, COUNT(*) AS cnt FROM entries "
+        "WHERE status != 'archived' GROUP BY entry_type ORDER BY cnt DESC"
+    ).fetchall()
+    by_type = {row[0]: row[1] for row in type_rows}
+
+    status_rows = conn.execute(
+        "SELECT status, COUNT(*) AS cnt FROM entries GROUP BY status ORDER BY cnt DESC"
+    ).fetchall()
+    by_status = {row[0]: row[1] for row in status_rows}
+
+    source_rows = conn.execute(
+        "SELECT source, COUNT(*) AS cnt FROM entries "
+        "WHERE status != 'archived' GROUP BY source ORDER BY cnt DESC"
+    ).fetchall()
+    by_source = {row[0]: row[1] for row in source_rows}
+
+    entries_section: dict[str, Any] = {
+        "total": total_entries,
+        "by_type": by_type,
+        "by_status": by_status,
+        "by_source": by_source,
+    }
+
+    # ------------------------------------------------------------------ #
+    # activity section                                                     #
+    # ------------------------------------------------------------------ #
+    def _count_where(column: str, days: int) -> int:
+        """
+        Count entries in the `entries` table whose timestamp in the given column is within the past `days`.
+
+        Parameters:
+            column (str): Name of a datetime column in the `entries` table (for example `accessed_at`, `updated_at`, or `created_at`).
+            days (int): Number of days for the lookback window; rows with `column > CURRENT_TIMESTAMP - days` are counted.
+
+        Returns:
+            int: The number of rows matching the condition.
+        """
+        row = conn.execute(
+            f"SELECT COUNT(*) FROM entries "
+            f"WHERE {column} > CURRENT_TIMESTAMP - (? * INTERVAL '1 day')",
+            [days],
+        ).fetchone()
+        return row[0] if row else 0
+
+    activity_section: dict[str, Any] = {
+        "created_7d": _count_where("created_at", 7),
+        "created_30d": _count_where("created_at", 30),
+        "created_90d": _count_where("created_at", 90),
+        "updated_7d": _count_where("updated_at", 7),
+        "updated_30d": _count_where("updated_at", 30),
+        "updated_90d": _count_where("updated_at", 90),
+        f"created_{period_days}d": _count_where("created_at", period_days),
+        f"updated_{period_days}d": _count_where("updated_at", period_days),
+    }
+
+    # ------------------------------------------------------------------ #
+    # search section (search_log table may not exist yet)                 #
+    # ------------------------------------------------------------------ #
+    search_section: dict[str, Any] = {
+        "total_searches": 0,
+        "searches_7d": 0,
+        "searches_30d": 0,
+        f"searches_{period_days}d": 0,
+        "avg_results_per_search": 0.0,
+    }
+    try:
+        _table_exists = conn.execute(
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_name = 'search_log'"
+        ).fetchone()
+        if _table_exists and _table_exists[0] > 0:
+            total_searches_row = conn.execute(
+                "SELECT COUNT(*) FROM search_log"
+            ).fetchone()
+            total_searches: int = total_searches_row[0] if total_searches_row else 0
+
+            def _count_searches(days: int) -> int:
+                """
+                Count search log entries with timestamps within the last `days` days.
+
+                Parameters:
+                    days (int): Number of days to look back from the current time.
+
+                Returns:
+                    int: Number of search_log rows with timestamp > now - `days` days.
+                """
+                r = conn.execute(
+                    f"SELECT COUNT(*) FROM search_log "
+                    f"WHERE timestamp > CURRENT_TIMESTAMP - INTERVAL '{days} days'"
+                ).fetchone()
+                return r[0] if r else 0
+
+            avg_row = conn.execute(
+                "SELECT AVG(array_length(result_entry_ids)) FROM search_log"
+            ).fetchone()
+            avg_results = float(avg_row[0]) if avg_row and avg_row[0] is not None else 0.0
+
+            search_section = {
+                "total_searches": total_searches,
+                "searches_7d": _count_searches(7),
+                "searches_30d": _count_searches(30),
+                f"searches_{period_days}d": _count_searches(period_days),
+                "avg_results_per_search": round(avg_results, 4),
+            }
+    except Exception:  # noqa: BLE001
+        # Table doesn't exist or is not accessible; return zeros.
+        pass
+
+    # ------------------------------------------------------------------ #
+    # quality section (feedback_log table may not exist yet)              #
+    # ------------------------------------------------------------------ #
+    quality_section: dict[str, Any] = {
+        "total_feedback": 0,
+        "feedback_30d": 0,
+        "positive_rate": 0.0,
+    }
+    try:
+        _fb_exists = conn.execute(
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_name = 'feedback_log'"
+        ).fetchone()
+        if _fb_exists and _fb_exists[0] > 0:
+            total_fb_row = conn.execute(
+                "SELECT COUNT(*) FROM feedback_log"
+            ).fetchone()
+            total_fb: int = total_fb_row[0] if total_fb_row else 0
+
+            positive_row = conn.execute(
+                "SELECT COUNT(*) FROM feedback_log WHERE signal = 'positive'"
+            ).fetchone()
+            positive_count: int = positive_row[0] if positive_row else 0
+
+            fb_30d_row = conn.execute(
+                "SELECT COUNT(*) FROM feedback_log "
+                "WHERE timestamp > CURRENT_TIMESTAMP - INTERVAL '30 days'"
+            ).fetchone()
+            fb_30d: int = fb_30d_row[0] if fb_30d_row else 0
+
+            positive_rate = (positive_count / total_fb) if total_fb > 0 else 0.0
+
+            quality_section = {
+                "total_feedback": total_fb,
+                "feedback_30d": fb_30d,
+                "positive_rate": round(positive_rate, 4),
+            }
+    except Exception:  # noqa: BLE001
+        # Table doesn't exist or is not accessible; return zeros.
+        pass
+
+    # ------------------------------------------------------------------ #
+    # staleness section                                                    #
+    # ------------------------------------------------------------------ #
+    stale_days = _DEFAULT_STALE_DAYS
+
+    # accessed_at column may not exist yet (added by T02.1).
+    # Fall back to updated_at if the column is absent.
+    stale_count = 0
+    stale_by_type: dict[str, int] = {}
+    try:
+        stale_row = conn.execute(
+            f"SELECT COUNT(*) FROM entries "
+            f"WHERE status != 'archived' "
+            f"AND COALESCE(accessed_at, updated_at) < "
+            f"CURRENT_TIMESTAMP - INTERVAL '{stale_days} days'"
+        ).fetchone()
+        stale_count = stale_row[0] if stale_row else 0
+
+        stale_type_rows = conn.execute(
+            f"SELECT entry_type, COUNT(*) AS cnt FROM entries "
+            f"WHERE status != 'archived' "
+            f"AND COALESCE(accessed_at, updated_at) < "
+            f"CURRENT_TIMESTAMP - INTERVAL '{stale_days} days' "
+            f"GROUP BY entry_type ORDER BY cnt DESC"
+        ).fetchall()
+        stale_by_type = {row[0]: row[1] for row in stale_type_rows}
+    except Exception:  # noqa: BLE001
+        # If accessed_at column doesn't exist, try without it.
+        try:
+            stale_row = conn.execute(
+                f"SELECT COUNT(*) FROM entries "
+                f"WHERE status != 'archived' "
+                f"AND updated_at < CURRENT_TIMESTAMP - INTERVAL '{stale_days} days'"
+            ).fetchone()
+            stale_count = stale_row[0] if stale_row else 0
+
+            stale_type_rows = conn.execute(
+                f"SELECT entry_type, COUNT(*) AS cnt FROM entries "
+                f"WHERE status != 'archived' "
+                f"AND updated_at < CURRENT_TIMESTAMP - INTERVAL '{stale_days} days' "
+                f"GROUP BY entry_type ORDER BY cnt DESC"
+            ).fetchall()
+            stale_by_type = {row[0]: row[1] for row in stale_type_rows}
+        except Exception:  # noqa: BLE001
+            pass
+
+    staleness_section: dict[str, Any] = {
+        "stale_count": stale_count,
+        "stale_days": stale_days,
+        "by_type": stale_by_type,
+    }
+
+    # ------------------------------------------------------------------ #
+    # storage section                                                      #
+    # ------------------------------------------------------------------ #
+    db_path = os.path.expanduser(config.storage.database_path)
+    db_file_size: int | None = None
+    if db_path != ":memory:":
+        try:
+            db_file_size = Path(db_path).stat().st_size
+        except OSError:
+            db_file_size = None
+
+    model_name = getattr(embedding_provider, "model_name", "unknown")
+    embedding_dimensions = getattr(embedding_provider, "dimensions", None)
+
+    storage_section: dict[str, Any] = {
+        "db_file_size": db_file_size,
+        "embedding_model": model_name,
+        "embedding_dimensions": embedding_dimensions,
+    }
+
+    return {
+        "entries": entries_section,
+        "activity": activity_section,
+        "search": search_section,
+        "quality": quality_section,
+        "staleness": staleness_section,
+        "storage": storage_section,
+    }
+
+
+# ---------------------------------------------------------------------------
+# T01.4 tool handler: distillery_quality
 # ---------------------------------------------------------------------------
 
 
-async def run_server(config: DistilleryConfig | None = None) -> None:
-    """Run the Distillery MCP server over stdio.
+async def _handle_quality(
+    store: Any,
+    arguments: dict[str, Any],
+) -> list[types.TextContent]:
+    """
+    Aggregate search and feedback metrics and produce a quality summary payload.
 
-    This is the top-level coroutine launched by ``__main__.py``.
+    Reads the read-only `search_log` and `feedback_log` tables and computes
+    `total_searches`, `total_feedback`, `positive_rate`, `avg_result_count`,
+    and an optional `per_type_breakdown`. If `entry_type` is provided in
+    `arguments`, results are filtered to that entry type when possible.
+
+    Parameters:
+        store: Initialized DuckDBStore providing access to log tables.
+        arguments (dict): Tool arguments; accepts optional `entry_type` (str) to filter results.
+
+    Returns:
+        list[types.TextContent]: MCP content list with a single JSON `TextContent`
+        block containing the computed quality metrics.
+    """
+    entry_type_filter: str | None = arguments.get("entry_type")
+
+    try:
+        result = await asyncio.to_thread(_sync_gather_quality, store, entry_type_filter)
+        return success_response(result)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error gathering quality metrics")
+        return error_response("QUALITY_ERROR", f"Failed to gather quality metrics: {exc}")
+
+
+def _sync_gather_quality(
+    store: Any,
+    entry_type_filter: str | None,
+) -> dict[str, Any]:
+    """
+    Compute aggregated quality metrics from the DuckDB-backed store.
+
+    Handles missing `search_log` or `feedback_log` tables by returning zeroed metrics for the missing data.
+
+    Parameters:
+        store (DuckDBStore): Initialized store exposing a live `connection` to execute queries against.
+        entry_type_filter (str | None): Optional entry-type to include a per-type feedback breakdown.
+
+    Returns:
+        dict: A dictionary containing:
+            - total_searches (int): Total number of search events (0 if unavailable).
+            - total_feedback (int): Total number of feedback records (0 if unavailable).
+            - positive_rate (float): Fraction of feedback that is positive, rounded to 4 decimals.
+            - avg_result_count (float): Average number of results returned per search, rounded to 4 decimals.
+            - per_type_breakdown (dict): Mapping of the provided `entry_type_filter` to a dict with
+                `total_feedback`, `positive_count`, and `positive_rate` (rounded to 4 decimals). Empty if no filter provided or data unavailable.
+    """
+    conn = store.connection
+
+    total_searches = 0
+    total_feedback = 0
+    positive_count = 0
+    avg_result_count = 0.0
+
+    try:
+        sl_exists = conn.execute(
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_name = 'search_log'"
+        ).fetchone()
+        if sl_exists and sl_exists[0] > 0:
+            row = conn.execute("SELECT COUNT(*) FROM search_log").fetchone()
+            total_searches = row[0] if row else 0
+
+            avg_row = conn.execute(
+                "SELECT AVG(array_length(result_entry_ids)) FROM search_log"
+            ).fetchone()
+            avg_result_count = (
+                float(avg_row[0]) if avg_row and avg_row[0] is not None else 0.0
+            )
+    except Exception:  # noqa: BLE001
+        pass
+
+    try:
+        fl_exists = conn.execute(
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_name = 'feedback_log'"
+        ).fetchone()
+        if fl_exists and fl_exists[0] > 0:
+            row = conn.execute("SELECT COUNT(*) FROM feedback_log").fetchone()
+            total_feedback = row[0] if row else 0
+
+            pos_row = conn.execute(
+                "SELECT COUNT(*) FROM feedback_log WHERE signal = 'positive'"
+            ).fetchone()
+            positive_count = pos_row[0] if pos_row else 0
+    except Exception:  # noqa: BLE001
+        pass
+
+    positive_rate = (positive_count / total_feedback) if total_feedback > 0 else 0.0
+
+    # Per-type breakdown: join feedback_log -> search_log -> entries
+    per_type_breakdown: dict[str, Any] = {}
+    if entry_type_filter is not None:
+        try:
+            sl_exists2 = conn.execute(
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_name = 'search_log'"
+            ).fetchone()
+            fl_exists2 = conn.execute(
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_name = 'feedback_log'"
+            ).fetchone()
+            if (sl_exists2 and sl_exists2[0] > 0) and (fl_exists2 and fl_exists2[0] > 0):
+                type_fb_row = conn.execute(
+                    "SELECT COUNT(*) FROM feedback_log fl "
+                    "JOIN entries e ON fl.entry_id = e.id "
+                    "WHERE e.entry_type = ?",
+                    [entry_type_filter],
+                ).fetchone()
+                type_fb = type_fb_row[0] if type_fb_row else 0
+
+                type_pos_row = conn.execute(
+                    "SELECT COUNT(*) FROM feedback_log fl "
+                    "JOIN entries e ON fl.entry_id = e.id "
+                    "WHERE e.entry_type = ? AND fl.signal = 'positive'",
+                    [entry_type_filter],
+                ).fetchone()
+                type_pos = type_pos_row[0] if type_pos_row else 0
+
+                type_rate = (type_pos / type_fb) if type_fb > 0 else 0.0
+                per_type_breakdown[entry_type_filter] = {
+                    "total_feedback": type_fb,
+                    "positive_count": type_pos,
+                    "positive_rate": round(type_rate, 4),
+                }
+        except Exception:  # noqa: BLE001
+            pass
+
+    return {
+        "total_searches": total_searches,
+        "total_feedback": total_feedback,
+        "positive_rate": round(positive_rate, 4),
+        "avg_result_count": round(avg_result_count, 4),
+        "per_type_breakdown": per_type_breakdown,
+    }
+
+
+# ---------------------------------------------------------------------------
+# T03.2 tool handler: check_conflicts
+# ---------------------------------------------------------------------------
+
+
+async def _handle_check_conflicts(
+    store: Any,
+    config: DistilleryConfig,
+    arguments: dict[str, Any],
+) -> list[types.TextContent]:
+    """Implement the ``distillery_check_conflicts`` tool.
+
+    Supports a two-pass workflow:
+
+    **First pass** (``llm_responses`` absent or ``None``):
+    - Calls :class:`~distillery.classification.conflict.ConflictChecker` with
+      ``llm_responses=None`` to discover candidate entry IDs.
+    - Returns ``conflict_candidates`` with a prompt for each candidate pair so
+      the calling LLM can evaluate them.
+
+    **Second pass** (``llm_responses`` provided):
+    - Converts the supplied ``{entry_id: {is_conflict, reasoning}}`` dict to
+      the ``(bool, str)`` tuple format expected by
+      :meth:`~distillery.classification.conflict.ConflictChecker.check`.
+    - Returns the serialised :class:`~distillery.classification.conflict.ConflictResult`.
 
     Args:
-        config: Optional pre-loaded config.  Defaults to auto-discovery.
-    """
-    server = create_server(config)
-    init_options = server.create_initialization_options()
+        store: Initialised store with a ``find_similar`` method.
+        config: Loaded :class:`~distillery.config.DistilleryConfig` (conflict
+            threshold is read from ``config.classification.conflict_threshold``).
+        arguments: Tool argument dict.  Must contain ``"content"`` (str).
+            Optionally contains ``"llm_responses"`` (dict).
 
-    async with stdio_server() as (read_stream, write_stream):
-        await server.run(read_stream, write_stream, init_options)
+    Returns:
+        MCP content list with a single JSON ``TextContent`` block.
+    """
+    from distillery.classification.conflict import ConflictChecker
+
+    # --- validate input -----------------------------------------------------
+    err = validate_required(arguments, "content")
+    if err:
+        return error_response("INVALID_INPUT", err)
+
+    content = str(arguments["content"])
+
+    llm_responses_raw: dict[str, Any] | None = arguments.get("llm_responses")
+    if llm_responses_raw is not None and not isinstance(llm_responses_raw, dict):
+        return error_response("INVALID_INPUT", "Field 'llm_responses' must be an object")
+
+    # --- build checker -------------------------------------------------------
+    threshold = config.classification.conflict_threshold
+    checker = ConflictChecker(store=store, threshold=threshold)
+
+    # --- first pass: discover candidates (no llm_responses) ------------------
+    if not llm_responses_raw:
+        try:
+            # Call check with no LLM responses to find similar entries.
+            await checker.check(content, llm_responses=None)
+
+            # Retrieve similar entries to build prompts for the caller.
+            from distillery.classification.conflict import _DEFAULT_CONFLICT_LIMIT
+
+            similar = await store.find_similar(
+                content=content,
+                threshold=threshold,
+                limit=_DEFAULT_CONFLICT_LIMIT,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Error during conflict discovery pass")
+            return error_response("CONFLICT_ERROR", f"Conflict check failed: {exc}")
+
+        if not similar:
+            return success_response(
+                {
+                    "has_conflicts": False,
+                    "conflicts": [],
+                    "conflict_candidates": [],
+                    "message": "No similar entries found above the conflict threshold.",
+                }
+            )
+
+        candidates = []
+        for result in similar:
+            lines = result.entry.content.splitlines()
+            preview = lines[0][:120] if lines else result.entry.content[:120]
+            prompt = checker.build_prompt(content, result.entry.content)
+            candidates.append(
+                {
+                    "entry_id": result.entry.id,
+                    "content_preview": preview,
+                    "similarity_score": round(result.score, 4),
+                    "conflict_prompt": prompt,
+                }
+            )
+
+        return success_response(
+            {
+                "has_conflicts": False,
+                "conflicts": [],
+                "conflict_candidates": candidates,
+                "message": (
+                    f"Found {len(candidates)} conflict "
+                    f"{'candidate' if len(candidates) == 1 else 'candidates'}. "
+                    "Evaluate each conflict_prompt with an LLM and call "
+                    "distillery_check_conflicts again with llm_responses."
+                ),
+            }
+        )
+
+    # --- second pass: process LLM responses ----------------------------------
+    # Convert {entry_id: {is_conflict: bool, reasoning: str}} ->
+    #         {entry_id: (bool, str)}
+    llm_responses: dict[str, tuple[bool, str]] = {}
+    for entry_id, response_obj in llm_responses_raw.items():
+        if not isinstance(response_obj, dict):
+            return error_response(
+                "INVALID_INPUT",
+                f"llm_responses[{entry_id!r}] must be an object with 'is_conflict' and 'reasoning'.",
+            )
+        is_conflict_raw = response_obj.get("is_conflict")
+        if is_conflict_raw is None:
+            return error_response(
+                "INVALID_INPUT",
+                f"llm_responses[{entry_id!r}] is missing required field 'is_conflict'.",
+            )
+        reasoning = str(response_obj.get("reasoning", ""))
+        llm_responses[str(entry_id)] = (bool(is_conflict_raw), reasoning)
+
+    try:
+        result = await checker.check(content, llm_responses=llm_responses)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error during conflict evaluation pass")
+        return error_response("CONFLICT_ERROR", f"Conflict check failed: {exc}")
+
+    # Serialise ConflictResult.
+    conflicts_serialised = [
+        {
+            "entry_id": conflict.entry_id,
+            "content_preview": conflict.content_preview,
+            "similarity_score": round(conflict.similarity_score, 4),
+            "conflict_reasoning": conflict.conflict_reasoning,
+        }
+        for conflict in result.conflicts
+    ]
+
+    return success_response(
+        {
+            "has_conflicts": result.has_conflicts,
+            "conflicts": conflicts_serialised,
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
+# T02.2 tool handler: distillery_stale
+# ---------------------------------------------------------------------------
+
+
+async def _handle_stale(
+    store: Any,
+    config: DistilleryConfig,
+    arguments: dict[str, Any],
+) -> list[types.TextContent]:
+    """Implement the ``distillery_stale`` tool.
+
+    Returns entries that have not been accessed within the configured
+    staleness window.  An entry's last access time is determined by
+    ``COALESCE(accessed_at, updated_at)`` so that entries without an
+    explicit access timestamp fall back to their last modification time.
+
+    Args:
+        store: Initialised :class:`~distillery.store.duckdb.DuckDBStore`.
+        config: The loaded Distillery configuration.
+        arguments: Tool argument dict.  Accepts optional ``days`` (int),
+            ``limit`` (int), and ``entry_type`` (str).
+
+    Returns:
+        MCP content list with a single JSON ``TextContent`` block.
+    """
+    # --- validate days -------------------------------------------------------
+    err_days = validate_type(arguments, "days", int, "integer")
+    if err_days:
+        return error_response("VALIDATION_ERROR", err_days)
+    days_raw = arguments.get("days")
+    days: int = int(days_raw) if days_raw is not None else config.classification.stale_days
+    if days < 1:
+        return error_response("VALIDATION_ERROR", "Field 'days' must be >= 1")
+
+    # --- validate limit -------------------------------------------------------
+    err_limit = validate_type(arguments, "limit", int, "integer")
+    if err_limit:
+        return error_response("VALIDATION_ERROR", err_limit)
+    limit_raw = arguments.get("limit")
+    limit: int = int(limit_raw) if limit_raw is not None else 20
+    if limit < 1:
+        return error_response("VALIDATION_ERROR", "Field 'limit' must be >= 1")
+
+    # --- validate entry_type -------------------------------------------------
+    entry_type_filter: str | None = arguments.get("entry_type")
+    if entry_type_filter is not None and not isinstance(entry_type_filter, str):
+        return error_response("VALIDATION_ERROR", "Field 'entry_type' must be a string")
+
+    try:
+        stale_entries = await asyncio.to_thread(
+            _sync_gather_stale, store, days, limit, entry_type_filter
+        )
+        return success_response(
+            {
+                "days_threshold": days,
+                "entry_type_filter": entry_type_filter,
+                "stale_count": len(stale_entries),
+                "entries": stale_entries,
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error gathering stale entries")
+        return error_response("STALE_ERROR", f"Failed to gather stale entries: {exc}")
+
+
+def _sync_gather_stale(
+    store: Any,
+    days: int,
+    limit: int,
+    entry_type_filter: str | None,
+) -> list[dict[str, Any]]:
+    """
+    Return entries whose last access (accessed_at or updated_at) is older than the given number of days.
+
+    Parameters:
+        store (Any): Initialized DuckDBStore used to query entries.
+        days (int): Staleness threshold in days; entries last accessed strictly earlier than now - days are returned.
+        limit (int): Maximum number of entries to return.
+        entry_type_filter (str | None): Optional entry_type value to restrict results to a single type.
+
+    Returns:
+        list[dict[str, Any]]: List of stale entry summaries ordered stalest-first. Each dict contains:
+            - id: entry identifier
+            - content_preview: first 200 characters of the content (empty string if content is None)
+            - entry_type: entry type string
+            - author: author string
+            - project: project string or None
+            - last_accessed: ISO 8601 timestamp string of the last access or None
+            - days_since_access: integer days since last access or None
+    """
+    conn = store.connection
+
+    params: list[Any] = [days]
+    type_clause = ""
+    if entry_type_filter is not None:
+        type_clause = " AND entry_type = ?"
+        params.append(entry_type_filter)
+    params.append(limit)
+
+    sql = f"""
+        SELECT
+            id,
+            content,
+            entry_type,
+            author,
+            project,
+            COALESCE(accessed_at, updated_at) AS last_accessed
+        FROM entries
+        WHERE status != 'archived'
+          AND COALESCE(accessed_at, updated_at) < NOW() - INTERVAL (CAST(? AS INT)) DAYS
+          {type_clause}
+        ORDER BY last_accessed ASC
+        LIMIT ?
+    """
+
+    rows = conn.execute(sql, params).fetchall()
+
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        entry_id, content, entry_type, author, project, last_accessed = row
+        content_preview = (content or "")[:200]
+        # Calculate days since access
+        if last_accessed is not None:
+            from datetime import datetime
+
+            if hasattr(last_accessed, "tzinfo") and last_accessed.tzinfo is None:
+                last_accessed_aware = last_accessed.replace(tzinfo=UTC)
+            else:
+                last_accessed_aware = last_accessed
+            now = datetime.now(UTC)
+            days_since = (now - last_accessed_aware).days
+            last_accessed_iso = last_accessed_aware.isoformat()
+        else:
+            days_since = None
+            last_accessed_iso = None
+
+        result.append(
+            {
+                "id": entry_id,
+                "content_preview": content_preview,
+                "entry_type": entry_type,
+                "author": author,
+                "project": project,
+                "last_accessed": last_accessed_iso,
+                "days_since_access": days_since,
+            }
+        )
+
+    return result

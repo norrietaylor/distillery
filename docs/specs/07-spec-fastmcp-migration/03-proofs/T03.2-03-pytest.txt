@@ -1,0 +1,43 @@
+Type: test
+Command: .venv/bin/pytest tests/ --cov=src/distillery --cov-report=term-missing --cov-fail-under=80
+Expected: 525 passed, coverage >= 80%
+Timestamp: 2026-03-27T00:00:00Z
+
+--- OUTPUT ---
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+asyncio: mode=Mode.AUTO
+
+collected 525 items
+
+... 525 tests ran ...
+
+================================ tests coverage ================================
+
+Name                                        Stmts   Miss  Cover
+---------------------------------------------------------------
+src/distillery/__init__.py                      1      0   100%
+src/distillery/classification/__init__.py       6      0   100%
+src/distillery/classification/conflict.py      59      1    98%
+src/distillery/classification/dedup.py         34      1    97%
+src/distillery/classification/engine.py        46      0   100%
+src/distillery/classification/models.py        23      0   100%
+src/distillery/cli.py                         111     21    81%
+src/distillery/config.py                      145     10    93%
+src/distillery/embedding/__init__.py           13      7    46%
+src/distillery/embedding/jina.py               79      9    89%
+src/distillery/embedding/openai.py             61      0   100%
+src/distillery/embedding/protocol.py            8      0   100%
+src/distillery/mcp/__init__.py                  0      0   100%
+src/distillery/mcp/_stub_embedding.py          14      1    93%
+src/distillery/mcp/server.py                  847    267    68%
+src/distillery/models.py                       59      0   100%
+src/distillery/store/__init__.py                2      0   100%
+src/distillery/store/duckdb.py                317     12    96%
+src/distillery/store/protocol.py               18      0   100%
+---------------------------------------------------------------
+TOTAL                                        1843    329    82%
+Required test coverage of 80% reached. Total coverage: 82.15%
+============================= 525 passed in 7.19s ==============================
+
+Status: PASS

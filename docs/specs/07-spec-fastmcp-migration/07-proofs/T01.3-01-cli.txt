@@ -1,0 +1,21 @@
+Type: CLI
+Command: python -m distillery.mcp
+Description: Verify that the server starts without error and logs "Distillery MCP server ready"
+Expected: Server starts cleanly with logs showing initialization complete
+Timestamp: 2026-03-27T17:44:22Z
+
+Test Script Output:
+SUCCESS: Server started and logged ready message
+
+Server log output:
+2026-03-27 17:44:22,205 INFO     distillery.mcp.server Distillery MCP server starting up …
+2026-03-27 17:44:22,229 INFO     distillery.store.duckdb VSS extension loaded with HNSW persistence enabled
+2026-03-27 17:44:22,230 INFO     distillery.store.duckdb Entries table ready (embedding dimensions=1024)
+2026-03-27 17:44:22,230 INFO     distillery.store.duckdb search_log and feedback_log tables ready
+2026-03-27 17:44:22,231 INFO     distillery.store.duckdb HNSW index on entries.embedding ready
+2026-03-27 17:44:22,231 INFO     distillery.store.duckdb DuckDBStore initialized at /Users/norrie/.distillery/distillery.db
+2026-03-27 17:44:22,231 INFO     distillery.mcp.server Distillery MCP server ready (db=/Users/norrie/.distillery/distillery.db, embedding=stub)
+[03/27/26 17:44:22] INFO     Starting MCP server 'distillery'   transport.py:183
+                             with transport 'stdio'
+
+Status: PASS

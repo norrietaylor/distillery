@@ -1,0 +1,16 @@
+Type: cli
+Command: python3 -c "... list_tools() and filter T02.2 tool names ..."
+Expected: 7 T02.2 tools found in server tool registry
+Timestamp: 2026-03-27T00:00:00Z
+
+Output:
+T02.2 tools registered:
+  FOUND: distillery_check_conflicts
+  FOUND: distillery_check_dedup
+  FOUND: distillery_classify
+  FOUND: distillery_find_similar
+  FOUND: distillery_resolve_review
+  FOUND: distillery_review_queue
+  FOUND: distillery_search
+Count: 7/7
+Status: PASS

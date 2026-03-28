@@ -79,6 +79,14 @@ class ClassificationConfig:
             entries. Default ``0.60``.
         dedup_limit: Maximum number of similar entries to retrieve from the
             store during deduplication checks. Default ``5``.
+        feedback_window_minutes: Number of minutes after a search during which
+            a retrieval action is attributed as implicit positive feedback.
+            Default ``5``.
+        stale_days: Number of days without access after which an entry is
+            considered stale. Default ``30``.
+        conflict_threshold: Similarity score at or above which two entries in
+            different projects are flagged as potential conflicts. Default
+            ``0.60``.
     """
 
     confidence_threshold: float = 0.6
@@ -86,6 +94,9 @@ class ClassificationConfig:
     dedup_merge_threshold: float = 0.80
     dedup_link_threshold: float = 0.60
     dedup_limit: int = 5
+    feedback_window_minutes: int = 5
+    stale_days: int = 30
+    conflict_threshold: float = 0.60
 
 
 @dataclass
@@ -178,16 +189,17 @@ def _parse_team(raw: dict[str, Any]) -> TeamConfig:
 
 
 def _parse_float_field(raw: dict[str, Any], key: str, default: float, label: str) -> float:
-    """Parse a float field from *raw*, raising :class:`ValueError` on failure.
+    """
+    Parse a field value from a mapping and convert it to a float.
 
-    Args:
-        raw: The raw dict section from the YAML file.
-        key: Field name within *raw*.
-        default: Value to use when the field is absent.
-        label: Human-readable name for error messages.
+    Parameters:
+        raw (dict[str, Any]): Mapping containing the raw configuration values.
+        key (str): Key to read from `raw`; uses `default` if key is missing.
+        default (float): Value to use when the field is absent.
+        label (str): Human-readable field name used in error messages.
 
     Returns:
-        Parsed float value.
+        float: The parsed float value.
 
     Raises:
         ValueError: If the value cannot be converted to a float.
@@ -201,7 +213,50 @@ def _parse_float_field(raw: dict[str, Any], key: str, default: float, label: str
         ) from exc
 
 
+def _parse_strict_int(value: Any, label: str) -> int:
+    """
+    Parse and validate an integer value from a restrictive set of inputs.
+
+    Accepts a native `int` (explicitly rejects `bool`) or a `str` that, after trimming, is an optional leading `-` followed by digits. On success returns the corresponding `int`; otherwise raises `ValueError` with `label` included in the message.
+
+    Parameters:
+        value (Any): The value to parse as an integer.
+        label (str): Human-readable name used in the error message on failure.
+
+    Returns:
+        int: The parsed integer value.
+    """
+    if type(value) is int:  # noqa: E721 – reject bool subclass
+        return value
+    if isinstance(value, str):
+        stripped = value.strip()
+        candidate = stripped.lstrip("-")
+        if candidate.isdigit() and (len(candidate) == len(stripped) or stripped.startswith("-")):
+            return int(stripped)
+    raise ValueError(f"{label} must be an integer, got: {value!r}")
+
+
 def _parse_classification(raw: dict[str, Any]) -> ClassificationConfig:
+    """
+    Parse the classification section from a raw mapping and return a populated ClassificationConfig.
+
+    Parameters:
+        raw (dict[str, Any]): Mapping (typically from YAML) containing any of the following keys:
+            - "confidence_threshold" (float, default 0.6)
+            - "dedup_skip_threshold" (float, default 0.95)
+            - "dedup_merge_threshold" (float, default 0.80)
+            - "dedup_link_threshold" (float, default 0.60)
+            - "dedup_limit" (int, default 5)
+            - "feedback_window_minutes" (int or int-string, default 5)
+            - "stale_days" (int or int-string, default 30)
+            - "conflict_threshold" (float, default 0.60)
+
+    Returns:
+        ClassificationConfig: Configuration object with parsed and coerced values for classification settings.
+
+    Raises:
+        ValueError: If any numeric field cannot be parsed or does not meet expected type/format (e.g., invalid floats, non-integer dedup_limit, or strict-integer parsing failures for feedback_window_minutes/stale_days).
+    """
     threshold = _parse_float_field(
         raw, "confidence_threshold", 0.6, "classification.confidence_threshold"
     )
@@ -223,23 +278,50 @@ def _parse_classification(raw: dict[str, Any]) -> ClassificationConfig:
             f"classification.dedup_limit must be an integer, got: {limit_raw!r}"
         ) from exc
 
+    feedback_window_raw = raw.get("feedback_window_minutes", 5)
+    feedback_window_minutes = _parse_strict_int(
+        feedback_window_raw, "classification.feedback_window_minutes"
+    )
+
+    stale_days_raw = raw.get("stale_days", 30)
+    stale_days = _parse_strict_int(stale_days_raw, "classification.stale_days")
+
+    conflict_threshold = _parse_float_field(
+        raw, "conflict_threshold", 0.60, "classification.conflict_threshold"
+    )
+
     return ClassificationConfig(
         confidence_threshold=threshold,
         dedup_skip_threshold=skip,
         dedup_merge_threshold=merge,
         dedup_link_threshold=link,
         dedup_limit=limit,
+        feedback_window_minutes=feedback_window_minutes,
+        stale_days=stale_days,
+        conflict_threshold=conflict_threshold,
     )
 
 
 def _validate(config: DistilleryConfig) -> None:
-    """Validate required fields and raise clear errors if any are missing.
+    """
+    Validate a DistilleryConfig instance and raise a ValueError for any invalid setting.
 
     Args:
-        config: The fully parsed configuration object.
+        config: Parsed DistilleryConfig to validate.
 
     Raises:
-        ValueError: If a required field is absent or has an invalid value.
+        ValueError: If any of the following conditions are violated:
+            - embedding.provider is non-empty and not one of "jina" or "openai".
+            - embedding.dimensions is not greater than 0.
+            - classification.confidence_threshold is not between 0.0 and 1.0.
+            - classification.dedup_link_threshold, classification.dedup_merge_threshold,
+              or classification.dedup_skip_threshold is not between 0.0 and 1.0.
+            - classification dedup thresholds do not satisfy
+              dedup_link_threshold <= dedup_merge_threshold <= dedup_skip_threshold.
+            - classification.dedup_limit is not greater than 0.
+            - classification.feedback_window_minutes is not greater than 0.
+            - classification.stale_days is not greater than 0.
+            - classification.conflict_threshold is not between 0.0 and 1.0.
     """
     valid_providers = {"jina", "openai"}
     if config.embedding.provider and config.embedding.provider not in valid_providers:
@@ -286,6 +368,25 @@ def _validate(config: DistilleryConfig) -> None:
         raise ValueError(
             "classification.dedup_limit must be a positive integer, "
             f"got: {config.classification.dedup_limit}"
+        )
+
+    if config.classification.feedback_window_minutes <= 0:
+        raise ValueError(
+            "classification.feedback_window_minutes must be a positive integer, "
+            f"got: {config.classification.feedback_window_minutes}"
+        )
+
+    if config.classification.stale_days <= 0:
+        raise ValueError(
+            "classification.stale_days must be a positive integer, "
+            f"got: {config.classification.stale_days}"
+        )
+
+    conflict = config.classification.conflict_threshold
+    if not (0.0 <= conflict <= 1.0):
+        raise ValueError(
+            "classification.conflict_threshold must be between 0.0 and 1.0, "
+            f"got: {conflict}"
         )
 
 

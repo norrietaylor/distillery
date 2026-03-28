@@ -139,19 +139,20 @@ class Entry:
     tags: list[str] = field(default_factory=list)
     status: EntryStatus = EntryStatus.ACTIVE
     metadata: dict[str, Any] = field(default_factory=dict)
+    accessed_at: datetime | None = None
 
     # ------------------------------------------------------------------ #
     # Serialisation                                                        #
     # ------------------------------------------------------------------ #
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialise this entry to a JSON-compatible dictionary.
+        """
+        Serialize this entry to a JSON-compatible flat dictionary.
 
-        All enum values are stored as their string values.  ``datetime``
-        fields are stored as ISO 8601 strings with UTC offset (``+00:00``).
+        Enum fields (`entry_type`, `source`, `status`) are stored as their string values. Datetime fields (`created_at`, `updated_at`, `accessed_at`) are stored as ISO 8601 strings with UTC offset; `accessed_at` is `None` if unset. `tags` and `metadata` are shallow copies to avoid mutating internal state.
 
         Returns:
-            A flat dictionary suitable for ``json.dumps`` or YAML serialisation.
+            dict: A flat dictionary suitable for JSON or YAML serialization.
         """
         return {
             "id": self.id,
@@ -166,32 +167,49 @@ class Entry:
             "updated_at": self.updated_at.isoformat(),
             "version": self.version,
             "metadata": dict(self.metadata),
+            "accessed_at": self.accessed_at.isoformat() if self.accessed_at is not None else None,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Entry:
-        """Reconstruct an ``Entry`` from a dictionary produced by :meth:`to_dict`.
+        """
+        Create an Entry instance from a dictionary representation.
 
-        Args:
-            data: Dictionary with the same keys as :meth:`to_dict`.  Values
-                for ``entry_type``, ``source``, and ``status`` may be either
-                the enum instance or the underlying string value.
+        Parameters:
+            data (dict[str, Any]): Dictionary containing entry fields. Enum fields
+                (`entry_type`, `source`, `status`) may be provided as enum members or
+                their string values. Datetime fields (`created_at`, `updated_at`,
+                `accessed_at`) may be ISO 8601 strings or datetime objects; naive
+                datetimes are treated as UTC.
 
         Returns:
-            A fully initialised ``Entry`` instance.
+            Entry: A fully initialized Entry instance.
 
         Raises:
-            KeyError: If a required key is absent from ``data``.
-            ValueError: If an enum value string is not recognised.
+            KeyError: If a required key (e.g., `id`, `content`, `entry_type`,
+                `source`, `created_at`, `updated_at`, `author`) is missing.
+            ValueError: If a provided string does not match a valid enum member.
         """
 
         def _parse_dt(value: str | datetime) -> datetime:
+            """
+            Parse an ISO 8601 datetime string or return the given datetime, ensuring the result is timezone-aware (UTC if no timezone is present).
+
+            Parameters:
+                value (str | datetime): An ISO 8601 datetime string or a datetime object.
+
+            Returns:
+                datetime: A timezone-aware datetime; if `value` was a naive datetime or a string without timezone, the returned datetime will have its timezone set to UTC.
+            """
             if isinstance(value, datetime):
                 return value
             dt = datetime.fromisoformat(value)
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=UTC)
             return dt
+
+        accessed_at_raw = data.get("accessed_at")
+        accessed_at = _parse_dt(accessed_at_raw) if accessed_at_raw is not None else None
 
         return cls(
             id=data["id"],
@@ -206,6 +224,7 @@ class Entry:
             updated_at=_parse_dt(data["updated_at"]),
             version=int(data.get("version", 1)),
             metadata=dict(data.get("metadata", {})),
+            accessed_at=accessed_at,
         )
 
 

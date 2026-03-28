@@ -32,18 +32,20 @@ def _configure_logging() -> None:
 
 
 def main() -> int:
-    """CLI entry point for ``python -m distillery.mcp`` and ``distillery-mcp``.
+    """
+    Start the Distillery MCP server over stdio and run it until completion or interruption.
 
     Returns:
-        Exit code -- ``0`` on success, ``1`` on error.
+        Exit code: `0` on successful exit or interruption, `1` on unexpected error.
     """
     _configure_logging()
     logger = logging.getLogger(__name__)
 
     try:
-        from distillery.mcp.server import run_server
+        from distillery.mcp.server import create_server
 
-        asyncio.run(run_server())
+        server = create_server()
+        asyncio.run(server.run_stdio_async(show_banner=False))
         return 0
     except KeyboardInterrupt:
         logger.info("Distillery MCP server interrupted")

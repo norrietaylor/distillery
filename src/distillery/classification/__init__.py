@@ -6,18 +6,27 @@ This package provides:
   LLM prompts and parses structured JSON classification responses.
 - :class:`~distillery.classification.dedup.DeduplicationChecker` -- uses
   ``DistilleryStore.find_similar()`` to detect near-duplicate content.
+- :class:`~distillery.classification.conflict.ConflictChecker` -- uses
+  ``DistilleryStore.find_similar()`` and LLM responses to detect contradictions.
 - :class:`~distillery.classification.models.ClassificationResult` -- result
   dataclass returned by :class:`ClassificationEngine`.
 - :class:`~distillery.classification.models.DeduplicationResult` -- result
   dataclass returned by :class:`DeduplicationChecker`.
 - :class:`~distillery.classification.models.DeduplicationAction` -- enum of
   recommended actions (``skip``, ``merge``, ``link``, ``create``).
+- :class:`~distillery.classification.conflict.ConflictResult` -- result
+  dataclass returned by :class:`ConflictChecker`.
+- :class:`~distillery.classification.conflict.ConflictEntry` -- a single
+  conflicting entry detected by :class:`ConflictChecker`.
 
 Quick start::
 
     from distillery.classification import (
         ClassificationEngine,
         ClassificationResult,
+        ConflictChecker,
+        ConflictEntry,
+        ConflictResult,
         DeduplicationAction,
         DeduplicationChecker,
         DeduplicationResult,
@@ -32,6 +41,7 @@ Quick start::
 
 from __future__ import annotations
 
+from .conflict import ConflictChecker, ConflictEntry, ConflictResult
 from .dedup import DeduplicationChecker
 from .engine import ClassificationEngine
 from .models import ClassificationResult, DeduplicationAction, DeduplicationResult
@@ -39,6 +49,9 @@ from .models import ClassificationResult, DeduplicationAction, DeduplicationResu
 __all__ = [
     "ClassificationEngine",
     "ClassificationResult",
+    "ConflictChecker",
+    "ConflictEntry",
+    "ConflictResult",
     "DeduplicationAction",
     "DeduplicationChecker",
     "DeduplicationResult",

@@ -1,0 +1,7 @@
+Type: cli
+Command: .venv/bin/python -m ruff check src/distillery/mcp/server.py
+Expected: All checks passed (no lint errors)
+Timestamp: 2026-03-27T00:00:00Z
+Status: PASS
+
+All checks passed!

@@ -573,3 +573,76 @@ class TestListEntries:
         result = await store.list_entries(filters=None, limit=5, offset=0)
         for e in result:
             assert isinstance(e, Entry)
+
+
+# ---------------------------------------------------------------------------
+# accessed_at tracking
+# ---------------------------------------------------------------------------
+
+
+class TestAccessedAt:
+    async def test_new_entry_accessed_at_is_none(self, store: DuckDBStore) -> None:
+        """A freshly stored entry has accessed_at = None before any access."""
+        entry = make_entry(content="brand new")
+        await store.store(entry)
+        # Directly query the DB to confirm accessed_at is NULL before get().
+        row = store.connection.execute(
+            "SELECT accessed_at FROM entries WHERE id = ?", [entry.id]
+        ).fetchone()
+        assert row is not None
+        assert row[0] is None
+
+    async def test_get_sets_accessed_at(self, store: DuckDBStore) -> None:
+        """get() must set accessed_at to a non-None timestamp."""
+        entry = make_entry(content="fetch me")
+        await store.store(entry)
+        fetched = await store.get(entry.id)
+        assert fetched is not None
+        # accessed_at should be set in the DB after get().
+        row = store.connection.execute(
+            "SELECT accessed_at FROM entries WHERE id = ?", [entry.id]
+        ).fetchone()
+        assert row is not None
+        assert row[0] is not None
+        assert isinstance(row[0], datetime)
+
+    async def test_get_missing_entry_does_not_set_accessed_at(
+        self, store: DuckDBStore
+    ) -> None:
+        """get() on a non-existent ID returns None without error."""
+        result = await store.get("no-such-id")
+        assert result is None
+
+    async def test_search_sets_accessed_at(self, store: DuckDBStore) -> None:
+        """search() must update accessed_at for all returned entries."""
+        entry = make_entry(content="searchable content")
+        await store.store(entry)
+        results = await store.search(query="searchable content", filters=None, limit=10)
+        assert len(results) >= 1
+        returned_ids = [r.entry.id for r in results]
+        assert entry.id in returned_ids
+        row = store.connection.execute(
+            "SELECT accessed_at FROM entries WHERE id = ?", [entry.id]
+        ).fetchone()
+        assert row is not None
+        assert row[0] is not None
+        assert isinstance(row[0], datetime)
+
+    async def test_update_sets_accessed_at(self, store: DuckDBStore) -> None:
+        """update() must set accessed_at on the updated entry."""
+        entry = make_entry(content="initial")
+        await store.store(entry)
+        updated = await store.update(entry.id, {"content": "modified"})
+        assert updated.accessed_at is not None
+        assert isinstance(updated.accessed_at, datetime)
+
+    async def test_accessed_at_populated_in_returned_entry(self, store: DuckDBStore) -> None:
+        """Entry returned by get() after access should have accessed_at populated."""
+        entry = make_entry(content="check returned value")
+        await store.store(entry)
+        await store.get(entry.id)  # triggers accessed_at update
+        # Second get() should return the entry with accessed_at set.
+        fetched = await store.get(entry.id)
+        assert fetched is not None
+        assert fetched.accessed_at is not None
+        assert isinstance(fetched.accessed_at, datetime)

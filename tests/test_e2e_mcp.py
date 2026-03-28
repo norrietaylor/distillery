@@ -24,7 +24,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import mcp.types as mcp_types
 import pytest
 
 from distillery.config import (
@@ -67,29 +66,22 @@ async def _call(
     tool_name: str,
     arguments: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Invoke a tool via the server's _call_tool dispatcher.
+    """Invoke a tool via the FastMCP server's call_tool interface.
 
-    Builds a CallToolRequest, dispatches it through the registered handler,
-    and returns the parsed JSON payload.
+    Dispatches the named tool through FastMCP's call_tool() method and
+    returns the parsed JSON payload.
 
     Args:
-        server: An MCP Server instance created by create_server().
+        server: A FastMCP instance created by create_server().
         tool_name: The tool name to invoke (e.g. "distillery_store").
         arguments: Tool argument dict.  Defaults to empty dict.
 
     Returns:
         Parsed JSON response dict.
     """
-    handler = server.request_handlers[mcp_types.CallToolRequest]
-    request = mcp_types.CallToolRequest(
-        params=mcp_types.CallToolRequestParams(
-            name=tool_name,
-            arguments=arguments or {},
-        )
-    )
-    result = await handler(request)
-    # result.root.content is a list[TextContent]; parse first item
-    content = result.root.content
+    result = await server.call_tool(tool_name, arguments or {})
+    # result is a ToolResult; content is a list[TextContent]
+    content = result.content
     return parse_mcp_response(content)
 
 
@@ -503,13 +495,12 @@ class TestCallToolDispatcher:
         assert status_data["total_entries"] >= 1
 
     async def test_create_server_registers_all_tools(self) -> None:
-        """create_server() must register all 11 expected tools."""
+        """create_server() must register all 15 expected tools."""
         config = _make_config()
         server = create_server(config)
 
-        handler = server.request_handlers[mcp_types.ListToolsRequest]
-        result = await handler(mcp_types.ListToolsRequest())
-        tool_names = {t.name for t in result.root.tools}
+        tools = await server.list_tools()
+        tool_names = {t.name for t in tools}
 
         expected = {
             "distillery_status",
@@ -523,5 +514,9 @@ class TestCallToolDispatcher:
             "distillery_review_queue",
             "distillery_resolve_review",
             "distillery_check_dedup",
+            "distillery_metrics",
+            "distillery_check_conflicts",
+            "distillery_quality",
+            "distillery_stale",
         }
         assert expected == tool_names, f"Missing tools: {expected - tool_names}"

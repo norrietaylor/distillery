@@ -1,0 +1,29 @@
+Type: cli
+Description: Verify that pip install -e ".[dev]" succeeds with fastmcp dependency
+Expected: Successfully installed fastmcp and all dependencies, no errors
+Timestamp: 2026-03-27T17:00:00Z
+Command: /Users/norrie/code/distillery/.venv/bin/pip install -e ".[dev]"
+
+Output (last lines):
+Requirement already satisfied: coverage>=7.10.6 in ./.venv/lib/python3.12/site-packages (from coverage[toml]>=7.10.6->pytest-cov>=4.0->distillery==0.1.0) (7.13.5)
+Requirement already satisfied: markdown-it-py>=2.2.0 in ./.venv/lib/python3.12/site-packages (from rich>=13.9.4->fastmcp>=2.0.0->distillery==0.1.0) (4.0.0)
+Requirement already satisfied: mdurl~=0.1 in ./.venv/lib/python3.12/site-packages (from markdown-it-py>=2.2.0->rich>=13.9.4->fastmcp>=2.0.0->distillery==0.1.0) (0.1.2)
+Requirement already satisfied: click>=7.0 in ./.venv/lib/python3.12/site-packages (from uvicorn>=0.35->fastmcp>=2.0.0->distillery==0.1.0) (8.3.1)
+Requirement already satisfied: more-itertools in ./.venv/lib/python3.12/site-packages (from jaraco.classes->keyring>=25.6.0->py-key-value-aio[filetree,keyring,memory]<0.5.0,>=0.4.4->fastmcp>=2.0.0->distillery==0.1.0) (10.8.0)
+Building wheels for collected packages: distillery
+  Building editable for distillery (pyproject.toml): started
+  Building editable for distillery (pyproject.toml): finished with status 'done'
+  Created wheel for distillery: filename=distillery-0.1.0-py3-none-any.whl size=8644 sha256=cd1da307ffdd818c6a744c0d990abad205cdaa222fff8300706845e8f6ee9964
+  Stored in directory: /private/var/folders/mk/_9_wsvxj1tdf7kc38z6tr_dc0000gp/T/pip-ephem-wheel-cache-89p279r1/wheels/a2/65/36/69f0183417060a1db13c61980a05898f0a46bb2ec118909283
+Successfully built distillery
+Installing collected packages: distillery
+  Attempting uninstall: distillery
+    Found existing installation: distillery 0.1.0
+    Uninstalling distillery-0.1.0:
+      Successfully uninstalled distillery-0.1.0
+Successfully installed distillery-0.1.0
+
+[notice] A new release of pip is available: 26.0 -> 26.0.1
+[notice] To update, run: /Users/norrie/code/distillery/.venv/bin/python3.12 -m pip install --upgrade pip
+
+Status: PASS
