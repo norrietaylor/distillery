@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 420" font-family="Inter, -apple-system, system-ui, sans-serif">
+  <defs>
+    <style>
+      .layer-bg { fill: #1a1a1a; rx: 12; }
+      .layer-label { fill: #888; font-size: 11px; font-weight: 500; letter-spacing: 0.5px; text-transform: uppercase; }
+      .skill { fill: #242424; rx: 6; }
+      .skill-text { fill: #e8e8e8; font-size: 13px; font-weight: 500; }
+      .mcp-bg { fill: #BA7517; rx: 8; }
+      .mcp-title { fill: #fff; font-size: 16px; font-weight: 600; }
+      .mcp-sub { fill: rgba(255,255,255,0.7); font-size: 11px; }
+      .backend-bg { fill: #242424; stroke: #BA7517; stroke-width: 1.5; rx: 8; }
+      .backend-title { fill: #EF9F27; font-size: 14px; font-weight: 600; }
+      .backend-sub { fill: #888; font-size: 11px; }
+      .connector { stroke: #444; stroke-width: 2; }
+    </style>
+  </defs>
+
+  <!-- Background -->
+  <rect width="720" height="420" fill="#0f0f0f" rx="16"/>
+
+  <!-- Claude Code layer -->
+  <rect class="layer-bg" x="40" y="20" width="640" height="160"/>
+  <text class="layer-label" x="60" y="44">Claude Code</text>
+
+  <!-- Skills row -->
+  <rect class="skill" x="60" y="54" width="72" height="30"/><text class="skill-text" x="96" y="74" text-anchor="middle">/distill</text>
+  <rect class="skill" x="142" y="54" width="68" height="30"/><text class="skill-text" x="176" y="74" text-anchor="middle">/recall</text>
+  <rect class="skill" x="220" y="54" width="60" height="30"/><text class="skill-text" x="250" y="74" text-anchor="middle">/pour</text>
+  <rect class="skill" x="290" y="54" width="84" height="30"/><text class="skill-text" x="332" y="74" text-anchor="middle">/bookmark</text>
+  <rect class="skill" x="384" y="54" width="78" height="30"/><text class="skill-text" x="423" y="74" text-anchor="middle">/minutes</text>
+  <rect class="skill" x="472" y="54" width="74" height="30"/><text class="skill-text" x="509" y="74" text-anchor="middle">/classify</text>
+
+  <!-- MCP Server box -->
+  <rect class="mcp-bg" x="60" y="100" width="600" height="64"/>
+  <text class="mcp-title" x="360" y="128" text-anchor="middle">MCP Server</text>
+  <text class="mcp-sub" x="360" y="148" text-anchor="middle">FastMCP 2.x/3.x  ·  stdio + HTTP  ·  17 tools</text>
+
+  <!-- Connector lines -->
+  <line class="connector" x1="200" y1="180" x2="200" y2="210"/>
+  <line class="connector" x1="360" y1="180" x2="360" y2="210"/>
+  <line class="connector" x1="520" y1="180" x2="520" y2="210"/>
+
+  <!-- Fan connector -->
+  <line class="connector" x1="360" y1="180" x2="360" y2="195"/>
+  <line class="connector" x1="200" y1="195" x2="520" y2="195"/>
+  <line class="connector" x1="200" y1="195" x2="200" y2="210"/>
+  <line class="connector" x1="520" y1="195" x2="520" y2="210"/>
+
+  <!-- Backend boxes -->
+  <!-- DuckDB -->
+  <rect class="backend-bg" x="60" y="210" width="200" height="80"/>
+  <text class="backend-title" x="160" y="238" text-anchor="middle">DuckDB + VSS</text>
+  <text class="backend-sub" x="160" y="258" text-anchor="middle">HNSW cosine similarity</text>
+  <text class="backend-sub" x="160" y="274" text-anchor="middle">Vector search + SQL</text>
+
+  <!-- Embedding -->
+  <rect class="backend-bg" x="280" y="210" width="160" height="80"/>
+  <text class="backend-title" x="360" y="238" text-anchor="middle">Embedding</text>
+  <text class="backend-sub" x="360" y="258" text-anchor="middle">Jina v3 / OpenAI</text>
+  <text class="backend-sub" x="360" y="274" text-anchor="middle">Configurable provider</text>
+
+  <!-- Classification -->
+  <rect class="backend-bg" x="460" y="210" width="220" height="80"/>
+  <text class="backend-title" x="570" y="238" text-anchor="middle">Classification</text>
+  <text class="backend-sub" x="570" y="258" text-anchor="middle">LLM engine + Dedup</text>
+  <text class="backend-sub" x="570" y="274" text-anchor="middle">Conflicts + Tag validation</text>
+
+  <!-- Entry types row -->
+  <text class="layer-label" x="60" y="324">11 Entry Types</text>
+  <rect class="skill" x="60" y="334" width="66" height="24"/><text class="backend-sub" x="93" y="350" text-anchor="middle" fill="#e8e8e8">session</text>
+  <rect class="skill" x="134" y="334" width="74" height="24"/><text class="backend-sub" x="171" y="350" text-anchor="middle" fill="#e8e8e8">bookmark</text>
+  <rect class="skill" x="216" y="334" width="66" height="24"/><text class="backend-sub" x="249" y="350" text-anchor="middle" fill="#e8e8e8">minutes</text>
+  <rect class="skill" x="290" y="334" width="72" height="24"/><text class="backend-sub" x="326" y="350" text-anchor="middle" fill="#e8e8e8">reference</text>
+  <rect class="skill" x="370" y="334" width="46" height="24"/><text class="backend-sub" x="393" y="350" text-anchor="middle" fill="#e8e8e8">idea</text>
+  <rect class="skill" x="424" y="334" width="60" height="24"/><text class="backend-sub" x="454" y="350" text-anchor="middle" fill="#e8e8e8">person</text>
+  <rect class="skill" x="492" y="334" width="62" height="24"/><text class="backend-sub" x="523" y="350" text-anchor="middle" fill="#e8e8e8">project</text>
+  <rect class="skill" x="562" y="334" width="56" height="24"/><text class="backend-sub" x="590" y="350" text-anchor="middle" fill="#e8e8e8">github</text>
+
+  <!-- Tag namespaces -->
+  <text class="layer-label" x="60" y="386">Hierarchical Tags</text>
+  <text class="backend-sub" x="60" y="404" fill="#EF9F27">project/distillery/sessions  ·  domain/storage  ·  source/bookmark/duckdb-org  ·  team/distillery</text>
+</svg>

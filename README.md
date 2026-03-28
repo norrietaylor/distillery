@@ -126,34 +126,9 @@ See [docs/mcp-setup.md](docs/mcp-setup.md) for detailed setup instructions.
 
 ## Architecture
 
-```mermaid
-graph TD
-    subgraph Claude Code
-        skills["/distill · /recall · /pour · /bookmark · /minutes · /classify"]
-    end
-
-    skills -->|invoke| mcp
-
-    subgraph MCP Server - 17 tools
-        mcp["FastMCP (stdio / HTTP)"]
-    end
-
-    mcp --> store
-    mcp --> embed
-    mcp --> classify
-
-    subgraph Backends
-        store["DuckDB + VSS\n(HNSW cosine similarity)"]
-        embed["Embedding Provider\n(Jina v3 / OpenAI)"]
-        classify["Classification Engine\n+ Dedup + Conflicts"]
-    end
-
-    style skills fill:#fdf4e7,stroke:#BA7517,color:#1a1a1a
-    style mcp fill:#BA7517,stroke:#1a1a1a,color:#fff
-    style store fill:#f5e6cc,stroke:#BA7517,color:#1a1a1a
-    style embed fill:#f5e6cc,stroke:#BA7517,color:#1a1a1a
-    style classify fill:#f5e6cc,stroke:#BA7517,color:#1a1a1a
-```
+<picture>
+  <img alt="Distillery Architecture" src="docs/assets/architecture.svg" width="720">
+</picture>
 
 ### Key design decisions
 
