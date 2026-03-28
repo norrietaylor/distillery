@@ -1,0 +1,20 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.7, pytest-9.0.2, pluggy-1.6.0 -- /home/norrie.guest/code/distillery/.venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/norrie.guest/code/distillery
+configfile: pyproject.toml
+plugins: asyncio-1.3.0, anyio-4.13.0, cov-7.1.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 48 items / 39 deselected / 9 selected
+
+tests/test_embedding.py::TestHashEmbeddingProvider::test_embed_returns_correct_dimensions PASSED [ 11%]
+tests/test_embedding.py::TestHashEmbeddingProvider::test_embed_returns_l2_normalized PASSED [ 22%]
+tests/test_embedding.py::TestHashEmbeddingProvider::test_embed_deterministic PASSED [ 33%]
+tests/test_embedding.py::TestHashEmbeddingProvider::test_embed_different_inputs_produce_different_vectors PASSED [ 44%]
+tests/test_embedding.py::TestHashEmbeddingProvider::test_embed_batch PASSED [ 55%]
+tests/test_embedding.py::TestHashEmbeddingProvider::test_dimensions_property PASSED [ 66%]
+tests/test_embedding.py::TestHashEmbeddingProvider::test_default_dimensions PASSED [ 77%]
+tests/test_embedding.py::TestHashEmbeddingProvider::test_model_name PASSED [ 88%]
+tests/test_embedding.py::TestHashEmbeddingProvider::test_protocol_compliance PASSED [100%]
+
+======================= 9 passed, 39 deselected in 0.05s =======================

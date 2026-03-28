@@ -603,3 +603,84 @@ class TestEmbeddingProviderProtocolStructure:
     def test_openai_dimensions_positive(self) -> None:
         provider = OpenAIEmbeddingProvider(api_key="sk-test", dimensions=256)
         assert provider.dimensions > 0
+
+
+# ---------------------------------------------------------------------------
+# HashEmbeddingProvider tests
+# ---------------------------------------------------------------------------
+
+
+class TestHashEmbeddingProvider:
+    """Tests for the hash-based mock embedding provider."""
+
+    def test_embed_returns_correct_dimensions(self) -> None:
+        from distillery.mcp._stub_embedding import HashEmbeddingProvider
+
+        provider = HashEmbeddingProvider(dimensions=4)
+        vec = provider.embed("hello world")
+        assert len(vec) == 4
+
+    def test_embed_returns_l2_normalized(self) -> None:
+        import math
+
+        from distillery.mcp._stub_embedding import HashEmbeddingProvider
+
+        provider = HashEmbeddingProvider(dimensions=4)
+        vec = provider.embed("test input")
+        magnitude = math.sqrt(sum(x * x for x in vec))
+        assert abs(magnitude - 1.0) < 1e-6
+
+    def test_embed_deterministic(self) -> None:
+        from distillery.mcp._stub_embedding import HashEmbeddingProvider
+
+        provider = HashEmbeddingProvider(dimensions=4)
+        v1 = provider.embed("same text")
+        v2 = provider.embed("same text")
+        assert v1 == v2
+
+    def test_embed_different_inputs_produce_different_vectors(self) -> None:
+        from distillery.mcp._stub_embedding import HashEmbeddingProvider
+
+        provider = HashEmbeddingProvider(dimensions=4)
+        v1 = provider.embed("input A")
+        v2 = provider.embed("input B")
+        assert v1 != v2
+
+    def test_embed_batch(self) -> None:
+        from distillery.mcp._stub_embedding import HashEmbeddingProvider
+
+        provider = HashEmbeddingProvider(dimensions=4)
+        results = provider.embed_batch(["aaa", "bbb", "ccc"])
+        assert len(results) == 3
+        assert all(len(v) == 4 for v in results)
+
+    def test_dimensions_property(self) -> None:
+        from distillery.mcp._stub_embedding import HashEmbeddingProvider
+
+        provider = HashEmbeddingProvider(dimensions=8)
+        assert provider.dimensions == 8
+
+    def test_default_dimensions(self) -> None:
+        from distillery.mcp._stub_embedding import HashEmbeddingProvider
+
+        provider = HashEmbeddingProvider()
+        assert provider.dimensions == 4
+
+    def test_model_name(self) -> None:
+        from distillery.mcp._stub_embedding import HashEmbeddingProvider
+
+        provider = HashEmbeddingProvider()
+        assert provider.model_name == "mock-hash"
+
+    def test_protocol_compliance(self) -> None:
+        import inspect
+
+        from distillery.mcp._stub_embedding import HashEmbeddingProvider
+
+        provider = HashEmbeddingProvider()
+        assert callable(provider.embed)
+        assert callable(provider.embed_batch)
+        assert not inspect.iscoroutinefunction(provider.embed)
+        assert not inspect.iscoroutinefunction(provider.embed_batch)
+        assert isinstance(provider.dimensions, int)
+        assert isinstance(provider.model_name, str)

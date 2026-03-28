@@ -1,0 +1,13 @@
+Type: file
+Description: Verify pyproject.toml eval extras do not include anthropic
+Expected: eval extras should be empty list
+Timestamp: 2026-03-27T00:00:00Z
+
+Content check from pyproject.toml:
+eval = []
+
+Grep check:
+$ grep -i "anthropic" pyproject.toml
+(no results)
+
+Status: PASS

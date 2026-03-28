@@ -1,0 +1,14 @@
+Type: file
+Command: grep anthropic pyproject.toml
+Expected: no 'anthropic' in eval extras
+Timestamp: 2026-03-28T11:03:02-07:00
+---
+Checking eval extras in pyproject.toml:
+eval = []
+
+[project.scripts]
+
+Searching for 'anthropic' in pyproject.toml:
+1
+
+Status: PASS

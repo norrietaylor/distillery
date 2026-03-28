@@ -1,0 +1,63 @@
+# Eval scenarios for the /classify skill.
+# Classify runs the classification engine and manages the review queue.
+
+- name: classify-shows-review-queue
+  skill: classify
+  description: "Claude should call distillery_review_queue when asked to review pending entries"
+  prompt: "/classify --review"
+  seed_entries: []
+  expected_tools:
+    - distillery_status
+    - distillery_review_queue
+  max_latency_ms: 60000
+  max_total_tokens: 8000
+
+- name: classify-empty-queue
+  skill: classify
+  description: "Claude should gracefully report an empty review queue"
+  prompt: "/classify --review"
+  seed_entries: []
+  expected_tools:
+    - distillery_review_queue
+  max_latency_ms: 60000
+  max_total_tokens: 8000
+
+- name: classify-inbox-entries
+  skill: classify
+  description: "Claude should list and classify inbox entries when invoked with --inbox"
+  prompt: "/classify --inbox"
+  seed_entries:
+    - content: "We should investigate whether pgvector is a viable alternative backend for cloud deployments."
+      entry_type: inbox
+      author: alice
+      tags: [todo]
+    - content: "Consider adding a GraphQL API layer on top of the MCP server for web clients."
+      entry_type: inbox
+      author: bob
+      tags: [todo, idea]
+  expected_tools:
+    - distillery_status
+    - distillery_list
+  max_latency_ms: 90000
+  max_total_tokens: 10000
+
+- name: classify-type-schemas
+  skill: classify
+  description: "Claude should be able to retrieve type schemas to inform classification"
+  prompt: "/classify --review"
+  seed_entries: []
+  expected_tools:
+    - distillery_status
+    - distillery_type_schemas
+  max_latency_ms: 60000
+  max_total_tokens: 8000
+
+- name: classify-resolve-approve
+  skill: classify
+  description: "When reviewing an entry, Claude should be able to approve it"
+  prompt: "/classify --review"
+  seed_entries: []
+  expected_tools:
+    - distillery_review_queue
+  max_latency_ms: 90000
+  max_total_tokens: 10000

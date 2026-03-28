@@ -1,0 +1,91 @@
+# Eval scenarios for the /minutes skill.
+# Minutes captures structured meeting notes into the knowledge base.
+
+- name: minutes-stores-new-meeting
+  skill: minutes
+  description: "Claude should store meeting notes with entry_type=minutes"
+  prompt: |
+    /minutes
+    Meeting: Architecture Review 2026-03-28
+    Attendees: Alice, Bob
+    Decisions: (1) Finalize eval framework by end of sprint. (2) Use haiku model for eval runs.
+    Action items: Alice to write scenario YAML files. Bob to review PR.
+  seed_entries: []
+  expected_tools:
+    - distillery_status
+    - distillery_store
+  min_entries_stored: 1
+  max_latency_ms: 90000
+  max_total_tokens: 10000
+
+- name: minutes-list-recent
+  skill: minutes
+  description: "Claude should list recent meeting entries when asked with --list"
+  prompt: "/minutes --list"
+  seed_entries:
+    - content: "Sprint planning 2026-03-17. Team: Alice, Bob. Stories decided for next sprint."
+      entry_type: minutes
+      author: bob
+      tags: [meeting, planning]
+      metadata:
+        meeting_id: "sprint-2026-03-17"
+    - content: "Architecture review 2026-03-10. Decided DuckDB is the storage backend."
+      entry_type: minutes
+      author: carol
+      tags: [meeting, architecture]
+      metadata:
+        meeting_id: "arch-2026-03-10"
+  expected_tools:
+    - distillery_list
+  max_latency_ms: 60000
+  max_total_tokens: 8000
+
+- name: minutes-entry-type-is-minutes
+  skill: minutes
+  description: "distillery_store should be called with entry_type=minutes"
+  prompt: |
+    /minutes
+    Meeting: Quick sync 2026-03-28
+    Attendees: Alice, Carol
+    Discussed: Release date for v1.0 — targeting Q2.
+  seed_entries: []
+  expected_tools:
+    - distillery_store
+  min_entries_stored: 1
+  max_latency_ms: 90000
+  max_total_tokens: 10000
+
+- name: minutes-includes-participants
+  skill: minutes
+  description: "The stored meeting notes should include participant names"
+  prompt: |
+    /minutes
+    Meeting: 1:1 with Bob 2026-03-28
+    Attendees: Alice, Bob
+    Discussed: Progress on eval framework. Bob will finish the runner by tomorrow.
+    Actions: Bob to finish runner. Alice to write scenarios.
+  seed_entries: []
+  expected_tools:
+    - distillery_store
+  min_entries_stored: 1
+  max_latency_ms: 90000
+  max_total_tokens: 10000
+
+- name: minutes-search-by-topic
+  skill: minutes
+  description: "Claude can search for past meeting notes on a topic"
+  prompt: "what was decided in our architecture meetings?"
+  seed_entries:
+    - content: "Architecture review 2026-03-10. Decided: DuckDB is storage backend. Embedding dimensions fixed at 1024."
+      entry_type: minutes
+      author: carol
+      tags: [meeting, architecture]
+    - content: "Architecture deep-dive 2026-02-15. Rejected PostgreSQL — too heavy for local tools."
+      entry_type: minutes
+      author: alice
+      tags: [meeting, architecture]
+  expected_tools:
+    - distillery_search
+  min_entries_retrieved: 1
+  max_latency_ms: 60000
+  max_total_tokens: 8000

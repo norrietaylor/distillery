@@ -202,6 +202,12 @@ def _create_embedding_provider(config: DistilleryConfig) -> Any:
             model=model,
             dimensions=dimensions,
         )
+    elif provider_name == "mock":
+        # Hash-based mock provider -- deterministic, no API calls, functional
+        # search via cosine similarity.  Used by eval scenarios and local dev.
+        from distillery.mcp._stub_embedding import HashEmbeddingProvider
+
+        return HashEmbeddingProvider(dimensions=dimensions)
     elif provider_name == "":
         # No provider configured -- return a lightweight stub used for testing
         # and status-only operations.
@@ -210,7 +216,8 @@ def _create_embedding_provider(config: DistilleryConfig) -> Any:
         return StubEmbeddingProvider(dimensions=dimensions)
     else:
         raise ValueError(
-            f"Unsupported embedding provider: {provider_name!r}. Must be one of: 'jina', 'openai'."
+            f"Unsupported embedding provider: {provider_name!r}. "
+            "Must be one of: 'jina', 'openai', 'mock'."
         )
 
 

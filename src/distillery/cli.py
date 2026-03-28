@@ -6,6 +6,8 @@ Provides the ``distillery`` entry point with the following subcommands:
   and status, database path, and configured embedding model).
 - ``health``: Verify database connectivity and exit with code 0 on success
   or code 1 on failure.
+- ``eval``: Run skill evaluation scenarios against Claude (requires
+  ``ANTHROPIC_API_KEY`` and ``pip install 'distillery[eval]'``).
 
 Global options:
 - ``--version``: Print the package version and exit.
@@ -19,6 +21,7 @@ The ``DISTILLERY_CONFIG`` environment variable is also respected when
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import sys
 from pathlib import Path
@@ -78,6 +81,42 @@ def _build_parser() -> argparse.ArgumentParser:
         "health",
         help="Verify database connectivity",
         parents=[shared],
+    )
+
+    eval_parser = subparsers.add_parser(
+        "eval",
+        help="Run skill evaluation scenarios against Claude",
+        parents=[shared],
+    )
+    eval_parser.add_argument(
+        "--skill",
+        metavar="NAME",
+        default=None,
+        help="Run only scenarios for this skill (e.g. recall, distill)",
+    )
+    eval_parser.add_argument(
+        "--scenarios-dir",
+        metavar="PATH",
+        default=None,
+        help="Directory containing scenario YAML files (default: tests/eval/scenarios)",
+    )
+    eval_parser.add_argument(
+        "--save-baseline",
+        metavar="PATH",
+        default=None,
+        help="Save eval results as a JSON baseline for regression detection",
+    )
+    eval_parser.add_argument(
+        "--baseline",
+        metavar="PATH",
+        default=None,
+        help="Compare results against a previously saved baseline",
+    )
+    eval_parser.add_argument(
+        "--model",
+        metavar="MODEL",
+        default="claude-haiku-4-5-20251001",
+        help="Claude model to use for eval runs (default: claude-haiku-4-5-20251001)",
     )
 
     return parser
@@ -260,6 +299,135 @@ def _cmd_health(config_path: str | None, fmt: str) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Eval subcommand
+# ---------------------------------------------------------------------------
+
+
+def _cmd_eval(
+    scenarios_dir: str | None,
+    skill_filter: str | None,
+    save_baseline: str | None,
+    baseline: str | None,
+    model: str,
+    fmt: str,
+) -> int:
+    """Implement the ``eval`` subcommand.
+
+    Loads scenario YAML files, drives Claude against an in-process MCP
+    bridge, and reports pass/fail per scenario with performance metrics.
+
+    Returns:
+        Exit code — 0 if all scenarios pass, 1 if any fail or on error.
+    """
+    try:
+        from distillery.eval.runner import ClaudeEvalRunner
+        from distillery.eval.scenarios import load_scenarios_from_dir
+    except ImportError as exc:
+        print(
+            f"Error: eval dependencies not installed. "
+            f"Run: pip install 'distillery[eval]'\n{exc}",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Resolve scenarios directory.
+    if scenarios_dir is None:
+        default_dir = Path(__file__).parents[2] / "tests" / "eval" / "scenarios"
+        resolved_dir = default_dir if default_dir.exists() else Path("tests/eval/scenarios")
+    else:
+        resolved_dir = Path(scenarios_dir)
+
+    if not resolved_dir.exists():
+        print(f"Error: scenarios directory not found: {resolved_dir}", file=sys.stderr)
+        return 1
+
+    scenarios = load_scenarios_from_dir(resolved_dir)
+    if skill_filter:
+        scenarios = [s for s in scenarios if s.skill == skill_filter]
+
+    if not scenarios:
+        print(f"No scenarios found (skill filter: {skill_filter!r})", file=sys.stderr)
+        return 1
+
+    # Override model on all scenarios.
+    for s in scenarios:
+        s.model = model
+
+    try:
+        runner = ClaudeEvalRunner()
+    except (ImportError, ValueError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    async def _run_all() -> list[Any]:
+        results = []
+        for scenario in scenarios:
+            result = await runner.run(scenario)
+            results.append(result)
+        return results
+
+    results = asyncio.run(_run_all())
+
+    passed = sum(1 for r in results if r.passed)
+    total = len(results)
+    pass_rate = passed / total if total > 0 else 0.0
+
+    if fmt == "json":
+        output = []
+        for r in results:
+            output.append({
+                "name": r.scenario_name,
+                "skill": r.skill,
+                "passed": r.passed,
+                "latency_ms": round(r.performance.total_latency_ms, 1),
+                "input_tokens": r.performance.input_tokens,
+                "output_tokens": r.performance.output_tokens,
+                "tool_call_count": r.performance.tool_call_count,
+                "tools_called": r.effectiveness.tools_called,
+                "failure_reasons": r.effectiveness.failure_reasons,
+            })
+        summary = {"results": output, "passed": passed, "total": total, "pass_rate": pass_rate}
+        print(json.dumps(summary, indent=2))
+    else:
+        for r in results:
+            print(r.summary())
+        print(f"\n{'='*60}")
+        print(f"Results: {passed}/{total} passed ({pass_rate:.0%})")
+
+    # Save baseline if requested.
+    if save_baseline:
+        baseline_data = [
+            {
+                "name": r.scenario_name,
+                "skill": r.skill,
+                "passed": r.passed,
+                "latency_ms": r.performance.total_latency_ms,
+                "total_tokens": r.performance.total_tokens,
+                "tool_call_count": r.performance.tool_call_count,
+            }
+            for r in results
+        ]
+        Path(save_baseline).write_text(json.dumps(baseline_data, indent=2), encoding="utf-8")
+        print(f"Baseline saved to {save_baseline}")
+
+    # Regression check if baseline provided.
+    if baseline and Path(baseline).exists():
+        baseline_data_loaded = json.loads(Path(baseline).read_text(encoding="utf-8"))
+        baseline_by_name = {e["name"]: e for e in baseline_data_loaded}
+        regressions = []
+        for r in results:
+            prev = baseline_by_name.get(r.scenario_name)
+            if prev and prev["passed"] and not r.passed:
+                regressions.append(f"  REGRESSION: {r.scenario_name} was passing, now failing")
+        if regressions:
+            print("\nRegressions detected:")
+            print("\n".join(regressions))
+            return 1
+
+    return 0 if passed == total else 1
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -284,5 +452,16 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(_cmd_status(config_path, fmt))
     elif command == "health":
         sys.exit(_cmd_health(config_path, fmt))
+    elif command == "eval":
+        sys.exit(
+            _cmd_eval(
+                scenarios_dir=getattr(args, "scenarios_dir", None),
+                skill_filter=getattr(args, "skill", None),
+                save_baseline=getattr(args, "save_baseline", None),
+                baseline=getattr(args, "baseline", None),
+                model=getattr(args, "model", "claude-haiku-4-5-20251001"),
+                fmt=fmt,
+            )
+        )
     else:  # pragma: no cover – argparse rejects unknown subcommands
         parser.error(f"Unknown command: {command}")

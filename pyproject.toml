@@ -42,6 +42,7 @@ dev = [
     "pytest-cov>=4.0",
     "types-PyYAML>=6.0",
 ]
+eval = []
 
 [project.scripts]
 distillery = "distillery.cli:main"
@@ -57,6 +58,7 @@ addopts = ["-v", "--strict-markers", "--tb=short"]
 markers = [
     "unit: unit tests",
     "integration: integration tests",
+    "eval: Claude-powered skill evaluation tests (requires claude CLI)",
 ]
 
 [tool.mypy]
@@ -75,6 +77,12 @@ disallow_incomplete_defs = false
 module = "distillery.mcp.server"
 disable_error_code = ["untyped-decorator"]
 
+[[tool.mypy.overrides]]
+# The eval module has optional dependencies (anthropic) that are not installed
+# in the base dev environment. Suppress import-not-found for the eval sub-package.
+module = "distillery.eval.*"
+ignore_missing_imports = true
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
@@ -91,6 +99,7 @@ source = ["src/distillery"]
 omit = [
     "src/distillery/mcp/__main__.py",
     "src/distillery/store/__main__.py",
+    "src/distillery/eval/runner.py",
 ]
 
 [tool.coverage.report]

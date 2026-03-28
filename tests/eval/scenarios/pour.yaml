@@ -1,0 +1,104 @@
+# Eval scenarios for the /pour skill.
+# Pour synthesizes multiple entries into a coherent narrative.
+
+- name: pour-synthesizes-architecture-topic
+  skill: pour
+  description: "Claude should search multiple times and synthesize findings about architecture"
+  prompt: "/pour what's the full picture on the storage architecture decisions?"
+  seed_entries:
+    - content: "Decided to use DuckDB for local storage because it requires no separate server process."
+      entry_type: session
+      author: alice
+      tags: [architecture, storage, duckdb]
+    - content: "Chose cosine similarity over L2 distance for vector search — 15% more accurate on our benchmarks."
+      entry_type: session
+      author: alice
+      tags: [architecture, search]
+    - content: "DuckDB VSS extension documentation — covers HNSW index creation and cosine similarity."
+      entry_type: bookmark
+      author: alice
+      tags: [reference, duckdb]
+    - content: "Architecture review meeting 2026-03-10: DuckDB confirmed as the storage backend."
+      entry_type: minutes
+      author: carol
+      tags: [meeting, architecture]
+  expected_tools:
+    - distillery_status
+    - distillery_search
+  min_entries_retrieved: 1
+  max_latency_ms: 120000
+  max_total_tokens: 12000
+
+- name: pour-multiple-search-passes
+  skill: pour
+  description: "Pour should perform multiple searches to gather comprehensive context"
+  prompt: "/pour embedding pipeline design"
+  seed_entries:
+    - content: "Refactored embedding pipeline to support multiple providers via a Protocol interface."
+      entry_type: session
+      author: alice
+      tags: [embedding, architecture]
+    - content: "Jina AI embeddings v3 model — 1024-dimensional multilingual embeddings."
+      entry_type: bookmark
+      author: alice
+      tags: [embeddings, jina]
+    - content: "Decided to fix embedding dimensions at 1024 for production."
+      entry_type: minutes
+      author: carol
+      tags: [meeting, embeddings]
+  expected_tools:
+    - distillery_search
+  min_entries_retrieved: 1
+  max_latency_ms: 120000
+  max_total_tokens: 12000
+
+- name: pour-cites-sources
+  skill: pour
+  description: "Pour output should reference the entries it synthesized from"
+  prompt: "what's the full picture on deduplication in Distillery?"
+  seed_entries:
+    - content: "Added dedup checker with three thresholds: skip (0.95), merge (0.80), link (0.60)."
+      entry_type: session
+      author: bob
+      tags: [deduplication]
+    - content: "Dedup accuracy was validated on 500 entries — 97% correct classification."
+      entry_type: session
+      author: alice
+      tags: [deduplication, testing]
+  expected_tools:
+    - distillery_search
+  min_entries_retrieved: 1
+  max_latency_ms: 120000
+  max_total_tokens: 12000
+
+- name: pour-empty-store-no-crash
+  skill: pour
+  description: "Pour should handle an empty knowledge base gracefully"
+  prompt: "/pour decision log"
+  seed_entries: []
+  expected_tools:
+    - distillery_status
+    - distillery_search
+  max_latency_ms: 60000
+  max_total_tokens: 8000
+
+- name: pour-project-filter
+  skill: pour
+  description: "Pour with --project should filter results to that project"
+  prompt: "/pour MCP server design --project distillery"
+  seed_entries:
+    - content: "Decided to use FastMCP for the MCP server layer."
+      entry_type: session
+      author: bob
+      tags: [mcp]
+      project: distillery
+    - content: "MCP tool registration uses Python decorators in FastMCP."
+      entry_type: reference
+      author: alice
+      tags: [mcp]
+      project: distillery
+  expected_tools:
+    - distillery_search
+  min_entries_retrieved: 1
+  max_latency_ms: 120000
+  max_total_tokens: 12000

@@ -1,0 +1,73 @@
+# Eval scenarios for the /distill skill.
+# Tests knowledge capture, dedup detection, and tag extraction.
+
+- name: distill-stores-new-entry
+  skill: distill
+  description: "Claude should store a new session entry when explicitly given content"
+  prompt: '/distill "We decided to use pytest-asyncio in auto mode so async tests are detected automatically without needing @pytest.mark.asyncio on each function."'
+  seed_entries: []
+  expected_tools:
+    - distillery_status
+    - distillery_store
+  min_entries_stored: 1
+  max_latency_ms: 90000
+  max_total_tokens: 10000
+
+- name: distill-checks-dedup-first
+  skill: distill
+  description: "Claude should call distillery_check_dedup before storing"
+  prompt: '/distill "Decided to use DuckDB for local storage because it has no server process."'
+  seed_entries:
+    - content: "Decided to use DuckDB for local storage because it requires no separate server process."
+      entry_type: session
+      author: alice
+      tags: [architecture, duckdb]
+  expected_tools:
+    - distillery_status
+    - distillery_check_dedup
+  max_latency_ms: 90000
+  max_total_tokens: 10000
+
+- name: distill-with-project-flag
+  skill: distill
+  description: "Claude should use the --project flag value as the project name"
+  prompt: '/distill --project api-redesign "We decided to move from REST to GraphQL for the public API to reduce over-fetching."'
+  seed_entries: []
+  expected_tools:
+    - distillery_status
+    - distillery_store
+  min_entries_stored: 1
+  max_latency_ms: 90000
+  max_total_tokens: 10000
+
+- name: distill-extracts-tags
+  skill: distill
+  description: "The stored entry should have tags extracted from the content"
+  prompt: '/distill "We decided to implement rate limiting on the embedding API to avoid hitting Jina rate limits during bulk imports."'
+  seed_entries: []
+  expected_tools:
+    - distillery_store
+  min_entries_stored: 1
+  max_latency_ms: 90000
+  max_total_tokens: 10000
+
+- name: distill-session-entry-type
+  skill: distill
+  description: "distillery_store should be called with entry_type=session for /distill"
+  prompt: '/distill "Added retry logic with exponential backoff to the embedding provider HTTP client."'
+  seed_entries: []
+  expected_tools:
+    - distillery_store
+  min_entries_stored: 1
+  max_latency_ms: 90000
+  max_total_tokens: 10000
+
+- name: distill-mcp-unavailable-message
+  skill: distill
+  description: "Claude should call distillery_status even for lowercase distill prompts without the / prefix"
+  prompt: "distill this insight: we should add circuit breakers to the embedding provider"
+  seed_entries: []
+  expected_tools:
+    - distillery_status
+  max_latency_ms: 60000
+  max_total_tokens: 8000

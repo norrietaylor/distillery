@@ -17,8 +17,14 @@
 #             Requires: OPENAI_API_KEY environment variable.
 #             Default model: text-embedding-3-small (512 dimensions)
 #
-# Both providers implement exponential backoff retry on HTTP 429 (rate limit)
-# and 5xx server errors (up to 3 retries).
+# - mock   : Hash-based mock provider (no API calls, no key required)
+#             Produces deterministic vectors from text hashes. Functional for
+#             search and dedup via cosine similarity. Useful for local
+#             development, eval scenarios, and testing.
+#             Default model: mock-hash (4 dimensions)
+#
+# Both Jina and OpenAI providers implement exponential backoff retry on
+# HTTP 429 (rate limit) and 5xx server errors (up to 3 retries).
 
 # ---------------------------------------------------------------------------
 # Storage settings
