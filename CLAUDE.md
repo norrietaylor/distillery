@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is Distillery
 
-Distillery is a knowledge-base system for Claude Code. It stores, searches, and classifies knowledge entries using DuckDB with vector similarity search (VSS/HNSW). It exposes functionality via an MCP server (stdio or streamable-HTTP transport) with 17 tools, orchestrated by Claude Code skills (`/distill`, `/recall`, `/pour`, `/bookmark`, `/minutes`, `/classify`). HTTP transport supports GitHub OAuth for team access.
+Distillery is a knowledge-base system for Claude Code. It stores, searches, and classifies knowledge entries using DuckDB with vector similarity search (VSS/HNSW). It includes ambient intelligence features that poll external feeds (GitHub, RSS) and score relevance using embeddings. It exposes functionality via an MCP server (stdio or streamable-HTTP transport) with 21 tools, orchestrated by 9 Claude Code skills (`/distill`, `/recall`, `/pour`, `/bookmark`, `/minutes`, `/classify`, `/watch`, `/radar`, `/tune`). HTTP transport supports GitHub OAuth for team access.
 
 ## Commands
 
@@ -51,7 +51,7 @@ Four-layer design:
 ```text
 Skills (.claude/skills/<name>/SKILL.md)  →  slash commands users invoke
     ↓
-MCP Server (src/distillery/mcp/server.py)  →  17 tools over stdio or HTTP (FastMCP 2.x/3.x)
+MCP Server (src/distillery/mcp/server.py)  →  21 tools over stdio or HTTP (FastMCP 2.x/3.x)
     ↓
 Core Protocols (store/protocol.py, embedding/protocol.py)  →  typed Protocol interfaces
     ↓
@@ -85,4 +85,8 @@ Uses Python `Protocol` (structural subtyping), not ABCs. All storage operations 
 
 ## Skills
 
-Skills live in `.claude/skills/<name>/SKILL.md` with YAML frontmatter. Shared conventions are in `.claude/skills/CONVENTIONS.md`. All skills follow the same pattern: check MCP availability, determine author (git config > env > ask), determine project (git repo name > flag > ask), execute, confirm.
+9 skills live in `.claude/skills/<name>/SKILL.md` with YAML frontmatter. Shared conventions are in `.claude/skills/CONVENTIONS.md`. All skills follow the same pattern: check MCP availability, determine author (git config > env > ask), determine project (git repo name > flag > ask), execute, confirm.
+
+- **Knowledge capture**: `/distill`, `/bookmark`, `/minutes`
+- **Knowledge retrieval**: `/recall`, `/pour`, `/classify`
+- **Ambient intelligence**: `/watch` (manage feed sources), `/radar` (digest + source suggestions), `/tune` (adjust thresholds)

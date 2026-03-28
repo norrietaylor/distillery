@@ -45,6 +45,7 @@ Categories:
 - project: A project or repository record with status and metadata.
 - digest: A periodic digest or summary covering a date range.
 - github: A GitHub artifact reference (issue, PR, discussion, or release).
+- feed: An ambient feed item captured from a monitored source (RSS, GitHub, Hacker News).
 - inbox: Cannot be classified (use as a fallback).
 
 Content to classify:

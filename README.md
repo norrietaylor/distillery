@@ -34,7 +34,7 @@ Inspired by Tiago Forte's **Building a Second Brain** methodology (CODE: Capture
 
 ## Skills
 
-Distillery provides 6 Claude Code slash commands:
+Distillery provides 9 Claude Code slash commands:
 
 | Skill | Purpose | Example |
 |-------|---------|---------|
@@ -44,6 +44,9 @@ Distillery provides 6 Claude Code slash commands:
 | `/bookmark` | Store URLs with auto-generated summaries | `/bookmark https://example.com/article #caching` |
 | `/minutes` | Meeting notes with append updates | `/minutes --update standup-2026-03-22` |
 | `/classify` | Classify entries and triage review queue | `/classify --inbox` |
+| `/watch` | Manage monitored feed sources | `/watch add github:duckdb/duckdb` |
+| `/radar` | Ambient feed digest with source suggestions | `/radar --days 7` |
+| `/tune` | Adjust feed relevance thresholds | `/tune relevance 0.4` |
 
 ### How `/pour` works
 
@@ -192,10 +195,16 @@ distillery/
 │   │   ├── engine.py        # ClassificationEngine
 │   │   └── dedup.py         # DeduplicationChecker
 │   └── mcp/
-│       ├── server.py        # MCP server (17 tools, FastMCP 2.x/3.x)
+│       ├── server.py        # MCP server (21 tools, FastMCP 2.x/3.x)
 │       ├── auth.py          # GitHub OAuth via FastMCP GitHubProvider
 │       └── __main__.py      # CLI: --transport stdio|http, --host, --port
-├── tests/                   # 860+ tests
+│   └── feeds/
+│       ├── github.py        # GitHub event adapter
+│       ├── rss.py           # RSS/Atom feed adapter
+│       ├── scorer.py        # Embedding-based relevance scorer
+│       ├── poller.py        # Background feed poller
+│       └── interests.py     # Interest extractor for source suggestions
+├── tests/                   # 1000+ tests
 ├── docs/
 │   ├── mcp-setup.md
 │   ├── ROADMAP.md

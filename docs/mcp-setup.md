@@ -154,6 +154,10 @@ Once connected, the following tools are available:
 | `distillery_stale` | Surface entries not accessed within a configurable time window |
 | `distillery_tag_tree` | Return a nested tree of all tags in use with entry counts per node |
 | `distillery_type_schemas` | Return the metadata schema registry for all entry types |
+| `distillery_watch` | List, add, or remove monitored feed sources |
+| `distillery_poll` | Trigger a feed poll cycle and return results (fetched, scored, stored counts) |
+| `distillery_interests` | Return the user's interest profile (top tags, domains, repos, expertise) |
+| `distillery_suggest_sources` | Return interest profile with suggestion context for source discovery |
 
 ## Verifying the Server Works
 
