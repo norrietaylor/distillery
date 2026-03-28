@@ -31,21 +31,13 @@ pytestmark = pytest.mark.unit
 
 def _make_jina_response(embeddings: list[list[float]]) -> dict:
     """Build a dict that mimics the Jina API response payload."""
-    return {
-        "data": [
-            {"embedding": emb, "index": i}
-            for i, emb in enumerate(embeddings)
-        ]
-    }
+    return {"data": [{"embedding": emb, "index": i} for i, emb in enumerate(embeddings)]}
 
 
 def _make_openai_response(embeddings: list[list[float]]) -> dict:
     """Build a dict that mimics the OpenAI API response payload."""
     return {
-        "data": [
-            {"embedding": emb, "index": i}
-            for i, emb in enumerate(embeddings)
-        ],
+        "data": [{"embedding": emb, "index": i} for i, emb in enumerate(embeddings)],
         "model": "text-embedding-3-small",
         "usage": {"prompt_tokens": 5, "total_tokens": 5},
     }
@@ -225,8 +217,7 @@ class TestJinaRateLimitRetry:
                 mock_resp.status_code = 200
             return mock_resp
 
-        with patch("httpx.Client") as mock_client_cls, \
-             patch("time.sleep") as mock_sleep:
+        with patch("httpx.Client") as mock_client_cls, patch("time.sleep") as mock_sleep:
             mock_client = MagicMock()
             mock_client_cls.return_value.__enter__.return_value = mock_client
             mock_client.post.side_effect = side_effect
@@ -264,8 +255,7 @@ class TestJinaRateLimitRetry:
                 mock_resp.status_code = 200
             return mock_resp
 
-        with patch("httpx.Client") as mock_client_cls, \
-             patch("time.sleep"):
+        with patch("httpx.Client") as mock_client_cls, patch("time.sleep"):
             mock_client = MagicMock()
             mock_client_cls.return_value.__enter__.return_value = mock_client
             mock_client.post.side_effect = side_effect
@@ -288,8 +278,7 @@ class TestJinaRateLimitRetry:
 
         provider = JinaEmbeddingProvider(api_key="test-key", dimensions=4)
 
-        with patch("httpx.Client") as mock_client_cls, \
-             patch("time.sleep"):
+        with patch("httpx.Client") as mock_client_cls, patch("time.sleep"):
             mock_client = MagicMock()
             mock_client_cls.return_value.__enter__.return_value = mock_client
             mock_resp = MagicMock()
@@ -504,8 +493,7 @@ class TestOpenAIRateLimitRetry:
                 return rate_limit_response
             return good_response
 
-        with patch.object(provider, "_client") as mock_client, \
-             patch("time.sleep"):
+        with patch.object(provider, "_client") as mock_client, patch("time.sleep"):
             mock_client.post.side_effect = side_effect
             result = provider.embed_batch(["test text"])
 
@@ -529,8 +517,7 @@ class TestOpenAIRateLimitRetry:
                 return server_error_response
             return good_response
 
-        with patch.object(provider, "_client") as mock_client, \
-             patch("time.sleep"):
+        with patch.object(provider, "_client") as mock_client, patch("time.sleep"):
             mock_client.post.side_effect = side_effect
             result = provider.embed_batch(["test"])
 
@@ -542,8 +529,7 @@ class TestOpenAIRateLimitRetry:
         rate_limit_response = _mock_httpx_response(429, {"error": "rate limit"})
         provider = OpenAIEmbeddingProvider(api_key="sk-test", dimensions=4)
 
-        with patch.object(provider, "_client") as mock_client, \
-             patch("time.sleep"):
+        with patch.object(provider, "_client") as mock_client, patch("time.sleep"):
             mock_client.post.return_value = rate_limit_response
             with pytest.raises(RuntimeError, match="retries"):
                 provider.embed_batch(["test"])
@@ -569,8 +555,10 @@ class TestOpenAIRateLimitRetry:
         def mock_sleep(seconds):
             sleep_calls.append(seconds)
 
-        with patch.object(provider, "_client") as mock_client, \
-             patch("time.sleep", side_effect=mock_sleep):
+        with (
+            patch.object(provider, "_client") as mock_client,
+            patch("time.sleep", side_effect=mock_sleep),
+        ):
             mock_client.post.side_effect = side_effect
             provider.embed_batch(["test"])
 

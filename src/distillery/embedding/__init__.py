@@ -6,7 +6,12 @@ from .jina import JinaEmbeddingProvider
 from .openai import OpenAIEmbeddingProvider
 from .protocol import EmbeddingProvider
 
-__all__ = ["EmbeddingProvider", "JinaEmbeddingProvider", "OpenAIEmbeddingProvider", "create_provider"]
+__all__ = [
+    "EmbeddingProvider",
+    "JinaEmbeddingProvider",
+    "OpenAIEmbeddingProvider",
+    "create_provider",
+]
 
 
 def create_provider(config: object) -> EmbeddingProvider:
@@ -50,6 +55,5 @@ def create_provider(config: object) -> EmbeddingProvider:
         )
 
     raise ValueError(
-        f"Unknown embedding provider: {provider_name!r}. "
-        "Supported values are 'openai' and 'jina'."
+        f"Unknown embedding provider: {provider_name!r}. Supported values are 'openai' and 'jina'."
     )

@@ -112,7 +112,9 @@ def _make_config(conflict_threshold: float = 0.60) -> DistilleryConfig:
 
 
 @pytest.fixture
-def embedding_provider(controlled_embedding_provider: ControlledEmbeddingProvider) -> ControlledEmbeddingProvider:
+def embedding_provider(
+    controlled_embedding_provider: ControlledEmbeddingProvider,
+) -> ControlledEmbeddingProvider:
     """
     Provide the injected ControlledEmbeddingProvider fixture for tests.
 
@@ -563,7 +565,10 @@ class TestMCPCheckConflictsSecondPass:
 
         config = _make_config(conflict_threshold=0.60)
         llm_responses = {
-            entry_id: {"is_conflict": False, "reasoning": "Both describe Python capabilities without contradiction"}
+            entry_id: {
+                "is_conflict": False,
+                "reasoning": "Both describe Python capabilities without contradiction",
+            }
         }
         response = await _handle_check_conflicts(
             store,

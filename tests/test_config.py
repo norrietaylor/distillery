@@ -34,7 +34,9 @@ def write_yaml(tmp_path: Path, content: str, name: str = "distillery.yaml") -> P
 
 
 class TestDefaultConfig:
-    def test_returns_distillery_config(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def test_returns_distillery_config(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         monkeypatch.chdir(tmp_path)  # No yaml present in tmp_path
         monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
         cfg = load_config()
@@ -68,7 +70,9 @@ class TestDefaultConfig:
         cfg = load_config()
         assert cfg.classification.confidence_threshold == pytest.approx(0.6)
 
-    def test_dedup_threshold_defaults(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def test_dedup_threshold_defaults(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         monkeypatch.chdir(tmp_path)
         monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
         cfg = load_config()
@@ -495,9 +499,7 @@ class TestTagsConfig:
         with pytest.raises(ValueError, match="reserved_prefix"):
             load_config(str(p))
 
-    def test_tags_section_without_enforce_namespaces_defaults_false(
-        self, tmp_path: Path
-    ) -> None:
+    def test_tags_section_without_enforce_namespaces_defaults_false(self, tmp_path: Path) -> None:
         yaml_content = """\
             tags:
               reserved_prefixes: ["system"]

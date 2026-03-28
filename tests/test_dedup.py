@@ -258,7 +258,14 @@ class TestDedupLimit:
 
         store.find_similar.assert_called_once()
         _, kwargs = store.find_similar.call_args
-        assert kwargs.get("limit", store.find_similar.call_args[0][2] if store.find_similar.call_args[0] else None) == 3 or store.find_similar.call_args[0][2] == 3
+        assert (
+            kwargs.get(
+                "limit",
+                store.find_similar.call_args[0][2] if store.find_similar.call_args[0] else None,
+            )
+            == 3
+            or store.find_similar.call_args[0][2] == 3
+        )
 
     async def test_dedup_limit_3_with_10_results_caps_list(self) -> None:
         """Simulate store returning exactly limit results as configured."""

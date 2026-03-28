@@ -153,9 +153,7 @@ class DeduplicationChecker:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _decide(
-        self, score: float, first_line: str
-    ) -> tuple[DeduplicationAction, str]:
+    def _decide(self, score: float, first_line: str) -> tuple[DeduplicationAction, str]:
         """Map a similarity *score* to an action and reasoning string.
 
         Args:

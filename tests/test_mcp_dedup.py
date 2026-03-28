@@ -125,9 +125,7 @@ class TestCheckDedupNoEntries:
 
 
 class TestCheckDedupValidation:
-    async def test_missing_content_returns_error(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_missing_content_returns_error(self, store: DuckDBStore) -> None:
         config = _make_config()
         response = await _handle_check_dedup(store, config, {})
         data = parse_mcp_response(response)

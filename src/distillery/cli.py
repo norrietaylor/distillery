@@ -121,8 +121,7 @@ def _query_status(db_path: str) -> dict[str, Any]:
     try:
         # Guard against databases that have not been initialised yet.
         table_check = conn.execute(
-            "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_name = 'entries'"
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'entries'"
         ).fetchone()
         if table_check is None or table_check[0] == 0:
             return {

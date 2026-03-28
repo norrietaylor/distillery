@@ -145,12 +145,14 @@ class TestTagPrefixFilter:
         """Entries tagged under 'project/billing-v2' are returned."""
         entries = [
             make_entry(content=f"content {i}", tags=[tag])
-            for i, tag in enumerate([
-                "project/billing-v2/decisions",
-                "project/billing-v2/api",
-                "project/billing-v3/api",
-                "project/payments/decisions",
-            ])
+            for i, tag in enumerate(
+                [
+                    "project/billing-v2/decisions",
+                    "project/billing-v2/api",
+                    "project/billing-v3/api",
+                    "project/payments/decisions",
+                ]
+            )
         ]
         for e in entries:
             await tag_store.store(e)
@@ -163,8 +165,7 @@ class TestTagPrefixFilter:
         assert len(results) == 2
         for entry in results:
             matching = any(
-                t == "project/billing-v2" or t.startswith("project/billing-v2/")
-                for t in entry.tags
+                t == "project/billing-v2" or t.startswith("project/billing-v2/") for t in entry.tags
             )
             assert matching, f"Entry tags {entry.tags!r} did not match prefix"
 
@@ -237,12 +238,14 @@ class TestTagTreeMCPTool:
 
         entries = [
             make_entry(content=f"c{i}", tags=[tag])
-            for i, tag in enumerate([
-                "project/billing-v2/decisions",
-                "project/billing-v2/api",
-                "project/payments/decisions",
-                "team/backend",
-            ])
+            for i, tag in enumerate(
+                [
+                    "project/billing-v2/decisions",
+                    "project/billing-v2/api",
+                    "project/payments/decisions",
+                    "team/backend",
+                ]
+            )
         ]
         for e in entries:
             await tag_store.store(e)

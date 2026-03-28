@@ -200,8 +200,7 @@ class DuckDBStore:
         ``RuntimeError`` to prevent mixed-model embeddings.
         """
         result = conn.execute(
-            "SELECT key, value FROM _meta WHERE key IN "
-            "('embedding_model', 'embedding_dimensions')"
+            "SELECT key, value FROM _meta WHERE key IN ('embedding_model', 'embedding_dimensions')"
         )
         rows = {row[0]: row[1] for row in result.fetchall()}
 
@@ -304,8 +303,7 @@ class DuckDBStore:
         """
         if self._conn is None:
             raise RuntimeError(
-                "DuckDBStore has not been initialized. "
-                "Call 'await store.initialize()' first."
+                "DuckDBStore has not been initialized. Call 'await store.initialize()' first."
             )
         return self._conn
 
@@ -377,9 +375,7 @@ class DuckDBStore:
             Also attempts to update the entry's `accessed_at` timestamp; failures to update are ignored.
         """
         conn = self.connection
-        sql = (
-            f"SELECT {self._ENTRY_COLUMNS} FROM entries WHERE id = ?"
-        )
+        sql = f"SELECT {self._ENTRY_COLUMNS} FROM entries WHERE id = ?"
         result = conn.execute(sql, [entry_id])
         col_names = [desc[0] for desc in result.description]
         row = result.fetchone()
@@ -434,25 +430,29 @@ class DuckDBStore:
         # Reject attempts to change immutable fields.
         bad_keys = self._IMMUTABLE_FIELDS & updates.keys()
         if bad_keys:
-            raise ValueError(
-                f"Cannot update immutable field(s): {', '.join(sorted(bad_keys))}"
-            )
+            raise ValueError(f"Cannot update immutable field(s): {', '.join(sorted(bad_keys))}")
 
         conn = self.connection
 
-        # Verify the entry exists first (also fetch entry_type for validation).
-        check_sql = "SELECT id, entry_type FROM entries WHERE id = ?"
+        # Verify the entry exists first (also fetch entry_type and metadata for validation).
+        check_sql = "SELECT id, entry_type, metadata FROM entries WHERE id = ?"
         check_result = conn.execute(check_sql, [entry_id])
         existing_row = check_result.fetchone()
         if existing_row is None:
             raise KeyError(f"No entry found with id={entry_id!r}")
         existing_entry_type: str = existing_row[1]
+        existing_metadata_json: str = existing_row[2]
+        existing_metadata: dict[str, Any] = (
+            json.loads(existing_metadata_json) if existing_metadata_json else {}
+        )
 
         # Validate metadata against the effective entry type schema.
-        if "metadata" in updates:
+        # Run validation if metadata is changing OR if entry_type is changing.
+        if "metadata" in updates or "entry_type" in updates:
             raw_type = updates.get("entry_type", existing_entry_type)
             effective_entry_type = raw_type.value if hasattr(raw_type, "value") else str(raw_type)
-            validate_metadata(effective_entry_type, updates["metadata"])
+            effective_metadata = updates.get("metadata", existing_metadata)
+            validate_metadata(effective_entry_type, effective_metadata)
 
         now = datetime.now(tz=UTC)
 
@@ -523,9 +523,7 @@ class DuckDBStore:
         """Synchronous implementation of delete(); called via asyncio.to_thread."""
         conn = self.connection
         now = datetime.now(tz=UTC)
-        sql = (
-            "UPDATE entries SET status = ?, updated_at = ? WHERE id = ?"
-        )
+        sql = "UPDATE entries SET status = ?, updated_at = ? WHERE id = ?"
         conn.execute(sql, [EntryStatus.ARCHIVED.value, now, entry_id])
 
         # Check whether any row was actually affected by inspecting row count.
@@ -612,14 +610,13 @@ class DuckDBStore:
 
         if "tag_prefix" in filters:
             prefix = filters["tag_prefix"]
-            # Match entries where any tag equals the prefix exactly or starts with
-            # "prefix/" to avoid partial-segment matches (e.g. "project/billing"
-            # must not match "project/billing-v2/api").
-            clauses.append(
-                "len(list_filter(tags, t -> t = ? OR starts_with(t, ?))) > 0"
-            )
-            params.append(prefix)
-            params.append(prefix + "/")
+            if prefix:
+                # Match entries where any tag equals the prefix exactly or starts with
+                # "prefix/" to avoid partial-segment matches (e.g. "project/billing"
+                # must not match "project/billing-v2/api").
+                clauses.append("len(list_filter(tags, t -> t = ? OR starts_with(t, ?))) > 0")
+                params.append(prefix)
+                params.append(prefix + "/")
 
         if "date_from" in filters:
             val = filters["date_from"]
@@ -845,9 +842,7 @@ class DuckDBStore:
             col_names = [desc[0] for desc in result.description]
 
             rows = result.fetchall()
-            return [
-                self._row_to_entry(row, col_names) for row in rows
-            ]
+            return [self._row_to_entry(row, col_names) for row in rows]
 
         return await asyncio.to_thread(_sync)
 
@@ -929,11 +924,7 @@ class DuckDBStore:
         """
         feedback_id = str(uuid.uuid4())
         conn = self.connection
-        sql = (
-            "INSERT INTO feedback_log "
-            "(id, search_id, entry_id, signal) "
-            "VALUES (?, ?, ?, ?)"
-        )
+        sql = "INSERT INTO feedback_log (id, search_id, entry_id, signal) VALUES (?, ?, ?, ?)"
         conn.execute(sql, [feedback_id, search_id, entry_id, signal])
         logger.debug(
             "Logged feedback id=%s search_id=%s entry_id=%s signal=%r",
@@ -958,6 +949,4 @@ class DuckDBStore:
         Returns:
             str: UUID string of the created `feedback_log` row.
         """
-        return await asyncio.to_thread(
-            self._sync_log_feedback, search_id, entry_id, signal
-        )
+        return await asyncio.to_thread(self._sync_log_feedback, search_id, entry_id, signal)

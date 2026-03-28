@@ -176,9 +176,7 @@ class TestStoreFindSimilarRoundTrip:
         assert "entry_id" in store_data
 
         # find_similar with threshold=0.0 ensures we get results back
-        find_resp = await _handle_find_similar(
-            e2e_store, {"content": content, "threshold": 0.0}
-        )
+        find_resp = await _handle_find_similar(e2e_store, {"content": content, "threshold": 0.0})
         find_data = parse_mcp_response(find_resp)
 
         assert "results" in find_data
@@ -470,9 +468,7 @@ class TestErrorPathInvalidInput:
 class TestCallToolDispatcher:
     """Scenario: end-to-end tool dispatch via create_server() handler."""
 
-    async def test_call_tool_dispatches_store_and_status(
-        self, e2e_store: DuckDBStore
-    ) -> None:
+    async def test_call_tool_dispatches_store_and_status(self, e2e_store: DuckDBStore) -> None:
         """Verify that the CallToolRequest handler routes to correct tool handlers."""
         from distillery.mcp.server import _handle_status, _handle_store
 

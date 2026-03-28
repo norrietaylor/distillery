@@ -147,9 +147,7 @@ class ClassificationEngine:
         try:
             entry_type = EntryType(raw_type)
         except ValueError:
-            logger.warning(
-                "ClassificationEngine: unknown entry_type %r, using inbox", raw_type
-            )
+            logger.warning("ClassificationEngine: unknown entry_type %r, using inbox", raw_type)
             entry_type = EntryType.INBOX
 
         confidence = float(data["confidence"])

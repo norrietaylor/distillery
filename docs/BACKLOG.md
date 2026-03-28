@@ -39,7 +39,7 @@ Prioritized work items derived from [ROADMAP.md](ROADMAP.md) and spec research. 
 | 11 | Elasticsearch migration | `ElasticsearchStore` backend — hybrid search (BM25 + kNN + RRF), ES\|QL for temporal queries. Triggered when DuckDB hits ~10K entries | Not started |
 | 12 | Access control | Team/private visibility flag on entries | Not started |
 | 13 | Session capture hooks | Auto-distill on Claude Code session end | Not started |
-| 14 | Namespace taxonomy | Hierarchical validated tag system (`/project/billing-v2/decisions`) | Done (spec 08) |
+| 14 | Namespace taxonomy | Hierarchical validated tag system (`project/billing-v2/decisions`) | Done (spec 08) |
 | 15 | Provenance tracking | Full version history, source chain, author chain | Not started |
 | 16 | Port type schemas | `person`, `project`, `digest`, `GitHub` entry types | Done (spec 08) |
 

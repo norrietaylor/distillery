@@ -67,7 +67,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def error_response(code: str, message: str, details: dict[str, Any] | None = None) -> list[types.TextContent]:
+def error_response(
+    code: str, message: str, details: dict[str, Any] | None = None
+) -> list[types.TextContent]:
     """Build a structured error response as MCP content.
 
     Args:
@@ -118,7 +120,9 @@ def validate_required(arguments: dict[str, Any], *fields: str) -> str | None:
     return None
 
 
-def validate_type(arguments: dict[str, Any], field: str, expected_type: type | tuple[type, ...], label: str) -> str | None:
+def validate_type(
+    arguments: dict[str, Any], field: str, expected_type: type | tuple[type, ...], label: str
+) -> str | None:
     """Return an error message if *field* is not of *expected_type*.
 
     Args:
@@ -189,8 +193,7 @@ def _create_embedding_provider(config: DistilleryConfig) -> Any:
         return StubEmbeddingProvider(dimensions=dimensions)
     else:
         raise ValueError(
-            f"Unsupported embedding provider: {provider_name!r}. "
-            "Must be one of: 'jina', 'openai'."
+            f"Unsupported embedding provider: {provider_name!r}. Must be one of: 'jina', 'openai'."
         )
 
 
@@ -967,8 +970,17 @@ def _sync_gather_stats(
 
 # Valid entry_type values (mirrors EntryType enum).
 _VALID_ENTRY_TYPES = {
-    "session", "bookmark", "minutes", "meeting", "reference", "idea", "inbox",
-    "person", "project", "digest", "github",
+    "session",
+    "bookmark",
+    "minutes",
+    "meeting",
+    "reference",
+    "idea",
+    "inbox",
+    "person",
+    "project",
+    "digest",
+    "github",
 }
 
 # Valid status values (mirrors EntryStatus enum).
@@ -1107,7 +1119,9 @@ async def _handle_store(
     try:
         from distillery.classification.conflict import ConflictChecker
 
-        conflict_threshold = float(cfg.classification.conflict_threshold if cfg is not None else 0.60)
+        conflict_threshold = float(
+            cfg.classification.conflict_threshold if cfg is not None else 0.60
+        )
         conflict_checker = ConflictChecker(store=store, threshold=conflict_threshold)
         conflict_similar = await store.find_similar(
             content=entry.content,
@@ -1261,9 +1275,7 @@ async def _handle_update(
     entry_id: str = arguments["entry_id"]
 
     # Build the updates dict from all keys except entry_id.
-    updatable_keys = {
-        "content", "entry_type", "author", "project", "tags", "status", "metadata"
-    }
+    updatable_keys = {"content", "entry_type", "author", "project", "tags", "status", "metadata"}
     updates: dict[str, Any] = {}
     for key in updatable_keys:
         if key in arguments:
@@ -1301,8 +1313,7 @@ async def _handle_update(
         if st_str not in _VALID_STATUSES:
             return error_response(
                 "INVALID_INPUT",
-                f"Invalid status {st_str!r}. "
-                f"Must be one of: {', '.join(sorted(_VALID_STATUSES))}.",
+                f"Invalid status {st_str!r}. Must be one of: {', '.join(sorted(_VALID_STATUSES))}.",
             )
         updates["status"] = EntryStatus(st_str)
 
@@ -1349,7 +1360,16 @@ def _build_filters_from_arguments(arguments: dict[str, Any]) -> dict[str, Any] |
     Returns:
         A dict of filters, or ``None`` if no filter keys are present.
     """
-    filter_keys = ("entry_type", "author", "project", "tags", "status", "date_from", "date_to", "tag_prefix")
+    filter_keys = (
+        "entry_type",
+        "author",
+        "project",
+        "tags",
+        "status",
+        "date_from",
+        "date_to",
+        "tag_prefix",
+    )
     filters: dict[str, Any] = {}
     for key in filter_keys:
         if key in arguments and arguments[key] is not None:
@@ -1398,10 +1418,7 @@ async def _handle_search(
         logger.exception("Error in distillery_search")
         return error_response("SEARCH_ERROR", f"Search failed: {exc}")
 
-    results = [
-        {"score": round(sr.score, 6), "entry": sr.entry.to_dict()}
-        for sr in search_results
-    ]
+    results = [{"score": round(sr.score, 6), "entry": sr.entry.to_dict()} for sr in search_results]
 
     # Log the search event and record it for implicit feedback correlation.
     if recent_searches is not None and search_results:
@@ -1471,17 +1488,12 @@ async def _handle_find_similar(
         return error_response("VALIDATION_ERROR", "Field 'limit' must be <= 200")
 
     try:
-        search_results = await store.find_similar(
-            content=content, threshold=threshold, limit=limit
-        )
+        search_results = await store.find_similar(content=content, threshold=threshold, limit=limit)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error in distillery_find_similar")
         return error_response("FIND_SIMILAR_ERROR", f"find_similar failed: {exc}")
 
-    results = [
-        {"score": round(sr.score, 6), "entry": sr.entry.to_dict()}
-        for sr in search_results
-    ]
+    results = [{"score": round(sr.score, 6), "entry": sr.entry.to_dict()} for sr in search_results]
     return success_response({"results": results, "count": len(results), "threshold": threshold})
 
 
@@ -1561,9 +1573,7 @@ async def _handle_tag_tree(
         """Query all tags and build the nested hierarchy synchronously."""
         conn = store.connection
         # Only include active entries to avoid noise from archived ones.
-        result = conn.execute(
-            "SELECT tags FROM entries WHERE status != 'archived'"
-        )
+        result = conn.execute("SELECT tags FROM entries WHERE status != 'archived'")
         rows = result.fetchall()
 
         # Collect all individual tag strings.
@@ -1576,10 +1586,7 @@ async def _handle_tag_tree(
         # either equals the prefix exactly or starts with "prefix/".
         if prefix is not None:
             prefix_slash = prefix + "/"
-            all_tags = [
-                t for t in all_tags
-                if t == prefix or t.startswith(prefix_slash)
-            ]
+            all_tags = [t for t in all_tags if t == prefix or t.startswith(prefix_slash)]
             # Strip the prefix (and its trailing slash) from the remaining tags
             # so that the returned tree is rooted at the prefix.
             stripped: list[str] = []
@@ -1588,7 +1595,7 @@ async def _handle_tag_tree(
                     # The tag is exactly the prefix -- represents the root node.
                     stripped.append("")
                 else:
-                    stripped.append(t[len(prefix_slash):])
+                    stripped.append(t[len(prefix_slash) :])
             all_tags = stripped
 
         # Build the tree from path segments.
@@ -2093,9 +2100,7 @@ def _sync_gather_metrics(
     # ------------------------------------------------------------------ #
     # entries section                                                      #
     # ------------------------------------------------------------------ #
-    total_row = conn.execute(
-        "SELECT COUNT(*) FROM entries WHERE status != 'archived'"
-    ).fetchone()
+    total_row = conn.execute("SELECT COUNT(*) FROM entries WHERE status != 'archived'").fetchone()
     total_entries: int = total_row[0] if total_row else 0
 
     type_rows = conn.execute(
@@ -2166,13 +2171,10 @@ def _sync_gather_metrics(
     }
     try:
         _table_exists = conn.execute(
-            "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_name = 'search_log'"
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'search_log'"
         ).fetchone()
         if _table_exists and _table_exists[0] > 0:
-            total_searches_row = conn.execute(
-                "SELECT COUNT(*) FROM search_log"
-            ).fetchone()
+            total_searches_row = conn.execute("SELECT COUNT(*) FROM search_log").fetchone()
             total_searches: int = total_searches_row[0] if total_searches_row else 0
 
             def _count_searches(days: int) -> int:
@@ -2217,13 +2219,10 @@ def _sync_gather_metrics(
     }
     try:
         _fb_exists = conn.execute(
-            "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_name = 'feedback_log'"
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'feedback_log'"
         ).fetchone()
         if _fb_exists and _fb_exists[0] > 0:
-            total_fb_row = conn.execute(
-                "SELECT COUNT(*) FROM feedback_log"
-            ).fetchone()
+            total_fb_row = conn.execute("SELECT COUNT(*) FROM feedback_log").fetchone()
             total_fb: int = total_fb_row[0] if total_fb_row else 0
 
             positive_row = conn.execute(
@@ -2396,8 +2395,7 @@ def _sync_gather_quality(
 
     try:
         sl_exists = conn.execute(
-            "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_name = 'search_log'"
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'search_log'"
         ).fetchone()
         if sl_exists and sl_exists[0] > 0:
             row = conn.execute("SELECT COUNT(*) FROM search_log").fetchone()
@@ -2406,16 +2404,13 @@ def _sync_gather_quality(
             avg_row = conn.execute(
                 "SELECT AVG(array_length(result_entry_ids)) FROM search_log"
             ).fetchone()
-            avg_result_count = (
-                float(avg_row[0]) if avg_row and avg_row[0] is not None else 0.0
-            )
+            avg_result_count = float(avg_row[0]) if avg_row and avg_row[0] is not None else 0.0
     except Exception:  # noqa: BLE001
         pass
 
     try:
         fl_exists = conn.execute(
-            "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_name = 'feedback_log'"
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'feedback_log'"
         ).fetchone()
         if fl_exists and fl_exists[0] > 0:
             row = conn.execute("SELECT COUNT(*) FROM feedback_log").fetchone()
@@ -2435,12 +2430,10 @@ def _sync_gather_quality(
     if entry_type_filter is not None:
         try:
             sl_exists2 = conn.execute(
-                "SELECT COUNT(*) FROM information_schema.tables "
-                "WHERE table_name = 'search_log'"
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'search_log'"
             ).fetchone()
             fl_exists2 = conn.execute(
-                "SELECT COUNT(*) FROM information_schema.tables "
-                "WHERE table_name = 'feedback_log'"
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'feedback_log'"
             ).fetchone()
             if (sl_exists2 and sl_exists2[0] > 0) and (fl_exists2 and fl_exists2[0] > 0):
                 type_fb_row = conn.execute(

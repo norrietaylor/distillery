@@ -254,9 +254,7 @@ class TestClassifyTool:
 
 
 class TestReviewQueueTool:
-    async def test_review_queue_returns_pending_entries(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_review_queue_returns_pending_entries(self, store: DuckDBStore) -> None:
         """Returns only pending_review entries."""
         pending = make_entry(content="Needs review", status=EntryStatus.PENDING_REVIEW)
         active = make_entry(content="Already active", status=EntryStatus.ACTIVE)
@@ -292,15 +290,15 @@ class TestReviewQueueTool:
         assert "created_at" in item
         assert item["classification_reasoning"] == "Unclear"
 
-    async def test_review_queue_filters_by_entry_type(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_review_queue_filters_by_entry_type(self, store: DuckDBStore) -> None:
         session = make_entry(
-            content="A session entry", entry_type=EntryType.SESSION,
+            content="A session entry",
+            entry_type=EntryType.SESSION,
             status=EntryStatus.PENDING_REVIEW,
         )
         inbox = make_entry(
-            content="An inbox entry", entry_type=EntryType.INBOX,
+            content="An inbox entry",
+            entry_type=EntryType.INBOX,
             status=EntryStatus.PENDING_REVIEW,
         )
         await store.store(session)
@@ -320,9 +318,7 @@ class TestReviewQueueTool:
         data = parse_mcp_response(response)
         assert data["count"] == 3
 
-    async def test_review_queue_returns_empty_when_none_pending(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_review_queue_returns_empty_when_none_pending(self, store: DuckDBStore) -> None:
         entry = make_entry(status=EntryStatus.ACTIVE)
         await store.store(entry)
 
@@ -331,17 +327,13 @@ class TestReviewQueueTool:
         assert data["count"] == 0
         assert data["entries"] == []
 
-    async def test_review_queue_validates_bad_limit(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_review_queue_validates_bad_limit(self, store: DuckDBStore) -> None:
         response = await _handle_review_queue(store, {"limit": 0})
         data = parse_mcp_response(response)
         assert data["error"] is True
         assert data["code"] == "VALIDATION_ERROR"
 
-    async def test_review_queue_validates_invalid_entry_type(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_review_queue_validates_invalid_entry_type(self, store: DuckDBStore) -> None:
         response = await _handle_review_queue(store, {"entry_type": "not_a_type"})
         data = parse_mcp_response(response)
         assert data["error"] is True
@@ -354,9 +346,7 @@ class TestReviewQueueTool:
 
 
 class TestResolveReviewTool:
-    async def test_resolve_approve_sets_status_active(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_resolve_approve_sets_status_active(self, store: DuckDBStore) -> None:
         entry = make_entry(status=EntryStatus.PENDING_REVIEW)
         entry_id = await store.store(entry)
 
@@ -369,23 +359,17 @@ class TestResolveReviewTool:
         assert data["metadata"]["reviewed_at"]
         assert data["metadata"]["reviewed_by"] == "bob"
 
-    async def test_resolve_archive_sets_status_archived(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_resolve_archive_sets_status_archived(self, store: DuckDBStore) -> None:
         entry = make_entry(status=EntryStatus.PENDING_REVIEW)
         entry_id = await store.store(entry)
 
-        response = await _handle_resolve_review(
-            store, {"entry_id": entry_id, "action": "archive"}
-        )
+        response = await _handle_resolve_review(store, {"entry_id": entry_id, "action": "archive"})
         data = parse_mcp_response(response)
         assert "error" not in data
         assert data["status"] == "archived"
         assert data["metadata"]["archived_at"]
 
-    async def test_resolve_reclassify_updates_entry_type(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_resolve_reclassify_updates_entry_type(self, store: DuckDBStore) -> None:
         entry = make_entry(entry_type=EntryType.INBOX, status=EntryStatus.PENDING_REVIEW)
         entry_id = await store.store(entry)
 
@@ -405,9 +389,7 @@ class TestResolveReviewTool:
         assert data["metadata"]["reviewed_at"]
         assert data["metadata"]["reviewed_by"] == "alice"
 
-    async def test_resolve_reclassify_requires_new_entry_type(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_resolve_reclassify_requires_new_entry_type(self, store: DuckDBStore) -> None:
         entry = make_entry(status=EntryStatus.PENDING_REVIEW)
         entry_id = await store.store(entry)
 
@@ -418,9 +400,7 @@ class TestResolveReviewTool:
         assert data["error"] is True
         assert data["code"] == "INVALID_INPUT"
 
-    async def test_resolve_reclassify_validates_new_entry_type(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_resolve_reclassify_validates_new_entry_type(self, store: DuckDBStore) -> None:
         entry = make_entry(status=EntryStatus.PENDING_REVIEW)
         entry_id = await store.store(entry)
 
@@ -436,9 +416,7 @@ class TestResolveReviewTool:
         assert data["error"] is True
         assert data["code"] == "INVALID_INPUT"
 
-    async def test_resolve_returns_not_found_for_missing_entry(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_resolve_returns_not_found_for_missing_entry(self, store: DuckDBStore) -> None:
         response = await _handle_resolve_review(
             store,
             {
@@ -450,37 +428,27 @@ class TestResolveReviewTool:
         assert data["error"] is True
         assert data["code"] == "NOT_FOUND"
 
-    async def test_resolve_validates_missing_required_fields(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_resolve_validates_missing_required_fields(self, store: DuckDBStore) -> None:
         response = await _handle_resolve_review(store, {"entry_id": "abc"})
         data = parse_mcp_response(response)
         assert data["error"] is True
         assert data["code"] == "INVALID_INPUT"
 
-    async def test_resolve_validates_invalid_action(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_resolve_validates_invalid_action(self, store: DuckDBStore) -> None:
         entry = make_entry(status=EntryStatus.PENDING_REVIEW)
         entry_id = await store.store(entry)
 
-        response = await _handle_resolve_review(
-            store, {"entry_id": entry_id, "action": "reject"}
-        )
+        response = await _handle_resolve_review(store, {"entry_id": entry_id, "action": "reject"})
         data = parse_mcp_response(response)
         assert data["error"] is True
         assert data["code"] == "INVALID_INPUT"
 
-    async def test_resolve_approve_without_reviewer(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_resolve_approve_without_reviewer(self, store: DuckDBStore) -> None:
         """Reviewer field is optional."""
         entry = make_entry(status=EntryStatus.PENDING_REVIEW)
         entry_id = await store.store(entry)
 
-        response = await _handle_resolve_review(
-            store, {"entry_id": entry_id, "action": "approve"}
-        )
+        response = await _handle_resolve_review(store, {"entry_id": entry_id, "action": "approve"})
         data = parse_mcp_response(response)
         assert "error" not in data
         assert data["status"] == "active"

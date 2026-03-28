@@ -63,9 +63,7 @@ class TestValidateMetadata:
 
     def test_digest_valid(self) -> None:
         """Digest entry with both date fields passes."""
-        validate_metadata(
-            "digest", {"period_start": "2026-03-01", "period_end": "2026-03-07"}
-        )
+        validate_metadata("digest", {"period_start": "2026-03-01", "period_end": "2026-03-07"})
 
     def test_digest_missing_period_start_raises(self) -> None:
         """Digest entry missing period_start raises ValueError."""
@@ -79,24 +77,16 @@ class TestValidateMetadata:
 
     def test_github_valid(self) -> None:
         """GitHub entry with all required fields and valid ref_type passes."""
-        validate_metadata(
-            "github", {"repo": "org/repo", "ref_type": "pr", "ref_number": 42}
-        )
+        validate_metadata("github", {"repo": "org/repo", "ref_type": "pr", "ref_number": 42})
 
     def test_github_valid_issue(self) -> None:
-        validate_metadata(
-            "github", {"repo": "org/repo", "ref_type": "issue", "ref_number": 1}
-        )
+        validate_metadata("github", {"repo": "org/repo", "ref_type": "issue", "ref_number": 1})
 
     def test_github_valid_discussion(self) -> None:
-        validate_metadata(
-            "github", {"repo": "org/repo", "ref_type": "discussion", "ref_number": 5}
-        )
+        validate_metadata("github", {"repo": "org/repo", "ref_type": "discussion", "ref_number": 5})
 
     def test_github_valid_release(self) -> None:
-        validate_metadata(
-            "github", {"repo": "org/repo", "ref_type": "release", "ref_number": 10}
-        )
+        validate_metadata("github", {"repo": "org/repo", "ref_type": "release", "ref_number": 10})
 
     def test_github_missing_repo_raises(self) -> None:
         with pytest.raises(ValueError, match="repo"):

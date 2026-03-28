@@ -106,11 +106,11 @@ class OpenAIEmbeddingProvider:
                 return self._request(texts)
             except _RateLimitError as exc:
                 last_error = exc
-                wait = 2 ** attempt  # 1 s, 2 s, 4 s
+                wait = 2**attempt  # 1 s, 2 s, 4 s
                 time.sleep(wait)
             except _ServerError as exc:
                 last_error = exc
-                wait = 2 ** attempt
+                wait = 2**attempt
                 time.sleep(wait)
 
         raise RuntimeError(
@@ -169,9 +169,7 @@ class OpenAIEmbeddingProvider:
             raise RuntimeError(f"OpenAI API request failed: {exc}") from exc
 
         if response.status_code == 429:
-            raise _RateLimitError(
-                f"OpenAI rate limit exceeded (HTTP 429): {response.text}"
-            )
+            raise _RateLimitError(f"OpenAI rate limit exceeded (HTTP 429): {response.text}")
 
         if response.status_code >= 500:
             raise _ServerError(
@@ -179,9 +177,7 @@ class OpenAIEmbeddingProvider:
             )
 
         if response.status_code != 200:
-            raise RuntimeError(
-                f"OpenAI API error (HTTP {response.status_code}): {response.text}"
-            )
+            raise RuntimeError(f"OpenAI API error (HTTP {response.status_code}): {response.text}")
 
         data = response.json()
 

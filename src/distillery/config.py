@@ -229,9 +229,7 @@ def _parse_float_field(raw: dict[str, Any], key: str, default: float, label: str
     try:
         return float(value_raw)
     except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"{label} must be a float, got: {value_raw!r}"
-        ) from exc
+        raise ValueError(f"{label} must be a float, got: {value_raw!r}") from exc
 
 
 def _parse_strict_int(value: Any, label: str) -> int:
@@ -339,15 +337,11 @@ def _parse_tags(raw: dict[str, Any]) -> TagsConfig:
             ``reserved_prefixes`` is not a list.
     """
     if not isinstance(raw, dict):
-        raise ValueError(
-            f"tags must be a YAML mapping, got: {type(raw).__name__}"
-        )
+        raise ValueError(f"tags must be a YAML mapping, got: {type(raw).__name__}")
 
     enforce_raw = raw.get("enforce_namespaces", False)
     if not isinstance(enforce_raw, bool):
-        raise ValueError(
-            f"tags.enforce_namespaces must be a boolean, got: {enforce_raw!r}"
-        )
+        raise ValueError(f"tags.enforce_namespaces must be a boolean, got: {enforce_raw!r}")
 
     prefixes_raw = raw.get("reserved_prefixes", [])
     if not isinstance(prefixes_raw, list):
@@ -392,15 +386,13 @@ def _validate(config: DistilleryConfig) -> None:
 
     if config.embedding.dimensions <= 0:
         raise ValueError(
-            "embedding.dimensions must be a positive integer, "
-            f"got: {config.embedding.dimensions}"
+            f"embedding.dimensions must be a positive integer, got: {config.embedding.dimensions}"
         )
 
     threshold = config.classification.confidence_threshold
     if not (0.0 <= threshold <= 1.0):
         raise ValueError(
-            "classification.confidence_threshold must be between 0.0 and 1.0, "
-            f"got: {threshold}"
+            f"classification.confidence_threshold must be between 0.0 and 1.0, got: {threshold}"
         )
 
     link = config.classification.dedup_link_threshold
@@ -413,9 +405,7 @@ def _validate(config: DistilleryConfig) -> None:
         ("dedup_skip_threshold", skip),
     ]:
         if not (0.0 <= value <= 1.0):
-            raise ValueError(
-                f"classification.{name} must be between 0.0 and 1.0, got: {value}"
-            )
+            raise ValueError(f"classification.{name} must be between 0.0 and 1.0, got: {value}")
 
     if not (link <= merge <= skip):
         raise ValueError(
@@ -445,8 +435,7 @@ def _validate(config: DistilleryConfig) -> None:
     conflict = config.classification.conflict_threshold
     if not (0.0 <= conflict <= 1.0):
         raise ValueError(
-            "classification.conflict_threshold must be between 0.0 and 1.0, "
-            f"got: {conflict}"
+            f"classification.conflict_threshold must be between 0.0 and 1.0, got: {conflict}"
         )
 
     # Validate reserved_prefixes: each must be a valid single tag segment.
@@ -488,9 +477,7 @@ def load_config(config_path: str | None = None) -> DistilleryConfig:
     if config_path is not None:
         explicit = Path(config_path).expanduser()
         if not explicit.exists():
-            raise FileNotFoundError(
-                f"Configuration file not found: {explicit}"
-            )
+            raise FileNotFoundError(f"Configuration file not found: {explicit}")
         resolved: Path | None = explicit
     else:
         resolved = _find_config_path()
@@ -508,9 +495,7 @@ def load_config(config_path: str | None = None) -> DistilleryConfig:
         raw = {}
 
     if not isinstance(raw, dict):
-        raise ValueError(
-            f"Configuration file must be a YAML mapping, got: {type(raw).__name__}"
-        )
+        raise ValueError(f"Configuration file must be a YAML mapping, got: {type(raw).__name__}")
 
     storage_raw = raw.get("storage", {}) or {}
     embedding_raw = raw.get("embedding", {}) or {}
