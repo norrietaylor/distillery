@@ -53,7 +53,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from fastmcp import Context, FastMCP  # noqa: F401  # Context used by tool wrappers added in T02
 from mcp import types
@@ -271,6 +271,29 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
 
     server = FastMCP("distillery", lifespan=lifespan)
 
+    def _get_lifespan_context(ctx: Context) -> dict[str, Any]:
+        """Extract the lifespan context dict from a FastMCP Context.
+
+        Supports both FastMCP 3.x (``ctx.lifespan_context``) and 2.x
+        (``ctx.request_context.lifespan_context``) attribute paths.
+        """
+        # FastMCP 3.x exposes a top-level property.
+        try:
+            lc = ctx.lifespan_context
+            if isinstance(lc, dict):
+                return lc
+        except AttributeError:
+            pass
+        # FastMCP 2.x: traverse through request_context.
+        rc = getattr(ctx, "request_context", None)
+        if rc is not None:
+            lc_v2 = getattr(rc, "lifespan_context", None)
+            if lc_v2 is not None and isinstance(lc_v2, dict):
+                return cast(dict[str, Any], lc_v2)
+        raise RuntimeError(
+            "Cannot access lifespan context — verify FastMCP version compatibility."
+        )
+
     # -----------------------------------------------------------------------
     # T02.1 tool wrappers: distillery_status, distillery_store,
     # distillery_get, distillery_update, distillery_list
@@ -286,7 +309,7 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
         Returns:
             list[types.TextContent]: A single-element list containing a TextContent block with a JSON-serializable dictionary of statistics (e.g., `entries`, `entries_by_type`, `entries_by_status`, `db_size_bytes`, `embedding_model`, and `status`).
         """
-        lc = ctx.lifespan_context
+        lc = _get_lifespan_context(ctx)
         return await _handle_status(
             store=lc["store"],
             embedding_provider=lc["embedding_provider"],
@@ -321,7 +344,7 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
                   such as "conflict_message" and "conflict_candidates".
                 - On validation or persistence failures: an error object with "error", "code", and "message".
         """
-        lc = ctx.lifespan_context
+        lc = _get_lifespan_context(ctx)
         arguments: dict[str, Any] = {
             "content": content,
             "entry_type": entry_type,
@@ -357,7 +380,7 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
         Returns:
             list[types.TextContent]: A one-element list containing either the serialized entry dict on success or an error object with code `"NOT_FOUND"` if the entry is missing.
         """
-        lc = ctx.lifespan_context
+        lc = _get_lifespan_context(ctx)
         return await _handle_get(
             store=lc["store"],
             arguments={"entry_id": entry_id},
@@ -387,7 +410,7 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
         entry_type must be one of: session, bookmark, minutes, meeting,
         reference, idea, inbox.
         """
-        lc = ctx.lifespan_context
+        lc = _get_lifespan_context(ctx)
         arguments: dict[str, Any] = {"entry_id": entry_id}
         if content is not None:
             arguments["content"] = content
@@ -443,7 +466,7 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
             keys "entries" (list of entry dicts), "count" (total matching entries),
             "limit", and "offset".
         """
-        lc = ctx.lifespan_context
+        lc = _get_lifespan_context(ctx)
         arguments: dict[str, Any] = {"limit": limit, "offset": offset}
         if entry_type is not None:
             arguments["entry_type"] = entry_type
@@ -499,7 +522,7 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
         prefix (e.g. "domain/architecture" matches "domain/architecture/api"
         but not "domain/architecture-old").
         """
-        lc = ctx.lifespan_context
+        lc = _get_lifespan_context(ctx)
         arguments: dict[str, Any] = {"query": query, "limit": limit}
         if entry_type is not None:
             arguments["entry_type"] = entry_type
@@ -545,7 +568,7 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
                 - `count`: total number of matches returned,
                 - `threshold`: the similarity threshold used.
         """
-        lc = ctx.lifespan_context
+        lc = _get_lifespan_context(ctx)
         return await _handle_find_similar(
             store=lc["store"],
             arguments={"content": content, "threshold": threshold, "limit": limit},
@@ -571,7 +594,7 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
         Returns:
             list[types.TextContent]: A single MCP TextContent block containing the serialized updated entry or an error payload.
         """
-        lc = ctx.lifespan_context
+        lc = _get_lifespan_context(ctx)
         arguments: dict[str, Any] = {
             "entry_id": entry_id,
             "entry_type": entry_type,
@@ -609,7 +632,7 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
                   and `classification_reasoning` (if present).
                 - count: total number of entries returned.
         """
-        lc = ctx.lifespan_context
+        lc = _get_lifespan_context(ctx)
         arguments: dict[str, Any] = {"limit": limit}
         if entry_type is not None:
             arguments["entry_type"] = entry_type
@@ -643,7 +666,7 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
         Returns:
             list[types.TextContent]: A one-element MCP TextContent list containing the updated entry as a JSON-serializable object on success, or an error payload on failure.
         """
-        lc = ctx.lifespan_context
+        lc = _get_lifespan_context(ctx)
         arguments: dict[str, Any] = {"entry_id": entry_id, "action": action}
         if new_entry_type is not None:
             arguments["new_entry_type"] = new_entry_type
@@ -676,7 +699,7 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
                   `id`, `score` (float), `content_preview` (str, up to 120 chars),
                   `entry_type`, `author`, `project`, and `created_at` (ISO string or None).
         """
-        lc = ctx.lifespan_context
+        lc = _get_lifespan_context(ctx)
         return await _handle_check_dedup(
             store=lc["store"],
             config=lc["config"],
@@ -703,7 +726,7 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
         Returns:
             list[types.TextContent]: A single MCP `TextContent` block containing a JSON-serializable payload. In the first pass the payload includes `conflict_candidates` (and guidance); in the second pass it includes `has_conflicts` and `conflicts` (confirmed items with reasoning).
         """
-        lc = ctx.lifespan_context
+        lc = _get_lifespan_context(ctx)
         arguments: dict[str, Any] = {"content": content}
         if llm_responses is not None:
             arguments["llm_responses"] = llm_responses
@@ -734,7 +757,7 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
         Returns:
             list[types.TextContent]: A one-element list containing a TextContent block with a JSON-serializable dict of metrics (keys include `entries`, `activity`, `search`, `quality`, `staleness`, and `storage`).
         """
-        lc = ctx.lifespan_context
+        lc = _get_lifespan_context(ctx)
         return await _handle_metrics(
             store=lc["store"],
             config=lc["config"],
@@ -758,7 +781,7 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
         Returns:
             list[types.TextContent]: A one-element MCP `TextContent` list containing a JSON-serializable object with metrics (totals, rates, and optional per-type breakdown).
         """
-        lc = ctx.lifespan_context
+        lc = _get_lifespan_context(ctx)
         arguments: dict[str, Any] = {}
         if entry_type is not None:
             arguments["entry_type"] = entry_type
@@ -792,7 +815,7 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
                 - stale_count: total number of matching stale entries (may exceed returned list)
                 - entries: array of stale entry summaries (id, content_preview, entry_type, author, project, last_accessed, days_since)
         """
-        lc = ctx.lifespan_context
+        lc = _get_lifespan_context(ctx)
         arguments: dict[str, Any] = {"limit": limit}
         if days is not None:
             arguments["days"] = days
@@ -826,7 +849,7 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
             a JSON object with key ``tree`` (the nested dict) and ``prefix``
             (the filter applied, or null).
         """
-        lc = ctx.lifespan_context
+        lc = _get_lifespan_context(ctx)
         return await _handle_tag_tree(
             store=lc["store"],
             arguments={"prefix": prefix},
