@@ -52,7 +52,7 @@
   max_total_tokens: 10000
 
 - name: bookmark-search-by-topic
-  skill: bookmark
+  skill: recall
   description: "Claude should search existing bookmarks when asked to find one by topic"
   prompt: "/recall vector search --type bookmark"
   seed_entries:

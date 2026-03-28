@@ -85,6 +85,7 @@ def eval_runner():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(_SHOULD_SKIP, reason=_SKIP_REASON)
 @pytest.mark.parametrize("scenario", _ALL_SCENARIOS, ids=_SCENARIO_IDS)
 async def test_eval_scenario(scenario: EvalScenario, eval_runner) -> None:
@@ -135,9 +136,11 @@ def test_scenario_names_unique() -> None:
 def test_scenario_skills_valid() -> None:
     """Each scenario must reference a skill that has a SKILL.md file."""
     skills_dir = Path(__file__).parents[1] / ".claude" / "skills"
-    valid_skills = {p.parent.name for p in skills_dir.glob("*/SKILL.md")} if skills_dir.exists() else set()
+    if not skills_dir.exists():
+        pytest.skip("Skills directory not found")
+    valid_skills = {p.parent.name for p in skills_dir.glob("*/SKILL.md")}
     for scenario in _ALL_SCENARIOS:
-        assert scenario.skill in valid_skills or not valid_skills, (
+        assert scenario.skill in valid_skills, (
             f"Scenario '{scenario.name}' references unknown skill '{scenario.skill}'. "
             f"Valid skills: {sorted(valid_skills)}"
         )
@@ -181,6 +184,7 @@ def test_skill_coverage() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(_SHOULD_SKIP, reason=_SKIP_REASON)
 async def test_eval_aggregate_pass_rate(eval_runner) -> None:
     """At least 80% of scenarios must pass.
@@ -240,6 +244,7 @@ def _print_performance_report(results: list[ScenarioResult]) -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(_SHOULD_SKIP, reason=_SKIP_REASON)
 async def test_eval_save_baseline(eval_runner, tmp_path) -> None:
     """Run all scenarios and save results to a JSON baseline file.
@@ -268,6 +273,7 @@ async def test_eval_save_baseline(eval_runner, tmp_path) -> None:
     print(f"\nBaseline saved to {baseline_path} ({len(results)} scenarios)")
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(_SHOULD_SKIP, reason=_SKIP_REASON)
 async def test_eval_regression_check(eval_runner) -> None:
     """Compare current results against a saved baseline.

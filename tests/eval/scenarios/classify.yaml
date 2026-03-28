@@ -48,6 +48,7 @@
   seed_entries: []
   expected_tools:
     - distillery_status
+    - distillery_type_schemas
   max_latency_ms: 60000
   max_total_tokens: 8000
 

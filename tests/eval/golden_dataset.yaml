@@ -1,4 +1,4 @@
-# Golden dataset: 25 seed entries covering all EntryType values.
+# Golden dataset: 24 seed entries covering all EntryType values.
 # Used by multiple eval scenarios to pre-populate the knowledge base.
 
 entries:

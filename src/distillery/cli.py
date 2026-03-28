@@ -332,7 +332,7 @@ def _cmd_eval(
 
     # Resolve scenarios directory.
     if scenarios_dir is None:
-        default_dir = Path(__file__).parents[3] / "tests" / "eval" / "scenarios"
+        default_dir = Path(__file__).parents[2] / "tests" / "eval" / "scenarios"
         resolved_dir = default_dir if default_dir.exists() else Path("tests/eval/scenarios")
     else:
         resolved_dir = Path(scenarios_dir)
@@ -386,7 +386,8 @@ def _cmd_eval(
                 "tools_called": r.effectiveness.tools_called,
                 "failure_reasons": r.effectiveness.failure_reasons,
             })
-        print(json.dumps({"results": output, "passed": passed, "total": total, "pass_rate": pass_rate}, indent=2))
+        summary = {"results": output, "passed": passed, "total": total, "pass_rate": pass_rate}
+        print(json.dumps(summary, indent=2))
     else:
         for r in results:
             print(r.summary())

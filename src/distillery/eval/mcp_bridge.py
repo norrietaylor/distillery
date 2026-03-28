@@ -403,7 +403,7 @@ class MCPBridge:
 
     async def count_stored_entries(self) -> int:
         """Return the current number of entries in the store."""
-        results = await self._store.list(filters={}, limit=1000, offset=0)
+        results = await self._store.list_entries(filters=None, limit=2147483647, offset=0)
         return len(results)
 
     async def count_entries_since_seed(self, seed_count: int) -> int:
@@ -424,9 +424,10 @@ class MCPBridge:
         content = await self._dispatch(name, arguments)
         if content and hasattr(content[0], "text"):
             try:
-                return json.loads(content[0].text)  # type: ignore[union-attr]
+                result: dict[str, Any] = json.loads(content[0].text)
+                return result
             except json.JSONDecodeError:
-                return {"text": content[0].text}  # type: ignore[union-attr]
+                return {"text": str(content[0].text)}
         return {"error": True, "message": f"Unknown tool: {name}"}
 
     async def _dispatch(self, name: str, args: dict[str, Any]) -> Any:
@@ -454,7 +455,7 @@ class MCPBridge:
         if name == "distillery_check_dedup":
             return await _handle_check_dedup(store=store, config=config, arguments=args)
         if name == "distillery_classify":
-            return await _handle_classify(store=store, arguments=args)
+            return await _handle_classify(store=store, config=config, arguments=args)
         if name == "distillery_review_queue":
             return await _handle_review_queue(store=store, arguments=args)
         if name == "distillery_resolve_review":

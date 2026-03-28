@@ -64,7 +64,7 @@
 
 - name: distill-mcp-unavailable-message
   skill: distill
-  description: "When status check fails, Claude should show setup instructions (mocked via prompt)"
+  description: "Claude should call distillery_status even for lowercase distill prompts without the / prefix"
   prompt: "distill this insight: we should add circuit breakers to the embedding provider"
   seed_entries: []
   expected_tools:
