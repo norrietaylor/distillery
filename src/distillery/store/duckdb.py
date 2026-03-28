@@ -245,12 +245,20 @@ class DuckDBStore:
             )
 
     def _add_accessed_at_column(self, conn: duckdb.DuckDBPyConnection) -> None:
-        """Add the ``accessed_at`` column to ``entries`` if it does not exist."""
+        """
+        Ensure the `entries` table has an `accessed_at` TIMESTAMP column.
+        
+        If the column already exists this is a no-op; otherwise the table schema is altered to add `accessed_at`.
+        """
         conn.execute(_ADD_ACCESSED_AT_COLUMN)
         logger.debug("accessed_at column ready on entries table")
 
     def _sync_initialize(self) -> None:
-        """Synchronous initialisation: open connection, create schema."""
+        """
+        Initialize the DuckDB connection and ensure the database is ready for use.
+        
+        Opens or creates the DuckDB database, loads and configures the VSS extension, creates or migrates the schema (entries, logs, and metadata), validates or records embedding model metadata, and ensures the HNSW index and accessed_at column exist. On success, stores the active connection on the instance and marks the store as initialized.
+        """
         conn = self._open_connection()
         self._setup_vss(conn)
         self._create_schema(conn)
@@ -355,7 +363,18 @@ class DuckDBStore:
         return await asyncio.to_thread(self._sync_store, entry)
 
     def _sync_get(self, entry_id: str) -> Entry | None:
-        """Synchronous implementation of get(); called via asyncio.to_thread."""
+        """
+        Retrieve the entry with the given ID and convert it to an Entry object.
+        
+        Parameters:
+            entry_id (str): UUID of the entry to retrieve.
+        
+        Returns:
+            Entry | None: The matching Entry if found, `None` if no entry exists with the given ID.
+        
+        Notes:
+            Also attempts to update the entry's `accessed_at` timestamp; failures to update are ignored.
+        """
         conn = self.connection
         sql = (
             f"SELECT {self._ENTRY_COLUMNS} FROM entries WHERE id = ?"
@@ -384,7 +403,33 @@ class DuckDBStore:
         return await asyncio.to_thread(self._sync_get, entry_id)
 
     def _sync_update(self, entry_id: str, updates: dict[str, Any]) -> Entry:
-        """Synchronous implementation of update(); called via asyncio.to_thread."""
+        """
+        Apply partial updates to an existing entry and return its updated representation.
+        
+        Performs a database UPDATE for the entry identified by entry_id using the keys
+        provided in updates. Immutable fields are rejected. If `content` is updated,
+        a new embedding is computed and stored. `metadata` dicts are serialized to
+        JSON and `tags` lists are stored as arrays. The entry's `version` is
+        incremented and both `updated_at` and `accessed_at` are refreshed to the
+        current UTC time.
+        
+        Parameters:
+            entry_id (str): UUID of the entry to update.
+            updates (dict[str, Any]): Mapping of column names to new values. Supported
+                special cases:
+                  - Enum-like objects with a `.value` attribute are stored as that value.
+                  - `metadata`: dict values are serialized to JSON.
+                  - `tags`: lists are stored as array values.
+                  - `content`: triggers recomputation and storage of the embedding.
+        
+        Returns:
+            Entry: The entry record after the update.
+        
+        Raises:
+            ValueError: If updates include immutable fields (e.g., id, created_at, source).
+            KeyError: If no entry exists with the given id or if the entry cannot be
+                found after the update.
+        """
         # Reject attempts to change immutable fields.
         bad_keys = self._IMMUTABLE_FIELDS & updates.keys()
         if bad_keys:
@@ -615,19 +660,33 @@ class DuckDBStore:
         filters: dict[str, Any] | None,
         limit: int,
     ) -> list[SearchResult]:
-        """Perform semantic search with optional metadata filters.
-
-        Embeds *query* via the configured embedding provider, then uses the
-        HNSW index to find nearest neighbours by cosine similarity.  Metadata
-        filters are applied as SQL ``WHERE`` predicates.
-
-        Returns a ``list[SearchResult]`` sorted by descending similarity.
+        """
+        Search the store for entries semantically similar to the provided query, optionally constrained by metadata filters.
+        
+        Applies the given metadata filters to restrict candidates and returns matches sorted by descending similarity. Scores in each SearchResult are normalized to the range [0, 1].
+        
+        Parameters:
+            query (str): Text to search for.
+            filters (dict[str, Any] | None): Optional metadata filters. Supported keys include
+                `entry_type`, `author`, `project`, `tags`, `status`, `date_from`, and `date_to`.
+            limit (int): Maximum number of results to return.
+        
+        Returns:
+            list[SearchResult]: Matches ordered by decreasing similarity; each result contains the matched Entry and a `score` in [0, 1].
         """
         from distillery.store.protocol import SearchResult
 
         embedding = self._embedding_provider.embed(query)
 
         def _sync() -> list[SearchResult]:
+            """
+            Execute a synchronous similarity search using the prepared embedding and filters, returning matching entries ordered by similarity.
+            
+            Performs a SQL query that computes cosine similarity between stored embeddings and the provided embedding, orders results by similarity descending, and returns a list of SearchResult objects. As a best-effort side effect, updates the `accessed_at` timestamp for returned entries; failures to update are ignored.
+            
+            Returns:
+                list[SearchResult]: A list of search results ordered by descending similarity. Each result's `score` is the raw cosine similarity value (float, typically in the range -1.0 to 1.0).
+            """
             conn = self.connection
 
             where_clauses, params = self._build_filter_clauses(filters)
@@ -728,15 +787,25 @@ class DuckDBStore:
         limit: int,
         offset: int,
     ) -> list[Entry]:
-        """List entries with optional metadata filtering and pagination.
-
-        Unlike ``search``, this method does **not** perform semantic ranking.
-        Results are ordered by ``created_at`` descending (newest first).
-
-        Returns a ``list[Entry]``.
+        """
+        Retrieve entries matching optional filters, ordered by created_at descending.
+        
+        Parameters:
+        	filters (dict[str, Any] | None): Filter criteria accepted by the store (see `_build_filter_clauses`). If None, no filtering is applied.
+        	limit (int): Maximum number of entries to return.
+        	offset (int): Number of entries to skip before returning results.
+        
+        Returns:
+        	list[Entry]: Entries matching the filters for the requested page, ordered newest first.
         """
 
         def _sync() -> list[Entry]:
+            """
+            Fetch entries from the database applying filters, ordering by creation time, and paginating the results.
+            
+            Returns:
+                list[Entry]: Entries that match the provided filters, ordered by created_at descending and limited/offset according to the surrounding scope.
+            """
             conn = self.connection
 
             where_clauses, params = self._build_filter_clauses(filters)
@@ -773,7 +842,18 @@ class DuckDBStore:
         result_scores: list[float],
         session_id: str | None,
     ) -> str:
-        """Synchronous implementation of log_search(); called via asyncio.to_thread."""
+        """
+        Record a search event in the search_log table and return its generated ID.
+        
+        Parameters:
+            query (str): The original search query text.
+            result_entry_ids (list[str]): Ordered list of entry IDs returned by the search.
+            result_scores (list[float]): Corresponding similarity scores for each returned entry.
+            session_id (str | None): Optional session identifier to associate with the search.
+        
+        Returns:
+            search_id (str): UUID string identifying the inserted search_log row.
+        """
         search_id = str(uuid.uuid4())
         conn = self.connection
         sql = (
@@ -792,14 +872,19 @@ class DuckDBStore:
         result_scores: list[float],
         session_id: str | None = None,
     ) -> str:
-        """Record a search event and return its generated ID.
-
-        Appends a row to the ``search_log`` table capturing the query,
-        the IDs and similarity scores of returned entries, and an optional
-        session identifier for grouping related searches.
-
+        """
+        Record a search event in the search_log table.
+        
+        Inserts a row containing the search `query`, the lists of returned entry IDs and their corresponding similarity `result_scores`, and an optional `session_id`. `result_entry_ids` and `result_scores` are parallel lists and must have the same length.
+        
+        Parameters:
+            query (str): The text of the search query.
+            result_entry_ids (list[str]): List of entry UUIDs returned by the search, in result order.
+            result_scores (list[float]): List of similarity scores corresponding to `result_entry_ids`.
+            session_id (str | None): Optional identifier to group related searches.
+        
         Returns:
-            The UUID string of the newly created ``search_log`` row.
+            search_id (str): UUID string of the newly created `search_log` row.
         """
         return await asyncio.to_thread(
             self._sync_log_search, query, result_entry_ids, result_scores, session_id
@@ -811,7 +896,17 @@ class DuckDBStore:
         entry_id: str,
         signal: str,
     ) -> str:
-        """Synchronous implementation of log_feedback(); called via asyncio.to_thread."""
+        """
+        Record a feedback signal for a search and return the new feedback entry ID.
+        
+        Parameters:
+            search_id (str): UUID of the related search (must correspond to an existing search_log entry).
+            entry_id (str): UUID of the entry the feedback refers to.
+            signal (str): Feedback signal (e.g., "click", "relevant", "not_relevant").
+        
+        Returns:
+            feedback_id (str): UUID of the newly created feedback_log row.
+        """
         feedback_id = str(uuid.uuid4())
         conn = self.connection
         sql = (
@@ -835,13 +930,13 @@ class DuckDBStore:
         entry_id: str,
         signal: str,
     ) -> str:
-        """Record implicit feedback for a search result and return its ID.
-
-        Appends a row to the ``feedback_log`` table linking a specific
-        search event to the entry the user interacted with.
-
+        """
+        Record a feedback event linking a search to an interacted entry.
+        
+        Inserts a row into the `feedback_log` table that references a prior search event.
+        
         Returns:
-            The UUID string of the newly created ``feedback_log`` row.
+            str: UUID string of the created `feedback_log` row.
         """
         return await asyncio.to_thread(
             self._sync_log_feedback, search_id, entry_id, signal

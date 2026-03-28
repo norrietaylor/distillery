@@ -51,13 +51,33 @@ _UNIT_B = [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
 
 def _interpolated_vector(a: list[float], b: list[float], t: float) -> list[float]:
-    """Return an L2-normalised vector lying between *a* and *b* at parameter *t*."""
+    """
+    Compute the L2-normalized vector interpolated between a and b at fraction t.
+    
+    Parameters:
+        a (list[float]): First vector (same length as b).
+        b (list[float]): Second vector (same length as a).
+        t (float): Interpolation parameter where 0.0 yields `a` and 1.0 yields `b`.
+    
+    Returns:
+        list[float]: An L2-normalized vector (length 1) positioned between `a` and `b` according to `t`.
+    """
     vec = [a[i] * (1.0 - t) + b[i] * t for i in range(len(a))]
     magnitude = math.sqrt(sum(x * x for x in vec))
     return [x / magnitude for x in vec]
 
 
 def _cosine(u: list[float], v: list[float]) -> float:
+    """
+    Compute the dot product of two equal-length numeric vectors; if both vectors are L2-normalized, this equals their cosine similarity.
+    
+    Parameters:
+        u (list[float]): First vector.
+        v (list[float]): Second vector of the same length as `u`.
+    
+    Returns:
+        float: The sum of element-wise products (dot product); equals cosine similarity when inputs are normalized.
+    """
     return sum(a * b for a, b in zip(u, v, strict=True))
 
 
@@ -67,6 +87,15 @@ def _cosine(u: list[float], v: list[float]) -> float:
 
 
 def _make_config(conflict_threshold: float = 0.60) -> DistilleryConfig:
+    """
+    Create a DistilleryConfig configured for in-memory tests with a controlled embedding model.
+    
+    Parameters:
+        conflict_threshold (float): Similarity threshold (0.0–1.0) used to determine whether two entries are considered a conflict.
+    
+    Returns:
+        DistilleryConfig: Configuration with an in-memory database, a controlled 8-dimensional embedding model, and a classification section using the provided conflict threshold and a fixed confidence threshold of 0.6.
+    """
     return DistilleryConfig(
         storage=StorageConfig(database_path=":memory:"),
         embedding=EmbeddingConfig(provider="", model="controlled-8d", dimensions=8),
@@ -84,11 +113,26 @@ def _make_config(conflict_threshold: float = 0.60) -> DistilleryConfig:
 
 @pytest.fixture
 def embedding_provider(controlled_embedding_provider: ControlledEmbeddingProvider) -> ControlledEmbeddingProvider:
+    """
+    Provide the injected ControlledEmbeddingProvider fixture for tests.
+    
+    Returns:
+        The same ControlledEmbeddingProvider instance that was passed in.
+    """
     return controlled_embedding_provider
 
 
 @pytest.fixture
 async def store(embedding_provider: ControlledEmbeddingProvider) -> DuckDBStore:  # type: ignore[return]
+    """
+    Provide an initialized in-memory DuckDBStore backed by the given embedding provider for use in tests.
+    
+    Parameters:
+        embedding_provider (ControlledEmbeddingProvider): Embedding provider used by the store to generate vectors for entries.
+    
+    Returns:
+        DuckDBStore: An initialized in-memory store ready for use; the store will be closed after the caller finishes using it.
+    """
     s = DuckDBStore(db_path=":memory:", embedding_provider=embedding_provider)
     await s.initialize()
     yield s
@@ -136,6 +180,12 @@ class TestConflictCheckerParseResponse:
     """ConflictChecker.parse_response must handle valid and malformed responses."""
 
     def _make_checker(self) -> ConflictChecker:
+        """
+        Create a ConflictChecker configured with a mocked store for use in tests.
+        
+        Returns:
+            ConflictChecker: An instance whose `store` is a MagicMock.
+        """
         return ConflictChecker(store=MagicMock())
 
     def test_valid_conflict_response_returns_true(self) -> None:
@@ -188,6 +238,17 @@ class TestConflictCheckerCheck:
         content: str,
         score: float,
     ) -> SearchResult:
+        """
+        Create a SearchResult whose entry contains the given content and a forced id.
+        
+        Parameters:
+            entry_id (str): The id to assign to the created entry.
+            content (str): The textual content for the entry.
+            score (float): The similarity score to attach to the SearchResult.
+        
+        Returns:
+            SearchResult: A search result with an entry containing `content`, with `entry.id` set to `entry_id`, and the provided `score`.
+        """
         entry = make_entry(content=content)
         # Patch id so we can match it
         object.__setattr__(entry, "id", entry_id)
@@ -213,7 +274,11 @@ class TestConflictCheckerCheck:
         assert result.conflicts == []
 
     async def test_similar_entries_with_conflict_llm_response_returns_conflict(self) -> None:
-        """When LLM says is_conflict=True, check returns ConflictResult with that entry."""
+        """
+        Verifies that when an LLM marks a similar stored entry as a conflict, ConflictChecker.check includes that entry in the returned ConflictResult.
+        
+        The resulting conflict entry is expected to contain the stored entry's id, the LLM's conflict reasoning, and the similarity score.
+        """
         mock_store = AsyncMock()
         mock_store.find_similar.return_value = [
             self._make_search_result("entry-abc", "Existing contradicting content", 0.75),
@@ -514,7 +579,9 @@ class TestMCPCheckConflictsSecondPass:
         self,
         store: DuckDBStore,
     ) -> None:
-        """Omitting 'content' returns an INVALID_INPUT error."""
+        """
+        Verify that calling _handle_check_conflicts without a "content" field produces an INVALID_INPUT error in the response.
+        """
         config = _make_config()
         response = await _handle_check_conflicts(store, config, {})
         data = parse_mcp_response(response)

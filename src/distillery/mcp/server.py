@@ -219,7 +219,19 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
 
     @asynccontextmanager
     async def lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
-        """Startup / shutdown lifecycle for the Distillery MCP server."""
+        """
+        Manage the startup and shutdown lifecycle for the Distillery MCP server.
+        
+        Yields:
+            A lifespan context dict with:
+              - "store": an initialized DuckDBStore instance connected to the configured database.
+              - "config": the Distillery configuration used to construct shared components.
+              - "embedding_provider": the instantiated embedding provider.
+              - "recent_searches": an in-memory list used to track recent search events for implicit feedback correlation.
+        
+        Notes:
+            On exit, the store is closed to release resources.
+        """
         logger.info("Distillery MCP server starting up …")
 
         # Build embedding provider and store.
@@ -263,10 +275,13 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
 
     @server.tool
     async def distillery_status(ctx: Context) -> list[types.TextContent]:
-        """Return database statistics for the Distillery knowledge store.
-
-        Returns aggregate counts (total entries, by type, by status), database
-        file size, and the active embedding model name and dimension count.
+        """
+        Retrieve database and embedding model statistics for the Distillery store.
+        
+        Returns aggregate counts (total entries, counts by type and status), database file size (or `None` for in-memory DBs), and embedding model metadata (model name and dimensions).
+        
+        Returns:
+            list[types.TextContent]: A single-element list containing a TextContent block with a JSON-serializable dictionary of statistics (e.g., `entries`, `entries_by_type`, `entries_by_status`, `db_size_bytes`, `embedding_model`, and `status`).
         """
         lc = ctx.lifespan_context
         return await _handle_status(
@@ -287,14 +302,21 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
         dedup_threshold: float = _DEFAULT_DEDUP_THRESHOLD,
         dedup_limit: int = _DEFAULT_DEDUP_LIMIT,
     ) -> list[types.TextContent]:
-        """Store a new knowledge entry in the Distillery store.
-
-        Creates a new entry from the supplied content and metadata, persists it,
-        then runs a deduplication check against similar existing entries.  Returns
-        the new entry ID plus any near-duplicate warnings and conflict candidates.
-
-        entry_type must be one of: session, bookmark, minutes, meeting,
-        reference, idea, inbox.
+        """
+        Store a new knowledge entry and return the created entry ID with optional deduplication and conflict information.
+        
+        Creates and persists an entry from the provided content and metadata, performs non-fatal deduplication and conflict checks, and returns a single MCP TextContent block containing a JSON-serializable response.
+        
+        Parameters:
+            entry_type (str): One of: "session", "bookmark", "minutes", "meeting", "reference", "idea", "inbox".
+            dedup_threshold (float): Similarity threshold (0.0–1.0) used to surface near-duplicate warnings.
+            dedup_limit (int): Maximum number of deduplication warnings to include.
+        
+        Returns:
+            list[types.TextContent]: A one-element list with a TextContent block whose JSON object contains:
+                - On success: "entry_id" and optionally "warnings" (list), "warning_message", and conflict-related keys
+                  such as "conflict_message" and "conflict_candidates".
+                - On validation or persistence failures: an error object with "error", "code", and "message".
         """
         lc = ctx.lifespan_context
         arguments: dict[str, Any] = {
@@ -321,13 +343,16 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
         ctx: Context,
         entry_id: str,
     ) -> list[types.TextContent]:
-        """Retrieve a single knowledge entry by its ID.
-
-        Looks up the entry with the given ID and returns its full content and
-        metadata.  Also records an implicit positive feedback signal if this
-        retrieval follows a recent search that returned this entry.
-
-        Returns a NOT_FOUND error if no entry exists with the given ID.
+        """
+        Retrieve a knowledge entry by ID.
+        
+        If the entry is found, returns a single TextContent block containing the entry's serialized dictionary. If this retrieval follows a recent search that returned the entry, an implicit positive feedback event is recorded. If no entry exists with the given ID, an error block with code "NOT_FOUND" is returned.
+        
+        Parameters:
+            entry_id (str): The identifier of the entry to retrieve.
+        
+        Returns:
+            list[types.TextContent]: A one-element list containing either the serialized entry dict on success or an error object with code `"NOT_FOUND"` if the entry is missing.
         """
         lc = ctx.lifespan_context
         return await _handle_get(
@@ -393,13 +418,23 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
         limit: int = 20,
         offset: int = 0,
     ) -> list[types.TextContent]:
-        """List knowledge entries with optional filters and pagination.
-
-        Returns entries ordered by creation time (newest first) without
-        semantic ranking.  Use distillery_search for similarity-ranked results.
-
-        All filter parameters are optional.  date_from and date_to accept
-        ISO 8601 date strings (e.g. "2024-01-15").
+        """
+        List knowledge entries with optional filters and pagination.
+        
+        Returns entries ordered by creation time (newest first). Filtering is exact-match for
+        string fields; `tags` should be a list of tag strings. `date_from` and `date_to`
+        accept ISO 8601 date strings (e.g. "2024-01-15") and are used to filter by
+        creation date (inclusive).
+        
+        Parameters:
+            date_from (str | None): ISO 8601 start date to include (inclusive).
+            date_to (str | None): ISO 8601 end date to include (inclusive).
+            tags (list[str] | None): List of tag strings to filter by.
+        
+        Returns:
+            list[types.TextContent]: MCP TextContent blocks containing a JSON object with
+            keys "entries" (list of entry dicts), "count" (total matching entries),
+            "limit", and "offset".
         """
         lc = ctx.lifespan_context
         arguments: dict[str, Any] = {"limit": limit, "offset": offset}
@@ -480,13 +515,20 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
         threshold: float = 0.8,
         limit: int = 10,
     ) -> list[types.TextContent]:
-        """Find entries similar to the provided content for deduplication.
-
-        Embeds the content string and returns stored entries whose cosine
-        similarity exceeds the threshold, sorted by descending similarity.
-
-        threshold must be in [0.0, 1.0] (default 0.8).
-        limit must be between 1 and 200 (default 10).
+        """
+        Find stored entries whose content is similar to the provided text.
+        
+        Parameters:
+            ctx (Context): MCP invocation context (provides lifespan state).
+            content (str): Text to compare against stored entries.
+            threshold (float): Similarity cutoff in the range 0.0 to 1.0 (default 0.8).
+            limit (int): Maximum number of results to return, between 1 and 200 (default 10).
+        
+        Returns:
+            list[types.TextContent]: A single MCP TextContent block containing a JSON object with keys:
+                - `results`: list of `{score, entry}` objects (scores rounded, entries serialized),
+                - `count`: total number of matches returned,
+                - `threshold`: the similarity threshold used.
         """
         lc = ctx.lifespan_context
         return await _handle_find_similar(
@@ -504,16 +546,15 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
         suggested_tags: list[str] | None = None,
         suggested_project: str | None = None,
     ) -> list[types.TextContent]:
-        """Persist a pre-computed classification result onto an existing entry.
-
-        Stores the classification result fields onto the entry and updates its
-        status based on the confidence threshold from config.  If confidence
-        meets the threshold the entry becomes active, otherwise pending_review.
-        Handles reclassification of already-classified entries.
-
-        entry_type must be one of: session, bookmark, minutes, meeting,
-        reference, idea, inbox.
-        confidence must be in [0.0, 1.0].
+        """
+        Apply a pre-computed classification to an existing entry and persist the resulting updates.
+        
+        Parameters:
+            entry_type (str): New entry type; must be one of: "session", "bookmark", "minutes", "meeting", "reference", "idea", "inbox".
+            confidence (float): Classification confidence between 0.0 and 1.0 inclusive; used to determine the updated entry status.
+        
+        Returns:
+            list[types.TextContent]: A single MCP TextContent block containing the serialized updated entry or an error payload.
         """
         lc = ctx.lifespan_context
         arguments: dict[str, Any] = {
@@ -539,14 +580,19 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
         entry_type: str | None = None,
         limit: int = 20,
     ) -> list[types.TextContent]:
-        """Return entries awaiting human review after classification.
-
-        Returns pending_review entries sorted by created_at descending with id,
-        content preview, entry_type, confidence, author, created_at, and
-        classification_reasoning.
-
-        entry_type optionally filters to a specific type.
-        limit must be between 1 and 500 (default 20).
+        """
+        List entries awaiting human review after classification.
+        
+        Parameters:
+        	entry_type (str | None): If provided, filter results to this entry type.
+        	limit (int): Maximum number of entries to return; must be between 1 and 500.
+        
+        Returns:
+        	list[types.TextContent]: A single-element MCP text content payload containing a JSON object with:
+        		- entries: list of review items each containing `id`, `content_preview` (first 200 chars),
+        		  `entry_type`, `confidence` (from metadata), `author`, `created_at` (ISO string),
+        		  and `classification_reasoning` (if present).
+        		- count: total number of entries returned.
         """
         lc = ctx.lifespan_context
         arguments: dict[str, Any] = {"limit": limit}
@@ -565,17 +611,22 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
         new_entry_type: str | None = None,
         reviewer: str | None = None,
     ) -> list[types.TextContent]:
-        """Resolve a pending-review entry by approving, reclassifying, or archiving.
-
-        action must be one of:
-          approve     - sets status=active, records reviewed_at in metadata.
-          reclassify  - updates entry_type (requires new_entry_type), records
-                        reclassified_from in metadata.
-          archive     - soft-deletes the entry by setting status=archived.
-
-        new_entry_type is required when action='reclassify'.
-        new_entry_type must be one of: session, bookmark, minutes, meeting,
-        reference, idea, inbox.
+        """
+        Resolve a pending-review entry by approving, reclassifying, or archiving.
+        
+        Performs one of three actions on the entry identified by `entry_id`:
+        - "approve": sets status to active and records `reviewed_at` (and `reviewed_by` if `reviewer` provided) in metadata.
+        - "reclassify": requires `new_entry_type`; updates the entry's type, records `reclassified_from` and `reviewed_at` (and `reviewed_by` if provided) in metadata.
+        - "archive": sets status to archived and records archival metadata.
+        
+        Parameters:
+            entry_id (str): ID of the entry to update.
+            action (str): One of "approve", "reclassify", or "archive".
+            new_entry_type (str | None): Required when `action` is "reclassify". Must be one of: "session", "bookmark", "minutes", "meeting", "reference", "idea", "inbox".
+            reviewer (str | None): Optional identifier of the reviewer to record as `reviewed_by`.
+        
+        Returns:
+            list[types.TextContent]: A one-element MCP TextContent list containing the updated entry as a JSON-serializable object on success, or an error payload on failure.
         """
         lc = ctx.lifespan_context
         arguments: dict[str, Any] = {"entry_id": entry_id, "action": action}
@@ -593,12 +644,22 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
         ctx: Context,
         content: str,
     ) -> list[types.TextContent]:
-        """Run a deduplication check against the knowledge store.
-
-        Runs the DeduplicationChecker against the store using thresholds from
-        config and returns the deduplication result including action
-        (store/skip/merge/link), highest similarity score, reasoning, and
-        list of similar entries.
+        """
+        Perform a deduplication check of the given content against the store.
+        
+        Runs the configured deduplication logic and returns a serialized response describing the recommended action and matching entries.
+        
+        Parameters:
+            content (str): The text to check for duplicates.
+        
+        Returns:
+            list[types.TextContent]: A single-element list whose JSON payload contains:
+                - action (str): One of `store`, `skip`, `merge`, or `link`.
+                - highest_score (float): Highest similarity score found.
+                - reasoning (str): Human-readable explanation for the chosen action.
+                - similar_entries (list): List of matches; each item is a dict with
+                  `id`, `score` (float), `content_preview` (str, up to 120 chars),
+                  `entry_type`, `author`, `project`, and `created_at` (ISO string or None).
         """
         lc = ctx.lifespan_context
         return await _handle_check_dedup(
@@ -613,20 +674,19 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
         content: str,
         llm_responses: dict[str, Any] | None = None,
     ) -> list[types.TextContent]:
-        """Check for conflicting information in the knowledge store.
-
+        """
+        Check for potential conflicts between the provided content and existing knowledge-store entries.
+        
         Supports a two-pass workflow:
-
-        First pass (llm_responses absent or None):
-          Returns conflict_candidates with a conflict_prompt for each similar
-          entry so the calling LLM can evaluate them.
-
-        Second pass (llm_responses provided):
-          Accepts a mapping of {entry_id: {is_conflict: bool, reasoning: str}}
-          and returns has_conflicts plus the list of confirmed conflicts.
-
-        Call this tool once without llm_responses to get candidates, evaluate
-        each conflict_prompt, then call again with llm_responses to confirm.
+        - First pass (no `llm_responses`): returns `conflict_candidates` with a `conflict_prompt` for each similar entry so an external LLM can evaluate whether it is a conflict.
+        - Second pass (with `llm_responses`): accepts a mapping `{entry_id: {"is_conflict": bool, "reasoning": str}}` and returns `has_conflicts` plus a list of confirmed `conflicts` with reasoning.
+        
+        Parameters:
+            content (str): The content to check for conflicts against stored entries.
+            llm_responses (dict[str, Any] | None): Optional mapping of LLM evaluations for candidates (present only in the second pass).
+        
+        Returns:
+            list[types.TextContent]: A single MCP `TextContent` block containing a JSON-serializable payload. In the first pass the payload includes `conflict_candidates` (and guidance); in the second pass it includes `has_conflicts` and `conflicts` (confirmed items with reasoning).
         """
         lc = ctx.lifespan_context
         arguments: dict[str, Any] = {"content": content}
@@ -648,12 +708,16 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
         ctx: Context,
         period_days: int = 30,
     ) -> list[types.TextContent]:
-        """Return usage metrics and statistics for the Distillery knowledge store.
-
-        Aggregates usage statistics from the store including entry counts,
-        search activity, and feedback signals over the specified period.
-
-        period_days must be >= 1 (default 30).
+        """
+        Provide usage metrics and statistics for the Distillery knowledge store.
+        
+        Aggregates entry counts, activity windows, search and feedback summaries, staleness and storage information for the past `period_days`.
+        
+        Parameters:
+            period_days (int): Number of days to include in period-specific metrics; must be >= 1.
+        
+        Returns:
+            list[types.TextContent]: A one-element list containing a TextContent block with a JSON-serializable dict of metrics (keys include `entries`, `activity`, `search`, `quality`, `staleness`, and `storage`).
         """
         lc = ctx.lifespan_context
         return await _handle_metrics(
@@ -668,13 +732,16 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
         ctx: Context,
         entry_type: str | None = None,
     ) -> list[types.TextContent]:
-        """Return search quality signals from the Distillery knowledge store.
-
-        Aggregates search quality signals from search_log and feedback_log
-        including total searches, total feedback, positive rate, average
-        result count, and per-type breakdown.
-
-        entry_type optionally filters to a specific type.
+        """
+        Retrieve aggregated search-quality metrics from the Distillery store.
+        
+        Aggregates counts from `search_log` and `feedback_log` and computes totals and rates such as total searches, total feedback, positive feedback rate, and average result count. When `entry_type` is provided, metrics are filtered to that entry type if supported.
+        
+        Parameters:
+            entry_type (str | None): Optional entry type to filter metrics by.
+        
+        Returns:
+            list[types.TextContent]: A one-element MCP `TextContent` list containing a JSON-serializable object with metrics (totals, rates, and optional per-type breakdown).
         """
         lc = ctx.lifespan_context
         arguments: dict[str, Any] = {}
@@ -692,14 +759,23 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
         limit: int = 20,
         entry_type: str | None = None,
     ) -> list[types.TextContent]:
-        """Return entries that have not been accessed within a staleness window.
-
-        An entry's last access time is determined by
-        COALESCE(accessed_at, updated_at) so entries without an explicit
-        access timestamp fall back to their last modification time.
-
-        days defaults to config.classification.stale_days if not provided.
-        limit must be >= 1 (default 20).
+        """
+        Return a list of entries that are considered stale based on last access time.
+        
+        If `days` is omitted, the server configuration's `classification.stale_days` is used. `limit` must be >= 1 and bounds the number of returned entries. When provided, `entry_type` restricts results to that entry type.
+        
+        Parameters:
+            ctx (Context): MCP request context providing lifespan state.
+            days (int | None): Age threshold in days; entries with COALESCE(accessed_at, updated_at) older than this are stale.
+            limit (int): Maximum number of stale entries to return.
+            entry_type (str | None): Optional entry type filter.
+        
+        Returns:
+            list[types.TextContent]: A single TextContent block containing a JSON object with keys:
+                - days_threshold: the days cutoff used
+                - entry_type_filter: the entry_type filter or null
+                - stale_count: total number of matching stale entries (may exceed returned list)
+                - entries: array of stale entry summaries (id, content_preview, entry_type, author, project, last_accessed, days_since)
         """
         lc = ctx.lifespan_context
         arguments: dict[str, Any] = {"limit": limit}
@@ -834,22 +910,19 @@ async def _handle_store(
     arguments: dict[str, Any],
     cfg: DistilleryConfig | None = None,
 ) -> list[types.TextContent]:
-    """Implement the ``distillery_store`` tool.
-
-    Creates a new ``Entry`` from the supplied arguments, persists it via the
-    store, then runs ``find_similar`` to surface any near-duplicate entries
-    that already exist (excluding the just-stored entry).  Also performs a
-    non-fatal conflict check and returns ``conflict_candidates`` when similar
-    entries are found above the configured ``conflict_threshold``.
-
-    Args:
-        store: Initialised ``DuckDBStore``.
-        arguments: Raw MCP tool arguments dict.
-        cfg: Loaded :class:`~distillery.config.DistilleryConfig`.  When
-            ``None`` a default config is used.
-
+    """
+    Create and persist a new Entry from the provided arguments, run deduplication and a non-fatal conflict check, and return the stored entry id along with any warnings or conflict candidates.
+    
+    Parameters:
+        arguments (dict): MCP tool arguments. Required keys: `content`, `entry_type`, `author`. Optional keys: `project`, `tags` (list), `metadata` (dict), `dedup_threshold` (number), `dedup_limit` (int).
+        cfg (DistilleryConfig | None): Optional configuration used to derive classification/conflict thresholds; when omitted a default conflict threshold of 0.60 is used.
+    
     Returns:
-        MCP content list containing ``{"entry_id": ..., "warnings": [...]}``.
+        list[types.TextContent]: MCP content list containing a JSON-serializable object with at least `entry_id`. May also include:
+          - `warnings`: list of similar-entry summaries (id, score, content_preview) when near-duplicates were found,
+          - `warning_message`: human-readable summary of warnings,
+          - `conflicts`: list of conflict candidate objects (entry_id, content_preview, similarity_score, conflict_reasoning),
+          - `conflict_message`: guidance message when conflict candidates are returned.
     """
     from distillery.models import Entry, EntrySource, EntryType
 
@@ -994,28 +1067,17 @@ async def _handle_get(
     recent_searches: list[dict[str, Any]] | None = None,
     config: DistilleryConfig | None = None,
 ) -> list[types.TextContent]:
-    """Implement the ``distillery_get`` tool.
-
-    Before returning the entry, checks *recent_searches* for any search within
-    the configured ``feedback_window_minutes`` that included this entry.  If
-    found, records a positive implicit feedback signal via
-    ``store.log_feedback()``.  Expired entries are pruned from
-    *recent_searches* on each call.
-
-    Args:
-        store: Initialised ``DuckDBStore``.
-        arguments: Raw MCP tool arguments dict (must contain ``entry_id``).
-        recent_searches: Shared in-memory list of recent search events used
-            for implicit feedback correlation.  Each element is a dict with
-            keys ``search_id`` (str), ``entry_ids`` (set[str]), and
-            ``timestamp`` (datetime).  When ``None`` (e.g. in unit tests),
-            feedback recording is skipped.
-        config: Loaded :class:`~distillery.config.DistilleryConfig` used to
-            read ``classification.feedback_window_minutes``.  Defaults to
-            5 minutes when ``None``.
-
+    """
+    Retrieve an entry by its ID and, when applicable, record implicit positive feedback.
+    
+    Validates presence of `entry_id`, fetches the entry from `store`, and returns the serialized entry. If `recent_searches` is provided, prunes expired search records (based on `config.classification.feedback_window_minutes`, or 5 minutes when `config` is None) and logs a single implicit positive feedback event per (search_id, entry_id) pair for any recent search that included this entry. Failures to log feedback are caught and do not prevent returning the entry.
+    
+    Parameters:
+        recent_searches (list[dict]): Optional shared in-memory list of recent search events; each element must contain `search_id` (str), `entry_ids` (set[str]), and `timestamp` (datetime). When `None`, implicit feedback recording is skipped.
+        config (DistilleryConfig | None): Optional configuration used to read `classification.feedback_window_minutes`; defaults to 5 minutes when `None`.
+    
     Returns:
-        MCP content list with the serialised entry or a NOT_FOUND error.
+        list[types.TextContent]: MCP content list containing the serialized entry on success, or an error response (e.g., `NOT_FOUND`, `INVALID_INPUT`, `STORE_ERROR`).
     """
     err = validate_required(arguments, "entry_id")
     if err:
@@ -1200,26 +1262,17 @@ async def _handle_search(
     arguments: dict[str, Any],
     recent_searches: list[dict[str, Any]] | None = None,
 ) -> list[types.TextContent]:
-    """Implement the ``distillery_search`` tool.
-
-    Embeds the query string via the store's embedding provider and returns
-    entries ranked by cosine similarity descending, with optional metadata
-    filters applied.
-
-    After returning results, logs the search event via ``store.log_search()``
-    and appends a record to *recent_searches* for implicit feedback correlation.
-
-    Args:
-        store: Initialised :class:`~distillery.store.duckdb.DuckDBStore`.
-        arguments: Tool argument dict containing at minimum ``query``.
-        recent_searches: Shared in-memory list of recent search events used
-            for implicit feedback correlation.  Each element is a dict with
-            keys ``search_id`` (str), ``entry_ids`` (set[str]), and
-            ``timestamp`` (datetime).  When ``None`` (e.g. in unit tests),
-            search logging is skipped.
-
+    """
+    Search stored entries for a text query and return matching entries ranked by similarity.
+    
+    Performs validation on `query` and `limit`, applies optional filters from `arguments`, and returns search hits ordered by descending similarity. When `recent_searches` is provided and results are non-empty, logs the search via the store and appends a compact record to `recent_searches` for later implicit-feedback correlation; failures to log do not affect the returned results.
+    
+    Parameters:
+        arguments: Dictionary containing at minimum the key `query` (str). May include optional filter keys (e.g., `entry_type`, `author`, `project`, `tags`, `status`, `date_from`, `date_to`) and `limit` (int).
+        recent_searches: Optional shared in-memory list used for implicit feedback correlation. When provided, a record with keys `search_id` (str), `entry_ids` (set[str]), and `timestamp` (datetime) will be appended for logged searches. If `None`, search logging and in-memory tracking are skipped.
+    
     Returns:
-        MCP content list with a JSON payload of ``results`` and ``count``.
+        MCP content list containing a single JSON object with `results` (list of objects each with `score` and `entry`) and `count` (int) describing the number of results returned.
     """
     err = validate_required(arguments, "query")
     if err:
@@ -1765,19 +1818,14 @@ async def _handle_metrics(
     embedding_provider: Any,
     arguments: dict[str, Any],
 ) -> list[types.TextContent]:
-    """Implement the ``distillery_metrics`` tool.
-
-    Aggregates usage statistics from the DuckDB store and returns them as a
-    JSON payload.  All queries are read-only.
-
-    Args:
-        store: Initialised :class:`~distillery.store.duckdb.DuckDBStore`.
-        config: The loaded Distillery configuration.
-        embedding_provider: The active embedding provider instance.
-        arguments: Tool argument dict.  Accepts optional ``period_days`` (int).
-
+    """
+    Aggregate usage and quality metrics from the DuckDB store for the Distillery instance.
+    
+    Parameters:
+        arguments (dict): Tool arguments; supports optional `period_days` (int) specifying the lookback window in days (must be >= 1). Other parameters are ignored.
+    
     Returns:
-        MCP content list with a single JSON ``TextContent`` block.
+        list[types.TextContent]: A single MCP `TextContent` block containing a JSON-serializable dict with aggregated metrics (entries, activity, search, quality, staleness, and storage sections).
     """
     # --- validate period_days -----------------------------------------------
     period_days_raw = arguments.get("period_days", 30)
@@ -1804,23 +1852,19 @@ def _sync_gather_metrics(
     embedding_provider: Any,
     period_days: int,
 ) -> dict[str, Any]:
-    """Synchronous helper that queries DuckDB for all metrics.
-
-    Runs inside ``asyncio.to_thread`` so that blocking DuckDB calls do not
-    stall the event loop.  Handles missing ``search_log`` and
-    ``feedback_log`` tables gracefully by returning zero counts.
-
-    Args:
-        store: Initialised ``DuckDBStore`` whose ``connection`` property is
-            available.
-        config: Loaded ``DistilleryConfig``.
-        embedding_provider: Active embedding provider (for model metadata).
-        period_days: The "recent" window in days used for activity/search
-            period metrics.
-
+    """
+    Gather comprehensive DuckDB-backed metrics for Distillery.
+    
+    Collects entry counts, activity windows, search statistics (if available), feedback quality (if available), staleness estimates, and storage/embedding metadata; missing auxiliary tables yield zeroed metrics.
+    
+    Parameters:
+        store: Initialized DuckDBStore exposing a live `connection`.
+        config: Loaded DistilleryConfig (used for storage path resolution).
+        embedding_provider: Active embedding provider (used to report model metadata).
+        period_days: Number of days for the "recent" activity/search window.
+    
     Returns:
-        A dict suitable for JSON serialisation with keys: entries, activity,
-        search, quality, staleness, storage.
+        A JSON-serializable dict with keys: `entries`, `activity`, `search`, `quality`, `staleness`, and `storage`, each containing aggregated metrics described by their section names.
     """
     conn = store.connection
 
@@ -1860,6 +1904,16 @@ def _sync_gather_metrics(
     # activity section                                                     #
     # ------------------------------------------------------------------ #
     def _count_where(column: str, days: int) -> int:
+        """
+        Count entries in the `entries` table whose timestamp in the given column is within the past `days`.
+        
+        Parameters:
+            column (str): Name of a datetime column in the `entries` table (for example `accessed_at`, `updated_at`, or `created_at`).
+            days (int): Number of days for the lookback window; rows with `column > CURRENT_TIMESTAMP - days` are counted.
+        
+        Returns:
+            int: The number of rows matching the condition.
+        """
         row = conn.execute(
             f"SELECT COUNT(*) FROM entries "
             f"WHERE {column} > CURRENT_TIMESTAMP - (? * INTERVAL '1 day')",
@@ -1900,6 +1954,15 @@ def _sync_gather_metrics(
             total_searches: int = total_searches_row[0] if total_searches_row else 0
 
             def _count_searches(days: int) -> int:
+                """
+                Count search log entries with timestamps within the last `days` days.
+                
+                Parameters:
+                    days (int): Number of days to look back from the current time.
+                
+                Returns:
+                    int: Number of search_log rows with timestamp > now - `days` days.
+                """
                 r = conn.execute(
                     f"SELECT COUNT(*) FROM search_log "
                     f"WHERE timestamp > CURRENT_TIMESTAMP - INTERVAL '{days} days'"
@@ -2054,19 +2117,21 @@ async def _handle_quality(
     store: Any,
     arguments: dict[str, Any],
 ) -> list[types.TextContent]:
-    """Implement the ``distillery_quality`` tool.
-
-    Aggregates search quality signals from ``search_log`` and ``feedback_log``
-    and returns them as a JSON payload.  All queries are read-only.
-
-    Args:
-        store: Initialised :class:`~distillery.store.duckdb.DuckDBStore`.
-        arguments: Tool argument dict.  Accepts optional ``entry_type`` (str).
-
+    """
+    Aggregate search and feedback metrics and produce a quality summary payload.
+    
+    Reads the read-only `search_log` and `feedback_log` tables and computes
+    `total_searches`, `total_feedback`, `positive_rate`, `avg_result_count`,
+    and an optional `per_type_breakdown`. If `entry_type` is provided in
+    `arguments`, results are filtered to that entry type when possible.
+    
+    Parameters:
+        store: Initialized DuckDBStore providing access to log tables.
+        arguments (dict): Tool arguments; accepts optional `entry_type` (str) to filter results.
+    
     Returns:
-        MCP content list with a single JSON ``TextContent`` block containing:
-        ``total_searches``, ``total_feedback``, ``positive_rate``,
-        ``avg_result_count``, and ``per_type_breakdown``.
+        list[types.TextContent]: MCP content list with a single JSON `TextContent`
+        block containing the computed quality metrics.
     """
     entry_type_filter: str | None = arguments.get("entry_type")
 
@@ -2082,20 +2147,23 @@ def _sync_gather_quality(
     store: Any,
     entry_type_filter: str | None,
 ) -> dict[str, Any]:
-    """Synchronous helper that queries DuckDB for quality metrics.
-
-    Runs inside ``asyncio.to_thread`` so that blocking DuckDB calls do not
-    stall the event loop.  Handles missing ``search_log`` and
-    ``feedback_log`` tables gracefully by returning zero counts.
-
-    Args:
-        store: Initialised ``DuckDBStore`` whose ``connection`` property is
-            available.
-        entry_type_filter: Optional entry-type string for per-type breakdown.
-
+    """
+    Compute aggregated quality metrics from the DuckDB-backed store.
+    
+    Handles missing `search_log` or `feedback_log` tables by returning zeroed metrics for the missing data.
+    
+    Parameters:
+        store (DuckDBStore): Initialized store exposing a live `connection` to execute queries against.
+        entry_type_filter (str | None): Optional entry-type to include a per-type feedback breakdown.
+    
     Returns:
-        A dict with keys: total_searches, total_feedback, positive_rate,
-        avg_result_count, per_type_breakdown.
+        dict: A dictionary containing:
+            - total_searches (int): Total number of search events (0 if unavailable).
+            - total_feedback (int): Total number of feedback records (0 if unavailable).
+            - positive_rate (float): Fraction of feedback that is positive, rounded to 4 decimals.
+            - avg_result_count (float): Average number of results returned per search, rounded to 4 decimals.
+            - per_type_breakdown (dict): Mapping of the provided `entry_type_filter` to a dict with
+                `total_feedback`, `positive_count`, and `positive_rate` (rounded to 4 decimals). Empty if no filter provided or data unavailable.
     """
     conn = store.connection
 
@@ -2411,18 +2479,24 @@ def _sync_gather_stale(
     limit: int,
     entry_type_filter: str | None,
 ) -> list[dict[str, Any]]:
-    """Synchronous helper that queries DuckDB for stale entries.
-
-    Runs inside ``asyncio.to_thread`` to avoid blocking the event loop.
-
-    Args:
-        store: Initialised ``DuckDBStore``.
-        days: Number of days since last access for staleness cutoff.
-        limit: Maximum number of results to return.
-        entry_type_filter: Optional entry type to filter by.
-
+    """
+    Return entries whose last access (accessed_at or updated_at) is older than the given number of days.
+    
+    Parameters:
+        store (Any): Initialized DuckDBStore used to query entries.
+        days (int): Staleness threshold in days; entries last accessed strictly earlier than now - days are returned.
+        limit (int): Maximum number of entries to return.
+        entry_type_filter (str | None): Optional entry_type value to restrict results to a single type.
+    
     Returns:
-        List of dicts describing stale entries, ordered stalest-first.
+        list[dict[str, Any]]: List of stale entry summaries ordered stalest-first. Each dict contains:
+            - id: entry identifier
+            - content_preview: first 200 characters of the content (empty string if content is None)
+            - entry_type: entry type string
+            - author: author string
+            - project: project string or None
+            - last_accessed: ISO 8601 timestamp string of the last access or None
+            - days_since_access: integer days since last access or None
     """
     conn = store.connection
 

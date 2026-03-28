@@ -146,13 +146,13 @@ class Entry:
     # ------------------------------------------------------------------ #
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialise this entry to a JSON-compatible dictionary.
-
-        All enum values are stored as their string values.  ``datetime``
-        fields are stored as ISO 8601 strings with UTC offset (``+00:00``).
-
+        """
+        Serialize this entry to a JSON-compatible flat dictionary.
+        
+        Enum fields (`entry_type`, `source`, `status`) are stored as their string values. Datetime fields (`created_at`, `updated_at`, `accessed_at`) are stored as ISO 8601 strings with UTC offset; `accessed_at` is `None` if unset. `tags` and `metadata` are shallow copies to avoid mutating internal state.
+        
         Returns:
-            A flat dictionary suitable for ``json.dumps`` or YAML serialisation.
+            dict: A flat dictionary suitable for JSON or YAML serialization.
         """
         return {
             "id": self.id,
@@ -172,22 +172,35 @@ class Entry:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Entry:
-        """Reconstruct an ``Entry`` from a dictionary produced by :meth:`to_dict`.
-
-        Args:
-            data: Dictionary with the same keys as :meth:`to_dict`.  Values
-                for ``entry_type``, ``source``, and ``status`` may be either
-                the enum instance or the underlying string value.
-
+        """
+        Create an Entry instance from a dictionary representation.
+        
+        Parameters:
+            data (dict[str, Any]): Dictionary containing entry fields. Enum fields
+                (`entry_type`, `source`, `status`) may be provided as enum members or
+                their string values. Datetime fields (`created_at`, `updated_at`,
+                `accessed_at`) may be ISO 8601 strings or datetime objects; naive
+                datetimes are treated as UTC.
+        
         Returns:
-            A fully initialised ``Entry`` instance.
-
+            Entry: A fully initialized Entry instance.
+        
         Raises:
-            KeyError: If a required key is absent from ``data``.
-            ValueError: If an enum value string is not recognised.
+            KeyError: If a required key (e.g., `id`, `content`, `entry_type`,
+                `source`, `created_at`, `updated_at`, `author`) is missing.
+            ValueError: If a provided string does not match a valid enum member.
         """
 
         def _parse_dt(value: str | datetime) -> datetime:
+            """
+            Parse an ISO 8601 datetime string or return the given datetime, ensuring the result is timezone-aware (UTC if no timezone is present).
+            
+            Parameters:
+                value (str | datetime): An ISO 8601 datetime string or a datetime object.
+            
+            Returns:
+                datetime: A timezone-aware datetime; if `value` was a naive datetime or a string without timezone, the returned datetime will have its timezone set to UTC.
+            """
             if isinstance(value, datetime):
                 return value
             dt = datetime.fromisoformat(value)

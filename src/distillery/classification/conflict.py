@@ -158,6 +158,13 @@ class ConflictChecker:
         store: DistilleryStore,
         threshold: float = _DEFAULT_CONFLICT_THRESHOLD,
     ) -> None:
+        """
+        Initialize a ConflictChecker with a similarity store and threshold.
+        
+        Parameters:
+            store (DistilleryStore): Store used to retrieve semantically similar entries for conflict checks.
+            threshold (float): Minimum similarity score (inclusive) required for a stored entry to be considered a candidate.
+        """
         self._store = store
         self._threshold = threshold
 
@@ -166,18 +173,15 @@ class ConflictChecker:
     # ------------------------------------------------------------------
 
     def build_prompt(self, new_content: str, existing_content: str) -> str:
-        """Return an LLM prompt that asks whether *new_content* contradicts
-        *existing_content*.
-
-        Args:
-            new_content: The raw text of the candidate new entry.
-            existing_content: The raw text of the existing knowledge-base
-                entry to compare against.
-
+        """
+        Builds an LLM prompt that asks whether the provided new content contradicts the provided existing content.
+        
+        Parameters:
+            new_content (str): Raw text of the candidate new entry.
+            existing_content (str): Raw text of the existing knowledge-base entry to compare against.
+        
         Returns:
-            A ready-to-send prompt string following the same template
-            convention as
-            :data:`~distillery.classification.engine._CLASSIFY_PROMPT`.
+            str: Prompt string with the conflict-checking instructions and the provided contents embedded.
         """
         return _CONFLICT_PROMPT.format(
             new_content=new_content,
@@ -185,19 +189,16 @@ class ConflictChecker:
         )
 
     def parse_response(self, llm_response: str) -> tuple[bool, str]:
-        """Parse a structured JSON response from the LLM.
-
-        Extracts ``is_conflict`` (bool) and ``reasoning`` (str) from the
-        JSON payload.  If parsing fails for any reason the method returns a
-        safe fallback of ``(False, "")``.
-
-        Args:
-            llm_response: The raw string returned by the LLM.
-
+        """
+        Parse the LLM's JSON response for a conflict decision and extract its result.
+        
+        Parses `llm_response`, extracting the keys `is_conflict` and `reasoning` from the returned JSON. If parsing fails for any reason, returns a safe fallback of `(False, "")` and logs a warning.
+        
+        Parameters:
+            llm_response (str): The raw string returned by the LLM, possibly containing a fenced code block.
+        
         Returns:
-            A ``(is_conflict, reasoning)`` tuple where *is_conflict* is
-            ``True`` when the LLM determined the two entries contradict each
-            other.
+            tuple[bool, str]: `is_conflict` is `True` if the LLM indicates the new content contradicts the existing content, `False` otherwise; `reasoning` is the LLM-provided explanation (empty string on parse failure).
         """
         try:
             return self._parse(llm_response)
@@ -210,25 +211,17 @@ class ConflictChecker:
         content: str,
         llm_responses: dict[str, tuple[bool, str]] | None = None,
     ) -> ConflictResult:
-        """Evaluate *content* for conflicts against the existing knowledge base.
-
-        Calls :meth:`~distillery.store.protocol.DistilleryStore.find_similar`
-        to retrieve candidate entries at or above *threshold*.  If
-        *llm_responses* are provided, each ``(is_conflict, reasoning)`` pair
-        is used to decide whether the corresponding entry is a conflict.
-        Entries without a corresponding *llm_responses* entry are omitted
-        from the result (they need LLM evaluation first).
-
-        Args:
-            content: The raw text of the candidate new entry.
-            llm_responses: Optional mapping from ``entry_id`` to the parsed
-                LLM result ``(is_conflict, reasoning)``.  When ``None``, the
-                method still queries the store for similar entries but returns
-                an empty conflict list (caller needs to collect LLM responses
-                first).
-
+        """
+        Determine whether the given content conflicts with entries in the knowledge base.
+        
+        Queries the configured store for entries similar to `content` and, when `llm_responses` is provided, uses each mapping value `(is_conflict, reasoning)` to mark similar entries as conflicts. If no similar entries are found or `llm_responses` is `None`, returns an empty result. Conflicting entries include a short content preview (first line truncated to 120 characters), the similarity score, and the LLM-provided reasoning.
+        
+        Parameters:
+            content (str): The raw text of the candidate new entry.
+            llm_responses (dict[str, tuple[bool, str]] | None): Optional mapping from existing `entry_id` to a parsed LLM evaluation `(is_conflict, reasoning)`. Entries not present in this mapping are skipped.
+        
         Returns:
-            A :class:`ConflictResult` describing any detected conflicts.
+            ConflictResult: Object with `has_conflicts` set to `True` if any conflicts were detected, and `conflicts` containing a list of `ConflictEntry` items for each detected conflict.
         """
         similar = await self._store.find_similar(
             content=content,
@@ -269,7 +262,15 @@ class ConflictChecker:
     # ------------------------------------------------------------------
 
     def _parse(self, llm_response: str) -> tuple[bool, str]:
-        """Attempt to parse *llm_response* as JSON and extract fields."""
+        """
+        Parse an LLM response (optionally wrapped in a fenced code block) and extract the conflict decision.
+        
+        Parameters:
+            llm_response (str): Text returned by an LLM containing JSON (either raw JSON or inside a ```json```/``` ``` fenced code block) with keys `is_conflict` and optional `reasoning`.
+        
+        Returns:
+            tuple[bool, str]: `is_conflict` is `True` if the JSON `is_conflict` value is truthy, `False` otherwise; `reasoning` is the `reasoning` field as a string (empty string if missing).
+        """
         import json
         import re
 

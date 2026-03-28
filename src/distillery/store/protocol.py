@@ -165,21 +165,18 @@ class DistilleryStore(Protocol):
         limit: int,
         offset: int,
     ) -> list[Entry]:
-        """List entries with optional metadata filtering and pagination.
-
-        Unlike ``search``, this method does not perform semantic ranking -- it
-        returns entries in insertion order (descending ``created_at``).
-
-        Supports the same filter keys as ``search`` (``entry_type``,
-        ``author``, ``project``, ``tags``, ``status``, date ranges).
-
-        Args:
-            filters: Optional dict of metadata constraints.
-            limit: Maximum number of entries to return per page.
-            offset: Number of entries to skip (for pagination).
-
+        """
+        List entries filtered by metadata with pagination.
+        
+        Returns entries in insertion order (sorted by descending `created_at`) and does not perform semantic ranking.
+        
+        Parameters:
+            filters (dict[str, Any] | None): Optional metadata constraints. Supported keys: `entry_type`, `author`, `project`, `tags` (matches any tag), `status`, `date_from`, `date_to`.
+            limit (int): Maximum number of entries to return.
+            offset (int): Number of entries to skip for pagination.
+        
         Returns:
-            List of ``Entry`` objects matching the filters.
+            list[Entry]: Entries matching the filters, ordered by descending `created_at`.
         """
         ...
 
@@ -190,23 +187,19 @@ class DistilleryStore(Protocol):
         result_scores: list[float],
         session_id: str | None = None,
     ) -> str:
-        """Record a search event and return its generated ID.
-
-        Appends a row to the ``search_log`` table capturing the query,
-        the IDs and similarity scores of returned entries, and an optional
-        session identifier for grouping related searches.
-
-        Args:
-            query: The natural-language query string that was searched.
-            result_entry_ids: Ordered list of entry UUIDs returned by the
-                search (same order as *result_scores*).
-            result_scores: Ordered list of similarity scores corresponding
-                to *result_entry_ids*.
-            session_id: Optional opaque string that groups searches from
-                the same user session.
-
+        """
+        Record a search event in the search_log and return the created log row ID.
+        
+        Records the query text, the ordered list of returned entry IDs with their corresponding similarity scores, and an optional session identifier for grouping related searches. The order of result_entry_ids must match the order of result_scores.
+        
+        Parameters:
+            query (str): The natural-language query string.
+            result_entry_ids (list[str]): Ordered list of entry UUIDs returned by the search.
+            result_scores (list[float]): Ordered list of similarity scores corresponding to result_entry_ids.
+            session_id (str | None): Optional opaque string that groups searches from the same user session.
+        
         Returns:
-            The UUID string of the newly created ``search_log`` row.
+            str: The UUID string of the newly created search_log row.
         """
         ...
 

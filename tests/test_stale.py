@@ -41,12 +41,29 @@ _UTC = UTC
 
 
 def _ts(days_ago: float) -> str:
-    """Return an ISO-formatted timestamp N days in the past (UTC)."""
+    """
+    Produce a UTC timestamp string representing the time days_ago days before now.
+    
+    Parameters:
+        days_ago (float): Number of days to subtract from the current UTC time; may be fractional.
+    
+    Returns:
+        str: UTC timestamp formatted as "YYYY-MM-DD HH:MM:SS".
+    """
     dt = datetime.now(_UTC) - timedelta(days=days_ago)
     return dt.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _make_config(stale_days: int = 30) -> DistilleryConfig:
+    """
+    Create a DistilleryConfig preconfigured for in-memory testing.
+    
+    Parameters:
+        stale_days (int): Number of days after which an entry is considered stale; used to set the classification stale_days threshold.
+    
+    Returns:
+        DistilleryConfig: Configuration using in-memory storage, a mock embedding provider, and a classification config with confidence_threshold 0.6 and the specified stale_days.
+    """
     return DistilleryConfig(
         storage=StorageConfig(database_path=":memory:"),
         embedding=EmbeddingConfig(provider="", model="mock-hash-4d", dimensions=4),
@@ -64,11 +81,26 @@ def _make_config(stale_days: int = 30) -> DistilleryConfig:
 
 @pytest.fixture
 def embedding_provider() -> MockEmbeddingProvider:
+    """
+    Provide a fresh MockEmbeddingProvider for tests.
+    
+    Returns:
+        MockEmbeddingProvider: A new mock embedding provider instance.
+    """
     return MockEmbeddingProvider()
 
 
 @pytest.fixture
 async def store(embedding_provider: MockEmbeddingProvider) -> DuckDBStore:  # type: ignore[return]
+    """
+    Provide an initialized DuckDBStore backed by an in-memory database and ensure it is closed when the fixture is torn down.
+    
+    Parameters:
+        embedding_provider (MockEmbeddingProvider): Embedding provider to attach to the store.
+    
+    Returns:
+        DuckDBStore: An initialized store instance connected to an in-memory DuckDB and ready for use.
+    """
     s = DuckDBStore(db_path=":memory:", embedding_provider=embedding_provider)
     await s.initialize()
     yield s
@@ -77,6 +109,13 @@ async def store(embedding_provider: MockEmbeddingProvider) -> DuckDBStore:  # ty
 
 @pytest.fixture
 def config() -> DistilleryConfig:
+    """
+    Create a DistilleryConfig using the test defaults.
+    
+    Returns:
+        DistilleryConfig: Configuration with in-memory DuckDB storage, a mock embedding provider,
+        classification confidence_threshold of 0.6, and the default stale_days (30).
+    """
     return _make_config()
 
 
@@ -93,7 +132,17 @@ async def _stale(
     limit: int | None = None,
     entry_type: str | None = None,
 ) -> dict:
-    """Call _handle_stale and return the parsed JSON payload."""
+    """
+    Request stale entries from the stale MCP handler and return the parsed response.
+    
+    Parameters:
+    	days (int | None): Optional override for the staleness threshold in days.
+    	limit (int | None): Optional maximum number of entries to return.
+    	entry_type (str | None): Optional entry type filter (e.g., "reference", "idea").
+    
+    Returns:
+    	dict: Parsed MCP response containing keys such as `stale_count`, `entries`, `days_threshold`, and any validation `error` information.
+    """
     args: dict = {}
     if days is not None:
         args["days"] = days
@@ -113,7 +162,18 @@ def _force_timestamps(
     accessed_at: str | None = None,
     clear_accessed_at: bool = False,
 ) -> None:
-    """Directly set timestamp columns on an entry via the raw connection."""
+    """
+    Set an entry's `updated_at` and/or `accessed_at` timestamp fields directly in the database.
+    
+    This helper mutates the `entries` table using the store's raw connection. Provide ISO-like UTC timestamp strings formatted as "%Y-%m-%d %H:%M:%S" for `updated_at` and `accessed_at`. If `clear_accessed_at` is True, `accessed_at` will be set to NULL regardless of `accessed_at` value.
+    
+    Parameters:
+        store (DuckDBStore): Store whose database connection will be used.
+        entry_id (str): ID of the entry to update.
+        updated_at (str | None): Timestamp to set for `updated_at`, or None to leave unchanged.
+        accessed_at (str | None): Timestamp to set for `accessed_at`, or None to leave unchanged.
+        clear_accessed_at (bool): If True, set `accessed_at` to NULL; takes precedence over `accessed_at`.
+    """
     conn = store.connection
     if updated_at is not None:
         conn.execute(
@@ -140,6 +200,11 @@ class TestEmptyDatabase:
     async def test_empty_db_returns_empty_list(
         self, store: DuckDBStore, config: DistilleryConfig
     ) -> None:
+        """
+        Verify that requesting stale entries from an empty store returns no entries.
+        
+        Asserts the response contains no "error" key, `stale_count` is 0, and `entries` is an empty list.
+        """
         data = await _stale(store, config)
         # No error key, successful response with stale_count == 0
         assert "error" not in data

@@ -43,12 +43,29 @@ _UTC = UTC
 
 
 def _ts(days_ago: float) -> str:
-    """Return an ISO-formatted timestamp N days in the past (UTC)."""
+    """
+    Generate a UTC timestamp string for the current time minus the given number of days.
+    
+    Parameters:
+        days_ago (float): Number of days to subtract from the current UTC time. Use fractional values for partial days.
+    
+    Returns:
+        str: Timestamp formatted as "YYYY-MM-DD HH:MM:SS" in UTC.
+    """
     dt = datetime.now(_UTC) - timedelta(days=days_ago)
     return dt.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _make_config(db_path: str = ":memory:") -> DistilleryConfig:
+    """
+    Builds a DistilleryConfig prepopulated for tests with a mock embedding and configurable database path.
+    
+    Parameters:
+        db_path (str): Path to the database file; use ":memory:" (default) for an in-memory database.
+    
+    Returns:
+        DistilleryConfig: Configuration with storage.database_path set to `db_path`, embedding.provider set to an empty string, embedding.model set to "mock-hash-4d", embedding.dimensions set to 4, and classification.confidence_threshold set to 0.6.
+    """
     return DistilleryConfig(
         storage=StorageConfig(database_path=db_path),
         embedding=EmbeddingConfig(provider="", model="mock-hash-4d", dimensions=4),
@@ -63,11 +80,26 @@ def _make_config(db_path: str = ":memory:") -> DistilleryConfig:
 
 @pytest.fixture
 def embedding_provider() -> MockEmbeddingProvider:
+    """
+    Provide a mock embedding provider for tests.
+    
+    Returns:
+        MockEmbeddingProvider: A new MockEmbeddingProvider instance configured for use in test cases.
+    """
     return MockEmbeddingProvider()
 
 
 @pytest.fixture
 async def store(embedding_provider: MockEmbeddingProvider) -> DuckDBStore:  # type: ignore[return]
+    """
+    Provide an initialized in-memory DuckDBStore configured with the given embedding provider.
+    
+    Parameters:
+        embedding_provider (MockEmbeddingProvider): Embedding provider used to configure the store.
+    
+    Returns:
+        DuckDBStore: An initialized in-memory DuckDBStore instance. The store is closed by the fixture after the caller finishes using it.
+    """
     s = DuckDBStore(db_path=":memory:", embedding_provider=embedding_provider)
     await s.initialize()
     yield s
@@ -76,6 +108,14 @@ async def store(embedding_provider: MockEmbeddingProvider) -> DuckDBStore:  # ty
 
 @pytest.fixture
 def config() -> DistilleryConfig:
+    """
+    Builds a DistilleryConfig populated with the default test settings.
+    
+    Defaults: storage.database_path=":memory:", embedding.model="mock-hash-4d", embedding.dimensions=4, embedding.provider="", classification.confidence_threshold=0.6.
+    
+    Returns:
+        DistilleryConfig: Configuration configured for tests using an in-memory database and mock embedding settings.
+    """
     return _make_config()
 
 
@@ -91,6 +131,15 @@ async def _metrics(
     *,
     period_days: int = 30,
 ) -> dict:
+    """
+    Retrieve metrics for the given store using the specified recent-period window and return the parsed MCP response.
+    
+    Parameters:
+        period_days (int): Number of days used as the "recent" window for metrics (e.g., created_{n}d, searches_{n}d). Defaults to 30.
+    
+    Returns:
+        dict: Parsed MCP response containing top-level sections such as `entries`, `activity`, `search`, `quality`, `staleness`, and `storage`.
+    """
     response = await _handle_metrics(
         store, config, embedding_provider, {"period_days": period_days}
     )
@@ -138,6 +187,11 @@ class TestEmptyDatabase:
         config: DistilleryConfig,
         embedding_provider: MockEmbeddingProvider,
     ) -> None:
+        """
+        Verify activity metrics are zero when the database contains no entries.
+        
+        Asserts that `created_7d`, `created_30d`, `created_90d`, and `updated_7d` are all 0.
+        """
         data = await _metrics(store, config, embedding_provider)
         activity = data["activity"]
         assert activity["created_7d"] == 0
@@ -151,6 +205,11 @@ class TestEmptyDatabase:
         config: DistilleryConfig,
         embedding_provider: MockEmbeddingProvider,
     ) -> None:
+        """
+        Verify search metrics return zeroed values when the database contains no search logs.
+        
+        Asserts that `total_searches` is 0, `searches_7d` is 0, and `avg_results_per_search` is 0.0.
+        """
         data = await _metrics(store, config, embedding_provider)
         search = data["search"]
         assert search["total_searches"] == 0
@@ -320,7 +379,18 @@ class TestSearchMetrics:
         result_ids: list[str] | None = None,
         days_ago: float = 0.0,
     ) -> str:
-        """Insert a row into search_log directly and return the id."""
+        """
+        Insert a search record into the store's search_log and return the new record id.
+        
+        Parameters:
+            store (DuckDBStore): Database store to insert into.
+            query (str): Search query text to record.
+            result_ids (list[str] | None): List of result entry IDs to store; empty list if None.
+            days_ago (float): Age of the timestamp in days relative to now.
+        
+        Returns:
+            row_id (str): UUID string of the inserted search record.
+        """
         row_id = str(uuid.uuid4())
         ts = _ts(days_ago)
         ids_array = result_ids or []
@@ -377,6 +447,15 @@ class TestSearchMetrics:
 
 class TestQualityMetrics:
     def _insert_search(self, store: DuckDBStore) -> str:
+        """
+        Insert a row into `search_log` with query `'q'`, empty result arrays, and the current timestamp.
+        
+        Parameters:
+            store (DuckDBStore): Database store whose connection will be used to perform the insert.
+        
+        Returns:
+            row_id (str): UUID string of the newly inserted search row.
+        """
         row_id = str(uuid.uuid4())
         store.connection.execute(
             "INSERT INTO search_log (id, query, result_entry_ids, result_scores, timestamp) "
@@ -394,6 +473,16 @@ class TestQualityMetrics:
         signal: str = "positive",
         days_ago: float = 0.0,
     ) -> None:
+        """
+        Insert a feedback record into the store's feedback_log table.
+        
+        Parameters:
+            store (DuckDBStore): Target database store where the feedback row will be inserted.
+            search_id (str): Identifier of the related search.
+            entry_id (str): Identifier of the related entry.
+            signal (str): Feedback signal value (e.g., "positive" or "negative"). Defaults to "positive".
+            days_ago (float): Age of the inserted timestamp in days relative to now; 0.0 sets the current timestamp.
+        """
         row_id = str(uuid.uuid4())
         ts = _ts(days_ago)
         store.connection.execute(
@@ -513,6 +602,13 @@ class TestStalenessMetrics:
 
 class TestPeriodDaysParameter:
     def _insert_search(self, store: DuckDBStore, *, days_ago: float) -> None:
+        """
+        Insert a search record into the store's search_log with a timestamp offset by the given number of days.
+        
+        Parameters:
+            store (DuckDBStore): Target database store where the search row will be inserted.
+            days_ago (float): Number of days to subtract from now to set the search `timestamp`.
+        """
         row_id = str(uuid.uuid4())
         ts = _ts(days_ago)
         store.connection.execute(
@@ -527,7 +623,9 @@ class TestPeriodDaysParameter:
         config: DistilleryConfig,
         embedding_provider: MockEmbeddingProvider,
     ) -> None:
-        """When period_days=14, response includes created_14d and searches_14d keys."""
+        """
+        Verify that setting period_days=14 adds activity keys `created_14d` and `updated_14d` and the search key `searches_14d` to the metrics response.
+        """
         data = await _metrics(store, config, embedding_provider, period_days=14)
         assert "created_14d" in data["activity"]
         assert "updated_14d" in data["activity"]

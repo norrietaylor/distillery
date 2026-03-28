@@ -39,6 +39,15 @@ pytestmark = pytest.mark.integration
 
 
 def _make_config(feedback_window_minutes: int = 5) -> DistilleryConfig:
+    """
+    Builds a DistilleryConfig preconfigured for in-memory tests.
+    
+    Parameters:
+        feedback_window_minutes (int): Maximum age, in minutes, for considering searches as recent for implicit feedback.
+    
+    Returns:
+        DistilleryConfig: Configuration using in-memory DuckDB storage, a mock embedding provider (model "mock-hash-4d", 4 dimensions), and classification settings with a 0.6 confidence threshold and the provided feedback window.
+    """
     return DistilleryConfig(
         storage=StorageConfig(database_path=":memory:"),
         embedding=EmbeddingConfig(provider="", model="mock-hash-4d", dimensions=4),
@@ -56,11 +65,26 @@ def _make_config(feedback_window_minutes: int = 5) -> DistilleryConfig:
 
 @pytest.fixture
 def embedding_provider() -> MockEmbeddingProvider:
+    """
+    Create and return a new MockEmbeddingProvider instance for tests.
+    
+    Returns:
+        MockEmbeddingProvider: a fresh mock embedding provider.
+    """
     return MockEmbeddingProvider()
 
 
 @pytest.fixture
 async def store(embedding_provider: MockEmbeddingProvider) -> DuckDBStore:  # type: ignore[return]
+    """
+    Provide an initialized in-memory DuckDBStore for tests and ensure it is closed after use.
+    
+    Parameters:
+        embedding_provider (MockEmbeddingProvider): Embedding provider to attach to the store.
+    
+    Returns:
+        DuckDBStore: An initialized DuckDBStore using an in-memory database (":memory:") configured with the given embedding provider.
+    """
     s = DuckDBStore(db_path=":memory:", embedding_provider=embedding_provider)
     await s.initialize()
     yield s
@@ -69,6 +93,13 @@ async def store(embedding_provider: MockEmbeddingProvider) -> DuckDBStore:  # ty
 
 @pytest.fixture
 def config() -> DistilleryConfig:
+    """
+    Builds the default DistilleryConfig used by the tests.
+    
+    Returns:
+        DistilleryConfig: Configuration using an in-memory DuckDB store (":memory:"), a mock embedding provider,
+        and classification settings with `confidence_threshold=0.6` and the default feedback window (5 minutes).
+    """
     return _make_config()
 
 
@@ -82,6 +113,21 @@ async def _quality(
     *,
     entry_type: str | None = None,
 ) -> dict:
+    """
+    Compute aggregated quality metrics for searches and feedback, optionally filtered by entry type.
+    
+    Parameters:
+        entry_type (str | None): If provided, restrict metrics to feedback/searches for the given entry type.
+    
+    Returns:
+        dict: Aggregated metrics with the following keys:
+            - total_searches (int): Total number of recorded searches.
+            - total_feedback (int): Total number of recorded feedback events.
+            - positive_rate (float): Fraction of feedback events with a positive signal (0.0 to 1.0).
+            - avg_result_count (float): Average number of results returned per recorded search.
+            - per_type_breakdown (dict): Mapping from entry type (str) to a dict of metrics for that type
+              (each sub-dict contains `total_feedback` (int), `positive_count` (int), and `positive_rate` (float)).
+    """
     args: dict = {}
     if entry_type is not None:
         args["entry_type"] = entry_type
