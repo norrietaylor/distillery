@@ -1017,8 +1017,8 @@ async def _handle_store(
 
     # --- reserved prefix enforcement ----------------------------------------
     # Sources that are permitted to use tags under reserved top-level prefixes.
-    _reserved_allowed_sources: set[str] = {"distillery-core"}
-    entry_source_str: str = arguments.get("source", EntrySource.CLAUDE_CODE)
+    _reserved_allowed_sources: set[str] = {EntrySource.IMPORT.value}
+    entry_source_str: str = str(arguments.get("source", EntrySource.CLAUDE_CODE.value))
     if cfg is not None and cfg.tags.reserved_prefixes:
         tags_to_check: list[str] = list(arguments.get("tags") or [])
         if entry_source_str not in _reserved_allowed_sources:
@@ -1664,7 +1664,7 @@ async def _handle_classify(
     """
     from datetime import datetime
 
-    from distillery.models import EntryStatus, EntryType
+    from distillery.models import EntryStatus, EntryType, validate_tag
 
     # --- input validation ---------------------------------------------------
     err = validate_required(arguments, "entry_id", "entry_type", "confidence")
@@ -1711,7 +1711,15 @@ async def _handle_classify(
     new_status = EntryStatus.ACTIVE if confidence >= threshold else EntryStatus.PENDING_REVIEW
 
     # Merge suggested tags with existing tags (de-duplicate, preserve order).
-    suggested_tags: list[str] = list(arguments.get("suggested_tags") or [])
+    # Filter out invalid tags from LLM suggestions to prevent validation failures.
+    suggested_tags_raw: list[str] = list(arguments.get("suggested_tags") or [])
+    suggested_tags: list[str] = []
+    for t in suggested_tags_raw:
+        try:
+            validate_tag(t)
+            suggested_tags.append(t)
+        except ValueError:
+            logger.warning("Dropping invalid LLM-suggested tag: %r", t)
     merged_tags = list(entry.tags) + [t for t in suggested_tags if t not in entry.tags]
 
     # Build updated metadata -- preserve existing metadata, add classification fields.

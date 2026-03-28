@@ -338,6 +338,11 @@ def _parse_tags(raw: dict[str, Any]) -> TagsConfig:
         ValueError: If ``enforce_namespaces`` is not a boolean or
             ``reserved_prefixes`` is not a list.
     """
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"tags must be a YAML mapping, got: {type(raw).__name__}"
+        )
+
     enforce_raw = raw.get("enforce_namespaces", False)
     if not isinstance(enforce_raw, bool):
         raise ValueError(

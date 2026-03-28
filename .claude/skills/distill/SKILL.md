@@ -210,6 +210,7 @@ Automatically extract 2–5 relevant keywords from the distilled summary as tags
 Prefer hierarchical tags that reflect project context:
 
 - Use `project/{repo-name}/sessions` as a base tag for the current project (e.g. `project/billing-v2/sessions`)
+  - Sanitize repo names: convert to lowercase, replace underscores and dots with hyphens, remove any characters not matching `[a-z0-9-]`
 - Use `project/{repo-name}/decisions` for decision entries
 - Use `project/{repo-name}/architecture` for architectural insights
 - Supplement with domain-specific tags (e.g. `domain/storage`, `domain/api-design`)

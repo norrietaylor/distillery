@@ -450,11 +450,8 @@ class DuckDBStore:
 
         # Validate metadata against the effective entry type schema.
         if "metadata" in updates:
-            effective_entry_type = str(
-                updates["entry_type"].value
-                if "entry_type" in updates and hasattr(updates["entry_type"], "value")
-                else updates.get("entry_type", existing_entry_type)
-            )
+            raw_type = updates.get("entry_type", existing_entry_type)
+            effective_entry_type = raw_type.value if hasattr(raw_type, "value") else str(raw_type)
             validate_metadata(effective_entry_type, updates["metadata"])
 
         now = datetime.now(tz=UTC)

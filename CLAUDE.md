@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is Distillery
 
-Distillery is a knowledge-base system for Claude Code. It stores, searches, and classifies knowledge entries using DuckDB with vector similarity search (VSS/HNSW). It exposes functionality via an MCP server (stdio transport) with 11 tools, orchestrated by Claude Code skills (`/distill`, `/recall`, `/pour`, `/bookmark`, `/minutes`, `/classify`).
+Distillery is a knowledge-base system for Claude Code. It stores, searches, and classifies knowledge entries using DuckDB with vector similarity search (VSS/HNSW). It exposes functionality via an MCP server (stdio transport) with 17 tools, orchestrated by Claude Code skills (`/distill`, `/recall`, `/pour`, `/bookmark`, `/minutes`, `/classify`).
 
 ## Commands
 
@@ -48,7 +48,7 @@ Four-layer design:
 ```
 Skills (.claude/skills/<name>/SKILL.md)  →  slash commands users invoke
     ↓
-MCP Server (src/distillery/mcp/server.py)  →  15 tools over stdio (FastMCP 2.x)
+MCP Server (src/distillery/mcp/server.py)  →  17 tools over stdio (FastMCP 2.x)
     ↓
 Core Protocols (store/protocol.py, embedding/protocol.py)  →  typed Protocol interfaces
     ↓
