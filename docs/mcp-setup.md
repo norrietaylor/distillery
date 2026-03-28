@@ -58,10 +58,20 @@ python -m distillery.mcp
 distillery-mcp
 ```
 
-The server communicates over `stdio` using the MCP protocol and logs to
-`stderr` so it does not interfere with the transport stream.
+By default, the server communicates over `stdio` and logs to `stderr`.
+
+For team access, use HTTP transport with GitHub OAuth:
+
+```bash
+distillery-mcp --transport http --port 8000
+```
+
+See [deployment.md](deployment.md) for full HTTP setup and [team-setup.md](team-setup.md) for
+connecting team members.
 
 ## Connecting Claude Code
+
+### Local (stdio)
 
 Add the following to your Claude Code MCP settings file
 (`~/.claude/settings.json` or the project-level `.claude/settings.json`):
@@ -100,6 +110,27 @@ use the entry point instead:
 After saving the settings file, restart Claude Code or reload the MCP servers.
 You should see "distillery" appear in the connected MCP servers list.
 
+### Remote (HTTP)
+
+For team access via a hosted Distillery server:
+
+```json
+{
+  "mcpServers": {
+    "distillery": {
+      "url": "https://your-distillery-host.example.com/mcp",
+      "transport": "http"
+    }
+  }
+}
+```
+
+On first use, Claude Code will open a browser window for GitHub OAuth login.
+No local installation or API keys needed — the server handles embedding and
+storage.
+
+See [team-setup.md](team-setup.md) for the full team member guide.
+
 ## Available Tools
 
 Once connected, the following tools are available:
@@ -123,6 +154,10 @@ Once connected, the following tools are available:
 | `distillery_stale` | Surface entries not accessed within a configurable time window |
 | `distillery_tag_tree` | Return a nested tree of all tags in use with entry counts per node |
 | `distillery_type_schemas` | Return the metadata schema registry for all entry types |
+| `distillery_watch` | List, add, or remove monitored feed sources |
+| `distillery_poll` | Trigger a feed poll cycle and return results (fetched, scored, stored counts) |
+| `distillery_interests` | Return the user's interest profile (top tags, domains, repos, expertise) |
+| `distillery_suggest_sources` | Return interest profile with suggestion context for source discovery |
 
 ## Verifying the Server Works
 
@@ -298,3 +333,12 @@ MCP server settings:
   testing
 - If you switch embedding models, you must create a new database -- the schema
   records the model name and rejects mismatches
+
+**HTTP transport / GitHub OAuth**
+
+- `distillery-mcp --transport http` fails with missing credentials: set
+  `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` env vars, or set
+  `server.auth.provider: none` in `distillery.yaml` for unauthenticated local testing
+- OAuth login fails: verify the GitHub OAuth App callback URL matches your
+  server's `DISTILLERY_BASE_URL`
+- See [deployment.md](deployment.md) for GitHub OAuth App registration steps

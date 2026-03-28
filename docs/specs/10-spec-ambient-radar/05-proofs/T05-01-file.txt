@@ -1,0 +1,30 @@
+Type: file
+Description: Verify /radar SKILL.md exists and has correct structure
+Command: test -f .claude/skills/radar/SKILL.md && grep -c "^###" .claude/skills/radar/SKILL.md
+Expected: File exists, contains multiple Step sections (## Process with ### Step headers)
+Timestamp: 2026-03-27T00:00:00Z
+
+--- RESULT ---
+
+File check: .claude/skills/radar/SKILL.md
+$ ls -la .claude/skills/radar/SKILL.md
+-rw-r--r-- 1 norrie.guest norrie.guest 4321 .claude/skills/radar/SKILL.md
+
+YAML frontmatter check:
+name: radar
+description: "Generates an ambient intelligence digest from recent feed entries, suggests new sources, and stores the digest. Triggered by: 'radar', '/radar', 'what's new', 'show my digest', 'ambient digest', 'what have I missed', 'feed digest'."
+
+Sections found:
+- ## Prerequisites
+- ## When to Use
+- ## Process (with 7 steps)
+- ## Output Format
+- ## Rules
+
+MCP tools referenced:
+- distillery_status (Step 1)
+- distillery_list (Step 3)
+- distillery_suggest_sources (Step 5)
+- distillery_store (Step 6)
+
+Status: PASS

@@ -74,12 +74,16 @@ Scale from single user to team. Six new skills, richer metadata, optional Elasti
 - [ ] `/gh-sync` — GitHub issue/PR knowledge tracking
 
 ### Infrastructure
+- [x] **HTTP transport** — `distillery-mcp --transport http` for streamable-HTTP MCP server (Spec 10)
+- [x] **GitHub OAuth** — team authentication via FastMCP `GitHubProvider` (Spec 10)
+- [x] **MotherDuck validation** — strict `md:` prefix and token checks at startup (Spec 10)
+- [ ] **Prefect Horizon deployment** — `prefect.yaml` manifest for managed hosting
 - [ ] **Elasticsearch migration** — `ElasticsearchStore` backend via `DistilleryStore` protocol
   - Native `semantic_text` for auto-embedding
   - Hybrid search (BM25 + kNN + RRF)
   - ES|QL for temporal queries and aggregations
   - Triggered when DuckDB hits concurrency or scale ceiling (~10K entries)
-- [ ] **Access control** — team/private visibility flag on entries
+- [ ] **Access control** — team/private visibility flag on entries (multi-team extension point ready)
 - [ ] **Session capture hooks** — auto-distill on Claude Code session end
 - [x] **Namespace taxonomy** — hierarchical, validated tag system (`project/billing-v2/decisions`)
 - [ ] **Provenance tracking** — full version history, source chain, author chain
@@ -97,20 +101,20 @@ Scale from single user to team. Six new skills, richer metadata, optional Elasti
 
 The knowledge base starts watching the world. Feed polling, relevance scoring, proactive insights.
 
-### New Skills
-- [ ] `/radar` — view latest ambient feed digest (what happened that matters to our projects?)
-- [ ] `/watch` — add/remove/list monitored feed sources
-- [ ] `/tune` — adjust relevance thresholds and source trust weights
+### Skills (Spec 10)
+- [x] `/radar` — view latest ambient feed digest with AI source suggestions
+- [x] `/watch` — add/remove/list monitored feed sources
+- [x] `/tune` — adjust relevance thresholds and source trust weights
 
-### Infrastructure
-- [ ] **Feed polling architecture** — scheduler with configurable intervals per source
-- [ ] **Source adapters** — RSS, Slack, GitHub, Hacker News, webhooks
-- [ ] **Relevance scoring pipeline:**
-  1. Embed incoming item
-  2. Compare against active project embeddings
-  3. Score = similarity x priority x tag overlap x recency x source trust
-  4. Above relevance threshold → include in digest
-  5. Above alert threshold → immediate notification
+### Infrastructure (Spec 10)
+- [x] **Feed polling architecture** — `FeedPoller` with configurable intervals, `distillery poll` CLI
+- [x] **Source adapters** — GitHub events (REST API) and RSS/Atom (stdlib ElementTree)
+- [x] **Relevance scoring pipeline** — embedding-based cosine similarity (no LLM in poller)
+- [x] **Interest extractor** — mines entries for tags, domains, repos, expertise; feeds source suggestions
+- [x] 4 new MCP tools: `distillery_watch`, `distillery_poll`, `distillery_interests`, `distillery_suggest_sources`
+
+### Remaining Phase 3 Items
+- [ ] **Slack, Hacker News, webhook adapters** — only GitHub + RSS implemented so far
 - [ ] **Cold-start bootstrapping** — seed relevance scoring without feedback data
 - [ ] **Feedback loop** — trust weight adjustment based on user engagement with digest items
 
@@ -137,18 +141,21 @@ thresholds:
 - [ ] LangGraph evaluation for complex skill orchestration
 - [ ] CODE pipeline formalization for team workflows
 - [ ] Web UI or REST API (all access currently via MCP + Claude Code)
-- [ ] Multi-team support and cross-team knowledge sharing
+- [ ] Multi-team support and cross-team knowledge sharing (auth extension point in place)
 - [ ] Re-embedding migration tooling (model upgrade path)
 
 ---
 
 ## Technology Stack
 
-| Layer | Phase 1 (Current) | Phase 2 | Phase 3 |
-|-------|-------------------|---------|---------|
+| Layer | Phase 1 | Phase 2 (Current) | Phase 3 |
+|-------|---------|-------------------|---------|
 | Interface | Claude Code skills | Same | Same |
-| Storage | DuckDB + VSS | Elasticsearch | Same |
+| Transport | stdio | stdio + streamable-HTTP | Same |
+| Auth | None (local trust) | GitHub OAuth (FastMCP) | + multi-team RBAC |
+| Storage | DuckDB + VSS | + MotherDuck (shared) / Elasticsearch | Same |
 | Embeddings | Jina v3 / OpenAI | ES native or external | Same |
 | Language | Python 3.11+ | Same | Same |
+| Hosting | Local | + Prefect Horizon | Same |
 | Orchestration | Skill invocation | Same | + scheduled polling |
-| Config | `distillery.yaml` | Same | + feed config |
+| Config | `distillery.yaml` | + `server.auth` section | + feed config |

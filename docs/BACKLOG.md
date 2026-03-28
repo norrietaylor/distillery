@@ -2,9 +2,9 @@
 
 Prioritized work items derived from [ROADMAP.md](ROADMAP.md) and spec research. Items are grouped by phase and ordered by priority within each group.
 
-**Completed specs:** 01 (storage/data model), 02 (core skills), 03 (classification), 04 (public release), 05 (developer experience), 06 (MVP maturity), 07 (FastMCP migration), 08 (infrastructure improvements).
+**Completed specs:** 01 (storage/data model), 02 (core skills), 03 (classification), 04 (public release), 05 (developer experience), 06 (MVP maturity), 07 (FastMCP migration), 08 (infrastructure improvements), 09 (CLI eval runner), 10 (ambient intelligence), 10b (GitHub team OAuth).
 
-**Current state:** 17 MCP tools, FastMCP 2.x/3.x, Python 3.11-3.13 CI matrix, 80% coverage threshold, 600+ tests.
+**Current state:** 21 MCP tools, 9 skills, FastMCP 2.12+, stdio + HTTP transport, GitHub OAuth, Python 3.11-3.13 CI matrix, 80% coverage threshold, 1000+ tests.
 
 ---
 
@@ -37,11 +37,15 @@ Prioritized work items derived from [ROADMAP.md](ROADMAP.md) and spec research. 
 | # | Item | Description | Status |
 |---|------|-------------|--------|
 | 11 | Elasticsearch migration | `ElasticsearchStore` backend — hybrid search (BM25 + kNN + RRF), ES\|QL for temporal queries. Triggered when DuckDB hits ~10K entries | Not started |
-| 12 | Access control | Team/private visibility flag on entries | Not started |
+| 12 | Access control | Team/private visibility flag on entries. Auth extension point ready (spec 10) | Not started |
 | 13 | Session capture hooks | Auto-distill on Claude Code session end | Not started |
 | 14 | Namespace taxonomy | Hierarchical validated tag system (`project/billing-v2/decisions`) | Done (spec 08) |
 | 15 | Provenance tracking | Full version history, source chain, author chain | Not started |
 | 16 | Port type schemas | `person`, `project`, `digest`, `GitHub` entry types | Done (spec 08) |
+| 34 | HTTP transport | Streamable-HTTP via `--transport http` CLI flag | Done (spec 10) |
+| 35 | GitHub OAuth | Team auth via FastMCP `GitHubProvider`, `server.auth` config | Done (spec 10) |
+| 36 | MotherDuck validation | `backend=motherduck` requires `md:` prefix + token at startup | Done (spec 10) |
+| 37 | Prefect Horizon deploy | `prefect.yaml` deployment manifest for managed MCP hosting | Not started |
 
 ### Quality
 
@@ -60,17 +64,17 @@ Prioritized work items derived from [ROADMAP.md](ROADMAP.md) and spec research. 
 
 | # | Item | Description | Status |
 |---|------|-------------|--------|
-| 21 | `/radar` | View latest ambient feed digest | Not started |
-| 22 | `/watch` | Add/remove/list monitored feed sources | Not started |
-| 23 | `/tune` | Adjust relevance thresholds and source trust weights | Not started |
+| 21 | `/radar` | Ambient feed digest with AI source suggestions | Done (spec 10) |
+| 22 | `/watch` | Add/remove/list monitored feed sources | Done (spec 10) |
+| 23 | `/tune` | Adjust relevance thresholds and source trust weights | Done (spec 10) |
 
 ### Infrastructure
 
 | # | Item | Description | Status |
 |---|------|-------------|--------|
-| 24 | Feed polling architecture | Scheduler with configurable intervals per source | Not started |
-| 25 | Source adapters | RSS, Slack, GitHub, Hacker News, webhooks | Not started |
-| 26 | Relevance scoring pipeline | Embed → compare against project embeddings → score → threshold → digest/alert | Not started |
+| 24 | Feed polling architecture | `FeedPoller` + `distillery poll` CLI + `distillery_poll` MCP tool | Done (spec 10) |
+| 25 | Source adapters | GitHub events + RSS/Atom done. Slack, Hacker News, webhooks remaining | Partial (spec 10) |
+| 26 | Relevance scoring pipeline | Embedding-based cosine similarity scorer + interest extractor | Done (spec 10) |
 | 27 | Cold-start bootstrapping | Seed relevance scoring without feedback data | Not started |
 | 28 | Feedback loop | Trust weight adjustment based on user engagement with digest items | Not started |
 
@@ -83,5 +87,5 @@ Prioritized work items derived from [ROADMAP.md](ROADMAP.md) and spec research. 
 | 29 | LangGraph evaluation | Evaluate for complex skill orchestration |
 | 30 | CODE pipeline formalization | Formalize for team workflows |
 | 31 | Web UI / REST API | All access currently via MCP + Claude Code |
-| 32 | Multi-team support | Cross-team knowledge sharing |
+| 32 | Multi-team support | Cross-team knowledge sharing. Auth identity smoke test in place (spec 10) |
 | 33 | Re-embedding migration tooling | Model upgrade path |

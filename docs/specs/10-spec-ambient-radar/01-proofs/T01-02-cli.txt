@@ -1,0 +1,30 @@
+Type: cli
+Command: python3 -c "from distillery.models import EntryType, TYPE_METADATA_SCHEMAS; ..."
+Expected: EntryType.FEED = 'feed', feed schema present, FeedsConfig defaults work
+Timestamp: 2026-03-27T00:00:00Z
+
+OUTPUT:
+
+EntryType.FEED: feed
+Feed in enum values: True
+Feed schema: {
+  'required': {'source_url': 'str', 'source_type': 'str'},
+  'optional': {'title': 'str', 'item_url': 'str', 'published_at': 'str', 'relevance_score': 'float'},
+  'constraints': {'source_type': ['rss', 'github', 'hackernews', 'webhook']}
+}
+FeedsConfig defaults: FeedsConfig(sources=[], thresholds=FeedsThresholdsConfig(alert=0.85, digest=0.6))
+Alert threshold: 0.85
+Digest threshold: 0.6
+Sources (empty): []
+
+VERIFICATION:
+- EntryType.FEED enum value: 'feed' [PASS]
+- 'feed' in all EntryType values: True [PASS]
+- feed schema has required fields (source_url, source_type): [PASS]
+- feed schema has optional fields (title, item_url, published_at, relevance_score): [PASS]
+- feed schema constraints on source_type: [rss, github, hackernews, webhook] [PASS]
+- FeedsConfig default alert threshold: 0.85 [PASS]
+- FeedsConfig default digest threshold: 0.6 [PASS]
+- FeedsConfig default sources: [] [PASS]
+
+Status: PASS
