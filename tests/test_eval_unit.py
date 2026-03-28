@@ -729,13 +729,12 @@ class TestScenarioLoading:
 
 @pytest.mark.unit
 class TestMockEmbeddingProvider:
-    """Unit tests for the hash-based embedding provider."""
+    """Unit tests for the hash-based embedding provider used by the eval bridge."""
 
     def setup_method(self) -> None:
-        # Import private class for direct testing.
-        from distillery.eval.mcp_bridge import _MockEmbeddingProvider
+        from distillery.mcp._stub_embedding import HashEmbeddingProvider
 
-        self.provider = _MockEmbeddingProvider()
+        self.provider = HashEmbeddingProvider(dimensions=4)
 
     def test_dimensions_property(self) -> None:
         assert self.provider.dimensions == 4
@@ -1284,7 +1283,8 @@ class TestSeedFileStore:
     @pytest.mark.asyncio
     async def test_creates_readable_db_file(self, tmp_path: Path) -> None:
         """The seeded DB should be openable and contain the expected entries."""
-        from distillery.eval.mcp_bridge import _MockEmbeddingProvider, seed_file_store
+        from distillery.eval.mcp_bridge import seed_file_store
+        from distillery.mcp._stub_embedding import HashEmbeddingProvider
         from distillery.store.duckdb import DuckDBStore
 
         db_path = str(tmp_path / "readable.db")
@@ -1295,8 +1295,8 @@ class TestSeedFileStore:
         count = await seed_file_store(db_path=db_path, seed_entries=seeds)
         assert count == 2
 
-        # Reopen and verify.
-        provider = _MockEmbeddingProvider()
+        # Reopen and verify using the same provider type as seed_file_store.
+        provider = HashEmbeddingProvider(dimensions=4)
         store = DuckDBStore(db_path=db_path, embedding_provider=provider)
         await store.initialize()
         results = await store.list_entries(filters=None, limit=100, offset=0)
