@@ -208,15 +208,15 @@ class DuckDBStore:
         dims = str(self._embedding_provider.dimensions)
 
         if not rows:
-            # First use -- record the model metadata.  Use INSERT OR IGNORE
-            # so concurrent sessions racing through this path don't fail on
-            # a primary-key conflict.
+            # First use -- record the model metadata.  Use ON CONFLICT DO
+            # NOTHING so concurrent sessions racing through this path don't
+            # fail on a primary-key constraint violation.
             conn.execute(
-                "INSERT OR IGNORE INTO _meta (key, value) VALUES (?, ?)",
+                "INSERT INTO _meta (key, value) VALUES (?, ?) ON CONFLICT DO NOTHING",
                 ["embedding_model", model],
             )
             conn.execute(
-                "INSERT OR IGNORE INTO _meta (key, value) VALUES (?, ?)",
+                "INSERT INTO _meta (key, value) VALUES (?, ?) ON CONFLICT DO NOTHING",
                 ["embedding_dimensions", dims],
             )
             logger.info(
@@ -286,7 +286,7 @@ class DuckDBStore:
                 self._validate_or_record_meta(conn)
                 self._create_index(conn)
                 break  # Success - exit retry loop
-            except duckdb.TransactionException:
+            except (duckdb.TransactionException, duckdb.ConstraintException):
                 if attempt < 2:
                     logger.warning(
                         "Write-write conflict during initialization (attempt %d/3), retrying…",
