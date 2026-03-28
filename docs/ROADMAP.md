@@ -40,11 +40,24 @@ The foundation: storage layer, 6 core skills, classification pipeline.
 - [x] `/distill` updated with full dedup flow via `distillery_check_dedup`
 - [x] Config extended with dedup threshold fields and ordering validation
 
-### Remaining MVP Items (Not Yet Started)
-- [ ] Deploy for single-user validation — use the system, measure retrieval quality
-- [ ] Establish retrieval quality baseline — precision/recall metrics for `/recall`
-- [ ] Define content lifecycle policy — when entries get archived or expire
-- [ ] Design conflict detection — strategy for contradictory entries on the same topic
+### MVP Maturity (Spec 06)
+- [x] Implicit retrieval feedback — `search_log`/`feedback_log` + `distillery_quality` tool
+- [x] Stale entry detection — `distillery_stale` tool + `accessed_at` tracking
+- [x] Conflict detection — `ConflictChecker` + `distillery_check_conflicts` tool
+- [x] Usage metrics dashboard — `distillery_metrics` tool (15 tools total)
+
+### FastMCP Migration (Spec 07)
+- [x] Migrated from `mcp` library to FastMCP 2.x with `@server.tool` decorators
+- [x] Lazy module-level auto-discovery for `fastmcp run` and FastMCP Cloud
+
+### Infrastructure Improvements (Spec 08)
+- [x] Hierarchical tag namespace — slash-separated tags with validation and `distillery_tag_tree` tool
+- [x] 4 new entry types — `person`, `project`, `digest`, `github` with strict metadata validation
+- [x] `distillery_type_schemas` MCP tool for schema discovery (17 tools total)
+- [x] `TagsConfig` — `enforce_namespaces`, `reserved_prefixes` in `distillery.yaml`
+
+### Remaining MVP Items
+- [ ] Deploy for single-user validation — use the system end-to-end, validate retrieval quality
 
 ---
 
@@ -68,9 +81,9 @@ Scale from single user to team. Six new skills, richer metadata, optional Elasti
   - Triggered when DuckDB hits concurrency or scale ceiling (~10K entries)
 - [ ] **Access control** — team/private visibility flag on entries
 - [ ] **Session capture hooks** — auto-distill on Claude Code session end
-- [ ] **Namespace taxonomy** — hierarchical, validated tag system (`/project/billing-v2/decisions`)
+- [x] **Namespace taxonomy** — hierarchical, validated tag system (`project/billing-v2/decisions`)
 - [ ] **Provenance tracking** — full version history, source chain, author chain
-- [ ] **Port type schemas** — `person` (expertise profiles), `project`, `digest`, `github` entry types
+- [x] **Port type schemas** — `person` (expertise profiles), `project`, `digest`, `github` entry types
 
 ### Quality
 - [ ] Classification correction tracking — measure how often human review overrides the classifier

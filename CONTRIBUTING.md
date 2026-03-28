@@ -185,7 +185,7 @@ DuckDB (local persistent storage)
 | Layer | Description | Key types |
 |-------|-------------|-----------|
 | **Skills** | `/distill`, `/recall`, `/pour`, `/bookmark`, `/minutes`, `/classify` — CLAUDE.md files that orchestrate MCP tool calls | — |
-| **MCP Server** | FastMCP server exposing 11 tools over stdio transport | `mcp/server.py` |
+| **MCP Server** | FastMCP server exposing 17 tools over stdio transport | `mcp/server.py` |
 | **Core protocols** | `DistilleryStore`, `EmbeddingProvider`, `ClassificationEngine` — typed `Protocol` interfaces | `store/protocol.py`, `embedding/protocol.py`, `classification/engine.py` |
 | **DuckDB backend** | `DuckDBStore` implements `DistilleryStore`; vector similarity search via VSS extension | `store/duckdb.py` |
 

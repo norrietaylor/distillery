@@ -2,9 +2,9 @@
 
 Prioritized work items derived from [ROADMAP.md](ROADMAP.md) and spec research. Items are grouped by phase and ordered by priority within each group.
 
-**Completed specs:** 01 (storage/data model), 02 (core skills), 03 (classification), 04 (public release), 05 (developer experience/FastMCP migration), 06 (MVP maturity).
+**Completed specs:** 01 (storage/data model), 02 (core skills), 03 (classification), 04 (public release), 05 (developer experience), 06 (MVP maturity), 07 (FastMCP migration), 08 (infrastructure improvements).
 
-**Current state:** 15 MCP tools, FastMCP 2.x, Python 3.11-3.13 CI matrix, 80% coverage threshold.
+**Current state:** 17 MCP tools, FastMCP 2.x/3.x, Python 3.11-3.13 CI matrix, 80% coverage threshold, 600+ tests.
 
 ---
 

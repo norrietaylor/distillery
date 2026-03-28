@@ -126,28 +126,33 @@ See [docs/mcp-setup.md](docs/mcp-setup.md) for detailed setup instructions.
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────┐
-│                  Claude Code                     │
-│  ┌──────┐ ┌──────┐ ┌────┐ ┌────────┐ ┌───────┐ │
-│  │/distill│/recall│/pour│/bookmark│/minutes│ │
-│  └───┬───┘ └──┬───┘ └─┬──┘ └───┬────┘ └──┬────┘ │
-│      │        │       │        │         │       │
-│  ┌───┴────────┴───────┴────────┴─────────┴───┐   │
-│  │          MCP Server (stdio)                │   │
-│  │  11 tools: store, get, update, search,     │   │
-│  │  find_similar, list, status, classify,     │   │
-│  │  review_queue, resolve_review, check_dedup │   │
-│  └──────────────┬────────────────────────────┘   │
-└─────────────────┼────────────────────────────────┘
-                  │
-    ┌─────────────┼──────────────┐
-    │             │              │
-┌───┴───┐  ┌─────┴─────┐  ┌────┴────────┐
-│DuckDB │  │ Embedding  │  │Classification│
-│+ VSS  │  │ Provider   │  │   Engine     │
-│(HNSW) │  │(Jina/OpenAI)│  │  + Dedup    │
-└───────┘  └───────────┘  └─────────────┘
+```mermaid
+graph TD
+    subgraph Claude Code
+        skills["/distill · /recall · /pour · /bookmark · /minutes · /classify"]
+    end
+
+    skills -->|invoke| mcp
+
+    subgraph MCP Server — 17 tools
+        mcp["FastMCP (stdio / HTTP)"]
+    end
+
+    mcp --> store
+    mcp --> embed
+    mcp --> classify
+
+    subgraph Backends
+        store["DuckDB + VSS\n(HNSW cosine similarity)"]
+        embed["Embedding Provider\n(Jina v3 / OpenAI)"]
+        classify["Classification Engine\n+ Dedup + Conflicts"]
+    end
+
+    style skills fill:#fdf4e7,stroke:#BA7517,color:#1a1a1a
+    style mcp fill:#BA7517,stroke:#1a1a1a,color:#fff
+    style store fill:#f5e6cc,stroke:#BA7517,color:#1a1a1a
+    style embed fill:#f5e6cc,stroke:#BA7517,color:#1a1a1a
+    style classify fill:#f5e6cc,stroke:#BA7517,color:#1a1a1a
 ```
 
 ### Key design decisions
@@ -186,8 +191,8 @@ distillery/
 │   │   ├── engine.py        # ClassificationEngine
 │   │   └── dedup.py         # DeduplicationChecker
 │   └── mcp/
-│       └── server.py        # MCP server (11 tools)
-├── tests/                   # 339+ tests
+│       └── server.py        # MCP server (17 tools, FastMCP 2.x/3.x)
+├── tests/                   # 267 tests
 ├── docs/
 │   ├── mcp-setup.md
 │   ├── ROADMAP.md

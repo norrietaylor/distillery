@@ -107,12 +107,22 @@ Once connected, the following tools are available:
 | Tool | Description |
 |------|-------------|
 | `distillery_status` | Returns database stats: total entries, breakdown by type and status, embedding model in use |
-| `distillery_store` | Store a new knowledge entry; checks for duplicates and returns warnings |
+| `distillery_store` | Store a new knowledge entry; checks for duplicates, conflicts, and returns warnings |
 | `distillery_get` | Retrieve a single entry by UUID |
-| `distillery_update` | Partially update an existing entry |
+| `distillery_update` | Partially update an existing entry (with metadata re-validation) |
 | `distillery_search` | Semantic search using cosine similarity; returns ranked results |
 | `distillery_find_similar` | Find entries similar to a given text (for deduplication) |
 | `distillery_list` | List entries with optional filtering and pagination |
+| `distillery_classify` | Classify an entry by type with LLM-based confidence scoring |
+| `distillery_review_queue` | List entries pending manual review |
+| `distillery_resolve_review` | Resolve a pending review entry (accept/reject/reclassify) |
+| `distillery_check_dedup` | Check content for duplicates against existing entries |
+| `distillery_check_conflicts` | Detect semantic contradictions between new content and existing entries |
+| `distillery_metrics` | Comprehensive usage dashboard: entries, activity, search, quality, staleness |
+| `distillery_quality` | Aggregate retrieval quality metrics from implicit feedback signals |
+| `distillery_stale` | Surface entries not accessed within a configurable time window |
+| `distillery_tag_tree` | Return a nested tree of all tags in use with entry counts per node |
+| `distillery_type_schemas` | Return the metadata schema registry for all entry types |
 
 ## Verifying the Server Works
 
