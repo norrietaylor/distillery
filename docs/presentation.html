@@ -528,6 +528,107 @@
   @media (min-width: 769px) {
     .nav .mobile-nav { display: none; }
   }
+
+  /* ---------------------------------------------------------- */
+  /* Live MCP demo widget                                        */
+  /* ---------------------------------------------------------- */
+  .demo-panel {
+    width: 100%;
+    max-width: 860px;
+    background: var(--surface);
+    border: 1px solid #2a2a2a;
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .demo-titlebar {
+    background: var(--surface2);
+    border-bottom: 1px solid #2a2a2a;
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 13px;
+    color: var(--text-muted);
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .demo-dot { width: 10px; height: 10px; border-radius: 50%; background: #444; flex-shrink: 0; }
+  .demo-dot.green { background: var(--green); }
+  .demo-dot.amber { background: var(--amber); }
+  .demo-status-indicator { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 12px; }
+  .demo-status-dot { width: 7px; height: 7px; border-radius: 50%; background: #555; flex-shrink: 0; }
+  .demo-status-dot.connected { background: var(--green); }
+  .demo-status-dot.connecting { background: var(--amber); animation: mcpPulse 1s ease-in-out infinite; }
+  .demo-status-dot.offline { background: var(--red); }
+  @keyframes mcpPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+  .demo-buttons {
+    padding: 10px 14px;
+    display: flex;
+    gap: 8px;
+    border-bottom: 1px solid #2a2a2a;
+    flex-wrap: wrap;
+  }
+  .demo-btn {
+    background: var(--surface2);
+    border: 1px solid #333;
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: var(--amber);
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .demo-btn:hover { border-color: var(--amber-dim); background: var(--amber-glow); }
+  .demo-btn:disabled, .demo-run-btn:disabled { opacity: 0.4; cursor: default; pointer-events: none; }
+  .demo-input-row { padding: 10px 14px; display: flex; gap: 8px; border-bottom: 1px solid #2a2a2a; }
+  .demo-input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid #333;
+    border-radius: 6px;
+    padding: 7px 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: var(--text);
+    outline: none;
+  }
+  .demo-input:focus { border-color: var(--amber-dim); }
+  .demo-run-btn {
+    background: var(--amber);
+    color: #111;
+    font-weight: 600;
+    border: none;
+    border-radius: 6px;
+    padding: 7px 18px;
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .demo-output {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    line-height: 1.65;
+    padding: 16px 20px;
+    height: 210px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .demo-out-prompt { color: var(--amber); }
+  .demo-out-result  { color: var(--green); }
+  .demo-out-label   { color: var(--blue); }
+  .demo-out-error   { color: var(--red); }
+  .demo-out-muted   { color: var(--text-muted); }
+  .demo-out-plain   { color: var(--text); }
+
+  @media (max-width: 768px) {
+    .demo-buttons { gap: 6px; }
+    .demo-btn { font-size: 11px; padding: 5px 10px; }
+    .demo-output { font-size: 12px; height: 160px; }
+    .demo-input { font-size: 12px; }
+    .demo-run-btn { font-size: 12px; padding: 6px 12px; }
+  }
 </style>
 </head>
 <body>
@@ -661,7 +762,42 @@
 </div>
 
 <!-- ============================================================ -->
-<!-- SLIDE 6: /pour deep dive -->
+<!-- SLIDE 6: Live MCP Demo -->
+<!-- ============================================================ -->
+<div class="slide" id="s-demo">
+  <h2 class="fade-in">Live demo <span class="dim" style="font-size:24px;">&mdash; hosted MCP</span></h2>
+  <p class="subtitle fade-in" style="font-size:17px;">
+    Direct connection to
+    <span style="font-family:'JetBrains Mono',monospace;color:var(--amber);font-size:15px;">https://able-red-cougar.fastmcp.app/mcp</span>
+  </p>
+  <div style="height:12px;"></div>
+  <div id="demo-panel" class="demo-panel fade-in">
+    <div class="demo-titlebar">
+      <div class="demo-dot"></div>
+      <div class="demo-dot amber"></div>
+      <div class="demo-dot green"></div>
+      <span style="margin-left:8px;">distillery &mdash; live knowledge base</span>
+      <div class="demo-status-indicator">
+        <div class="demo-status-dot" id="demo-status-dot"></div>
+        <span id="demo-status-text">idle</span>
+      </div>
+    </div>
+    <div class="demo-buttons">
+      <button class="demo-btn" id="demo-btn-status">distillery_status()</button>
+      <button class="demo-btn" id="demo-btn-search">distillery_search("caching strategy")</button>
+      <button class="demo-btn" id="demo-btn-recent">distillery_list(limit=5)</button>
+    </div>
+    <div class="demo-input-row">
+      <input class="demo-input" id="demo-search-input" type="text"
+             placeholder='search query &mdash; e.g. "architecture decisions"' />
+      <button class="demo-run-btn" id="demo-run-btn">&#9654; Search</button>
+    </div>
+    <div class="demo-output" id="demo-output"><span class="demo-out-muted">Click a button above or type a query and press Search.</span></div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- SLIDE 7: /pour deep dive -->
 <!-- ============================================================ -->
 <div class="slide left" id="s6">
   <h2 class="fade-in">Deep synthesis with <span class="highlight">/pour</span></h2>
@@ -1070,6 +1206,243 @@ For each new feed item:
   });
 
   show(0);
+</script>
+
+<!-- ============================================================ -->
+<!-- MCP DEMO SCRIPT                                             -->
+<!-- ============================================================ -->
+<script>
+(function () {
+  'use strict';
+
+  var MCP_URL = 'https://able-red-cougar.fastmcp.app/mcp';
+  var sessionId = null;
+  var initialized = false;
+  var msgId = 1;
+  var busy = false;
+
+  /* Pre-recorded fallbacks shown when the hosted MCP is unreachable */
+  var FALLBACK = {
+    distillery_status: [
+      ['prompt', '> distillery_status()'],
+      ['plain',  ''],
+      ['label',  '● Distillery Knowledge Base'],
+      ['plain',  ''],
+      ['plain',  '  Entries  : 47  (active: 43  pending: 4)'],
+      ['plain',  '  Types    : session(18)  bookmark(12)  minutes(9)  reference(8)'],
+      ['plain',  '  Embedding: Jina v3  |  Dimensions: 1024'],
+      ['plain',  '  Index    : HNSW  |  Search: ready'],
+      ['plain',  ''],
+      ['muted',  '  (pre-recorded — MCP unreachable)'],
+    ],
+    distillery_search: [
+      ['prompt', '> distillery_search(query="caching strategy")'],
+      ['plain',  ''],
+      ['label',  'Results (3 entries):'],
+      ['plain',  ''],
+      ['result', '  92%  [session]   Decided to use Redis for session caching...'],
+      ['muted',  '       ID: abc12345 | norrie | 2026-03-22'],
+      ['plain',  ''],
+      ['result', '  87%  [bookmark]  Redis vs Memcached: A 2026 Comparison'],
+      ['muted',  '       ID: def67890 | alice  | 2026-03-20'],
+      ['plain',  ''],
+      ['result', '  71%  [minutes]   Standup: discussed CDN caching layer...'],
+      ['muted',  '       ID: ghi11223 | bob    | 2026-03-19'],
+      ['plain',  ''],
+      ['muted',  '  (pre-recorded — MCP unreachable)'],
+    ],
+    distillery_list: [
+      ['prompt', '> distillery_list(limit=5)'],
+      ['plain',  ''],
+      ['label',  'Recent entries (5):'],
+      ['plain',  ''],
+      ['plain',  '  [session]    We chose DuckDB for local storage...     norrie  2026-03-28'],
+      ['plain',  '  [bookmark]   FastMCP deployment patterns...           norrie  2026-03-28'],
+      ['plain',  '  [minutes]    Standup 2026-03-27: sprint planning...   alice   2026-03-27'],
+      ['plain',  '  [session]    Decided on HNSW index for VSS...         norrie  2026-03-26'],
+      ['plain',  '  [reference]  MCP protocol 2024-11-05 spec overview    norrie  2026-03-25'],
+      ['plain',  ''],
+      ['muted',  '  (pre-recorded — MCP unreachable)'],
+    ],
+  };
+
+  /* --- Output helpers ------------------------------------------------ */
+  function clearOutput(el) { el.innerHTML = ''; }
+
+  function appendLine(el, text, cls) {
+    var span = document.createElement('span');
+    span.className = 'demo-out-' + (cls || 'plain');
+    span.textContent = text + '\n';
+    el.appendChild(span);
+    el.scrollTop = el.scrollHeight;
+  }
+
+  function showFallback(toolName, outputEl, query) {
+    clearOutput(outputEl);
+    var lines = FALLBACK[toolName] || [['error', 'No fallback available.']];
+    lines.forEach(function (pair) {
+      var cls = pair[0], text = pair[1];
+      /* patch search prompt and result header to show the actual query */
+      if (cls === 'prompt' && toolName === 'distillery_search' && query) {
+        text = '> distillery_search(query="' + query + '")';
+      }
+      if (cls === 'label' && toolName === 'distillery_search' && query && text.indexOf('Results') === 0) {
+        text = 'Results for "' + query + '" (3 entries):';
+      }
+      appendLine(outputEl, text, cls);
+    });
+  }
+
+  /* --- MCP HTTP/SSE transport ---------------------------------------- */
+  function TransportError(message) {
+    this.name = 'TransportError';
+    this.message = message || 'Transport failure';
+    this.isTransportError = true;
+  }
+  TransportError.prototype = Object.create(Error.prototype);
+
+  function postMCP(body) {
+    var controller = new AbortController();
+    var timeoutId = setTimeout(function () { controller.abort(); }, 5000);
+    var headers = {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    };
+    if (sessionId) headers['mcp-session-id'] = sessionId;
+    return fetch(MCP_URL, { method: 'POST', headers: headers, body: JSON.stringify(body), signal: controller.signal })
+      .finally(function () { clearTimeout(timeoutId); })
+      .then(function (resp) {
+        var sid = resp.headers.get('mcp-session-id');
+        if (sid) sessionId = sid;
+        if (resp.status === 204 || resp.headers.get('content-length') === '0') {
+          return null;
+        }
+        return resp.json();
+      })
+      .catch(function (err) {
+        // Network/fetch/timeout errors are transport failures
+        throw new TransportError(err.message);
+      });
+  }
+
+  function ensureInit() {
+    if (initialized) return Promise.resolve();
+    return postMCP({
+      jsonrpc: '2.0', id: msgId++, method: 'initialize',
+      params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'distillery-slides', version: '1.0' } },
+    }).then(function (r) {
+      if (r && r.result) {
+        return postMCP({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} })
+          .then(function () { initialized = true; });
+      } else {
+        throw new Error('MCP init failed');
+      }
+    });
+  }
+
+  function callTool(name, args) {
+    return ensureInit().then(function () {
+      return postMCP({ jsonrpc: '2.0', id: msgId++, method: 'tools/call', params: { name: name, arguments: args } });
+    }).then(function (r) {
+      if (!r) throw new Error('No response');
+      if (r.error) throw new Error(r.error.message || 'MCP error');
+      var content = r.result && r.result.content;
+      if (Array.isArray(content)) {
+        return content.filter(function (c) { return c.type === 'text'; }).map(function (c) { return c.text; }).join('\n');
+      }
+      throw new Error('Unexpected response shape');
+    });
+  }
+
+  /* --- Run a demo action --------------------------------------------- */
+  function runAction(toolName, args, outputEl, query) {
+    if (busy) return;
+    busy = true;
+
+    var allBtns = document.querySelectorAll('#demo-panel .demo-btn, #demo-panel .demo-run-btn');
+    allBtns.forEach(function (b) { b.disabled = true; });
+
+    var statusDot  = document.getElementById('demo-status-dot');
+    var statusText = document.getElementById('demo-status-text');
+    statusDot.className  = 'demo-status-dot connecting';
+    statusText.textContent = 'connecting\u2026';
+    clearOutput(outputEl);
+
+    var promptLine;
+    if (toolName === 'distillery_search') {
+      promptLine = '> distillery_search(query="' + (query || args.query || '') + '")';
+    } else if (toolName === 'distillery_list') {
+      promptLine = '> distillery_list(limit=' + (args.limit || 5) + ')';
+    } else {
+      promptLine = '> ' + toolName + '()';
+    }
+    appendLine(outputEl, promptLine, 'prompt');
+    appendLine(outputEl, '', 'plain');
+
+    callTool(toolName, args)
+      .then(function (text) {
+        statusDot.className  = 'demo-status-dot connected';
+        statusText.textContent = 'connected';
+        text.split('\n').forEach(function (line) { appendLine(outputEl, line, 'plain'); });
+      })
+      .catch(function (err) {
+        // Only show fallback for transport failures; surface application errors
+        if (err && err.isTransportError) {
+          statusDot.className  = 'demo-status-dot offline';
+          statusText.textContent = 'offline \u2014 showing recorded';
+          showFallback(toolName, outputEl, query);
+        } else {
+          statusDot.className  = 'demo-status-dot offline';
+          statusText.textContent = 'error';
+          appendLine(outputEl, 'Error: ' + (err ? err.message : 'Unknown error'), 'error');
+        }
+      })
+      .then(function () {
+        busy = false;
+        allBtns.forEach(function (b) { b.disabled = false; });
+      });
+  }
+
+  /* --- Wire up buttons ----------------------------------------------- */
+  function setup() {
+    var outputEl = document.getElementById('demo-output');
+    if (!outputEl) return;
+
+    /* Prevent demo panel events from triggering slide navigation */
+    var panel = document.getElementById('demo-panel');
+    panel.addEventListener('click',   function (e) { e.stopPropagation(); });
+    panel.addEventListener('keydown', function (e) { e.stopPropagation(); });
+
+    document.getElementById('demo-btn-status').addEventListener('click', function () {
+      runAction('distillery_status', {}, outputEl, null);
+    });
+    document.getElementById('demo-btn-search').addEventListener('click', function () {
+      runAction('distillery_search', { query: 'caching strategy', limit: 5 }, outputEl, 'caching strategy');
+    });
+    document.getElementById('demo-btn-recent').addEventListener('click', function () {
+      runAction('distillery_list', { limit: 5 }, outputEl, null);
+    });
+
+    var searchInput = document.getElementById('demo-search-input');
+    var runBtn      = document.getElementById('demo-run-btn');
+
+    function runSearch() {
+      var q = searchInput.value.trim();
+      if (q) runAction('distillery_search', { query: q, limit: 5 }, outputEl, q);
+    }
+
+    runBtn.addEventListener('click', runSearch);
+    searchInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); runSearch(); }
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setup);
+  } else {
+    setup();
+  }
+}());
 </script>
 
 </body>
