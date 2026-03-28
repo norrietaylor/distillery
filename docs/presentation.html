@@ -1282,15 +1282,25 @@ For each new feed item:
     var lines = FALLBACK[toolName] || [['error', 'No fallback available.']];
     lines.forEach(function (pair) {
       var cls = pair[0], text = pair[1];
-      /* patch search prompt to show the actual query */
+      /* patch search prompt and result header to show the actual query */
       if (cls === 'prompt' && toolName === 'distillery_search' && query) {
         text = '> distillery_search(query="' + query + '")';
+      }
+      if (cls === 'label' && toolName === 'distillery_search' && query && text.indexOf('Results') === 0) {
+        text = 'Results for "' + query + '" (3 entries):';
       }
       appendLine(outputEl, text, cls);
     });
   }
 
   /* --- MCP HTTP/SSE transport ---------------------------------------- */
+  function TransportError(message) {
+    this.name = 'TransportError';
+    this.message = message || 'Transport failure';
+    this.isTransportError = true;
+  }
+  TransportError.prototype = Object.create(Error.prototype);
+
   function postMCP(body) {
     var controller = new AbortController();
     var timeoutId = setTimeout(function () { controller.abort(); }, 5000);
@@ -1308,6 +1318,10 @@ For each new feed item:
           return null;
         }
         return resp.json();
+      })
+      .catch(function (err) {
+        // Network/fetch/timeout errors are transport failures
+        throw new TransportError(err.message);
       });
   }
 
@@ -1354,9 +1368,14 @@ For each new feed item:
     statusText.textContent = 'connecting\u2026';
     clearOutput(outputEl);
 
-    var promptLine = toolName === 'distillery_search'
-      ? '> distillery_search(query="' + (query || args.query || '') + '")'
-      : '> ' + toolName + '()';
+    var promptLine;
+    if (toolName === 'distillery_search') {
+      promptLine = '> distillery_search(query="' + (query || args.query || '') + '")';
+    } else if (toolName === 'distillery_list') {
+      promptLine = '> distillery_list(limit=' + (args.limit || 5) + ')';
+    } else {
+      promptLine = '> ' + toolName + '()';
+    }
     appendLine(outputEl, promptLine, 'prompt');
     appendLine(outputEl, '', 'plain');
 
@@ -1366,10 +1385,17 @@ For each new feed item:
         statusText.textContent = 'connected';
         text.split('\n').forEach(function (line) { appendLine(outputEl, line, 'plain'); });
       })
-      .catch(function () {
-        statusDot.className  = 'demo-status-dot offline';
-        statusText.textContent = 'offline \u2014 showing recorded';
-        showFallback(toolName, outputEl, query);
+      .catch(function (err) {
+        // Only show fallback for transport failures; surface application errors
+        if (err && err.isTransportError) {
+          statusDot.className  = 'demo-status-dot offline';
+          statusText.textContent = 'offline \u2014 showing recorded';
+          showFallback(toolName, outputEl, query);
+        } else {
+          statusDot.className  = 'demo-status-dot offline';
+          statusText.textContent = 'error';
+          appendLine(outputEl, 'Error: ' + (err ? err.message : 'Unknown error'), 'error');
+        }
       })
       .then(function () {
         busy = false;
