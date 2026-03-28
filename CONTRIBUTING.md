@@ -137,7 +137,7 @@ feat(embedding): implement JinaEmbeddingProvider with task types
 chore: update ruff to v0.4 and fix new lint warnings
 ```
 
-Scope values: `store`, `mcp`, `embedding`, `classification`, `config`, `skills`, `cli`
+Scope values: `store`, `mcp`, `embedding`, `classification`, `config`, `skills`, `cli`, `auth`, `feeds`
 
 ---
 

@@ -75,7 +75,7 @@ Uses Python `Protocol` (structural subtyping), not ABCs. All storage operations 
 - **Test markers**: `@pytest.mark.unit`, `@pytest.mark.integration`
 - **Commit format**: Conventional Commits — `type(scope): description`
   - Types: feat, fix, docs, test, refactor, chore
-  - Scopes: store, mcp, embedding, classification, config, skills, cli, auth
+  - Scopes: store, mcp, embedding, classification, config, skills, cli, auth, feeds
 
 ## Testing
 
