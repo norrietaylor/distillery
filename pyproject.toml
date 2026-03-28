@@ -31,6 +31,7 @@ dependencies = [
     "pyyaml>=6.0",
     "httpx>=0.24.0",
     "fastmcp>=2.12.0",
+    "mangum>=0.17.0",
 ]
 
 [project.optional-dependencies]
@@ -81,6 +82,11 @@ disable_error_code = ["untyped-decorator"]
 # The eval module has optional dependencies (anthropic) that are not installed
 # in the base dev environment. Suppress import-not-found for the eval sub-package.
 module = "distillery.eval.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# mangum ships without type stubs; suppress import-not-found for the lambda handler.
+module = ["mangum", "distillery.mcp.lambda_handler"]
 ignore_missing_imports = true
 
 [tool.ruff]
