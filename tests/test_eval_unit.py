@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
 
 from distillery.eval.models import (
     EffectivenessScore,
@@ -27,7 +26,6 @@ from distillery.eval.scenarios import (
     load_scenarios_from_dir,
 )
 from distillery.eval.scorer import score_effectiveness
-
 
 # ---------------------------------------------------------------------------
 # Helpers
