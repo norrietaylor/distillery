@@ -347,7 +347,6 @@ class ClaudeEvalRunner:
                 "--output-format",
                 "stream-json",
                 "--verbose",
-                "--bare",
                 "--model",
                 scenario.model,
                 "--mcp-config",
@@ -358,6 +357,9 @@ class ClaudeEvalRunner:
                 "--allowedTools",
                 "mcp__distillery__*",
             ]
+            # Note: --bare is intentionally omitted. In bare mode the CLI
+            # only accepts ANTHROPIC_API_KEY and ignores OAuth tokens.
+            # Without --bare, CLAUDE_CODE_OAUTH_TOKEN is read from env.
 
             # 5. Run the CLI subprocess.
             env = os.environ.copy()

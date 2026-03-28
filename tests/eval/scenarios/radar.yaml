@@ -10,16 +10,31 @@
       author: eval-seed
       tags: [python, release, feed]
       project: distillery
+      metadata:
+        source_url: "https://docs.python.org/3.13/whatsnew/3.13.html"
+        source_name: "Python Changelog"
+        source_type: "rss"
+        relevance_score: 0.75
     - content: "OpenAI releases GPT-4o mini with 8x lower cost than GPT-4o. Context window: 128k tokens. Strong performance on coding benchmarks."
       entry_type: feed
       author: eval-seed
       tags: [llm, openai, release, feed]
       project: distillery
+      metadata:
+        source_url: "https://openai.com/blog"
+        source_name: "OpenAI Blog"
+        source_type: "rss"
+        relevance_score: 0.65
     - content: "Rust 1.78 stabilises the #[diagnostic::on_unimplemented] attribute, improving error messages for trait bounds."
       entry_type: feed
       author: eval-seed
       tags: [rust, release, feed]
       project: distillery
+      metadata:
+        source_url: "https://blog.rust-lang.org/"
+        source_name: "Rust Blog"
+        source_type: "rss"
+        relevance_score: 0.60
   expected_tools:
     - distillery_status
     - distillery_list
@@ -51,14 +66,17 @@
       entry_type: feed
       author: eval-seed
       tags: [python, fastapi, release, feed]
+      metadata: {source_url: "https://fastapi.tiangolo.com", source_name: "FastAPI", source_type: "rss", relevance_score: 0.7}
     - content: "Anthropic publishes Claude 3.5 Sonnet evaluation results. Improved coding and reasoning over Claude 3 Sonnet."
       entry_type: feed
       author: eval-seed
       tags: [llm, anthropic, release, feed]
+      metadata: {source_url: "https://anthropic.com/blog", source_name: "Anthropic Blog", source_type: "rss", relevance_score: 0.8}
     - content: "DuckDB 0.10 ships with Arrow IPC streaming and improved ASOF join performance."
       entry_type: feed
       author: eval-seed
       tags: [duckdb, release, feed]
+      metadata: {source_url: "https://duckdb.org/news", source_name: "DuckDB News", source_type: "rss", relevance_score: 0.75}
   expected_tools:
     - distillery_status
     - distillery_list
@@ -77,14 +95,17 @@
       entry_type: feed
       author: eval-seed
       tags: [typescript, release, feed]
+      metadata: {source_url: "https://devblogs.microsoft.com/typescript", source_name: "TypeScript Blog", source_type: "rss", relevance_score: 0.65}
     - content: "Bun 1.1 lands with Windows support and improved Node.js compatibility."
       entry_type: feed
       author: eval-seed
       tags: [javascript, bun, release, feed]
+      metadata: {source_url: "https://bun.sh/blog", source_name: "Bun Blog", source_type: "rss", relevance_score: 0.6}
     - content: "Go 1.22 ships with improved loop variable semantics (each iteration gets its own variable)."
       entry_type: feed
       author: eval-seed
       tags: [go, release, feed]
+      metadata: {source_url: "https://go.dev/blog", source_name: "Go Blog", source_type: "rss", relevance_score: 0.6}
   expected_tools:
     - distillery_status
     - distillery_list
@@ -102,14 +123,17 @@
       entry_type: feed
       author: eval-seed
       tags: [kubernetes, release, feed]
+      metadata: {source_url: "https://kubernetes.io/blog", source_name: "Kubernetes Blog", source_type: "rss", relevance_score: 0.7}
     - content: "GitHub Copilot now supports Claude 3.5 Sonnet as an alternative model."
       entry_type: feed
       author: eval-seed
       tags: [github, copilot, llm, feed]
+      metadata: {source_url: "https://github.blog", source_name: "GitHub Blog", source_type: "rss", relevance_score: 0.75}
     - content: "Terraform 1.8 adds provider-defined functions for custom validation logic."
       entry_type: feed
       author: eval-seed
       tags: [terraform, release, feed]
+      metadata: {source_url: "https://www.hashicorp.com/blog", source_name: "HashiCorp Blog", source_type: "rss", relevance_score: 0.6}
   expected_tools:
     - distillery_status
     - distillery_list
