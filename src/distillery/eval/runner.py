@@ -30,7 +30,7 @@ from distillery.eval.scorer import score_effectiveness
 logger = logging.getLogger(__name__)
 
 # Path to the skills directory (relative to the repo root).
-_SKILLS_DIR = Path(__file__).parents[4] / ".claude" / "skills"
+_SKILLS_DIR = Path(__file__).resolve().parents[3] / ".claude" / "skills"
 
 
 def _load_skill_prompt(skill_name: str) -> str:
@@ -99,7 +99,7 @@ class ClaudeEvalRunner:
     def _get_client(self) -> Any:
         import anthropic  # type: ignore[import-not-found]
 
-        return anthropic.Anthropic(api_key=self._api_key)
+        return anthropic.AsyncAnthropic(api_key=self._api_key)
 
     def _get_skill_prompt(self, skill_name: str) -> str:
         if self._skills_dir is not None:
@@ -123,10 +123,10 @@ class ClaudeEvalRunner:
             :class:`~distillery.eval.models.ScenarioResult` with performance
             and effectiveness data.
         """
-        bridge = await MCPBridge.create(seed_entries=scenario.seed_entries)
-        seed_count = await bridge.count_stored_entries()
-
+        bridge: MCPBridge | None = None
         try:
+            bridge = await MCPBridge.create(seed_entries=scenario.seed_entries)
+            seed_count = await bridge.count_stored_entries()
             result = await self._execute(scenario, bridge, seed_count)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Eval runner error for scenario %r", scenario.name)
@@ -160,7 +160,8 @@ class ClaudeEvalRunner:
                 error=str(exc),
             )
         finally:
-            await bridge.close()
+            if bridge is not None:
+                await bridge.close()
 
         return result
 
@@ -189,7 +190,7 @@ class ClaudeEvalRunner:
 
         while api_call_count < max_iterations:
             api_call_count += 1
-            response = client.messages.create(
+            response = await client.messages.create(
                 model=scenario.model,
                 max_tokens=scenario.max_tokens,
                 system=system_prompt,
@@ -246,6 +247,9 @@ class ClaudeEvalRunner:
 
             messages.append({"role": "user", "content": tool_results})
 
+        # Check if we hit the iteration cap.
+        hit_iteration_cap = api_call_count >= max_iterations
+
         total_latency_ms = (time.perf_counter() - run_start) * 1000
 
         # Extract final text response from the last assistant turn.
@@ -273,10 +277,20 @@ class ClaudeEvalRunner:
             performance=performance,
         )
 
+        # If we hit the iteration cap, mark as failure.
+        if hit_iteration_cap:
+            effectiveness.failure_reasons.append(
+                f"Reached maximum iterations ({max_iterations}) without completing"
+            )
+            # Override passed status to False when iteration cap is hit.
+            passed = False
+        else:
+            passed = effectiveness.passed
+
         return ScenarioResult(
             scenario_name=scenario.name,
             skill=scenario.skill,
-            passed=effectiveness.passed,
+            passed=passed,
             performance=performance,
             effectiveness=effectiveness,
             tool_calls=tool_calls,
