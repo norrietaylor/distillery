@@ -126,30 +126,33 @@ See [docs/mcp-setup.md](docs/mcp-setup.md) for detailed setup instructions.
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────┐
-│                  Claude Code                     │
-│  ┌──────┐ ┌──────┐ ┌────┐ ┌────────┐ ┌───────┐ │
-│  │/distill│/recall│/pour│/bookmark│/minutes│ │
-│  └───┬───┘ └──┬───┘ └─┬──┘ └───┬────┘ └──┬────┘ │
-│      │        │       │        │         │       │
-│  ┌───┴────────┴───────┴────────┴─────────┴───┐   │
-│  │          MCP Server (stdio)                │   │
-│  │  17 tools: store, get, update, search,      │   │
-│  │  find_similar, list, status, classify,      │   │
-│  │  review_queue, resolve_review, check_dedup, │   │
-│  │  check_conflicts, metrics, quality, stale,  │   │
-│  │  tag_tree, type_schemas                     │   │
-│  └──────────────┬────────────────────────────┘   │
-└─────────────────┼────────────────────────────────┘
-                  │
-    ┌─────────────┼──────────────┐
-    │             │              │
-┌───┴───┐  ┌─────┴─────┐  ┌────┴────────┐
-│DuckDB │  │ Embedding  │  │Classification│
-│+ VSS  │  │ Provider   │  │   Engine     │
-│(HNSW) │  │(Jina/OpenAI)│  │  + Dedup    │
-└───────┘  └───────────┘  └─────────────┘
+```mermaid
+graph TD
+    subgraph Claude Code
+        skills["/distill · /recall · /pour · /bookmark · /minutes · /classify"]
+    end
+
+    skills -->|invoke| mcp
+
+    subgraph MCP Server — 17 tools
+        mcp["FastMCP (stdio / HTTP)"]
+    end
+
+    mcp --> store
+    mcp --> embed
+    mcp --> classify
+
+    subgraph Backends
+        store["DuckDB + VSS\n(HNSW cosine similarity)"]
+        embed["Embedding Provider\n(Jina v3 / OpenAI)"]
+        classify["Classification Engine\n+ Dedup + Conflicts"]
+    end
+
+    style skills fill:#e8f0fe,stroke:#4285f4
+    style mcp fill:#fef7e0,stroke:#f9ab00
+    style store fill:#e6f4ea,stroke:#34a853
+    style embed fill:#e6f4ea,stroke:#34a853
+    style classify fill:#e6f4ea,stroke:#34a853
 ```
 
 ### Key design decisions
