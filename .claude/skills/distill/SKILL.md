@@ -210,7 +210,14 @@ Automatically extract 2–5 relevant keywords from the distilled summary as tags
 Prefer hierarchical tags that reflect project context:
 
 - Use `project/{repo-name}/sessions` as a base tag for the current project (e.g. `project/billing-v2/sessions`)
-  - Sanitize repo names: convert to lowercase, replace underscores and dots with hyphens, remove any characters not matching `[a-z0-9-]`
+  - Sanitize repo names derived from `git rev-parse --show-toplevel`:
+    1. Convert to lowercase
+    2. Replace any characters not in `[a-z0-9-]` (including underscores, dots, spaces, uppercase) with hyphens
+    3. Collapse consecutive hyphens into a single hyphen
+    4. Trim leading and trailing hyphens
+    5. If the result doesn't start with `[a-z0-9]`, prefix with `repo-` to ensure validity
+  - The final segment must pass the validation regex `[a-z0-9][a-z0-9\-]*`
+  - Example: repo name `_internal.tools` becomes `repo-internal-tools` in `project/repo-internal-tools/sessions`
 - Use `project/{repo-name}/decisions` for decision entries
 - Use `project/{repo-name}/architecture` for architectural insights
 - Supplement with domain-specific tags (e.g. `domain/storage`, `domain/api-design`)
