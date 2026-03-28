@@ -638,6 +638,81 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
             arguments=arguments,
         )
 
+    # -----------------------------------------------------------------------
+    # T02.3 tool wrappers: distillery_metrics, distillery_quality,
+    # distillery_stale
+    # -----------------------------------------------------------------------
+
+    @server.tool
+    async def distillery_metrics(
+        ctx: Context,
+        period_days: int = 30,
+    ) -> list[types.TextContent]:
+        """Return usage metrics and statistics for the Distillery knowledge store.
+
+        Aggregates usage statistics from the store including entry counts,
+        search activity, and feedback signals over the specified period.
+
+        period_days must be >= 1 (default 30).
+        """
+        lc = ctx.lifespan_context
+        return await _handle_metrics(
+            store=lc["store"],
+            config=lc["config"],
+            embedding_provider=lc["embedding_provider"],
+            arguments={"period_days": period_days},
+        )
+
+    @server.tool
+    async def distillery_quality(
+        ctx: Context,
+        entry_type: str | None = None,
+    ) -> list[types.TextContent]:
+        """Return search quality signals from the Distillery knowledge store.
+
+        Aggregates search quality signals from search_log and feedback_log
+        including total searches, total feedback, positive rate, average
+        result count, and per-type breakdown.
+
+        entry_type optionally filters to a specific type.
+        """
+        lc = ctx.lifespan_context
+        arguments: dict[str, Any] = {}
+        if entry_type is not None:
+            arguments["entry_type"] = entry_type
+        return await _handle_quality(
+            store=lc["store"],
+            arguments=arguments,
+        )
+
+    @server.tool
+    async def distillery_stale(
+        ctx: Context,
+        days: int | None = None,
+        limit: int = 20,
+        entry_type: str | None = None,
+    ) -> list[types.TextContent]:
+        """Return entries that have not been accessed within a staleness window.
+
+        An entry's last access time is determined by
+        COALESCE(accessed_at, updated_at) so entries without an explicit
+        access timestamp fall back to their last modification time.
+
+        days defaults to config.classification.stale_days if not provided.
+        limit must be >= 1 (default 20).
+        """
+        lc = ctx.lifespan_context
+        arguments: dict[str, Any] = {"limit": limit}
+        if days is not None:
+            arguments["days"] = days
+        if entry_type is not None:
+            arguments["entry_type"] = entry_type
+        return await _handle_stale(
+            store=lc["store"],
+            config=lc["config"],
+            arguments=arguments,
+        )
+
     return server
 
 

@@ -1,0 +1,11 @@
+Type: test
+Command: .venv/bin/python -m pytest tests/test_mcp_server.py::TestCreateServer -v
+Expected: All 15 tools registered, server isinstance FastMCP
+Timestamp: 2026-03-27T00:00:00Z
+Status: PASS
+
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+tests/test_mcp_server.py::TestCreateServer::test_create_server_returns_server_instance PASSED [ 50%]
+tests/test_mcp_server.py::TestCreateServer::test_server_registers_all_fifteen_tools PASSED [100%]
+============================== 2 passed in 0.35s ===============================
