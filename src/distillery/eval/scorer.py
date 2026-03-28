@@ -35,7 +35,18 @@ def score_effectiveness(
     Returns:
         :class:`~distillery.eval.models.EffectivenessScore` with pass/fail detail.
     """
-    tools_called = [tc.tool_name for tc in tool_calls]
+    # Normalize tool names: the CLI reports tools with an MCP transport prefix
+    # (e.g. "mcp__distillery__distillery_status") but scenarios use the bare
+    # tool name ("distillery_status").  Strip the prefix for matching.
+    def _normalize_tool_name(name: str) -> str:
+        prefix = "mcp__distillery__"
+        return name[len(prefix):] if name.startswith(prefix) else name
+
+    tools_called = [
+        _normalize_tool_name(tc.tool_name)
+        for tc in tool_calls
+        if tc.tool_name not in ("Skill", "Read", "Bash", "Edit", "Glob", "Grep")
+    ]
     failure_reasons: list[str] = []
 
     # --- required tools present (order-insensitive) -------------------------
