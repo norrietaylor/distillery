@@ -268,9 +268,7 @@ class TestDelete:
         await store.delete(entry.id)
         # get() returns None for archived entries -- but we can check via list_entries
         # with explicit status filter.
-        entries = await store.list_entries(
-            filters={"status": "archived"}, limit=10, offset=0
-        )
+        entries = await store.list_entries(filters={"status": "archived"}, limit=10, offset=0)
         ids = [e.id for e in entries]
         assert entry.id in ids
 
@@ -381,9 +379,7 @@ class TestSearch:
 
     async def test_search_filter_by_status(self, store: DuckDBStore) -> None:
         active_entry = make_entry(content="active entry", status=EntryStatus.ACTIVE)
-        pending_entry = make_entry(
-            content="pending entry", status=EntryStatus.PENDING_REVIEW
-        )
+        pending_entry = make_entry(content="pending entry", status=EntryStatus.PENDING_REVIEW)
         await store.store(active_entry)
         await store.store(pending_entry)
         results = await store.search("entry", filters={"status": "active"}, limit=10)
@@ -401,6 +397,7 @@ class TestSearch:
         await store.store(entry)
         # Use a date in the past so our entry is included.
         from datetime import timedelta
+
         past = datetime.now(tz=UTC) - timedelta(hours=1)
         results = await store.search(
             "dated content",
@@ -435,9 +432,7 @@ class TestFindSimilar:
         entry = make_entry(content="test threshold content")
         await store.store(entry)
         threshold = 0.5
-        results = await store.find_similar(
-            "test threshold content", threshold=threshold, limit=10
-        )
+        results = await store.find_similar("test threshold content", threshold=threshold, limit=10)
         for r in results:
             assert r.score >= threshold
 
@@ -508,9 +503,7 @@ class TestListEntries:
     async def test_list_entries_filter_by_entry_type(self, store: DuckDBStore) -> None:
         await store.store(make_entry(content="bookmark one", entry_type=EntryType.BOOKMARK))
         await store.store(make_entry(content="idea one", entry_type=EntryType.IDEA))
-        result = await store.list_entries(
-            filters={"entry_type": "bookmark"}, limit=10, offset=0
-        )
+        result = await store.list_entries(filters={"entry_type": "bookmark"}, limit=10, offset=0)
         for e in result:
             assert e.entry_type is EntryType.BOOKMARK
 
@@ -524,18 +517,14 @@ class TestListEntries:
     async def test_list_entries_filter_by_project(self, store: DuckDBStore) -> None:
         await store.store(make_entry(content="proj content", project="alpha"))
         await store.store(make_entry(content="other content", project="beta"))
-        result = await store.list_entries(
-            filters={"project": "alpha"}, limit=10, offset=0
-        )
+        result = await store.list_entries(filters={"project": "alpha"}, limit=10, offset=0)
         for e in result:
             assert e.project == "alpha"
 
     async def test_list_entries_filter_by_tags(self, store: DuckDBStore) -> None:
         await store.store(make_entry(content="tagged", tags=["critical"]))
         await store.store(make_entry(content="plain"))
-        result = await store.list_entries(
-            filters={"tags": ["critical"]}, limit=10, offset=0
-        )
+        result = await store.list_entries(filters={"tags": ["critical"]}, limit=10, offset=0)
         for e in result:
             assert "critical" in e.tags
 
@@ -543,9 +532,7 @@ class TestListEntries:
         await store.store(make_entry(content="active", status=EntryStatus.ACTIVE))
         pending = make_entry(content="pending", status=EntryStatus.PENDING_REVIEW)
         await store.store(pending)
-        result = await store.list_entries(
-            filters={"status": "pending_review"}, limit=10, offset=0
-        )
+        result = await store.list_entries(filters={"status": "pending_review"}, limit=10, offset=0)
         for e in result:
             assert e.status is EntryStatus.PENDING_REVIEW
 
@@ -561,9 +548,7 @@ class TestListEntries:
         for i in range(len(result) - 1):
             assert result[i].created_at >= result[i + 1].created_at
 
-    async def test_list_entries_offset_beyond_total_returns_empty(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_list_entries_offset_beyond_total_returns_empty(self, store: DuckDBStore) -> None:
         await store.store(make_entry(content="only one"))
         result = await store.list_entries(filters=None, limit=10, offset=100)
         assert result == []
@@ -606,9 +591,7 @@ class TestAccessedAt:
         assert row[0] is not None
         assert isinstance(row[0], datetime)
 
-    async def test_get_missing_entry_does_not_set_accessed_at(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_get_missing_entry_does_not_set_accessed_at(self, store: DuckDBStore) -> None:
         """get() on a non-existent ID returns None without error."""
         result = await store.get("no-such-id")
         assert result is None

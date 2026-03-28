@@ -176,9 +176,7 @@ class TestStoreFindSimilarRoundTrip:
         assert "entry_id" in store_data
 
         # find_similar with threshold=0.0 ensures we get results back
-        find_resp = await _handle_find_similar(
-            e2e_store, {"content": content, "threshold": 0.0}
-        )
+        find_resp = await _handle_find_similar(e2e_store, {"content": content, "threshold": 0.0})
         find_data = parse_mcp_response(find_resp)
 
         assert "results" in find_data
@@ -470,9 +468,7 @@ class TestErrorPathInvalidInput:
 class TestCallToolDispatcher:
     """Scenario: end-to-end tool dispatch via create_server() handler."""
 
-    async def test_call_tool_dispatches_store_and_status(
-        self, e2e_store: DuckDBStore
-    ) -> None:
+    async def test_call_tool_dispatches_store_and_status(self, e2e_store: DuckDBStore) -> None:
         """Verify that the CallToolRequest handler routes to correct tool handlers."""
         from distillery.mcp.server import _handle_status, _handle_store
 
@@ -495,7 +491,7 @@ class TestCallToolDispatcher:
         assert status_data["total_entries"] >= 1
 
     async def test_create_server_registers_all_tools(self) -> None:
-        """create_server() must register all 15 expected tools."""
+        """create_server() must register all expected tools."""
         config = _make_config()
         server = create_server(config)
 
@@ -518,5 +514,7 @@ class TestCallToolDispatcher:
             "distillery_check_conflicts",
             "distillery_quality",
             "distillery_stale",
+            "distillery_tag_tree",
+            "distillery_type_schemas",
         }
         assert expected == tool_names, f"Missing tools: {expected - tool_names}"

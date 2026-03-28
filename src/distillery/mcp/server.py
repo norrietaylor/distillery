@@ -67,7 +67,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def error_response(code: str, message: str, details: dict[str, Any] | None = None) -> list[types.TextContent]:
+def error_response(
+    code: str, message: str, details: dict[str, Any] | None = None
+) -> list[types.TextContent]:
     """Build a structured error response as MCP content.
 
     Args:
@@ -118,7 +120,9 @@ def validate_required(arguments: dict[str, Any], *fields: str) -> str | None:
     return None
 
 
-def validate_type(arguments: dict[str, Any], field: str, expected_type: type | tuple[type, ...], label: str) -> str | None:
+def validate_type(
+    arguments: dict[str, Any], field: str, expected_type: type | tuple[type, ...], label: str
+) -> str | None:
     """Return an error message if *field* is not of *expected_type*.
 
     Args:
@@ -189,8 +193,7 @@ def _create_embedding_provider(config: DistilleryConfig) -> Any:
         return StubEmbeddingProvider(dimensions=dimensions)
     else:
         raise ValueError(
-            f"Unsupported embedding provider: {provider_name!r}. "
-            "Must be one of: 'jina', 'openai'."
+            f"Unsupported embedding provider: {provider_name!r}. Must be one of: 'jina', 'openai'."
         )
 
 
@@ -417,6 +420,7 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
         date_to: str | None = None,
         limit: int = 20,
         offset: int = 0,
+        tag_prefix: str | None = None,
     ) -> list[types.TextContent]:
         """
         List knowledge entries with optional filters and pagination.
@@ -430,6 +434,9 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
             date_from (str | None): ISO 8601 start date to include (inclusive).
             date_to (str | None): ISO 8601 end date to include (inclusive).
             tags (list[str] | None): List of tag strings to filter by.
+            tag_prefix (str | None): Namespace prefix filter — returns only entries whose
+                tags fall under this prefix (e.g. "source/bookmark" matches
+                "source/bookmark/rss" but not "source/bookmark-old").
 
         Returns:
             list[types.TextContent]: MCP TextContent blocks containing a JSON object with
@@ -452,6 +459,8 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
             arguments["date_from"] = date_from
         if date_to is not None:
             arguments["date_to"] = date_to
+        if tag_prefix is not None:
+            arguments["tag_prefix"] = tag_prefix
         return await _handle_list(
             store=lc["store"],
             arguments=arguments,
@@ -475,6 +484,7 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
         date_from: str | None = None,
         date_to: str | None = None,
         limit: int = 10,
+        tag_prefix: str | None = None,
     ) -> list[types.TextContent]:
         """Search the knowledge store using semantic similarity.
 
@@ -485,6 +495,9 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
         All filter parameters are optional.  date_from and date_to accept
         ISO 8601 date strings (e.g. "2024-01-15").
         limit must be between 1 and 200 (default 10).
+        tag_prefix filters to entries whose tags fall under that namespace
+        prefix (e.g. "domain/architecture" matches "domain/architecture/api"
+        but not "domain/architecture-old").
         """
         lc = ctx.lifespan_context
         arguments: dict[str, Any] = {"query": query, "limit": limit}
@@ -502,6 +515,8 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
             arguments["date_from"] = date_from
         if date_to is not None:
             arguments["date_to"] = date_to
+        if tag_prefix is not None:
+            arguments["tag_prefix"] = tag_prefix
         return await _handle_search(
             store=lc["store"],
             arguments=arguments,
@@ -789,7 +804,71 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
             arguments=arguments,
         )
 
+    @server.tool
+    async def distillery_tag_tree(
+        ctx: Context,
+        prefix: str | None = None,
+    ) -> list[types.TextContent]:
+        """Return a nested tag hierarchy with entry counts.
+
+        Scans all active entries and builds a tree from their slash-separated
+        tags.  Each node in the tree has a ``count`` (number of entries whose
+        tags fall under that node) and a ``children`` dict keyed by the next
+        segment name.
+
+        Parameters:
+            prefix (str | None): When provided, only nodes under this namespace
+                prefix are included in the response.  For example,
+                ``prefix="project"`` returns only ``project/*`` subtrees.
+
+        Returns:
+            list[types.TextContent]: A single MCP TextContent block containing
+            a JSON object with key ``tree`` (the nested dict) and ``prefix``
+            (the filter applied, or null).
+        """
+        lc = ctx.lifespan_context
+        return await _handle_tag_tree(
+            store=lc["store"],
+            arguments={"prefix": prefix},
+        )
+
+    @server.tool
+    async def distillery_type_schemas(
+        ctx: Context,  # noqa: ARG001
+    ) -> list[types.TextContent]:
+        """Return the metadata schemas for all structured entry types.
+
+        Reports required and optional metadata fields for each entry type that
+        has a defined schema (``person``, ``project``, ``digest``, ``github``).
+        Legacy types (e.g. ``session``, ``bookmark``) are listed with empty
+        required/optional dicts to indicate they accept any metadata.
+
+        Returns:
+            list[types.TextContent]: A single MCP TextContent block containing
+            a JSON object with key ``schemas``, mapping each entry type name to
+            its schema dict (``required``, ``optional``, and optionally
+            ``constraints``).
+        """
+        return await _handle_type_schemas()
+
     return server
+
+
+def __getattr__(name: str) -> FastMCP:
+    """Lazy module-level attribute for FastMCP auto-discovery.
+
+    ``fastmcp run src/distillery/mcp/server.py`` looks for a top-level
+    variable named ``mcp``, ``server``, or ``app``.  Because tool handler
+    closures reference module-level constants defined below
+    ``create_server``, we cannot call it at import time.  Instead we use
+    the module ``__getattr__`` hook (PEP 562) to build the server on first
+    access and cache it in the module globals for subsequent lookups.
+    """
+    if name in ("mcp", "server", "app"):
+        instance = create_server()
+        globals()[name] = instance
+        return instance
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -891,7 +970,17 @@ def _sync_gather_stats(
 
 # Valid entry_type values (mirrors EntryType enum).
 _VALID_ENTRY_TYPES = {
-    "session", "bookmark", "minutes", "meeting", "reference", "idea", "inbox"
+    "session",
+    "bookmark",
+    "minutes",
+    "meeting",
+    "reference",
+    "idea",
+    "inbox",
+    "person",
+    "project",
+    "digest",
+    "github",
 }
 
 # Valid status values (mirrors EntryStatus enum).
@@ -955,12 +1044,40 @@ async def _handle_store(
     if not isinstance(dedup_limit, int):
         return error_response("INVALID_INPUT", "Field 'dedup_limit' must be an integer")
 
+    # --- reserved prefix enforcement ----------------------------------------
+    # Sources that are permitted to use tags under reserved top-level prefixes.
+    _reserved_allowed_sources: set[str] = {EntrySource.IMPORT.value}
+    entry_source_str: str = str(arguments.get("source", EntrySource.CLAUDE_CODE.value))
+    if cfg is not None and cfg.tags.reserved_prefixes:
+        tags_raw = list(arguments.get("tags") or [])
+        for tag in tags_raw:
+            if not isinstance(tag, str):
+                return error_response(
+                    "INVALID_INPUT", f"Each tag must be a string, got: {type(tag).__name__}"
+                )
+        tags_to_check: list[str] = tags_raw
+        if entry_source_str not in _reserved_allowed_sources:
+            for tag in tags_to_check:
+                top = tag.split("/")[0]
+                if top in cfg.tags.reserved_prefixes:
+                    return error_response(
+                        "RESERVED_PREFIX",
+                        f"Tag {tag!r} uses reserved prefix {top!r}. "
+                        "Only internal sources may use this namespace.",
+                    )
+
     # --- build entry --------------------------------------------------------
     try:
+        # Determine EntrySource from arguments.
+        try:
+            resolved_source = EntrySource(entry_source_str)
+        except ValueError:
+            resolved_source = EntrySource.CLAUDE_CODE
+
         entry = Entry(
             content=arguments["content"],
             entry_type=EntryType(entry_type_str),
-            source=EntrySource.CLAUDE_CODE,
+            source=resolved_source,
             author=arguments["author"],
             project=arguments.get("project"),
             tags=list(arguments.get("tags") or []),
@@ -1007,7 +1124,9 @@ async def _handle_store(
     try:
         from distillery.classification.conflict import ConflictChecker
 
-        conflict_threshold = float(cfg.classification.conflict_threshold if cfg is not None else 0.60)
+        conflict_threshold = float(
+            cfg.classification.conflict_threshold if cfg is not None else 0.60
+        )
         conflict_checker = ConflictChecker(store=store, threshold=conflict_threshold)
         conflict_similar = await store.find_similar(
             content=entry.content,
@@ -1161,9 +1280,7 @@ async def _handle_update(
     entry_id: str = arguments["entry_id"]
 
     # Build the updates dict from all keys except entry_id.
-    updatable_keys = {
-        "content", "entry_type", "author", "project", "tags", "status", "metadata"
-    }
+    updatable_keys = {"content", "entry_type", "author", "project", "tags", "status", "metadata"}
     updates: dict[str, Any] = {}
     for key in updatable_keys:
         if key in arguments:
@@ -1201,8 +1318,7 @@ async def _handle_update(
         if st_str not in _VALID_STATUSES:
             return error_response(
                 "INVALID_INPUT",
-                f"Invalid status {st_str!r}. "
-                f"Must be one of: {', '.join(sorted(_VALID_STATUSES))}.",
+                f"Invalid status {st_str!r}. Must be one of: {', '.join(sorted(_VALID_STATUSES))}.",
             )
         updates["status"] = EntryStatus(st_str)
 
@@ -1249,7 +1365,16 @@ def _build_filters_from_arguments(arguments: dict[str, Any]) -> dict[str, Any] |
     Returns:
         A dict of filters, or ``None`` if no filter keys are present.
     """
-    filter_keys = ("entry_type", "author", "project", "tags", "status", "date_from", "date_to")
+    filter_keys = (
+        "entry_type",
+        "author",
+        "project",
+        "tags",
+        "status",
+        "date_from",
+        "date_to",
+        "tag_prefix",
+    )
     filters: dict[str, Any] = {}
     for key in filter_keys:
         if key in arguments and arguments[key] is not None:
@@ -1298,10 +1423,7 @@ async def _handle_search(
         logger.exception("Error in distillery_search")
         return error_response("SEARCH_ERROR", f"Search failed: {exc}")
 
-    results = [
-        {"score": round(sr.score, 6), "entry": sr.entry.to_dict()}
-        for sr in search_results
-    ]
+    results = [{"score": round(sr.score, 6), "entry": sr.entry.to_dict()} for sr in search_results]
 
     # Log the search event and record it for implicit feedback correlation.
     if recent_searches is not None and search_results:
@@ -1371,17 +1493,12 @@ async def _handle_find_similar(
         return error_response("VALIDATION_ERROR", "Field 'limit' must be <= 200")
 
     try:
-        search_results = await store.find_similar(
-            content=content, threshold=threshold, limit=limit
-        )
+        search_results = await store.find_similar(content=content, threshold=threshold, limit=limit)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error in distillery_find_similar")
         return error_response("FIND_SIMILAR_ERROR", f"find_similar failed: {exc}")
 
-    results = [
-        {"score": round(sr.score, 6), "entry": sr.entry.to_dict()}
-        for sr in search_results
-    ]
+    results = [{"score": round(sr.score, 6), "entry": sr.entry.to_dict()} for sr in search_results]
     return success_response({"results": results, "count": len(results), "threshold": threshold})
 
 
@@ -1438,6 +1555,130 @@ async def _handle_list(
     )
 
 
+async def _handle_tag_tree(
+    store: Any,
+    arguments: dict[str, Any],
+) -> list[types.TextContent]:
+    """Implement the ``distillery_tag_tree`` tool.
+
+    Fetches all tags from active entries and builds a nested dict tree.
+    Each node has a ``count`` (entries whose tags fall under that subtree)
+    and a ``children`` dict.
+
+    Args:
+        store: Initialised ``DuckDBStore``.
+        arguments: Dict with optional key ``prefix`` (str | None).
+
+    Returns:
+        MCP content list with a JSON payload containing ``tree`` and ``prefix``.
+    """
+    prefix: str | None = arguments.get("prefix")
+
+    def _sync_build_tree() -> dict[str, Any]:
+        """Query all tags and build the nested hierarchy synchronously."""
+        conn = store.connection
+        # Only include active entries to avoid noise from archived ones.
+        result = conn.execute("SELECT tags FROM entries WHERE status != 'archived'")
+        rows = result.fetchall()
+
+        # Collect all individual tag strings paired with a row index so we
+        # can count distinct entries (not tag occurrences) per tree node.
+        all_tags: list[tuple[str, int]] = []
+        for idx, (tags_col,) in enumerate(rows):
+            if tags_col:
+                for t in tags_col:
+                    all_tags.append((t, idx))
+
+        # Filter by prefix when requested.  A tag matches a prefix when it
+        # either equals the prefix exactly or starts with "prefix/".
+        if prefix is not None:
+            prefix_slash = prefix + "/"
+            all_tags = [
+                (t, idx) for t, idx in all_tags
+                if t == prefix or t.startswith(prefix_slash)
+            ]
+            # Strip the prefix (and its trailing slash) from the remaining tags
+            # so that the returned tree is rooted at the prefix.
+            stripped: list[tuple[str, int]] = []
+            for t, idx in all_tags:
+                if t == prefix:
+                    # The tag is exactly the prefix -- represents the root node.
+                    stripped.append(("", idx))
+                else:
+                    stripped.append((t[len(prefix_slash):], idx))
+            all_tags = stripped
+
+        # Build the tree from path segments.
+        # Each node: {"count": int, "children": {segment: node}, "_entry_ids": set}
+        # _entry_ids tracks distinct entries to avoid overcounting when one
+        # entry has multiple tags under the same namespace.
+        root: dict[str, Any] = {"count": 0, "children": {}, "_entry_ids": set()}
+
+        for tag, idx in all_tags:
+            if not tag:
+                # This tag exactly matched the prefix — count it at the root.
+                root["_entry_ids"].add(idx)
+                continue
+            segments = tag.split("/")
+            node = root
+            for seg in segments:
+                if seg not in node["children"]:
+                    node["children"][seg] = {"count": 0, "children": {}, "_entry_ids": set()}
+                node = node["children"][seg]
+                node["_entry_ids"].add(idx)
+
+        # Convert _entry_ids sets to counts and strip the internal sets.
+        def _finalize(n: dict[str, Any]) -> None:
+            n["count"] = len(n.pop("_entry_ids"))
+            for child in n["children"].values():
+                _finalize(child)
+
+        _finalize(root)
+
+        return root
+
+    try:
+        tree = await asyncio.to_thread(_sync_build_tree)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error in distillery_tag_tree")
+        return error_response("TAG_TREE_ERROR", f"Failed to build tag tree: {exc}")
+
+    return success_response({"tree": tree, "prefix": prefix})
+
+
+# ---------------------------------------------------------------------------
+# distillery_type_schemas tool handler
+# ---------------------------------------------------------------------------
+
+
+async def _handle_type_schemas() -> list[types.TextContent]:
+    """Implement the ``distillery_type_schemas`` tool.
+
+    Returns the full metadata schema registry for all known entry types.
+    Types with structured schemas (``person``, ``project``, ``digest``,
+    ``github``) include their required/optional/constraints definitions.
+    Legacy types are reported with empty required/optional dicts.
+
+    Returns:
+        MCP content list with a JSON payload containing a ``schemas`` dict.
+    """
+    from distillery.models import TYPE_METADATA_SCHEMAS, EntryType
+
+    all_schemas: dict[str, Any] = {}
+
+    # For each known entry type, include its schema (or empty dicts for legacy).
+    for et in EntryType:
+        schema = TYPE_METADATA_SCHEMAS.get(et.value, {})
+        all_schemas[et.value] = {
+            "required": schema.get("required", {}),
+            "optional": schema.get("optional", {}),
+        }
+        if "constraints" in schema:
+            all_schemas[et.value]["constraints"] = schema["constraints"]
+
+    return success_response({"schemas": all_schemas})
+
+
 # ---------------------------------------------------------------------------
 # T02 tool handlers: classify, review_queue, resolve_review
 # ---------------------------------------------------------------------------
@@ -1467,7 +1708,7 @@ async def _handle_classify(
     """
     from datetime import datetime
 
-    from distillery.models import EntryStatus, EntryType
+    from distillery.models import EntryStatus, EntryType, validate_tag
 
     # --- input validation ---------------------------------------------------
     err = validate_required(arguments, "entry_id", "entry_type", "confidence")
@@ -1514,7 +1755,18 @@ async def _handle_classify(
     new_status = EntryStatus.ACTIVE if confidence >= threshold else EntryStatus.PENDING_REVIEW
 
     # Merge suggested tags with existing tags (de-duplicate, preserve order).
-    suggested_tags: list[str] = list(arguments.get("suggested_tags") or [])
+    # Filter out invalid tags from LLM suggestions to prevent validation failures.
+    suggested_tags_raw = list(arguments.get("suggested_tags") or [])
+    suggested_tags: list[str] = []
+    for t in suggested_tags_raw:
+        if not isinstance(t, str):
+            logger.warning("Dropping non-string LLM-suggested tag: %r", t)
+            continue
+        try:
+            validate_tag(t)
+            suggested_tags.append(t)
+        except ValueError:
+            logger.warning("Dropping invalid LLM-suggested tag: %r", t)
     merged_tags = list(entry.tags) + [t for t in suggested_tags if t not in entry.tags]
 
     # Build updated metadata -- preserve existing metadata, add classification fields.
@@ -1871,9 +2123,7 @@ def _sync_gather_metrics(
     # ------------------------------------------------------------------ #
     # entries section                                                      #
     # ------------------------------------------------------------------ #
-    total_row = conn.execute(
-        "SELECT COUNT(*) FROM entries WHERE status != 'archived'"
-    ).fetchone()
+    total_row = conn.execute("SELECT COUNT(*) FROM entries WHERE status != 'archived'").fetchone()
     total_entries: int = total_row[0] if total_row else 0
 
     type_rows = conn.execute(
@@ -1944,13 +2194,10 @@ def _sync_gather_metrics(
     }
     try:
         _table_exists = conn.execute(
-            "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_name = 'search_log'"
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'search_log'"
         ).fetchone()
         if _table_exists and _table_exists[0] > 0:
-            total_searches_row = conn.execute(
-                "SELECT COUNT(*) FROM search_log"
-            ).fetchone()
+            total_searches_row = conn.execute("SELECT COUNT(*) FROM search_log").fetchone()
             total_searches: int = total_searches_row[0] if total_searches_row else 0
 
             def _count_searches(days: int) -> int:
@@ -1995,13 +2242,10 @@ def _sync_gather_metrics(
     }
     try:
         _fb_exists = conn.execute(
-            "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_name = 'feedback_log'"
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'feedback_log'"
         ).fetchone()
         if _fb_exists and _fb_exists[0] > 0:
-            total_fb_row = conn.execute(
-                "SELECT COUNT(*) FROM feedback_log"
-            ).fetchone()
+            total_fb_row = conn.execute("SELECT COUNT(*) FROM feedback_log").fetchone()
             total_fb: int = total_fb_row[0] if total_fb_row else 0
 
             positive_row = conn.execute(
@@ -2174,8 +2418,7 @@ def _sync_gather_quality(
 
     try:
         sl_exists = conn.execute(
-            "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_name = 'search_log'"
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'search_log'"
         ).fetchone()
         if sl_exists and sl_exists[0] > 0:
             row = conn.execute("SELECT COUNT(*) FROM search_log").fetchone()
@@ -2184,16 +2427,13 @@ def _sync_gather_quality(
             avg_row = conn.execute(
                 "SELECT AVG(array_length(result_entry_ids)) FROM search_log"
             ).fetchone()
-            avg_result_count = (
-                float(avg_row[0]) if avg_row and avg_row[0] is not None else 0.0
-            )
+            avg_result_count = float(avg_row[0]) if avg_row and avg_row[0] is not None else 0.0
     except Exception:  # noqa: BLE001
         pass
 
     try:
         fl_exists = conn.execute(
-            "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_name = 'feedback_log'"
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'feedback_log'"
         ).fetchone()
         if fl_exists and fl_exists[0] > 0:
             row = conn.execute("SELECT COUNT(*) FROM feedback_log").fetchone()
@@ -2213,12 +2453,10 @@ def _sync_gather_quality(
     if entry_type_filter is not None:
         try:
             sl_exists2 = conn.execute(
-                "SELECT COUNT(*) FROM information_schema.tables "
-                "WHERE table_name = 'search_log'"
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'search_log'"
             ).fetchone()
             fl_exists2 = conn.execute(
-                "SELECT COUNT(*) FROM information_schema.tables "
-                "WHERE table_name = 'feedback_log'"
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'feedback_log'"
             ).fetchone()
             if (sl_exists2 and sl_exists2[0] > 0) and (fl_exists2 and fl_exists2[0] > 0):
                 type_fb_row = conn.execute(

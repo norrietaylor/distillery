@@ -161,11 +161,27 @@ Cache the project for the remainder of the session.
 
 ### Step 8: Extract Tags
 
-Combine explicit tags from Step 2 with auto-extracted keywords from the summary:
+Combine explicit tags from Step 2 with auto-extracted keywords from the summary.
 
+Prefer hierarchical tags that reflect the bookmark's origin and content:
+
+- Use `source/bookmark/{domain}` as a base tag derived from the URL domain (e.g. a URL from `docs.python.org` yields `source/bookmark/docs-python-org`, converting dots to hyphens and dropping `www.`)
+- Use `domain/{topic}` for subject-area tags (e.g. `domain/web-performance`, `domain/api-design`)
+- If the current project is known, add `project/{repo-name}/references`
+  - Sanitize repo names using the same normalization as domains:
+    1. Convert to lowercase
+    2. Drop any leading "www." if present
+    3. Replace any characters not in `[a-z0-9-]` (including dots, underscores, spaces, uppercase letters) with hyphens
+    4. Collapse consecutive hyphens into a single hyphen
+    5. Trim leading and trailing hyphens
+  - The final segment must conform to the regex `[a-z0-9][a-z0-9\-]*` (start with alphanumeric, followed by alphanumeric or hyphens)
+  - Example: repo name `My_Repo.v2` becomes `my-repo-v2` in `project/my-repo-v2/references`
+- Fall back to flat tags only when no domain or project context is available
+
+Tag format rules:
+- Tags are lowercase and hyphen-separated within each segment (e.g., `source/bookmark/docs-python-org`, `domain/api-design`)
 - Auto-extract 2–5 relevant keywords from the summary content
 - Merge with any explicit `#tag` arguments from the invocation
-- Tags must be lowercase and hyphen-separated (e.g., `web-performance`, `api-design`)
 - Strip leading `#` characters from user-provided tags
 
 ### Step 9: Store Entry

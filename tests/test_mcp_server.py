@@ -401,9 +401,7 @@ class TestUpdateTool:
     async def test_update_content(self, store: DuckDBStore) -> None:
         entry = make_entry(content="Before update")
         await store.store(entry)
-        response = await _handle_update(
-            store, {"entry_id": entry.id, "content": "After update"}
-        )
+        response = await _handle_update(store, {"entry_id": entry.id, "content": "After update"})
         data = parse_mcp_response(response)
         assert "error" not in data
         assert data["content"] == "After update"
@@ -411,27 +409,21 @@ class TestUpdateTool:
     async def test_update_version_increments(self, store: DuckDBStore) -> None:
         entry = make_entry(content="Versioned content")
         await store.store(entry)
-        response = await _handle_update(
-            store, {"entry_id": entry.id, "content": "Version 2"}
-        )
+        response = await _handle_update(store, {"entry_id": entry.id, "content": "Version 2"})
         data = parse_mcp_response(response)
         assert data["version"] == 2
 
     async def test_update_tags(self, store: DuckDBStore) -> None:
         entry = make_entry(content="Tag test")
         await store.store(entry)
-        response = await _handle_update(
-            store, {"entry_id": entry.id, "tags": ["new-tag"]}
-        )
+        response = await _handle_update(store, {"entry_id": entry.id, "tags": ["new-tag"]})
         data = parse_mcp_response(response)
         assert "new-tag" in data["tags"]
 
     async def test_update_status(self, store: DuckDBStore) -> None:
         entry = make_entry(content="Status test")
         await store.store(entry)
-        response = await _handle_update(
-            store, {"entry_id": entry.id, "status": "archived"}
-        )
+        response = await _handle_update(store, {"entry_id": entry.id, "status": "archived"})
         data = parse_mcp_response(response)
         assert data["status"] == "archived"
 
@@ -445,12 +437,8 @@ class TestUpdateTool:
         assert data["error"] is True
         assert data["code"] == "INVALID_INPUT"
 
-    async def test_update_nonexistent_entry_returns_not_found(
-        self, store: DuckDBStore
-    ) -> None:
-        response = await _handle_update(
-            store, {"entry_id": "nonexistent-id", "content": "Updated"}
-        )
+    async def test_update_nonexistent_entry_returns_not_found(self, store: DuckDBStore) -> None:
+        response = await _handle_update(store, {"entry_id": "nonexistent-id", "content": "Updated"})
         data = parse_mcp_response(response)
         assert data["error"] is True
         assert data["code"] == "NOT_FOUND"
@@ -472,9 +460,7 @@ class TestUpdateTool:
     async def test_update_immutable_field_returns_error(self, store: DuckDBStore) -> None:
         entry = make_entry(content="Immutable test")
         await store.store(entry)
-        response = await _handle_update(
-            store, {"entry_id": entry.id, "id": "new-id"}
-        )
+        response = await _handle_update(store, {"entry_id": entry.id, "id": "new-id"})
         data = parse_mcp_response(response)
         assert data["error"] is True
         assert data["code"] == "INVALID_INPUT"
@@ -526,9 +512,7 @@ class TestSearchTool:
     async def test_search_filters_by_entry_type(self, store: DuckDBStore) -> None:
         await store.store(make_entry(content="Idea entry", entry_type=EntryType.IDEA))
         await store.store(make_entry(content="Inbox entry", entry_type=EntryType.INBOX))
-        response = await _handle_search(
-            store, {"query": "entry", "entry_type": "idea"}
-        )
+        response = await _handle_search(store, {"query": "entry", "entry_type": "idea"})
         data = parse_mcp_response(response)
         for result in data["results"]:
             assert result["entry"]["entry_type"] == "idea"
@@ -551,9 +535,7 @@ class TestFindSimilarTool:
         assert "count" in data
         assert "threshold" in data
 
-    async def test_find_similar_missing_content_returns_error(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_find_similar_missing_content_returns_error(self, store: DuckDBStore) -> None:
         response = await _handle_find_similar(store, {})
         data = parse_mcp_response(response)
         assert data["error"] is True
@@ -562,9 +544,7 @@ class TestFindSimilarTool:
     async def test_find_similar_threshold_out_of_range_returns_error(
         self, store: DuckDBStore
     ) -> None:
-        response = await _handle_find_similar(
-            store, {"content": "test", "threshold": 1.5}
-        )
+        response = await _handle_find_similar(store, {"content": "test", "threshold": 1.5})
         data = parse_mcp_response(response)
         assert data["error"] is True
         assert data["code"] == "VALIDATION_ERROR"
@@ -644,9 +624,7 @@ class TestListTool:
         assert data["error"] is True
         assert data["code"] == "VALIDATION_ERROR"
 
-    async def test_list_includes_limit_and_offset_in_response(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_list_includes_limit_and_offset_in_response(self, store: DuckDBStore) -> None:
         response = await _handle_list(store, {"limit": 5, "offset": 2})
         data = parse_mcp_response(response)
         assert data["limit"] == 5
@@ -669,8 +647,8 @@ class TestCreateServer:
         server = create_server(config)
         assert isinstance(server, FastMCP)
 
-    async def test_server_registers_all_fifteen_tools(self) -> None:
-        """list_tools() must return all 15 tool names."""
+    async def test_server_registers_all_tools(self) -> None:
+        """list_tools() must return all expected tool names."""
         config = DistilleryConfig(
             storage=StorageConfig(database_path=":memory:"),
             embedding=EmbeddingConfig(provider="", model="stub", dimensions=4),
@@ -697,5 +675,7 @@ class TestCreateServer:
             "distillery_check_conflicts",
             "distillery_quality",
             "distillery_stale",
+            "distillery_tag_tree",
+            "distillery_type_schemas",
         }
         assert expected == tool_names, f"Missing tools: {expected - tool_names}"

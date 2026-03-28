@@ -52,6 +52,7 @@ class TestVersion:
 
     def test_version_matches_package(self) -> None:
         from distillery import __version__ as ver
+
         assert ver == "0.1.0"
 
 
@@ -271,6 +272,7 @@ class TestEnvVarConfig:
     ) -> None:
         cfg_path = write_config(tmp_path, ":memory:")
         from distillery.config import CONFIG_ENV_VAR
+
         monkeypatch.setenv(CONFIG_ENV_VAR, str(cfg_path))
         monkeypatch.chdir(tmp_path)
         with pytest.raises(SystemExit) as exc:
@@ -333,9 +335,7 @@ class TestCmdStatusUnit:
         rc = _cmd_status(str(cfg_path), "text")
         assert rc == 0
 
-    def test_cmd_status_returns_one_for_bad_config(
-        self, tmp_path: Path
-    ) -> None:
+    def test_cmd_status_returns_one_for_bad_config(self, tmp_path: Path) -> None:
         missing = str(tmp_path / "missing.yaml")
         rc = _cmd_status(missing, "text")
         assert rc == 1

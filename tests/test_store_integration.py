@@ -43,18 +43,14 @@ async def store(embedding_provider) -> DuckDBStore:  # type: ignore[return]
 
 
 class TestStoreGetRoundTrip:
-    async def test_store_and_retrieve_preserves_content(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_store_and_retrieve_preserves_content(self, store: DuckDBStore) -> None:
         entry = make_entry(content="integration test content")
         entry_id = await store.store(entry)
         fetched = await store.get(entry_id)
         assert fetched is not None
         assert fetched.content == "integration test content"
 
-    async def test_store_and_retrieve_preserves_metadata(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_store_and_retrieve_preserves_metadata(self, store: DuckDBStore) -> None:
         entry = make_entry(
             content="entry with metadata",
             metadata={"source_url": "https://example.com", "priority": "high"},
@@ -65,18 +61,14 @@ class TestStoreGetRoundTrip:
         assert fetched.metadata["source_url"] == "https://example.com"
         assert fetched.metadata["priority"] == "high"
 
-    async def test_store_and_retrieve_preserves_tags(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_store_and_retrieve_preserves_tags(self, store: DuckDBStore) -> None:
         entry = make_entry(content="tagged entry", tags=["integration", "test", "alpha"])
         await store.store(entry)
         fetched = await store.get(entry.id)
         assert fetched is not None
         assert set(fetched.tags) == {"integration", "test", "alpha"}
 
-    async def test_store_and_retrieve_preserves_type(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_store_and_retrieve_preserves_type(self, store: DuckDBStore) -> None:
         entry = make_entry(content="session entry", entry_type=EntryType.SESSION)
         await store.store(entry)
         fetched = await store.get(entry.id)
@@ -85,10 +77,7 @@ class TestStoreGetRoundTrip:
 
     async def test_multiple_entries_independent(self, store: DuckDBStore) -> None:
         """Storing multiple entries does not corrupt individual records."""
-        entries = [
-            make_entry(content=f"entry number {i}", author=f"user-{i}")
-            for i in range(10)
-        ]
+        entries = [make_entry(content=f"entry number {i}", author=f"user-{i}") for i in range(10)]
         for entry in entries:
             await store.store(entry)
 
@@ -171,9 +160,7 @@ class TestStoreSearchFlow:
             f"unrelated entry (rank {unrelated_rank})"
         )
 
-    async def test_search_with_entry_type_filter(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_search_with_entry_type_filter(self, store: DuckDBStore) -> None:
         """search() with entry_type filter only returns matching entries."""
         bookmark = make_entry(
             content="bookmark entry content",
@@ -201,9 +188,7 @@ class TestStoreSearchFlow:
         await store.store(alice_entry)
         await store.store(bob_entry)
 
-        results = await store.search(
-            "wrote this", filters={"author": "alice"}, limit=10
-        )
+        results = await store.search("wrote this", filters={"author": "alice"}, limit=10)
         for r in results:
             assert r.entry.author == "alice"
 
@@ -240,9 +225,7 @@ class TestFindSimilarIntegration:
         await store.store(original_entry)
 
         # Query with the same content: cosine similarity should be ~1.0
-        results = await store.find_similar(
-            duplicate_text, threshold=0.9, limit=10
-        )
+        results = await store.find_similar(duplicate_text, threshold=0.9, limit=10)
         assert len(results) >= 1
         result_ids = [r.entry.id for r in results]
         assert original_entry.id in result_ids
@@ -267,28 +250,20 @@ class TestFindSimilarIntegration:
         await store.store(dissimilar_entry)
 
         # With a high threshold, only the similar entry should appear
-        results = await store.find_similar(
-            "query text for similarity", threshold=0.9, limit=10
-        )
+        results = await store.find_similar("query text for similarity", threshold=0.9, limit=10)
         result_ids = [r.entry.id for r in results]
         assert similar_entry.id in result_ids
         assert dissimilar_entry.id not in result_ids
 
-    async def test_find_similar_scores_above_threshold(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_find_similar_scores_above_threshold(self, store: DuckDBStore) -> None:
         """Every result from find_similar must have score >= threshold."""
         for i in range(5):
             await store.store(make_entry(content=f"similarity test content {i}"))
 
         threshold = 0.5
-        results = await store.find_similar(
-            "similarity test content", threshold=threshold, limit=10
-        )
+        results = await store.find_similar("similarity test content", threshold=threshold, limit=10)
         for r in results:
-            assert r.score >= threshold, (
-                f"Score {r.score} is below threshold {threshold}"
-            )
+            assert r.score >= threshold, f"Score {r.score} is below threshold {threshold}"
 
     async def test_find_similar_orders_by_score_descending(
         self,
@@ -310,17 +285,14 @@ class TestFindSimilarIntegration:
         await store.store(high_entry)
         await store.store(low_entry)
 
-        results = await store.find_similar(
-            "the search query text", threshold=0.0, limit=10
-        )
+        results = await store.find_similar("the search query text", threshold=0.0, limit=10)
         assert len(results) >= 2
 
         # Verify scores are in descending order
         scores = [r.score for r in results]
         for i in range(len(scores) - 1):
             assert scores[i] >= scores[i + 1], (
-                f"Results out of order: score[{i}]={scores[i]} < "
-                f"score[{i+1}]={scores[i+1]}"
+                f"Results out of order: score[{i}]={scores[i]} < score[{i + 1}]={scores[i + 1]}"
             )
 
     async def test_find_similar_empty_store(self, store: DuckDBStore) -> None:
@@ -333,9 +305,7 @@ class TestFindSimilarIntegration:
         for i in range(10):
             await store.store(make_entry(content=f"similar item {i}"))
 
-        results = await store.find_similar(
-            "similar item", threshold=0.0, limit=3
-        )
+        results = await store.find_similar("similar item", threshold=0.0, limit=3)
         assert len(results) <= 3
 
 
@@ -368,15 +338,11 @@ class TestUpdateEmbeddingRefresh:
         await store.update(entry.id, {"content": "updated content here"})
 
         # Search for the updated content -- entry should now rank high
-        results = await store.search(
-            "search for updated", filters=None, limit=10
-        )
+        results = await store.search("search for updated", filters=None, limit=10)
         result_ids = [r.entry.id for r in results]
         assert entry.id in result_ids
 
-    async def test_get_after_update_reflects_new_content(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_get_after_update_reflects_new_content(self, store: DuckDBStore) -> None:
         """get() after update() returns the updated content."""
         entry = make_entry(content="before update")
         await store.store(entry)
@@ -401,24 +367,18 @@ class TestUpdateEmbeddingRefresh:
 
 
 class TestDeleteIntegration:
-    async def test_deleted_entry_still_in_db_with_archived_status(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_deleted_entry_still_in_db_with_archived_status(self, store: DuckDBStore) -> None:
         """Deleted (soft-deleted) entries remain in DB with archived status."""
         entry = make_entry(content="to be deleted")
         await store.store(entry)
         result = await store.delete(entry.id)
         assert result is True
 
-        entries = await store.list_entries(
-            filters={"status": "archived"}, limit=10, offset=0
-        )
+        entries = await store.list_entries(filters={"status": "archived"}, limit=10, offset=0)
         ids = [e.id for e in entries]
         assert entry.id in ids
 
-    async def test_active_entries_not_filtered_by_default(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_active_entries_not_filtered_by_default(self, store: DuckDBStore) -> None:
         """Active entries show up in list_entries with no filter."""
         active_entry = make_entry(content="active entry", status=EntryStatus.ACTIVE)
         await store.store(active_entry)
@@ -439,14 +399,11 @@ class TestDeleteIntegration:
 
 
 class TestMetaTableIntegration:
-    async def test_embedding_metadata_recorded_on_first_init(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_embedding_metadata_recorded_on_first_init(self, store: DuckDBStore) -> None:
         """The _meta table records model name and dimensions after initialize."""
         conn = store.connection
         result = conn.execute(
-            "SELECT key, value FROM _meta WHERE key IN "
-            "('embedding_model', 'embedding_dimensions')"
+            "SELECT key, value FROM _meta WHERE key IN ('embedding_model', 'embedding_dimensions')"
         ).fetchall()
         meta = {row[0]: row[1] for row in result}
 

@@ -207,9 +207,27 @@ metadata={
 
 Automatically extract 2–5 relevant keywords from the distilled summary as tags.
 
-- Tags are lowercase and hyphen-separated (e.g., `storage-decision`, `api-design`)
+Prefer hierarchical tags that reflect project context:
+
+- Use `project/{repo-name}/sessions` as a base tag for the current project (e.g. `project/billing-v2/sessions`)
+  - Sanitize repo names derived from `git rev-parse --show-toplevel`:
+    1. Convert to lowercase
+    2. Replace any characters not in `[a-z0-9-]` (including underscores, dots, spaces, uppercase) with hyphens
+    3. Collapse consecutive hyphens into a single hyphen
+    4. Trim leading and trailing hyphens
+    5. If the result doesn't start with `[a-z0-9]`, prefix with `repo-` to ensure validity
+  - The final segment must pass the validation regex `[a-z0-9][a-z0-9\-]*`
+  - Example: repo name `_internal.tools` becomes `repo-internal-tools` in `project/repo-internal-tools/sessions`
+- Use `project/{repo-name}/decisions` for decision entries
+- Use `project/{repo-name}/architecture` for architectural insights
+- Supplement with domain-specific tags (e.g. `domain/storage`, `domain/api-design`)
+- Fall back to flat tags (e.g., `storage-decision`) only when no project context is available
+
+Tag format rules:
+- Tags are lowercase and hyphen-separated within each segment (e.g., `project/billing-v2/sessions`, `domain/api-design`)
 - The user may also provide explicit tags via `#tag` syntax in the original invocation (e.g., `/distill #caching #architecture`)
 - Explicit tags are merged with auto-extracted tags
+- Strip any leading `#` characters from user-provided tags
 
 ### Step 8: Store Entry
 

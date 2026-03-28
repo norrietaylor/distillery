@@ -41,6 +41,10 @@ Categories:
 - meeting: A structured meeting record with agenda, participants, and outcomes.
 - reference: A reference document, code snippet, or factual note.
 - idea: An idea, hypothesis, or open question.
+- person: A profile or record about a specific person (team member, contributor, contact).
+- project: A project or repository record with status and metadata.
+- digest: A periodic digest or summary covering a date range.
+- github: A GitHub artifact reference (issue, PR, discussion, or release).
 - inbox: Cannot be classified (use as a fallback).
 
 Content to classify:
@@ -143,9 +147,7 @@ class ClassificationEngine:
         try:
             entry_type = EntryType(raw_type)
         except ValueError:
-            logger.warning(
-                "ClassificationEngine: unknown entry_type %r, using inbox", raw_type
-            )
+            logger.warning("ClassificationEngine: unknown entry_type %r, using inbox", raw_type)
             entry_type = EntryType.INBOX
 
         confidence = float(data["confidence"])

@@ -1,0 +1,25 @@
+Type: cli
+Command: uv run python -c "... (reserved prefix enforcement tests via _handle_store)"
+Expected: Reserved prefix blocks unauthorized tags, allows distillery-core source
+Timestamp: 2026-03-27T00:00:00Z
+Status: PASS
+
+--- Test 1: Reserved prefix blocked for claude-code source ---
+{
+  "error": true,
+  "code": "RESERVED_PREFIX",
+  "message": "Tag 'system/internal' uses reserved prefix 'system'. Only internal sources may use this namespace."
+}
+PASS: rejected with RESERVED_PREFIX code
+
+--- Test 2: Reserved prefix allowed for distillery-core source ---
+{
+  "entry_id": "mock-entry-id-1234"
+}
+PASS: stored successfully with entry_id: mock-entry-id-1234
+
+--- Test 3: Non-reserved hierarchical tag accepted for any source ---
+{
+  "entry_id": "mock-entry-id-1234"
+}
+PASS: non-reserved hierarchical tag accepted

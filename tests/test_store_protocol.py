@@ -23,9 +23,7 @@ pytestmark = pytest.mark.unit
 class TestDistilleryStoreProtocolCompliance:
     """Verify that DuckDBStore satisfies the DistilleryStore protocol."""
 
-    def test_duckdb_store_is_instance_of_protocol(
-        self, mock_embedding_provider
-    ) -> None:
+    def test_duckdb_store_is_instance_of_protocol(self, mock_embedding_provider) -> None:
         """isinstance check against @runtime_checkable Protocol passes."""
         store = DuckDBStore(db_path=":memory:", embedding_provider=mock_embedding_provider)
         assert isinstance(store, DistilleryStore)
@@ -65,13 +63,16 @@ class TestDistilleryStoreProtocolCompliance:
         assert hasattr(store, "list_entries")
         assert callable(store.list_entries)
 
-    def test_all_protocol_methods_are_coroutines(
-        self, mock_embedding_provider
-    ) -> None:
+    def test_all_protocol_methods_are_coroutines(self, mock_embedding_provider) -> None:
         """Every required method must be an async coroutine function."""
         method_names = [
-            "store", "get", "update", "delete",
-            "search", "find_similar", "list_entries",
+            "store",
+            "get",
+            "update",
+            "delete",
+            "search",
+            "find_similar",
+            "list_entries",
         ]
         store = DuckDBStore(db_path=":memory:", embedding_provider=mock_embedding_provider)
         for name in method_names:

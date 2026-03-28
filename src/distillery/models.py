@@ -7,6 +7,7 @@ dataclass returned by semantic search operations.
 
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -25,6 +26,10 @@ class EntryType(StrEnum):
         REFERENCE: A reference document, snippet, or fact.
         IDEA: An idea, hypothesis, or open question.
         INBOX: An unsorted entry awaiting classification.
+        PERSON: A person profile entry (team member, contributor, contact).
+        PROJECT: A project or repository record.
+        DIGEST: A periodic digest or summary covering a date range.
+        GITHUB: A GitHub artifact reference (issue, PR, discussion, release).
     """
 
     SESSION = "session"
@@ -34,6 +39,10 @@ class EntryType(StrEnum):
     REFERENCE = "reference"
     IDEA = "idea"
     INBOX = "inbox"
+    PERSON = "person"
+    PROJECT = "project"
+    DIGEST = "digest"
+    GITHUB = "github"
 
 
 class EntrySource(StrEnum):
@@ -72,6 +81,146 @@ def _utcnow() -> datetime:
 def _new_uuid() -> str:
     """Return a new UUID4 as a string."""
     return str(uuid.uuid4())
+
+
+_TAG_SEGMENT_RE = re.compile(r"^[a-z0-9][a-z0-9\-]*$")
+
+
+def validate_tag(tag: str) -> None:
+    """Validate a single tag string.
+
+    Tags must be non-empty lowercase alphanumeric slugs, optionally joined by
+    forward slashes to form a hierarchical namespace.  Each slash-separated
+    segment must match ``[a-z0-9][a-z0-9\\-]*`` (starts with a letter or digit,
+    may contain hyphens, no uppercase, no underscores, no consecutive or
+    trailing slashes).
+
+    Valid examples::
+
+        "meeting-notes"
+        "project/billing-v2/decisions"
+        "team/backend"
+
+    Invalid examples::
+
+        "Project/Billing"   # uppercase not allowed
+        "project/billing/"  # trailing slash
+        "project//billing"  # empty segment
+
+    Raises:
+        ValueError: If the tag is empty, contains uppercase characters, has a
+            trailing slash, or contains any empty segment.
+    """
+    if not tag:
+        raise ValueError("Tag must not be empty.")
+    segments = tag.split("/")
+    for segment in segments:
+        if not segment:
+            raise ValueError(
+                f"Tag {tag!r} is invalid: each slash-separated segment must be non-empty "
+                "(no leading, trailing, or consecutive slashes)."
+            )
+        if not _TAG_SEGMENT_RE.match(segment):
+            raise ValueError(
+                f"Tag {tag!r} is invalid: segment {segment!r} must match "
+                "[a-z0-9][a-z0-9-]* (lowercase alphanumeric plus hyphens only)."
+            )
+
+
+# ---------------------------------------------------------------------------
+# Metadata schemas
+# ---------------------------------------------------------------------------
+
+#: Registry mapping each entry type that has structured metadata requirements
+#: to a schema dict describing its ``required`` and ``optional`` fields.
+#: Types not listed here (e.g. ``session``, ``bookmark``) accept any metadata.
+TYPE_METADATA_SCHEMAS: dict[str, dict[str, Any]] = {
+    "person": {
+        "required": {
+            "expertise": "list[str]",
+        },
+        "optional": {
+            "github_username": "str",
+            "team": "str",
+            "role": "str",
+            "email": "str",
+        },
+    },
+    "project": {
+        "required": {
+            "repo": "str",
+        },
+        "optional": {
+            "status": "str",
+            "language": "str",
+            "description": "str",
+        },
+    },
+    "digest": {
+        "required": {
+            "period_start": "str",
+            "period_end": "str",
+        },
+        "optional": {
+            "sources": "list[str]",
+            "summary": "str",
+        },
+    },
+    "github": {
+        "required": {
+            "repo": "str",
+            "ref_type": "str",
+            "ref_number": "int",
+        },
+        "optional": {
+            "title": "str",
+            "url": "str",
+            "state": "str",
+        },
+        "constraints": {
+            "ref_type": ["issue", "pr", "discussion", "release"],
+        },
+    },
+}
+
+
+def validate_metadata(entry_type: str, metadata: dict[str, Any]) -> None:
+    """Validate *metadata* against the schema for *entry_type*.
+
+    For entry types not listed in :data:`TYPE_METADATA_SCHEMAS` this is a
+    no-op -- legacy types accept arbitrary metadata.
+
+    Args:
+        entry_type: The string value of the entry type (e.g. ``"person"``).
+        metadata: The metadata dict to validate.
+
+    Raises:
+        ValueError: If a required field is missing or a constrained field
+            contains an invalid value.
+    """
+    schema = TYPE_METADATA_SCHEMAS.get(entry_type)
+    if schema is None:
+        return  # No schema for this type -- anything is valid.
+
+    required_fields: dict[str, str] = schema.get("required", {})
+    constraints: dict[str, list[str]] = schema.get("constraints", {})
+
+    # Check required fields are present.
+    for field_name in required_fields:
+        if field_name not in metadata:
+            raise ValueError(
+                f"Metadata for entry_type={entry_type!r} is missing required field "
+                f"{field_name!r} (type: {required_fields[field_name]})."
+            )
+
+    # Check field-level constraints (e.g. enum-like allowed values).
+    for field_name, allowed_values in constraints.items():
+        if field_name in metadata and metadata[field_name] not in allowed_values:
+            raise ValueError(
+                f"Metadata field {field_name!r} for entry_type={entry_type!r} "
+                f"must be one of {', '.join(repr(v) for v in allowed_values)}; "
+                f"got {metadata[field_name]!r}."
+            )
 
 
 @dataclass
@@ -140,6 +289,15 @@ class Entry:
     status: EntryStatus = EntryStatus.ACTIVE
     metadata: dict[str, Any] = field(default_factory=dict)
     accessed_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        """Validate all tags on construction.
+
+        Raises:
+            ValueError: If any tag in ``self.tags`` fails :func:`validate_tag`.
+        """
+        for tag in self.tags:
+            validate_tag(tag)
 
     # ------------------------------------------------------------------ #
     # Serialisation                                                        #

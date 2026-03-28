@@ -180,9 +180,7 @@ class TestSearchLogging:
         recent_searches: list[dict] = []
         await _handle_search(store, {"query": "searchable knowledge"}, recent_searches)
 
-        row = store.connection.execute(
-            "SELECT COUNT(*) FROM search_log"
-        ).fetchone()
+        row = store.connection.execute("SELECT COUNT(*) FROM search_log").fetchone()
         assert row is not None
         assert row[0] == 1
 
@@ -195,13 +193,9 @@ class TestSearchLogging:
         entry_id = await store.store(entry)
 
         recent_searches: list[dict] = []
-        await _handle_search(
-            store, {"query": "unique knowledge fragment"}, recent_searches
-        )
+        await _handle_search(store, {"query": "unique knowledge fragment"}, recent_searches)
 
-        row = store.connection.execute(
-            "SELECT result_entry_ids FROM search_log LIMIT 1"
-        ).fetchone()
+        row = store.connection.execute("SELECT result_entry_ids FROM search_log LIMIT 1").fetchone()
         assert row is not None
         result_ids: list[str] = row[0]
         assert entry_id in result_ids
@@ -232,9 +226,7 @@ class TestSearchLogging:
         # Search against an empty store - no results expected.
         await _handle_search(store, {"query": "no match at all"}, recent_searches)
 
-        row = store.connection.execute(
-            "SELECT COUNT(*) FROM search_log"
-        ).fetchone()
+        row = store.connection.execute("SELECT COUNT(*) FROM search_log").fetchone()
         assert row is not None
         assert row[0] == 0
 
@@ -295,8 +287,7 @@ class TestImplicitFeedbackWithinWindow:
         await _handle_get(store, {"entry_id": entry_id}, recent_searches, config)
 
         row = store.connection.execute(
-            "SELECT COUNT(*), signal FROM feedback_log "
-            "WHERE entry_id = ? GROUP BY signal",
+            "SELECT COUNT(*), signal FROM feedback_log WHERE entry_id = ? GROUP BY signal",
             [entry_id],
         ).fetchone()
         assert row is not None
@@ -391,9 +382,7 @@ class TestImplicitFeedbackWindowExpiry:
 
         await _handle_get(store, {"entry_id": entry_id}, recent_searches, config)
 
-        row = store.connection.execute(
-            "SELECT COUNT(*) FROM feedback_log"
-        ).fetchone()
+        row = store.connection.execute("SELECT COUNT(*) FROM feedback_log").fetchone()
         assert row is not None
         assert row[0] == 0
 
@@ -455,9 +444,7 @@ class TestImplicitFeedbackWindowExpiry:
         # Fetch entry B - not in the search results
         await _handle_get(store, {"entry_id": id_b}, recent_searches, config)
 
-        row = store.connection.execute(
-            "SELECT COUNT(*) FROM feedback_log"
-        ).fetchone()
+        row = store.connection.execute("SELECT COUNT(*) FROM feedback_log").fetchone()
         assert row is not None
         assert row[0] == 0
 

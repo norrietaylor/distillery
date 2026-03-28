@@ -212,9 +212,19 @@ class TestEntryToDict:
         e = make_entry()
         d = e.to_dict()
         expected_keys = {
-            "id", "content", "entry_type", "source", "author",
-            "project", "tags", "status", "created_at", "updated_at",
-            "version", "metadata", "accessed_at",
+            "id",
+            "content",
+            "entry_type",
+            "source",
+            "author",
+            "project",
+            "tags",
+            "status",
+            "created_at",
+            "updated_at",
+            "version",
+            "metadata",
+            "accessed_at",
         }
         assert set(d.keys()) == expected_keys
 

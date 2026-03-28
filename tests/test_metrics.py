@@ -160,7 +160,14 @@ class TestTopLevelKeys:
     ) -> None:
         """The response must contain all 6 top-level sections."""
         data = await _metrics(store, config, embedding_provider)
-        assert set(data.keys()) >= {"entries", "activity", "search", "quality", "staleness", "storage"}
+        assert set(data.keys()) >= {
+            "entries",
+            "activity",
+            "search",
+            "quality",
+            "staleness",
+            "storage",
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -266,9 +273,15 @@ class TestEntryMetrics:
     ) -> None:
         """Store entries with different types/statuses/sources; verify counts."""
         entries = [
-            make_entry(content="Session A", entry_type=EntryType.SESSION, source=EntrySource.CLAUDE_CODE),
-            make_entry(content="Session B", entry_type=EntryType.SESSION, source=EntrySource.CLAUDE_CODE),
-            make_entry(content="Bookmark A", entry_type=EntryType.BOOKMARK, source=EntrySource.MANUAL),
+            make_entry(
+                content="Session A", entry_type=EntryType.SESSION, source=EntrySource.CLAUDE_CODE
+            ),
+            make_entry(
+                content="Session B", entry_type=EntryType.SESSION, source=EntrySource.CLAUDE_CODE
+            ),
+            make_entry(
+                content="Bookmark A", entry_type=EntryType.BOOKMARK, source=EntrySource.MANUAL
+            ),
             make_entry(content="Idea A", entry_type=EntryType.IDEA, source=EntrySource.IMPORT),
         ]
         for e in entries:
@@ -292,9 +305,7 @@ class TestEntryMetrics:
         embedding_provider: MockEmbeddingProvider,
     ) -> None:
         """Archived entries must not count toward total."""
-        await store.store(
-            make_entry(content="Keep me", entry_type=EntryType.INBOX)
-        )
+        await store.store(make_entry(content="Keep me", entry_type=EntryType.INBOX))
         archived_id = await store.store(
             make_entry(content="Archive me", entry_type=EntryType.INBOX)
         )
@@ -418,7 +429,7 @@ class TestSearchMetrics:
         config: DistilleryConfig,
         embedding_provider: MockEmbeddingProvider,
     ) -> None:
-        self._insert_search(store, days_ago=1)   # recent
+        self._insert_search(store, days_ago=1)  # recent
         self._insert_search(store, days_ago=10)  # > 7 days
         data = await _metrics(store, config, embedding_provider)
         assert data["search"]["searches_7d"] == 1
@@ -432,8 +443,8 @@ class TestSearchMetrics:
     ) -> None:
         e1_id = str(uuid.uuid4())
         e2_id = str(uuid.uuid4())
-        self._insert_search(store, result_ids=[e1_id, e2_id])   # 2 results
-        self._insert_search(store, result_ids=[e1_id])           # 1 result
+        self._insert_search(store, result_ids=[e1_id, e2_id])  # 2 results
+        self._insert_search(store, result_ids=[e1_id])  # 1 result
         # avg = (2 + 1) / 2 = 1.5
         data = await _metrics(store, config, embedding_provider)
         avg = data["search"]["avg_results_per_search"]
@@ -517,7 +528,7 @@ class TestQualityMetrics:
     ) -> None:
         sid = self._insert_search(store)
         eid = str(uuid.uuid4())
-        self._insert_feedback(store, search_id=sid, entry_id=eid, days_ago=5)   # recent
+        self._insert_feedback(store, search_id=sid, entry_id=eid, days_ago=5)  # recent
         self._insert_feedback(store, search_id=sid, entry_id=eid, days_ago=40)  # old
         data = await _metrics(store, config, embedding_provider)
         assert data["quality"]["total_feedback"] == 2
@@ -638,7 +649,7 @@ class TestPeriodDaysParameter:
         embedding_provider: MockEmbeddingProvider,
     ) -> None:
         """searches_{period_days}d only counts searches within that window."""
-        self._insert_search(store, days_ago=3)   # within 7d
+        self._insert_search(store, days_ago=3)  # within 7d
         self._insert_search(store, days_ago=10)  # within 14d but not 7d
         self._insert_search(store, days_ago=20)  # outside 14d
 
@@ -674,9 +685,7 @@ class TestPeriodDaysParameter:
         embedding_provider: MockEmbeddingProvider,
     ) -> None:
         """period_days < 1 must return a VALIDATION_ERROR response."""
-        response = await _handle_metrics(
-            store, config, embedding_provider, {"period_days": 0}
-        )
+        response = await _handle_metrics(store, config, embedding_provider, {"period_days": 0})
         data = parse_mcp_response(response)
         assert data.get("error") is not None or data.get("code") == "VALIDATION_ERROR"
 

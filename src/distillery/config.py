@@ -7,6 +7,7 @@ for path override via the DISTILLERY_CONFIG environment variable.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -100,6 +101,24 @@ class ClassificationConfig:
 
 
 @dataclass
+class TagsConfig:
+    """Tag namespace configuration.
+
+    Attributes:
+        enforce_namespaces: When ``True``, all new tags submitted to the store
+            must contain at least one ``/`` separator.  Existing entries with
+            flat tags are unaffected.  Defaults to ``False``.
+        reserved_prefixes: Top-level namespace prefixes (e.g. ``["system"]``)
+            that only specific internal sources may use.  Each entry must be a
+            valid lowercase alphanumeric slug (same rules as a single tag
+            segment).  Defaults to ``[]``.
+    """
+
+    enforce_namespaces: bool = False
+    reserved_prefixes: list[str] = field(default_factory=list)
+
+
+@dataclass
 class DistilleryConfig:
     """Top-level configuration container for a Distillery deployment.
 
@@ -108,12 +127,14 @@ class DistilleryConfig:
         embedding: Embedding provider settings.
         team: Team-level metadata settings.
         classification: Classification threshold settings.
+        tags: Tag namespace enforcement settings.
     """
 
     storage: StorageConfig = field(default_factory=StorageConfig)
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     team: TeamConfig = field(default_factory=TeamConfig)
     classification: ClassificationConfig = field(default_factory=ClassificationConfig)
+    tags: TagsConfig = field(default_factory=TagsConfig)
 
 
 # ---------------------------------------------------------------------------
@@ -208,9 +229,7 @@ def _parse_float_field(raw: dict[str, Any], key: str, default: float, label: str
     try:
         return float(value_raw)
     except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"{label} must be a float, got: {value_raw!r}"
-        ) from exc
+        raise ValueError(f"{label} must be a float, got: {value_raw!r}") from exc
 
 
 def _parse_strict_int(value: Any, label: str) -> int:
@@ -302,6 +321,40 @@ def _parse_classification(raw: dict[str, Any]) -> ClassificationConfig:
     )
 
 
+def _parse_tags(raw: dict[str, Any]) -> TagsConfig:
+    """Parse the ``tags`` section from a raw YAML mapping.
+
+    Args:
+        raw: Mapping (typically from YAML) containing any of the following keys:
+            - ``enforce_namespaces`` (bool, default ``False``)
+            - ``reserved_prefixes`` (list[str], default ``[]``)
+
+    Returns:
+        A populated :class:`TagsConfig` instance.
+
+    Raises:
+        ValueError: If ``enforce_namespaces`` is not a boolean or
+            ``reserved_prefixes`` is not a list.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError(f"tags must be a YAML mapping, got: {type(raw).__name__}")
+
+    enforce_raw = raw.get("enforce_namespaces", False)
+    if not isinstance(enforce_raw, bool):
+        raise ValueError(f"tags.enforce_namespaces must be a boolean, got: {enforce_raw!r}")
+
+    prefixes_raw = raw.get("reserved_prefixes", [])
+    if not isinstance(prefixes_raw, list):
+        raise ValueError(
+            f"tags.reserved_prefixes must be a list, got: {type(prefixes_raw).__name__}"
+        )
+
+    return TagsConfig(
+        enforce_namespaces=enforce_raw,
+        reserved_prefixes=[str(p) for p in prefixes_raw],
+    )
+
+
 def _validate(config: DistilleryConfig) -> None:
     """
     Validate a DistilleryConfig instance and raise a ValueError for any invalid setting.
@@ -322,6 +375,7 @@ def _validate(config: DistilleryConfig) -> None:
             - classification.feedback_window_minutes is not greater than 0.
             - classification.stale_days is not greater than 0.
             - classification.conflict_threshold is not between 0.0 and 1.0.
+            - Any entry in tags.reserved_prefixes is not a valid tag segment.
     """
     valid_providers = {"jina", "openai"}
     if config.embedding.provider and config.embedding.provider not in valid_providers:
@@ -332,15 +386,13 @@ def _validate(config: DistilleryConfig) -> None:
 
     if config.embedding.dimensions <= 0:
         raise ValueError(
-            "embedding.dimensions must be a positive integer, "
-            f"got: {config.embedding.dimensions}"
+            f"embedding.dimensions must be a positive integer, got: {config.embedding.dimensions}"
         )
 
     threshold = config.classification.confidence_threshold
     if not (0.0 <= threshold <= 1.0):
         raise ValueError(
-            "classification.confidence_threshold must be between 0.0 and 1.0, "
-            f"got: {threshold}"
+            f"classification.confidence_threshold must be between 0.0 and 1.0, got: {threshold}"
         )
 
     link = config.classification.dedup_link_threshold
@@ -353,9 +405,7 @@ def _validate(config: DistilleryConfig) -> None:
         ("dedup_skip_threshold", skip),
     ]:
         if not (0.0 <= value <= 1.0):
-            raise ValueError(
-                f"classification.{name} must be between 0.0 and 1.0, got: {value}"
-            )
+            raise ValueError(f"classification.{name} must be between 0.0 and 1.0, got: {value}")
 
     if not (link <= merge <= skip):
         raise ValueError(
@@ -385,9 +435,18 @@ def _validate(config: DistilleryConfig) -> None:
     conflict = config.classification.conflict_threshold
     if not (0.0 <= conflict <= 1.0):
         raise ValueError(
-            "classification.conflict_threshold must be between 0.0 and 1.0, "
-            f"got: {conflict}"
+            f"classification.conflict_threshold must be between 0.0 and 1.0, got: {conflict}"
         )
+
+    # Validate reserved_prefixes: each must be a valid single tag segment.
+    _segment_re = re.compile(r"^[a-z0-9][a-z0-9\-]*$")
+    for prefix in config.tags.reserved_prefixes:
+        if not _segment_re.match(prefix):
+            raise ValueError(
+                f"tags.reserved_prefixes entry {prefix!r} is not a valid tag segment. "
+                "Each prefix must match [a-z0-9][a-z0-9-]* "
+                "(lowercase alphanumeric plus internal hyphens only)."
+            )
 
 
 def load_config(config_path: str | None = None) -> DistilleryConfig:
@@ -418,9 +477,7 @@ def load_config(config_path: str | None = None) -> DistilleryConfig:
     if config_path is not None:
         explicit = Path(config_path).expanduser()
         if not explicit.exists():
-            raise FileNotFoundError(
-                f"Configuration file not found: {explicit}"
-            )
+            raise FileNotFoundError(f"Configuration file not found: {explicit}")
         resolved: Path | None = explicit
     else:
         resolved = _find_config_path()
@@ -438,20 +495,20 @@ def load_config(config_path: str | None = None) -> DistilleryConfig:
         raw = {}
 
     if not isinstance(raw, dict):
-        raise ValueError(
-            f"Configuration file must be a YAML mapping, got: {type(raw).__name__}"
-        )
+        raise ValueError(f"Configuration file must be a YAML mapping, got: {type(raw).__name__}")
 
     storage_raw = raw.get("storage", {}) or {}
     embedding_raw = raw.get("embedding", {}) or {}
     team_raw = raw.get("team", {}) or {}
     classification_raw = raw.get("classification", {}) or {}
+    tags_raw = raw.get("tags", {}) or {}
 
     config = DistilleryConfig(
         storage=_parse_storage(storage_raw),
         embedding=_parse_embedding(embedding_raw),
         team=_parse_team(team_raw),
         classification=_parse_classification(classification_raw),
+        tags=_parse_tags(tags_raw),
     )
 
     _validate(config)

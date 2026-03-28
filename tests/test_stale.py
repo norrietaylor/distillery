@@ -294,9 +294,7 @@ class TestStalenessDetection:
         await store.store(entry)
         _force_timestamps(store, entry.id, updated_at=_ts(60), accessed_at=_ts(60))
         # Archive the entry.
-        store.connection.execute(
-            "UPDATE entries SET status = 'archived' WHERE id = ?", [entry.id]
-        )
+        store.connection.execute("UPDATE entries SET status = 'archived' WHERE id = ?", [entry.id])
 
         data = await _stale(store, config, days=30)
         ids = [e["id"] for e in data["entries"]]
@@ -352,9 +350,7 @@ class TestAccessedAtUpdates:
 class TestDayThreshold:
     """Custom ``days`` parameter should control the staleness cutoff."""
 
-    async def test_default_days_uses_config(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_default_days_uses_config(self, store: DuckDBStore) -> None:
         config = _make_config(stale_days=7)
         entry = make_entry(content="Entry just over 7 days old")
         await store.store(entry)
@@ -428,12 +424,8 @@ class TestEntryTypeFilter:
     async def test_entry_type_filter_returns_only_matching(
         self, store: DuckDBStore, config: DistilleryConfig
     ) -> None:
-        note = make_entry(
-            content="Stale reference entry", entry_type=EntryType.REFERENCE
-        )
-        fact = make_entry(
-            content="Stale idea entry", entry_type=EntryType.IDEA
-        )
+        note = make_entry(content="Stale reference entry", entry_type=EntryType.REFERENCE)
+        fact = make_entry(content="Stale idea entry", entry_type=EntryType.IDEA)
         await store.store(note)
         await store.store(fact)
         _force_timestamps(store, note.id, updated_at=_ts(60), accessed_at=_ts(60))
@@ -480,9 +472,7 @@ class TestEntryTypeFilter:
 class TestLimitParameter:
     """limit parameter should cap the number of results."""
 
-    async def test_limit_caps_results(
-        self, store: DuckDBStore, config: DistilleryConfig
-    ) -> None:
+    async def test_limit_caps_results(self, store: DuckDBStore, config: DistilleryConfig) -> None:
         for i in range(5):
             entry = make_entry(content=f"Stale entry number {i}")
             await store.store(entry)
@@ -491,9 +481,7 @@ class TestLimitParameter:
         data = await _stale(store, config, days=30, limit=3)
         assert len(data["entries"]) <= 3
 
-    async def test_default_limit_is_20(
-        self, store: DuckDBStore, config: DistilleryConfig
-    ) -> None:
+    async def test_default_limit_is_20(self, store: DuckDBStore, config: DistilleryConfig) -> None:
         # Insert 25 stale entries.
         for i in range(25):
             entry = make_entry(content=f"Stale limit test entry {i}")
@@ -523,17 +511,13 @@ class TestLimitParameter:
 class TestValidation:
     """Validation errors should return error responses, not exceptions."""
 
-    async def test_invalid_days_type(
-        self, store: DuckDBStore, config: DistilleryConfig
-    ) -> None:
+    async def test_invalid_days_type(self, store: DuckDBStore, config: DistilleryConfig) -> None:
         response = await _handle_stale(store, config, {"days": "not-an-int"})
         data = parse_mcp_response(response)
         assert data.get("error") is True
         assert "VALIDATION_ERROR" in data["code"]
 
-    async def test_invalid_limit_type(
-        self, store: DuckDBStore, config: DistilleryConfig
-    ) -> None:
+    async def test_invalid_limit_type(self, store: DuckDBStore, config: DistilleryConfig) -> None:
         response = await _handle_stale(store, config, {"limit": "not-an-int"})
         data = parse_mcp_response(response)
         assert data.get("error") is True

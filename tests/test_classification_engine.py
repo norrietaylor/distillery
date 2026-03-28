@@ -225,9 +225,7 @@ class TestOptionalFields:
 
     def test_suggested_project_extracted(self) -> None:
         engine = _make_engine()
-        response = _json_response(
-            "session", 0.88, "Billing work.", suggested_project="billing-v2"
-        )
+        response = _json_response("session", 0.88, "Billing work.", suggested_project="billing-v2")
         result = engine.parse_response(response)
 
         assert result.suggested_project == "billing-v2"

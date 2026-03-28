@@ -175,16 +175,14 @@ class JinaEmbeddingProvider:
                 else:
                     # Non-retryable client error (4xx other than 429)
                     raise RuntimeError(
-                        f"Jina API request failed with status {status}: "
-                        f"{exc.response.text}"
+                        f"Jina API request failed with status {status}: {exc.response.text}"
                     ) from exc
 
             except httpx.RequestError as exc:
                 last_error = exc
                 if attempt < _MAX_RETRIES - 1:
                     logger.warning(
-                        "Jina API network error (attempt %d/%d): %s. "
-                        "Retrying in %.1f seconds.",
+                        "Jina API network error (attempt %d/%d): %s. Retrying in %.1f seconds.",
                         attempt + 1,
                         _MAX_RETRIES,
                         str(exc),
@@ -195,8 +193,7 @@ class JinaEmbeddingProvider:
                 continue
 
         raise RuntimeError(
-            f"Jina API request failed after {_MAX_RETRIES} attempts. "
-            f"Last error: {last_error}"
+            f"Jina API request failed after {_MAX_RETRIES} attempts. Last error: {last_error}"
         ) from last_error
 
     # ------------------------------------------------------------------
@@ -225,9 +222,7 @@ class JinaEmbeddingProvider:
 
         items = data["data"]
         if not isinstance(items, list):
-            raise RuntimeError(
-                f"Jina API 'data' field must be a list, got: {type(items).__name__}"
-            )
+            raise RuntimeError(f"Jina API 'data' field must be a list, got: {type(items).__name__}")
 
         if len(items) != expected_count:
             raise RuntimeError(
