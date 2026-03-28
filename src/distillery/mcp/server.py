@@ -988,6 +988,101 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
             arguments=arguments,
         )
 
+    @server.tool
+    async def distillery_interests(
+        ctx: Context,
+        recency_days: int = 90,
+        top_n: int = 20,
+    ) -> list[types.TextContent]:
+        """Extract an interest profile from the knowledge base.
+
+        Mines all active entries to produce a weighted summary of the user's
+        topics of interest.  The result includes top tags (recency-weighted),
+        bookmark domains, tracked GitHub repositories, expertise areas, and
+        the list of sources already being watched (for exclusion from new
+        suggestions).
+
+        Parameters:
+            recency_days (int): Number of days used as the recency window.
+                Entries within this window receive full weight; older entries
+                decay linearly.  Default ``90``.
+            top_n (int): Maximum number of tags to include in the response.
+                Default ``20``.
+
+        Returns:
+            list[types.TextContent]: A single MCP TextContent block containing
+            a JSON object with keys:
+              - ``top_tags``: list of ``[tag, weight]`` pairs, descending.
+              - ``bookmark_domains``: list of domain strings.
+              - ``tracked_repos``: list of ``owner/repo`` strings.
+              - ``expertise_areas``: list of topic strings.
+              - ``watched_sources``: list of watched source URLs.
+              - ``suggestion_context``: prose paragraph for LLM prompting.
+              - ``entry_count``: number of entries analysed.
+              - ``generated_at``: ISO 8601 timestamp.
+            On error: ``error``, ``code``, and ``message``.
+        """
+        lc = _get_lifespan_context(ctx)
+        return await _handle_interests(
+            store=lc["store"],
+            config=lc["config"],
+            arguments={"recency_days": recency_days, "top_n": top_n},
+        )
+
+    @server.tool
+    async def distillery_suggest_sources(  # noqa: PLR0913
+        ctx: Context,
+        max_suggestions: int = 5,
+        source_types: list[str] | None = None,
+        recency_days: int = 90,
+        top_n: int = 20,
+    ) -> list[types.TextContent]:
+        """Suggest new feed sources to monitor based on the user's interests.
+
+        Builds an :class:`~distillery.feeds.interests.InterestProfile` from
+        the knowledge base and returns a structured prompt fragment plus a
+        list of illustrative source suggestions inferred from the profile.
+        The suggestions are heuristic (pattern-matched from tracked repos and
+        bookmark domains) and are intended as a starting point; callers can
+        pass ``suggestion_context`` to an LLM for richer recommendations.
+
+        Parameters:
+            max_suggestions (int): Maximum number of source suggestions to
+                return.  Default ``5``.
+            source_types (list[str] | None): Filter suggestions to these
+                adapter types.  Accepted values: ``'rss'``, ``'github'``,
+                ``'hackernews'``, ``'webhook'``.  ``None`` means no filter.
+            recency_days (int): Recency window passed to
+                :class:`~distillery.feeds.interests.InterestExtractor`.
+                Default ``90``.
+            top_n (int): Top-tags count passed to the extractor.  Default
+                ``20``.
+
+        Returns:
+            list[types.TextContent]: A single MCP TextContent block containing
+            a JSON object with keys:
+              - ``suggestions``: list of dicts, each with ``url``,
+                ``source_type``, ``label``, and ``rationale``.
+              - ``suggestion_context``: full prose paragraph for LLM prompting.
+              - ``watched_sources``: list of currently-watched source URLs
+                (already excluded from suggestions).
+              - ``entry_count``: number of entries analysed.
+            On error: ``error``, ``code``, and ``message``.
+        """
+        lc = _get_lifespan_context(ctx)
+        arguments: dict[str, Any] = {
+            "max_suggestions": max_suggestions,
+            "recency_days": recency_days,
+            "top_n": top_n,
+        }
+        if source_types is not None:
+            arguments["source_types"] = source_types
+        return await _handle_suggest_sources(
+            store=lc["store"],
+            config=lc["config"],
+            arguments=arguments,
+        )
+
     return server
 
 
@@ -3071,3 +3166,256 @@ async def _handle_watch(
             ),
         }
     )
+
+
+# ---------------------------------------------------------------------------
+# distillery_interests handler
+# ---------------------------------------------------------------------------
+
+
+async def _handle_interests(
+    store: Any,
+    config: DistilleryConfig,
+    arguments: dict[str, Any],
+) -> list[types.TextContent]:
+    """Handle the ``distillery_interests`` tool.
+
+    Builds an :class:`~distillery.feeds.interests.InterestProfile` by mining
+    the active entries in *store* and returns it as a JSON payload.
+
+    Args:
+        store: An initialised storage backend.
+        config: The current :class:`~distillery.config.DistilleryConfig`.
+        arguments: Parsed tool arguments dict (``recency_days``, ``top_n``).
+
+    Returns:
+        A structured MCP success or error response.
+    """
+    from distillery.feeds.interests import InterestExtractor
+
+    recency_days_raw = arguments.get("recency_days", 90)
+    try:
+        recency_days = int(recency_days_raw)
+    except (TypeError, ValueError):
+        return error_response(
+            "INVALID_FIELD",
+            f"recency_days must be an integer, got: {recency_days_raw!r}",
+        )
+    if recency_days <= 0:
+        return error_response(
+            "INVALID_FIELD",
+            f"recency_days must be a positive integer, got: {recency_days}",
+        )
+
+    top_n_raw = arguments.get("top_n", 20)
+    try:
+        top_n = int(top_n_raw)
+    except (TypeError, ValueError):
+        return error_response(
+            "INVALID_FIELD",
+            f"top_n must be an integer, got: {top_n_raw!r}",
+        )
+    if top_n <= 0:
+        return error_response(
+            "INVALID_FIELD",
+            f"top_n must be a positive integer, got: {top_n}",
+        )
+
+    extractor = InterestExtractor(
+        store=store,
+        feeds_config=config.feeds,
+        recency_days=recency_days,
+        top_n=top_n,
+    )
+    profile = await extractor.extract()
+
+    return success_response(
+        {
+            "top_tags": [[tag, weight] for tag, weight in profile.top_tags],
+            "bookmark_domains": profile.bookmark_domains,
+            "tracked_repos": profile.tracked_repos,
+            "expertise_areas": profile.expertise_areas,
+            "watched_sources": profile.watched_sources,
+            "suggestion_context": profile.suggestion_context,
+            "entry_count": profile.entry_count,
+            "generated_at": profile.generated_at.isoformat(),
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
+# distillery_suggest_sources handler
+# ---------------------------------------------------------------------------
+
+_VALID_SUGGEST_SOURCE_TYPES = {"rss", "github", "hackernews", "webhook"}
+
+
+async def _handle_suggest_sources(
+    store: Any,
+    config: DistilleryConfig,
+    arguments: dict[str, Any],
+) -> list[types.TextContent]:
+    """Handle the ``distillery_suggest_sources`` tool.
+
+    Extracts an interest profile from the store and derives heuristic source
+    suggestions from tracked repos and bookmark domains.  The ``suggestion_context``
+    field in the response can be forwarded to an LLM for richer recommendations.
+
+    Args:
+        store: An initialised storage backend.
+        config: The current :class:`~distillery.config.DistilleryConfig`.
+        arguments: Parsed tool arguments dict (``max_suggestions``,
+            ``source_types``, ``recency_days``, ``top_n``).
+
+    Returns:
+        A structured MCP success or error response.
+    """
+    from distillery.feeds.interests import InterestExtractor
+
+    max_suggestions_raw = arguments.get("max_suggestions", 5)
+    try:
+        max_suggestions = int(max_suggestions_raw)
+    except (TypeError, ValueError):
+        return error_response(
+            "INVALID_FIELD",
+            f"max_suggestions must be an integer, got: {max_suggestions_raw!r}",
+        )
+    if max_suggestions <= 0:
+        return error_response(
+            "INVALID_FIELD",
+            f"max_suggestions must be a positive integer, got: {max_suggestions}",
+        )
+
+    source_types_raw = arguments.get("source_types")
+    source_type_filter: set[str] | None = None
+    if source_types_raw is not None:
+        if not isinstance(source_types_raw, list):
+            return error_response(
+                "INVALID_FIELD",
+                f"source_types must be a list, got: {type(source_types_raw).__name__}",
+            )
+        invalid = [t for t in source_types_raw if t not in _VALID_SUGGEST_SOURCE_TYPES]
+        if invalid:
+            return error_response(
+                "INVALID_SOURCE_TYPE",
+                f"Invalid source_types: {invalid}. "
+                f"Must be one of {sorted(_VALID_SUGGEST_SOURCE_TYPES)}.",
+            )
+        source_type_filter = set(source_types_raw)
+
+    recency_days_raw = arguments.get("recency_days", 90)
+    try:
+        recency_days = int(recency_days_raw)
+    except (TypeError, ValueError):
+        return error_response(
+            "INVALID_FIELD",
+            f"recency_days must be an integer, got: {recency_days_raw!r}",
+        )
+    if recency_days <= 0:
+        return error_response(
+            "INVALID_FIELD",
+            f"recency_days must be a positive integer, got: {recency_days}",
+        )
+
+    top_n_raw = arguments.get("top_n", 20)
+    try:
+        top_n = int(top_n_raw)
+    except (TypeError, ValueError):
+        return error_response(
+            "INVALID_FIELD",
+            f"top_n must be an integer, got: {top_n_raw!r}",
+        )
+    if top_n <= 0:
+        return error_response(
+            "INVALID_FIELD",
+            f"top_n must be a positive integer, got: {top_n}",
+        )
+
+    extractor = InterestExtractor(
+        store=store,
+        feeds_config=config.feeds,
+        recency_days=recency_days,
+        top_n=top_n,
+    )
+    profile = await extractor.extract()
+
+    watched_set = set(profile.watched_sources)
+    suggestions = _derive_suggestions(
+        profile=profile,
+        watched_set=watched_set,
+        source_type_filter=source_type_filter,
+        max_suggestions=max_suggestions,
+    )
+
+    return success_response(
+        {
+            "suggestions": suggestions,
+            "suggestion_context": profile.suggestion_context,
+            "watched_sources": profile.watched_sources,
+            "entry_count": profile.entry_count,
+        }
+    )
+
+
+def _derive_suggestions(
+    profile: Any,
+    watched_set: set[str],
+    source_type_filter: set[str] | None,
+    max_suggestions: int,
+) -> list[dict[str, Any]]:
+    """Build heuristic source suggestions from a profile.
+
+    Derives candidate sources from tracked repositories (GitHub releases/
+    activity feeds) and bookmark domains (RSS feeds), filtering out sources
+    already in *watched_set* and applying *source_type_filter*.
+
+    Args:
+        profile: An :class:`~distillery.feeds.interests.InterestProfile`.
+        watched_set: Set of already-watched source URLs.
+        source_type_filter: When non-None, only include suggestions of these
+            source types.
+        max_suggestions: Maximum number of suggestions to return.
+
+    Returns:
+        A list of suggestion dicts, each with ``url``, ``source_type``,
+        ``label``, and ``rationale``.
+    """
+    candidates: list[dict[str, Any]] = []
+
+    # GitHub suggestions from tracked repos
+    if source_type_filter is None or "github" in source_type_filter:
+        for repo in profile.tracked_repos:
+            candidate_url = repo  # owner/repo slug used by GitHub adapter
+            if candidate_url not in watched_set:
+                candidates.append(
+                    {
+                        "url": candidate_url,
+                        "source_type": "github",
+                        "label": repo,
+                        "rationale": (
+                            f"You have referenced the {repo!r} repository in your "
+                            "knowledge base. Monitoring it will surface new releases, "
+                            "issues, and pull requests."
+                        ),
+                    }
+                )
+
+    # RSS suggestions from bookmark domains
+    if source_type_filter is None or "rss" in source_type_filter:
+        for domain in profile.bookmark_domains:
+            candidate_url = f"https://{domain}/rss"
+            if candidate_url not in watched_set and len(domain) > 3 and "." in domain:
+                    candidates.append(
+                        {
+                            "url": candidate_url,
+                            "source_type": "rss",
+                            "label": domain,
+                            "rationale": (
+                                f"You frequently bookmark content from {domain!r}. "
+                                "An RSS feed from this domain would surface new content "
+                                "automatically."
+                            ),
+                        }
+                    )
+
+    return candidates[:max_suggestions]
