@@ -14,11 +14,11 @@ from __future__ import annotations
 
 import textwrap
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from distillery.config import StorageConfig, load_config
+from distillery.config import load_config
 from distillery.store.duckdb import DuckDBStore, _sql_escape
 
 pytestmark = pytest.mark.unit

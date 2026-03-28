@@ -255,6 +255,17 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
             else:
                 db_path = os.path.expanduser(raw_db_path)
 
+            # Apply MotherDuck token from the configured env var name if set.
+            if config.storage.motherduck_token_env:
+                token = os.environ.get(config.storage.motherduck_token_env)
+                if token:
+                    os.environ["MOTHERDUCK_TOKEN"] = token
+                else:
+                    logger.warning(
+                        "motherduck_token_env is set to %r but the environment variable is not set",
+                        config.storage.motherduck_token_env,
+                    )
+
             from distillery.store.duckdb import DuckDBStore
 
             store = DuckDBStore(
@@ -978,9 +989,13 @@ def _sync_gather_stats(
     entries_by_status = {row[0]: row[1] for row in status_rows}
 
     # Database file size.
-    db_path = os.path.expanduser(config.storage.database_path)
+    _raw_db_path = config.storage.database_path
+    if _raw_db_path.startswith("s3://") or _raw_db_path.startswith("md:"):
+        db_path = _raw_db_path
+    else:
+        db_path = os.path.expanduser(_raw_db_path)
     database_size_bytes: int | None = None
-    if db_path != ":memory:":
+    if db_path != ":memory:" and not db_path.startswith("s3://") and not db_path.startswith("md:"):
         try:
             database_size_bytes = Path(db_path).stat().st_size
         except OSError:
@@ -2362,9 +2377,13 @@ def _sync_gather_metrics(
     # ------------------------------------------------------------------ #
     # storage section                                                      #
     # ------------------------------------------------------------------ #
-    db_path = os.path.expanduser(config.storage.database_path)
+    _raw_db_path = config.storage.database_path
+    if _raw_db_path.startswith("s3://") or _raw_db_path.startswith("md:"):
+        db_path = _raw_db_path
+    else:
+        db_path = os.path.expanduser(_raw_db_path)
     db_file_size: int | None = None
-    if db_path != ":memory:":
+    if db_path != ":memory:" and not db_path.startswith("s3://") and not db_path.startswith("md:"):
         try:
             db_file_size = Path(db_path).stat().st_size
         except OSError:
