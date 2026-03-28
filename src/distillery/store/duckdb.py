@@ -848,7 +848,7 @@ class DuckDBStore:
             Performs a SQL query that computes cosine similarity between stored embeddings and the provided embedding, orders results by similarity descending, and returns a list of SearchResult objects. As a best-effort side effect, updates the `accessed_at` timestamp for returned entries; failures to update are ignored.
 
             Returns:
-                list[SearchResult]: A list of search results ordered by descending similarity. Each result's `score` is the raw cosine similarity value (float, typically in the range -1.0 to 1.0).
+                list[SearchResult]: A list of search results ordered by descending similarity. Each result's `score` is normalized to the range [0.0, 1.0].
             """
             conn = self.connection
 
@@ -876,7 +876,8 @@ class DuckDBStore:
             returned_ids: list[str] = []
             for row in rows:
                 row_dict = dict(zip(col_names, row, strict=True))
-                score = float(row_dict.pop("score"))
+                raw_score = float(row_dict.pop("score"))
+                score = (raw_score + 1.0) / 2.0
                 entry = self._row_to_entry(
                     tuple(row_dict.values()),
                     list(row_dict.keys()),
@@ -926,7 +927,9 @@ class DuckDBStore:
                 f"ORDER BY score DESC "
                 f"LIMIT ?"
             )
-            params: list[Any] = [embedding, embedding, threshold, limit]
+            # Convert normalized [0, 1] threshold to raw [-1, 1] for SQL comparison
+            raw_threshold = threshold * 2.0 - 1.0
+            params: list[Any] = [embedding, embedding, raw_threshold, limit]
             result = conn.execute(sql, params)
             col_names = [desc[0] for desc in result.description]
 
@@ -934,7 +937,8 @@ class DuckDBStore:
             results: list[SearchResult] = []
             for row in rows:
                 row_dict = dict(zip(col_names, row, strict=True))
-                score = float(row_dict.pop("score"))
+                raw_score = float(row_dict.pop("score"))
+                score = (raw_score + 1.0) / 2.0
                 entry = self._row_to_entry(
                     tuple(row_dict.values()),
                     list(row_dict.keys()),
