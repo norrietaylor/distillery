@@ -27,6 +27,36 @@
 # HTTP 429 (rate limit) and 5xx server errors (up to 3 retries).
 
 # ---------------------------------------------------------------------------
+# Server settings (HTTP transport + authentication)
+# ---------------------------------------------------------------------------
+#
+# This section configures remote access and authentication when running
+# distillery-mcp in HTTP mode (distillery-mcp --transport http).
+# Stdio mode (default) ignores this section.
+#
+# Transport mode is controlled by CLI flags:
+#   distillery-mcp --transport http --port 8000  (HTTP remote access)
+#   distillery-mcp                               (stdio local access, default)
+#
+# Authentication providers:
+#   - github: GitHub OAuth via FastMCP's GitHubProvider
+#             Requires: GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, DISTILLERY_BASE_URL env vars
+#   - none:   No authentication (development only, logs a warning)
+#
+# The auth section stores environment variable *names*, not secret values.
+# Actual secrets are set in environment variables, never in this config file.
+
+# server:
+#   auth:
+#     # Authentication provider: github or none (default: none)
+#     provider: github
+#     # Environment variable name holding the GitHub OAuth Client ID
+#     # (from https://github.com/settings/developers after registering the app)
+#     client_id_env: GITHUB_CLIENT_ID
+#     # Environment variable name holding the GitHub OAuth Client Secret
+#     client_secret_env: GITHUB_CLIENT_SECRET
+
+# ---------------------------------------------------------------------------
 # Storage settings
 # ---------------------------------------------------------------------------
 #

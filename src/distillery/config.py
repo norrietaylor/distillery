@@ -182,6 +182,34 @@ class FeedsConfig:
 
 
 @dataclass
+class ServerAuthConfig:
+    """Server authentication configuration.
+
+    Attributes:
+        provider: Authentication provider. One of ``'github'`` or ``'none'``.
+        client_id_env: Name of the environment variable holding the OAuth
+            client ID.
+        client_secret_env: Name of the environment variable holding the OAuth
+            client secret.
+    """
+
+    provider: str = "none"
+    client_id_env: str = "GITHUB_CLIENT_ID"
+    client_secret_env: str = "GITHUB_CLIENT_SECRET"
+
+
+@dataclass
+class ServerConfig:
+    """Server configuration.
+
+    Attributes:
+        auth: Authentication settings for HTTP transport.
+    """
+
+    auth: ServerAuthConfig = field(default_factory=ServerAuthConfig)
+
+
+@dataclass
 class DistilleryConfig:
     """Top-level configuration container for a Distillery deployment.
 
@@ -192,6 +220,7 @@ class DistilleryConfig:
         classification: Classification threshold settings.
         tags: Tag namespace enforcement settings.
         feeds: Ambient feed monitoring settings.
+        server: Server (HTTP transport) settings.
     """
 
     storage: StorageConfig = field(default_factory=StorageConfig)
@@ -200,6 +229,7 @@ class DistilleryConfig:
     classification: ClassificationConfig = field(default_factory=ClassificationConfig)
     tags: TagsConfig = field(default_factory=TagsConfig)
     feeds: FeedsConfig = field(default_factory=FeedsConfig)
+    server: ServerConfig = field(default_factory=ServerConfig)
 
 
 # ---------------------------------------------------------------------------
@@ -528,6 +558,35 @@ def _parse_feeds(raw: dict[str, Any]) -> FeedsConfig:
     )
 
 
+def _parse_server(raw: dict[str, Any]) -> ServerConfig:
+    """Parse the ``server`` section from a raw YAML mapping.
+
+    Args:
+        raw: Mapping (typically from YAML) containing:
+            - ``auth`` (mapping with ``provider``, ``client_id_env``,
+              ``client_secret_env``)
+
+    Returns:
+        A populated :class:`ServerConfig` instance.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError(f"server must be a YAML mapping, got: {type(raw).__name__}")
+
+    auth_raw = raw.get("auth", {})
+    if auth_raw is None:
+        auth_raw = {}
+    if not isinstance(auth_raw, dict):
+        raise ValueError(f"server.auth must be a YAML mapping, got: {type(auth_raw).__name__}")
+
+    return ServerConfig(
+        auth=ServerAuthConfig(
+            provider=str(auth_raw.get("provider", "none")),
+            client_id_env=str(auth_raw.get("client_id_env", "GITHUB_CLIENT_ID")),
+            client_secret_env=str(auth_raw.get("client_secret_env", "GITHUB_CLIENT_SECRET")),
+        ),
+    )
+
+
 def _validate(config: DistilleryConfig) -> None:
     """
     Validate a DistilleryConfig instance and raise a ValueError for any invalid setting.
@@ -559,6 +618,19 @@ def _validate(config: DistilleryConfig) -> None:
             f"storage.backend must be one of {sorted(valid_backends)}, "
             f"got: {config.storage.backend!r}"
         )
+
+    if config.storage.backend == "motherduck":
+        if not config.storage.database_path.startswith("md:"):
+            raise ValueError(
+                "storage.database_path must start with 'md:' when backend is 'motherduck', "
+                f"got: {config.storage.database_path!r}"
+            )
+        token_env = config.storage.motherduck_token_env
+        if not os.environ.get(token_env):
+            raise ValueError(
+                f"MotherDuck token env var {token_env!r} is not set. "
+                "Set the environment variable before starting the server."
+            )
 
     valid_providers = {"jina", "openai", "mock"}
     if config.embedding.provider and config.embedding.provider not in valid_providers:
@@ -643,6 +715,14 @@ def _validate(config: DistilleryConfig) -> None:
             f"feeds.thresholds.digest ({digest}) must not exceed feeds.thresholds.alert ({alert})"
         )
 
+    # Validate server.auth.provider
+    valid_auth_providers = {"github", "none"}
+    if config.server.auth.provider not in valid_auth_providers:
+        raise ValueError(
+            f"server.auth.provider must be one of {sorted(valid_auth_providers)}, "
+            f"got: {config.server.auth.provider!r}"
+        )
+
 
 def load_config(config_path: str | None = None) -> DistilleryConfig:
     """Load and validate configuration from a YAML file.
@@ -698,6 +778,9 @@ def load_config(config_path: str | None = None) -> DistilleryConfig:
     classification_raw = raw.get("classification", {}) or {}
     tags_raw = raw.get("tags", {}) or {}
     feeds_raw = raw.get("feeds", {}) or {}
+    server_raw = raw.get("server", {})
+    if server_raw is None:
+        server_raw = {}
 
     config = DistilleryConfig(
         storage=_parse_storage(storage_raw),
@@ -706,6 +789,7 @@ def load_config(config_path: str | None = None) -> DistilleryConfig:
         classification=_parse_classification(classification_raw),
         tags=_parse_tags(tags_raw),
         feeds=_parse_feeds(feeds_raw),
+        server=_parse_server(server_raw),
     )
 
     _validate(config)

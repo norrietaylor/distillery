@@ -318,7 +318,7 @@ class ClaudeEvalRunner:
                 f"  database_path: {db_path}\n"
                 "embedding:\n"
                 "  provider: mock\n"
-                "  model: mock-hash-4d\n"
+                "  model: mock-hash\n"
                 "  dimensions: 4\n",
                 encoding="utf-8",
             )

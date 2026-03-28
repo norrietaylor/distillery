@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3:*)",
+      "Bash(grep -r GitHubProvider /home/norrie.guest/code/distillery/.worktrees/feature-git-hub-team-oauth/.venv/lib/python3.13/site-packages/fastmcp/ --include=*.py)"
+    ]
+  }
+}

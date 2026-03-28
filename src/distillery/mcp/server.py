@@ -226,7 +226,10 @@ def _create_embedding_provider(config: DistilleryConfig) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def create_server(config: DistilleryConfig | None = None) -> FastMCP:
+def create_server(
+    config: DistilleryConfig | None = None,
+    auth: Any | None = None,
+) -> FastMCP:
     """Build and return the configured :class:`~fastmcp.FastMCP` server.
 
     The server is stateless at construction time -- the store and embedding
@@ -237,6 +240,8 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
         config: Pre-loaded configuration.  When ``None`` the config is loaded
             from the standard locations (``DISTILLERY_CONFIG`` env var, then
             ``distillery.yaml`` in the cwd).
+        auth: Optional authentication provider (e.g. ``GitHubProvider``) to
+            pass to ``FastMCP``.  When ``None`` no authentication is required.
 
     Returns:
         A fully decorated :class:`~fastmcp.FastMCP` instance ready to run.
@@ -316,7 +321,7 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
             # session) this runs once at exit and is fine.
             pass
 
-    server = FastMCP("distillery", lifespan=lifespan)
+    server = FastMCP("distillery", lifespan=lifespan, auth=auth)
 
     def _get_lifespan_context(ctx: Context) -> dict[str, Any]:
         """Extract the lifespan context dict from a FastMCP Context.

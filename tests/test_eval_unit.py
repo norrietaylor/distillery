@@ -741,7 +741,7 @@ class TestMockEmbeddingProvider:
         assert self.provider.dimensions == 4
 
     def test_model_name_property(self) -> None:
-        assert self.provider.model_name == "mock-hash-4d"
+        assert self.provider.model_name == "mock-hash"
 
     def test_embed_returns_correct_dims(self) -> None:
         vec = self.provider.embed("hello")

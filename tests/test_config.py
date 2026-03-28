@@ -13,6 +13,8 @@ from distillery.config import (
     FeedsConfig,
     FeedSourceConfig,
     FeedsThresholdsConfig,
+    ServerAuthConfig,
+    ServerConfig,
     TagsConfig,
     load_config,
 )
@@ -694,3 +696,217 @@ class TestFeedsThresholdsConfig:
         t = FeedsThresholdsConfig()
         assert t.alert == pytest.approx(0.85)
         assert t.digest == pytest.approx(0.60)
+
+
+# ---------------------------------------------------------------------------
+# MotherDuck backend validation
+# ---------------------------------------------------------------------------
+
+
+class TestMotherDuckValidation:
+    def test_motherduck_backend_requires_md_prefix(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Validation rejects non-md: path with motherduck backend."""
+        monkeypatch.setenv("MOTHERDUCK_TOKEN", "dummy-token")
+        yaml_content = """\
+            storage:
+              backend: motherduck
+              database_path: my_database
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="md:"):
+            load_config(str(p))
+
+    def test_motherduck_backend_accepts_md_prefix(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Valid md: path with token passes validation."""
+        monkeypatch.setenv("MOTHERDUCK_TOKEN", "dummy-token")
+        yaml_content = """\
+            storage:
+              backend: motherduck
+              database_path: md:my_database
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.storage.backend == "motherduck"
+        assert cfg.storage.database_path == "md:my_database"
+
+    def test_motherduck_missing_token_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Missing token env var raises ValueError at config validation time."""
+        monkeypatch.delenv("MOTHERDUCK_TOKEN", raising=False)
+        yaml_content = """\
+            storage:
+              backend: motherduck
+              database_path: md:my_database
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="MOTHERDUCK_TOKEN"):
+            load_config(str(p))
+
+    def test_motherduck_custom_token_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Custom motherduck_token_env name is validated correctly."""
+        monkeypatch.setenv("MY_MD_TOKEN", "custom-token")
+        monkeypatch.delenv("MOTHERDUCK_TOKEN", raising=False)
+        yaml_content = """\
+            storage:
+              backend: motherduck
+              database_path: md:my_database
+              motherduck_token_env: MY_MD_TOKEN
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.storage.motherduck_token_env == "MY_MD_TOKEN"
+
+    def test_motherduck_missing_custom_token_env_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Missing custom token env var uses correct name in error message."""
+        monkeypatch.delenv("MY_MD_TOKEN", raising=False)
+        yaml_content = """\
+            storage:
+              backend: motherduck
+              database_path: md:my_database
+              motherduck_token_env: MY_MD_TOKEN
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="MY_MD_TOKEN"):
+            load_config(str(p))
+
+    def test_duckdb_backend_no_md_prefix_required(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Non-motherduck backends do not require md: prefix or token."""
+        monkeypatch.delenv("MOTHERDUCK_TOKEN", raising=False)
+        yaml_content = """\
+            storage:
+              backend: duckdb
+              database_path: /tmp/test.db
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.storage.backend == "duckdb"
+
+
+# ---------------------------------------------------------------------------
+# Server auth configuration
+# ---------------------------------------------------------------------------
+
+
+class TestServerAuthConfigParsing:
+    def test_server_auth_config_parsing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """YAML server.auth section parses correctly."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        yaml_content = """\
+            server:
+              auth:
+                provider: github
+                client_id_env: MY_GH_CLIENT_ID
+                client_secret_env: MY_GH_CLIENT_SECRET
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.server.auth.provider == "github"
+        assert cfg.server.auth.client_id_env == "MY_GH_CLIENT_ID"
+        assert cfg.server.auth.client_secret_env == "MY_GH_CLIENT_SECRET"
+
+    def test_server_auth_defaults(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """When no server section is present, defaults are applied."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        cfg = load_config()
+        assert cfg.server.auth.provider == "none"
+        assert cfg.server.auth.client_id_env == "GITHUB_CLIENT_ID"
+        assert cfg.server.auth.client_secret_env == "GITHUB_CLIENT_SECRET"
+
+    def test_server_auth_provider_none(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """provider: none is valid."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        yaml_content = """\
+            server:
+              auth:
+                provider: none
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.server.auth.provider == "none"
+
+    def test_server_config_dataclass_defaults(self) -> None:
+        """ServerConfig and ServerAuthConfig have correct defaults."""
+        sc = ServerConfig()
+        assert isinstance(sc.auth, ServerAuthConfig)
+        assert sc.auth.provider == "none"
+        assert sc.auth.client_id_env == "GITHUB_CLIENT_ID"
+        assert sc.auth.client_secret_env == "GITHUB_CLIENT_SECRET"
+
+
+class TestServerAuthInvalidProvider:
+    def test_server_auth_invalid_provider(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Invalid provider raises ValueError."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        yaml_content = """\
+            server:
+              auth:
+                provider: google
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="server.auth.provider"):
+            load_config(str(p))
+
+
+class TestServerMalformedValues:
+    """Malformed server/auth values must raise, not silently coerce to defaults."""
+
+    def test_server_as_list_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        yaml_content = """\
+            server: []
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="server must be a YAML mapping"):
+            load_config(str(p))
+
+    def test_server_auth_as_list_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        yaml_content = """\
+            server:
+              auth: []
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="server.auth must be a YAML mapping"):
+            load_config(str(p))
+
+    def test_server_auth_as_string_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        yaml_content = """\
+            server:
+              auth: "github"
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="server.auth must be a YAML mapping"):
+            load_config(str(p))

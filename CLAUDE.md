@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is Distillery
 
-Distillery is a knowledge-base system for Claude Code. It stores, searches, and classifies knowledge entries using DuckDB with vector similarity search (VSS/HNSW). It includes ambient intelligence features that poll external feeds (GitHub, RSS) and score relevance using embeddings. It exposes functionality via an MCP server (stdio/HTTP) with 21 tools, orchestrated by 9 Claude Code skills (`/distill`, `/recall`, `/pour`, `/bookmark`, `/minutes`, `/classify`, `/watch`, `/radar`, `/tune`).
+Distillery is a knowledge-base system for Claude Code. It stores, searches, and classifies knowledge entries using DuckDB with vector similarity search (VSS/HNSW). It includes ambient intelligence features that poll external feeds (GitHub, RSS) and score relevance using embeddings. It exposes functionality via an MCP server (stdio or streamable-HTTP transport) with 21 tools, orchestrated by 9 Claude Code skills (`/distill`, `/recall`, `/pour`, `/bookmark`, `/minutes`, `/classify`, `/watch`, `/radar`, `/tune`). HTTP transport supports GitHub OAuth for team access.
 
 ## Commands
 
@@ -37,8 +37,11 @@ pytest --cov=src/distillery --cov-fail-under=80
 distillery status
 distillery health
 
-# MCP server
+# MCP server (stdio, default)
 distillery-mcp
+
+# MCP server (HTTP with GitHub OAuth)
+distillery-mcp --transport http --port 8000
 ```
 
 ## Architecture
@@ -48,7 +51,7 @@ Four-layer design:
 ```text
 Skills (.claude/skills/<name>/SKILL.md)  →  slash commands users invoke
     ↓
-MCP Server (src/distillery/mcp/server.py)  →  21 tools over stdio/HTTP (FastMCP 2.x/3.x)
+MCP Server (src/distillery/mcp/server.py)  →  21 tools over stdio or HTTP (FastMCP 2.x/3.x)
     ↓
 Core Protocols (store/protocol.py, embedding/protocol.py)  →  typed Protocol interfaces
     ↓
@@ -72,7 +75,7 @@ Uses Python `Protocol` (structural subtyping), not ABCs. All storage operations 
 - **Test markers**: `@pytest.mark.unit`, `@pytest.mark.integration`
 - **Commit format**: Conventional Commits — `type(scope): description`
   - Types: feat, fix, docs, test, refactor, chore
-  - Scopes: store, mcp, embedding, classification, config, skills, cli
+  - Scopes: store, mcp, embedding, classification, config, skills, cli, auth
 
 ## Testing
 

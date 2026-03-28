@@ -73,6 +73,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MotherDuck backend (`md:distillery`) for persistent storage across container restarts
 - 21 MCP tools total, 1000+ tests
 
+### Spec 10b — GitHub Team OAuth
+
+- Streamable-HTTP transport: `distillery-mcp --transport http` starts an HTTP MCP server alongside
+  the existing stdio mode. CLI flags `--host` / `--port` with `DISTILLERY_HOST` / `DISTILLERY_PORT`
+  env var fallbacks
+- GitHub OAuth authentication via FastMCP `GitHubProvider`: HTTP mode secured with OAuth 2.1 PKCE
+  flow. Stdio mode remains unauthenticated (local trust model)
+- `ServerAuthConfig` / `ServerConfig` dataclasses in `config.py` with YAML `server.auth` section
+- New `src/distillery/mcp/auth.py` module: `build_github_auth()` reads credentials from env vars,
+  never logs secrets, fails fast on missing credentials
+- MotherDuck backend validation: `backend=motherduck` requires `md:` prefix on `database_path` and
+  `MOTHERDUCK_TOKEN` env var present at startup
+- Team setup documentation: `docs/team-setup.md` (member guide), `docs/deployment.md` (operator
+  guide), skills audit confirming all 9 skills are transport-agnostic
+- Bumped `fastmcp` dependency from `>=2.0.0` to `>=2.12.0`
+- Multi-team extension point: smoke test proves tool handlers can read caller identity from
+  FastMCP `Context` — no production wiring yet, validated for future access control spec
+- 1000+ tests, 80%+ coverage
+
 ---
 
 ## [v0.1.0] - 2026-03-22

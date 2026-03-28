@@ -386,6 +386,7 @@ class TestStorageConfigParsing:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("MY_MD_TOKEN", "dummy-token")
         write_yaml(
             tmp_path,
             """
@@ -402,6 +403,7 @@ class TestStorageConfigParsing:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("MOTHERDUCK_TOKEN", "dummy-token")
         write_yaml(
             tmp_path,
             """
