@@ -94,7 +94,7 @@ class TestPluginManifestMetadata:
         """version must follow a MAJOR.MINOR.PATCH pattern."""
         manifest = load_plugin_manifest()
         version = manifest["version"]
-        assert re.match(r"^\d+\.\d+\.\d+", version), f"version '{version}' is not semver"
+        assert re.fullmatch(r"\d+\.\d+\.\d+", version), f"version '{version}' is not semver"
 
     def test_version_value(self) -> None:
         """version must be '0.1.0'."""
@@ -399,10 +399,12 @@ class TestPluginDocumentationFile:
     def test_plugin_doc_starts_with_h1(self) -> None:
         """docs/plugin.md must start with an H1 heading."""
         content = load_plugin_doc()
-        first_heading = next(
-            (line for line in content.splitlines() if line.startswith("# ")), None
+        first_non_empty = next(
+            (line for line in content.splitlines() if line.strip()), None
         )
-        assert first_heading is not None, "docs/plugin.md has no H1 heading"
+        assert first_non_empty is not None and first_non_empty.startswith("# "), (
+            "docs/plugin.md has no H1 heading"
+        )
 
 
 # ---------------------------------------------------------------------------
