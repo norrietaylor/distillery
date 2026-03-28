@@ -208,13 +208,15 @@ class DuckDBStore:
         dims = str(self._embedding_provider.dimensions)
 
         if not rows:
-            # First use -- record the model metadata.
+            # First use -- record the model metadata.  Use INSERT OR IGNORE
+            # so concurrent sessions racing through this path don't fail on
+            # a primary-key conflict.
             conn.execute(
-                "INSERT INTO _meta (key, value) VALUES (?, ?)",
+                "INSERT OR IGNORE INTO _meta (key, value) VALUES (?, ?)",
                 ["embedding_model", model],
             )
             conn.execute(
-                "INSERT INTO _meta (key, value) VALUES (?, ?)",
+                "INSERT OR IGNORE INTO _meta (key, value) VALUES (?, ?)",
                 ["embedding_dimensions", dims],
             )
             logger.info(
