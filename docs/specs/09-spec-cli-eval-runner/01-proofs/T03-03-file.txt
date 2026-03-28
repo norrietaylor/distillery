@@ -1,0 +1,10 @@
+Type: file
+Description: Verify .github/workflows/eval-nightly.yml does not reference ANTHROPIC_API_KEY
+Expected: File does not contain ANTHROPIC_API_KEY string
+Timestamp: 2026-03-27T00:00:00Z
+
+Grep check:
+$ grep -q "ANTHROPIC_API_KEY" .github/workflows/eval-nightly.yml
+Exit code: 1 (not found)
+
+Status: PASS
