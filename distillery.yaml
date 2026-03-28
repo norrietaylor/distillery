@@ -1,6 +1,7 @@
 storage:
-  backend: duckdb
-  database_path: ~/.distillery/distillery.db
+  backend: motherduck
+  database_path: md:distillery
+  motherduck_token_env: MOTHERDUCK_TOKEN
 
 embedding:
   provider: jina
