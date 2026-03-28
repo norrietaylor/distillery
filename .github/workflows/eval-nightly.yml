@@ -1,0 +1,43 @@
+name: Eval (Nightly)
+
+on:
+  schedule:
+    - cron: "0 3 * * *" # 03:00 UTC daily
+  workflow_dispatch: # allow manual runs
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies (with eval extras)
+        run: pip install -e ".[dev,eval]"
+
+      - name: Run eval suite
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: pytest -m eval -v --tb=short
+
+      - name: Upload eval results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results-${{ github.run_id }}
+          path: |
+            eval_results/
+            baseline*.json
+          retention-days: 30
+          if-no-files-found: ignore
