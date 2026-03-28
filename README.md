@@ -134,7 +134,7 @@ graph TD
 
     skills -->|invoke| mcp
 
-    subgraph MCP Server — 17 tools
+    subgraph MCP Server - 17 tools
         mcp["FastMCP (stdio / HTTP)"]
     end
 
