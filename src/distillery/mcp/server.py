@@ -3095,6 +3095,12 @@ def _feed_source_to_dict(source: FeedSourceConfig) -> dict[str, Any]:
     }
 
 
+# Lock protecting mutations to the shared ``config.feeds.sources`` list.
+# In stateless HTTP mode every request shares the same config object, so
+# concurrent ``/watch add`` / ``/watch remove`` calls must be serialised.
+_watch_lock = asyncio.Lock()
+
+
 async def _handle_watch(
     config: DistilleryConfig,
     arguments: dict[str, Any],
@@ -3102,7 +3108,8 @@ async def _handle_watch(
     """Handle the ``distillery_watch`` tool.
 
     Supports ``list``, ``add``, and ``remove`` actions against the in-memory
-    ``config.feeds.sources`` list.
+    ``config.feeds.sources`` list.  Mutations are serialised via
+    ``_watch_lock`` to prevent concurrent request clobbering.
 
     Args:
         config: The current :class:`~distillery.config.DistilleryConfig`
@@ -3198,7 +3205,15 @@ async def _handle_watch(
             poll_interval_minutes=poll_interval,
             trust_weight=trust_weight,
         )
-        sources.append(new_source)
+        # Reject duplicates (same URL already registered).
+        if any(s.url == url for s in sources):
+            return error_response(
+                "DUPLICATE_SOURCE",
+                f"Source with URL {url!r} is already registered.",
+            )
+
+        async with _watch_lock:
+            sources.append(new_source)
 
         return success_response(
             {
@@ -3216,9 +3231,10 @@ async def _handle_watch(
     if not url:
         return error_response("MISSING_FIELD", "url is required for action='remove'")
 
-    original_count = len(sources)
-    config.feeds.sources = [s for s in sources if s.url != url]
-    removed = len(config.feeds.sources) < original_count
+    async with _watch_lock:
+        original_count = len(sources)
+        config.feeds.sources = [s for s in sources if s.url != url]
+        removed = len(config.feeds.sources) < original_count
 
     return success_response(
         {
@@ -3508,18 +3524,18 @@ def _derive_suggestions(
         for domain in profile.bookmark_domains:
             candidate_url = f"https://{domain}/rss"
             if candidate_url not in watched_set and len(domain) > 3 and "." in domain:
-                    candidates.append(
-                        {
-                            "url": candidate_url,
-                            "source_type": "rss",
-                            "label": domain,
-                            "rationale": (
-                                f"You frequently bookmark content from {domain!r}. "
-                                "An RSS feed from this domain would surface new content "
-                                "automatically."
-                            ),
-                        }
-                    )
+                candidates.append(
+                    {
+                        "url": candidate_url,
+                        "source_type": "rss",
+                        "label": domain,
+                        "rationale": (
+                            f"You frequently bookmark content from {domain!r}. "
+                            "An RSS feed from this domain would surface new content "
+                            "automatically."
+                        ),
+                    }
+                )
 
     return candidates[:max_suggestions]
 

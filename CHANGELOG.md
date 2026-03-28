@@ -69,7 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `InterestExtractor` — mines existing entries for tag frequencies, domains, repos, expertise
 - 4 new MCP tools: `distillery_watch`, `distillery_poll`, `distillery_interests`, `distillery_suggest_sources`
 - `distillery poll` CLI command for cron-based scheduling
-- `FeedsConfig` in `distillery.yaml` with sources, thresholds, and trust weights
+- `FeedsConfig` in `distillery.yaml` with sources (each with per-source `trust_weight`) and thresholds
 - MotherDuck backend (`md:distillery`) for persistent storage across container restarts
 - 21 MCP tools total, 1000+ tests
 
