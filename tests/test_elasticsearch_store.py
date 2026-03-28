@@ -682,3 +682,686 @@ class TestLifecycle:
         """close() closes the underlying ES client."""
         await es_store.close()
         es_store.client.close.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Helper: build mock ES search response
+# ---------------------------------------------------------------------------
+
+
+def _es_search_response(hits: list[dict[str, Any]]) -> dict[str, Any]:
+    """Build a mock ES search response from a list of hit dicts.
+
+    Each dict in *hits* must contain ``_id``, ``_score``, and ``_source``.
+    """
+    return {"hits": {"hits": hits, "total": {"value": len(hits)}}}
+
+
+def _make_hit(
+    entry_id: str,
+    es_score: float,
+    content: str = "content",
+    entry_type: str = "inbox",
+    author: str = "tester",
+    project: str | None = None,
+    tags: list[str] | None = None,
+    status: str = "active",
+) -> dict[str, Any]:
+    """Build a single ES hit dict."""
+    now = datetime.now(tz=UTC)
+    return {
+        "_id": entry_id,
+        "_score": es_score,
+        "_source": {
+            "content": content,
+            "entry_type": entry_type,
+            "source": "manual",
+            "author": author,
+            "project": project,
+            "tags": tags or [],
+            "status": status,
+            "metadata": "{}",
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+            "version": 1,
+            "embedding": [0.1] * 768,
+            "accessed_at": None,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Search operation tests (T02)
+# ---------------------------------------------------------------------------
+
+
+class TestSearch:
+    """Tests for ElasticsearchStore.search()."""
+
+    @pytest.mark.unit
+    async def test_search_returns_results_ranked_by_score(
+        self, es_store: ElasticsearchStore
+    ) -> None:
+        """search() returns SearchResult objects ordered by descending score."""
+        es_store.client.search = AsyncMock(
+            return_value=_es_search_response([
+                _make_hit("id-1", 0.95, content="best match"),
+                _make_hit("id-2", 0.80, content="second match"),
+                _make_hit("id-3", 0.65, content="third match"),
+            ])
+        )
+
+        results = await es_store.search("test query", None, 10)
+
+        assert len(results) == 3
+        assert results[0].entry.id == "id-1"
+        assert results[1].entry.id == "id-2"
+        assert results[2].entry.id == "id-3"
+        # Scores should be converted: 2 * es_score - 1
+        assert results[0].score == pytest.approx(0.90, abs=0.01)
+        assert results[1].score == pytest.approx(0.60, abs=0.01)
+        assert results[2].score == pytest.approx(0.30, abs=0.01)
+
+    @pytest.mark.unit
+    async def test_search_calls_embedding_provider(
+        self, es_store: ElasticsearchStore
+    ) -> None:
+        """search() in client mode calls EmbeddingProvider.embed()."""
+        es_store.client.search = AsyncMock(
+            return_value=_es_search_response([])
+        )
+
+        await es_store.search("test query", None, 5)
+
+        # The kNN search should use the embedding vector.
+        call_kwargs = es_store.client.search.call_args.kwargs
+        assert "knn" in call_kwargs
+        assert call_kwargs["knn"]["field"] == "embedding"
+        assert len(call_kwargs["knn"]["query_vector"]) == 768
+
+    @pytest.mark.unit
+    async def test_search_applies_entry_type_filter(
+        self, es_store: ElasticsearchStore
+    ) -> None:
+        """search() includes a term filter for entry_type."""
+        es_store.client.search = AsyncMock(
+            return_value=_es_search_response([
+                _make_hit("id-1", 0.9, entry_type="session"),
+            ])
+        )
+
+        await es_store.search("auth", {"entry_type": "session"}, 10)
+
+        call_kwargs = es_store.client.search.call_args.kwargs
+        knn_filter = call_kwargs["knn"]["filter"]
+        filter_clauses = knn_filter["bool"]["filter"]
+        assert {"term": {"entry_type": "session"}} in filter_clauses
+
+    @pytest.mark.unit
+    async def test_search_applies_author_filter(
+        self, es_store: ElasticsearchStore
+    ) -> None:
+        """search() includes a term filter for author."""
+        es_store.client.search = AsyncMock(
+            return_value=_es_search_response([
+                _make_hit("id-1", 0.85, author="alice"),
+            ])
+        )
+
+        await es_store.search("deploy", {"author": "alice"}, 10)
+
+        call_kwargs = es_store.client.search.call_args.kwargs
+        filter_clauses = call_kwargs["knn"]["filter"]["bool"]["filter"]
+        assert {"term": {"author": "alice"}} in filter_clauses
+
+    @pytest.mark.unit
+    async def test_search_applies_project_filter(
+        self, es_store: ElasticsearchStore
+    ) -> None:
+        """search() includes a term filter for project."""
+        es_store.client.search = AsyncMock(
+            return_value=_es_search_response([
+                _make_hit("id-1", 0.85, project="billing-v2"),
+            ])
+        )
+
+        await es_store.search("API", {"project": "billing-v2"}, 10)
+
+        call_kwargs = es_store.client.search.call_args.kwargs
+        filter_clauses = call_kwargs["knn"]["filter"]["bool"]["filter"]
+        assert {"term": {"project": "billing-v2"}} in filter_clauses
+
+    @pytest.mark.unit
+    async def test_search_applies_tags_filter_any_match(
+        self, es_store: ElasticsearchStore
+    ) -> None:
+        """search() includes a terms filter for tags (any-match semantics)."""
+        es_store.client.search = AsyncMock(
+            return_value=_es_search_response([
+                _make_hit("id-1", 0.85, tags=["python", "ci"]),
+            ])
+        )
+
+        await es_store.search("testing", {"tags": ["python", "ci"]}, 10)
+
+        call_kwargs = es_store.client.search.call_args.kwargs
+        filter_clauses = call_kwargs["knn"]["filter"]["bool"]["filter"]
+        assert {"terms": {"tags": ["python", "ci"]}} in filter_clauses
+
+    @pytest.mark.unit
+    async def test_search_applies_status_filter(
+        self, es_store: ElasticsearchStore
+    ) -> None:
+        """search() includes a term filter for status."""
+        es_store.client.search = AsyncMock(
+            return_value=_es_search_response([
+                _make_hit("id-1", 0.85, status="active"),
+            ])
+        )
+
+        await es_store.search("patterns", {"status": "active"}, 10)
+
+        call_kwargs = es_store.client.search.call_args.kwargs
+        filter_clauses = call_kwargs["knn"]["filter"]["bool"]["filter"]
+        assert {"term": {"status": "active"}} in filter_clauses
+
+    @pytest.mark.unit
+    async def test_search_applies_date_range_filter(
+        self, es_store: ElasticsearchStore
+    ) -> None:
+        """search() includes a range filter for date_from and date_to."""
+        es_store.client.search = AsyncMock(
+            return_value=_es_search_response([
+                _make_hit("id-1", 0.85),
+            ])
+        )
+
+        await es_store.search(
+            "release notes",
+            {"date_from": "2026-01-01", "date_to": "2026-03-01"},
+            10,
+        )
+
+        call_kwargs = es_store.client.search.call_args.kwargs
+        filter_clauses = call_kwargs["knn"]["filter"]["bool"]["filter"]
+        assert {
+            "range": {"created_at": {"gte": "2026-01-01", "lte": "2026-03-01"}}
+        } in filter_clauses
+
+    @pytest.mark.unit
+    async def test_search_applies_multiple_filters(
+        self, es_store: ElasticsearchStore
+    ) -> None:
+        """search() applies all filters simultaneously."""
+        es_store.client.search = AsyncMock(
+            return_value=_es_search_response([
+                _make_hit("id-1", 0.85, entry_type="session", author="bob", status="active"),
+            ])
+        )
+
+        await es_store.search(
+            "refactoring",
+            {"entry_type": "session", "author": "bob", "status": "active"},
+            10,
+        )
+
+        call_kwargs = es_store.client.search.call_args.kwargs
+        filter_clauses = call_kwargs["knn"]["filter"]["bool"]["filter"]
+        assert {"term": {"entry_type": "session"}} in filter_clauses
+        assert {"term": {"author": "bob"}} in filter_clauses
+        assert {"term": {"status": "active"}} in filter_clauses
+
+    @pytest.mark.unit
+    async def test_search_no_filters_omits_filter_clause(
+        self, es_store: ElasticsearchStore
+    ) -> None:
+        """search() without filters does not include a filter clause in kNN."""
+        es_store.client.search = AsyncMock(
+            return_value=_es_search_response([])
+        )
+
+        await es_store.search("test", None, 5)
+
+        call_kwargs = es_store.client.search.call_args.kwargs
+        assert "filter" not in call_kwargs["knn"]
+
+
+# ---------------------------------------------------------------------------
+# Score conversion tests (T02)
+# ---------------------------------------------------------------------------
+
+
+class TestScoreConversion:
+    """Tests for ES cosine score conversion to [0, 1] range."""
+
+    @pytest.mark.unit
+    def test_score_085_converts_to_070(self) -> None:
+        """ES score 0.85 -> cosine 0.70."""
+        assert ElasticsearchStore._convert_es_score(0.85) == pytest.approx(0.70)
+
+    @pytest.mark.unit
+    def test_perfect_score_converts_to_1(self) -> None:
+        """ES score 1.0 -> cosine 1.0."""
+        assert ElasticsearchStore._convert_es_score(1.0) == pytest.approx(1.0)
+
+    @pytest.mark.unit
+    def test_orthogonal_score_converts_to_0(self) -> None:
+        """ES score 0.5 -> cosine 0.0."""
+        assert ElasticsearchStore._convert_es_score(0.5) == pytest.approx(0.0)
+
+    @pytest.mark.unit
+    def test_score_clamps_below_zero(self) -> None:
+        """ES scores below 0.5 clamp to 0.0."""
+        assert ElasticsearchStore._convert_es_score(0.3) == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# find_similar tests (T02)
+# ---------------------------------------------------------------------------
+
+
+class TestFindSimilar:
+    """Tests for ElasticsearchStore.find_similar()."""
+
+    @pytest.mark.unit
+    async def test_find_similar_returns_entries_above_threshold(
+        self, es_store: ElasticsearchStore
+    ) -> None:
+        """find_similar() returns only entries above the threshold."""
+        # ES scores for cosine similarities 0.97, 0.88, 0.72, 0.45
+        # ES score = (1 + cosine) / 2 -> 0.985, 0.94, 0.86, 0.725
+        es_store.client.search = AsyncMock(
+            return_value=_es_search_response([
+                _make_hit("id-1", 0.985, content="near duplicate"),
+                _make_hit("id-2", 0.94, content="similar"),
+            ])
+        )
+
+        results = await es_store.find_similar("test content", threshold=0.80, limit=10)
+
+        assert len(results) == 2
+        assert results[0].score >= 0.80
+        assert results[1].score >= 0.80
+
+    @pytest.mark.unit
+    async def test_find_similar_skip_threshold(
+        self, es_store: ElasticsearchStore
+    ) -> None:
+        """find_similar() with 0.95 threshold identifies exact duplicates."""
+        es_store.client.search = AsyncMock(
+            return_value=_es_search_response([
+                _make_hit("id-1", 0.985, content="near duplicate"),  # cosine = 0.97
+            ])
+        )
+
+        results = await es_store.find_similar("test content", threshold=0.95, limit=10)
+
+        assert len(results) == 1
+        assert results[0].score >= 0.95
+
+    @pytest.mark.unit
+    async def test_find_similar_link_threshold(
+        self, es_store: ElasticsearchStore
+    ) -> None:
+        """find_similar() with 0.60 threshold identifies related content."""
+        es_store.client.search = AsyncMock(
+            return_value=_es_search_response([
+                _make_hit("id-1", 0.86, content="related a"),  # cosine = 0.72
+                _make_hit("id-2", 0.825, content="related b"),  # cosine = 0.65
+            ])
+        )
+
+        results = await es_store.find_similar("test content", threshold=0.60, limit=10)
+
+        assert len(results) == 2
+        assert all(r.score >= 0.60 for r in results)
+
+    @pytest.mark.unit
+    async def test_find_similar_empty_when_below_threshold(
+        self, es_store: ElasticsearchStore
+    ) -> None:
+        """find_similar() returns empty when no entries meet the threshold."""
+        es_store.client.search = AsyncMock(
+            return_value=_es_search_response([])
+        )
+
+        results = await es_store.find_similar("test content", threshold=0.80, limit=10)
+
+        assert results == []
+
+    @pytest.mark.unit
+    async def test_find_similar_passes_similarity_to_knn(
+        self, es_store: ElasticsearchStore
+    ) -> None:
+        """find_similar() passes the min ES score as similarity to kNN."""
+        es_store.client.search = AsyncMock(
+            return_value=_es_search_response([])
+        )
+
+        await es_store.find_similar("test", threshold=0.80, limit=5)
+
+        call_kwargs = es_store.client.search.call_args.kwargs
+        knn = call_kwargs["knn"]
+        # threshold 0.80 -> ES score = (1 + 0.80) / 2 = 0.90
+        assert knn["similarity"] == pytest.approx(0.90)
+
+
+# ---------------------------------------------------------------------------
+# list_entries tests (T02)
+# ---------------------------------------------------------------------------
+
+
+class TestListEntries:
+    """Tests for ElasticsearchStore.list_entries()."""
+
+    @pytest.mark.unit
+    async def test_list_entries_returns_sorted_by_created_at(
+        self, es_store: ElasticsearchStore
+    ) -> None:
+        """list_entries() sorts by created_at descending."""
+        es_store.client.search = AsyncMock(
+            return_value=_es_search_response([
+                _make_hit("id-1", 1.0, content="newest"),
+                _make_hit("id-2", 1.0, content="oldest"),
+            ])
+        )
+
+        results = await es_store.list_entries(None, 10, 0)
+
+        assert len(results) == 2
+        call_kwargs = es_store.client.search.call_args.kwargs
+        body = call_kwargs["body"]
+        assert body["sort"] == [{"created_at": {"order": "desc"}}]
+
+    @pytest.mark.unit
+    async def test_list_entries_pagination(
+        self, es_store: ElasticsearchStore
+    ) -> None:
+        """list_entries() uses from/size for pagination."""
+        es_store.client.search = AsyncMock(
+            return_value=_es_search_response([])
+        )
+
+        await es_store.list_entries(None, 10, 5)
+
+        call_kwargs = es_store.client.search.call_args.kwargs
+        body = call_kwargs["body"]
+        assert body["from"] == 5
+        assert body["size"] == 10
+
+    @pytest.mark.unit
+    async def test_list_entries_applies_filters(
+        self, es_store: ElasticsearchStore
+    ) -> None:
+        """list_entries() applies metadata filters as bool query clauses."""
+        es_store.client.search = AsyncMock(
+            return_value=_es_search_response([
+                _make_hit("id-1", 1.0, entry_type="bookmark", status="active"),
+            ])
+        )
+
+        await es_store.list_entries(
+            {"entry_type": "bookmark", "status": "active"}, 10, 0
+        )
+
+        call_kwargs = es_store.client.search.call_args.kwargs
+        body = call_kwargs["body"]
+        filter_clauses = body["query"]["bool"]["filter"]
+        assert {"term": {"entry_type": "bookmark"}} in filter_clauses
+        assert {"term": {"status": "active"}} in filter_clauses
+
+    @pytest.mark.unit
+    async def test_list_entries_no_filters_uses_match_all(
+        self, es_store: ElasticsearchStore
+    ) -> None:
+        """list_entries() without filters uses match_all query."""
+        es_store.client.search = AsyncMock(
+            return_value=_es_search_response([])
+        )
+
+        await es_store.list_entries(None, 10, 0)
+
+        call_kwargs = es_store.client.search.call_args.kwargs
+        body = call_kwargs["body"]
+        assert "match_all" in body["query"]
+
+
+# ---------------------------------------------------------------------------
+# Dual embedding mode tests (T02)
+# ---------------------------------------------------------------------------
+
+
+class TestEmbeddingModeSelection:
+    """Tests for client/server/auto embedding mode switching."""
+
+    @pytest.mark.unit
+    async def test_client_mode_calls_embedding_provider_on_store(
+        self, es_client: AsyncMock, embedding_provider: MockEmbeddingProvider
+    ) -> None:
+        """Client mode calls EmbeddingProvider.embed() during store()."""
+        store = ElasticsearchStore(
+            client=es_client,
+            embedding_provider=embedding_provider,
+            embedding_mode="client",
+        )
+        await store.initialize()
+
+        entry = _make_entry(content="test client mode")
+        await store.store(entry)
+
+        # Embedding should be in the document.
+        doc = es_client.index.call_args.kwargs["document"]
+        assert len(doc["embedding"]) == 768
+        assert "content_semantic" not in doc
+
+    @pytest.mark.unit
+    async def test_client_mode_calls_embedding_provider_on_search(
+        self, es_client: AsyncMock, embedding_provider: MockEmbeddingProvider
+    ) -> None:
+        """Client mode calls EmbeddingProvider.embed() during search()."""
+        store = ElasticsearchStore(
+            client=es_client,
+            embedding_provider=embedding_provider,
+            embedding_mode="client",
+        )
+        await store.initialize()
+        es_client.search = AsyncMock(return_value=_es_search_response([]))
+
+        await store.search("test query", None, 5)
+
+        call_kwargs = es_client.search.call_args.kwargs
+        assert "knn" in call_kwargs
+        assert len(call_kwargs["knn"]["query_vector"]) == 768
+
+    @pytest.mark.unit
+    async def test_server_mode_skips_embedding_on_store(
+        self, es_client: AsyncMock, embedding_provider: MockEmbeddingProvider
+    ) -> None:
+        """Server mode does NOT call EmbeddingProvider.embed() during store()."""
+        # Mock inference detection.
+        es_client.inference = AsyncMock()
+        es_client.inference.get = AsyncMock(
+            return_value={"endpoints": [{"inference_id": "my-model"}]}
+        )
+
+        store = ElasticsearchStore(
+            client=es_client,
+            embedding_provider=embedding_provider,
+            embedding_mode="server",
+        )
+        await store.initialize()
+
+        entry = _make_entry(content="test server mode")
+        await store.store(entry)
+
+        doc = es_client.index.call_args.kwargs["document"]
+        # Embedding should be empty in server mode.
+        assert doc["embedding"] == []
+        # content_semantic field should be populated.
+        assert doc["content_semantic"] == "test server mode"
+
+    @pytest.mark.unit
+    async def test_server_mode_uses_semantic_query_on_search(
+        self, es_client: AsyncMock, embedding_provider: MockEmbeddingProvider
+    ) -> None:
+        """Server mode uses semantic query instead of kNN on search()."""
+        es_client.inference = AsyncMock()
+        es_client.inference.get = AsyncMock(
+            return_value={"endpoints": [{"inference_id": "my-model"}]}
+        )
+
+        store = ElasticsearchStore(
+            client=es_client,
+            embedding_provider=embedding_provider,
+            embedding_mode="server",
+        )
+        await store.initialize()
+        es_client.search = AsyncMock(return_value=_es_search_response([]))
+
+        await store.search("test query", None, 5)
+
+        call_kwargs = es_client.search.call_args.kwargs
+        # Should NOT have knn.
+        assert "knn" not in call_kwargs
+        # Should have semantic query in body.
+        body = call_kwargs["body"]
+        assert "semantic" in body["query"]["bool"]["must"][0]
+
+    @pytest.mark.unit
+    async def test_auto_mode_selects_server_when_inference_available(
+        self, es_client: AsyncMock, embedding_provider: MockEmbeddingProvider
+    ) -> None:
+        """Auto mode selects server when inference endpoint is available."""
+        es_client.inference = AsyncMock()
+        es_client.inference.get = AsyncMock(
+            return_value={"endpoints": [{"inference_id": "my-model"}]}
+        )
+
+        store = ElasticsearchStore(
+            client=es_client,
+            embedding_provider=embedding_provider,
+            embedding_mode="auto",
+        )
+        await store.initialize()
+
+        assert store.effective_embedding_mode == "server"
+
+    @pytest.mark.unit
+    async def test_auto_mode_selects_client_when_no_inference(
+        self, es_client: AsyncMock, embedding_provider: MockEmbeddingProvider
+    ) -> None:
+        """Auto mode selects client when no inference endpoint exists."""
+        es_client.inference = AsyncMock()
+        es_client.inference.get = AsyncMock(side_effect=Exception("not found"))
+
+        store = ElasticsearchStore(
+            client=es_client,
+            embedding_provider=embedding_provider,
+            embedding_mode="auto",
+        )
+        await store.initialize()
+
+        assert store.effective_embedding_mode == "client"
+
+    @pytest.mark.unit
+    async def test_auto_mode_selects_client_when_empty_endpoints(
+        self, es_client: AsyncMock, embedding_provider: MockEmbeddingProvider
+    ) -> None:
+        """Auto mode selects client when endpoint list is empty."""
+        es_client.inference = AsyncMock()
+        es_client.inference.get = AsyncMock(return_value={"endpoints": []})
+
+        store = ElasticsearchStore(
+            client=es_client,
+            embedding_provider=embedding_provider,
+            embedding_mode="auto",
+        )
+        await store.initialize()
+
+        assert store.effective_embedding_mode == "client"
+
+    @pytest.mark.unit
+    async def test_server_mode_adds_semantic_text_mapping(
+        self, es_client: AsyncMock, embedding_provider: MockEmbeddingProvider
+    ) -> None:
+        """Server mode adds content_semantic field to index mappings."""
+        es_client.indices.exists.return_value = False
+        es_client.inference = AsyncMock()
+        es_client.inference.get = AsyncMock(
+            return_value={"endpoints": [{"inference_id": "my-model"}]}
+        )
+
+        store = ElasticsearchStore(
+            client=es_client,
+            embedding_provider=embedding_provider,
+            embedding_mode="server",
+        )
+        await store.initialize()
+
+        # Find entries index creation call.
+        entries_call = None
+        for call in es_client.indices.create.call_args_list:
+            if call.kwargs["index"].endswith("entries_v1"):
+                entries_call = call
+                break
+
+        assert entries_call is not None
+        mappings = entries_call.kwargs["body"]["mappings"]
+        assert "content_semantic" in mappings["properties"]
+        assert mappings["properties"]["content_semantic"]["type"] == "semantic_text"
+        assert mappings["properties"]["content_semantic"]["inference_id"] == "my-model"
+
+
+# ---------------------------------------------------------------------------
+# Filter builder tests (T02)
+# ---------------------------------------------------------------------------
+
+
+class TestBuildFilterClauses:
+    """Tests for the static _build_filter_clauses helper."""
+
+    @pytest.mark.unit
+    def test_none_filters_returns_empty(self) -> None:
+        """None filters returns empty list."""
+        assert ElasticsearchStore._build_filter_clauses(None) == []
+
+    @pytest.mark.unit
+    def test_empty_dict_returns_empty(self) -> None:
+        """Empty dict returns empty list."""
+        assert ElasticsearchStore._build_filter_clauses({}) == []
+
+    @pytest.mark.unit
+    def test_entry_type_filter(self) -> None:
+        """entry_type becomes a term clause."""
+        clauses = ElasticsearchStore._build_filter_clauses({"entry_type": "session"})
+        assert {"term": {"entry_type": "session"}} in clauses
+
+    @pytest.mark.unit
+    def test_tags_filter(self) -> None:
+        """tags becomes a terms clause."""
+        clauses = ElasticsearchStore._build_filter_clauses({"tags": ["a", "b"]})
+        assert {"terms": {"tags": ["a", "b"]}} in clauses
+
+    @pytest.mark.unit
+    def test_date_range_filter(self) -> None:
+        """date_from and date_to become a range clause."""
+        clauses = ElasticsearchStore._build_filter_clauses(
+            {"date_from": "2026-01-01", "date_to": "2026-03-01"}
+        )
+        assert {
+            "range": {"created_at": {"gte": "2026-01-01", "lte": "2026-03-01"}}
+        } in clauses
+
+    @pytest.mark.unit
+    def test_date_from_only(self) -> None:
+        """date_from alone creates a range with gte only."""
+        clauses = ElasticsearchStore._build_filter_clauses({"date_from": "2026-01-01"})
+        assert {"range": {"created_at": {"gte": "2026-01-01"}}} in clauses
+
+    @pytest.mark.unit
+    def test_multiple_filters_combined(self) -> None:
+        """Multiple filter keys produce multiple clauses."""
+        clauses = ElasticsearchStore._build_filter_clauses(
+            {"entry_type": "session", "author": "alice", "status": "active"}
+        )
+        assert len(clauses) == 3

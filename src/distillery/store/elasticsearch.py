@@ -9,8 +9,11 @@ This module provides:
   - Versioned index creation with aliases
   - BBQ HNSW mappings for embedding fields
   - Async CRUD operations (store, get, update, delete)
-
-Search, find_similar, list_entries, and logging operations are added by T02/T03.
+  - Semantic search via kNN with metadata filters
+  - Similarity search with threshold enforcement
+  - Paginated list_entries with bool query filters
+  - Dual embedding: client-side (EmbeddingProvider), server-side (ES Inference),
+    and auto-detection mode
 """
 
 from __future__ import annotations
@@ -147,7 +150,9 @@ class ElasticsearchStore:
         self._embedding_provider = embedding_provider
         self._index_prefix = index_prefix
         self._embedding_mode = embedding_mode
+        self._effective_mode: str = embedding_mode
         self._initialized: bool = False
+        self._inference_endpoint_id: str | None = None
 
     # ------------------------------------------------------------------
     # Index name helpers
@@ -166,34 +171,46 @@ class ElasticsearchStore:
     # ------------------------------------------------------------------
 
     def _entries_mappings(self) -> dict[str, Any]:
-        """Return the index mappings for the entries index."""
-        return {
-            "properties": {
-                "content": {"type": "text"},
-                "entry_type": {"type": "keyword"},
-                "source": {"type": "keyword"},
-                "author": {"type": "keyword"},
-                "project": {"type": "keyword"},
-                "tags": {"type": "keyword"},
-                "status": {"type": "keyword"},
-                "metadata": {"type": "text", "index": False},
-                "created_at": {"type": "date"},
-                "updated_at": {"type": "date"},
-                "version": {"type": "integer"},
-                "embedding": {
-                    "type": "dense_vector",
-                    "dims": self._embedding_provider.dimensions,
-                    "index": True,
-                    "similarity": "cosine",
-                    "index_options": {
-                        "type": "bbq_hnsw",
-                        "m": 16,
-                        "ef_construction": 100,
-                    },
+        """Return the index mappings for the entries index.
+
+        When the effective embedding mode is ``"server"``, a ``semantic_text``
+        field backed by an ES Inference endpoint is added alongside the
+        ``dense_vector`` field for backward compatibility.
+        """
+        properties: dict[str, Any] = {
+            "content": {"type": "text"},
+            "entry_type": {"type": "keyword"},
+            "source": {"type": "keyword"},
+            "author": {"type": "keyword"},
+            "project": {"type": "keyword"},
+            "tags": {"type": "keyword"},
+            "status": {"type": "keyword"},
+            "metadata": {"type": "text", "index": False},
+            "created_at": {"type": "date"},
+            "updated_at": {"type": "date"},
+            "version": {"type": "integer"},
+            "embedding": {
+                "type": "dense_vector",
+                "dims": self._embedding_provider.dimensions,
+                "index": True,
+                "similarity": "cosine",
+                "index_options": {
+                    "type": "bbq_hnsw",
+                    "m": 16,
+                    "ef_construction": 100,
                 },
-                "accessed_at": {"type": "date"},
-            }
+            },
+            "accessed_at": {"type": "date"},
         }
+
+        # Add semantic_text field when server-side embedding is active.
+        if self._effective_mode == "server" and self._inference_endpoint_id:
+            properties["content_semantic"] = {
+                "type": "semantic_text",
+                "inference_id": self._inference_endpoint_id,
+            }
+
+        return {"properties": properties}
 
     def _search_log_mappings(self) -> dict[str, Any]:
         """Return the index mappings for the search_log index."""
@@ -222,14 +239,56 @@ class ElasticsearchStore:
     # Lifecycle
     # ------------------------------------------------------------------
 
+    async def _detect_inference_endpoint(self) -> str | None:
+        """Detect whether an ES inference endpoint is available.
+
+        Returns the first inference endpoint ID if one exists, ``None``
+        otherwise.
+        """
+        try:
+            resp = await self._client.inference.get(inference_id="_all")
+            endpoints: list[Any] = resp.get("endpoints", resp.get("models", []))
+            if endpoints and len(endpoints) > 0:
+                first: dict[str, Any] = endpoints[0]
+                endpoint_id: str = str(
+                    first.get("inference_id", first.get("model_id", ""))
+                )
+                return endpoint_id if endpoint_id else None
+        except Exception:
+            logger.debug("Inference endpoint detection failed (falling back to client mode)")
+        return None
+
     async def initialize(self) -> None:
         """Create versioned indices with aliases if they do not already exist.
+
+        When ``embedding_mode`` is ``"auto"``, detects whether an ES inference
+        endpoint is available and selects server or client mode accordingly.
 
         This must be called once before any other method.  Subsequent calls
         are no-ops.
         """
         if self._initialized:
             return
+
+        # Resolve auto mode before creating indices.
+        if self._embedding_mode == "auto":
+            endpoint_id = await self._detect_inference_endpoint()
+            if endpoint_id:
+                self._effective_mode = "server"
+                self._inference_endpoint_id = endpoint_id
+                logger.info(
+                    "Auto mode: detected inference endpoint %r, using server mode",
+                    endpoint_id,
+                )
+            else:
+                self._effective_mode = "client"
+                logger.info("Auto mode: no inference endpoint found, using client mode")
+        elif self._embedding_mode == "server":
+            self._effective_mode = "server"
+            # Try to detect the endpoint for semantic_text mapping.
+            endpoint_id = await self._detect_inference_endpoint()
+            if endpoint_id:
+                self._inference_endpoint_id = endpoint_id
 
         mappings_map: dict[str, dict[str, Any]] = {
             "entries_v1": self._entries_mappings(),
@@ -286,6 +345,11 @@ class ElasticsearchStore:
         """Return the configured embedding provider."""
         return self._embedding_provider
 
+    @property
+    def effective_embedding_mode(self) -> str:
+        """Return the resolved embedding mode (after auto-detection)."""
+        return self._effective_mode
+
     # ------------------------------------------------------------------
     # CRUD operations
     # ------------------------------------------------------------------
@@ -293,15 +357,27 @@ class ElasticsearchStore:
     async def store(self, entry: Entry) -> str:
         """Persist a new entry and return its ID.
 
-        Embeds the entry content via the configured embedding provider,
-        then indexes the document into Elasticsearch.
+        In client mode, embeds the entry content via the configured embedding
+        provider and passes the vector to Elasticsearch.  In server mode,
+        skips client-side embedding and relies on ES Inference to generate
+        embeddings from the ``content_semantic`` field.
 
         Returns:
             The UUID string of the stored entry.
         """
         validate_metadata(entry.entry_type.value, entry.metadata)
-        embedding = self._embedding_provider.embed(entry.content)
+
+        if self._effective_mode == "server":
+            # Server mode: no client-side embedding; ES infers from content.
+            embedding: list[float] = []
+        else:
+            embedding = self._embedding_provider.embed(entry.content)
+
         doc = _entry_to_doc(entry, embedding)
+
+        # For server mode, populate the semantic_text source field.
+        if self._effective_mode == "server":
+            doc["content_semantic"] = entry.content
 
         await self._client.index(
             index=self._alias_name("entries"),
@@ -309,7 +385,7 @@ class ElasticsearchStore:
             document=doc,
             refresh="wait_for",
         )
-        logger.debug("Stored entry id=%s", entry.id)
+        logger.debug("Stored entry id=%s (mode=%s)", entry.id, self._effective_mode)
         return entry.id
 
     async def get(self, entry_id: str) -> Entry | None:
@@ -453,7 +529,71 @@ class ElasticsearchStore:
             return False
 
     # ------------------------------------------------------------------
-    # Stub methods for protocol compliance (implemented in T02/T03)
+    # Filter helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_filter_clauses(filters: dict[str, Any] | None) -> list[dict[str, Any]]:
+        """Build a list of Elasticsearch filter clauses from metadata filters.
+
+        Supports: ``entry_type``, ``author``, ``project``, ``tags`` (any-match),
+        ``status``, ``date_from``, ``date_to``.
+
+        Args:
+            filters: Optional dict of filter keys to values.
+
+        Returns:
+            A list of ES query DSL filter clause dicts suitable for use in a
+            ``bool.filter`` or kNN ``filter`` array.
+        """
+        if not filters:
+            return []
+
+        clauses: list[dict[str, Any]] = []
+
+        for key in ("entry_type", "author", "project", "status"):
+            value = filters.get(key)
+            if value is not None:
+                clauses.append({"term": {key: value}})
+
+        tags = filters.get("tags")
+        if tags is not None:
+            clauses.append({"terms": {"tags": tags}})
+
+        date_from = filters.get("date_from")
+        date_to = filters.get("date_to")
+        if date_from is not None or date_to is not None:
+            range_clause: dict[str, Any] = {}
+            if date_from is not None:
+                range_clause["gte"] = str(date_from)
+            if date_to is not None:
+                range_clause["lte"] = str(date_to)
+            clauses.append({"range": {"created_at": range_clause}})
+
+        return clauses
+
+    @staticmethod
+    def _convert_es_score(es_score: float) -> float:
+        """Convert an Elasticsearch cosine similarity score to [0.0, 1.0].
+
+        ES stores cosine similarity as ``(1 + cosine) / 2``, mapping the
+        ``[-1, 1]`` cosine range to ``[0, 1]``.  We invert this to recover
+        the raw cosine value: ``cosine = 2 * es_score - 1``.
+
+        The returned value is clamped to ``[0.0, 1.0]``.
+
+        Args:
+            es_score: The ``_score`` from an ES kNN search using cosine
+                similarity.
+
+        Returns:
+            The cosine similarity in ``[0.0, 1.0]``.
+        """
+        cosine = 2.0 * es_score - 1.0
+        return max(0.0, min(1.0, cosine))
+
+    # ------------------------------------------------------------------
+    # Search operations
     # ------------------------------------------------------------------
 
     async def search(
@@ -462,8 +602,73 @@ class ElasticsearchStore:
         filters: dict[str, Any] | None,
         limit: int,
     ) -> list[SearchResult]:
-        """Perform semantic search (implemented in T02)."""
-        raise NotImplementedError("search() will be implemented in T02")
+        """Perform semantic search with optional metadata filters.
+
+        In client mode, embeds the query via the ``EmbeddingProvider`` and
+        issues a kNN search with ``query_vector``.  In server mode, uses
+        the ES ``semantic`` query on the ``content_semantic`` field.
+
+        Args:
+            query: Natural-language query string.
+            filters: Optional metadata constraints.
+            limit: Maximum number of results.
+
+        Returns:
+            List of ``SearchResult`` objects sorted by descending score.
+        """
+        from distillery.store.protocol import SearchResult
+
+        filter_clauses = self._build_filter_clauses(filters)
+
+        if self._effective_mode == "server":
+            # Server mode: use semantic query instead of kNN.
+            search_body: dict[str, Any] = {
+                "query": {
+                    "bool": {
+                        "must": [
+                            {
+                                "semantic": {
+                                    "field": "content_semantic",
+                                    "query": query,
+                                }
+                            }
+                        ],
+                        "filter": filter_clauses,
+                    }
+                },
+                "size": limit,
+            }
+            resp = await self._client.search(
+                index=self._alias_name("entries"),
+                body=search_body,
+            )
+        else:
+            # Client mode: embed query and use kNN search.
+            query_vector = self._embedding_provider.embed(query)
+
+            knn: dict[str, Any] = {
+                "field": "embedding",
+                "query_vector": query_vector,
+                "k": limit,
+                "num_candidates": limit * 10,
+            }
+            if filter_clauses:
+                knn["filter"] = {"bool": {"filter": filter_clauses}}
+
+            resp = await self._client.search(
+                index=self._alias_name("entries"),
+                knn=knn,
+                size=limit,
+            )
+
+        hits: list[dict[str, Any]] = resp["hits"]["hits"]
+        results: list[SearchResult] = []
+        for hit in hits:
+            score = self._convert_es_score(float(hit["_score"]))
+            entry = _doc_to_entry(hit["_id"], hit["_source"])
+            results.append(SearchResult(entry=entry, score=score))
+
+        return results
 
     async def find_similar(
         self,
@@ -471,8 +676,51 @@ class ElasticsearchStore:
         threshold: float,
         limit: int,
     ) -> list[SearchResult]:
-        """Find similar entries (implemented in T02)."""
-        raise NotImplementedError("find_similar() will be implemented in T02")
+        """Find entries whose cosine similarity to *content* exceeds *threshold*.
+
+        Embeds the content, issues a kNN search, converts scores, and filters
+        results below *threshold*.
+
+        Args:
+            content: Raw text to compare against the stored corpus.
+            threshold: Minimum cosine similarity (inclusive) in ``[0.0, 1.0]``.
+            limit: Maximum number of results to return.
+
+        Returns:
+            List of ``SearchResult`` with ``score >= threshold``, sorted by
+            descending score.
+        """
+        from distillery.store.protocol import SearchResult
+
+        query_vector = self._embedding_provider.embed(content)
+
+        # Convert the [0, 1] threshold to the ES [0, 1] score space.
+        # ES cosine score = (1 + cosine) / 2, so min_score = (1 + threshold) / 2
+        min_es_score = (1.0 + threshold) / 2.0
+
+        knn: dict[str, Any] = {
+            "field": "embedding",
+            "query_vector": query_vector,
+            "k": limit,
+            "num_candidates": limit * 10,
+            "similarity": min_es_score,
+        }
+
+        resp = await self._client.search(
+            index=self._alias_name("entries"),
+            knn=knn,
+            size=limit,
+        )
+
+        hits: list[dict[str, Any]] = resp["hits"]["hits"]
+        results: list[SearchResult] = []
+        for hit in hits:
+            score = self._convert_es_score(float(hit["_score"]))
+            if score >= threshold:
+                entry = _doc_to_entry(hit["_id"], hit["_source"])
+                results.append(SearchResult(entry=entry, score=score))
+
+        return results
 
     async def list_entries(
         self,
@@ -480,8 +728,37 @@ class ElasticsearchStore:
         limit: int,
         offset: int,
     ) -> list[Entry]:
-        """List entries with filters (implemented in T02)."""
-        raise NotImplementedError("list_entries() will be implemented in T02")
+        """List entries with optional filters, sorted by ``created_at`` descending.
+
+        Uses a ``bool`` query with filter clauses and ``from``/``size``
+        pagination.
+
+        Args:
+            filters: Optional metadata constraints.
+            limit: Maximum number of entries to return (ES ``size``).
+            offset: Number of entries to skip (ES ``from``).
+
+        Returns:
+            List of ``Entry`` objects matching the filters.
+        """
+        filter_clauses = self._build_filter_clauses(filters)
+
+        body: dict[str, Any] = {
+            "query": {"bool": {"filter": filter_clauses}} if filter_clauses else {
+                "match_all": {}
+            },
+            "sort": [{"created_at": {"order": "desc"}}],
+            "from": offset,
+            "size": limit,
+        }
+
+        resp = await self._client.search(
+            index=self._alias_name("entries"),
+            body=body,
+        )
+
+        hits: list[dict[str, Any]] = resp["hits"]["hits"]
+        return [_doc_to_entry(hit["_id"], hit["_source"]) for hit in hits]
 
     async def log_search(
         self,
