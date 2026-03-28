@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 
 import duckdb
 
-from distillery.models import Entry, EntryStatus
+from distillery.models import Entry, EntryStatus, validate_metadata
 
 if TYPE_CHECKING:
     from distillery.embedding.protocol import EmbeddingProvider
@@ -323,6 +323,7 @@ class DuckDBStore:
 
     def _sync_store(self, entry: Entry) -> str:
         """Synchronous implementation of store(); called via asyncio.to_thread."""
+        validate_metadata(entry.entry_type.value, entry.metadata)
         conn = self.connection
         embedding = self._embedding_provider.embed(entry.content)
 
@@ -439,11 +440,22 @@ class DuckDBStore:
 
         conn = self.connection
 
-        # Verify the entry exists first.
-        check_sql = "SELECT id FROM entries WHERE id = ?"
+        # Verify the entry exists first (also fetch entry_type for validation).
+        check_sql = "SELECT id, entry_type FROM entries WHERE id = ?"
         check_result = conn.execute(check_sql, [entry_id])
-        if check_result.fetchone() is None:
+        existing_row = check_result.fetchone()
+        if existing_row is None:
             raise KeyError(f"No entry found with id={entry_id!r}")
+        existing_entry_type: str = existing_row[1]
+
+        # Validate metadata against the effective entry type schema.
+        if "metadata" in updates:
+            effective_entry_type = str(
+                updates["entry_type"].value
+                if "entry_type" in updates and hasattr(updates["entry_type"], "value")
+                else updates.get("entry_type", existing_entry_type)
+            )
+            validate_metadata(effective_entry_type, updates["metadata"])
 
         now = datetime.now(tz=UTC)
 
@@ -600,6 +612,17 @@ class DuckDBStore:
         if "status" in filters:
             clauses.append("status = ?")
             params.append(str(filters["status"]))
+
+        if "tag_prefix" in filters:
+            prefix = filters["tag_prefix"]
+            # Match entries where any tag equals the prefix exactly or starts with
+            # "prefix/" to avoid partial-segment matches (e.g. "project/billing"
+            # must not match "project/billing-v2/api").
+            clauses.append(
+                "len(list_filter(tags, t -> t = ? OR starts_with(t, ?))) > 0"
+            )
+            params.append(prefix)
+            params.append(prefix + "/")
 
         if "date_from" in filters:
             val = filters["date_from"]

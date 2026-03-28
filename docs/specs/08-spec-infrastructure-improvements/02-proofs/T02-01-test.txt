@@ -1,0 +1,62 @@
+Type: test
+Command: uv run python -m pytest tests/test_type_schemas.py -v
+Expected: All 45 tests pass
+Timestamp: 2026-03-27T00:00:00Z
+Status: PASS
+---
+============================= test session starts ==============================
+platform linux -- Python 3.13.7, pytest-9.0.2, pluggy-1.6.0 -- /home/norrie.guest/code/distillery/.venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/norrie.guest/code/distillery
+configfile: pyproject.toml
+plugins: asyncio-1.3.0, anyio-4.13.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 45 items
+
+tests/test_type_schemas.py::TestValidateMetadata::test_person_valid PASSED [  2%]
+tests/test_type_schemas.py::TestValidateMetadata::test_person_valid_with_optional PASSED [  4%]
+tests/test_type_schemas.py::TestValidateMetadata::test_person_missing_expertise_raises PASSED [  6%]
+tests/test_type_schemas.py::TestValidateMetadata::test_person_empty_metadata_raises PASSED [  8%]
+tests/test_type_schemas.py::TestValidateMetadata::test_project_valid PASSED [ 11%]
+tests/test_type_schemas.py::TestValidateMetadata::test_project_missing_repo_raises PASSED [ 13%]
+tests/test_type_schemas.py::TestValidateMetadata::test_digest_valid PASSED [ 15%]
+tests/test_type_schemas.py::TestValidateMetadata::test_digest_missing_period_start_raises PASSED [ 17%]
+tests/test_type_schemas.py::TestValidateMetadata::test_digest_missing_period_end_raises PASSED [ 20%]
+tests/test_type_schemas.py::TestValidateMetadata::test_github_valid PASSED [ 22%]
+tests/test_type_schemas.py::TestValidateMetadata::test_github_valid_issue PASSED [ 24%]
+tests/test_type_schemas.py::TestValidateMetadata::test_github_valid_discussion PASSED [ 26%]
+tests/test_type_schemas.py::TestValidateMetadata::test_github_valid_release PASSED [ 28%]
+tests/test_type_schemas.py::TestValidateMetadata::test_github_missing_repo_raises PASSED [ 31%]
+tests/test_type_schemas.py::TestValidateMetadata::test_github_missing_ref_type_raises PASSED [ 33%]
+tests/test_type_schemas.py::TestValidateMetadata::test_github_missing_ref_number_raises PASSED [ 35%]
+tests/test_type_schemas.py::TestValidateMetadata::test_github_invalid_ref_type_raises PASSED [ 37%]
+tests/test_type_schemas.py::TestValidateMetadata::test_legacy_types_accept_any_metadata PASSED [ 40%]
+tests/test_type_schemas.py::TestValidateMetadata::test_unknown_type_accepts_any_metadata PASSED [ 42%]
+tests/test_type_schemas.py::TestTypeMetadataSchemasRegistry::test_person_schema_has_expertise_required PASSED [ 44%]
+tests/test_type_schemas.py::TestTypeMetadataSchemasRegistry::test_github_schema_has_all_required_fields PASSED [ 46%]
+tests/test_type_schemas.py::TestTypeMetadataSchemasRegistry::test_github_schema_has_constraints PASSED [ 48%]
+tests/test_type_schemas.py::TestTypeMetadataSchemasRegistry::test_project_schema_has_repo_required PASSED [ 51%]
+tests/test_type_schemas.py::TestTypeMetadataSchemasRegistry::test_digest_schema_has_date_fields_required PASSED [ 53%]
+tests/test_type_schemas.py::TestTypeMetadataSchemasRegistry::test_all_four_typed_schemas_present PASSED [ 55%]
+tests/test_type_schemas.py::TestNewEntryTypes::test_new_entry_types_have_correct_values PASSED [ 57%]
+tests/test_type_schemas.py::TestNewEntryTypes::test_new_entry_types_are_str_subclasses PASSED [ 60%]
+tests/test_type_schemas.py::TestNewEntryTypes::test_new_entry_types_constructible_from_string PASSED [ 62%]
+tests/test_type_schemas.py::TestDuckDBStoreValidation::test_person_valid_metadata_stored PASSED [ 64%]
+tests/test_type_schemas.py::TestDuckDBStoreValidation::test_person_missing_expertise_rejected PASSED [ 66%]
+tests/test_type_schemas.py::TestDuckDBStoreValidation::test_github_valid_metadata_stored PASSED [ 68%]
+tests/test_type_schemas.py::TestDuckDBStoreValidation::test_github_invalid_ref_type_rejected PASSED [ 71%]
+tests/test_type_schemas.py::TestDuckDBStoreValidation::test_project_missing_repo_rejected PASSED [ 73%]
+tests/test_type_schemas.py::TestDuckDBStoreValidation::test_digest_valid_stored PASSED [ 75%]
+tests/test_type_schemas.py::TestDuckDBStoreValidation::test_session_arbitrary_metadata_accepted PASSED [ 77%]
+tests/test_type_schemas.py::TestDuckDBStoreValidation::test_bookmark_empty_metadata_accepted PASSED [ 80%]
+tests/test_type_schemas.py::TestDuckDBStoreValidation::test_update_revalidates_metadata PASSED [ 82%]
+tests/test_type_schemas.py::TestDistilleryTypeSchemasMCPTool::test_type_schemas_returns_all_typed_schemas PASSED [ 84%]
+tests/test_type_schemas.py::TestDistilleryTypeSchemasMCPTool::test_person_schema_has_expertise_required PASSED [ 86%]
+tests/test_type_schemas.py::TestDistilleryTypeSchemasMCPTool::test_github_schema_has_required_fields PASSED [ 88%]
+tests/test_type_schemas.py::TestDistilleryTypeSchemasMCPTool::test_session_type_has_no_required_fields PASSED [ 91%]
+tests/test_type_schemas.py::TestDistilleryTypeSchemasMCPTool::test_all_entry_types_present PASSED [ 93%]
+tests/test_type_schemas.py::TestDistilleryStoreMCPValidation::test_store_person_missing_expertise_returns_error PASSED [ 95%]
+tests/test_type_schemas.py::TestDistilleryStoreMCPValidation::test_store_person_valid_returns_entry_id PASSED [ 97%]
+tests/test_type_schemas.py::TestDistilleryStoreMCPValidation::test_store_invalid_entry_type_returns_error PASSED [100%]
+
+============================== 45 passed in 0.66s ==============================

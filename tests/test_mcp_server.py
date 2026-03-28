@@ -670,7 +670,7 @@ class TestCreateServer:
         assert isinstance(server, FastMCP)
 
     async def test_server_registers_all_fifteen_tools(self) -> None:
-        """list_tools() must return all 15 tool names."""
+        """list_tools() must return all expected tool names."""
         config = DistilleryConfig(
             storage=StorageConfig(database_path=":memory:"),
             embedding=EmbeddingConfig(provider="", model="stub", dimensions=4),
@@ -697,5 +697,7 @@ class TestCreateServer:
             "distillery_check_conflicts",
             "distillery_quality",
             "distillery_stale",
+            "distillery_tag_tree",
+            "distillery_type_schemas",
         }
         assert expected == tool_names, f"Missing tools: {expected - tool_names}"

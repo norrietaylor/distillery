@@ -417,6 +417,7 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
         date_to: str | None = None,
         limit: int = 20,
         offset: int = 0,
+        tag_prefix: str | None = None,
     ) -> list[types.TextContent]:
         """
         List knowledge entries with optional filters and pagination.
@@ -430,6 +431,9 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
             date_from (str | None): ISO 8601 start date to include (inclusive).
             date_to (str | None): ISO 8601 end date to include (inclusive).
             tags (list[str] | None): List of tag strings to filter by.
+            tag_prefix (str | None): Namespace prefix filter — returns only entries whose
+                tags fall under this prefix (e.g. "source/bookmark" matches
+                "source/bookmark/rss" but not "source/bookmark-old").
 
         Returns:
             list[types.TextContent]: MCP TextContent blocks containing a JSON object with
@@ -452,6 +456,8 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
             arguments["date_from"] = date_from
         if date_to is not None:
             arguments["date_to"] = date_to
+        if tag_prefix is not None:
+            arguments["tag_prefix"] = tag_prefix
         return await _handle_list(
             store=lc["store"],
             arguments=arguments,
@@ -475,6 +481,7 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
         date_from: str | None = None,
         date_to: str | None = None,
         limit: int = 10,
+        tag_prefix: str | None = None,
     ) -> list[types.TextContent]:
         """Search the knowledge store using semantic similarity.
 
@@ -485,6 +492,9 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
         All filter parameters are optional.  date_from and date_to accept
         ISO 8601 date strings (e.g. "2024-01-15").
         limit must be between 1 and 200 (default 10).
+        tag_prefix filters to entries whose tags fall under that namespace
+        prefix (e.g. "domain/architecture" matches "domain/architecture/api"
+        but not "domain/architecture-old").
         """
         lc = ctx.lifespan_context
         arguments: dict[str, Any] = {"query": query, "limit": limit}
@@ -502,6 +512,8 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
             arguments["date_from"] = date_from
         if date_to is not None:
             arguments["date_to"] = date_to
+        if tag_prefix is not None:
+            arguments["tag_prefix"] = tag_prefix
         return await _handle_search(
             store=lc["store"],
             arguments=arguments,
@@ -789,6 +801,53 @@ def create_server(config: DistilleryConfig | None = None) -> FastMCP:
             arguments=arguments,
         )
 
+    @server.tool
+    async def distillery_tag_tree(
+        ctx: Context,
+        prefix: str | None = None,
+    ) -> list[types.TextContent]:
+        """Return a nested tag hierarchy with entry counts.
+
+        Scans all active entries and builds a tree from their slash-separated
+        tags.  Each node in the tree has a ``count`` (number of entries whose
+        tags fall under that node) and a ``children`` dict keyed by the next
+        segment name.
+
+        Parameters:
+            prefix (str | None): When provided, only nodes under this namespace
+                prefix are included in the response.  For example,
+                ``prefix="project"`` returns only ``project/*`` subtrees.
+
+        Returns:
+            list[types.TextContent]: A single MCP TextContent block containing
+            a JSON object with key ``tree`` (the nested dict) and ``prefix``
+            (the filter applied, or null).
+        """
+        lc = ctx.lifespan_context
+        return await _handle_tag_tree(
+            store=lc["store"],
+            arguments={"prefix": prefix},
+        )
+
+    @server.tool
+    async def distillery_type_schemas(
+        ctx: Context,  # noqa: ARG001
+    ) -> list[types.TextContent]:
+        """Return the metadata schemas for all structured entry types.
+
+        Reports required and optional metadata fields for each entry type that
+        has a defined schema (``person``, ``project``, ``digest``, ``github``).
+        Legacy types (e.g. ``session``, ``bookmark``) are listed with empty
+        required/optional dicts to indicate they accept any metadata.
+
+        Returns:
+            list[types.TextContent]: A single MCP TextContent block containing
+            a JSON object with key ``schemas``, mapping each entry type name to
+            its schema dict (``required``, ``optional``, and optionally
+            ``constraints``).
+        """
+        return await _handle_type_schemas()
+
     return server
 
 
@@ -891,7 +950,8 @@ def _sync_gather_stats(
 
 # Valid entry_type values (mirrors EntryType enum).
 _VALID_ENTRY_TYPES = {
-    "session", "bookmark", "minutes", "meeting", "reference", "idea", "inbox"
+    "session", "bookmark", "minutes", "meeting", "reference", "idea", "inbox",
+    "person", "project", "digest", "github",
 }
 
 # Valid status values (mirrors EntryStatus enum).
@@ -1249,7 +1309,7 @@ def _build_filters_from_arguments(arguments: dict[str, Any]) -> dict[str, Any] |
     Returns:
         A dict of filters, or ``None`` if no filter keys are present.
     """
-    filter_keys = ("entry_type", "author", "project", "tags", "status", "date_from", "date_to")
+    filter_keys = ("entry_type", "author", "project", "tags", "status", "date_from", "date_to", "tag_prefix")
     filters: dict[str, Any] = {}
     for key in filter_keys:
         if key in arguments and arguments[key] is not None:
@@ -1436,6 +1496,120 @@ async def _handle_list(
             "offset": offset,
         }
     )
+
+
+async def _handle_tag_tree(
+    store: Any,
+    arguments: dict[str, Any],
+) -> list[types.TextContent]:
+    """Implement the ``distillery_tag_tree`` tool.
+
+    Fetches all tags from active entries and builds a nested dict tree.
+    Each node has a ``count`` (entries whose tags fall under that subtree)
+    and a ``children`` dict.
+
+    Args:
+        store: Initialised ``DuckDBStore``.
+        arguments: Dict with optional key ``prefix`` (str | None).
+
+    Returns:
+        MCP content list with a JSON payload containing ``tree`` and ``prefix``.
+    """
+    prefix: str | None = arguments.get("prefix")
+
+    def _sync_build_tree() -> dict[str, Any]:
+        """Query all tags and build the nested hierarchy synchronously."""
+        conn = store.connection
+        # Only include active entries to avoid noise from archived ones.
+        result = conn.execute(
+            "SELECT tags FROM entries WHERE status != 'archived'"
+        )
+        rows = result.fetchall()
+
+        # Collect all individual tag strings.
+        all_tags: list[str] = []
+        for (tags_col,) in rows:
+            if tags_col:
+                all_tags.extend(tags_col)
+
+        # Filter by prefix when requested.  A tag matches a prefix when it
+        # either equals the prefix exactly or starts with "prefix/".
+        if prefix is not None:
+            prefix_slash = prefix + "/"
+            all_tags = [
+                t for t in all_tags
+                if t == prefix or t.startswith(prefix_slash)
+            ]
+            # Strip the prefix (and its trailing slash) from the remaining tags
+            # so that the returned tree is rooted at the prefix.
+            stripped: list[str] = []
+            for t in all_tags:
+                if t == prefix:
+                    # The tag is exactly the prefix -- represents the root node.
+                    stripped.append("")
+                else:
+                    stripped.append(t[len(prefix_slash):])
+            all_tags = stripped
+
+        # Build the tree from path segments.
+        # Each node: {"count": int, "children": {segment: node}}
+        root: dict[str, Any] = {"count": 0, "children": {}}
+
+        for tag in all_tags:
+            if not tag:
+                # This tag exactly matched the prefix — count it at the root.
+                root["count"] += 1
+                continue
+            segments = tag.split("/")
+            node = root
+            for seg in segments:
+                if seg not in node["children"]:
+                    node["children"][seg] = {"count": 0, "children": {}}
+                node = node["children"][seg]
+                node["count"] += 1
+
+        return root
+
+    try:
+        tree = await asyncio.to_thread(_sync_build_tree)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error in distillery_tag_tree")
+        return error_response("TAG_TREE_ERROR", f"Failed to build tag tree: {exc}")
+
+    return success_response({"tree": tree, "prefix": prefix})
+
+
+# ---------------------------------------------------------------------------
+# distillery_type_schemas tool handler
+# ---------------------------------------------------------------------------
+
+
+async def _handle_type_schemas() -> list[types.TextContent]:
+    """Implement the ``distillery_type_schemas`` tool.
+
+    Returns the full metadata schema registry for all known entry types.
+    Types with structured schemas (``person``, ``project``, ``digest``,
+    ``github``) include their required/optional/constraints definitions.
+    Legacy types are reported with empty required/optional dicts.
+
+    Returns:
+        MCP content list with a JSON payload containing a ``schemas`` dict.
+    """
+    from distillery.models import TYPE_METADATA_SCHEMAS, EntryType
+
+    all_schemas: dict[str, Any] = {}
+
+    # For each known entry type, include its schema (or empty dicts for legacy).
+    for et in EntryType:
+        schema = TYPE_METADATA_SCHEMAS.get(et.value, {})
+        all_schemas[et.value] = {
+            "required": schema.get("required", {}),
+            "optional": schema.get("optional", {}),
+        }
+        if "constraints" in schema:
+            all_schemas[et.value]["constraints"] = schema["constraints"]
+
+    return success_response({"schemas": all_schemas})
 
 
 # ---------------------------------------------------------------------------

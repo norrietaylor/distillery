@@ -1,0 +1,39 @@
+Type: test
+Command: uv run python -m pytest -q
+Expected: All 603 tests pass (no regressions)
+Timestamp: 2026-03-27T00:00:00Z
+Status: PASS
+---
+============================= test session starts ==============================
+platform linux -- Python 3.13.7, pytest-9.0.2, pluggy-1.6.0
+rootdir: /home/norrie.guest/code/distillery
+configfile: pyproject.toml
+testpaths: tests
+plugins: asyncio-1.3.0, anyio-4.13.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 603 items
+
+tests/test_classification_engine.py ................................     [  5%]
+tests/test_cli.py .............................                          [ 10%]
+tests/test_config.py ......................................              [ 16%]
+tests/test_conflict.py ..........................                        [ 20%]
+tests/test_dedup.py .........................                            [ 24%]
+tests/test_duckdb_store.py ............................................. [ 32%]
+.............................                                            [ 37%]
+tests/test_e2e_mcp.py ............                                       [ 39%]
+tests/test_embedding.py .......................................          [ 45%]
+tests/test_entry.py .................................................... [ 54%]
+..............                                                           [ 56%]
+tests/test_feedback.py ................                                  [ 59%]
+tests/test_mcp_classify.py ...........................                   [ 63%]
+tests/test_mcp_dedup.py .........                                        [ 65%]
+tests/test_mcp_server.py ............................................... [ 72%]
+...                                                                      [ 73%]
+tests/test_metrics.py ..........................                         [ 77%]
+tests/test_stale.py .........................                            [ 81%]
+tests/test_store_integration.py .........................                [ 86%]
+tests/test_store_protocol.py ..........                                  [ 87%]
+tests/test_tags.py .............................                         [ 92%]
+tests/test_type_schemas.py ............................................. [100%]
+
+============================= 603 passed in 13.00s =============================
