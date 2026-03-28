@@ -99,3 +99,21 @@ classification:
 
   # Maximum number of similar entries to retrieve during a dedup check.
   dedup_limit: 5
+
+# ---------------------------------------------------------------------------
+# Tag namespace settings
+# ---------------------------------------------------------------------------
+tags:
+  # When true, all new tags submitted via distillery_store must contain at
+  # least one "/" separator (hierarchical namespace required). Existing entries
+  # with flat tags are unaffected — this only applies on write.
+  # Examples of valid hierarchical tags: project/billing-v2/decisions,
+  #   source/bookmark/docs-python-org, domain/api-design
+  enforce_namespaces: false
+
+  # Top-level namespace prefixes that only internal distillery sources may use.
+  # Each prefix must be a valid lowercase alphanumeric slug (e.g. "system").
+  # Entries with tags under a reserved prefix submitted via MCP will be
+  # rejected unless the source is an authorized internal source.
+  # Example: ["system"] reserves system/* tags for internal use.
+  reserved_prefixes: []

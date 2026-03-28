@@ -1015,12 +1015,35 @@ async def _handle_store(
     if not isinstance(dedup_limit, int):
         return error_response("INVALID_INPUT", "Field 'dedup_limit' must be an integer")
 
+    # --- reserved prefix enforcement ----------------------------------------
+    # Sources that are permitted to use tags under reserved top-level prefixes.
+    _reserved_allowed_sources: set[str] = {"distillery-core"}
+    entry_source_str: str = arguments.get("source", EntrySource.CLAUDE_CODE)
+    if cfg is not None and cfg.tags.reserved_prefixes:
+        tags_to_check: list[str] = list(arguments.get("tags") or [])
+        if entry_source_str not in _reserved_allowed_sources:
+            for tag in tags_to_check:
+                top = tag.split("/")[0]
+                if top in cfg.tags.reserved_prefixes:
+                    return error_response(
+                        "RESERVED_PREFIX",
+                        f"Tag {tag!r} uses reserved prefix {top!r}. "
+                        "Only internal sources may use this namespace.",
+                    )
+
     # --- build entry --------------------------------------------------------
     try:
+        # Determine EntrySource from arguments (supports internal callers passing
+        # a non-default source value, e.g. "distillery-core").
+        try:
+            resolved_source = EntrySource(entry_source_str)
+        except ValueError:
+            resolved_source = EntrySource.CLAUDE_CODE
+
         entry = Entry(
             content=arguments["content"],
             entry_type=EntryType(entry_type_str),
-            source=EntrySource.CLAUDE_CODE,
+            source=resolved_source,
             author=arguments["author"],
             project=arguments.get("project"),
             tags=list(arguments.get("tags") or []),

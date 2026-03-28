@@ -207,9 +207,19 @@ metadata={
 
 Automatically extract 2–5 relevant keywords from the distilled summary as tags.
 
-- Tags are lowercase and hyphen-separated (e.g., `storage-decision`, `api-design`)
+Prefer hierarchical tags that reflect project context:
+
+- Use `project/{repo-name}/sessions` as a base tag for the current project (e.g. `project/billing-v2/sessions`)
+- Use `project/{repo-name}/decisions` for decision entries
+- Use `project/{repo-name}/architecture` for architectural insights
+- Supplement with domain-specific tags (e.g. `domain/storage`, `domain/api-design`)
+- Fall back to flat tags (e.g., `storage-decision`) only when no project context is available
+
+Tag format rules:
+- Tags are lowercase and hyphen-separated within each segment (e.g., `project/billing-v2/sessions`, `domain/api-design`)
 - The user may also provide explicit tags via `#tag` syntax in the original invocation (e.g., `/distill #caching #architecture`)
 - Explicit tags are merged with auto-extracted tags
+- Strip any leading `#` characters from user-provided tags
 
 ### Step 8: Store Entry
 

@@ -10,6 +10,7 @@ import pytest
 from distillery.config import (
     CONFIG_ENV_VAR,
     DistilleryConfig,
+    TagsConfig,
     load_config,
 )
 
@@ -402,3 +403,106 @@ class TestExampleConfigFile:
         assert cfg.classification.dedup_merge_threshold == pytest.approx(0.80)
         assert cfg.classification.dedup_link_threshold == pytest.approx(0.60)
         assert cfg.classification.dedup_limit == 5
+
+    def test_example_config_tags_section(self) -> None:
+        repo_root = Path(__file__).parent.parent
+        example_path = repo_root / "distillery.yaml.example"
+        cfg = load_config(str(example_path))
+        assert isinstance(cfg.tags, TagsConfig)
+        assert cfg.tags.enforce_namespaces is False
+        assert cfg.tags.reserved_prefixes == []
+
+
+# ---------------------------------------------------------------------------
+# Tags config parsing and validation
+# ---------------------------------------------------------------------------
+
+
+class TestTagsConfig:
+    def test_default_tags_config_when_section_absent(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        cfg = load_config()
+        assert isinstance(cfg.tags, TagsConfig)
+        assert cfg.tags.enforce_namespaces is False
+        assert cfg.tags.reserved_prefixes == []
+
+    def test_tags_section_parsed_enforce_namespaces_true(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            tags:
+              enforce_namespaces: true
+              reserved_prefixes: ["system"]
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.tags.enforce_namespaces is True
+        assert "system" in cfg.tags.reserved_prefixes
+
+    def test_tags_enforce_namespaces_false_is_default(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            tags:
+              enforce_namespaces: false
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.tags.enforce_namespaces is False
+
+    def test_tags_reserved_prefixes_empty_list(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            tags:
+              reserved_prefixes: []
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.tags.reserved_prefixes == []
+
+    def test_tags_multiple_reserved_prefixes(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            tags:
+              reserved_prefixes: ["system", "internal"]
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert set(cfg.tags.reserved_prefixes) == {"system", "internal"}
+
+    def test_invalid_reserved_prefix_raises_value_error(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            tags:
+              reserved_prefixes: ["INVALID-PREFIX!"]
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="reserved_prefix"):
+            load_config(str(p))
+
+    def test_reserved_prefix_with_slash_raises_value_error(self, tmp_path: Path) -> None:
+        """A prefix with a slash is not a valid single segment."""
+        yaml_content = """\
+            tags:
+              reserved_prefixes: ["system/internal"]
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="reserved_prefix"):
+            load_config(str(p))
+
+    def test_reserved_prefix_uppercase_raises_value_error(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            tags:
+              reserved_prefixes: ["System"]
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="reserved_prefix"):
+            load_config(str(p))
+
+    def test_tags_section_without_enforce_namespaces_defaults_false(
+        self, tmp_path: Path
+    ) -> None:
+        yaml_content = """\
+            tags:
+              reserved_prefixes: ["system"]
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.tags.enforce_namespaces is False
+        assert "system" in cfg.tags.reserved_prefixes
