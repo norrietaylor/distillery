@@ -192,7 +192,7 @@ distillery/
 │   │   └── dedup.py         # DeduplicationChecker
 │   └── mcp/
 │       └── server.py        # MCP server (17 tools, FastMCP 2.x/3.x)
-├── tests/                   # 600+ tests
+├── tests/                   # 267 tests
 ├── docs/
 │   ├── mcp-setup.md
 │   ├── ROADMAP.md
