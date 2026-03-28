@@ -196,6 +196,89 @@ embedding:
   dimensions: 1024
 ```
 
+## Persistent Storage for Cloud Deployments
+
+By default Distillery stores the DuckDB database on the local filesystem.
+When running on ephemeral infrastructure (e.g. FastMCP Cloud / Prefect Horizon)
+the local `/tmp` directory is wiped on every container reprovision, losing all
+stored knowledge.  Two persistent-storage options are supported.
+
+### Option A: S3-backed DuckDB
+
+DuckDB's `httpfs` extension lets the database file live in an S3 bucket (or any
+S3-compatible object store such as MinIO or Cloudflare R2).
+
+**`distillery.yaml`**
+
+```yaml
+storage:
+  backend: duckdb
+  database_path: s3://my-bucket/distillery/distillery.db
+  s3_region: us-east-1
+  # s3_endpoint: https://my-minio.example.com  # for non-AWS services
+```
+
+**Credentials** — resolved in this order:
+1. `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` environment variables
+2. `AWS_SESSION_TOKEN` (for temporary STS credentials)
+3. IAM role / instance metadata (no env vars needed on AWS infrastructure)
+
+MCP server settings with explicit credentials:
+
+```json
+{
+  "mcpServers": {
+    "distillery": {
+      "command": "distillery-mcp",
+      "env": {
+        "JINA_API_KEY": "your-jina-api-key-here",
+        "DISTILLERY_CONFIG": "/path/to/distillery.yaml",
+        "AWS_ACCESS_KEY_ID": "AKIAIOSFODNN7EXAMPLE",
+        "AWS_SECRET_ACCESS_KEY": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        "AWS_DEFAULT_REGION": "us-east-1"
+      }
+    }
+  }
+}
+```
+
+### Option B: MotherDuck
+
+[MotherDuck](https://motherduck.com) is DuckDB's managed cloud service.  Databases
+are stored in your MotherDuck account and accessed via the `md:` URI prefix.
+
+**`distillery.yaml`**
+
+```yaml
+storage:
+  backend: motherduck
+  database_path: md:distillery
+  motherduck_token_env: MOTHERDUCK_TOKEN  # default; can be omitted
+```
+
+**Credentials** — set `MOTHERDUCK_TOKEN` in your environment:
+
+```bash
+export MOTHERDUCK_TOKEN=your-motherduck-token-here
+```
+
+MCP server settings:
+
+```json
+{
+  "mcpServers": {
+    "distillery": {
+      "command": "distillery-mcp",
+      "env": {
+        "JINA_API_KEY": "your-jina-api-key-here",
+        "DISTILLERY_CONFIG": "/path/to/distillery.yaml",
+        "MOTHERDUCK_TOKEN": "your-motherduck-token-here"
+      }
+    }
+  }
+}
+```
+
 ## Troubleshooting
 
 **Server does not appear in Claude Code**
