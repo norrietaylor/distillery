@@ -1,3 +1,11 @@
+# Development Distillery configuration — local-only with no authentication.
+#
+# Purpose: This is the development configuration for running Distillery locally during
+# testing and development. It uses a local DuckDB file for storage (no cloud dependencies)
+# and no authentication (open access for convenience).
+#
+# For production deployment, use distillery.yaml instead (MotherDuck storage, GitHub OAuth).
+#
 storage:
   backend: duckdb
   database_path: "/tmp/distillery-dev.db"
