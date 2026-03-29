@@ -298,6 +298,11 @@ class FeedPoller:
             "FeedPoller: fetched %d items from %s", result.items_fetched, source.url
         )
 
+        # Track entry IDs stored during this batch so we can exclude them
+        # from semantic dedup — prevents same-batch items from blocking
+        # each other.
+        batch_entry_ids: set[str] = set()
+
         for item in items:
             text = _item_text(item)
             if not text.strip():
@@ -310,7 +315,7 @@ class FeedPoller:
                 continue
 
             # Semantic dedup: skip if a near-duplicate already exists
-            if await self._is_duplicate(item, text):
+            if await self._is_duplicate(item, text, batch_entry_ids):
                 result.items_skipped_dedup += 1
                 continue
 
@@ -347,6 +352,7 @@ class FeedPoller:
                 kwargs = _item_to_entry_kwargs(item, adjusted_score)
                 entry = Entry(**kwargs)
                 await self._store.store(entry)
+                batch_entry_ids.add(str(entry.id))
                 result.items_stored += 1
                 logger.debug(
                     "FeedPoller: stored item %r (score=%.3f)", item.item_id, adjusted_score
@@ -388,25 +394,37 @@ class FeedPoller:
             )
             return False
 
-    async def _is_duplicate(self, item: FeedItem, text: str) -> bool:
+    async def _is_duplicate(
+        self,
+        item: FeedItem,
+        text: str,
+        batch_entry_ids: set[str] | None = None,
+    ) -> bool:
         """Return ``True`` if *item* is a near-duplicate of an existing entry.
 
-        First checks whether any stored entry has ``metadata.external_id``
-        equal to ``item.item_id`` by looking for near-exact text similarity
-        (threshold 0.95).
+        Checks whether any stored entry has ``metadata.external_id``
+        equal to ``item.item_id`` or has near-exact text similarity
+        (threshold 0.95).  Entries whose IDs appear in *batch_entry_ids*
+        are ignored so that items stored earlier in the same poll batch
+        do not block later items.
 
         Args:
             item: The feed item to check.
             text: Pre-computed text representation of *item*.
+            batch_entry_ids: Entry IDs stored during the current poll
+                batch — matches against these are not treated as
+                duplicates.
 
         Returns:
             ``True`` if the item should be skipped as a duplicate.
         """
+        _batch_ids = batch_entry_ids or set()
+
         try:
             results = await self._store.find_similar(
                 content=text,
                 threshold=_DEDUP_THRESHOLD,
-                limit=1,
+                limit=5,
             )
         except Exception:  # noqa: BLE001
             logger.debug(
@@ -416,12 +434,15 @@ class FeedPoller:
             return False
 
         if results:
-            # Check if the matching entry has the same external_id
             for result in results:
+                # Skip matches from the current poll batch
+                if str(result.entry.id) in _batch_ids:
+                    continue
+                # Exact external_id match — definite duplicate
                 ext_id = result.entry.metadata.get("external_id")
                 if ext_id == item.item_id:
                     return True
-            # Even without an explicit id match, a 0.95+ similarity is a dedup
-            return True
+                # High similarity to a pre-existing entry — treat as duplicate
+                return True
 
         return False
