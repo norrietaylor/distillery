@@ -35,7 +35,7 @@ Inspired by Tiago Forte's **Building a Second Brain** methodology (CODE: Capture
 
 ## Skills
 
-Distillery provides 9 Claude Code slash commands:
+Distillery provides 10 Claude Code slash commands:
 
 | Skill | Purpose | Example |
 |-------|---------|---------|
@@ -48,6 +48,7 @@ Distillery provides 9 Claude Code slash commands:
 | `/watch` | Manage monitored feed sources | `/watch add github:duckdb/duckdb` |
 | `/radar` | Ambient feed digest with source suggestions | `/radar --days 7` |
 | `/tune` | Adjust feed relevance thresholds | `/tune relevance 0.4` |
+| `/setup` | Onboarding wizard for MCP connectivity and config | `/setup` |
 
 ### How `/pour` works
 
