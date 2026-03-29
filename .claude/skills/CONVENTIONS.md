@@ -330,7 +330,7 @@ The following skills are available in `.claude/skills/`:
 | `/bookmark` | `bookmark/` | distillery_store, distillery_find_similar | Save and annotate URLs |
 | `/minutes` | `minutes/` | distillery_store, distillery_update, distillery_list | Record and update meeting notes |
 | `/classify` | `classify/` | distillery_classify, distillery_review_queue, distillery_resolve_review | Classify and review entries |
-| `/watch` | `watch/` | distillery_watch | Manage monitored feed sources |
+| `/watch` | `watch/` | distillery_watch | Manage monitored feed sources + auto-poll scheduling (via CronCreate/RemoteTrigger) |
 | `/radar` | `radar/` | distillery_list, distillery_suggest_sources, distillery_store | Ambient feed digest and source suggestions |
 | `/tune` | `tune/` | distillery_status | Display and adjust feed relevance thresholds |
 

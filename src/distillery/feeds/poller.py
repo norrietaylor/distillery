@@ -242,7 +242,29 @@ class FeedPoller:
             summary.finished_at = datetime.now(tz=UTC)
             return summary
 
-        scorer = RelevanceScorer(store=self._store, min_score=0.0)
+        # Build interest profile for relevance boosting.
+        interest_profile = None
+        try:
+            from distillery.feeds.interests import InterestExtractor
+
+            extractor = InterestExtractor(
+                store=self._store,
+                feeds_config=self._config.feeds,
+            )
+            interest_profile = await extractor.extract()
+            logger.debug(
+                "FeedPoller: built interest profile with %d entries, %d top tags",
+                interest_profile.entry_count,
+                len(interest_profile.top_tags),
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("FeedPoller: interest profile extraction failed — scoring without boost")
+
+        scorer = RelevanceScorer(
+            store=self._store,
+            min_score=0.0,
+            interest_profile=interest_profile,
+        )
 
         for source in sources:
             result = await self._poll_source(source, scorer)
@@ -367,6 +389,111 @@ class FeedPoller:
                 )
 
         return result
+
+    async def rescore(self, *, limit: int = 100) -> dict[str, Any]:
+        """Re-score existing feed entries against the current store state.
+
+        Uses the same scoring semantics as :meth:`poll` — builds an
+        :class:`~distillery.feeds.interests.InterestProfile` for tag-weighted
+        boosting and applies ``source.trust_weight`` when available.
+        Self-matches (the entry matching itself via ``find_similar``) are
+        filtered out so scores reflect relevance to *other* entries only.
+
+        Args:
+            limit: Maximum number of feed entries to re-score.
+
+        Returns:
+            A summary dict with ``rescored``, ``upgraded``, ``downgraded``,
+            and ``errors`` counts.
+        """
+        # Build interest profile for consistent scoring with poll().
+        interest_profile = None
+        try:
+            from distillery.feeds.interests import InterestExtractor
+
+            extractor = InterestExtractor(
+                store=self._store,
+                feeds_config=self._config.feeds,
+            )
+            interest_profile = await extractor.extract()
+        except Exception:  # noqa: BLE001
+            logger.debug("FeedPoller.rescore: interest profile extraction failed")
+
+        scorer = RelevanceScorer(
+            store=self._store,
+            min_score=0.0,
+            interest_profile=interest_profile,
+        )
+        entries = await self._store.list_entries(
+            filters={"entry_type": "feed"},
+            limit=limit,
+            offset=0,
+        )
+
+        # Build a source trust_weight lookup from config.
+        trust_weights: dict[str, float] = {
+            s.url: s.trust_weight for s in self._config.feeds.sources
+        }
+
+        stats: dict[str, int] = {
+            "rescored": 0,
+            "upgraded": 0,
+            "downgraded": 0,
+            "archived": 0,
+            "errors": 0,
+        }
+
+        for entry in entries:
+            try:
+                # Score against the store, then filter out self-match.
+                results = await self._store.find_similar(
+                    content=entry.content,
+                    threshold=0.0,
+                    limit=11,  # fetch one extra to allow self-exclusion
+                )
+                filtered = [r for r in results if str(r.entry.id) != str(entry.id)]
+                new_score = max((r.score for r in filtered), default=0.0)
+
+                # Apply interest-profile boost (consistent with scorer).
+                if interest_profile and interest_profile.top_tags and filtered:
+                    boost = scorer._compute_interest_boost(filtered)
+                    new_score = min(new_score + boost, 1.0)
+
+                # Apply source trust_weight if available.
+                source_url = entry.metadata.get("source_url", "")
+                trust = trust_weights.get(source_url, 1.0)
+                new_score *= trust
+
+                old_score = entry.metadata.get("relevance_score", 0.0)
+
+                updated_metadata = dict(entry.metadata)
+                updated_metadata["relevance_score"] = new_score
+                updated_metadata["previous_score"] = old_score
+                updated_metadata["rescored_at"] = datetime.now(tz=UTC).isoformat()
+
+                await self._store.update(
+                    entry_id=str(entry.id),
+                    updates={"metadata": updated_metadata},
+                )
+                stats["rescored"] += 1
+
+                if new_score > old_score:
+                    stats["upgraded"] += 1
+                elif new_score < old_score:
+                    stats["downgraded"] += 1
+
+                # Archive entries that dropped below threshold
+                if new_score < self._threshold and old_score >= self._threshold:
+                    await self._store.delete(str(entry.id))
+                    stats["archived"] += 1
+
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "FeedPoller: rescore failed for entry %s", entry.id, exc_info=True
+                )
+                stats["errors"] += 1
+
+        return stats
 
     async def _has_external_id(self, external_id: str) -> bool:
         """Return ``True`` if any stored entry already carries *external_id*.
