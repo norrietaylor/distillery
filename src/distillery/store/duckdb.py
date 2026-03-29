@@ -215,9 +215,9 @@ class DuckDBStore:
     def _setup_vss(self, conn: duckdb.DuckDBPyConnection) -> None:
         """Install and load the vss extension, enable HNSW persistence.
 
-        Sets ``self._vss_available`` to ``True`` on success.  On failure
-        the flag remains ``False`` and a warning is logged; the store
-        falls back to brute-force cosine similarity search.
+        If the VSS extension is unavailable (e.g. in constrained environments
+        like AWS Lambda), we log a warning and continue without it.  Vector
+        search will still work via brute-force cosine distance — just slower.
         """
         try:
             conn.execute("INSTALL vss;")
@@ -225,10 +225,11 @@ class DuckDBStore:
             conn.execute("SET hnsw_enable_experimental_persistence = true;")
             self._vss_available = True
             logger.info("VSS extension loaded with HNSW persistence enabled")
-        except Exception as exc:  # noqa: BLE001
+        except (duckdb.IOException, duckdb.CatalogException, duckdb.Error) as exc:
             self._vss_available = False
             logger.warning(
-                "VSS extension unavailable (%s); falling back to brute-force search",
+                "VSS extension not available — HNSW indexing disabled, "
+                "falling back to brute-force vector search: %s",
                 exc,
             )
 
@@ -300,15 +301,11 @@ class DuckDBStore:
     def _create_index(self, conn: duckdb.DuckDBPyConnection) -> None:
         """Create the HNSW index on the embedding column.
 
-        When VSS is unavailable the index creation is skipped and a
-        warning is logged.  Queries fall back to brute-force cosine
-        similarity which is functionally correct (just slower for large
-        datasets).
+        Skipped when the VSS extension is not available — vector search
+        degrades to brute-force cosine distance which is still correct.
         """
         if not self._vss_available:
-            logger.warning(
-                "HNSW index not created, falling back to brute-force search"
-            )
+            logger.info("Skipping HNSW index creation (VSS extension not available)")
             return
         try:
             conn.execute(_CREATE_HNSW_INDEX)
@@ -316,6 +313,10 @@ class DuckDBStore:
         except duckdb.CatalogException:
             # Index already exists -- safe to ignore.
             logger.debug("HNSW index already exists, skipping creation")
+        except duckdb.BinderException:
+            logger.warning(
+                "HNSW index type not recognized — skipping index creation"
+            )
 
     def _create_meta_table(self, conn: duckdb.DuckDBPyConnection) -> None:
         """Create the ``_meta`` table if it does not exist."""
