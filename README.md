@@ -16,6 +16,7 @@
 
 <p align="center">
   <a href="#skills">Skills</a> &middot;
+  <a href="#plugin-install">Plugin Install</a> &middot;
   <a href="#quick-start">Quick Start</a> &middot;
   <a href="#architecture">Architecture</a> &middot;
   <a href="#team-access">Team Access</a> &middot;
@@ -57,6 +58,31 @@ Pour performs multi-pass retrieval to build a complete picture:
 3. **Gap-filling** — targeted queries for referenced but missing topics
 
 The output is a structured synthesis with **Summary**, **Timeline**, **Key Decisions**, **Contradictions**, and **Knowledge Gaps** — all with inline citations linking back to source entries.
+
+## Plugin Install
+
+The fastest way to use Distillery in any project is via the Claude Code plugin system:
+
+```bash
+claude plugin install https://github.com/norrietaylor/distillery
+```
+
+This reads [`plugin.json`](plugin.json) and:
+1. Copies all nine skills to `~/.claude/skills/distillery/` (available in every project)
+2. Prompts you to configure the MCP server in `~/.claude/settings.json`
+3. Guides you through setting up your API key
+
+After installation, restart Claude Code and verify with:
+
+```
+distillery_status
+```
+
+> **Note:** The Claude desktop app does not support Claude Code skills or the plugin install system. Desktop users can connect the MCP server directly (all 17 tools are available) but `/distill`, `/recall`, and other slash commands are CLI-only features.
+
+See [docs/plugin.md](docs/plugin.md) for full plugin documentation including manual install, transport options, and troubleshooting.
+
+---
 
 ## Quick Start
 
