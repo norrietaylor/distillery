@@ -359,8 +359,10 @@ class RSSAdapter:
     def __init__(self, url: str) -> None:
         if not url.strip():
             raise ValueError("RSSAdapter requires a non-empty feed URL.")
-        normalised, extra_headers = _normalise_feed_url(url.strip())
-        self._url = normalised
+        raw = url.strip()
+        normalised, extra_headers = _normalise_feed_url(raw)
+        self._source_url = raw  # original URL — used as identity / source_url in FeedItems
+        self._fetch_url = normalised  # possibly rewritten URL — used for HTTP requests only
         self._extra_headers = extra_headers
         self.last_polled_at: datetime | None = None
 
@@ -370,8 +372,8 @@ class RSSAdapter:
 
     @property
     def source_url(self) -> str:
-        """The feed URL passed at construction time."""
-        return self._url
+        """The original feed URL passed at construction time (identity key)."""
+        return self._source_url
 
     def fetch(self) -> list[FeedItem]:
         """Fetch the feed URL and return normalised :class:`FeedItem` objects.
@@ -389,14 +391,14 @@ class RSSAdapter:
             xml.etree.ElementTree.ParseError: If the response body is not
                 valid XML.
         """
-        logger.debug("RSSAdapter: fetching %s", self._url)
+        logger.debug("RSSAdapter: fetching %s", self._fetch_url)
 
         headers = {"User-Agent": "Distillery/0.1 (RSS adapter)"}
         headers.update(self._extra_headers)
 
         with httpx.Client(timeout=_REQUEST_TIMEOUT) as client:
             response = client.get(
-                self._url,
+                self._fetch_url,
                 headers=headers,
                 follow_redirects=True,
             )
@@ -404,4 +406,6 @@ class RSSAdapter:
 
         self.last_polled_at = datetime.now(tz=UTC)
 
-        return parse_feed_xml(response.content, self._url)
+        # Use the original source_url (not the rewritten fetch URL) so
+        # FeedItem.source_url and _stable_id inputs stay consistent.
+        return parse_feed_xml(response.content, self._source_url)
