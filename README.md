@@ -64,13 +64,14 @@ The output is a structured synthesis with **Summary**, **Timeline**, **Key Decis
 The fastest way to use Distillery in any project is via the Claude Code plugin system:
 
 ```bash
-claude plugin install https://github.com/norrietaylor/distillery
+# Step 1 — Add the Distillery marketplace
+claude plugin marketplace add norrietaylor/distillery
+
+# Step 2 — Install the plugin
+claude plugin install distillery
 ```
 
-This reads [`plugin.json`](plugin.json) and:
-1. Copies all nine skills to `~/.claude/skills/distillery/` (available in every project)
-2. Prompts you to configure the MCP server in `~/.claude/settings.json`
-3. Guides you through setting up your API key
+This installs all ten skills (available in every project) and configures the MCP server connection.
 
 After installation, restart Claude Code and verify with:
 
