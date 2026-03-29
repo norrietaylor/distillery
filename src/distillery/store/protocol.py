@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from distillery.models import Entry
 
 
@@ -223,5 +225,20 @@ class DistilleryStore(Protocol):
 
         Returns:
             The UUID string of the newly created ``feedback_log`` row.
+        """
+        ...
+
+    async def get_searches_for_entry(self, entry_id: str, since: datetime) -> list[str]:
+        """Return IDs of search_log rows that include entry_id and are newer than since.
+
+        Queries the persistent ``search_log`` table so the result is correct
+        across process restarts (e.g. Lambda invocations).
+
+        Args:
+            entry_id: UUID of the entry to look up in search results.
+            since: Inclusive lower bound on ``search_log.timestamp``.
+
+        Returns:
+            List of search_log row IDs (UUID strings) for matching searches.
         """
         ...
