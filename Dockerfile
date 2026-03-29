@@ -25,7 +25,7 @@ COPY src/ ./src/
 
 # Install the package and all runtime dependencies.
 # --no-deps is NOT used so that transitive requirements are resolved.
-RUN pip install --no-cache-dir ".[dev]" || pip install --no-cache-dir .
+RUN pip install --no-cache-dir .
 
 # Copy the container-specific configuration.
 # This must come AFTER pip install so the file is picked up at runtime rather

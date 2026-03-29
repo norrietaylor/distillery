@@ -34,6 +34,15 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "storage" {
   }
 }
 
+resource "aws_s3_bucket_public_access_block" "storage" {
+  bucket = aws_s3_bucket.storage.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
 resource "aws_s3_bucket_lifecycle_configuration" "storage" {
   bucket = aws_s3_bucket.storage.id
 
@@ -170,11 +179,21 @@ resource "aws_lambda_function" "mcp_server" {
 }
 
 # --- Provisioned Concurrency ---
+#
+# Provisioned concurrency requires a published version or alias — it cannot
+# be set on $LATEST.  The "live" alias is created here pointing to the
+# initial version.  The CD pipeline (deploy.yml) publishes a new version
+# after each deploy and updates the alias via `aws lambda update-alias`.
 
 resource "aws_lambda_alias" "live" {
   name             = "live"
   function_name    = aws_lambda_function.mcp_server.function_name
   function_version = aws_lambda_function.mcp_server.version
+
+  lifecycle {
+    # The CD pipeline updates the alias to point to newly published versions.
+    ignore_changes = [function_version]
+  }
 }
 
 resource "aws_lambda_provisioned_concurrency_config" "mcp_server" {

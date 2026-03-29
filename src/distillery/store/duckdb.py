@@ -16,6 +16,7 @@ are implemented below (T02.4).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -490,6 +491,7 @@ class DuckDBStore:
         last_exc: Exception | None = None
 
         for outer_attempt in range(3):
+            conn = None
             try:
                 conn = self._open_connection()
 
@@ -543,6 +545,12 @@ class DuckDBStore:
                     )
                     time.sleep(delay)
                 # On last attempt, fall through to raise below.
+            finally:
+                # Close the connection on failure before retrying — avoid
+                # leaking partially-initialized connections.
+                if conn is not None and not self._initialized:
+                    with contextlib.suppress(Exception):
+                        conn.close()
 
         # All retries exhausted.
         assert last_exc is not None  # noqa: S101
