@@ -412,7 +412,7 @@ The GitHub Actions CD pipeline automatically deploys changes to AWS Lambda whene
 
 The pipeline uses GitHub Actions variables (not secrets) for AWS identifiers:
 
-```
+```text
 AWS_REGION               (default: us-east-1)
 AWS_ACCOUNT_ID           (required)
 ECR_REPOSITORY           (required)
