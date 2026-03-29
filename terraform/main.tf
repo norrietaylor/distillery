@@ -50,6 +50,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "storage" {
     id     = "expire-old-versions"
     status = "Enabled"
 
+    filter {
+      prefix = ""
+    }
+
     noncurrent_version_expiration {
       noncurrent_days = 30
     }
@@ -162,9 +166,9 @@ resource "aws_lambda_function" "mcp_server" {
 
   environment {
     variables = {
-      DISTILLERY_ENV        = var.environment
-      DISTILLERY_S3_BUCKET  = aws_s3_bucket.storage.id
-      SECRETS_MANAGER_ARN   = aws_secretsmanager_secret.app_secrets.arn
+      DISTILLERY_ENV          = var.environment
+      DISTILLERY_S3_BUCKET    = aws_s3_bucket.storage.id
+      SECRETS_MANAGER_ARN     = aws_secretsmanager_secret.app_secrets.arn
       AWS_LAMBDA_EXEC_WRAPPER = "/opt/bootstrap"
     }
   }
