@@ -7,7 +7,11 @@
 #   1. Sign in to https://horizon.prefect.io with your GitHub account.
 #   2. Grant Horizon access to the norrietaylor/distillery repository.
 #   3. Add the secrets listed below in the Horizon dashboard.
-#   4. Run `prefect deploy` — a live endpoint is available in ~60 seconds.
+#   4. Install Prefect CLI: `pip install prefect`
+#   5. Run `prefect deploy` from this repository root — a live endpoint is available in ~60 seconds.
+#
+# The `prefect deploy` command is a CLI tool (not a dashboard feature) that reads this
+# manifest, packages the deployment, and sends it to Horizon for hosting.
 
 name: distillery-mcp
 
