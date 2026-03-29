@@ -23,9 +23,9 @@ Run this once after installing the plugin. It is safe to run again at any time t
 
 Call `distillery_status` to confirm the Distillery MCP server is running.
 
-If the tool is unavailable or returns an error, display:
+If the tool is unavailable or returns an error, display the error message and the setup summary (Step 6) with `MCP Server: not connected`. Do not proceed with Steps 2-5.
 
-```
+```text
 Distillery MCP Server Not Available
 
 The Distillery MCP server is not configured or not running.
@@ -38,15 +38,15 @@ To set up the server:
 For detailed setup instructions, see: docs/mcp-setup.md
 ```
 
-Stop here if MCP is unavailable.
+Then skip to Step 6 (Summary) with `MCP Server: not connected`.
 
-If connected, display:
+If connected, display using the actual fields from `distillery_status`:
 
-```
+```text
 MCP server connected.
-  Database: <database_path>
   Entries:  <total_entries>
-  Model:    <embedding_model> (<embedding_dimensions>d)
+  Model:    <embedding_model>
+  DB Size:  <database_size_bytes / 1048576> MB
 ```
 
 ### Step 2: Detect Transport Mode
@@ -63,7 +63,7 @@ Classify the transport:
 
 Display:
 
-```
+```text
 Transport: <Local | Hosted | Team HTTP>
 URL: <server URL or "stdio">
 ```
@@ -74,7 +74,7 @@ Call `distillery_watch(action="list")` to see if any feed sources are configured
 
 Display:
 
-```
+```text
 Feed sources: <N> configured
 ```
 
@@ -82,26 +82,30 @@ If sources exist, list them briefly (URL + label).
 
 ### Step 4: MCP Connector Registration (hosted/team only)
 
-**Skip this step if transport is `local`.**
+**Skip this step if transport is `local`.** Proceed directly to Step 5.
 
-For hosted or team HTTP transports, the user needs an MCP connector registered at claude.ai to enable remote auto-polling via scheduled triggers. Check if one is already set up:
+For hosted or team HTTP transports, the user needs an MCP connector registered at claude.ai to enable remote auto-polling via scheduled triggers.
+
+**4a. Check for existing trigger:**
 
 Call `RemoteTrigger(action="list")` to see if any triggers with MCP connections to the Distillery server already exist.
 
 **If a matching trigger exists:**
 
-```
+```text
 Remote polling: configured
   Trigger: <trigger_name> (<trigger_id>)
   Schedule: <cron_expression>
   Status: <enabled|disabled>
 ```
 
-Skip to Step 6.
+Skip to Step 6 (Summary) — remote polling is already set up.
 
-**If no matching trigger exists, prompt the user:**
+**If no matching trigger exists, check connector availability:**
 
-```
+The connector UUID is needed to create a remote trigger. Since connectors must be registered via the claude.ai web UI, prompt the user:
+
+```text
 Remote Auto-Poll Setup
 
 To enable automatic feed polling when you're not in Claude Code,
@@ -121,19 +125,75 @@ while Claude Code is active). (yes / no)
 
 If the user says yes (skip), note the limitation and continue to Step 5.
 
-If the user says no (they'll register), stop here with:
+If the user says no (they'll register), display the summary (Step 6) noting remote polling is pending, then stop:
 
-```
+```text
 After registering the connector at claude.ai, run /setup again to complete configuration.
 ```
 
 ### Step 5: Auto-Poll Configuration
 
-Check `CronList` for any existing poll jobs.
+**5a. Remote trigger creation (hosted/team with connector):**
 
-**If a poll job exists:**
+If transport is hosted or team HTTP, and the user has registered the MCP connector (confirmed via `RemoteTrigger(action="list")` returning a connector UUID), and no existing trigger was found in Step 4a, create the remote trigger:
 
+```json
+{
+  "name": "distillery-feed-poll",
+  "cron_expression": "23 * * * *",
+  "enabled": true,
+  "job_config": {
+    "ccr": {
+      "environment_id": "<environment_id from available environments>",
+      "session_context": {
+        "model": "claude-sonnet-4-6",
+        "sources": [
+          {"git_repository": {"url": "https://github.com/norrietaylor/distillery"}}
+        ],
+        "allowed_tools": ["Bash", "Read", "Glob", "Grep", "mcp__distillery__distillery_poll"]
+      },
+      "events": [
+        {"data": {
+          "uuid": "<generate fresh v4 UUID>",
+          "session_id": "",
+          "type": "user",
+          "parent_tool_use_id": null,
+          "message": {
+            "content": "Use distillery_poll to poll all configured feed sources. Report a one-line summary of items fetched and stored.",
+            "role": "user"
+          }
+        }}
+      ]
+    }
+  },
+  "mcp_connections": [
+    {
+      "connector_uuid": "<uuid from claude.ai>",
+      "name": "distillery",
+      "url": "<server URL>"
+    }
+  ]
+}
 ```
+
+Display:
+
+```text
+Remote trigger created: distillery-feed-poll
+  Schedule: every hour at :23 (UTC)
+  Trigger ID: <trigger_id>
+  Manage at: https://claude.ai/code/scheduled/<trigger_id>
+```
+
+**5b. Local cron fallback:**
+
+If transport is local, or if RemoteTrigger creation failed, use `CronCreate` for local auto-polling.
+
+Check `CronList` for any existing poll jobs first — do not create duplicates.
+
+**If a poll job already exists:**
+
+```text
 Auto-poll: active (cron job <job_id>, every hour at :<minute>)
 ```
 
@@ -141,108 +201,47 @@ Auto-poll: active (cron job <job_id>, every hour at :<minute>)
 
 Ask the user:
 
-```
+```text
 Enable auto-poll? Feeds will be polled every hour while Claude Code is active.
 (yes / no)
 ```
 
 If yes, create the cron job:
 
-```
+```python
 CronCreate(
   cron="<random off-peak minute> * * * *",
   prompt="Use distillery_poll to poll all configured feed sources. Report a one-line summary of items fetched and stored.",
-  recurring=true,
-  durable=true
+  recurring=True,
+  durable=True
 )
 ```
 
 Display:
 
-```
+```text
 Auto-poll enabled: every hour at :<minute> (cron job <job_id>)
 ```
 
 **If no feed sources are configured:**
 
-```
+```text
 Auto-poll: skipped (no feed sources configured)
   Add sources with /watch add <url> — auto-poll will be set up automatically.
 ```
 
-### Step 6: Create Remote Trigger (hosted/team with connector)
+### Step 6: Summary
 
-**Only reach this step if:**
-- Transport is hosted or team HTTP
-- User has registered the MCP connector (from Step 4)
-- No existing trigger found
+Always display the configuration summary, regardless of which steps were completed or skipped. Use "not connected" or "N/A" for fields that could not be determined.
 
-Call `RemoteTrigger(action="list")` to check for the distillery connector UUID. If a connector is available, create the trigger:
-
-```
-RemoteTrigger(
-  action="create",
-  body={
-    "name": "distillery-feed-poll",
-    "cron_expression": "23 * * * *",
-    "enabled": true,
-    "job_config": {
-      "ccr": {
-        "environment_id": "<environment_id from available environments>",
-        "session_context": {
-          "model": "claude-sonnet-4-6",
-          "sources": [
-            {"git_repository": {"url": "https://github.com/norrietaylor/distillery"}}
-          ],
-          "allowed_tools": ["Bash", "Read", "Glob", "Grep"]
-        },
-        "events": [
-          {"data": {
-            "uuid": "<generate fresh v4 UUID>",
-            "session_id": "",
-            "type": "user",
-            "parent_tool_use_id": null,
-            "message": {
-              "content": "Use distillery_poll to poll all configured feed sources. Report a one-line summary of items fetched and stored.",
-              "role": "user"
-            }
-          }}
-        ]
-      }
-    },
-    "mcp_connections": [
-      {
-        "connector_uuid": "<uuid from claude.ai>",
-        "name": "distillery",
-        "url": "<server URL>"
-      }
-    ]
-  }
-)
-```
-
-Display:
-
-```
-Remote trigger created: distillery-feed-poll
-  Schedule: every hour at :23 (UTC)
-  Trigger ID: <trigger_id>
-  Manage at: https://claude.ai/code/scheduled/<trigger_id>
-```
-
-### Step 7: Summary
-
-Display the full configuration summary:
-
-```
+```text
 Distillery Setup Complete
 
-  MCP Server:    <connected>
-  Transport:     <Local | Hosted | Team HTTP>
-  Database:      <database_path>
-  Entries:       <total_entries>
+  MCP Server:    <connected | not connected>
+  Transport:     <Local | Hosted | Team HTTP | unknown>
+  Entries:       <total_entries | N/A>
   Feed Sources:  <N> configured
-  Auto-Poll:     <active (cron) | active (remote trigger) | inactive>
+  Auto-Poll:     <active (cron) | active (remote trigger) | inactive | pending connector>
 
 Available skills:
   /distill   — capture knowledge      /recall   — search knowledge
@@ -256,16 +255,17 @@ Run /watch add <url> to start monitoring feeds.
 
 ## Output Format
 
-The setup wizard uses a sequential, conversational format. Each step prints its result before proceeding to the next. The final summary is always shown.
+The setup wizard uses a sequential, conversational format. Each step prints its result before proceeding to the next. The summary in Step 6 is always shown — even when MCP is unavailable or steps are skipped.
 
 ## Rules
 
-- Always start by checking MCP availability — stop immediately if unavailable
+- Always start by checking MCP availability
+- Always show the Step 6 summary — even on early exits (MCP unavailable, user defers connector registration)
 - Never create duplicate cron jobs — always check `CronList` first
 - Never create duplicate remote triggers — always check `RemoteTrigger(action="list")` first
-- For remote trigger creation, use the exact `job_config` schema documented in Step 6
+- For remote trigger creation, include `mcp__distillery__distillery_poll` in `allowed_tools`
 - Pick an off-peak cron minute (not :00 or :30) for auto-poll schedules
 - If the user has no feed sources, skip auto-poll setup but explain how to enable it later
-- If `RemoteTrigger` calls fail, fall back gracefully and explain the limitation
+- If `RemoteTrigger` calls fail, fall back to `CronCreate` gracefully and explain the limitation
 - This skill is idempotent — running it multiple times should not create duplicates
-- Always show the final summary regardless of which steps were skipped
+- Use actual field names from `distillery_status` response (`total_entries`, `embedding_model`, `database_size_bytes`)

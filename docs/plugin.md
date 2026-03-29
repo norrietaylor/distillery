@@ -1,14 +1,15 @@
 # Distillery — Claude Code Plugin
 
-The Distillery plugin packages all six knowledge-base skills (`/distill`, `/recall`, `/pour`,
-`/bookmark`, `/minutes`, `/classify`) for distribution and installation via the Claude Code plugin
-mechanism.  Once installed, the skills are available in every project without copying files.
+The Distillery plugin packages all ten knowledge-base skills (`/distill`, `/recall`, `/pour`,
+`/bookmark`, `/minutes`, `/classify`, `/watch`, `/radar`, `/tune`, `/setup`) for distribution
+and installation via the Claude Code plugin mechanism.  Once installed, the skills are available
+in every project without copying files.
 
 ## Plugin Manifest
 
 The plugin is declared in [`plugin.json`](../plugin.json) at the repository root.  It specifies:
 
-- **Skill declarations** — name, description, and path for each of the six skills
+- **Skill declarations** — name, description, and path for each of the ten skills
 - **MCP server dependency** — both the local stdio transport and the hosted HTTP/SSE endpoint
 - **Configuration schema** — environment variables and optional config file path
 
@@ -182,7 +183,7 @@ This generates a `connector_uuid` that Claude Code uses when creating scheduled 
 
 After registering the connector, run the setup wizard in Claude Code:
 
-```
+```text
 /setup
 ```
 
@@ -194,7 +195,7 @@ https://claude.ai/code/scheduled.
 
 Check that the trigger was created:
 
-```
+```text
 /watch list
 ```
 

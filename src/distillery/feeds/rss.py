@@ -34,7 +34,7 @@ _REQUEST_TIMEOUT = 30.0
 
 # Reddit subreddit URL pattern — matches /r/<name>/ or /r/<name>
 _REDDIT_SUBREDDIT_RE = re.compile(
-    r"^https?://(?:www\.)?reddit\.com/r/[^/]+/?$",
+    r"^https?://(?:(?:www|old)\.)?reddit\.com/r/[^/]+/?$",
     re.IGNORECASE,
 )
 
@@ -306,8 +306,9 @@ def parse_feed_xml(xml_bytes: bytes, source_url: str) -> list[FeedItem]:
         List of :class:`FeedItem` objects in document order.
 
     Raises:
-        DefusedElementTree.ParseError: If *xml_bytes* is not valid XML.
-        ValueError: If the XML contains a DOCTYPE declaration (potential XXE).
+        xml.etree.ElementTree.ParseError: If *xml_bytes* is not valid XML.
+        defusedxml.EntitiesForbidden: If the XML contains entity declarations
+            (blocked by defusedxml's default ``forbid_entities=True``).
     """
     # Use defusedxml to safely parse XML — blocks XXE, entity expansion,
     # and DTD retrieval while accepting valid feeds with DOCTYPE declarations.
