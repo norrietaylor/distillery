@@ -1,3 +1,9 @@
+---
+marp: true
+theme: default
+paginate: true
+---
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/distillery-logo-dark-512.png" width="200">
@@ -6,83 +12,70 @@
   </picture>
 </p>
 
----
-
-<!-- Slide deck formatted as markdown sections. Each ## is a slide. -->
-<!-- Render with any markdown presentation tool (Marp, Slidev, Deckset, etc.) -->
-
-## Distillery
-
-**A team-accessible Second Brain powered by Claude Code**
-
-Refine raw information into concentrated, searchable team knowledge.
-
-*Inspired by Tiago Forte's Building a Second Brain — CODE methodology*
+# Distillery
+### A team Second Brain — built into Claude Code
 
 ---
 
 ## The Problem
 
-Teams generate knowledge constantly:
-- Architecture decisions in Claude Code sessions
-- Meeting outcomes discussed but not recorded
-- Useful articles shared once and forgotten
-- Insights scattered across Slack, docs, and memory
+Your team generates knowledge constantly.
 
-**Result:** Knowledge is created, then lost. New team members start from zero. Decisions get relitigated. Context evaporates.
+- **Architecture decisions** made in Claude Code — never written down
+- **Meeting outcomes** discussed, forgotten by next sprint
+- **Useful articles** shared once in Slack, impossible to find later
+- **Hard-won insights** trapped in one person's head
+
+---
+
+## The Problem
+
+**The result:**
+
+Knowledge gets created, then lost.
+Decisions get relitigated.
+New team members start from zero.
+
+> *"Didn't we already figure this out?"*
 
 ---
 
 ## The Solution
 
-<p align="center"><img src="assets/distillery-logo-256.png" width="80"></p>
+Knowledge capture should live **where work happens**.
 
-Distillery captures, classifies, connects, and surfaces team knowledge through **conversational commands** inside Claude Code.
+```
+You                  Claude Code                Distillery
+ │                        │                         │
+ │  /distill              │                         │
+ ├───────────────────────▶│ ──────────────────────▶ │
+ │                        │    capture              │
+ │                        │    deduplicate          │
+ │                        │    classify + embed     │
+ │                        │    index                │
+ │  /recall               │                         │
+ ├───────────────────────▶│ ──────────────────────▶ │
+ │  ◀─────────────────────│ ◀────────────────────── │
+ │    semantically ranked results                   │
+```
 
-No context switching. No separate app. Knowledge flows where work happens.
+No context switching. No separate app. One slash command.
 
 ---
 
-## How It Works
+## 9 Skills — The Interface
 
-```
-         You working in Claude Code
-                    │
-            "We decided to use Redis
-             for the session cache"
-                    │
-                /distill
-                    │
-        ┌───────────┴───────────┐
-        │  Dedup Check          │
-        │  Is this already      │
-        │  known? (0.95/0.80    │
-        │  /0.60 thresholds)    │
-        └───────────┬───────────┘
-                    │
-        ┌───────────┴───────────┐
-        │  Classify             │
-        │  Type: session        │
-        │  Confidence: 0.92     │
-        │  Tags: [cache, redis] │
-        └───────────┬───────────┘
-                    │
-              Stored in KB
-          (embedded + indexed)
-```
-
----
-
-## 6 Skills — The Interface
-
-| | Skill | What it does |
+| Category | Skill | What it does |
 |---|---|---|
 | **Capture** | `/distill` | Distill session knowledge with duplicate detection |
-| **Search** | `/recall` | Semantic search — "what do we know about caching?" |
-| **Synthesize** | `/pour` | Multi-entry synthesis with citations |
-| **Bookmark** | `/bookmark` | Store URLs with auto-generated summaries |
-| **Record** | `/minutes` | Meeting notes with append updates |
-| **Organize** | `/classify` | Classify entries, triage review queue |
+| **Search** | `/recall` | Natural language semantic search |
+| **Synthesize** | `/pour` | Multi-pass synthesis with cited narrative |
+| **Organize** | `/bookmark` | Save URLs with auto-generated summaries |
+| **Record** | `/minutes` | Meeting notes with append and browse modes |
+| **Triage** | `/classify` | Classify entries, work the review queue |
+| **Ambient** | `/watch` | Manage monitored feed sources |
+| **Ambient** | `/tune` | Calibrate relevance thresholds |
+| **Ambient** | `/radar` | Proactive digest of what's new in your ecosystem |
 
 ---
 
@@ -93,156 +86,206 @@ Capture a decision from a working session:
 ```
 > /distill
 
-Scanning session context...
+  Distilling session context...
 
-Distilled Summary:
-  - Decided to use Redis for session caching (replaced Memcached)
-  - Rationale: native pub/sub for cache invalidation across services
-  - Action item: benchmark Redis cluster vs single-node for our load
+  ┌────────────────────────────────────────────────────────┐
+  │ Summary                                                │
+  │  - Decided to use Redis for session caching            │
+  │  - Replaced Memcached — native pub/sub wins            │
+  │  - Action item: benchmark cluster vs single-node       │
+  └────────────────────────────────────────────────────────┘
 
-Checking for duplicates...
-  No similar entries found (highest score: 0.34)
+  Checking for duplicates...
+    No similar entries found (highest score: 0.34) ✓
 
-Stored as entry abc12345
-  Type: session | Author: norrie | Project: api-refactor
-  Tags: [redis, caching, architecture]
+  Stored → abc12345
+    Type: session  │  Author: norrie  │  Project: api-refactor
+    Tags: [redis, caching, architecture]
 ```
 
 ---
 
-## Demo: /recall
+## Demo: /recall and /pour
 
-Search the knowledge base with natural language:
+**`/recall` — find what the team already knows**
 
 ```
-> /recall distributed caching strategies
+> /recall distributed caching
 
-Results (4 entries):
-
-  92% [session] Decided to use Redis for session caching...
-  ID: abc12345 | Author: norrie | Project: api-refactor | 2026-03-22
-
-  87% [bookmark] Redis vs Memcached: A 2026 Comparison...
-  ID: def67890 | Author: alice | Project: api-refactor | 2026-03-20
-
-  71% [minutes] Standup: discussed CDN caching layer for static assets...
-  ID: ghi11223 | Author: bob | Project: frontend | 2026-03-19
-
-  65% [session] Evaluated Varnish for API response caching...
-  ID: jkl44556 | Author: norrie | Project: api-refactor | 2026-03-15
+  92%  [session]   Decided to use Redis for session caching  (norrie, 2026-03-22)
+  87%  [bookmark]  Redis vs Memcached: A 2026 Comparison     (alice, 2026-03-20)
+  71%  [minutes]   Standup: CDN caching layer for static...  (bob,   2026-03-19)
 ```
 
----
-
-## Demo: /pour
-
-Synthesize across multiple entries into a cited narrative:
+**`/pour` — synthesize before a big decision**
 
 ```
 > /pour how does our caching strategy work?
 
-Pass 1: 8 entries found (broad search)
-Pass 2: 4 additional entries (follow-up on "Redis", "CDN", "invalidation")
-Pass 3: 2 entries (gap-fill on "Varnish evaluation")
-Total: 12 unique entries across 3 passes
+  Pass 1: 8 entries  →  Pass 2: +4 entries  →  Pass 3: +2 (gap-fill)
+  Total: 12 unique entries
 
-## Summary
+  Redis was selected for session caching [abc123] after evaluating
+  Memcached [jkl445]. The CDN layer handles static assets [ghi112]...
 
-The team's caching strategy has evolved over the past month...
-Redis was selected for session caching [Entry abc123] after evaluating
-Memcached [Entry jkl445]. The CDN layer handles static assets [Entry ghi112]...
-
-## Key Decisions
-- Redis over Memcached for session cache (norrie, 2026-03-22)
-- Varnish rejected for API caching due to config complexity (norrie, 2026-03-15)
-
-## Knowledge Gaps
-- No entries about cache warming strategy
-- Single perspective on Redis decision (only norrie)
-
-Would you like to go deeper on any sub-topic?
+  Knowledge Gaps:  no entries on cache warming strategy
 ```
 
 ---
 
-## Semantic Deduplication
+## Demo: /bookmark, /minutes, /classify
 
-Prevents knowledge base pollution from repeated captures:
-
-```
-Score >= 0.95  →  SKIP     "This is already captured"
-Score 0.80-0.95 →  MERGE    "Merge into existing entry?"
-Score 0.60-0.80 →  LINK     "Store and link to related entries"
-Score < 0.60  →  CREATE   "Novel knowledge — store as new"
-```
+**`/bookmark`** — save a URL in seconds
 
 ```
-> /distill "We're using Redis for caching"
+> /bookmark https://stripe.com/blog/payment-intents #payments #api
+  Fetched → auto-summarized → stored → dedup checked ✓
+```
 
-Duplicate detected (similarity: 0.97)
-  Existing entry abc12345: "Decided to use Redis for session caching..."
+**`/minutes`** — capture and append meeting notes
 
-This appears to be a duplicate. Options:
-  1. Skip (don't store)
-  2. Merge new details into existing entry
-  3. Store anyway as separate entry
+```
+> /minutes                →  capture new meeting
+> /minutes --update <id>  →  append to existing
+> /minutes --list         →  browse all meetings
+```
+
+**`/classify`** — triage the review queue
+
+```
+> /classify --inbox
+  3 entries pending review:
+  [1] Low confidence (0.43) → "Stripe webhook retry logic notes"
+      Suggested type: bookmark  │  Accept / Reclassify / Archive
 ```
 
 ---
 
-## Classification Pipeline
+## Ambient Intelligence
 
-LLM-based auto-classification with confidence scoring:
+The knowledge base starts **watching the world for you**.
 
 ```
-                    Raw Content
-                        │
-                   ┌────┴────┐
-                   │ Classify │
-                   │ (LLM)   │
-                   └────┬────┘
-                        │
-              ┌─────────┼─────────┐
-              │         │         │
-         conf >= 0.6   │    conf < 0.6
-              │         │         │
-           Active    Suggest   Pending
-                     tags &    Review
-                     project     │
-                              ┌──┴──┐
-                              │Queue│
-                              └──┬──┘
-                                 │
-                        /classify --review
-                                 │
-                     Approve / Reclassify / Archive
+┌─────────────────────────────────────────────────────────┐
+│                   The outside world                      │
+│    GitHub repos  ·  RSS feeds  ·  (Slack, HN — soon)    │
+└──────────────────────────┬──────────────────────────────┘
+                           │  polls every N hours
+                           ▼
+                 ┌──────────────────────┐
+                 │   Relevance Scoring  │
+                 │  embedding cosine ≥  │
+                 │  your interests      │
+                 └──────────┬───────────┘
+                            │
+            ┌───────────────┼────────────────┐
+            │               │                │
+     below threshold   digest range     alert range
+        (ignored)       → /radar          → notify
 ```
+
+Three skills: **`/watch`** to add sources · **`/tune`** to calibrate · **`/radar`** to read the digest
+
+---
+
+## Demo: /watch and /tune
+
+**`/watch`** — manage your feed sources
+
+```
+> /watch add https://github.com/anthropics/anthropic-cookbook #ai #tools
+  Added: anthropics/anthropic-cookbook (github) — polls every 6h  trust: 0.90
+
+> /watch list
+  [1] anthropics/anthropic-cookbook   github   6h   trust: 0.90
+  [2] stripe.com/blog/feed.xml        rss      6h   trust: 0.85
+```
+
+**`/tune`** — calibrate what surfaces
+
+```
+> /tune
+  Current thresholds:
+    relevance (digest):  0.65   →  lower = more items surface
+    alert (immediate):   0.90   →  raise = fewer interruptions
+    max digest items:    20
+
+  Adjust relevance → 0.70   [saved ✓]
+```
+
+---
+
+## Demo: /radar
+
+```
+> /radar
+
+  Ambient digest — last 24h  (6 items above threshold 0.65)
+
+  ★★★  [0.94]  anthropics/anthropic-cookbook
+               New example: multi-agent orchestration patterns
+               → matches your interests: #ai, #architecture
+
+  ★★   [0.78]  stripe.com/blog
+               Payment Intents v3: what changed in the API
+               → matches: #payments, #api
+
+  ★    [0.67]  github.com/duckdb/duckdb
+               VSS extension: HNSW scan performance improvements
+               → matches: #search, #storage
+
+  ─────────────────────────────────────────────────────
+  Suggested new sources based on your interests:
+    → pgvector/pgvector   (GitHub)  — "adjacent to DuckDB VSS"
+    → simonwillison.net   (RSS)     — "high overlap with your #ai tags"
+```
+
+---
+
+## Under the Hood: Semantic Deduplication
+
+Every capture runs through this before storing:
+
+```
+New entry arrives
+       │
+       ├──  score ≥ 0.95  →  SKIP    "Already captured — nothing to do"
+       │
+       ├──  score 0.80–0.95  →  MERGE   "Merge into existing entry?"
+       │
+       ├──  score 0.60–0.80  →  LINK    "Store + link to related entries"
+       │
+       └──  score < 0.60   →  CREATE  "Novel knowledge — store as new"
+```
+
+Thresholds are fully configurable in `distillery.yaml`.
+Runs on every `/distill` and `/bookmark`.
 
 ---
 
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────┐
-│               Claude Code                     │
-│                                               │
-│   /distill  /recall  /pour  /bookmark         │
-│   /minutes  /classify                         │
-│                                               │
-│   ┌──────────────────────────────────────┐    │
-│   │        MCP Server (stdio)            │    │
-│   │        11 tools                      │    │
-│   └──────────────┬───────────────────────┘    │
-└──────────────────┼────────────────────────────┘
-                   │
-     ┌─────────────┼──────────────┐
-     │             │              │
-  DuckDB       Embedding    Classification
-  + HNSW       Provider     Engine + Dedup
-  index      (Jina/OpenAI)  (LLM-based)
+┌─────────────────────────────────────────────────────────┐
+│                     Claude Code                          │
+│                                                          │
+│  /distill  /recall  /pour  /bookmark  /minutes           │
+│  /classify  /watch  /tune  /radar                        │
+│                                                          │
+│  ┌───────────────────────────────────────────────────┐   │
+│  │   MCP Server — 21 tools                           │   │
+│  │   stdio (local)  ·  HTTP + GitHub OAuth (team)    │   │
+│  └──────────────────────┬────────────────────────────┘   │
+└─────────────────────────┼───────────────────────────────┘
+                          │
+          ┌───────────────┼───────────────┐
+          │               │               │
+       DuckDB         Embedding     Classification
+       + HNSW          Provider      Engine + Dedup
+       index         (Jina/OpenAI)    (LLM-based)
 ```
 
-**Key:** The MCP server is the sole runtime interface. Skills are markdown files. Storage is swappable.
+Team access: `distillery-mcp --transport http` → shared server, GitHub OAuth
 
 ---
 
@@ -250,59 +293,35 @@ LLM-based auto-classification with confidence scoring:
 
 | Traditional KB | Distillery |
 |---|---|
-| Separate app to switch to | Lives in your coding tool |
+| Separate app to switch to | Lives inside Claude Code |
 | Manual categorization | LLM auto-classification |
 | Keyword search | Semantic vector search |
 | Flat document list | Multi-pass synthesis with citations |
 | Grows noisy over time | Semantic dedup keeps it clean |
 | Individual silos | Team-shared by default |
+| Passive | Watches external sources for you |
 
 ---
 
-## Roadmap
+## Status & What's Next
 
-<table>
-<tr>
-<td width="33%" valign="top">
+**Shipped:**
+- ✅ **Phase 1** — 9 skills, 21 tools, DuckDB + HNSW, classification, dedup (1000+ tests)
+- ✅ **Phase 3** — Ambient intelligence: feed polling, relevance scoring, `/radar /watch /tune`
+- ✅ **Phase 2 infra** — HTTP transport, GitHub OAuth, MotherDuck, namespace taxonomy
 
-### Phase 1 — MVP
-**Complete**
+**Up next — Phase 2 Team Skills:**
 
-- Storage layer (DuckDB + VSS)
-- 6 core skills
-- Classification pipeline
-- Semantic deduplication
-- Configurable embeddings
+| Skill | What it unlocks |
+|---|---|
+| `/whois` | Evidence-backed expertise map: "Who knows about caching?" |
+| `/investigate` | Deep domain context builder (5-phase workflow) |
+| `/digest` | Team activity summaries with stale entry detection |
+| `/briefing` | Team knowledge dashboard |
+| `/process` | Batch classify + digest + stale detection pipeline |
+| `/gh-sync` | GitHub issue/PR knowledge tracking |
 
-</td>
-<td width="33%" valign="top">
-
-### Phase 2 — Team
-**Next**
-
-- `/whois` expertise map
-- `/digest` team summaries
-- `/gh-sync` GitHub tracking
-- Elasticsearch migration
-- Access control
-- Session capture hooks
-
-</td>
-<td width="33%" valign="top">
-
-### Phase 3 — Ambient
-**Future**
-
-- `/radar` feed digest
-- `/watch` source mgmt
-- `/tune` relevance tuning
-- Feed polling infra
-- Relevance scoring
-- Trust feedback loop
-
-</td>
-</tr>
-</table>
+**Also:** Elasticsearch backend, Prefect Horizon deploy, session capture hooks
 
 ---
 
@@ -316,20 +335,19 @@ pip install -e .
 cp distillery.yaml.example distillery.yaml
 export JINA_API_KEY=jina_...
 
-# Connect to Claude Code
-# Add MCP server config to ~/.claude/settings.json
-# (see docs/mcp-setup.md)
+# Add MCP to Claude Code  →  docs/mcp-setup.md
 
 # Verify
-> distillery_status
+distillery status
 ```
 
-Then start capturing:
+Start capturing:
 
 ```
-> /distill
-> /recall what do we know about...
-> /pour give me the full picture on...
+> /distill      →  capture what you just decided
+> /recall       →  find what the team already knows
+> /pour         →  synthesize the full picture before a big decision
+> /radar        →  see what's changed in your ecosystem overnight
 ```
 
 ---
