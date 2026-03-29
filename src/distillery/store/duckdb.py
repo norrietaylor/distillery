@@ -19,6 +19,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -163,6 +164,7 @@ class DuckDBStore:
         self._s3_endpoint = s3_endpoint
         self._conn: duckdb.DuckDBPyConnection | None = None
         self._initialized: bool = False
+        self._vss_available: bool = False
 
     # ------------------------------------------------------------------
     # Cloud path helpers
@@ -211,11 +213,25 @@ class DuckDBStore:
         return conn
 
     def _setup_vss(self, conn: duckdb.DuckDBPyConnection) -> None:
-        """Install and load the vss extension, enable HNSW persistence."""
-        conn.execute("INSTALL vss;")
-        conn.execute("LOAD vss;")
-        conn.execute("SET hnsw_enable_experimental_persistence = true;")
-        logger.info("VSS extension loaded with HNSW persistence enabled")
+        """Install and load the vss extension, enable HNSW persistence.
+
+        If the VSS extension is unavailable (e.g. in constrained environments
+        like AWS Lambda), we log a warning and continue without it.  Vector
+        search will still work via brute-force cosine distance — just slower.
+        """
+        try:
+            conn.execute("INSTALL vss;")
+            conn.execute("LOAD vss;")
+            conn.execute("SET hnsw_enable_experimental_persistence = true;")
+            self._vss_available = True
+            logger.info("VSS extension loaded with HNSW persistence enabled")
+        except (duckdb.IOException, duckdb.CatalogException, duckdb.Error) as exc:
+            self._vss_available = False
+            logger.warning(
+                "VSS extension not available — HNSW indexing disabled, "
+                "falling back to brute-force vector search: %s",
+                exc,
+            )
 
     def _setup_httpfs(self, conn: duckdb.DuckDBPyConnection) -> None:
         """Install and load the httpfs extension, then configure S3 credentials.
@@ -283,13 +299,24 @@ class DuckDBStore:
         )
 
     def _create_index(self, conn: duckdb.DuckDBPyConnection) -> None:
-        """Create the HNSW index on the embedding column."""
+        """Create the HNSW index on the embedding column.
+
+        Skipped when the VSS extension is not available — vector search
+        degrades to brute-force cosine distance which is still correct.
+        """
+        if not self._vss_available:
+            logger.info("Skipping HNSW index creation (VSS extension not available)")
+            return
         try:
             conn.execute(_CREATE_HNSW_INDEX)
             logger.info("HNSW index on entries.embedding ready")
         except duckdb.CatalogException:
             # Index already exists -- safe to ignore.
             logger.debug("HNSW index already exists, skipping creation")
+        except duckdb.BinderException:
+            logger.warning(
+                "HNSW index type not recognized — skipping index creation"
+            )
 
     def _create_meta_table(self, conn: duckdb.DuckDBPyConnection) -> None:
         """Create the ``_meta`` table if it does not exist."""
@@ -777,6 +804,23 @@ class DuckDBStore:
                 val = datetime.fromisoformat(val)
             clauses.append("created_at <= ?")
             params.append(val)
+
+        # Support metadata path filters like "metadata.external_id".
+        # DuckDB stores metadata as a JSON string; use json_extract_string
+        # to pull out the nested value for exact-match comparison.
+        # Whitelist path segments to alphanumeric + underscore to prevent
+        # SQL injection via crafted filter keys.  Fail closed on invalid
+        # paths so callers cannot accidentally get unfiltered results.
+        for key, val in filters.items():
+            if key.startswith("metadata."):
+                json_path = key.split(".", 1)[1]
+                if not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]*", json_path):
+                    raise ValueError(
+                        f"Invalid metadata filter path segment: {json_path!r}. "
+                        "Only alphanumeric characters and underscores are allowed."
+                    )
+                clauses.append(f"json_extract_string(metadata, '$.{json_path}') = ?")
+                params.append(str(val))
 
         return clauses, params
 

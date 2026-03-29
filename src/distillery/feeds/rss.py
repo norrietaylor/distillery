@@ -12,12 +12,14 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from typing import Any
-from xml.etree import ElementTree as ET
+from urllib.parse import urlparse
 from xml.etree.ElementTree import Element
 
+import defusedxml.ElementTree as DefusedElementTree
 import httpx
 
 from distillery.feeds.models import FeedItem
@@ -29,6 +31,45 @@ _ATOM_NS = "http://www.w3.org/2005/Atom"
 
 # Request timeout in seconds.
 _REQUEST_TIMEOUT = 30.0
+
+# Reddit subreddit URL pattern — matches /r/<name>/ or /r/<name>
+_REDDIT_SUBREDDIT_RE = re.compile(
+    r"^https?://(?:(?:www|old)\.)?reddit\.com/r/[^/]+/?$",
+    re.IGNORECASE,
+)
+
+# User-Agent that Reddit will accept (requires a descriptive bot string).
+_REDDIT_USER_AGENT = (
+    "Distillery/0.1 (RSS feed reader; https://github.com/norrietaylor/distillery)"
+)
+
+
+def _normalise_feed_url(url: str) -> tuple[str, dict[str, str]]:
+    """Normalise a feed URL and return ``(url, extra_headers)``.
+
+    Applies domain-specific transformations:
+
+    - **Reddit**: Appends ``.rss`` to bare subreddit URLs and uses a
+      descriptive User-Agent (Reddit blocks generic bots).
+
+    Args:
+        url: The raw feed URL.
+
+    Returns:
+        A tuple of the (possibly rewritten) URL and any extra HTTP headers
+        to include in the request.
+    """
+    extra_headers: dict[str, str] = {}
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+
+    # Reddit: /r/SubName/ → /r/SubName/.rss
+    if host in ("reddit.com", "www.reddit.com", "old.reddit.com"):
+        extra_headers["User-Agent"] = _REDDIT_USER_AGENT
+        if _REDDIT_SUBREDDIT_RE.match(url) and not url.rstrip("/").endswith(".rss"):
+            url = url.rstrip("/") + "/.rss"
+
+    return url, extra_headers
 
 
 # ---------------------------------------------------------------------------
@@ -265,19 +306,13 @@ def parse_feed_xml(xml_bytes: bytes, source_url: str) -> list[FeedItem]:
         List of :class:`FeedItem` objects in document order.
 
     Raises:
-        ET.ParseError: If *xml_bytes* is not valid XML.
-        ValueError: If the XML contains a DOCTYPE declaration (potential XXE).
+        xml.etree.ElementTree.ParseError: If *xml_bytes* is not valid XML.
+        defusedxml.EntitiesForbidden: If the XML contains entity declarations
+            (blocked by defusedxml's default ``forbid_entities=True``).
     """
-    # Mitigate XXE attacks: reject XML that contains a DOCTYPE declaration.
-    # Entity expansion and external entity loading both require a DOCTYPE.
-    # This is a stdlib-only safeguard (no defusedxml dependency required).
-    header = xml_bytes[:1024].lower()
-    if b"<!doctype" in header or b"<!entity" in header:
-        raise ValueError(
-            "XML contains a DOCTYPE or ENTITY declaration; "
-            "rejecting to prevent XML External Entity (XXE) attacks."
-        )
-    root = ET.fromstring(xml_bytes)  # noqa: S314 – stdlib, mitigated above
+    # Use defusedxml to safely parse XML — blocks XXE, entity expansion,
+    # and DTD retrieval while accepting valid feeds with DOCTYPE declarations.
+    root = DefusedElementTree.fromstring(xml_bytes)
 
     items: list[FeedItem] = []
 
@@ -324,7 +359,11 @@ class RSSAdapter:
     def __init__(self, url: str) -> None:
         if not url.strip():
             raise ValueError("RSSAdapter requires a non-empty feed URL.")
-        self._url = url.strip()
+        raw = url.strip()
+        normalised, extra_headers = _normalise_feed_url(raw)
+        self._source_url = raw  # original URL — used as identity / source_url in FeedItems
+        self._fetch_url = normalised  # possibly rewritten URL — used for HTTP requests only
+        self._extra_headers = extra_headers
         self.last_polled_at: datetime | None = None
 
     # ------------------------------------------------------------------
@@ -333,8 +372,8 @@ class RSSAdapter:
 
     @property
     def source_url(self) -> str:
-        """The feed URL passed at construction time."""
-        return self._url
+        """The original feed URL passed at construction time (identity key)."""
+        return self._source_url
 
     def fetch(self) -> list[FeedItem]:
         """Fetch the feed URL and return normalised :class:`FeedItem` objects.
@@ -352,16 +391,21 @@ class RSSAdapter:
             xml.etree.ElementTree.ParseError: If the response body is not
                 valid XML.
         """
-        logger.debug("RSSAdapter: fetching %s", self._url)
+        logger.debug("RSSAdapter: fetching %s", self._fetch_url)
+
+        headers = {"User-Agent": "Distillery/0.1 (RSS adapter)"}
+        headers.update(self._extra_headers)
 
         with httpx.Client(timeout=_REQUEST_TIMEOUT) as client:
             response = client.get(
-                self._url,
-                headers={"User-Agent": "Distillery/0.1 (RSS adapter)"},
+                self._fetch_url,
+                headers=headers,
                 follow_redirects=True,
             )
             response.raise_for_status()
 
         self.last_polled_at = datetime.now(tz=UTC)
 
-        return parse_feed_xml(response.content, self._url)
+        # Use the original source_url (not the rewritten fetch URL) so
+        # FeedItem.source_url and _stable_id inputs stay consistent.
+        return parse_feed_xml(response.content, self._source_url)
