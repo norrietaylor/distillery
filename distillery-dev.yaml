@@ -1,0 +1,41 @@
+# distillery-dev.yaml
+#
+# Dev/test configuration for the Prefect Horizon Lambda deployment.
+# Main branch is auto-deployed using this config, making it a functional
+# test environment for all 9 Distillery skills.
+#
+# Key choices:
+#   - In-memory DuckDB: no external storage required, resets on cold start
+#   - Mock embeddings: deterministic hash-based vectors, no API key needed
+#   - No auth: open access for dev testing
+#
+# To use locally:
+#   DISTILLERY_CONFIG=distillery-dev.yaml distillery-mcp --transport http
+
+storage:
+  backend: duckdb
+  # Ephemeral in-memory store — resets on each Lambda cold start.
+  # All skills work normally; data does not persist across restarts.
+  database_path: ":memory:"
+
+embedding:
+  # Hash-based mock provider: deterministic, no API calls, no key required.
+  # Cosine similarity search and deduplication are fully functional.
+  provider: mock
+  model: mock-hash
+  dimensions: 4
+
+team:
+  name: distillery-dev
+
+server:
+  auth:
+    # No authentication gate for the dev/test environment.
+    provider: none
+
+classification:
+  confidence_threshold: 0.6
+  dedup_skip_threshold: 0.95
+  dedup_merge_threshold: 0.80
+  dedup_link_threshold: 0.60
+  dedup_limit: 5
