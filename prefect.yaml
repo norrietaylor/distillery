@@ -1,0 +1,38 @@
+# Prefect Horizon deployment manifest for the Distillery MCP server.
+#
+# Horizon is a managed MCP hosting platform purpose-built for FastMCP servers.
+# Docs: https://docs.prefect.io/horizon/deployment
+#
+# Quick-start:
+#   1. Sign in to https://horizon.prefect.io with your GitHub account.
+#   2. Grant Horizon access to the norrietaylor/distillery repository.
+#   3. Add the secrets listed below in the Horizon dashboard.
+#   4. Run `prefect deploy` — a live endpoint is available in ~60 seconds.
+
+name: distillery-mcp
+
+deployments:
+  - name: distillery
+    description: "Distillery knowledge-base MCP server (21 tools)"
+
+    # FastMCP streamable-HTTP transport required for Horizon hosting.
+    command: distillery-mcp --transport http
+
+    # Stateless HTTP mode — Horizon Gateway manages session state so each
+    # request can be handled by any replica.
+    stateless_http: true
+
+    # Build: install the package from source.
+    build:
+      - prefect.deployments.steps.run_shell_script:
+          script: pip install -e .
+
+    # Secrets — set these values in the Horizon dashboard before deploying.
+    # Horizon injects them as environment variables at runtime; they are never
+    # committed to the repository.
+    secrets:
+      - JINA_API_KEY          # Jina embedding API key (embedding provider)
+      - GITHUB_CLIENT_ID      # GitHub OAuth app client ID (HTTP auth)
+      - GITHUB_CLIENT_SECRET  # GitHub OAuth app client secret (HTTP auth)
+      - MOTHERDUCK_TOKEN      # MotherDuck cloud DuckDB token (shared storage)
+      - DISTILLERY_CONFIG     # Path or inline YAML for distillery.yaml config

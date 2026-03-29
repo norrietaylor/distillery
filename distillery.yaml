@@ -1,3 +1,6 @@
+# Horizon-ready configuration — MotherDuck provides shared cloud storage so
+# all Horizon replicas read from and write to the same DuckDB database.
+# MOTHERDUCK_TOKEN is injected by Horizon from the secrets dashboard.
 storage:
   backend: motherduck
   database_path: md:distillery
@@ -22,3 +25,13 @@ classification:
 tags:
   enforce_namespaces: false
   reserved_prefixes: []
+
+# GitHub OAuth for HTTP transport.
+# When deployed to Horizon, the Horizon Gateway layers additional RBAC on top
+# of the GitHubProvider below.  GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET are
+# injected by Horizon from the secrets dashboard.
+server:
+  auth:
+    provider: github
+    client_id_env: GITHUB_CLIENT_ID
+    client_secret_env: GITHUB_CLIENT_SECRET
