@@ -17,6 +17,10 @@ on:
         required: false
         default: "Manual redeploy"
 
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
 permissions:
   contents: read
   id-token: write  # Required for AWS OIDC authentication
@@ -72,6 +76,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # workflow_run trigger: github.sha is the default branch HEAD, not the
+          # commit that triggered CI.  Use the triggering run's head_sha instead.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       # Authenticate to AWS using GitHub OIDC — no long-lived access keys stored
       - name: Configure AWS credentials (OIDC)
@@ -87,7 +95,10 @@ jobs:
       - name: Set image tag
         id: image-tag
         run: |
-          SHORT_SHA="${GITHUB_SHA::8}"
+          # workflow_run trigger: use the triggering CI run's commit SHA,
+          # not the default branch HEAD.
+          COMMIT_SHA="${{ github.event.workflow_run.head_sha || github.sha }}"
+          SHORT_SHA="${COMMIT_SHA::8}"
           IMAGE_TAG="${SHORT_SHA}-$(date -u +%Y%m%d%H%M%S)"
           echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
           echo "image_uri=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
@@ -126,15 +137,39 @@ jobs:
             --region "${{ env.AWS_REGION }}"
           echo "Lambda function update complete."
 
+      - name: Publish Lambda version and update alias
+        id: publish-version
+        run: |
+          echo "Publishing new Lambda version..."
+          VERSION=$(aws lambda publish-version \
+            --function-name "${{ env.LAMBDA_FUNCTION_NAME }}" \
+            --region "${{ env.AWS_REGION }}" \
+            --query 'Version' \
+            --output text)
+          echo "Published version: ${VERSION}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+          echo "Updating 'live' alias to version ${VERSION}..."
+          aws lambda update-alias \
+            --function-name "${{ env.LAMBDA_FUNCTION_NAME }}" \
+            --name live \
+            --function-version "${VERSION}" \
+            --region "${{ env.AWS_REGION }}" \
+          || aws lambda create-alias \
+            --function-name "${{ env.LAMBDA_FUNCTION_NAME }}" \
+            --name live \
+            --function-version "${VERSION}" \
+            --region "${{ env.AWS_REGION }}"
+
       - name: Wait for provisioned concurrency to stabilize
         run: |
-          echo "Checking provisioned concurrency status..."
+          echo "Checking provisioned concurrency status on alias 'live'..."
           # Poll until provisioned concurrency is ready or timeout after 5 minutes
           END_TIME=$(( $(date +%s) + 300 ))
           while [ "$(date +%s)" -lt "$END_TIME" ]; do
             STATUS=$(aws lambda get-provisioned-concurrency-config \
               --function-name "${{ env.LAMBDA_FUNCTION_NAME }}" \
-              --qualifier "\$LATEST" \
+              --qualifier "live" \
               --region "${{ env.AWS_REGION }}" \
               --query 'Status' \
               --output text 2>/dev/null || echo "NONE")

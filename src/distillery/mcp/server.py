@@ -1139,28 +1139,24 @@ def create_server(
         """Return server health status.
 
         This endpoint is always unauthenticated and returns a JSON object
-        with ``status``, ``vss_available``, ``store_initialized``, and
-        ``database_path``.
+        with ``status``, ``vss_available``, and ``store_initialized``.
         """
         from starlette.responses import JSONResponse
 
         store_obj = _shared.get("store")
         vss = False
         initialized = False
-        db_path = ""
         if store_obj is not None:
             from distillery.store.duckdb import DuckDBStore
 
             if isinstance(store_obj, DuckDBStore):
                 vss = store_obj.vss_available
                 initialized = store_obj._initialized
-                db_path = store_obj._db_path
         return JSONResponse(
             {
                 "status": "ok",
                 "vss_available": vss,
                 "store_initialized": initialized,
-                "database_path": db_path,
             }
         )
 

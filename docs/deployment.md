@@ -404,7 +404,7 @@ Expected response: `{"status": "ok"}`
 
 **Error: "S3 bucket already exists"**
 - Cause: Bucket name conflict (S3 bucket names are globally unique)
-- Fix: Modify the `s3_bucket_name` variable in `terraform/variables.tf`
+- Fix: Modify the `project_name` and/or `environment` variables in `terraform/variables.tf` (the bucket name is `${project_name}-${environment}-storage`)
 
 ### Continuous Deployment Pipeline
 

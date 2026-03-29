@@ -6,10 +6,11 @@
 
 storage:
   backend: duckdb
-  # Use S3 path when AWS_S3_BUCKET env var is set; fall back to /tmp for
-  # smoke-testing without storage.  Override this path via the
-  # DISTILLERY_DB_PATH env var at runtime if needed.
-  database_path: /tmp/distillery.duckdb
+  # IMPORTANT: /tmp is ephemeral on Lambda — data is lost between invocations
+  # and cold starts.  Always set DISTILLERY_DB_PATH to an S3 path in
+  # production (e.g. s3://bucket/distillery.duckdb).  The /tmp fallback
+  # exists only for local smoke-testing.
+  database_path: ${DISTILLERY_DB_PATH:?DISTILLERY_DB_PATH must be set to an S3 path}
 
 embedding:
   provider: jina

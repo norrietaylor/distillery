@@ -21,6 +21,7 @@ The Lambda function entrypoint is ``distillery.mcp.lambda_handler.handler``.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -53,9 +54,17 @@ def _build_mangum_handler() -> Any:
 
         auth = build_github_auth(config)
     elif provider_name == "none":
+        allow_no_auth = os.environ.get("DISTILLERY_ALLOW_NO_AUTH", "").lower() == "true"
+        if not allow_no_auth:
+            raise ValueError(
+                "Authentication is required in Lambda. "
+                "server.auth.provider is 'none' but DISTILLERY_ALLOW_NO_AUTH "
+                "is not set to 'true'. Configure GitHub OAuth or set "
+                "DISTILLERY_ALLOW_NO_AUTH=true to explicitly allow unauthenticated access."
+            )
         logger.warning(
             "Lambda handler starting without authentication "
-            "(server.auth.provider is 'none')",
+            "(server.auth.provider is 'none', DISTILLERY_ALLOW_NO_AUTH=true)",
         )
     else:
         raise ValueError(
