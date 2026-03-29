@@ -5,7 +5,7 @@ Timestamp: 2026-03-28T00:00:00Z
 
 ============================= test session starts ==============================
 platform linux -- Python 3.13.7, pytest-9.0.2, pluggy-1.6.0
-rootdir: /home/norrie.guest/code/distillery/.worktrees/feature-elastic-backend
+rootdir: <repo_root>
 configfile: pyproject.toml
 plugins: asyncio-1.3.0, anyio-4.13.0, cov-7.1.0
 

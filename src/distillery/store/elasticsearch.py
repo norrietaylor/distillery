@@ -23,7 +23,7 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from distillery.models import Entry, EntryStatus, validate_metadata
+from distillery.models import Entry, EntrySource, EntryStatus, EntryType, validate_metadata
 
 if TYPE_CHECKING:
     from elasticsearch import AsyncElasticsearch
@@ -98,12 +98,12 @@ def _doc_to_entry(doc_id: str, source: dict[str, Any]) -> Entry:
     return Entry(
         id=doc_id,
         content=source["content"],
-        entry_type=source["entry_type"],
-        source=source["source"],
+        entry_type=EntryType(source["entry_type"]),
+        source=EntrySource(source["source"]),
         author=source["author"],
         project=source.get("project"),
         tags=list(source.get("tags", [])),
-        status=source.get("status", "active"),
+        status=EntryStatus(source.get("status", "active")),
         metadata=metadata,
         created_at=created_at,
         updated_at=updated_at,
@@ -482,8 +482,12 @@ class ElasticsearchStore:
 
         # Re-embed when content changes.
         if "content" in updates:
-            new_embedding = self._embedding_provider.embed(updates["content"])
-            doc["embedding"] = new_embedding
+            if self._effective_mode == "server":
+                # Server mode: update the semantic_text source field; ES re-infers.
+                doc["content_semantic"] = updates["content"]
+            else:
+                new_embedding = self._embedding_provider.embed(updates["content"])
+                doc["embedding"] = new_embedding
 
         # Always increment version and refresh timestamps.
         current_version = int(existing_source.get("version", 1))
@@ -554,7 +558,9 @@ class ElasticsearchStore:
         for key in ("entry_type", "author", "project", "status"):
             value = filters.get(key)
             if value is not None:
-                clauses.append({"term": {key: value}})
+                # Extract .value from enum types (StrEnum) for ES term queries.
+                term_value = value.value if hasattr(value, "value") else value
+                clauses.append({"term": {key: term_value}})
 
         tags = filters.get("tags")
         if tags is not None:
@@ -692,25 +698,45 @@ class ElasticsearchStore:
         """
         from distillery.store.protocol import SearchResult
 
-        query_vector = self._embedding_provider.embed(content)
+        if self._effective_mode == "server":
+            # Server mode: use semantic query with min_score filtering.
+            # ES cosine score = (1 + cosine) / 2, so min_score = (1 + threshold) / 2
+            min_es_score = (1.0 + threshold) / 2.0
+            search_body: dict[str, Any] = {
+                "query": {
+                    "semantic": {
+                        "field": "content_semantic",
+                        "query": content,
+                    }
+                },
+                "min_score": min_es_score,
+                "size": limit,
+            }
+            resp = await self._client.search(
+                index=self._alias_name("entries"),
+                body=search_body,
+            )
+        else:
+            # Client mode: embed content and use kNN search.
+            query_vector = self._embedding_provider.embed(content)
 
-        # Convert the [0, 1] threshold to the ES [0, 1] score space.
-        # ES cosine score = (1 + cosine) / 2, so min_score = (1 + threshold) / 2
-        min_es_score = (1.0 + threshold) / 2.0
+            # Convert the [0, 1] threshold to the ES [0, 1] score space.
+            # ES cosine score = (1 + cosine) / 2, so min_score = (1 + threshold) / 2
+            min_es_score = (1.0 + threshold) / 2.0
 
-        knn: dict[str, Any] = {
-            "field": "embedding",
-            "query_vector": query_vector,
-            "k": limit,
-            "num_candidates": limit * 10,
-            "similarity": min_es_score,
-        }
+            knn: dict[str, Any] = {
+                "field": "embedding",
+                "query_vector": query_vector,
+                "k": limit,
+                "num_candidates": limit * 10,
+                "similarity": min_es_score,
+            }
 
-        resp = await self._client.search(
-            index=self._alias_name("entries"),
-            knn=knn,
-            size=limit,
-        )
+            resp = await self._client.search(
+                index=self._alias_name("entries"),
+                knn=knn,
+                size=limit,
+            )
 
         hits: list[dict[str, Any]] = resp["hits"]["hits"]
         results: list[SearchResult] = []

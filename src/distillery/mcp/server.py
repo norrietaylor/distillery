@@ -275,13 +275,17 @@ async def _create_elasticsearch_store(config: DistilleryConfig, embedding_provid
             "Elasticsearch backend requires either 'url' or 'cloud_id_env' in config"
         )
 
-    es_store = ElasticsearchStore(
-        client=client,
-        embedding_provider=embedding_provider,
-        index_prefix=storage.index_prefix,
-        embedding_mode=storage.embedding_mode,
-    )
-    await es_store.initialize()
+    try:
+        es_store = ElasticsearchStore(
+            client=client,
+            embedding_provider=embedding_provider,
+            index_prefix=storage.index_prefix,
+            embedding_mode=storage.embedding_mode,
+        )
+        await es_store.initialize()
+    except Exception:
+        await client.close()
+        raise
     return es_store
 
 
@@ -388,16 +392,10 @@ def create_server(
         try:
             yield dict(_shared)
         finally:
-            # Close the async ES client on shutdown (stdio mode: runs once at exit).
-            # In stateless HTTP mode many sessions share the store — skip close.
-            es_client = _shared.get("es_client")
-            if es_client is not None and not _shared.get("_es_closed", False):
-                try:
-                    await es_client.close()
-                    _shared["_es_closed"] = True
-                    logger.info("Elasticsearch client closed on MCP server shutdown")
-                except Exception:
-                    logger.debug("Error closing ES client on shutdown (ignored)")
+            # In stateless HTTP mode many sessions share the store — only the
+            # process-level shutdown should close it.  For stdio mode (single
+            # session) this runs once at exit and is fine.
+            pass
 
 
     server = FastMCP("distillery", lifespan=lifespan, auth=auth)

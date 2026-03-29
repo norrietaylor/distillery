@@ -12,8 +12,8 @@ Feature: Search Logging, Feedback, and MCP Integration
     When log_search() is called with query "async patterns", result IDs ["id-1", "id-2"], scores [0.92, 0.85], and session_id "sess-abc"
     Then a document is indexed in "distillery_search_log"
     And the document contains the query "async patterns"
-    And the document contains result_ids ["id-1", "id-2"]
-    And the document contains scores [0.92, 0.85]
+    And the document contains result_entry_ids ["id-1", "id-2"]
+    And the document contains result_scores [0.92, 0.85]
     And the document contains session_id "sess-abc"
     And the document contains a timestamp
 
@@ -21,7 +21,7 @@ Feature: Search Logging, Feedback, and MCP Integration
     Given an initialized ElasticsearchStore with a mock ES client
     When log_search() is called with query "obscure topic", result IDs [], scores [], and session_id "sess-xyz"
     Then a document is indexed in "distillery_search_log"
-    And the document contains empty result_ids and scores
+    And the document contains empty result_entry_ids and result_scores
 
   # --- Feedback Logging ---
 
@@ -82,7 +82,7 @@ Feature: Search Logging, Feedback, and MCP Integration
     When "distillery health" CLI command is run
     Then the command calls client.info() on the ES client
     And the output reports connection status as healthy
-    And the output includes cluster health information
+    And the output includes cluster name and version from client.info()
 
   Scenario: distillery health reports failure when ES is unreachable
     Given a distillery.yaml with backend "elasticsearch"
