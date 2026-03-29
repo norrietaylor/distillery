@@ -1,3 +1,14 @@
+# Horizon-ready Distillery configuration — production deployment with MotherDuck storage.
+#
+# Purpose: This is the production configuration for deploying Distillery to Prefect Horizon
+# or other hosted environments. It uses MotherDuck for shared cloud storage (enabling
+# multiple replicas to access the same database) and GitHub OAuth for authentication.
+#
+# For local development, use distillery-dev.yaml instead (local DuckDB file, no auth).
+#
+# MotherDuck provides shared cloud storage so all Horizon replicas read from and write
+# to the same DuckDB database. MOTHERDUCK_TOKEN is injected by Horizon from the secrets
+# dashboard.
 storage:
   backend: motherduck
   database_path: md:distillery
@@ -22,3 +33,17 @@ classification:
 tags:
   enforce_namespaces: false
   reserved_prefixes: []
+
+# GitHub OAuth for HTTP transport.
+# Setup instructions: See docs/deployment.md for step-by-step guide to:
+#   1. Register a GitHub OAuth App at https://github.com/settings/developers
+#   2. Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET environment variables
+#   3. Configure callback URL to match your deployment URL
+# When deployed to Horizon, the Horizon Gateway layers additional RBAC on top
+# of the GitHubProvider below.  GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET are
+# injected by Horizon from the secrets dashboard.
+server:
+  auth:
+    provider: github
+    client_id_env: GITHUB_CLIENT_ID
+    client_secret_env: GITHUB_CLIENT_SECRET
