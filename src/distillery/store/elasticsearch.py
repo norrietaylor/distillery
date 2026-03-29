@@ -571,9 +571,13 @@ class ElasticsearchStore:
         if date_from is not None or date_to is not None:
             range_clause: dict[str, Any] = {}
             if date_from is not None:
-                range_clause["gte"] = str(date_from)
+                range_clause["gte"] = (
+                    date_from.isoformat() if hasattr(date_from, "isoformat") else str(date_from)
+                )
             if date_to is not None:
-                range_clause["lte"] = str(date_to)
+                range_clause["lte"] = (
+                    date_to.isoformat() if hasattr(date_to, "isoformat") else str(date_to)
+                )
             clauses.append({"range": {"created_at": range_clause}})
 
         return clauses
