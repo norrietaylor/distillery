@@ -405,7 +405,7 @@ class ClaudeEvalRunner:
                 conn = store._conn
                 if conn is not None:
                     row = conn.execute(
-                        "SELECT result_count FROM search_log ORDER BY searched_at DESC LIMIT 1"
+                        "SELECT len(result_entry_ids) FROM search_log ORDER BY timestamp DESC LIMIT 1"
                     ).fetchone()
                     if row:
                         last_search_count = int(row[0])
