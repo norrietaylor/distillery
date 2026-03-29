@@ -348,7 +348,6 @@ def create_server(
 
             if config.storage.backend == "elasticsearch":
                 store = await _create_elasticsearch_store(config, embedding_provider)
-                _shared["es_client"] = store.client
                 logger.info(
                     "Distillery MCP server ready (backend=elasticsearch, embedding=%s)",
                     getattr(embedding_provider, "model_name", "unknown"),
@@ -1400,8 +1399,10 @@ async def _async_gather_es_stats(
                 "doc_count": primaries.get("docs", {}).get("count", 0),
                 "store_size_bytes": primaries.get("store", {}).get("size_in_bytes", 0),
             }
-        except Exception:
-            index_stats[index_name] = {"doc_count": None, "store_size_bytes": None}
+        except Exception as e:
+            logger.error("Failed to retrieve stats for index %s: %s", index_name, e)
+            # Re-raise to signal ES connectivity/auth failure to _handle_status
+            raise
 
     entries_index = f"{index_prefix}_entries"
     total_entries = (index_stats.get(entries_index) or {}).get("doc_count", 0)

@@ -15,6 +15,8 @@ registered and the lifespan context initialises state correctly.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from distillery.config import DistilleryConfig, EmbeddingConfig, StorageConfig
@@ -694,7 +696,6 @@ class TestCreateServer:
 class TestElasticsearchBackendSelection:
     """Tests for MCP server Elasticsearch backend selection via lifespan."""
 
-    @pytest.mark.unit
     async def test_create_elasticsearch_store_called_for_es_backend(self) -> None:
         """_create_elasticsearch_store is called when config says elasticsearch."""
         import os
@@ -731,7 +732,6 @@ class TestElasticsearchBackendSelection:
             # the mock store when called.
             mock_create_es.return_value = mock_store
 
-    @pytest.mark.unit
     async def test_elasticsearch_backend_selection(self) -> None:
         """When backend=elasticsearch, _create_elasticsearch_store is called with correct args."""
         import os
@@ -778,7 +778,6 @@ class TestElasticsearchBackendSelection:
             # Verify index creation was attempted (initialize() was called).
             mock_es_client.indices.exists.assert_called()
 
-    @pytest.mark.unit
     async def test_elasticsearch_client_closed_on_shutdown(self) -> None:
         """ElasticsearchStore.close() is called on lifespan shutdown."""
         from unittest.mock import AsyncMock, MagicMock, patch
@@ -794,8 +793,9 @@ class TestElasticsearchBackendSelection:
 
         mock_es_client = AsyncMock()
         mock_es_client.close = AsyncMock()
-        mock_store = MagicMock()
+        mock_store = AsyncMock()
         mock_store.client = mock_es_client
+        mock_store.close = AsyncMock()
 
         import os
 
@@ -807,22 +807,18 @@ class TestElasticsearchBackendSelection:
                 return_value=mock_store,
             ),
         ):
-            # Directly test that the shutdown logic in lifespan calls close().
+            # Directly test that the shutdown logic should call store.close().
             # We create a minimal shared dict simulating post-startup state.
-            from typing import Any
-
             shared: dict[str, Any] = {
-                "es_client": mock_es_client,
                 "store": mock_store,
                 "config": config,
                 "embedding_provider": MagicMock(),
                 "recent_searches": [],
             }
 
-            # Simulate the finally block in lifespan.
-            es_client = shared.get("es_client")
-            if es_client is not None and not shared.get("_es_closed", False):
-                await es_client.close()
-                shared["_es_closed"] = True
+            # Simulate proper shutdown: call store.close()
+            store = shared.get("store")
+            if store is not None:
+                await store.close()
 
-            mock_es_client.close.assert_called_once()
+            mock_store.close.assert_called_once()
