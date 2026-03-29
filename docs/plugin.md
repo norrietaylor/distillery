@@ -154,6 +154,60 @@ Connect to the shared demonstration server.  No local installation or API key re
 
 ---
 
+## Remote Auto-Poll Setup (Hosted / Team HTTP only)
+
+When using a hosted or team HTTP transport, you can enable **remote auto-polling** so feed
+sources are polled automatically even when Claude Code is not running.  This uses Claude Code's
+scheduled remote agents (triggers) which run on Anthropic's infrastructure on a cron schedule.
+
+### Prerequisites
+
+Remote triggers need an **MCP connector** registered at claude.ai to connect to your
+Distillery server.  Without this, `/watch add` falls back to local cron polling (which only
+runs while Claude Code is active).
+
+### Step 1 — Register the MCP Connector
+
+1. Open **https://claude.ai/settings/connectors**
+2. Click **"Add connector"**
+3. Enter the Distillery MCP server URL:
+   - Hosted demo: `https://able-red-cougar.fastmcp.app/mcp`
+   - Team HTTP: your team's Distillery URL (e.g. `https://distillery.yourcompany.com/mcp`)
+4. Name it: `distillery`
+5. Click **Save**
+
+This generates a `connector_uuid` that Claude Code uses when creating scheduled triggers.
+
+### Step 2 — Run `/setup`
+
+After registering the connector, run the setup wizard in Claude Code:
+
+```
+/setup
+```
+
+The wizard detects your transport, finds the registered connector, and creates a scheduled
+trigger that polls all feed sources every hour.  You can manage triggers at
+https://claude.ai/code/scheduled.
+
+### Step 3 — Verify
+
+Check that the trigger was created:
+
+```
+/watch list
+```
+
+You should see your feed sources and a note about the active remote trigger.
+
+### What if I skip this?
+
+If you don't register the MCP connector, everything still works — but auto-polling falls back
+to a local cron job that only fires while Claude Code is running.  You can always register the
+connector later and run `/setup` again.
+
+---
+
 ## Verifying the Setup
 
 After saving the settings file, restart Claude Code or reload MCP servers.
@@ -181,6 +235,10 @@ distillery health
 | `/bookmark` | "bookmark", "save this link", "store this URL" | Fetch a URL, summarize, and store |
 | `/minutes` | "meeting notes", "capture meeting", "log meeting" | Structured meeting notes with append support |
 | `/classify` | "classify", "review queue", "triage inbox" | Entry classification and review queue triage |
+| `/watch` | "add feed", "remove source", "show my sources" | Manage feed sources with auto-poll scheduling |
+| `/radar` | "what's new", "show my digest", "what have I missed" | Ambient intelligence digest from feed entries |
+| `/tune` | "adjust thresholds", "tune my feed" | Display and adjust feed relevance thresholds |
+| `/setup` | "setup", "configure distillery" | Onboarding wizard — connectivity, connector registration, auto-poll |
 
 ## MCP Unavailability
 
