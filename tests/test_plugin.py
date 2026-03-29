@@ -1,12 +1,10 @@
-"""Tests for the Claude Code plugin manifest (plugin.json) and plugin documentation (docs/plugin.md).
+"""Tests for the Claude Code plugin manifest (.claude-plugin/plugin.json) and plugin documentation (docs/plugin.md).
 
 Covers:
-  - plugin.json is valid JSON and contains all required top-level fields
+  - .claude-plugin/plugin.json is valid JSON and contains all required top-level fields
   - Plugin metadata (name, version, author, homepage, repository, keywords)
-  - Skills array: count, required fields, names, and path conventions
-  - MCP server configuration: presence, required flag, transports, default_transport
-  - stdio transport fields (command, env, install)
-  - HTTP transport fields (url)
+  - Skills directory path and SKILL.md auto-discovery
+  - MCP server configuration: presence, command, env
   - docs/plugin.md structure: file existence, required headings, skill coverage
   - docs/plugin.md content: code blocks, references to plugin.json, installation sections
 """
@@ -26,14 +24,14 @@ pytestmark = pytest.mark.unit
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).parent.parent
-PLUGIN_JSON_PATH = REPO_ROOT / "plugin.json"
+PLUGIN_JSON_PATH = REPO_ROOT / ".claude-plugin" / "plugin.json"
 PLUGIN_DOC_PATH = REPO_ROOT / "docs" / "plugin.md"
 
 EXPECTED_SKILL_NAMES = {"distill", "recall", "pour", "bookmark", "minutes", "classify", "watch", "radar", "tune", "setup"}
 
 
 def load_plugin_manifest() -> dict:  # type: ignore[type-arg]
-    """Load and parse plugin.json from the repository root."""
+    """Load and parse .claude-plugin/plugin.json from the repository root."""
     return json.loads(PLUGIN_JSON_PATH.read_text(encoding="utf-8"))
 
 
@@ -49,17 +47,17 @@ def load_plugin_doc() -> str:
 
 class TestPluginManifestFile:
     def test_plugin_json_exists(self) -> None:
-        """plugin.json must exist at the repository root."""
-        assert PLUGIN_JSON_PATH.exists(), f"plugin.json not found at {PLUGIN_JSON_PATH}"
+        """.claude-plugin/plugin.json must exist."""
+        assert PLUGIN_JSON_PATH.exists(), f".claude-plugin/plugin.json not found at {PLUGIN_JSON_PATH}"
 
     def test_plugin_json_is_valid_json(self) -> None:
-        """plugin.json must be parseable as valid JSON."""
+        """.claude-plugin/plugin.json must be parseable as valid JSON."""
         content = PLUGIN_JSON_PATH.read_text(encoding="utf-8")
         manifest = json.loads(content)  # raises json.JSONDecodeError on failure
         assert isinstance(manifest, dict)
 
     def test_plugin_json_is_non_empty(self) -> None:
-        """plugin.json must not be empty."""
+        """.claude-plugin/plugin.json must not be empty."""
         manifest = load_plugin_manifest()
         assert len(manifest) > 0
 
@@ -70,15 +68,10 @@ class TestPluginManifestFile:
 
 
 class TestPluginManifestMetadata:
-    def test_schema_field_present(self) -> None:
-        """$schema field must be present."""
+    def test_no_schema_field(self) -> None:
+        """$schema field must not be present (not supported by Claude Code plugin schema)."""
         manifest = load_plugin_manifest()
-        assert "$schema" in manifest
-
-    def test_schema_field_references_claude(self) -> None:
-        """$schema must reference the Claude plugin schema."""
-        manifest = load_plugin_manifest()
-        assert "claude.ai" in manifest["$schema"]
+        assert "$schema" not in manifest
 
     def test_name_is_distillery(self) -> None:
         """Plugin name must be 'distillery'."""
@@ -108,10 +101,16 @@ class TestPluginManifestMetadata:
         assert isinstance(manifest["description"], str)
         assert len(manifest["description"]) > 0
 
-    def test_author_is_norrietaylor(self) -> None:
-        """author field must be 'norrietaylor'."""
+    def test_author_is_object(self) -> None:
+        """author field must be an object with a 'name' key."""
         manifest = load_plugin_manifest()
-        assert manifest["author"] == "norrietaylor"
+        assert isinstance(manifest["author"], dict)
+        assert "name" in manifest["author"]
+
+    def test_author_name_is_norrietaylor(self) -> None:
+        """author.name must be 'norrietaylor'."""
+        manifest = load_plugin_manifest()
+        assert manifest["author"]["name"] == "norrietaylor"
 
     def test_homepage_is_github_url(self) -> None:
         """homepage must point to the GitHub repository."""
@@ -139,102 +138,73 @@ class TestPluginManifestMetadata:
         """All required top-level keys must be present in the manifest."""
         manifest = load_plugin_manifest()
         required_keys = {
-            "$schema", "name", "version", "description",
+            "name", "version", "description",
             "author", "homepage", "repository", "keywords",
             "skills", "mcpServers",
         }
         for key in required_keys:
-            assert key in manifest, f"Required key '{key}' missing from plugin.json"
+            assert key in manifest, f"Required key '{key}' missing from .claude-plugin/plugin.json"
 
 
 # ---------------------------------------------------------------------------
-# plugin.json — skills array
+# .claude-plugin/plugin.json — skills directory
 # ---------------------------------------------------------------------------
 
 
 class TestPluginSkills:
-    def test_skills_is_a_list(self) -> None:
-        """skills field must be a list."""
+    def test_skills_is_a_directory_path(self) -> None:
+        """skills field must be a relative directory path string."""
         manifest = load_plugin_manifest()
-        assert isinstance(manifest["skills"], list)
+        assert isinstance(manifest["skills"], str)
+        assert manifest["skills"].startswith("./")
 
-    def test_skills_has_exactly_ten_entries(self) -> None:
-        """There must be exactly ten skills declared."""
+    def test_skills_directory_value(self) -> None:
+        """skills must point to './.claude/skills/'."""
         manifest = load_plugin_manifest()
-        assert len(manifest["skills"]) == 10
+        assert manifest["skills"] == "./.claude/skills/"
 
-    def test_each_skill_has_required_fields(self) -> None:
-        """Every skill must have 'name', 'description', and 'path' fields."""
+    def test_skills_directory_exists(self) -> None:
+        """The skills directory referenced in the manifest must exist."""
         manifest = load_plugin_manifest()
-        for skill in manifest["skills"]:
-            for field in ("name", "description", "path"):
-                assert field in skill, f"Skill is missing required field '{field}': {skill}"
+        skills_path = manifest["skills"].removeprefix("./")
+        skills_dir = REPO_ROOT / skills_path
+        assert skills_dir.exists(), f"Skills directory not found at {skills_dir}"
+        assert skills_dir.is_dir(), f"{skills_dir} is not a directory"
 
-    def test_skill_names_match_expected_set(self) -> None:
-        """Skill names must exactly match the expected set of six skill names."""
+    def test_all_expected_skill_subdirectories_exist(self) -> None:
+        """Each expected skill must have a subdirectory with a SKILL.md file."""
         manifest = load_plugin_manifest()
-        names = {skill["name"] for skill in manifest["skills"]}
-        assert names == EXPECTED_SKILL_NAMES
+        skills_path = manifest["skills"].removeprefix("./")
+        skills_dir = REPO_ROOT / skills_path
+        for skill_name in EXPECTED_SKILL_NAMES:
+            skill_file = skills_dir / skill_name / "SKILL.md"
+            assert skill_file.exists(), f"Skill file missing: {skill_file}"
 
-    def test_skill_paths_follow_convention(self) -> None:
-        """Each skill path must follow the '.claude/skills/{name}/SKILL.md' pattern."""
+    def test_skill_files_have_yaml_frontmatter(self) -> None:
+        """Each SKILL.md must start with YAML frontmatter."""
         manifest = load_plugin_manifest()
-        for skill in manifest["skills"]:
-            expected_path = f".claude/skills/{skill['name']}/SKILL.md"
-            assert skill["path"] == expected_path, (
-                f"Skill '{skill['name']}' has unexpected path '{skill['path']}'; "
-                f"expected '{expected_path}'"
-            )
-            skill_file = REPO_ROOT / skill["path"]
-            assert skill_file.exists(), f"Declared skill file missing: {skill_file}"
+        skills_path = manifest["skills"].removeprefix("./")
+        skills_dir = REPO_ROOT / skills_path
+        for skill_name in EXPECTED_SKILL_NAMES:
+            skill_file = skills_dir / skill_name / "SKILL.md"
             assert skill_file.read_text(encoding="utf-8").lstrip().startswith("---"), (
                 f"Skill file missing YAML frontmatter: {skill_file}"
             )
 
-    def test_skill_descriptions_are_non_empty(self) -> None:
-        """Each skill description must be a non-empty string."""
+    def test_exactly_ten_skill_subdirectories(self) -> None:
+        """The skills directory must contain exactly ten skill subdirectories with SKILL.md files."""
         manifest = load_plugin_manifest()
-        for skill in manifest["skills"]:
-            assert isinstance(skill["description"], str)
-            assert len(skill["description"]) > 0, (
-                f"Skill '{skill['name']}' has an empty description"
-            )
-
-    def test_distill_skill_trigger_phrases_mentioned(self) -> None:
-        """The distill skill description must mention its trigger phrases."""
-        manifest = load_plugin_manifest()
-        distill = next(s for s in manifest["skills"] if s["name"] == "distill")
-        desc = distill["description"].lower()
-        assert "distill" in desc or "capture" in desc or "save knowledge" in desc
-
-    def test_recall_skill_description_mentions_search(self) -> None:
-        """The recall skill description must mention semantic search."""
-        manifest = load_plugin_manifest()
-        recall = next(s for s in manifest["skills"] if s["name"] == "recall")
-        assert "search" in recall["description"].lower()
-
-    def test_bookmark_skill_description_mentions_url(self) -> None:
-        """The bookmark skill description must mention URLs."""
-        manifest = load_plugin_manifest()
-        bookmark = next(s for s in manifest["skills"] if s["name"] == "bookmark")
-        desc = bookmark["description"].lower()
-        assert "url" in desc or "link" in desc
-
-    def test_skill_names_are_unique(self) -> None:
-        """No two skills may share the same name."""
-        manifest = load_plugin_manifest()
-        names = [skill["name"] for skill in manifest["skills"]]
-        assert len(names) == len(set(names)), "Duplicate skill names detected"
-
-    def test_skill_paths_are_unique(self) -> None:
-        """No two skills may share the same path."""
-        manifest = load_plugin_manifest()
-        paths = [skill["path"] for skill in manifest["skills"]]
-        assert len(paths) == len(set(paths)), "Duplicate skill paths detected"
+        skills_path = manifest["skills"].removeprefix("./")
+        skills_dir = REPO_ROOT / skills_path
+        found = {
+            d.name for d in skills_dir.iterdir()
+            if d.is_dir() and (d / "SKILL.md").exists()
+        }
+        assert found == EXPECTED_SKILL_NAMES
 
 
 # ---------------------------------------------------------------------------
-# plugin.json — MCP server configuration
+# .claude-plugin/plugin.json — MCP server configuration
 # ---------------------------------------------------------------------------
 
 
@@ -249,150 +219,44 @@ class TestPluginMCPServers:
         manifest = load_plugin_manifest()
         assert "distillery" in manifest["mcpServers"]
 
-    def test_distillery_server_is_required(self) -> None:
-        """The distillery MCP server must be marked as required=true."""
+    def test_distillery_server_has_command(self) -> None:
+        """The distillery server must have a 'command' field."""
         manifest = load_plugin_manifest()
         server = manifest["mcpServers"]["distillery"]
-        assert server.get("required") is True
+        assert "command" in server
 
-    def test_distillery_server_has_description(self) -> None:
-        """The distillery server must have a description."""
+    def test_distillery_server_command_is_distillery_mcp(self) -> None:
+        """The distillery server command must be 'distillery-mcp'."""
         manifest = load_plugin_manifest()
         server = manifest["mcpServers"]["distillery"]
-        assert "description" in server
-        assert len(server["description"]) > 0
+        assert server["command"] == "distillery-mcp"
 
-    def test_distillery_server_has_setup_section(self) -> None:
-        """The distillery server config must include a setup guidance section."""
+    def test_distillery_server_has_env(self) -> None:
+        """The distillery server must have an 'env' field."""
         manifest = load_plugin_manifest()
         server = manifest["mcpServers"]["distillery"]
-        assert "setup" in server
-        assert "message" in server["setup"]
-        assert "docs" in server["setup"]
+        assert "env" in server
+        assert isinstance(server["env"], dict)
 
-    def test_setup_docs_url_references_mcp_setup(self) -> None:
-        """The setup docs URL must point to the MCP setup documentation."""
+    def test_distillery_server_env_has_jina_api_key(self) -> None:
+        """The distillery server env must declare JINA_API_KEY."""
         manifest = load_plugin_manifest()
-        docs_url = manifest["mcpServers"]["distillery"]["setup"]["docs"]
-        assert "mcp-setup" in docs_url
+        server = manifest["mcpServers"]["distillery"]
+        assert "JINA_API_KEY" in server["env"]
 
-    def test_transports_is_list_with_two_entries(self) -> None:
-        """The distillery server must declare exactly two transports."""
+    def test_distillery_server_env_has_distillery_config(self) -> None:
+        """The distillery server env must declare DISTILLERY_CONFIG."""
         manifest = load_plugin_manifest()
-        transports = manifest["mcpServers"]["distillery"]["transports"]
-        assert isinstance(transports, list)
-        assert len(transports) == 2
+        server = manifest["mcpServers"]["distillery"]
+        assert "DISTILLERY_CONFIG" in server["env"]
 
-    def test_default_transport_is_local(self) -> None:
-        """default_transport must be 'local'."""
+    def test_distillery_server_no_unsupported_fields(self) -> None:
+        """The distillery server must not contain fields unsupported by the plugin schema."""
         manifest = load_plugin_manifest()
-        assert manifest["mcpServers"]["distillery"]["default_transport"] == "local"
-
-    def test_stdio_transport_present(self) -> None:
-        """A stdio-type transport must be present."""
-        manifest = load_plugin_manifest()
-        transports = manifest["mcpServers"]["distillery"]["transports"]
-        types = [t["type"] for t in transports]
-        assert "stdio" in types
-
-    def test_http_transport_present(self) -> None:
-        """An http-type transport must be present."""
-        manifest = load_plugin_manifest()
-        transports = manifest["mcpServers"]["distillery"]["transports"]
-        types = [t["type"] for t in transports]
-        assert "http" in types
-
-    def test_stdio_transport_has_required_fields(self) -> None:
-        """The stdio transport must have 'command' and 'env' fields."""
-        manifest = load_plugin_manifest()
-        transports = manifest["mcpServers"]["distillery"]["transports"]
-        stdio = next((t for t in transports if t["type"] == "stdio"), None)
-        assert stdio is not None, "stdio transport not found"
-        assert "command" in stdio, "stdio transport missing 'command'"
-        assert "env" in stdio, "stdio transport missing 'env'"
-
-    def test_stdio_transport_command_is_distillery_mcp(self) -> None:
-        """The stdio transport command must be 'distillery-mcp'."""
-        manifest = load_plugin_manifest()
-        transports = manifest["mcpServers"]["distillery"]["transports"]
-        stdio = next((t for t in transports if t["type"] == "stdio"), None)
-        assert stdio is not None, "stdio transport not found"
-        assert stdio["command"] == "distillery-mcp"
-
-    def test_stdio_transport_env_has_jina_api_key(self) -> None:
-        """The stdio transport env must declare JINA_API_KEY."""
-        manifest = load_plugin_manifest()
-        transports = manifest["mcpServers"]["distillery"]["transports"]
-        stdio = next((t for t in transports if t["type"] == "stdio"), None)
-        assert stdio is not None, "stdio transport not found"
-        assert "JINA_API_KEY" in stdio["env"]
-
-    def test_stdio_transport_env_has_distillery_config(self) -> None:
-        """The stdio transport env must declare DISTILLERY_CONFIG."""
-        manifest = load_plugin_manifest()
-        transports = manifest["mcpServers"]["distillery"]["transports"]
-        stdio = next((t for t in transports if t["type"] == "stdio"), None)
-        assert stdio is not None, "stdio transport not found"
-        assert "DISTILLERY_CONFIG" in stdio["env"]
-
-    def test_stdio_transport_has_install_section(self) -> None:
-        """The stdio transport must include an install guidance section."""
-        manifest = load_plugin_manifest()
-        transports = manifest["mcpServers"]["distillery"]["transports"]
-        stdio = next((t for t in transports if t["type"] == "stdio"), None)
-        assert stdio is not None, "stdio transport not found"
-        assert "install" in stdio
-        assert "command" in stdio["install"]
-
-    def test_stdio_transport_install_command_is_pip(self) -> None:
-        """The stdio transport install command must be pip-based."""
-        manifest = load_plugin_manifest()
-        transports = manifest["mcpServers"]["distillery"]["transports"]
-        stdio = next((t for t in transports if t["type"] == "stdio"), None)
-        assert stdio is not None, "stdio transport not found"
-        assert "pip" in stdio["install"]["command"]
-
-    def test_http_transport_has_url(self) -> None:
-        """The http transport must have a 'url' field."""
-        manifest = load_plugin_manifest()
-        transports = manifest["mcpServers"]["distillery"]["transports"]
-        http = next((t for t in transports if t["type"] == "http"), None)
-        assert http is not None, "http transport not found"
-        assert "url" in http
-        assert http["url"].startswith("https://")
-
-    def test_transports_have_id_and_label(self) -> None:
-        """Every transport must have 'id' and 'label' fields."""
-        manifest = load_plugin_manifest()
-        transports = manifest["mcpServers"]["distillery"]["transports"]
-        for transport in transports:
-            assert "id" in transport, f"Transport missing 'id': {transport}"
-            assert "label" in transport, f"Transport missing 'label': {transport}"
-
-    def test_transport_ids_are_unique(self) -> None:
-        """Transport 'id' values must be unique."""
-        manifest = load_plugin_manifest()
-        transports = manifest["mcpServers"]["distillery"]["transports"]
-        ids = [t["id"] for t in transports]
-        assert len(ids) == len(set(ids)), "Duplicate transport ids detected"
-
-    def test_local_transport_id_and_label(self) -> None:
-        """The stdio transport must have id='local' and label='Local (stdio)'."""
-        manifest = load_plugin_manifest()
-        transports = manifest["mcpServers"]["distillery"]["transports"]
-        stdio = next((t for t in transports if t["type"] == "stdio"), None)
-        assert stdio is not None, "stdio transport not found"
-        assert stdio["id"] == "local"
-        assert stdio["label"] == "Local (stdio)"
-
-    def test_hosted_transport_id_and_label(self) -> None:
-        """The http transport must have id='hosted' and label='Hosted (HTTP/SSE)'."""
-        manifest = load_plugin_manifest()
-        transports = manifest["mcpServers"]["distillery"]["transports"]
-        http = next((t for t in transports if t["type"] == "http"), None)
-        assert http is not None, "http transport not found"
-        assert http["id"] == "hosted"
-        assert http["label"] == "Hosted (HTTP/SSE)"
+        server = manifest["mcpServers"]["distillery"]
+        unsupported = {"required", "description", "setup", "transports", "default_transport"}
+        found = unsupported & set(server.keys())
+        assert not found, f"Unsupported fields in mcpServers.distillery: {found}"
 
 
 # ---------------------------------------------------------------------------
@@ -547,6 +411,11 @@ class TestPluginDocumentationContent:
         """docs/plugin.md must show the 'claude plugin install' command."""
         content = load_plugin_doc()
         assert "claude plugin install" in content
+
+    def test_mentions_marketplace_add_command(self) -> None:
+        """docs/plugin.md must show the 'claude plugin marketplace add' command."""
+        content = load_plugin_doc()
+        assert "claude plugin marketplace add" in content
 
     def test_mentions_pip_install(self) -> None:
         """docs/plugin.md must include pip install instructions."""
