@@ -139,9 +139,16 @@ class TestPluginManifestMetadata:
         """All required top-level keys must be present in the manifest."""
         manifest = load_plugin_manifest()
         required_keys = {
-            "$schema", "name", "version", "description",
-            "author", "homepage", "repository", "keywords",
-            "skills", "mcpServers",
+            "$schema",
+            "name",
+            "version",
+            "description",
+            "author",
+            "homepage",
+            "repository",
+            "keywords",
+            "skills",
+            "mcpServers",
         }
         for key in required_keys:
             assert key in manifest, f"Required key '{key}' missing from plugin.json"
@@ -413,9 +420,7 @@ class TestPluginDocumentationFile:
     def test_plugin_doc_starts_with_h1(self) -> None:
         """docs/plugin.md must start with an H1 heading."""
         content = load_plugin_doc()
-        first_non_empty = next(
-            (line for line in content.splitlines() if line.strip()), None
-        )
+        first_non_empty = next((line for line in content.splitlines() if line.strip()), None)
         assert first_non_empty is not None and first_non_empty.startswith("# "), (
             "docs/plugin.md has no H1 heading"
         )
@@ -429,11 +434,7 @@ class TestPluginDocumentationFile:
 class TestPluginDocumentationHeadings:
     def _get_headings(self) -> list[str]:
         content = load_plugin_doc()
-        return [
-            line.lstrip("#").strip()
-            for line in content.splitlines()
-            if line.startswith("#")
-        ]
+        return [line.lstrip("#").strip() for line in content.splitlines() if line.startswith("#")]
 
     def test_has_plugin_manifest_section(self) -> None:
         """docs/plugin.md must have a 'Plugin Manifest' section."""
@@ -482,9 +483,7 @@ class TestPluginDocumentationSkillCoverage:
         """The Available Skills table must list all six skill names."""
         content = load_plugin_doc()
         for skill_name in EXPECTED_SKILL_NAMES:
-            assert skill_name in content.lower(), (
-                f"Skill '{skill_name}' not found in plugin.md"
-            )
+            assert skill_name in content.lower(), f"Skill '{skill_name}' not found in plugin.md"
 
     def test_distill_trigger_phrases_documented(self) -> None:
         """docs/plugin.md must document trigger phrases for /distill."""

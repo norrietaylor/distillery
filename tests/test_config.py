@@ -818,9 +818,7 @@ class TestServerAuthConfigParsing:
         assert cfg.server.auth.client_id_env == "MY_GH_CLIENT_ID"
         assert cfg.server.auth.client_secret_env == "MY_GH_CLIENT_SECRET"
 
-    def test_server_auth_defaults(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_server_auth_defaults(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """When no server section is present, defaults are applied."""
         monkeypatch.chdir(tmp_path)
         monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
@@ -873,9 +871,7 @@ class TestServerAuthInvalidProvider:
 class TestServerMalformedValues:
     """Malformed server/auth values must raise, not silently coerce to defaults."""
 
-    def test_server_as_list_raises(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_server_as_list_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.chdir(tmp_path)
         monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
         yaml_content = """\

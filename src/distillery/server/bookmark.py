@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import hashlib
 import html
 import re
 from dataclasses import dataclass
-from typing import Optional
 from urllib.parse import urlparse
 
 import httpx
@@ -16,8 +14,8 @@ from distillery.store.protocol import DistilleryStore
 
 from .ssrf import SSRFError, validate_url
 
-
 # ── Request / Response types ──────────────────────────────────────────────────
+
 
 @dataclass
 class BookmarkRequest:
@@ -34,8 +32,8 @@ class BookmarkResult:
     summary: str
     tags: list[str]
     duplicate: bool = False
-    existing_id: Optional[str] = None
-    similarity: Optional[float] = None
+    existing_id: str | None = None
+    similarity: float | None = None
 
 
 @dataclass
@@ -45,6 +43,7 @@ class DuplicateFound:
 
 
 # ── Service ───────────────────────────────────────────────────────────────────
+
 
 class BookmarkService:
     """
@@ -95,11 +94,14 @@ class BookmarkService:
 
         # 5. Build tags
         domain = _domain_tag(req.url)
-        tags = list({
-            f"source/bookmark/{domain}",
-            *req.tags,
-            *(f"project/{req.project}/references",) if req.project else (),
-        })
+        project_tags = [f"project/{req.project}/references"] if req.project else []
+        tags = list(
+            {
+                f"source/bookmark/{domain}",
+                *req.tags,
+                *project_tags,
+            }
+        )
 
         # 6. Store
         entry = Entry(
@@ -123,11 +125,7 @@ class BookmarkService:
 
     async def _fetch(self, url: str) -> str:
         """Fetch URL and return plain-text content (HTML stripped)."""
-        headers = {
-            "User-Agent": (
-                "Distillery/0.2 (+https://github.com/norrietaylor/distillery)"
-            )
-        }
+        headers = {"User-Agent": ("Distillery/0.2 (+https://github.com/norrietaylor/distillery)")}
         async with httpx.AsyncClient(follow_redirects=True, timeout=15) as client:
             response = await client.get(url, headers=headers)
             response.raise_for_status()
@@ -154,7 +152,7 @@ class BookmarkService:
         )
         return message.content[0].text  # type: ignore[union-attr]
 
-    async def _check_dup(self, url: str, summary: str) -> Optional[DuplicateFound]:
+    async def _check_dup(self, url: str, summary: str) -> DuplicateFound | None:
         """Return DuplicateFound if a similar entry already exists."""
         query = f"{url}\n{summary}"
         results = await self._store.find_similar(query, threshold=0.80)

@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 import yaml
 
@@ -36,7 +35,7 @@ class GatewayConfig:
     port: int = 8080
 
     # Resolved at load time — not from YAML
-    _anthropic_api_key: Optional[str] = field(default=None, init=False, repr=False)
+    _anthropic_api_key: str | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self._anthropic_api_key = os.environ.get(self.anthropic_api_key_env)
@@ -48,11 +47,11 @@ class GatewayConfig:
             )
 
     @property
-    def anthropic_api_key(self) -> Optional[str]:
+    def anthropic_api_key(self) -> str | None:
         return self._anthropic_api_key
 
     @classmethod
-    def load(cls, path: Path) -> "GatewayConfig":
+    def load(cls, path: Path) -> GatewayConfig:
         with path.open() as f:
             raw = yaml.safe_load(f)
 
@@ -83,7 +82,7 @@ class GatewayConfig:
             port=int(raw.get("port", 8080)),
         )
 
-    def get_user(self, token: str) -> Optional[UserConfig]:
+    def get_user(self, token: str) -> UserConfig | None:
         """Return the UserConfig for a given bearer token, or None if not found."""
         for user in self.users:
             if user.token == token:

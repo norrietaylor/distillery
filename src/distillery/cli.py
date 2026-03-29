@@ -347,8 +347,7 @@ def _cmd_eval(
         from distillery.eval.scenarios import load_scenarios_from_dir
     except ImportError as exc:
         print(
-            f"Error: eval dependencies not installed. "
-            f"Run: pip install 'distillery[eval]'\n{exc}",
+            f"Error: eval dependencies not installed. Run: pip install 'distillery[eval]'\n{exc}",
             file=sys.stderr,
         )
         return 1
@@ -398,23 +397,25 @@ def _cmd_eval(
     if fmt == "json":
         output = []
         for r in results:
-            output.append({
-                "name": r.scenario_name,
-                "skill": r.skill,
-                "passed": r.passed,
-                "latency_ms": round(r.performance.total_latency_ms, 1),
-                "input_tokens": r.performance.input_tokens,
-                "output_tokens": r.performance.output_tokens,
-                "tool_call_count": r.performance.tool_call_count,
-                "tools_called": r.effectiveness.tools_called,
-                "failure_reasons": r.effectiveness.failure_reasons,
-            })
+            output.append(
+                {
+                    "name": r.scenario_name,
+                    "skill": r.skill,
+                    "passed": r.passed,
+                    "latency_ms": round(r.performance.total_latency_ms, 1),
+                    "input_tokens": r.performance.input_tokens,
+                    "output_tokens": r.performance.output_tokens,
+                    "tool_call_count": r.performance.tool_call_count,
+                    "tools_called": r.effectiveness.tools_called,
+                    "failure_reasons": r.effectiveness.failure_reasons,
+                }
+            )
         summary = {"results": output, "passed": passed, "total": total, "pass_rate": pass_rate}
         print(json.dumps(summary, indent=2))
     else:
         for r in results:
             print(r.summary())
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"Results: {passed}/{total} passed ({pass_rate:.0%})")
 
     # Save baseline if requested.
@@ -463,6 +464,7 @@ def _cmd_gateway(
     """Start the Distillery HTTP Gateway."""
     try:
         import uvicorn
+
         from distillery.server.app import create_app
         from distillery.server.config import GatewayConfig
     except ImportError:

@@ -59,9 +59,7 @@ def _make_store(entries: list[Entry]) -> AsyncMock:
     """Return a mock DistilleryStore that yields *entries* from list_entries."""
     store = AsyncMock()
 
-    async def _list_entries(
-        filters: dict | None, limit: int, offset: int
-    ) -> list[Entry]:
+    async def _list_entries(filters: dict | None, limit: int, offset: int) -> list[Entry]:
         batch = entries[offset : offset + limit]
         return batch
 
@@ -82,7 +80,9 @@ class TestInterestProfile:
         assert profile.tracked_repos == []
         assert profile.expertise_areas == []
         assert profile.watched_sources == []
-        assert profile.suggestion_context == ""  # populated by extract(), empty on direct construction
+        assert (
+            profile.suggestion_context == ""
+        )  # populated by extract(), empty on direct construction
 
     def test_entry_count_default_zero(self) -> None:
         profile = InterestProfile()
@@ -345,9 +345,7 @@ class TestInterestExtractorExtract:
             _make_entry(tags=["current-topic"]),
         ]
         store = _make_store(entries)
-        ext = InterestExtractor(
-            store=store, feeds_config=_make_feeds_config(), recency_days=90
-        )
+        ext = InterestExtractor(store=store, feeds_config=_make_feeds_config(), recency_days=90)
         profile = await ext.extract()
         tag_names = [t for t, _ in profile.top_tags]
         assert "current-topic" in tag_names
@@ -406,9 +404,7 @@ class TestHandleInterests:
         from distillery.mcp.server import _handle_interests
 
         cfg = DistilleryConfig()
-        result = await _handle_interests(
-            store=AsyncMock(), config=cfg, arguments={"top_n": -5}
-        )
+        result = await _handle_interests(store=AsyncMock(), config=cfg, arguments={"top_n": -5})
         data = json.loads(result[0].text)
         assert data.get("error") is True
 
@@ -429,9 +425,7 @@ class TestHandleInterests:
 
         store = _make_store([_make_entry(tags=["python"])])
         cfg = DistilleryConfig()
-        result = await _handle_interests(
-            store=store, config=cfg, arguments={"recency_days": 30}
-        )
+        result = await _handle_interests(store=store, config=cfg, arguments={"recency_days": 30})
         data = json.loads(result[0].text)
         assert "error" not in data or not data.get("error")
 
@@ -516,9 +510,7 @@ class TestHandleSuggestSources:
             ]
         )
         cfg = DistilleryConfig()
-        cfg.feeds.sources = [
-            FeedSourceConfig(url="tiangolo/fastapi", source_type="github")
-        ]
+        cfg.feeds.sources = [FeedSourceConfig(url="tiangolo/fastapi", source_type="github")]
         result = await _handle_suggest_sources(store=store, config=cfg, arguments={})
         data = json.loads(result[0].text)
         suggestion_urls = [s["url"] for s in data["suggestions"]]

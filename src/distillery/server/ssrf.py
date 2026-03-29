@@ -6,7 +6,6 @@ import ipaddress
 import socket
 from urllib.parse import urlparse
 
-
 # RFC-1918 and other non-routable ranges
 _BLOCKED_NETWORKS = [
     ipaddress.ip_network("10.0.0.0/8"),
@@ -14,8 +13,8 @@ _BLOCKED_NETWORKS = [
     ipaddress.ip_network("192.168.0.0/16"),
     ipaddress.ip_network("127.0.0.0/8"),
     ipaddress.ip_network("169.254.0.0/16"),  # link-local
-    ipaddress.ip_network("::1/128"),          # IPv6 loopback
-    ipaddress.ip_network("fc00::/7"),         # IPv6 unique local
+    ipaddress.ip_network("::1/128"),  # IPv6 loopback
+    ipaddress.ip_network("fc00::/7"),  # IPv6 unique local
 ]
 
 _ALLOWED_SCHEMES = {"http", "https"}

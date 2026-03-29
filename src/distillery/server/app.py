@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import importlib.metadata
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -48,7 +48,7 @@ def create_app(gateway_config: GatewayConfig) -> FastAPI:
 
 async def _get_user(
     request: Request,
-    authorization: Annotated[Optional[str], Header()] = None,
+    authorization: Annotated[str | None, Header()] = None,
 ) -> UserConfig:
     gateway_config: GatewayConfig = request.app.state.gateway_config
 
@@ -103,7 +103,7 @@ def _api_router() -> Any:
 
     class WatchPayload(BaseModel):
         url: HttpUrl
-        type: Optional[str] = None   # auto-detect if omitted
+        type: str | None = None  # auto-detect if omitted
         interval: str = "6h"
         tags: list[str] = []
         project: str = ""
@@ -145,7 +145,9 @@ def _api_router() -> Any:
         try:
             result = await service.bookmark(req)
         except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+            ) from exc
 
         if result.duplicate:
             raise HTTPException(
