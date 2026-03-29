@@ -662,6 +662,9 @@
     <li class="fade-in">New team members start from zero because context evaporated</li>
   </ul>
   <p class="fade-in" style="margin-top: 32px; color: var(--amber); font-size: 24px; font-weight: 500;">
+    Knowledge gets created, then lost. Decisions get relitigated. New hires ramp slower.
+  </p>
+  <p class="fade-in" style="margin-top: 16px; color: var(--text-muted); font-size: 20px;">
     The problem isn't generating knowledge. It's retaining it.
   </p>
 </div>
@@ -1077,23 +1080,22 @@ $ distillery-mcp --transport http --port 8000
 <!-- SLIDE 12: Roadmap -->
 <!-- ============================================================ -->
 <div class="slide left" id="s12">
-  <h2 class="fade-in">What's next</h2>
+  <h2 class="fade-in">Status &amp; what's next</h2>
   <div style="height: 20px;"></div>
   <div class="timeline">
     <div class="timeline-item done fade-in">
-      <h3>Phase 1 &mdash; Foundation <span style="color: var(--green); font-size: 16px; font-weight: 400;">Complete</span></h3>
-      <p>Storage layer, 9 skills, classification pipeline, semantic deduplication, 21 MCP tools.</p>
+      <h3>Phase 1 &mdash; Foundation <span style="color: var(--green); font-size: 16px; font-weight: 400;">✓ Shipped</span></h3>
+      <p>9 skills, 21 MCP tools, DuckDB + HNSW, classification pipeline, semantic deduplication. 860+ tests passing.</p>
+    </div>
+    <div class="timeline-item done fade-in">
+      <h3>Phase 3 &mdash; Ambient Intelligence <span style="color: var(--green); font-size: 16px; font-weight: 400;">✓ Shipped</span></h3>
+      <p>Feed polling (GitHub + RSS), relevance scoring, interest extraction. <span style="color: var(--text);">/radar</span>, <span style="color: var(--text);">/watch</span>, <span style="color: var(--text);">/tune</span> live.</p>
     </div>
     <div class="timeline-item fade-in">
       <h3>Phase 2 &mdash; Team Expansion <span style="color: var(--amber); font-size: 16px; font-weight: 400;">In Progress</span></h3>
-      <p>Infrastructure shipped: HTTP transport, GitHub OAuth, MotherDuck, namespace taxonomy.<br>
-      Team skills up next: <span style="color: var(--text);">/whois</span>, <span style="color: var(--text);">/digest</span>, <span style="color: var(--text);">/investigate</span>, <span style="color: var(--text);">/gh-sync</span>, <span style="color: var(--text);">/briefing</span>, <span style="color: var(--text);">/process</span>.<br>
-      Elasticsearch migration. Access control. Session capture hooks.</p>
-    </div>
-    <div class="timeline-item done fade-in">
-      <h3>Phase 3 &mdash; Ambient Intelligence <span style="color: var(--green); font-size: 16px; font-weight: 400;">Complete</span></h3>
-      <p>The knowledge base watches the world. <span style="color: var(--text);">/radar</span>, <span style="color: var(--text);">/watch</span>, <span style="color: var(--text);">/tune</span> shipped.<br>
-      Feed polling (GitHub + RSS), relevance scoring pipeline, interest extractor.</p>
+      <p><strong style="color: var(--green);">Infrastructure shipped:</strong> HTTP transport, GitHub OAuth, MotherDuck shared storage, namespace taxonomy.<br>
+      <strong>Team skills up next:</strong> <span style="color: var(--text);">/whois</span> (expertise map), <span style="color: var(--text);">/digest</span> (activity summaries), <span style="color: var(--text);">/investigate</span> (deep domain context), <span style="color: var(--text);">/gh-sync</span>, <span style="color: var(--text);">/briefing</span>, <span style="color: var(--text);">/process</span>.<br>
+      Also: Elasticsearch backend, access control, session capture hooks.</p>
     </div>
   </div>
 </div>
@@ -1172,7 +1174,7 @@ For each new feed item:
 <!-- SLIDE 15: Differentiators -->
 <!-- ============================================================ -->
 <div class="slide" id="s15">
-  <h2 class="fade-in">Why this is different</h2>
+  <h2 class="fade-in">What makes this different</h2>
   <div style="height: 24px;"></div>
   <div class="grid-2 fade-in">
     <div class="card">
@@ -1184,17 +1186,19 @@ For each new feed item:
         <li>Flat document list</li>
         <li>Grows noisy over time</li>
         <li>Individual silos</li>
+        <li>Passive</li>
       </ul>
     </div>
     <div class="card accent">
       <h3>Distillery</h3>
       <ul>
-        <li>Lives in your coding tool</li>
+        <li>Lives inside Claude Code</li>
         <li>LLM auto-classification</li>
         <li>Semantic vector search</li>
         <li>Multi-pass synthesis with citations</li>
         <li>Semantic dedup keeps it clean</li>
         <li>Team-shared by default</li>
+        <li>Watches external sources for you</li>
       </ul>
     </div>
   </div>
@@ -1210,13 +1214,21 @@ For each new feed item:
   <h1 class="fade-in">Distillery</h1>
   <p class="subtitle fade-in">Refine raw information into concentrated team knowledge.</p>
   <div style="height: 40px;"></div>
+  <div class="fade-in" style="max-width: 800px;">
+    <p style="font-size: 20px; line-height: 1.6; margin-bottom: 24px;">
+      Start capturing knowledge where work happens. No separate app. No context switching.
+    </p>
+    <p style="font-size: 18px; color: var(--text-muted); margin-bottom: 32px;">
+      Deploy for a single user in minutes. Scale to your team when ready.
+    </p>
+  </div>
   <div class="grid-3 fade-in" style="max-width: 700px;">
     <div style="text-align: center;">
       <p class="small" style="margin-bottom: 4px; color: var(--amber);">Install</p>
       <p style="font-family: 'JetBrains Mono', monospace; font-size: 15px;">pip install -e .</p>
     </div>
     <div style="text-align: center;">
-      <p class="small" style="margin-bottom: 4px; color: var(--amber);">Docs</p>
+      <p class="small" style="margin-bottom: 4px; color: var(--amber);">Setup Guide</p>
       <p style="font-size: 15px;">docs/mcp-setup.md</p>
     </div>
     <div style="text-align: center;">
