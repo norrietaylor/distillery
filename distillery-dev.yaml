@@ -1,0 +1,16 @@
+storage:
+  backend: duckdb
+  database_path: "/tmp/distillery-dev.db"
+
+embedding:
+  provider: jina
+  model: jina-embeddings-v3
+  dimensions: 1024
+  api_key_env: JINA_API_KEY
+
+team:
+  name: distillery-dev
+
+server:
+  auth:
+    provider: none            # open access for dev testing
