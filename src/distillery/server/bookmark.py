@@ -150,12 +150,13 @@ class BookmarkService:
             max_tokens=512,
             messages=[{"role": "user", "content": prompt}],
         )
-        return message.content[0].text  # type: ignore[union-attr]
+        text: str = message.content[0].text
+        return text
 
     async def _check_dup(self, url: str, summary: str) -> DuplicateFound | None:
         """Return DuplicateFound if a similar entry already exists."""
         query = f"{url}\n{summary}"
-        results = await self._store.find_similar(query, threshold=0.80)
+        results = await self._store.find_similar(query, threshold=0.80, limit=5)
         if results:
             top = results[0]
             return DuplicateFound(

@@ -93,6 +93,7 @@ ignore_missing_imports = true
 # are not installed in the base dev environment.
 module = "distillery.server.*"
 ignore_missing_imports = true
+disable_error_code = ["import-not-found", "untyped-decorator"]
 
 [tool.ruff]
 line-length = 100

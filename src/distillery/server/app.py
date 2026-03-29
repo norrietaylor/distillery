@@ -183,7 +183,8 @@ def _api_router() -> Any:
     async def db_status(request: Request, user: AuthUser) -> dict[str, Any]:
         gateway_config: GatewayConfig = request.app.state.gateway_config
         store = await _get_store(user, gateway_config)
-        return await store.metrics_overview()
+        entries = await store.list_entries(filters=None, limit=0, offset=0)
+        return {"entry_count": len(entries), "db_path": user.db_path}
 
     return router
 
