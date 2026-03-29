@@ -20,6 +20,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -850,6 +851,23 @@ class DuckDBStore:
                 val = datetime.fromisoformat(val)
             clauses.append("created_at <= ?")
             params.append(val)
+
+        # Support metadata path filters like "metadata.external_id".
+        # DuckDB stores metadata as a JSON string; use json_extract_string
+        # to pull out the nested value for exact-match comparison.
+        # Whitelist path segments to alphanumeric + underscore to prevent
+        # SQL injection via crafted filter keys.  Fail closed on invalid
+        # paths so callers cannot accidentally get unfiltered results.
+        for key, val in filters.items():
+            if key.startswith("metadata."):
+                json_path = key.split(".", 1)[1]
+                if not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]*", json_path):
+                    raise ValueError(
+                        f"Invalid metadata filter path segment: {json_path!r}. "
+                        "Only alphanumeric characters and underscores are allowed."
+                    )
+                clauses.append(f"json_extract_string(metadata, '$.{json_path}') = ?")
+                params.append(str(val))
 
         return clauses, params
 

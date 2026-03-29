@@ -105,13 +105,94 @@ distillery_watch(action="remove", url="<url>")
 
 If the tool returns an error, display it clearly (see Rules below).
 
-### Step 4: Confirm
+### Step 4: Ensure Auto-Poll Schedule (after `add` only)
+
+After a successful `add` action, set up automatic polling so the user doesn't have to manually trigger `distillery_poll`. Only create the schedule if one doesn't already exist.
+
+**4a. Check for existing schedule:**
+
+Use `CronList` to check if a poll cron job already exists in this session. Look for any job whose prompt contains `distillery_poll`. If one already exists, skip to Step 5 — do not create a duplicate.
+
+**4b. Determine scheduling mechanism:**
+
+Read the `.mcp.json` file in the project root to determine the Distillery MCP server URL:
+
+- If the URL contains `localhost`, `127.0.0.1`, or the transport is `stdio` → **local server** → use `CronCreate`
+- If the URL is a remote host (e.g., `*.fastmcp.app`, any non-localhost domain) → **deployed server** → use `RemoteTrigger`
+
+**4c. Create the schedule:**
+
+**For local servers (CronCreate):**
+
+```
+CronCreate(
+  cron="23 * * * *",
+  prompt="Use distillery_poll to poll all configured feed sources. Report a one-line summary of items fetched and stored.",
+  recurring=true,
+  durable=true
+)
+```
+
+- Pick an off-peak minute (not :00 or :30) to avoid fleet congestion
+- Use `durable: true` so the job survives Claude Code restarts
+- Note: durable cron jobs auto-expire after 7 days
+
+Display:
+
+```
+Auto-poll scheduled: feeds will be polled every hour while Claude Code is active.
+(Durable cron job — survives restarts, expires after 7 days.)
+```
+
+**For deployed servers (RemoteTrigger):**
+
+```
+RemoteTrigger(
+  action="create",
+  body={
+    "name": "distillery-feed-poll",
+    "description": "Poll all Distillery feed sources for new items",
+    "schedule": "23 * * * *",
+    "prompt": "Use distillery_poll to poll all configured feed sources. Report a one-line summary of items fetched and stored.",
+    "max_turns": 3
+  }
+)
+```
+
+Display:
+
+```
+Auto-poll scheduled: feeds will be polled every hour via remote trigger.
+Trigger ID: <trigger_id>
+```
+
+If `RemoteTrigger` fails (e.g., not authenticated), fall back to `CronCreate` and note the limitation:
+
+```
+Remote trigger unavailable — falling back to local cron.
+Auto-poll scheduled: feeds will be polled every hour while Claude Code is active.
+```
+
+**4d. On `remove` — clean up schedule if no sources remain:**
+
+After a successful `remove`, check the updated sources list. If it is now empty (no sources configured), delete the auto-poll schedule:
+
+- For CronCreate: use `CronDelete` with the stored job ID
+- For RemoteTrigger: use `RemoteTrigger(action="list")` to find the `distillery-feed-poll` trigger, then `RemoteTrigger(action="update", trigger_id=..., body={"paused": true})`
+
+Display:
+
+```
+Auto-poll paused: no feed sources remaining.
+```
+
+### Step 5: Confirm
 
 Display results based on the action performed.
 
 **For `list`:** Display the source table (see Output Format).
 
-**For `add`:** Display a confirmation with the newly added source details, then show the updated source table.
+**For `add`:** Display a confirmation with the newly added source details, then show the updated source table, then the auto-poll status from Step 4.
 
 **For `remove`:** Confirm whether the source was found and removed, then show the updated source table.
 
@@ -179,6 +260,9 @@ No source with URL "<url>" was found in the registry.
 - Do not proceed with `add` without a URL; prompt the user if missing
 - Always show the updated source table after `add` or `remove`
 - Always include the persistence reminder when changes are made
+- **Auto-poll scheduling**: After a successful `add`, always check `CronList` before creating a new schedule — never create duplicate poll jobs
+- **Schedule cleanup**: After a successful `remove` that leaves zero sources, pause or delete the auto-poll schedule
+- **Scheduling fallback**: If `RemoteTrigger` fails for a deployed server, fall back to `CronCreate` gracefully
 - If `distillery_watch` returns an error, display it clearly:
 
 ```

@@ -37,6 +37,26 @@
       "name": "classify",
       "description": "Classifies knowledge entries and manages the manual review queue. Triggered by: 'classify', 'classify entry', 'review queue', 'triage inbox', or '/classify [entry_id|--inbox|--review]'.",
       "path": ".claude/skills/classify/SKILL.md"
+    },
+    {
+      "name": "watch",
+      "description": "Manages monitored feed sources with auto-poll scheduling. Triggered by: 'watch', '/watch list', '/watch add <url>', '/watch remove <url>'.",
+      "path": ".claude/skills/watch/SKILL.md"
+    },
+    {
+      "name": "radar",
+      "description": "Generates an ambient intelligence digest from recent feed entries. Triggered by: 'radar', '/radar', 'what's new', 'show my digest'.",
+      "path": ".claude/skills/radar/SKILL.md"
+    },
+    {
+      "name": "tune",
+      "description": "Displays and adjusts feed relevance thresholds. Triggered by: 'tune', '/tune', 'adjust thresholds'.",
+      "path": ".claude/skills/tune/SKILL.md"
+    },
+    {
+      "name": "setup",
+      "description": "Onboarding wizard — verifies MCP connectivity, detects transport, registers MCP connector, configures auto-poll. Triggered by: 'setup', '/setup', 'configure distillery'.",
+      "path": ".claude/skills/setup/SKILL.md"
     }
   ],
   "mcpServers": {
