@@ -1130,6 +1130,36 @@ def create_server(
             arguments=arguments,
         )
 
+    # -----------------------------------------------------------------
+    # /health endpoint — no authentication required
+    # -----------------------------------------------------------------
+
+    @server.custom_route("/health", methods=["GET"], name="health")
+    async def health_check(request: Any) -> Any:
+        """Return server health status.
+
+        This endpoint is always unauthenticated and returns a JSON object
+        with ``status``, ``vss_available``, and ``store_initialized``.
+        """
+        from starlette.responses import JSONResponse
+
+        store_obj = _shared.get("store")
+        vss = False
+        initialized = False
+        if store_obj is not None:
+            from distillery.store.duckdb import DuckDBStore
+
+            if isinstance(store_obj, DuckDBStore):
+                vss = store_obj.vss_available
+                initialized = store_obj._initialized
+        return JSONResponse(
+            {
+                "status": "ok",
+                "vss_available": vss,
+                "store_initialized": initialized,
+            }
+        )
+
     @server.tool
     async def distillery_rescore(
         ctx: Context,

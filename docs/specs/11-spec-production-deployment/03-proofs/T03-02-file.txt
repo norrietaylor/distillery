@@ -1,0 +1,20 @@
+Type: file
+Command: ls -la Dockerfile .dockerignore src/distillery/mcp/lambda_handler.py distillery.lambda.yaml
+Expected: All required files exist
+Timestamp: 2026-03-28T00:00:00Z
+
+Output:
+-rw-rw-r-- 1 norrie norrie  583 Mar 28 16:04 .dockerignore
+-rw-rw-r-- 1 norrie norrie 1235 Mar 28 16:04 Dockerfile
+-rw-rw-r-- 1 norrie norrie  832 Mar 28 16:04 distillery.lambda.yaml
+-rw-rw-r-- 1 norrie norrie 3676 Mar 28 16:06 src/distillery/mcp/lambda_handler.py
+
+Dockerfile contents:
+  FROM public.ecr.aws/lambda/python:3.12
+  CMD ["distillery.mcp.lambda_handler.handler"]
+
+lambda_handler.py exports:
+  handler(event, context) -> dict  [AWS Lambda entrypoint]
+  _build_mangum_handler()           [lazy init, callable once per cold start]
+
+Status: PASS

@@ -16,6 +16,7 @@ are implemented below (T02.4).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -305,7 +306,7 @@ class DuckDBStore:
         degrades to brute-force cosine distance which is still correct.
         """
         if not self._vss_available:
-            logger.info("Skipping HNSW index creation (VSS extension not available)")
+            logger.warning("HNSW index not created (VSS extension not available)")
             return
         try:
             conn.execute(_CREATE_HNSW_INDEX)
@@ -392,6 +393,13 @@ class DuckDBStore:
         conn.execute(_ADD_ACCESSED_AT_COLUMN)
         logger.debug("accessed_at column ready on entries table")
 
+    # Transient exceptions that trigger the outer connection retry loop.
+    _TRANSIENT_EXCEPTIONS: tuple[type[Exception], ...] = (
+        duckdb.IOException,
+        duckdb.ConnectionException,
+        duckdb.HTTPException,
+    )
+
     def _sync_initialize(self) -> None:
         """
         Initialize the DuckDB connection and ensure the database is ready for use.
@@ -401,46 +409,80 @@ class DuckDBStore:
         validates or records embedding model metadata, and ensures the HNSW
         index and ``accessed_at`` column exist.
 
-        Write-write conflicts (common when multiple stateless HTTP sessions
-        start concurrently) are retried automatically by wrapping the entire
-        initialization write path in a retry loop.
+        Transient connection failures (IOException, ConnectionException,
+        HTTPException) are retried up to 3 times with exponential backoff
+        (1 s, 2 s, 4 s).  Write-write conflicts (common when multiple
+        stateless HTTP sessions start concurrently) are retried in an
+        inner loop.
         """
         import time
 
-        conn = self._open_connection()
+        backoff_delays = [1.0, 2.0, 4.0]
+        last_exc: Exception | None = None
 
-        # httpfs must be loaded before vss when using S3 storage.
-        if self._is_s3_path(self._db_path):
-            self._setup_httpfs(conn)
-
-        self._setup_vss(conn)
-
-        # Wrap the entire initialization write path in a retry loop to handle
-        # write-write conflicts during concurrent initialization. All the wrapped
-        # operations use CREATE IF NOT EXISTS or transactional upsert patterns,
-        # making retries safe.
-        for attempt in range(3):
+        for outer_attempt in range(3):
+            conn = None
             try:
-                self._create_schema(conn)
-                self._add_accessed_at_column(conn)
-                self._create_log_tables(conn)
-                self._create_meta_table(conn)
-                self._validate_or_record_meta(conn)
-                self._create_index(conn)
-                break  # Success - exit retry loop
-            except (duckdb.TransactionException, duckdb.ConstraintException):
-                if attempt < 2:
-                    logger.warning(
-                        "Write-write conflict during initialization (attempt %d/3), retrying…",
-                        attempt + 1,
-                    )
-                    time.sleep(0.1 * (attempt + 1))
-                else:
-                    raise
+                conn = self._open_connection()
 
-        self._conn = conn
-        self._initialized = True
-        logger.info("DuckDBStore initialized at %s", self._db_path)
+                # httpfs must be loaded before vss when using S3 storage.
+                if self._is_s3_path(self._db_path):
+                    self._setup_httpfs(conn)
+
+                self._setup_vss(conn)
+
+                # Wrap the entire initialization write path in a retry loop to
+                # handle write-write conflicts during concurrent initialization.
+                # All the wrapped operations use CREATE IF NOT EXISTS or
+                # transactional upsert patterns, making retries safe.
+                for attempt in range(3):
+                    try:
+                        self._create_schema(conn)
+                        self._add_accessed_at_column(conn)
+                        self._create_log_tables(conn)
+                        self._create_meta_table(conn)
+                        self._validate_or_record_meta(conn)
+                        self._create_index(conn)
+                        break  # Success - exit inner retry loop
+                    except (duckdb.TransactionException, duckdb.ConstraintException):
+                        if attempt < 2:
+                            logger.warning(
+                                "Write-write conflict during initialization "
+                                "(attempt %d/3), retrying…",
+                                attempt + 1,
+                            )
+                            time.sleep(0.1 * (attempt + 1))
+                        else:
+                            raise
+
+                self._conn = conn
+                self._initialized = True
+                logger.info("DuckDBStore initialized at %s", self._db_path)
+                return  # Success -- exit outer retry loop
+
+            except self._TRANSIENT_EXCEPTIONS as exc:
+                last_exc = exc
+                if outer_attempt < 2:
+                    delay = backoff_delays[outer_attempt]
+                    logger.warning(
+                        "Transient connection error during initialization "
+                        "(attempt %d/3: %s), retrying in %.0fs…",
+                        outer_attempt + 1,
+                        exc,
+                        delay,
+                    )
+                    time.sleep(delay)
+                # On last attempt, fall through to raise below.
+            finally:
+                # Close the connection on failure before retrying — avoid
+                # leaking partially-initialized connections.
+                if conn is not None and not self._initialized:
+                    with contextlib.suppress(Exception):
+                        conn.close()
+
+        # All retries exhausted.
+        assert last_exc is not None  # noqa: S101
+        raise last_exc
 
     # ------------------------------------------------------------------
     # Public async API
@@ -478,6 +520,11 @@ class DuckDBStore:
                 "DuckDBStore has not been initialized. Call 'await store.initialize()' first."
             )
         return self._conn
+
+    @property
+    def vss_available(self) -> bool:
+        """Return whether the VSS extension was loaded successfully."""
+        return self._vss_available
 
     @property
     def embedding_provider(self) -> EmbeddingProvider:

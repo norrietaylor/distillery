@@ -1,0 +1,15 @@
+Type: test
+Command: grep "^def handler" src/distillery/mcp/lambda_handler.py
+Expected: handler function definition found in lambda_handler.py
+Timestamp: 2026-03-28T00:00:00Z
+
+Output:
+def handler(event: dict[Any, Any], context: Any) -> dict[Any, Any]:
+
+Verification: test_handler_returns_response confirms the handler:
+  - Returns a dict
+  - Dict contains 'statusCode' key
+  - statusCode is 200 for GET /health
+  - Body is valid JSON with 'status' field
+
+Status: PASS

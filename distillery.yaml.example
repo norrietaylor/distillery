@@ -78,6 +78,10 @@
 #    # s3_endpoint: https://my-minio.example.com
 #
 # 3. MotherDuck (DuckDB cloud service)
+#    ⚠️  LIMITATION: MotherDuck does NOT support the VSS extension. HNSW vector
+#    index creation will fail, so semantic search will not work. Use S3-backed
+#    DuckDB (option 2) for hosted deployments that require search.
+#
 #    Requires a MotherDuck token in the MOTHERDUCK_TOKEN environment variable
 #    (or the env var named by motherduck_token_env below).
 #

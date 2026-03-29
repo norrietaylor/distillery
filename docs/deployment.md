@@ -249,30 +249,12 @@ distillery-mcp --transport http --host 127.0.0.1 --port 8000
 Warning: This mode allows unauthenticated access. Binding to `127.0.0.1` ensures
 the server is only reachable from localhost. Use only for local development.
 
-### Production with MotherDuck
+### Production with S3 storage (recommended for hosted deployments)
 
-```yaml
-server:
-  auth:
-    provider: github
-    client_id_env: GITHUB_CLIENT_ID
-    client_secret_env: GITHUB_CLIENT_SECRET
-
-storage:
-  backend: motherduck
-  database_path: md:distillery
-```
-
-Set environment variables:
-```bash
-export GITHUB_CLIENT_ID="github_oauth_client_id"
-export GITHUB_CLIENT_SECRET="github_oauth_client_secret"
-export DISTILLERY_BASE_URL="https://distillery.myteam.com"
-export MOTHERDUCK_TOKEN="your_motherduck_token"
-export JINA_API_KEY="your_jina_api_key"
-```
-
-### Production with S3 storage
+S3-backed DuckDB is the recommended storage backend for hosted deployments (FastMCP Cloud,
+containers, PaaS). It uses standard DuckDB with the `httpfs` extension, so the VSS extension
+and HNSW vector indexes work normally. The database file persists on S3 across container
+restarts and cold starts.
 
 ```yaml
 server:
@@ -287,7 +269,236 @@ storage:
   s3_region: us-east-1
 ```
 
-S3 credentials are resolved from AWS environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`) or IAM roles.
+Set environment variables:
+```bash
+export GITHUB_CLIENT_ID="github_oauth_client_id"
+export GITHUB_CLIENT_SECRET="github_oauth_client_secret"
+export DISTILLERY_BASE_URL="https://distillery.myteam.com"
+export AWS_ACCESS_KEY_ID="your_aws_access_key"
+export AWS_SECRET_ACCESS_KEY="your_aws_secret_key"
+export JINA_API_KEY="your_jina_api_key"
+```
+
+S3 credentials can also be resolved from IAM roles when running on AWS infrastructure
+(no env vars needed).
+
+GCS is also supported via the S3-compatible API:
+
+```yaml
+storage:
+  backend: duckdb
+  database_path: gs://my-bucket/distillery/distillery.db
+  s3_endpoint: https://storage.googleapis.com
+```
+
+GCS authentication uses HMAC keys (`GCS_ACCESS_KEY_ID` + `GCS_SECRET`).
+
+### MotherDuck (not recommended for hosted deployments)
+
+> **Known limitation:** MotherDuck does not support the DuckDB VSS extension. HNSW vector
+> index creation will fail with `Unknown index type: HNSW`. This means semantic search
+> (which relies on vector similarity) will not work on MotherDuck. Use S3-backed DuckDB
+> instead for hosted deployments that require search.
+
+MotherDuck can still be used if you do not need vector search (e.g., for simple CRUD
+operations with `distillery_store`, `distillery_get`, `distillery_list`):
+
+```yaml
+storage:
+  backend: motherduck
+  database_path: md:distillery
+```
+
+```bash
+export MOTHERDUCK_TOKEN="your_motherduck_token"
+```
+
+## AWS Lambda Deployment
+
+Distillery can be deployed to AWS Lambda for serverless, auto-scaling hosting. This section covers the Terraform-based infrastructure setup and deployment process.
+
+### AWS Infrastructure Setup
+
+The Distillery project includes Terraform configuration in `terraform/` to provision all required AWS resources:
+
+- **S3 Bucket** — Stores the DuckDB database file, with versioning and encryption
+- **ECR Repository** — Stores the Distillery Docker container image
+- **Lambda Function** — Runs the Distillery MCP server with 2048MB memory, 300s timeout, and provisioned concurrency
+- **IAM Role** — Execution role with least-privilege policies for S3 and Secrets Manager access
+- **Secrets Manager** — Stores GitHub OAuth credentials and embedding API keys
+- **Lambda Function URL** or **API Gateway v2** — HTTPS endpoint for the MCP server (configurable via `endpoint_type` variable)
+
+#### Prerequisites
+
+- AWS account with appropriate permissions
+- Terraform installed (1.0+)
+- AWS CLI configured with credentials
+- GitHub OAuth App credentials (see Step 1 above)
+
+#### Bootstrap (One-Time)
+
+Before applying Terraform, create the state backend infrastructure:
+
+```bash
+cd terraform/bootstrap
+terraform init
+terraform apply
+# Output: S3 bucket name and DynamoDB table name for remote state
+# Copy these values to terraform/backend.tf
+```
+
+Record the S3 bucket and DynamoDB table names, then update `terraform/backend.tf`:
+
+```hcl
+terraform {
+  backend "s3" {
+    bucket         = "distillery-terraform-state-<account-id>"  # From bootstrap
+    key            = "distillery.tfstate"
+    region         = "us-east-1"
+    encrypt        = true
+    dynamodb_table = "distillery-lock"  # From bootstrap
+  }
+}
+```
+
+#### Deploy Infrastructure
+
+```bash
+cd terraform
+terraform init
+terraform plan
+terraform apply
+```
+
+Terraform will prompt for required variables:
+- `github_client_id` — From your GitHub OAuth App
+- `github_client_secret` — From your GitHub OAuth App
+- `jina_api_key` — Your Jina embeddings API key
+- `endpoint_type` — `"lambda-url"` (default) or `"api-gateway"`
+- `custom_domain` (optional) — For API Gateway custom domain
+- `acm_certificate_arn` (optional) — For API Gateway HTTPS
+
+#### Verify Deployment
+
+After Terraform applies successfully:
+
+```bash
+# Get Lambda function URL
+aws lambda get-function-url-config \
+  --function-name distillery-mcp \
+  --region us-east-1 \
+  --query 'FunctionUrl' \
+  --output text
+
+# Test the endpoint
+curl https://<function-url-from-above>/health
+```
+
+Expected response: `{"status": "ok"}`
+
+#### Troubleshooting
+
+**Error: "Failed to assume role"**
+- Cause: IAM permissions insufficient
+- Fix: Ensure your AWS credentials have permissions for Lambda, ECR, S3, Secrets Manager, and IAM
+
+**Error: "S3 bucket already exists"**
+- Cause: Bucket name conflict (S3 bucket names are globally unique)
+- Fix: Modify the `project_name` and/or `environment` variables in `terraform/variables.tf` (the bucket name is `${project_name}-${environment}-storage`)
+
+### Continuous Deployment Pipeline
+
+The GitHub Actions CD pipeline automatically deploys changes to AWS Lambda whenever code is merged to `main`.
+
+#### How It Works
+
+1. **Trigger** — Runs after CI passes on `main`, or manually via workflow_dispatch
+2. **Test** — Re-runs the full test suite to verify the commit
+3. **Build** — Builds Docker image and pushes to ECR
+4. **Deploy** — Updates Lambda function to the new image
+5. **Verify** — Runs smoke tests (/health, MCP initialize, tools/list)
+
+#### Configuration
+
+The pipeline uses GitHub Actions variables (not secrets) for AWS identifiers:
+
+```text
+AWS_REGION               (default: us-east-1)
+AWS_ACCOUNT_ID           (required)
+ECR_REPOSITORY           (required)
+LAMBDA_FUNCTION_NAME     (required)
+ENDPOINT_URL             (required, Lambda Function URL)
+```
+
+Set these in your repository settings:
+1. Go to Settings → Secrets and variables → Actions
+2. Click "New repository variable"
+3. Add each variable above
+
+#### Authentication
+
+The pipeline uses GitHub OIDC to authenticate with AWS, avoiding long-lived access keys. The IAM role `distillery-github-actions-deploy` is created by Terraform and trusts the GitHub Actions OIDC provider.
+
+#### Monitoring Deployments
+
+1. **View workflow runs** — Go to Actions tab in GitHub
+2. **Check deployment summary** — Each workflow run includes a markdown summary with deployment info
+3. **View server logs** — CloudWatch Logs group: `/aws/lambda/distillery-mcp`
+4. **Monitor Lambda metrics** — CloudWatch Dashboard auto-created by Terraform
+
+#### Smoke Test Details
+
+The CD pipeline runs three smoke tests after deployment:
+
+1. **GET /health** — Verifies the server is responding and returns `{"status": "ok"}`
+2. **POST /mcp (initialize)** — Tests the MCP protocol handshake
+3. **POST /mcp (tools/list)** — Verifies exactly 21 tools are available
+
+All tests are also available locally:
+
+```bash
+./scripts/smoke-test.sh https://<lambda-url>
+```
+
+The script outputs color-coded test results and detailed error messages if any test fails.
+
+#### Rollback Procedures
+
+If a deployment introduces issues:
+
+1. **Revert the commit** that caused the issue:
+   ```bash
+   git revert <commit-sha>
+   git push
+   ```
+   This will trigger a new deployment with the previous working version.
+
+2. **Manual rollback** (if urgent):
+   ```bash
+   aws lambda update-function-code \
+     --function-name distillery-mcp \
+     --image-uri <previous-image-uri>
+   ```
+   Find the previous image in ECR console.
+
+#### Troubleshooting Deployments
+
+**Smoke test fails with "401 Unauthorized"**
+- This indicates the server requires GitHub OAuth, which is expected
+- The CD pipeline assumes no auth (or local auth) for testing
+- To test auth-enabled deployment, see docs/team-setup.md
+
+**Lambda function times out during update**
+- Check CloudWatch Logs for errors
+- Verify the Docker image builds successfully locally:
+  ```bash
+  docker build -t distillery-test .
+  docker run -p 8000:8000 distillery-test distillery-mcp --transport http --port 8000
+  ```
+
+**ECR push fails with "AccessDenied"**
+- Verify the GitHub OIDC role has ECR push permissions
+- Check that `ECR_REPOSITORY` variable matches the repository name in AWS
 
 ## Scaling and High Availability
 
@@ -295,11 +506,11 @@ S3 credentials are resolved from AWS environment variables (`AWS_ACCESS_KEY_ID`,
 
 - Distillery HTTP server runs as a single-worker process (stateless)
 - Suitable for teams up to ~100 active users per instance
-- All storage operations delegate to the backend (MotherDuck or S3), which scales independently
+- All storage operations delegate to the backend (S3 or MotherDuck), which scales independently
 
 ### Multi-instance deployment (future)
 
-For larger teams, deploy multiple Distillery instances behind a load balancer, all pointing to the same MotherDuck or S3 backend. This is supported architecturally but requires operational setup (reverse proxy, SSL termination).
+For larger teams, deploy multiple Distillery instances behind a load balancer, all pointing to the same S3 backend. This is supported architecturally but requires operational setup (reverse proxy, SSL termination).
 
 ### Load balancer configuration
 
@@ -314,7 +525,7 @@ For larger teams, deploy multiple Distillery instances behind a load balancer, a
       Distillery  Distillery  Distillery
       (instance)  (instance)  (instance)
            |        |         |
-          \_________MotherDuck DB_________/
+          \_________ S3 DuckDB ________/
 ```
 
 ## Monitoring and Troubleshooting
