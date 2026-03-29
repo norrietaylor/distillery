@@ -20,7 +20,7 @@ RUN pip install --no-cache-dir --upgrade pip
 
 # Copy project metadata first so dependency layer is cached independently
 # from source changes.
-COPY pyproject.toml ./
+COPY pyproject.toml README.md ./
 COPY src/ ./src/
 
 # Install the package and all runtime dependencies.
