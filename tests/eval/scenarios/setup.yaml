@@ -1,0 +1,72 @@
+# Eval scenarios for the /setup skill.
+
+- name: setup-verify-connectivity
+  skill: setup
+  description: "Claude should check MCP status and report server connectivity details"
+  prompt: "/setup"
+  seed_entries: []
+  expected_tools:
+    - distillery_status
+  response_must_contain:
+    - connected
+  max_latency_ms: 45000
+  max_total_tokens: 8000
+
+- name: setup-detect-transport
+  skill: setup
+  description: "Claude should detect the transport mode and display it in the summary"
+  prompt: "/setup"
+  seed_entries: []
+  expected_tools:
+    - distillery_status
+  response_must_contain:
+    - Transport
+  max_latency_ms: 45000
+  max_total_tokens: 8000
+
+- name: setup-show-summary
+  skill: setup
+  description: "Claude should display the full configuration summary at the end"
+  prompt: "/setup"
+  seed_entries:
+    - content: "Test knowledge entry for setup verification."
+      entry_type: session
+      author: eval-seed
+      tags: [test]
+  expected_tools:
+    - distillery_status
+  response_must_contain:
+    - Setup
+    - Database
+  max_latency_ms: 45000
+  max_total_tokens: 8000
+
+- name: setup-check-feed-sources
+  skill: setup
+  description: "Claude should check for feed sources and report their count"
+  prompt: "/setup"
+  seed_entries: []
+  expected_tools:
+    - distillery_status
+    - distillery_watch
+  response_must_contain:
+    - source
+  max_latency_ms: 45000
+  max_total_tokens: 8000
+
+- name: setup-idempotent
+  skill: setup
+  description: "Running /setup multiple times should not create duplicate configurations"
+  prompt: "/setup"
+  seed_entries:
+    - content: "Existing entry to verify setup doesn't modify the store."
+      entry_type: reference
+      author: eval-seed
+      tags: [test, setup]
+  expected_tools:
+    - distillery_status
+  response_must_not_contain:
+    - Error
+    - error
+  max_latency_ms: 45000
+  max_total_tokens: 8000

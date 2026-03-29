@@ -520,5 +520,6 @@ class TestCallToolDispatcher:
             "distillery_interests",
             "distillery_suggest_sources",
             "distillery_poll",
+            "distillery_rescore",
         }
         assert expected == tool_names, f"Missing tools: {expected - tool_names}"

@@ -29,7 +29,7 @@ REPO_ROOT = Path(__file__).parent.parent
 PLUGIN_JSON_PATH = REPO_ROOT / "plugin.json"
 PLUGIN_DOC_PATH = REPO_ROOT / "docs" / "plugin.md"
 
-EXPECTED_SKILL_NAMES = {"distill", "recall", "pour", "bookmark", "minutes", "classify"}
+EXPECTED_SKILL_NAMES = {"distill", "recall", "pour", "bookmark", "minutes", "classify", "watch", "radar", "tune", "setup"}
 
 
 def load_plugin_manifest() -> dict:  # type: ignore[type-arg]
@@ -158,10 +158,10 @@ class TestPluginSkills:
         manifest = load_plugin_manifest()
         assert isinstance(manifest["skills"], list)
 
-    def test_skills_has_exactly_six_entries(self) -> None:
-        """There must be exactly six skills declared."""
+    def test_skills_has_exactly_ten_entries(self) -> None:
+        """There must be exactly ten skills declared."""
         manifest = load_plugin_manifest()
-        assert len(manifest["skills"]) == 6
+        assert len(manifest["skills"]) == 10
 
     def test_each_skill_has_required_fields(self) -> None:
         """Every skill must have 'name', 'description', and 'path' fields."""

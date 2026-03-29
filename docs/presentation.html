@@ -662,6 +662,9 @@
     <li class="fade-in">New team members start from zero because context evaporated</li>
   </ul>
   <p class="fade-in" style="margin-top: 32px; color: var(--amber); font-size: 24px; font-weight: 500;">
+    Knowledge gets created, then lost. Decisions get relitigated. New hires ramp slower.
+  </p>
+  <p class="fade-in" style="margin-top: 16px; color: var(--text-muted); font-size: 20px;">
     The problem isn't generating knowledge. It's retaining it.
   </p>
 </div>
@@ -985,7 +988,7 @@ Options:
 <!-- SLIDE 10: Team Access -->
 <!-- ============================================================ -->
 <div class="slide" id="s10">
-  <h2 class="fade-in">Team Access <span class="dim">(Spec 10)</span></h2>
+  <h2 class="fade-in">Team Access</h2>
   <p class="subtitle fade-in">Connect your team via HTTP + GitHub OAuth</p>
   <div style="height: 20px;"></div>
   <div class="code-block fade-in" style="max-width: 760px;"><span class="comment"># Operator: start the HTTP server</span>
@@ -1025,11 +1028,11 @@ $ distillery-mcp --transport http --port 8000
   <div style="height: 24px;"></div>
   <div style="display: flex; gap: 64px; justify-content: center;" class="fade-in">
     <div class="stat">
-      <div class="number">6</div>
+      <div class="number">9</div>
       <div class="label">Claude Code skills</div>
     </div>
     <div class="stat">
-      <div class="number">17</div>
+      <div class="number">21</div>
       <div class="label">MCP server tools</div>
     </div>
     <div class="stat">
@@ -1037,14 +1040,14 @@ $ distillery-mcp --transport http --port 8000
       <div class="label">tests passing</div>
     </div>
     <div class="stat">
-      <div class="number">10</div>
-      <div class="label">specs delivered</div>
+      <div class="number">2</div>
+      <div class="label">phases shipped</div>
     </div>
   </div>
   <div style="height: 40px;"></div>
   <div class="grid-3 fade-in">
     <div class="card accent">
-      <h3>Spec 01: Storage</h3>
+      <h3>Foundation</h3>
       <ul>
         <li>Entry data model</li>
         <li>DuckDB + HNSW index</li>
@@ -1053,21 +1056,21 @@ $ distillery-mcp --transport http --port 8000
       </ul>
     </div>
     <div class="card accent">
-      <h3>Spec 02: Skills</h3>
+      <h3>9 Skills</h3>
       <ul>
         <li>/distill, /recall, /pour</li>
-        <li>/bookmark, /minutes</li>
+        <li>/bookmark, /minutes, /classify</li>
+        <li>/radar, /watch, /tune</li>
         <li>Shared conventions</li>
-        <li>Provenance display</li>
       </ul>
     </div>
     <div class="card accent">
-      <h3>Spec 03: Classification</h3>
+      <h3>Classification &amp; Feeds</h3>
       <ul>
         <li>Classification engine</li>
         <li>Semantic dedup</li>
-        <li>/classify skill</li>
         <li>Review queue</li>
+        <li>Feed polling (GitHub + RSS)</li>
       </ul>
     </div>
   </div>
@@ -1077,22 +1080,22 @@ $ distillery-mcp --transport http --port 8000
 <!-- SLIDE 12: Roadmap -->
 <!-- ============================================================ -->
 <div class="slide left" id="s12">
-  <h2 class="fade-in">What's next</h2>
+  <h2 class="fade-in">Status &amp; what's next</h2>
   <div style="height: 20px;"></div>
   <div class="timeline">
     <div class="timeline-item done fade-in">
-      <h3>Phase 1 &mdash; MVP <span style="color: var(--green); font-size: 16px; font-weight: 400;">Complete</span></h3>
-      <p>Storage layer, 6 core skills, classification pipeline, semantic deduplication.</p>
+      <h3>Phase 1 &mdash; Foundation <span style="color: var(--green); font-size: 16px; font-weight: 400;">✓ Shipped</span></h3>
+      <p>9 skills, 21 MCP tools, DuckDB + HNSW, classification pipeline, semantic deduplication. 860+ tests passing.</p>
+    </div>
+    <div class="timeline-item done fade-in">
+      <h3>Phase 3 &mdash; Ambient Intelligence <span style="color: var(--green); font-size: 16px; font-weight: 400;">✓ Shipped</span></h3>
+      <p>Feed polling (GitHub + RSS), relevance scoring, interest extraction. <span style="color: var(--text);">/radar</span>, <span style="color: var(--text);">/watch</span>, <span style="color: var(--text);">/tune</span> live.</p>
     </div>
     <div class="timeline-item fade-in">
-      <h3>Phase 2 &mdash; Team Expansion</h3>
-      <p>6 new skills: <span style="color: var(--text);">/whois</span> (expertise map), <span style="color: var(--text);">/digest</span> (team summaries), <span style="color: var(--text);">/investigate</span> (deep context), <span style="color: var(--text);">/gh-sync</span> (GitHub tracking), <span style="color: var(--text);">/briefing</span>, <span style="color: var(--text);">/process</span>.<br>
-      Elasticsearch migration. Access control. Session capture hooks. Namespace taxonomy.</p>
-    </div>
-    <div class="timeline-item fade-in">
-      <h3>Phase 3 &mdash; Ambient Intelligence</h3>
-      <p>The knowledge base starts watching the world. <span style="color: var(--text);">/radar</span> (feed digest), <span style="color: var(--text);">/watch</span> (source management), <span style="color: var(--text);">/tune</span> (relevance tuning).<br>
-      Feed polling (RSS, Slack, GitHub, HN). Relevance scoring pipeline. Trust feedback loop.</p>
+      <h3>Phase 2 &mdash; Team Expansion <span style="color: var(--amber); font-size: 16px; font-weight: 400;">In Progress</span></h3>
+      <p><strong style="color: var(--green);">Infrastructure shipped:</strong> HTTP transport, GitHub OAuth, MotherDuck shared storage, namespace taxonomy.<br>
+      <strong>Team skills up next:</strong> <span style="color: var(--text);">/whois</span> (expertise map), <span style="color: var(--text);">/digest</span> (activity summaries), <span style="color: var(--text);">/investigate</span> (deep domain context), <span style="color: var(--text);">/gh-sync</span>, <span style="color: var(--text);">/briefing</span>, <span style="color: var(--text);">/process</span>.<br>
+      Also: Elasticsearch backend, access control, session capture hooks.</p>
     </div>
   </div>
 </div>
@@ -1120,6 +1123,7 @@ $ distillery-mcp --transport http --port 8000
       <h3>Infrastructure</h3>
       <ul>
         <li style="color: var(--green);"><strong>HTTP transport + GitHub OAuth</strong><br><span class="dim">Streamable-HTTP, FastMCP GitHubProvider</span></li>
+        <li style="color: var(--green);"><strong>MotherDuck shared storage</strong><br><span class="dim">md: prefix, team-shared DuckDB</span></li>
         <li style="color: var(--green);"><strong>Namespace taxonomy</strong><br><span class="dim">project/billing-v2/decisions</span></li>
         <li><strong>Access control</strong><br><span class="dim">Team/private visibility flag</span></li>
         <li><strong>Elasticsearch migration</strong><br><span class="dim">Native hybrid search, ES|QL analytics</span></li>
@@ -1132,21 +1136,23 @@ $ distillery-mcp --transport http --port 8000
 <!-- SLIDE 14: Phase 3 detail -->
 <!-- ============================================================ -->
 <div class="slide" id="s14">
-  <h2 class="fade-in">Phase 3: Ambient Intelligence</h2>
-  <p class="subtitle fade-in">The knowledge base watches the world for you</p>
+  <h2 class="fade-in">Ambient Intelligence <span style="color: var(--green); font-size: 28px; font-weight: 400;">✓ Shipped</span></h2>
+  <p class="subtitle fade-in">The knowledge base watches the world — automatically</p>
   <div style="height: 20px;"></div>
-  <div class="code-block fade-in" style="max-width: 760px;"><span class="comment"># The relevance scoring pipeline</span>
+  <div class="code-block fade-in" style="max-width: 760px;"><span class="comment"># How the relevance scoring pipeline works</span>
 
 For each new feed item:
   <span class="label">1.</span> Embed item (title + summary)
   <span class="label">2.</span> Compare against active project embeddings
   <span class="label">3.</span> Score = similarity x priority x tag overlap
                        x recency x source trust
-  <span class="label">4.</span> score > <span class="result">0.65</span>  &rarr;  include in daily digest
+  <span class="label">4.</span> score > <span class="result">0.65</span>  &rarr;  include in digest
   <span class="label">5.</span> score > <span class="warn">0.90</span>  &rarr;  immediate alert
 
-<span class="comment"># Feed sources</span>
-  RSS / Slack / GitHub / Hacker News / Webhooks</div>
+<span class="comment"># Feed sources (live)</span>
+  <span class="result">✓</span> GitHub events (REST API)
+  <span class="result">✓</span> RSS / Atom feeds
+  <span class="comment">  Slack / Hacker News / Webhooks — coming next</span></div>
   <div style="height: 24px;"></div>
   <div class="grid-3 fade-in">
     <div class="card" style="text-align: center;">
@@ -1168,7 +1174,7 @@ For each new feed item:
 <!-- SLIDE 15: Differentiators -->
 <!-- ============================================================ -->
 <div class="slide" id="s15">
-  <h2 class="fade-in">Why this is different</h2>
+  <h2 class="fade-in">What makes this different</h2>
   <div style="height: 24px;"></div>
   <div class="grid-2 fade-in">
     <div class="card">
@@ -1180,17 +1186,19 @@ For each new feed item:
         <li>Flat document list</li>
         <li>Grows noisy over time</li>
         <li>Individual silos</li>
+        <li>Passive</li>
       </ul>
     </div>
     <div class="card accent">
       <h3>Distillery</h3>
       <ul>
-        <li>Lives in your coding tool</li>
+        <li>Lives inside Claude Code</li>
         <li>LLM auto-classification</li>
         <li>Semantic vector search</li>
         <li>Multi-pass synthesis with citations</li>
         <li>Semantic dedup keeps it clean</li>
         <li>Team-shared by default</li>
+        <li>Watches external sources for you</li>
       </ul>
     </div>
   </div>
@@ -1206,13 +1214,21 @@ For each new feed item:
   <h1 class="fade-in">Distillery</h1>
   <p class="subtitle fade-in">Refine raw information into concentrated team knowledge.</p>
   <div style="height: 40px;"></div>
+  <div class="fade-in" style="max-width: 800px;">
+    <p style="font-size: 20px; line-height: 1.6; margin-bottom: 24px;">
+      Start capturing knowledge where work happens. No separate app. No context switching.
+    </p>
+    <p style="font-size: 18px; color: var(--text-muted); margin-bottom: 32px;">
+      Deploy for a single user in minutes. Scale to your team when ready.
+    </p>
+  </div>
   <div class="grid-3 fade-in" style="max-width: 700px;">
     <div style="text-align: center;">
       <p class="small" style="margin-bottom: 4px; color: var(--amber);">Install</p>
       <p style="font-family: 'JetBrains Mono', monospace; font-size: 15px;">pip install -e .</p>
     </div>
     <div style="text-align: center;">
-      <p class="small" style="margin-bottom: 4px; color: var(--amber);">Docs</p>
+      <p class="small" style="margin-bottom: 4px; color: var(--amber);">Setup Guide</p>
       <p style="font-size: 15px;">docs/mcp-setup.md</p>
     </div>
     <div style="text-align: center;">
