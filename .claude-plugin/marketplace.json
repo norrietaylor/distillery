@@ -1,0 +1,21 @@
+{
+  "name": "distillery-marketplace",
+  "owner": {
+    "name": "norrietaylor",
+    "url": "https://github.com/norrietaylor"
+  },
+  "metadata": {
+    "description": "Distillery knowledge base plugin for Claude Code",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "distillery",
+      "source": "./",
+      "description": "Knowledge base skills — capture, search, and synthesize project knowledge",
+      "version": "0.1.0",
+      "keywords": ["knowledge-base", "second-brain", "mcp", "embeddings"],
+      "category": "knowledge-management"
+    }
+  ]
+}
