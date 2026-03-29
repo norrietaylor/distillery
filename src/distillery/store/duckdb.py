@@ -229,10 +229,28 @@ class DuckDBStore:
         If the VSS extension is unavailable (e.g. in constrained environments
         like AWS Lambda), we log a warning and continue without it.  Vector
         search will still work via brute-force cosine distance — just slower.
+
+        ``INSTALL vss`` downloads from the network and can block indefinitely
+        when connectivity is unavailable.  To avoid hangs we first check if
+        the extension is already installed; if not, we attempt ``LOAD vss``
+        (which fails fast) so we never issue a blocking download.
         """
         try:
-            conn.execute("INSTALL vss;")
-            conn.execute("LOAD vss;")
+            row = conn.execute(
+                "SELECT installed, loaded FROM duckdb_extensions() "
+                "WHERE extension_name = 'vss'"
+            ).fetchone()
+            already_installed = row[0] if row else False
+            already_loaded = row[1] if row else False
+
+            if not already_installed:
+                # Try LOAD first — it will fail fast with an IOException if
+                # the extension files are missing, avoiding a potentially
+                # blocking INSTALL that requires network access.
+                conn.execute("LOAD vss;")
+            elif not already_loaded:
+                conn.execute("LOAD vss;")
+
             conn.execute("SET hnsw_enable_experimental_persistence = true;")
             self._vss_available = True
             logger.info("VSS extension loaded with HNSW persistence enabled")
