@@ -18,6 +18,37 @@ const connStatus         = $("conn-status");
 
 // ── Load saved settings ────────────────────────────────────────────────────────
 
+/**
+ * Validate gateway URL to ensure it's HTTPS and not a private/local address
+ */
+function validateGatewayUrl(urlString) {
+  try {
+    const url = new URL(urlString);
+
+    // Must be HTTPS
+    if (url.protocol !== "https:") {
+      return { valid: false, error: "Gateway URL must use HTTPS" };
+    }
+
+    // Reject localhost and private IPs
+    const hostname = url.hostname.toLowerCase();
+    if (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "::1" ||
+      hostname.startsWith("192.168.") ||
+      hostname.startsWith("10.") ||
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname)
+    ) {
+      return { valid: false, error: "Gateway URL cannot be localhost or private IP" };
+    }
+
+    return { valid: true };
+  } catch (err) {
+    return { valid: false, error: "Invalid URL format" };
+  }
+}
+
 async function load() {
   const stored = await chrome.storage.local.get({
     serverUrl: "",
@@ -39,8 +70,19 @@ async function load() {
 // ── Save ───────────────────────────────────────────────────────────────────────
 
 btnSave.addEventListener("click", async () => {
+  const url = serverUrlInput.value.trim().replace(/\/$/, "");
+
+  // Validate URL before saving
+  if (url) {
+    const validation = validateGatewayUrl(url);
+    if (!validation.valid) {
+      setConnStatus("error", validation.error);
+      return;
+    }
+  }
+
   await chrome.storage.local.set({
-    serverUrl:      serverUrlInput.value.trim().replace(/\/$/, ""),
+    serverUrl:      url,
     token:          tokenInput.value.trim(),
     project:        defaultProjectInput.value.trim(),
     autoMode:       autoModeSelect.value,
@@ -59,6 +101,13 @@ btnTest.addEventListener("click", async () => {
 
   if (!url || !token) {
     setConnStatus("error", "Enter server URL and token first");
+    return;
+  }
+
+  // Validate URL before testing
+  const validation = validateGatewayUrl(url);
+  if (!validation.valid) {
+    setConnStatus("error", validation.error);
     return;
   }
 

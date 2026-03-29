@@ -77,7 +77,7 @@ def _health_router(gateway_config: GatewayConfig) -> Any:
     @router.get("/api/health")
     async def health() -> dict[str, Any]:
         return {
-            "status": "ok" if gateway_config.anthropic_api_key else "degraded",
+            "status": "ok" if gateway_config.anthropic_api_key is not None else "degraded",
             "version": _version(),
             "summarization": gateway_config.anthropic_api_key is not None,
         }
@@ -138,7 +138,7 @@ def _api_router() -> Any:
             url=str(payload.url),
             tags=payload.tags,
             project=payload.project or user.project,
-            author=user.token[:8],  # use token prefix as author ID
+            author=f"user/{user.project}" if user.project else "user/anonymous",
             force=payload.force,
         )
 
@@ -183,7 +183,7 @@ def _api_router() -> Any:
     async def db_status(request: Request, user: AuthUser) -> dict[str, Any]:
         gateway_config: GatewayConfig = request.app.state.gateway_config
         store = await _get_store(user, gateway_config)
-        entries = await store.list_entries(filters=None, limit=0, offset=0)
+        entries = await store.list_entries(filters=None, limit=None, offset=0)
         return {"entry_count": len(entries), "db_path": user.db_path}
 
     return router

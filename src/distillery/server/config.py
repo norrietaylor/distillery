@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -83,8 +84,11 @@ class GatewayConfig:
         )
 
     def get_user(self, token: str) -> UserConfig | None:
-        """Return the UserConfig for a given bearer token, or None if not found."""
+        """Return the UserConfig for a given bearer token, or None if not found.
+
+        Uses constant-time comparison to prevent timing attacks.
+        """
         for user in self.users:
-            if user.token == token:
+            if hmac.compare_digest(user.token, token):
                 return user
         return None

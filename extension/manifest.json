@@ -9,7 +9,8 @@
     "storage"
   ],
   "host_permissions": [
-    "<all_urls>"
+    "https://*/*",
+    "http://*/*"
   ],
   "background": {
     "service_worker": "background/service-worker.js",
@@ -27,7 +28,7 @@
   "options_page": "options/options.html",
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": ["https://*/*", "http://*/*"],
       "js": ["content/meta-extractor.js"],
       "run_at": "document_idle"
     }

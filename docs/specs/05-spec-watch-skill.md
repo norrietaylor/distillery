@@ -63,11 +63,11 @@ CREATE TABLE watch_sources (
   tags        TEXT[],
   interval    TEXT DEFAULT '6h',   -- polling interval: 1h, 6h, 24h
   auth_type   TEXT DEFAULT 'none', -- none | basic | bearer | cookie
-  auth_config JSONB,               -- encrypted auth credentials
+  auth_config VARCHAR,             -- encrypted auth credentials (JSON string)
   status      TEXT DEFAULT 'active', -- active | paused | error
-  last_polled TIMESTAMPTZ,
+  last_polled TIMESTAMP,
   last_hash   TEXT,                -- content hash for change detection
-  created_at  TIMESTAMPTZ DEFAULT now(),
+  created_at  TIMESTAMP DEFAULT now(),
   error_count INTEGER DEFAULT 0,
   last_error  TEXT
 );

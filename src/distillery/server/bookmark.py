@@ -12,7 +12,7 @@ import httpx
 from distillery.models import Entry, EntrySource, EntryType
 from distillery.store.protocol import DistilleryStore
 
-from .ssrf import SSRFError, validate_url
+from .ssrf import SSRFError, create_ssrf_safe_client, validate_url
 
 # ── Request / Response types ──────────────────────────────────────────────────
 
@@ -126,12 +126,38 @@ class BookmarkService:
     async def _fetch(self, url: str) -> str:
         """Fetch URL and return plain-text content (HTML stripped)."""
         headers = {"User-Agent": ("Distillery/0.2 (+https://github.com/norrietaylor/distillery)")}
-        async with httpx.AsyncClient(follow_redirects=True, timeout=15) as client:
-            response = await client.get(url, headers=headers)
-            response.raise_for_status()
-            raw_html = response.text
 
-        return _strip_html(raw_html)[: self._max_chars]
+        # Manually follow redirects with SSRF validation on each hop
+        current_url = url
+        max_redirects = 5
+        redirect_count = 0
+
+        async with create_ssrf_safe_client(follow_redirects=False, timeout=15) as client:
+            while redirect_count < max_redirects:
+                # Validate current URL before fetching
+                try:
+                    validate_url(current_url)
+                except SSRFError as exc:
+                    raise ValueError(f"Redirect target blocked by SSRF protection: {exc}") from exc
+
+                response = await client.get(current_url, headers=headers)
+
+                # If not a redirect, we're done
+                if response.status_code not in (301, 302, 303, 307, 308):
+                    response.raise_for_status()
+                    raw_html = response.text
+                    return _strip_html(raw_html)[: self._max_chars]
+
+                # Extract redirect location
+                location = response.headers.get("location")
+                if not location:
+                    raise ValueError(f"Redirect response (HTTP {response.status_code}) missing Location header")
+
+                # Resolve relative URLs
+                current_url = str(httpx.URL(current_url).join(location))
+                redirect_count += 1
+
+            raise ValueError(f"Too many redirects (>{max_redirects})")
 
     async def _summarise(self, url: str, content: str) -> str:
         """Call Claude API to generate a 2-4 sentence summary."""

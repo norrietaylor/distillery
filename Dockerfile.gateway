@@ -14,8 +14,17 @@ COPY src/ src/
 # Install distillery with server extras
 RUN pip install --no-cache-dir -e ".[server]"
 
+# Create non-root user
+RUN groupadd -r distillery && useradd -r -g distillery distillery
+
 # Gateway config is expected at /config/gateway.yaml (mount as volume)
 VOLUME /config
+
+# Change ownership of app directory
+RUN chown -R distillery:distillery /app
+
+# Switch to non-root user
+USER distillery
 
 # Default port (override via gateway.yaml or --port flag)
 EXPOSE 8080

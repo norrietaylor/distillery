@@ -148,13 +148,15 @@ Register a URL/feed for polling (see Spec 05).
 
 ---
 
-### `GET /api/search`
+### `GET /api/search` *(planned)*
 
 ```
 GET /api/search?q=transformer+architecture&limit=5
 ```
 
 Proxies `distillery_search` and returns results with similarity scores.
+
+**Note:** Not yet implemented in the initial release.
 
 ---
 

@@ -50,7 +50,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 async function handleMessage(message) {
   switch (message.type) {
     case "BOOKMARK":
-      return bookmarkUrl(message.url, message.tags ?? [], message.title ?? "");
+      return bookmarkUrl(
+        message.url,
+        message.tags ?? [],
+        message.title ?? "",
+        message.force ?? false
+      );
     case "WATCH":
       return watchUrl(message.url, message.options ?? {});
     case "STATUS":
@@ -71,7 +76,7 @@ async function getConfig() {
   });
 }
 
-async function bookmarkUrl(url, tags, _title) {
+async function bookmarkUrl(url, tags, _title, force = false) {
   const config = await getConfig();
   assertConfigured(config);
 
@@ -84,6 +89,7 @@ async function bookmarkUrl(url, tags, _title) {
     body: JSON.stringify({
       url,
       tags,
+      force,
       project: config.project || undefined,
     }),
   });

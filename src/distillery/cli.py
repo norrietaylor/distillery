@@ -27,6 +27,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from distillery import __version__
 from distillery.config import CONFIG_ENV_VAR, load_config
 
@@ -486,7 +488,7 @@ def _cmd_gateway(
 
     try:
         gateway_config = GatewayConfig.load(config_file)
-    except (ValueError, KeyError) as exc:
+    except (ValueError, KeyError, yaml.YAMLError) as exc:
         print(f"Invalid gateway config: {exc}", file=sys.stderr)
         return 1
 
