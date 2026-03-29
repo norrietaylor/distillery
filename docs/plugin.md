@@ -7,23 +7,29 @@ in every project without copying files.
 
 ## Plugin Manifest
 
-The plugin is declared in [`plugin.json`](../plugin.json) at the repository root.  It specifies:
+The plugin manifest is located at [`.claude-plugin/plugin.json`](../.claude-plugin/plugin.json).
+The repository also serves as its own marketplace via [`.claude-plugin/marketplace.json`](../.claude-plugin/marketplace.json),
+enabling direct installation from the GitHub repo.
 
-- **Skill declarations** — name, description, and path for each of the ten skills
-- **MCP server dependency** — both the local stdio transport and the hosted HTTP/SSE endpoint
-- **Configuration schema** — environment variables and optional config file path
+The manifest specifies:
+
+- **Skills directory** — auto-discovered from `.claude/skills/`
+- **MCP server dependency** — local stdio transport with configurable environment variables
 
 ## Installation
 
-### Option 1 — Claude Code plugin install (marketplace / git)
+### Option 1 — Claude Code plugin install (recommended)
 
 ```bash
-# Install from the GitHub repository
-claude plugin install https://github.com/norrietaylor/distillery
+# Add the Distillery marketplace (one-time setup)
+claude plugin marketplace add norrietaylor/distillery
+
+# Install the plugin
+claude plugin install distillery
 ```
 
-This copies the six `SKILL.md` files to your global `~/.claude/skills/` directory and
-prompts you to configure the MCP server (see [MCP Configuration](#mcp-configuration) below).
+This installs the skill definitions globally and configures the MCP server
+(see [MCP Configuration](#mcp-configuration) below).
 
 ### Option 2 — Manual install (copy skills)
 
