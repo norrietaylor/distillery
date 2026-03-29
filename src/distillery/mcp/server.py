@@ -3012,9 +3012,7 @@ async def _handle_stale(
         return error_response("VALIDATION_ERROR", "Field 'entry_type' must be a string")
 
     try:
-        stale_entries = await asyncio.to_thread(
-            _sync_gather_stale, store, days, limit, entry_type_filter
-        )
+        stale_entries = _sync_gather_stale(store, days, limit, entry_type_filter)
         return success_response(
             {
                 "days_threshold": days,
