@@ -1135,7 +1135,7 @@ class DuckDBStore:
         conn = self.connection
         sql = (
             "SELECT id FROM search_log "
-            "WHERE timestamp > ? AND list_contains(result_entry_ids, ?)"
+            "WHERE timestamp >= ? AND list_contains(result_entry_ids, ?)"
         )
         rows = conn.execute(sql, [since, entry_id]).fetchall()
         return [row[0] for row in rows]
