@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Distillery — Options</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      background: #f9fafb;
+      color: #111;
+      padding: 32px;
+    }
+    .container { max-width: 520px; }
+    h1 { font-size: 20px; font-weight: 700; margin-bottom: 24px; color: #1a1a1a; }
+    h2 { font-size: 13px; font-weight: 600; text-transform: uppercase;
+         letter-spacing: 0.06em; color: #6b7280; margin: 24px 0 12px; }
+    .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 16px; }
+    label { font-size: 13px; font-weight: 500; color: #374151; }
+    .hint { font-size: 11px; color: #9ca3af; line-height: 1.4; }
+    input[type="text"], input[type="password"], textarea, select {
+      width: 100%; padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 6px;
+      font-size: 13px; background: #fff; outline: none; transition: border-color 0.15s;
+    }
+    input:focus, textarea:focus, select:focus {
+      border-color: #6366f1;
+      box-shadow: 0 0 0 2px rgba(99,102,241,0.15);
+    }
+    textarea { resize: vertical; min-height: 80px; font-family: ui-monospace, monospace; font-size: 12px; }
+    .actions { display: flex; gap: 10px; margin-top: 24px; align-items: center; }
+    .btn {
+      cursor: pointer; border: none; border-radius: 6px; font-size: 13px;
+      font-weight: 500; padding: 8px 16px; transition: background 0.15s;
+    }
+    .btn--primary { background: #6366f1; color: #fff; }
+    .btn--primary:hover { background: #4f46e5; }
+    .btn--secondary { background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; }
+    .btn--secondary:hover { background: #e5e7eb; }
+    .saved-msg { font-size: 12px; color: #15803d; opacity: 0; transition: opacity 0.3s; }
+    .saved-msg.visible { opacity: 1; }
+    .status-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #555; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #ccc; flex-shrink: 0; }
+    .dot--ok { background: #22c55e; }
+    .dot--error { background: #ef4444; }
+    .divider { border: none; border-top: 1px solid #e5e7eb; margin: 8px 0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Distillery Options</h1>
+
+    <h2>Server</h2>
+
+    <div class="field">
+      <label for="server-url">Server URL</label>
+      <input id="server-url" type="text" placeholder="https://distillery.yourdomain.com" />
+      <span class="hint">URL of your self-hosted Distillery HTTP Gateway (Spec 04).</span>
+    </div>
+
+    <div class="field">
+      <label for="token">Auth Token</label>
+      <input id="token" type="password" placeholder="tok_…" autocomplete="off" />
+      <span class="hint">Bearer token from your gateway.yaml. Stored locally on this device only.</span>
+    </div>
+
+    <div class="status-row">
+      <span class="dot" id="conn-dot"></span>
+      <span id="conn-status">Not tested</span>
+      <button class="btn btn--secondary" id="btn-test" style="margin-left: auto; font-size: 12px; padding: 4px 10px;">Test connection</button>
+    </div>
+
+    <hr class="divider" />
+
+    <h2>Defaults</h2>
+
+    <div class="field">
+      <label for="default-project">Default Project</label>
+      <input id="default-project" type="text" placeholder="my-project" />
+      <span class="hint">Pre-fills the project field on all bookmarks. Leave blank to omit.</span>
+    </div>
+
+    <hr class="divider" />
+
+    <h2>Auto-bookmark</h2>
+
+    <div class="field">
+      <label for="auto-mode">Trigger mode</label>
+      <select id="auto-mode">
+        <option value="manual">Manual — only when I click Bookmark</option>
+        <option value="watched-domains">Watched domains — prompt on tab close</option>
+        <option value="all">All pages — silent background bookmark</option>
+      </select>
+    </div>
+
+    <div class="field" id="field-watched-domains">
+      <label for="watched-domains">Watched domains</label>
+      <textarea id="watched-domains" placeholder="github.com&#10;news.ycombinator.com"></textarea>
+      <span class="hint">One domain per line. Prompts to bookmark when you close a tab from these domains.</span>
+    </div>
+
+    <div class="actions">
+      <button class="btn btn--primary" id="btn-save">Save</button>
+      <span class="saved-msg" id="saved-msg">Saved!</span>
+    </div>
+  </div>
+
+  <script src="options.js" type="module"></script>
+</body>
+</html>
