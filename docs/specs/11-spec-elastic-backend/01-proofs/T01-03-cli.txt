@@ -1,0 +1,7 @@
+Type: cli
+Command: mypy --strict src/distillery/store/elasticsearch.py
+Expected: 0 exit code (no type errors)
+Timestamp: 2026-03-28T21:00:00Z
+Status: PASS
+
+Success: no issues found in 1 source file

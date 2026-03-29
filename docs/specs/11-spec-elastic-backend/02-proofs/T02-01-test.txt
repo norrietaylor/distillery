@@ -1,0 +1,14 @@
+Type: test
+Command: .venv/bin/pytest tests/test_elasticsearch_store.py -k "TestSearch or TestScoreConversion or TestFindSimilar or TestListEntries or TestBuildFilterClauses" -v --tb=short
+Expected: All search, score conversion, find_similar, list_entries, and filter tests pass
+Timestamp: 2026-03-28T23:50:00Z
+Status: PASS
+
+Result: 30 passed, 34 deselected
+
+Tests verified:
+- TestSearch: 10 tests (ranked results, embedding provider call, all 7 filter types, multiple filters, no-filter)
+- TestScoreConversion: 4 tests (0.85->0.70, 1.0->1.0, 0.5->0.0, clamp below zero)
+- TestFindSimilar: 5 tests (above threshold, skip threshold, link threshold, empty result, min_score passthrough)
+- TestListEntries: 4 tests (sort order, pagination, filters, match_all)
+- TestBuildFilterClauses: 7 tests (none, empty, entry_type, tags, date range, date_from only, multiple)

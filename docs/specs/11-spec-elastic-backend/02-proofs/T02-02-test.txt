@@ -1,0 +1,17 @@
+Type: test
+Command: .venv/bin/pytest tests/test_elasticsearch_store.py -k "TestEmbeddingModeSelection" -v --tb=short
+Expected: All embedding mode selection tests pass (client/server/auto)
+Timestamp: 2026-03-28T23:50:00Z
+Status: PASS
+
+Result: 8 passed, 56 deselected
+
+Tests verified:
+- Client mode calls EmbeddingProvider on store()
+- Client mode calls EmbeddingProvider on search()
+- Server mode skips embedding on store() and populates content_semantic
+- Server mode uses semantic query on search() (no kNN)
+- Auto mode selects server when inference endpoint available
+- Auto mode selects client when inference endpoint missing
+- Auto mode selects client when endpoint list empty
+- Server mode adds semantic_text mapping with inference_id

@@ -26,7 +26,8 @@ class StorageConfig:
     """Storage backend configuration.
 
     Attributes:
-        backend: Storage backend identifier. One of ``'duckdb'`` or ``'motherduck'``.
+        backend: Storage backend identifier. One of ``'duckdb'``, ``'motherduck'``,
+            or ``'elasticsearch'``.
         database_path: Path to the DuckDB database file. Supports ``~`` expansion
             for local paths, ``s3://`` prefix for S3-backed storage, and ``md:``
             prefix for MotherDuck cloud databases.
@@ -38,6 +39,19 @@ class StorageConfig:
             When set, path-style URL access is enabled automatically.
         motherduck_token_env: Name of the environment variable that holds the
             MotherDuck token.  Defaults to ``'MOTHERDUCK_TOKEN'``.
+        url: Elasticsearch server URL (e.g.
+            ``'https://my-project.es.us-east-1.aws.elastic.cloud'``).
+            Required when backend is ``'elasticsearch'`` unless ``cloud_id_env``
+            is set.
+        api_key_env: Name of the environment variable holding the Elasticsearch
+            API key.  Required when backend is ``'elasticsearch'``.
+        cloud_id_env: Name of the environment variable holding the Elastic Cloud
+            ID.  Alternative to ``url`` for Elastic Cloud deployments.
+        index_prefix: Prefix for Elasticsearch index names.  Defaults to
+            ``'distillery'``.
+        embedding_mode: Embedding strategy for the Elasticsearch backend.  One of
+            ``'client'`` (embed via ``EmbeddingProvider``), ``'server'`` (ES
+            Inference API), or ``'auto'``.  Defaults to ``'client'``.
     """
 
     backend: str = "duckdb"
@@ -45,6 +59,13 @@ class StorageConfig:
     s3_region: str | None = None
     s3_endpoint: str | None = None
     motherduck_token_env: str = "MOTHERDUCK_TOKEN"
+
+    # Elasticsearch-specific fields (used when backend == "elasticsearch")
+    url: str | None = None
+    api_key_env: str | None = None
+    cloud_id_env: str | None = None
+    index_prefix: str = "distillery"
+    embedding_mode: str = "client"
 
 
 @dataclass
@@ -274,12 +295,22 @@ def _find_config_path(override: str | None = None) -> Path | None:
 def _parse_storage(raw: dict[str, Any]) -> StorageConfig:
     s3_region_raw = raw.get("s3_region")
     s3_endpoint_raw = raw.get("s3_endpoint")
+
+    url_raw = raw.get("url")
+    api_key_env_raw = raw.get("api_key_env")
+    cloud_id_env_raw = raw.get("cloud_id_env")
+
     return StorageConfig(
         backend=str(raw.get("backend", "duckdb")),
         database_path=str(raw.get("database_path", "~/.distillery/distillery.db")),
         s3_region=str(s3_region_raw) if s3_region_raw is not None else None,
         s3_endpoint=str(s3_endpoint_raw) if s3_endpoint_raw is not None else None,
         motherduck_token_env=str(raw.get("motherduck_token_env", "MOTHERDUCK_TOKEN")),
+        url=str(url_raw) if url_raw is not None else None,
+        api_key_env=str(api_key_env_raw) if api_key_env_raw is not None else None,
+        cloud_id_env=str(cloud_id_env_raw) if cloud_id_env_raw is not None else None,
+        index_prefix=str(raw.get("index_prefix", "distillery")),
+        embedding_mode=str(raw.get("embedding_mode", "client")),
     )
 
 
@@ -612,7 +643,7 @@ def _validate(config: DistilleryConfig) -> None:
             - feeds.thresholds.digest is not between 0.0 and 1.0.
             - feeds.thresholds.digest exceeds feeds.thresholds.alert.
     """
-    valid_backends = {"duckdb", "motherduck"}
+    valid_backends = {"duckdb", "motherduck", "elasticsearch"}
     if config.storage.backend not in valid_backends:
         raise ValueError(
             f"storage.backend must be one of {sorted(valid_backends)}, "
@@ -630,6 +661,29 @@ def _validate(config: DistilleryConfig) -> None:
             raise ValueError(
                 f"MotherDuck token env var {token_env!r} is not set. "
                 "Set the environment variable before starting the server."
+            )
+
+    if config.storage.backend == "elasticsearch":
+        if not config.storage.url and not config.storage.cloud_id_env:
+            raise ValueError(
+                "Elasticsearch backend requires either 'url' or 'cloud_id_env' "
+                "to be set in storage config."
+            )
+        if not config.storage.api_key_env:
+            raise ValueError(
+                "Elasticsearch backend requires 'api_key_env' to be set in storage config."
+            )
+        api_key_val = os.environ.get(config.storage.api_key_env, "")
+        if not api_key_val:
+            raise ValueError(
+                f"Elasticsearch API key env var {config.storage.api_key_env!r} is not set "
+                "or is empty. Set the environment variable before starting the server."
+            )
+        valid_embedding_modes = {"client", "server", "auto"}
+        if config.storage.embedding_mode not in valid_embedding_modes:
+            raise ValueError(
+                f"storage.embedding_mode must be one of {sorted(valid_embedding_modes)}, "
+                f"got: {config.storage.embedding_mode!r}"
             )
 
     valid_providers = {"jina", "openai", "mock"}
