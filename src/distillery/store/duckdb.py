@@ -358,7 +358,7 @@ class DuckDBStore:
         degrades to brute-force cosine distance which is still correct.
         """
         if not self._vss_available:
-            logger.info("Skipping HNSW index creation (VSS extension not available)")
+            logger.warning("HNSW index not created (VSS extension not available)")
             return
         try:
             conn.execute(_CREATE_HNSW_INDEX)
