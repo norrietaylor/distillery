@@ -2,7 +2,8 @@
 
 resource "aws_lambda_function_url" "mcp_server" {
   count              = var.endpoint_type == "function_url" ? 1 : 0
-  function_name      = aws_lambda_function.mcp_server.function_name
+  function_name      = aws_lambda_alias.live.function_name
+  qualifier          = aws_lambda_alias.live.name
   authorization_type = "NONE"
 }
 
@@ -18,7 +19,7 @@ resource "aws_apigatewayv2_integration" "lambda" {
   count                  = var.endpoint_type == "api_gateway" ? 1 : 0
   api_id                 = aws_apigatewayv2_api.mcp_server[0].id
   integration_type       = "AWS_PROXY"
-  integration_uri        = aws_lambda_function.mcp_server.invoke_arn
+  integration_uri        = aws_lambda_alias.live.invoke_arn
   integration_method     = "POST"
   payload_format_version = "2.0"
 }
@@ -41,7 +42,8 @@ resource "aws_lambda_permission" "api_gateway" {
   count         = var.endpoint_type == "api_gateway" ? 1 : 0
   statement_id  = "AllowAPIGatewayInvoke"
   action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.mcp_server.function_name
+  function_name = aws_lambda_alias.live.function_name
+  qualifier     = aws_lambda_alias.live.name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.mcp_server[0].execution_arn}/*/*"
 }

@@ -166,10 +166,9 @@ resource "aws_lambda_function" "mcp_server" {
 
   environment {
     variables = {
-      DISTILLERY_ENV          = var.environment
-      DISTILLERY_S3_BUCKET    = aws_s3_bucket.storage.id
-      SECRETS_MANAGER_ARN     = aws_secretsmanager_secret.app_secrets.arn
-      AWS_LAMBDA_EXEC_WRAPPER = "/opt/bootstrap"
+      DISTILLERY_ENV      = var.environment
+      DISTILLERY_DB_PATH  = "s3://${aws_s3_bucket.storage.id}/distillery.db"
+      SECRETS_MANAGER_ARN = aws_secretsmanager_secret.app_secrets.arn
     }
   }
 

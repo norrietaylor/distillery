@@ -205,6 +205,7 @@ class TestLambdaConfig:
 
     def test_lambda_config_no_hardcoded_secrets(self) -> None:
         """Ensure the Lambda config references env vars, not actual API keys."""
+        assert self.config_path.exists(), f"Lambda config not found: {self.config_path}"
         content = self.config_path.read_text()
         secret_patterns = [
             (r"AKIA[0-9A-Z]{16}", "AWS access key"),
