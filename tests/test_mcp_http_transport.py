@@ -53,6 +53,7 @@ EXPECTED_TOOLS = {
     "distillery_type_schemas",
     "distillery_watch",
     "distillery_poll",
+    "distillery_rescore",
     "distillery_interests",
     "distillery_suggest_sources",
 }
@@ -167,7 +168,7 @@ class TestAllToolsAccessibleOverHttp:
             assert "result" in data, f"Expected result in: {data}"
             tools = data["result"]["tools"]
             tool_names = {t["name"] for t in tools}
-            assert len(tool_names) == 21, f"Expected 21 tools, got {len(tool_names)}: {tool_names}"
+            assert len(tool_names) == 22, f"Expected 22 tools, got {len(tool_names)}: {tool_names}"
             assert tool_names == EXPECTED_TOOLS, (
                 f"Tool mismatch.\nExpected: {EXPECTED_TOOLS}\nGot: {tool_names}"
             )

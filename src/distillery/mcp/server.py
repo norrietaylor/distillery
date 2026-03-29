@@ -1130,6 +1130,43 @@ def create_server(
             arguments=arguments,
         )
 
+    @server.tool
+    async def distillery_rescore(
+        ctx: Context,
+        limit: int = 100,
+    ) -> list[types.TextContent]:
+        """Re-score existing feed entries against the current knowledge base.
+
+        Recomputes relevance scores for stored feed entries using the
+        current store state.  Useful after adding new knowledge entries
+        that change the interest profile, so previously low-scoring feed
+        items can be re-evaluated.
+
+        Parameters:
+            limit (int): Maximum number of feed entries to re-score.
+                Default ``100``.
+
+        Returns:
+            list[types.TextContent]: A single MCP TextContent block containing
+            a JSON object with keys:
+              - ``rescored``: number of entries re-scored.
+              - ``upgraded``: entries whose score increased.
+              - ``downgraded``: entries whose score decreased.
+              - ``archived``: entries archived for falling below threshold.
+              - ``errors``: number of entries that failed to re-score.
+            On error: ``error``, ``code``, and ``message``.
+        """
+        lc = _get_lifespan_context(ctx)
+        from distillery.feeds.poller import FeedPoller
+
+        poller = FeedPoller(store=lc["store"], config=lc["config"])
+        try:
+            stats = await poller.rescore(limit=limit)
+            return success_response(stats)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("distillery_rescore: unexpected error")
+            return error_response("RESCORE_ERROR", f"Rescore failed: {exc}")
+
     return server
 
 

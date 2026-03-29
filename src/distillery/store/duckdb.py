@@ -804,6 +804,15 @@ class DuckDBStore:
             clauses.append("created_at <= ?")
             params.append(val)
 
+        # Support metadata path filters like "metadata.external_id".
+        # DuckDB stores metadata as a JSON string; use json_extract_string
+        # to pull out the nested value for exact-match comparison.
+        for key, val in filters.items():
+            if key.startswith("metadata."):
+                json_path = key.split(".", 1)[1]
+                clauses.append(f"json_extract_string(metadata, '$.{json_path}') = ?")
+                params.append(str(val))
+
         return clauses, params
 
     def _row_to_entry(self, row: tuple[Any, ...], columns: list[str]) -> Entry:
