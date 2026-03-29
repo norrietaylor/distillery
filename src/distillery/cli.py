@@ -27,6 +27,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from distillery import __version__
 from distillery.config import CONFIG_ENV_VAR, load_config
 
@@ -83,18 +85,6 @@ def _build_parser() -> argparse.ArgumentParser:
         parents=[shared],
     )
 
-    poll_parser = subparsers.add_parser(
-        "poll",
-        help="Poll configured feed sources and store relevant items",
-        parents=[shared],
-    )
-    poll_parser.add_argument(
-        "--source",
-        metavar="URL",
-        default=None,
-        help="Poll only the source with this URL (polls all sources when omitted)",
-    )
-
     eval_parser = subparsers.add_parser(
         "eval",
         help="Run skill evaluation scenarios against Claude",
@@ -129,6 +119,29 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="MODEL",
         default="claude-haiku-4-5-20251001",
         help="Claude model to use for eval runs (default: claude-haiku-4-5-20251001)",
+    )
+
+    gateway_parser = subparsers.add_parser(
+        "gateway",
+        help="Start the Distillery HTTP Gateway for the browser extension",
+        parents=[shared],
+    )
+    gateway_parser.add_argument(
+        "--gateway-config",
+        metavar="PATH",
+        default="gateway.yaml",
+        help="Path to gateway.yaml (default: gateway.yaml)",
+    )
+    gateway_parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="Override port from gateway.yaml",
+    )
+    gateway_parser.add_argument(
+        "--host",
+        default=None,
+        help="Override host from gateway.yaml",
     )
 
     return parser
@@ -311,120 +324,6 @@ def _cmd_health(config_path: str | None, fmt: str) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Poll subcommand
-# ---------------------------------------------------------------------------
-
-
-def _cmd_poll(config_path: str | None, fmt: str, source_url: str | None) -> int:
-    """Implement the ``poll`` subcommand.
-
-    Loads the configuration, initialises the store and embedding provider,
-    runs the :class:`~distillery.feeds.poller.FeedPoller`, and prints a
-    summary.
-
-    Returns:
-        Exit code (0 on success, 1 on error).
-    """
-    try:
-        cfg = load_config(config_path)
-    except (FileNotFoundError, ValueError) as exc:
-        print(f"Error loading configuration: {exc}", file=sys.stderr)
-        return 1
-
-    if not cfg.feeds.sources:
-        msg = "No feed sources configured. Add sources via distillery_watch or distillery.yaml."
-        if fmt == "json":
-            print(json.dumps({"error": msg, "sources_polled": 0}))
-        else:
-            print(msg)
-        return 0
-
-    if source_url is not None:
-        from distillery.config import FeedsConfig
-
-        matching = [s for s in cfg.feeds.sources if s.url == source_url]
-        if not matching:
-            msg = f"No configured source found with url {source_url!r}."
-            print(f"Error: {msg}", file=sys.stderr)
-            return 1
-        cfg.feeds = FeedsConfig(sources=matching, thresholds=cfg.feeds.thresholds)
-
-    async def _run() -> Any:
-        from distillery.feeds.poller import FeedPoller
-        from distillery.mcp.server import _create_embedding_provider, _normalize_db_path
-        from distillery.store.duckdb import DuckDBStore
-
-        embedding_provider = _create_embedding_provider(cfg)
-        db_path = _normalize_db_path(cfg.storage.database_path)
-
-        store = DuckDBStore(
-            db_path=db_path,
-            embedding_provider=embedding_provider,
-            s3_region=cfg.storage.s3_region,
-            s3_endpoint=cfg.storage.s3_endpoint,
-        )
-        await store.initialize()
-
-        poller = FeedPoller(store=store, config=cfg)
-        return await poller.poll()
-
-    try:
-        summary = asyncio.run(_run())
-    except Exception as exc:
-        print(f"Error during poll: {exc}", file=sys.stderr)
-        return 1
-
-    if fmt == "json":
-        results_data = [
-            {
-                "source_url": r.source_url,
-                "source_type": r.source_type,
-                "items_fetched": r.items_fetched,
-                "items_stored": r.items_stored,
-                "items_skipped_dedup": r.items_skipped_dedup,
-                "items_below_threshold": r.items_below_threshold,
-                "errors": r.errors,
-                "polled_at": r.polled_at.isoformat(),
-            }
-            for r in summary.results
-        ]
-        print(
-            json.dumps(
-                {
-                    "sources_polled": summary.sources_polled,
-                    "sources_errored": summary.sources_errored,
-                    "total_fetched": summary.total_fetched,
-                    "total_stored": summary.total_stored,
-                    "total_skipped_dedup": summary.total_skipped_dedup,
-                    "total_below_threshold": summary.total_below_threshold,
-                    "results": results_data,
-                    "started_at": summary.started_at.isoformat(),
-                    "finished_at": summary.finished_at.isoformat(),
-                },
-                indent=2,
-            )
-        )
-    else:
-        print("Poll cycle complete:")
-        print(f"  sources_polled:        {summary.sources_polled}")
-        print(f"  sources_errored:       {summary.sources_errored}")
-        print(f"  total_fetched:         {summary.total_fetched}")
-        print(f"  total_stored:          {summary.total_stored}")
-        print(f"  total_skipped_dedup:   {summary.total_skipped_dedup}")
-        print(f"  total_below_threshold: {summary.total_below_threshold}")
-        for r in summary.results:
-            status = "ERROR" if r.errors else "OK"
-            print(
-                f"  [{status}] {r.source_url}: "
-                f"fetched={r.items_fetched} stored={r.items_stored}"
-            )
-            for err in r.errors:
-                print(f"    error: {err}", file=sys.stderr)
-
-    return 0 if summary.sources_errored == 0 else 1
-
-
-# ---------------------------------------------------------------------------
 # Eval subcommand
 # ---------------------------------------------------------------------------
 
@@ -555,6 +454,54 @@ def _cmd_eval(
 
 
 # ---------------------------------------------------------------------------
+# Gateway command
+# ---------------------------------------------------------------------------
+
+
+def _cmd_gateway(
+    gateway_config_path: str,
+    port: int | None,
+    host: str | None,
+) -> int:
+    """Start the Distillery HTTP Gateway."""
+    try:
+        import uvicorn
+
+        from distillery.server.app import create_app
+        from distillery.server.config import GatewayConfig
+    except ImportError:
+        print(
+            "The gateway command requires additional dependencies.\n"
+            "Install them with:  pip install 'distillery[server]'",
+            file=sys.stderr,
+        )
+        return 1
+
+    config_file = Path(gateway_config_path)
+    if not config_file.exists():
+        print(
+            f"Gateway config not found: {config_file}\n"
+            "Create a gateway.yaml file. See docs/specs/04-spec-hosted-service.md for format.",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        gateway_config = GatewayConfig.load(config_file)
+    except (ValueError, KeyError, yaml.YAMLError) as exc:
+        print(f"Invalid gateway config: {exc}", file=sys.stderr)
+        return 1
+
+    app = create_app(gateway_config)
+    uvicorn.run(
+        app,
+        host=host or gateway_config.host,
+        port=port or gateway_config.port,
+    )
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -579,14 +526,6 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(_cmd_status(config_path, fmt))
     elif command == "health":
         sys.exit(_cmd_health(config_path, fmt))
-    elif command == "poll":
-        sys.exit(
-            _cmd_poll(
-                config_path=config_path,
-                fmt=fmt,
-                source_url=getattr(args, "source", None),
-            )
-        )
     elif command == "eval":
         sys.exit(
             _cmd_eval(
@@ -596,6 +535,14 @@ def main(argv: list[str] | None = None) -> None:
                 baseline=getattr(args, "baseline", None),
                 model=getattr(args, "model", "claude-haiku-4-5-20251001"),
                 fmt=fmt,
+            )
+        )
+    elif command == "gateway":
+        sys.exit(
+            _cmd_gateway(
+                gateway_config_path=getattr(args, "gateway_config", "gateway.yaml"),
+                port=getattr(args, "port", None),
+                host=getattr(args, "host", None),
             )
         )
     else:  # pragma: no cover – argparse rejects unknown subcommands

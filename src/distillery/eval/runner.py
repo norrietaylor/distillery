@@ -334,9 +334,7 @@ class ClaudeEvalRunner:
                     }
                 }
             }
-            mcp_config_path.write_text(
-                json.dumps(mcp_config, indent=2), encoding="utf-8"
-            )
+            mcp_config_path.write_text(json.dumps(mcp_config, indent=2), encoding="utf-8")
 
             # 4. Build CLI command.
             system_prompt = self._get_skill_prompt(scenario.skill)

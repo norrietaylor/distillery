@@ -1,0 +1,37 @@
+# Distillery HTTP Gateway configuration
+# Copy to gateway.yaml and fill in your values.
+# See docs/specs/04-spec-hosted-service.md for full documentation.
+
+# ── Users ──────────────────────────────────────────────────────────────────────
+# Each user has a unique bearer token and their own DuckDB database.
+# Tokens are secrets — treat like passwords.
+users:
+  - token: "tok_changeme_abc123"           # Replace with a secure random string
+    db_path: "~/.distillery/user_abc.db"   # Local path, or s3://bucket/path.db
+    project: "personal"
+
+  # Add more users as needed:
+  # - token: "tok_changeme_def456"
+  #   db_path: "~/.distillery/user_def.db"
+  #   project: "work"
+
+# ── API keys ───────────────────────────────────────────────────────────────────
+# Environment variable names for API keys (do not put keys here directly)
+anthropic_api_key_env: ANTHROPIC_API_KEY
+# ANTHROPIC_API_KEY must be set in your environment.
+# If absent and require_summarization=true, the gateway will refuse to start.
+
+# ── Embedding ──────────────────────────────────────────────────────────────────
+embedding:
+  provider: jina
+  model: jina-embeddings-v3
+  dimensions: 1024
+  api_key_env: JINA_API_KEY   # Set JINA_API_KEY in your environment
+
+# ── Behaviour ──────────────────────────────────────────────────────────────────
+require_summarization: true   # Set to false to allow storing title+URL without Claude
+rate_limit_per_minute: 60
+
+# ── Server ─────────────────────────────────────────────────────────────────────
+host: "0.0.0.0"   # Use 127.0.0.1 if behind a reverse proxy
+port: 8080

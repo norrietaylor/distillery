@@ -294,9 +294,7 @@ class FeedPoller:
             return result
 
         result.items_fetched = len(items)
-        logger.debug(
-            "FeedPoller: fetched %d items from %s", result.items_fetched, source.url
-        )
+        logger.debug("FeedPoller: fetched %d items from %s", result.items_fetched, source.url)
 
         for item in items:
             text = _item_text(item)
@@ -318,9 +316,7 @@ class FeedPoller:
             try:
                 score = await scorer.score(text)
             except Exception as exc:  # noqa: BLE001
-                result.errors.append(
-                    f"Scoring failed for item {item.item_id!r}: {exc}"
-                )
+                result.errors.append(f"Scoring failed for item {item.item_id!r}: {exc}")
                 logger.warning(
                     "FeedPoller: scoring failed for item %r from %s: %s",
                     item.item_id,

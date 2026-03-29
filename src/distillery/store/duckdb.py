@@ -241,9 +241,7 @@ class DuckDBStore:
 
         # Region: config > AWS_DEFAULT_REGION > AWS_REGION
         region = (
-            self._s3_region
-            or os.environ.get("AWS_DEFAULT_REGION")
-            or os.environ.get("AWS_REGION")
+            self._s3_region or os.environ.get("AWS_DEFAULT_REGION") or os.environ.get("AWS_REGION")
         )
         if region:
             conn.execute(f"SET s3_region = '{_sql_escape(region)}';")

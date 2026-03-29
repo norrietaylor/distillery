@@ -108,9 +108,7 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.transport == "http":
             host = (
-                args.host
-                if args.host is not None
-                else os.environ.get("DISTILLERY_HOST", "0.0.0.0")
+                args.host if args.host is not None else os.environ.get("DISTILLERY_HOST", "0.0.0.0")
             )
             port_env = os.environ.get("DISTILLERY_PORT")
             port = args.port if args.port is not None else (int(port_env) if port_env else 8000)
@@ -123,8 +121,7 @@ def main(argv: list[str] | None = None) -> int:
                 auth = build_github_auth(config)
             elif provider_name == "none":
                 logger.warning(
-                    "HTTP server running without authentication "
-                    "(server.auth.provider is 'none')",
+                    "HTTP server running without authentication (server.auth.provider is 'none')",
                 )
             else:
                 raise ValueError(

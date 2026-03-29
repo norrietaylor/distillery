@@ -381,7 +381,9 @@ class TestFeedPollerMultipleSources:
 
         store.find_similar.side_effect = _find_similar
 
-        with patch("distillery.feeds.poller._build_adapter", side_effect=_build_adapter_side_effect):
+        with patch(
+            "distillery.feeds.poller._build_adapter", side_effect=_build_adapter_side_effect
+        ):
             poller = FeedPoller(store=store, config=cfg)
             summary = await poller.poll()
 
@@ -497,9 +499,7 @@ class TestCLIPollSubcommand:
                 sources=[FeedSourceConfig(url="https://real.com/rss", source_type="rss")]
             )
             mock_load.return_value = cfg
-            code = _cmd_poll(
-                config_path=None, fmt="text", source_url="https://nonexistent.com/rss"
-            )
+            code = _cmd_poll(config_path=None, fmt="text", source_url="https://nonexistent.com/rss")
             assert code == 1
 
     def test_poll_runs_and_exits_zero_on_no_errors(self) -> None:

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Distillery</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div id="app">
+
+    <!-- Header -->
+    <header>
+      <img src="../icons/icon-32.png" alt="Distillery" class="logo" />
+      <span class="title">Distillery</span>
+      <span id="status-dot" class="dot dot--unknown" title="Checking…"></span>
+    </header>
+
+    <!-- Not configured state -->
+    <div id="state-unconfigured" class="state hidden">
+      <p class="message">Configure your server URL and token to get started.</p>
+      <button id="btn-open-options" class="btn btn--secondary">Open Options</button>
+    </div>
+
+    <!-- Error state (server unreachable) -->
+    <div id="state-error" class="state hidden">
+      <p class="message error" id="error-text"></p>
+      <button id="btn-retry" class="btn btn--secondary">Retry</button>
+    </div>
+
+    <!-- Duplicate warning -->
+    <div id="state-duplicate" class="state hidden">
+      <p class="message warning">
+        Already saved as <code id="dup-entry-id"></code>
+        (similarity: <span id="dup-similarity"></span>)
+      </p>
+      <button id="btn-save-anyway" class="btn btn--secondary">Save anyway</button>
+      <button id="btn-cancel-dup" class="btn btn--ghost">Cancel</button>
+    </div>
+
+    <!-- Success state -->
+    <div id="state-success" class="state hidden">
+      <p class="message success">Saved! <code id="success-entry-id"></code></p>
+      <p id="success-summary" class="summary"></p>
+    </div>
+
+    <!-- Main form (ready state) -->
+    <div id="state-ready" class="state">
+      <div class="url-display">
+        <span id="current-url" class="url-text"></span>
+      </div>
+
+      <label for="tags-input" class="label">Tags</label>
+      <input
+        id="tags-input"
+        type="text"
+        class="input"
+        placeholder="ai, research, #ml"
+        autocomplete="off"
+      />
+
+      <div class="actions">
+        <button id="btn-bookmark" class="btn btn--primary">
+          <span id="btn-bookmark-text">Bookmark</span>
+          <span id="btn-bookmark-spinner" class="spinner hidden"></span>
+        </button>
+        <button id="btn-watch" class="btn btn--ghost" title="Watch this page for changes">
+          Watch
+        </button>
+      </div>
+    </div>
+
+  </div>
+
+  <footer>
+    <a id="link-options" href="#" class="footer-link">Options</a>
+  </footer>
+
+  <script src="popup.js" type="module"></script>
+</body>
+</html>

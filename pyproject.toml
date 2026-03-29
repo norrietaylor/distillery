@@ -30,7 +30,7 @@ dependencies = [
     "duckdb>=0.8.0",
     "pyyaml>=6.0",
     "httpx>=0.24.0",
-    "fastmcp>=2.12.0",
+    "fastmcp>=2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -43,6 +43,11 @@ dev = [
     "types-PyYAML>=6.0",
 ]
 eval = []
+server = [
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.29.0",
+    "anthropic>=0.26.0",
+]
 
 [project.scripts]
 distillery = "distillery.cli:main"
@@ -82,6 +87,13 @@ disable_error_code = ["untyped-decorator"]
 # in the base dev environment. Suppress import-not-found for the eval sub-package.
 module = "distillery.eval.*"
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# The server module has optional dependencies (fastapi, uvicorn, anthropic) that
+# are not installed in the base dev environment.
+module = "distillery.server.*"
+ignore_missing_imports = true
+disable_error_code = ["import-not-found", "untyped-decorator"]
 
 [tool.ruff]
 line-length = 100

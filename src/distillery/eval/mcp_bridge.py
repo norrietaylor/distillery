@@ -171,7 +171,10 @@ DISTILLERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "content": {"type": "string"},
-                "threshold": {"type": "number", "description": "Similarity threshold (default 0.8)."},
+                "threshold": {
+                    "type": "number",
+                    "description": "Similarity threshold (default 0.8).",
+                },
             },
             "required": ["content"],
         },
@@ -407,9 +410,7 @@ class MCPBridge:
         ep = self._embedding_provider
 
         if name == "distillery_status":
-            return await _handle_status(
-                store=store, embedding_provider=ep, config=config
-            )
+            return await _handle_status(store=store, embedding_provider=ep, config=config)
         if name == "distillery_store":
             return await _handle_store(store=store, arguments=args, cfg=config)
         if name == "distillery_get":
@@ -449,7 +450,9 @@ class MCPBridge:
         return [
             mcp_types.TextContent(
                 type="text",
-                text=json.dumps({"error": True, "code": "UNKNOWN_TOOL", "message": f"No handler for {name}"}),
+                text=json.dumps(
+                    {"error": True, "code": "UNKNOWN_TOOL", "message": f"No handler for {name}"}
+                ),
             )
         ]
 

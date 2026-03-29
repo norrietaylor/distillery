@@ -331,9 +331,7 @@ class InterestExtractor:
                         repo_counts[match.group(1)] += 1
 
     @staticmethod
-    def _normalise_top_n(
-        scores: defaultdict[str, float], top_n: int
-    ) -> list[tuple[str, float]]:
+    def _normalise_top_n(scores: defaultdict[str, float], top_n: int) -> list[tuple[str, float]]:
         """Return the top-*n* tags as ``(tag, normalised_weight)`` pairs.
 
         Weights are normalised so that the highest-scoring tag receives
