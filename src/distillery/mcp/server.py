@@ -1436,14 +1436,7 @@ async def _handle_store(
                         "Only internal sources may use this namespace.",
                     )
 
-    # --- embedding budget check (store=1 embed + dedup=1 embed) -------------
-    if cfg is not None and cfg.rate_limit.embedding_budget_daily >= 0:
-        try:
-            record_and_check(store.connection, cfg.rate_limit.embedding_budget_daily, count=2)
-        except EmbeddingBudgetError as exc:
-            return error_response("BUDGET_EXCEEDED", str(exc))
-
-    # --- db size check ------------------------------------------------------
+    # --- db size check (cheap, run first) ------------------------------------
     if cfg is not None and cfg.rate_limit.max_db_size_mb > 0:
         db_path = _normalize_db_path(cfg.storage.database_path)
         if db_path != ":memory:" and not _is_remote_db_path(db_path):
@@ -1458,6 +1451,13 @@ async def _handle_store(
                     )
             except OSError:
                 pass  # can't stat, skip check
+
+    # --- embedding budget check (store + dedup + conflict = 3 embeds) ------
+    if cfg is not None:
+        try:
+            record_and_check(store.connection, cfg.rate_limit.embedding_budget_daily, count=3)
+        except EmbeddingBudgetError as exc:
+            return error_response("BUDGET_EXCEEDED", str(exc))
 
     # --- build entry --------------------------------------------------------
     try:
@@ -1813,7 +1813,7 @@ async def _handle_search(
         return error_response("VALIDATION_ERROR", "Field 'limit' must be <= 200")
 
     # --- embedding budget check (1 embed call per search) -------------------
-    if cfg is not None and cfg.rate_limit.embedding_budget_daily >= 0:
+    if cfg is not None:
         try:
             record_and_check(store.connection, cfg.rate_limit.embedding_budget_daily)
         except EmbeddingBudgetError as exc:
@@ -1887,7 +1887,7 @@ async def _handle_find_similar(
         return error_response("VALIDATION_ERROR", "Field 'limit' must be <= 200")
 
     # --- embedding budget check (1 embed call) ----------------------------
-    if cfg is not None and cfg.rate_limit.embedding_budget_daily >= 0:
+    if cfg is not None:
         try:
             record_and_check(store.connection, cfg.rate_limit.embedding_budget_daily)
         except EmbeddingBudgetError as exc:
@@ -2414,11 +2414,10 @@ async def _handle_check_dedup(
     content = str(arguments["content"])
 
     # --- embedding budget check (1 embed call for find_similar) -------------
-    if config.rate_limit.embedding_budget_daily >= 0:
-        try:
-            record_and_check(store.connection, config.rate_limit.embedding_budget_daily)
-        except EmbeddingBudgetError as exc:
-            return error_response("BUDGET_EXCEEDED", str(exc))
+    try:
+        record_and_check(store.connection, config.rate_limit.embedding_budget_daily)
+    except EmbeddingBudgetError as exc:
+        return error_response("BUDGET_EXCEEDED", str(exc))
 
     # --- run dedup checker --------------------------------------------------
     from distillery.classification.dedup import DeduplicationChecker
