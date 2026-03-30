@@ -506,7 +506,7 @@ class DuckDBStore:
         if self._conn is not None:
             try:
                 self._conn.execute("CHECKPOINT")
-            except duckdb.Error as exc:
+            except duckdb.Error as exc:  # pragma: no cover
                 logger.warning("CHECKPOINT before close failed: %s", exc)
             await asyncio.to_thread(self._conn.close)
             self._conn = None

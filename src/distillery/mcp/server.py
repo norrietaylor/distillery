@@ -325,20 +325,18 @@ def create_server(
             # Register an atexit handler to checkpoint and close the store
             # on process shutdown (SIGINT/SIGTERM from Fly.io autostop).
             # This ensures the WAL is flushed so tables like feed_sources
-            # survive machine restarts.
+            # survive machine restarts.  We use synchronous calls because
+            # the async event loop is typically closed by the time atexit
+            # handlers run.
             import atexit
 
-            def _close_store() -> None:
-                try:
-                    asyncio.get_event_loop().run_until_complete(store.close())
-                except Exception:  # noqa: BLE001
-                    # Fallback: checkpoint synchronously if the loop is gone.
-                    if store._conn is not None:
-                        try:
-                            store._conn.execute("CHECKPOINT")
-                            store._conn.close()
-                        except Exception:  # noqa: BLE001
-                            pass
+            def _close_store() -> None:  # pragma: no cover
+                conn = store._conn
+                if conn is not None:
+                    with contextlib.suppress(Exception):
+                        conn.execute("CHECKPOINT")
+                    with contextlib.suppress(Exception):
+                        conn.close()
 
             atexit.register(_close_store)
 
