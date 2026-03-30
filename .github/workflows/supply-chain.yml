@@ -1,0 +1,88 @@
+name: Supply Chain Security
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+
+jobs:
+  supply-chain:
+    name: Scan (${{ matrix.target }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: fly
+            dockerfile: deploy/fly/Dockerfile
+            context: .
+          # - target: prefect
+          #   dockerfile: deploy/prefect/Dockerfile
+          #   context: .
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (local load)
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          load: true
+          push: false
+          tags: distillery-${{ matrix.target }}:scan
+          build-args: |
+            BUILD_SHA=${{ github.sha }}
+
+      - name: Generate SBOM (CycloneDX)
+        uses: anchore/sbom-action@v0
+        with:
+          image: distillery-${{ matrix.target }}:scan
+          format: cyclonedx-json
+          output-file: sbom-${{ matrix.target }}.cdx.json
+          artifact-name: sbom-${{ matrix.target }}
+
+      - name: Scan for vulnerabilities (Grype)
+        uses: anchore/scan-action@v4
+        id: grype
+        with:
+          sbom: sbom-${{ matrix.target }}.cdx.json
+          fail-build: true
+          severity-cutoff: high
+          output-format: json
+
+      - name: Save Grype report
+        if: always()
+        run: |
+          if [ -f "${{ steps.grype.outputs.json }}" ]; then
+            cp "${{ steps.grype.outputs.json }}" grype-report-${{ matrix.target }}.json
+          fi
+
+      - name: Upload SBOM artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ matrix.target }}.cdx.json
+          path: sbom-${{ matrix.target }}.cdx.json
+          retention-days: 30
+
+      - name: Upload Grype report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: grype-report-${{ matrix.target }}.json
+          path: grype-report-${{ matrix.target }}.json
+          retention-days: 30
