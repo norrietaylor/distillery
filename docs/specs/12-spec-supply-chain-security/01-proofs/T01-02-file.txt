@@ -1,0 +1,30 @@
+Type: file
+Command: cat .grype.yaml
+Expected: Exists at repository root with documented structure
+Timestamp: 2026-03-30T00:00:00Z
+
+Output:
+# Grype configuration for Distillery supply chain scanning.
+# See: https://github.com/anchore/grype#configuration
+#
+# False-positive suppressions go in the 'ignore' list below.
+# Each entry must include a reason explaining why the CVE is safe to ignore.
+#
+# Example:
+#   ignore:
+#     - vulnerability: CVE-2024-XXXXX
+#       reason: "Not exploitable in our context — we don't use the affected API"
+#     - package:
+#         name: some-package
+#         version: "1.2.3"
+#       reason: "Fixed in our fork, upstream CVE still open"
+
+ignore: []
+
+# Fail on critical and high severity vulnerabilities.
+fail-on-severity: high
+
+# Output format for local scans (CI overrides this via --output-format).
+output: table
+
+Status: PASS
