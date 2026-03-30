@@ -65,6 +65,47 @@ from distillery.mcp.budget import EmbeddingBudgetError, record_and_check
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# User identity helpers
+# ---------------------------------------------------------------------------
+
+def _get_authenticated_user() -> str:  # pragma: no cover — requires live OAuth context
+    """Return the authenticated GitHub username, or ``""`` if auth is not active.
+
+    Uses FastMCP's ``get_access_token()`` to retrieve the current request's
+    access token.  The GitHub username is extracted from the JWT claims
+    (``login`` field populated by the GitHubProvider).
+
+    Returns ``""`` only when no auth is configured (stdio transport or
+    ``auth=None``).  When a token is present but identity cannot be
+    resolved, raises ``RuntimeError`` to fail closed rather than silently
+    treating an authenticated-but-unresolvable request as anonymous.
+    """
+    try:
+        from fastmcp.server.dependencies import get_access_token
+    except ImportError:
+        return ""
+
+    token = get_access_token()
+    if token is None:
+        return ""
+
+    # Extract username from claims.  Validate type to avoid str(None) → "None".
+    raw_login = token.claims.get("login")
+    if isinstance(raw_login, str) and raw_login:
+        return raw_login
+
+    raw_sub = token.claims.get("sub")
+    if isinstance(raw_sub, str) and raw_sub:
+        return raw_sub
+
+    # Token present but no valid identity claim — fail closed.
+    raise RuntimeError(
+        "Authenticated request has no 'login' or 'sub' claim in access token. "
+        "Cannot determine user identity for ownership checks."
+    )
+
+
+# ---------------------------------------------------------------------------
 # Error response helpers
 # ---------------------------------------------------------------------------
 
@@ -82,6 +123,9 @@ def error_response(
     Returns:
         A single-element list of :class:`~mcp.types.TextContent` with a JSON payload.
     """
+    from distillery.security import sanitize_error
+
+    message = sanitize_error(message)
     payload: dict[str, Any] = {"error": True, "code": code, "message": message}
     if details:
         payload["details"] = details
@@ -322,24 +366,6 @@ def create_server(
             _shared["config"] = config
             _shared["embedding_provider"] = embedding_provider
 
-            # Register an atexit handler to checkpoint and close the store
-            # on process shutdown (SIGINT/SIGTERM from Fly.io autostop).
-            # This ensures the WAL is flushed so tables like feed_sources
-            # survive machine restarts.  We use synchronous calls because
-            # the async event loop is typically closed by the time atexit
-            # handlers run.
-            import atexit
-
-            def _close_store() -> None:  # pragma: no cover
-                conn = store._conn
-                if conn is not None:
-                    with contextlib.suppress(Exception):
-                        conn.execute("CHECKPOINT")
-                    with contextlib.suppress(Exception):
-                        conn.close()
-
-            atexit.register(_close_store)
-
             logger.info(
                 "Distillery MCP server ready (db=%s, embedding=%s)",
                 db_path,
@@ -443,11 +469,22 @@ def create_server(
             arguments["metadata"] = metadata
         arguments["dedup_threshold"] = dedup_threshold
         arguments["dedup_limit"] = dedup_limit
-        return await _handle_store(
+        user = _get_authenticated_user()
+        result = await _handle_store(
             store=lc["store"],
             arguments=arguments,
             cfg=lc["config"],
+            created_by=user,
         )
+        # Audit log (best-effort, never masks the result).
+        try:
+            response_data = json.loads(result[0].text) if result else {}
+            eid = response_data.get("entry_id", "")
+            outcome = "error" if response_data.get("error") else "success"
+            await lc["store"].write_audit_log(user, "distillery_store", eid, "store", outcome)
+        except Exception:  # noqa: BLE001
+            logger.debug("audit_log write failed for distillery_store (ignored)", exc_info=True)
+        return result
 
     @server.tool
     async def distillery_get(
@@ -495,6 +532,29 @@ def create_server(
         reference, idea, inbox.
         """
         lc = _get_lifespan_context(ctx)
+        user = _get_authenticated_user()
+
+        # Ownership check: if auth is active, verify the caller owns the entry.
+        if user:
+            try:
+                existing = await lc["store"].get(entry_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Ownership pre-check failed for entry %s", entry_id)
+                return error_response("STORE_ERROR", f"Failed to read entry: {exc}")
+            if existing is None:
+                await lc["store"].write_audit_log(
+                    user, "distillery_update", entry_id, "update", "not_found",
+                )
+                return error_response("NOT_FOUND", f"No entry found with id={entry_id!r}.")
+            if existing.created_by and existing.created_by != user:
+                await lc["store"].write_audit_log(
+                    user, "distillery_update", entry_id, "update", "forbidden",
+                )
+                return error_response(
+                    "FORBIDDEN",
+                    f"User {user!r} cannot modify entry owned by {existing.created_by!r}.",
+                )
+
         arguments: dict[str, Any] = {"entry_id": entry_id}
         if content is not None:
             arguments["content"] = content
@@ -510,10 +570,21 @@ def create_server(
             arguments["status"] = status
         if metadata is not None:
             arguments["metadata"] = metadata
-        return await _handle_update(
+        result = await _handle_update(
             store=lc["store"],
             arguments=arguments,
+            last_modified_by=user,
         )
+        # Audit log (best-effort).
+        try:
+            response_data = json.loads(result[0].text) if result else {}
+            outcome = "error" if response_data.get("error") else "success"
+            await lc["store"].write_audit_log(
+                user, "distillery_update", entry_id, "update", outcome,
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("audit_log write failed for distillery_update (ignored)", exc_info=True)
+        return result
 
     @server.tool
     async def distillery_list(  # noqa: PLR0913
@@ -752,15 +823,52 @@ def create_server(
             list[types.TextContent]: A one-element MCP TextContent list containing the updated entry as a JSON-serializable object on success, or an error payload on failure.
         """
         lc = _get_lifespan_context(ctx)
+        user = _get_authenticated_user()
+
+        # Ownership check: if auth is active, verify the caller owns the entry.
+        if user:
+            try:
+                existing = await lc["store"].get(entry_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Ownership pre-check failed for entry %s", entry_id)
+                return error_response("STORE_ERROR", f"Failed to read entry: {exc}")
+            if existing is None:
+                await lc["store"].write_audit_log(
+                    user, "distillery_resolve_review", entry_id, action, "not_found",
+                )
+                return error_response("NOT_FOUND", f"No entry found with id={entry_id!r}.")
+            if existing.created_by and existing.created_by != user:
+                await lc["store"].write_audit_log(
+                    user, "distillery_resolve_review", entry_id, action, "forbidden",
+                )
+                return error_response(
+                    "FORBIDDEN",
+                    f"User {user!r} cannot modify entry owned by {existing.created_by!r}.",
+                )
+
         arguments: dict[str, Any] = {"entry_id": entry_id, "action": action}
         if new_entry_type is not None:
             arguments["new_entry_type"] = new_entry_type
-        if reviewer is not None:
+        # When auth is active, override caller-supplied reviewer with the
+        # authenticated identity to prevent spoofing reviewed_by metadata.
+        if user:
+            arguments["reviewer"] = user
+        elif reviewer is not None:
             arguments["reviewer"] = reviewer
-        return await _handle_resolve_review(
+        result = await _handle_resolve_review(
             store=lc["store"],
             arguments=arguments,
         )
+        # Audit log (best-effort).
+        try:
+            response_data = json.loads(result[0].text) if result else {}
+            outcome = "error" if response_data.get("error") else "success"
+            await lc["store"].write_audit_log(
+                user, "distillery_resolve_review", entry_id, action, outcome,
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("audit_log write failed for resolve_review (ignored)", exc_info=True)
+        return result
 
     @server.tool
     async def distillery_check_dedup(
@@ -1334,12 +1442,8 @@ def _sync_gather_stats(
             "calls used."
         )
 
-    from distillery import __build_sha__, __version__
-
     result: dict[str, Any] = {
         "status": "ok",
-        "version": __version__,
-        "build_sha": __build_sha__,
         "total_entries": total_entries,
         "entries_by_type": entries_by_type,
         "entries_by_status": entries_by_status,
@@ -1390,6 +1494,7 @@ async def _handle_store(
     store: Any,
     arguments: dict[str, Any],
     cfg: DistilleryConfig | None = None,
+    created_by: str = "",
 ) -> list[types.TextContent]:
     """
     Create and persist a new Entry from the provided arguments, run deduplication and a non-fatal conflict check, and return the stored entry id along with any warnings or conflict candidates.
@@ -1497,6 +1602,7 @@ async def _handle_store(
             project=arguments.get("project"),
             tags=list(arguments.get("tags") or []),
             metadata=dict(arguments.get("metadata") or {}),
+            created_by=created_by,
         )
     except Exception as exc:  # noqa: BLE001
         return error_response("INVALID_INPUT", f"Failed to construct entry: {exc}")
@@ -1673,6 +1779,7 @@ async def _handle_get(
 async def _handle_update(
     store: Any,
     arguments: dict[str, Any],
+    last_modified_by: str = "",
 ) -> list[types.TextContent]:
     """Implement the ``distillery_update`` tool.
 
@@ -1714,6 +1821,11 @@ async def _handle_update(
             + ", ".join(sorted(updatable_keys))
             + ".",
         )
+
+    # Inject last_modified_by *after* the emptiness check so auth metadata
+    # alone cannot satisfy the "at least one field" requirement.
+    if last_modified_by:
+        updates["last_modified_by"] = last_modified_by
 
     # --- validate individual fields ----------------------------------------
     if "entry_type" in updates:
