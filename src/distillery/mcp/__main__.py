@@ -156,6 +156,7 @@ def main(argv: list[str] | None = None) -> int:
                 requests_per_minute=rl.requests_per_minute,
                 requests_per_hour=rl.requests_per_hour,
                 max_body_bytes=rl.max_body_bytes,
+                trust_proxy=rl.trust_proxy,
             )
 
             import uvicorn as _uvicorn

@@ -225,11 +225,15 @@ class HttpRateLimitConfig:
         requests_per_minute: Maximum requests per IP per minute.
         requests_per_hour: Maximum requests per IP per hour.
         max_body_bytes: Maximum request body size in bytes.
+        trust_proxy: When ``True``, prefer ``X-Forwarded-For`` for client IP
+            extraction.  Enable when running behind a reverse proxy (Fly.io,
+            nginx, Cloudflare).
     """
 
     requests_per_minute: int = 60
     requests_per_hour: int = 600
     max_body_bytes: int = 1_048_576  # 1 MB
+    trust_proxy: bool = False
 
 
 @dataclass
@@ -663,6 +667,7 @@ def _parse_server(raw: dict[str, Any]) -> ServerConfig:
             requests_per_minute=int(rl_raw.get("requests_per_minute", 60)),
             requests_per_hour=int(rl_raw.get("requests_per_hour", 600)),
             max_body_bytes=int(rl_raw.get("max_body_bytes", 1_048_576)),
+            trust_proxy=bool(rl_raw.get("trust_proxy", False)),
         ),
     )
 

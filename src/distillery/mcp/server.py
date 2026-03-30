@@ -89,18 +89,20 @@ def _get_authenticated_user() -> str:  # pragma: no cover — requires live OAut
     if token is None:
         return ""
 
-    # Extract username directly from claims — no caching needed since
-    # claims are already parsed from the JWT (no API call involved).
-    username = str(token.claims.get("login", ""))
-    if not username:
-        username = str(token.claims.get("sub", ""))
-    if not username:
-        # Token present but no identity claim — fail closed.
-        raise RuntimeError(
-            "Authenticated request has no 'login' or 'sub' claim in access token. "
-            "Cannot determine user identity for ownership checks."
-        )
-    return username
+    # Extract username from claims.  Validate type to avoid str(None) → "None".
+    raw_login = token.claims.get("login")
+    if isinstance(raw_login, str) and raw_login:
+        return raw_login
+
+    raw_sub = token.claims.get("sub")
+    if isinstance(raw_sub, str) and raw_sub:
+        return raw_sub
+
+    # Token present but no valid identity claim — fail closed.
+    raise RuntimeError(
+        "Authenticated request has no 'login' or 'sub' claim in access token. "
+        "Cannot determine user identity for ownership checks."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -534,7 +536,11 @@ def create_server(
 
         # Ownership check: if auth is active, verify the caller owns the entry.
         if user:
-            existing = await lc["store"].get(entry_id)
+            try:
+                existing = await lc["store"].get(entry_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Ownership pre-check failed for entry %s", entry_id)
+                return error_response("STORE_ERROR", f"Failed to read entry: {exc}")
             if existing is None:
                 await lc["store"].write_audit_log(
                     user, "distillery_update", entry_id, "update", "not_found",
@@ -821,7 +827,11 @@ def create_server(
 
         # Ownership check: if auth is active, verify the caller owns the entry.
         if user:
-            existing = await lc["store"].get(entry_id)
+            try:
+                existing = await lc["store"].get(entry_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Ownership pre-check failed for entry %s", entry_id)
+                return error_response("STORE_ERROR", f"Failed to read entry: {exc}")
             if existing is None:
                 await lc["store"].write_audit_log(
                     user, "distillery_resolve_review", entry_id, action, "not_found",
@@ -839,7 +849,11 @@ def create_server(
         arguments: dict[str, Any] = {"entry_id": entry_id, "action": action}
         if new_entry_type is not None:
             arguments["new_entry_type"] = new_entry_type
-        if reviewer is not None:
+        # When auth is active, override caller-supplied reviewer with the
+        # authenticated identity to prevent spoofing reviewed_by metadata.
+        if user:
+            arguments["reviewer"] = user
+        elif reviewer is not None:
             arguments["reviewer"] = reviewer
         result = await _handle_resolve_review(
             store=lc["store"],
