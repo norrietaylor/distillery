@@ -97,6 +97,11 @@ jobs:
           artifact-name: sbom-${{ matrix.target }}
 
       # --- Vulnerability scanning ---
+      - name: Update Grype DB
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+          grype db update
+
       - name: Scan for vulnerabilities (Grype)
         uses: anchore/scan-action@v4
         id: grype
@@ -105,7 +110,6 @@ jobs:
           fail-build: true
           severity-cutoff: high
           output-format: json
-          cache: false
 
       - name: Save Grype report
         if: always()
