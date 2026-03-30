@@ -1,11 +1,15 @@
-FROM python:3.13-slim
+FROM cgr.dev/chainguard/wolfi-base:latest
 
 WORKDIR /app
 
 ARG BUILD_SHA=unknown
 ENV DISTILLERY_BUILD_SHA=${BUILD_SHA}
 
-RUN useradd --create-home --uid 10001 appuser
+# Install Python 3.13 and pip
+RUN apk add --no-cache python-3.13 py3.13-pip
+
+# Create non-root user
+RUN adduser --disabled-password --uid 10001 appuser
 
 # Copy the full repo (build context is repo root)
 COPY . .

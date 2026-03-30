@@ -9,23 +9,7 @@
 #     - vulnerability: CVE-2024-XXXXX
 #       reason: "Not exploitable in our context — we don't use the affected API"
 
-ignore:
-  # --- Base image CVEs (python:3.13-slim / Debian 13) ---
-  # These are upstream vulnerabilities in the base image system packages.
-  # No fixed Debian packages are available yet. Suppress until upstream patches land.
-  # Reviewed: 2026-03-30
-
-  - vulnerability: CVE-2026-4437
-    reason: "glibc (libc-bin/libc6) — upstream Debian 13, no fix available"
-
-  - vulnerability: CVE-2026-2673
-    reason: "OpenSSL 3.5.x — upstream Debian 13, no fix available"
-
-  - vulnerability: CVE-2026-4519
-    reason: "CPython 3.13 — upstream Debian 13, no fix available"
-
-  - vulnerability: CVE-2025-69720
-    reason: "ncurses — upstream Debian 13, no fix available. Not used at runtime."
+ignore: []
 
 # Fail on critical and high severity vulnerabilities.
 # This is also enforced in the CI workflow via --severity-cutoff=high,
