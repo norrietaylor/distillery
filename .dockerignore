@@ -10,8 +10,10 @@ __pycache__
 tests/
 docs/
 issues/
-*.md
-!deploy/**/*.md
+CHANGELOG.md
+CONTRIBUTING.md
+CLAUDE.md
+LICENSE
 uv.lock
 Makefile
 .gitignore
