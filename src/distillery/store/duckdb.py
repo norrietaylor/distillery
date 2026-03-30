@@ -268,9 +268,7 @@ class DuckDBStore:
 
         # Region: config > AWS_DEFAULT_REGION > AWS_REGION
         region = (
-            self._s3_region
-            or os.environ.get("AWS_DEFAULT_REGION")
-            or os.environ.get("AWS_REGION")
+            self._s3_region or os.environ.get("AWS_DEFAULT_REGION") or os.environ.get("AWS_REGION")
         )
         if region:
             conn.execute(f"SET s3_region = '{_sql_escape(region)}';")
@@ -325,9 +323,7 @@ class DuckDBStore:
             # Index already exists -- safe to ignore.
             logger.debug("HNSW index already exists, skipping creation")
         except duckdb.BinderException:
-            logger.warning(
-                "HNSW index type not recognized — skipping index creation"
-            )
+            logger.warning("HNSW index type not recognized — skipping index creation")
 
     def _create_meta_table(self, conn: duckdb.DuckDBPyConnection) -> None:
         """Create the ``_meta`` table if it does not exist."""
@@ -337,6 +333,9 @@ class DuckDBStore:
         """Create the ``search_log`` and ``feedback_log`` tables if they don't exist."""
         conn.execute(_CREATE_SEARCH_LOG_TABLE)
         conn.execute(_CREATE_FEEDBACK_LOG_TABLE)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_search_log_timestamp ON search_log (timestamp)"
+        )
         logger.info("search_log and feedback_log tables ready")
 
     def _create_feed_sources_table(self, conn: duckdb.DuckDBPyConnection) -> None:
@@ -1163,6 +1162,37 @@ class DuckDBStore:
         return await asyncio.to_thread(self._sync_log_feedback, search_id, entry_id, signal)
 
     # ------------------------------------------------------------------
+    # Search log queries for implicit feedback
+    # ------------------------------------------------------------------
+
+    def _sync_get_searches_for_entry(self, entry_id: str, since: datetime) -> list[str]:
+        """Return IDs of search_log rows that include entry_id and are newer than since."""
+        conn = self.connection
+        sql = (
+            "SELECT id FROM search_log "
+            "WHERE timestamp >= ? AND list_contains(result_entry_ids, ?)"
+        )
+        rows = conn.execute(sql, [since, entry_id]).fetchall()
+        return [row[0] for row in rows]
+
+    async def get_searches_for_entry(self, entry_id: str, since: datetime) -> list[str]:
+        """
+        Return IDs of recent searches that returned entry_id.
+
+        Queries ``search_log`` directly so the result is durable across process restarts
+        (e.g. Lambda invocations). This replaces the former in-memory ``recent_searches``
+        list for implicit feedback correlation.
+
+        Parameters:
+            entry_id (str): UUID of the entry to look up.
+            since (datetime): Inclusive lower bound on ``search_log.timestamp``.
+
+        Returns:
+            list[str]: Search IDs (UUIDs) of matching ``search_log`` rows.
+        """
+        return await asyncio.to_thread(self._sync_get_searches_for_entry, entry_id, since)
+
+    # ------------------------------------------------------------------
     # Feed source persistence
     # ------------------------------------------------------------------
 
@@ -1215,9 +1245,7 @@ class DuckDBStore:
     def _sync_remove_feed_source(self, url: str) -> bool:
         """Remove a feed source by URL. Returns True if it existed."""
         assert self._conn is not None
-        result = self._conn.execute(
-            "DELETE FROM feed_sources WHERE url = ? RETURNING url", [url]
-        )
+        result = self._conn.execute("DELETE FROM feed_sources WHERE url = ? RETURNING url", [url])
         return len(result.fetchall()) > 0
 
     async def list_feed_sources(self) -> list[dict[str, Any]]:
@@ -1240,3 +1268,31 @@ class DuckDBStore:
     async def remove_feed_source(self, url: str) -> bool:
         """Remove a feed source by URL. Returns True if it existed."""
         return await asyncio.to_thread(self._sync_remove_feed_source, url)
+
+    # ------------------------------------------------------------------
+    # Metadata helpers
+    # ------------------------------------------------------------------
+
+    def _sync_get_metadata(self, key: str) -> str | None:
+        """Read a value from the ``_meta`` table."""
+        assert self._conn is not None
+        result = self._conn.execute("SELECT value FROM _meta WHERE key = ?", [key])
+        row = result.fetchone()
+        return row[0] if row else None
+
+    def _sync_set_metadata(self, key: str, value: str) -> None:
+        """Upsert a value into the ``_meta`` table."""
+        assert self._conn is not None
+        self._conn.execute(
+            "INSERT INTO _meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+            [key, value],
+        )
+
+    async def get_metadata(self, key: str) -> str | None:
+        """Read a value from the ``_meta`` key-value table."""
+        return await asyncio.to_thread(self._sync_get_metadata, key)
+
+    async def set_metadata(self, key: str, value: str) -> None:
+        """Write a value to the ``_meta`` key-value table (upsert)."""
+        await asyncio.to_thread(self._sync_set_metadata, key, value)

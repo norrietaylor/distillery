@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from distillery.models import Entry
 
 
@@ -226,6 +228,21 @@ class DistilleryStore(Protocol):
         """
         ...
 
+    async def get_searches_for_entry(self, entry_id: str, since: datetime) -> list[str]:
+        """Return IDs of search_log rows that include entry_id and are newer than since.
+
+        Queries the persistent ``search_log`` table so the result is correct
+        across process restarts (e.g. Lambda invocations).
+
+        Args:
+            entry_id: UUID of the entry to look up in search results.
+            since: Inclusive lower bound on ``search_log.timestamp``.
+
+        Returns:
+            List of search_log row IDs (UUID strings) for matching searches.
+        """
+        ...
+
     async def list_feed_sources(self) -> list[dict[str, Any]]:
         """Return all persisted feed sources as dicts.
 
@@ -271,5 +288,25 @@ class DistilleryStore(Protocol):
         Returns:
             ``True`` if the source existed and was removed, ``False``
             otherwise.
+        """
+        ...
+
+    async def get_metadata(self, key: str) -> str | None:
+        """Read a value from the ``_meta`` key-value table.
+
+        Args:
+            key: Metadata key to look up.
+
+        Returns:
+            The stored string value, or ``None`` if the key does not exist.
+        """
+        ...
+
+    async def set_metadata(self, key: str, value: str) -> None:
+        """Write a value to the ``_meta`` key-value table (upsert).
+
+        Args:
+            key: Metadata key.
+            value: String value to store.
         """
         ...

@@ -73,6 +73,8 @@ class TestDistilleryStoreProtocolCompliance:
             "search",
             "find_similar",
             "list_entries",
+            "get_metadata",
+            "set_metadata",
         ]
         store = DuckDBStore(db_path=":memory:", embedding_provider=mock_embedding_provider)
         for name in method_names:

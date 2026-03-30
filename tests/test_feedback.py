@@ -8,7 +8,7 @@ Covers:
   - Entry type filter: verify per_type_breakdown when entry_type argument is provided
   - Empty database: verify distillery_quality returns zeros gracefully
 
-Time-sensitive tests manipulate the in-memory recent_searches list directly so
+Time-window tests insert rows directly into search_log with explicit timestamps so
 they remain deterministic without requiring freezegun or wall-clock sleeps.
 """
 
@@ -177,8 +177,7 @@ class TestSearchLogging:
         entry = make_entry(content="searchable knowledge")
         await store.store(entry)
 
-        recent_searches: list[dict] = []
-        await _handle_search(store, {"query": "searchable knowledge"}, recent_searches)
+        await _handle_search(store, {"query": "searchable knowledge"})
 
         row = store.connection.execute("SELECT COUNT(*) FROM search_log").fetchone()
         assert row is not None
@@ -192,8 +191,7 @@ class TestSearchLogging:
         entry = make_entry(content="unique knowledge fragment")
         entry_id = await store.store(entry)
 
-        recent_searches: list[dict] = []
-        await _handle_search(store, {"query": "unique knowledge fragment"}, recent_searches)
+        await _handle_search(store, {"query": "unique knowledge fragment"})
 
         row = store.connection.execute("SELECT result_entry_ids FROM search_log LIMIT 1").fetchone()
         assert row is not None
@@ -210,9 +208,8 @@ class TestSearchLogging:
         entry = make_entry(content="query target")
         await store.store(entry)
 
-        recent_searches: list[dict] = []
-        await _handle_search(store, {"query": "query target"}, recent_searches)
-        await _handle_search(store, {"query": "query target"}, recent_searches)
+        await _handle_search(store, {"query": "query target"})
+        await _handle_search(store, {"query": "query target"})
 
         data = await _quality(store)
         assert data["total_searches"] == 2
@@ -222,9 +219,8 @@ class TestSearchLogging:
         store: DuckDBStore,
     ) -> None:
         """If search returns no results, no search_log row is created."""
-        recent_searches: list[dict] = []
         # Search against an empty store - no results expected.
-        await _handle_search(store, {"query": "no match at all"}, recent_searches)
+        await _handle_search(store, {"query": "no match at all"})
 
         row = store.connection.execute("SELECT COUNT(*) FROM search_log").fetchone()
         assert row is not None
@@ -269,22 +265,14 @@ class TestImplicitFeedbackWithinWindow:
         entry = make_entry(content="feedback target")
         entry_id = await store.store(entry)
 
-        # Build a recent_searches list that includes entry_id.
         search_id = str(uuid.uuid4())
         store.connection.execute(
             "INSERT INTO search_log (id, query, result_entry_ids, result_scores, timestamp) "
             "VALUES (?, 'q', ?, [], CURRENT_TIMESTAMP)",
             [search_id, [entry_id]],
         )
-        recent_searches: list[dict] = [
-            {
-                "search_id": search_id,
-                "entry_ids": {entry_id},
-                "timestamp": datetime.now(UTC),  # within window
-            }
-        ]
 
-        await _handle_get(store, {"entry_id": entry_id}, recent_searches, config)
+        await _handle_get(store, {"entry_id": entry_id}, config)
 
         row = store.connection.execute(
             "SELECT COUNT(*), signal FROM feedback_log WHERE entry_id = ? GROUP BY signal",
@@ -310,14 +298,7 @@ class TestImplicitFeedbackWithinWindow:
             "VALUES (?, 'q', ?, [], CURRENT_TIMESTAMP)",
             [search_id, [entry_id]],
         )
-        recent_searches: list[dict] = [
-            {
-                "search_id": search_id,
-                "entry_ids": {entry_id},
-                "timestamp": datetime.now(UTC),
-            }
-        ]
-        await _handle_get(store, {"entry_id": entry_id}, recent_searches, config)
+        await _handle_get(store, {"entry_id": entry_id}, config)
 
         data = await _quality(store)
         assert data["total_feedback"] == 1
@@ -363,58 +344,52 @@ class TestImplicitFeedbackWindowExpiry:
         entry = make_entry(content="late access entry")
         entry_id = await store.store(entry)
 
+        # Insert the search_log row with an old timestamp (10 min ago, window is 5 min).
+        expired_timestamp = datetime.now(UTC) - timedelta(minutes=10)
         search_id = str(uuid.uuid4())
         store.connection.execute(
             "INSERT INTO search_log (id, query, result_entry_ids, result_scores, timestamp) "
-            "VALUES (?, 'q', ?, [], CURRENT_TIMESTAMP)",
-            [search_id, [entry_id]],
+            "VALUES (?, 'q', ?, [], ?)",
+            [search_id, [entry_id], expired_timestamp],
         )
 
-        # Simulate an expired search record: timestamp 10 minutes ago with 5 min window.
-        expired_timestamp = datetime.now(UTC) - timedelta(minutes=10)
-        recent_searches: list[dict] = [
-            {
-                "search_id": search_id,
-                "entry_ids": {entry_id},
-                "timestamp": expired_timestamp,
-            }
-        ]
-
-        await _handle_get(store, {"entry_id": entry_id}, recent_searches, config)
+        await _handle_get(store, {"entry_id": entry_id}, config)
 
         row = store.connection.execute("SELECT COUNT(*) FROM feedback_log").fetchone()
         assert row is not None
         assert row[0] == 0
 
-    async def test_expired_search_pruned_from_list(
+    async def test_only_within_window_search_produces_feedback(
         self,
         store: DuckDBStore,
         config: DistilleryConfig,
     ) -> None:
-        """Expired records must be removed from recent_searches after get()."""
-        entry = make_entry(content="prune target")
+        """Only searches within the window produce feedback; expired ones are ignored."""
+        entry = make_entry(content="window boundary entry")
         entry_id = await store.store(entry)
 
-        search_id = str(uuid.uuid4())
+        expired_timestamp = datetime.now(UTC) - timedelta(minutes=10)
+        recent_timestamp = datetime.now(UTC) - timedelta(minutes=1)
+
+        expired_sid = str(uuid.uuid4())
+        recent_sid = str(uuid.uuid4())
         store.connection.execute(
             "INSERT INTO search_log (id, query, result_entry_ids, result_scores, timestamp) "
-            "VALUES (?, 'q', ?, [], CURRENT_TIMESTAMP)",
-            [search_id, [entry_id]],
+            "VALUES (?, 'q', ?, [], ?)",
+            [expired_sid, [entry_id], expired_timestamp],
+        )
+        store.connection.execute(
+            "INSERT INTO search_log (id, query, result_entry_ids, result_scores, timestamp) "
+            "VALUES (?, 'q', ?, [], ?)",
+            [recent_sid, [entry_id], recent_timestamp],
         )
 
-        expired_timestamp = datetime.now(UTC) - timedelta(minutes=10)
-        recent_searches: list[dict] = [
-            {
-                "search_id": search_id,
-                "entry_ids": {entry_id},
-                "timestamp": expired_timestamp,
-            }
-        ]
+        await _handle_get(store, {"entry_id": entry_id}, config)
 
-        await _handle_get(store, {"entry_id": entry_id}, recent_searches, config)
-
-        # Expired record must have been pruned from the list.
-        assert len(recent_searches) == 0
+        # Only the recent search should have produced feedback.
+        row = store.connection.execute("SELECT COUNT(*) FROM feedback_log").fetchone()
+        assert row is not None
+        assert row[0] == 1
 
     async def test_entry_not_in_search_results_no_feedback(
         self,
@@ -433,16 +408,9 @@ class TestImplicitFeedbackWindowExpiry:
             "VALUES (?, 'q', ?, [], CURRENT_TIMESTAMP)",
             [search_id, [id_a]],  # only entry A in results
         )
-        recent_searches: list[dict] = [
-            {
-                "search_id": search_id,
-                "entry_ids": {id_a},
-                "timestamp": datetime.now(UTC),
-            }
-        ]
 
         # Fetch entry B - not in the search results
-        await _handle_get(store, {"entry_id": id_b}, recent_searches, config)
+        await _handle_get(store, {"entry_id": id_b}, config)
 
         row = store.connection.execute("SELECT COUNT(*) FROM feedback_log").fetchone()
         assert row is not None

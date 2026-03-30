@@ -52,7 +52,7 @@ import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
@@ -273,7 +273,7 @@ def create_server(
               - "store": an initialized DuckDBStore instance.
               - "config": the Distillery configuration.
               - "embedding_provider": the embedding provider instance.
-              - "recent_searches": an in-memory list for implicit feedback.
+              - (implicit feedback correlation now uses search_log directly)
         """
         if not _shared:
             logger.info("Distillery MCP server starting up …")
@@ -302,11 +302,11 @@ def create_server(
             )
             await store.initialize()
 
-            # Seed YAML feed sources into DB only when the table is empty
-            # (first run).  Once the user has managed sources via /watch,
-            # the DB is the sole source of truth — re-seeding would undo
-            # any /watch remove operations.
-            if not await store.list_feed_sources():
+            # Seed YAML feed sources into DB exactly once.  After the first
+            # successful seed we write a persistent sentinel so restarts never
+            # re-insert sources — even when the user has /watch-removed them
+            # all and the feed_sources table is empty.
+            if await store.get_metadata("feeds_seeded") != "true":
                 for source in config.feeds.sources:
                     with contextlib.suppress(ValueError):
                         await store.add_feed_source(
@@ -316,11 +316,11 @@ def create_server(
                             poll_interval_minutes=source.poll_interval_minutes,
                             trust_weight=source.trust_weight,
                         )
+                await store.set_metadata("feeds_seeded", "true")
 
             _shared["store"] = store
             _shared["config"] = config
             _shared["embedding_provider"] = embedding_provider
-            _shared["recent_searches"] = []
 
             logger.info(
                 "Distillery MCP server ready (db=%s, embedding=%s)",
@@ -451,7 +451,6 @@ def create_server(
         return await _handle_get(
             store=lc["store"],
             arguments={"entry_id": entry_id},
-            recent_searches=lc["recent_searches"],
             config=lc["config"],
         )
 
@@ -610,7 +609,6 @@ def create_server(
         return await _handle_search(
             store=lc["store"],
             arguments=arguments,
-            recent_searches=lc["recent_searches"],
             cfg=lc["config"],
         )
 
@@ -1580,20 +1578,24 @@ async def _handle_store(
 async def _handle_get(
     store: Any,
     arguments: dict[str, Any],
-    recent_searches: list[dict[str, Any]] | None = None,
     config: DistilleryConfig | None = None,
 ) -> list[types.TextContent]:
     """
     Retrieve an entry by its ID and, when applicable, record implicit positive feedback.
 
-    Validates presence of `entry_id`, fetches the entry from `store`, and returns the serialized entry. If `recent_searches` is provided, prunes expired search records (based on `config.classification.feedback_window_minutes`, or 5 minutes when `config` is None) and logs a single implicit positive feedback event per (search_id, entry_id) pair for any recent search that included this entry. Failures to log feedback are caught and do not prevent returning the entry.
+    Validates presence of `entry_id`, fetches the entry from `store`, and returns the
+    serialized entry. Queries ``search_log`` directly for any recent search within the
+    feedback window that returned this entry, then logs a positive feedback event per
+    matching search. Failures to log feedback are caught and do not prevent returning
+    the entry.
 
     Parameters:
-        recent_searches (list[dict]): Optional shared in-memory list of recent search events; each element must contain `search_id` (str), `entry_ids` (set[str]), and `timestamp` (datetime). When `None`, implicit feedback recording is skipped.
-        config (DistilleryConfig | None): Optional configuration used to read `classification.feedback_window_minutes`; defaults to 5 minutes when `None`.
+        config (DistilleryConfig | None): Optional configuration used to read
+            `classification.feedback_window_minutes`; defaults to 5 minutes when `None`.
 
     Returns:
-        list[types.TextContent]: MCP content list containing the serialized entry on success, or an error response (e.g., `NOT_FOUND`, `INVALID_INPUT`, `STORE_ERROR`).
+        list[types.TextContent]: MCP content list containing the serialized entry on
+        success, or an error response (e.g., `NOT_FOUND`, `INVALID_INPUT`, `STORE_ERROR`).
     """
     err = validate_required(arguments, "entry_id")
     if err:
@@ -1614,42 +1616,36 @@ async def _handle_get(
             details={"entry_id": entry_id},
         )
 
-    # Implicit feedback: if this get follows a recent search that returned this
-    # entry, record a positive feedback signal.
-    if recent_searches is not None:
-        feedback_window_minutes: int = 5
-        if config is not None:
-            feedback_window_minutes = config.classification.feedback_window_minutes
+    # Implicit feedback: query search_log for any recent search that returned this
+    # entry and record a positive feedback signal. Using the DB directly (rather than
+    # an in-memory list) ensures correctness in stateless deployments such as Lambda.
+    feedback_window_minutes: int = 5
+    if config is not None:
+        feedback_window_minutes = config.classification.feedback_window_minutes
 
-        now = datetime.now(UTC)
-        cutoff_seconds = feedback_window_minutes * 60
+    since = datetime.now(UTC) - timedelta(minutes=feedback_window_minutes)
+    try:
+        recent_search_ids = await store.get_searches_for_entry(entry_id, since)
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to query recent searches for entry_id=%s", entry_id)
+        recent_search_ids = []
 
-        # Prune expired entries and collect matching searches in a single pass.
-        alive: list[dict[str, Any]] = []
-        logged_pairs: set[tuple[str, str]] = set()
-        for record in recent_searches:
-            age_seconds = (now - record["timestamp"]).total_seconds()
-            if age_seconds <= cutoff_seconds:
-                alive.append(record)
-                pair = (record["search_id"], entry_id)
-                if entry_id in record["entry_ids"] and pair not in logged_pairs:
-                    try:
-                        await store.log_feedback(
-                            search_id=record["search_id"],
-                            entry_id=entry_id,
-                            signal="positive",
-                        )
-                        logged_pairs.add(pair)
-                    except Exception:  # noqa: BLE001
-                        logger.exception(
-                            "Failed to log implicit feedback for entry_id=%s search_id=%s",
-                            entry_id,
-                            record["search_id"],
-                        )
-
-        # Replace the list contents in-place so callers sharing the reference
-        # also see the pruned version.
-        recent_searches[:] = alive
+    logged_search_ids: set[str] = set()
+    for search_id in recent_search_ids:
+        if search_id not in logged_search_ids:
+            try:
+                await store.log_feedback(
+                    search_id=search_id,
+                    entry_id=entry_id,
+                    signal="positive",
+                )
+                logged_search_ids.add(search_id)
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "Failed to log implicit feedback for entry_id=%s search_id=%s",
+                    entry_id,
+                    search_id,
+                )
 
     return success_response(entry.to_dict())
 
@@ -1782,20 +1778,25 @@ def _build_filters_from_arguments(arguments: dict[str, Any]) -> dict[str, Any] |
 async def _handle_search(
     store: Any,
     arguments: dict[str, Any],
-    recent_searches: list[dict[str, Any]] | None = None,
     cfg: DistilleryConfig | None = None,
 ) -> list[types.TextContent]:
     """
     Search stored entries for a text query and return matching entries ranked by similarity.
 
-    Performs validation on `query` and `limit`, applies optional filters from `arguments`, and returns search hits ordered by descending similarity. When `recent_searches` is provided and results are non-empty, logs the search via the store and appends a compact record to `recent_searches` for later implicit-feedback correlation; failures to log do not affect the returned results.
+    Performs validation on `query` and `limit`, applies optional filters from `arguments`,
+    and returns search hits ordered by descending similarity. When results are non-empty,
+    logs the search to ``search_log`` for later implicit-feedback correlation via
+    ``_handle_get``; failures to log do not affect the returned results.
 
     Parameters:
-        arguments: Dictionary containing at minimum the key `query` (str). May include optional filter keys (e.g., `entry_type`, `author`, `project`, `tags`, `status`, `date_from`, `date_to`) and `limit` (int).
-        recent_searches: Optional shared in-memory list used for implicit feedback correlation. When provided, a record with keys `search_id` (str), `entry_ids` (set[str]), and `timestamp` (datetime) will be appended for logged searches. If `None`, search logging and in-memory tracking are skipped.
+        arguments: Dictionary containing at minimum the key `query` (str). May include
+            optional filter keys (e.g., `entry_type`, `author`, `project`, `tags`,
+            `status`, `date_from`, `date_to`) and `limit` (int).
 
     Returns:
-        MCP content list containing a single JSON object with `results` (list of objects each with `score` and `entry`) and `count` (int) describing the number of results returned.
+        MCP content list containing a single JSON object with `results` (list of objects
+        each with `score` and `entry`) and `count` (int) describing the number of results
+        returned.
     """
     err = validate_required(arguments, "query")
     if err:
@@ -1830,27 +1831,16 @@ async def _handle_search(
 
     results = [{"score": round(sr.score, 6), "entry": sr.entry.to_dict()} for sr in search_results]
 
-    # Log the search event and record it for implicit feedback correlation.
-    if recent_searches is not None and search_results:
+    # Log the search event to search_log for later implicit-feedback correlation.
+    if search_results:
         result_entry_ids = [sr.entry.id for sr in search_results]
         result_scores = [sr.score for sr in search_results]
         try:
-            search_id = await store.log_search(
+            await store.log_search(
                 query=query,
                 result_entry_ids=result_entry_ids,
                 result_scores=result_scores,
             )
-            recent_searches.append(
-                {
-                    "search_id": search_id,
-                    "entry_ids": set(result_entry_ids),
-                    "timestamp": datetime.now(UTC),
-                }
-            )
-            # Cap the in-memory list to prevent unbounded growth.
-            recent_searches_max = 1000
-            if len(recent_searches) > recent_searches_max:
-                recent_searches[:] = recent_searches[-recent_searches_max:]
         except Exception:  # noqa: BLE001
             logger.exception("Failed to log search event; continuing without feedback tracking")
 
@@ -3222,7 +3212,6 @@ def _sync_gather_stale(
 # ---------------------------------------------------------------------------
 
 _VALID_SOURCE_TYPES = {"rss", "github"}
-
 
 
 async def _handle_watch(
