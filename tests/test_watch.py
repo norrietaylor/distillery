@@ -592,3 +592,70 @@ class TestFeedSourceDuckDBPersistence:
         assert "https://example.com/rss" not in urls, (
             "Removed source was re-created by YAML seeding"
         )
+
+
+# ---------------------------------------------------------------------------
+# _handle_watch: backend error handling (WATCH_ERROR)
+# ---------------------------------------------------------------------------
+
+
+class FailingSourceStore:
+    """Store that raises on every operation to simulate backend failures."""
+
+    async def list_feed_sources(self) -> list[dict[str, Any]]:
+        raise RuntimeError("DB connection lost")
+
+    async def add_feed_source(
+        self,
+        url: str,
+        source_type: str,
+        label: str = "",
+        poll_interval_minutes: int = 60,
+        trust_weight: float = 1.0,
+    ) -> dict[str, Any]:
+        raise RuntimeError("DB connection lost")
+
+    async def remove_feed_source(self, url: str) -> bool:
+        raise RuntimeError("DB connection lost")
+
+
+@pytest.mark.unit
+class TestHandleWatchBackendErrors:
+    """Backend failures must return structured WATCH_ERROR, not raw exceptions."""
+
+    async def test_list_backend_error(self) -> None:
+        from distillery.mcp.server import _handle_watch
+
+        store = FailingSourceStore()
+        result = await _handle_watch(store=store, arguments={"action": "list"})
+        data = json.loads(result[0].text)
+        assert data["error"] is True
+        assert data["code"] == "WATCH_ERROR"
+
+    async def test_add_backend_error(self) -> None:
+        from distillery.mcp.server import _handle_watch
+
+        store = FailingSourceStore()
+        result = await _handle_watch(
+            store=store,
+            arguments={
+                "action": "add",
+                "url": "https://example.com/rss",
+                "source_type": "rss",
+            },
+        )
+        data = json.loads(result[0].text)
+        assert data["error"] is True
+        assert data["code"] == "WATCH_ERROR"
+
+    async def test_remove_backend_error(self) -> None:
+        from distillery.mcp.server import _handle_watch
+
+        store = FailingSourceStore()
+        result = await _handle_watch(
+            store=store,
+            arguments={"action": "remove", "url": "https://example.com/rss"},
+        )
+        data = json.loads(result[0].text)
+        assert data["error"] is True
+        assert data["code"] == "WATCH_ERROR"

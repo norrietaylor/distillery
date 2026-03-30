@@ -3168,7 +3168,11 @@ async def _handle_watch(
         )
 
     if action == "list":
-        db_sources = await store.list_feed_sources()
+        try:
+            db_sources = await store.list_feed_sources()
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("distillery_watch: failed to list feed sources")
+            return error_response("WATCH_ERROR", f"Failed to list feed sources: {exc}")
         return success_response(
             {
                 "sources": db_sources,
@@ -3239,13 +3243,16 @@ async def _handle_watch(
                 poll_interval_minutes=poll_interval,
                 trust_weight=trust_weight,
             )
+            db_sources = await store.list_feed_sources()
         except ValueError:
             return error_response(
                 "DUPLICATE_SOURCE",
                 f"Source with URL {url!r} is already registered.",
             )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("distillery_watch: failed to add feed source")
+            return error_response("WATCH_ERROR", f"Failed to add feed source: {exc}")
 
-        db_sources = await store.list_feed_sources()
         return success_response(
             {
                 "added": added,
@@ -3258,8 +3265,12 @@ async def _handle_watch(
     if not url:
         return error_response("MISSING_FIELD", "url is required for action='remove'")
 
-    removed = await store.remove_feed_source(url)
-    db_sources = await store.list_feed_sources()
+    try:
+        removed = await store.remove_feed_source(url)
+        db_sources = await store.list_feed_sources()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("distillery_watch: failed to remove feed source")
+        return error_response("WATCH_ERROR", f"Failed to remove feed source: {exc}")
     return success_response(
         {
             "removed_url": url,
