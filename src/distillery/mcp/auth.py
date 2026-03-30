@@ -7,7 +7,7 @@ a configured ``GitHubProvider`` instance for FastMCP.
 **Authentication model:** GitHub OAuth is used as an identity gate only.
 FastMCP's ``GitHubProvider`` requests the ``user`` scope (read-only profile),
 verifies tokens by calling ``https://api.github.com/user``, and extracts
-identity claims (``login``, ``name``, ``email``).  The server never gains
+identity claims (``login``, ``name``, ``email``, ``avatar_url``).  The server never gains
 access to the user's repositories, organizations, or other GitHub data.
 Tool handlers can read the caller's identity from FastMCP's ``Context``
 object but never see the raw GitHub token.
