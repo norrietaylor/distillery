@@ -46,6 +46,7 @@ Tools added in T03.2 (conflict detection):
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -58,7 +59,7 @@ from typing import Any, cast
 from fastmcp import Context, FastMCP  # noqa: F401  # Context used by tool wrappers added in T02
 from mcp import types
 
-from distillery.config import DistilleryConfig, FeedSourceConfig, load_config
+from distillery.config import DistilleryConfig, load_config
 
 logger = logging.getLogger(__name__)
 
@@ -299,6 +300,21 @@ def create_server(
                 s3_endpoint=config.storage.s3_endpoint,
             )
             await store.initialize()
+
+            # Seed YAML feed sources into DB only when the table is empty
+            # (first run).  Once the user has managed sources via /watch,
+            # the DB is the sole source of truth — re-seeding would undo
+            # any /watch remove operations.
+            if not await store.list_feed_sources():
+                for source in config.feeds.sources:
+                    with contextlib.suppress(ValueError):
+                        await store.add_feed_source(
+                            url=source.url,
+                            source_type=source.source_type,
+                            label=source.label,
+                            poll_interval_minutes=source.poll_interval_minutes,
+                            trust_weight=source.trust_weight,
+                        )
 
             _shared["store"] = store
             _shared["config"] = config
@@ -948,10 +964,9 @@ def create_server(
         - ``remove``: Remove a feed source by exact URL match.  Requires
           ``url``.
 
-        Changes made via ``add`` and ``remove`` are applied to the in-memory
-        configuration for the current server session.  To persist changes
-        across restarts, update the ``feeds.sources`` section of
-        ``distillery.yaml``.
+        Changes made via ``add`` and ``remove`` are persisted to the database
+        and survive server restarts.  YAML-configured sources are seeded into
+        the database on first startup.
 
         Parameters:
             action (str): One of ``'list'``, ``'add'``, ``'remove'``.
@@ -988,7 +1003,7 @@ def create_server(
         if trust_weight is not None:
             arguments["trust_weight"] = trust_weight
         return await _handle_watch(
-            config=lc["config"],
+            store=lc["store"],
             arguments=arguments,
         )
 
@@ -3121,36 +3136,18 @@ def _sync_gather_stale(
 _VALID_SOURCE_TYPES = {"rss", "github"}
 
 
-def _feed_source_to_dict(source: FeedSourceConfig) -> dict[str, Any]:
-    """Serialise a :class:`~distillery.config.FeedSourceConfig` to a plain dict."""
-    return {
-        "url": source.url,
-        "source_type": source.source_type,
-        "label": source.label,
-        "poll_interval_minutes": source.poll_interval_minutes,
-        "trust_weight": source.trust_weight,
-    }
-
-
-# Lock protecting mutations to the shared ``config.feeds.sources`` list.
-# In stateless HTTP mode every request shares the same config object, so
-# concurrent ``/watch add`` / ``/watch remove`` calls must be serialised.
-_watch_lock = asyncio.Lock()
-
 
 async def _handle_watch(
-    config: DistilleryConfig,
+    store: Any,
     arguments: dict[str, Any],
 ) -> list[types.TextContent]:
     """Handle the ``distillery_watch`` tool.
 
-    Supports ``list``, ``add``, and ``remove`` actions against the in-memory
-    ``config.feeds.sources`` list.  Mutations are serialised via
-    ``_watch_lock`` to prevent concurrent request clobbering.
+    Supports ``list``, ``add``, and ``remove`` actions against the database-backed
+    feed sources table.
 
     Args:
-        config: The current :class:`~distillery.config.DistilleryConfig`
-            (mutations are applied in-place to ``config.feeds.sources``).
+        store: An initialised storage backend with feed source methods.
         arguments: Parsed tool arguments dict.
 
     Returns:
@@ -3170,13 +3167,16 @@ async def _handle_watch(
             f"action must be one of 'list', 'add', 'remove'; got: {action!r}",
         )
 
-    sources = config.feeds.sources
-
     if action == "list":
+        try:
+            db_sources = await store.list_feed_sources()
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("distillery_watch: failed to list feed sources")
+            return error_response("WATCH_ERROR", f"Failed to list feed sources: {exc}")
         return success_response(
             {
-                "sources": [_feed_source_to_dict(s) for s in sources],
-                "count": len(sources),
+                "sources": db_sources,
+                "count": len(db_sources),
             }
         )
 
@@ -3235,30 +3235,28 @@ async def _handle_watch(
                 f"trust_weight must be between 0.0 and 1.0, got: {trust_weight}",
             )
 
-        new_source = FeedSourceConfig(
-            url=url,
-            source_type=source_type,
-            label=label,
-            poll_interval_minutes=poll_interval,
-            trust_weight=trust_weight,
-        )
-        async with _watch_lock:
-            # Duplicate check inside lock to prevent TOCTOU race.
-            if any(s.url == url for s in sources):
-                return error_response(
-                    "DUPLICATE_SOURCE",
-                    f"Source with URL {url!r} is already registered.",
-                )
-            sources.append(new_source)
+        try:
+            added = await store.add_feed_source(
+                url=url,
+                source_type=source_type,
+                label=label,
+                poll_interval_minutes=poll_interval,
+                trust_weight=trust_weight,
+            )
+            db_sources = await store.list_feed_sources()
+        except ValueError:
+            return error_response(
+                "DUPLICATE_SOURCE",
+                f"Source with URL {url!r} is already registered.",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("distillery_watch: failed to add feed source")
+            return error_response("WATCH_ERROR", f"Failed to add feed source: {exc}")
 
         return success_response(
             {
-                "added": _feed_source_to_dict(new_source),
-                "sources": [_feed_source_to_dict(s) for s in sources],
-                "note": (
-                    "Source added to the in-memory registry. "
-                    "To persist across restarts, update feeds.sources in distillery.yaml."
-                ),
+                "added": added,
+                "sources": db_sources,
             }
         )
 
@@ -3267,20 +3265,17 @@ async def _handle_watch(
     if not url:
         return error_response("MISSING_FIELD", "url is required for action='remove'")
 
-    async with _watch_lock:
-        original_count = len(sources)
-        config.feeds.sources = [s for s in sources if s.url != url]
-        removed = len(config.feeds.sources) < original_count
-
+    try:
+        removed = await store.remove_feed_source(url)
+        db_sources = await store.list_feed_sources()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("distillery_watch: failed to remove feed source")
+        return error_response("WATCH_ERROR", f"Failed to remove feed source: {exc}")
     return success_response(
         {
             "removed_url": url,
             "removed": removed,
-            "sources": [_feed_source_to_dict(s) for s in config.feeds.sources],
-            "note": (
-                "Source removed from the in-memory registry. "
-                "To persist across restarts, update feeds.sources in distillery.yaml."
-            ),
+            "sources": db_sources,
         }
     )
 
@@ -3340,7 +3335,6 @@ async def _handle_interests(
 
     extractor = InterestExtractor(
         store=store,
-        feeds_config=config.feeds,
         recency_days=recency_days,
         top_n=top_n,
     )
@@ -3454,7 +3448,6 @@ async def _handle_suggest_sources(
 
     extractor = InterestExtractor(
         store=store,
-        feeds_config=config.feeds,
         recency_days=recency_days,
         top_n=top_n,
     )
@@ -3613,43 +3606,24 @@ async def _handle_poll(
     Returns:
         A structured MCP success or error response.
     """
-    from distillery.config import DistilleryConfig as _DistilleryConfig
     from distillery.feeds.poller import FeedPoller
 
     source_url: str | None = arguments.get("source_url")
 
-    # When a specific source_url is requested, temporarily narrow the config
-    # so the poller only touches that one source.
-    if source_url is not None:
-        matching = [s for s in config.feeds.sources if s.url == source_url]
-        if not matching:
-            return error_response(
-                "NOT_FOUND",
-                f"No configured source found with url {source_url!r}. "
-                "Use distillery_watch(action='list') to see available sources.",
-            )
-        # Build a shallow config copy restricted to the matching source.
-        from distillery.config import FeedsConfig
-
-        narrowed_feeds = FeedsConfig(
-            sources=matching,
-            thresholds=config.feeds.thresholds,
-        )
-        poll_config = _DistilleryConfig(
-            storage=config.storage,
-            embedding=config.embedding,
-            team=config.team,
-            classification=config.classification,
-            tags=config.tags,
-            feeds=narrowed_feeds,
-        )
-    else:
-        poll_config = config
-
-    poller = FeedPoller(store=store, config=poll_config)
-
     try:
-        summary = await poller.poll()
+        # When a specific source_url is requested, verify it exists in DB.
+        if source_url is not None:
+            db_sources = await store.list_feed_sources()
+            matching = [s for s in db_sources if s["url"] == source_url]
+            if not matching:
+                return error_response(
+                    "NOT_FOUND",
+                    f"No configured source found with url {source_url!r}. "
+                    "Use distillery_watch(action='list') to see available sources.",
+                )
+
+        poller = FeedPoller(store=store, config=config)
+        summary = await poller.poll(source_url=source_url)
     except Exception as exc:  # noqa: BLE001
         logger.exception("distillery_poll: unexpected error during poll cycle")
         return error_response("POLL_ERROR", f"Poll cycle failed: {exc}")
