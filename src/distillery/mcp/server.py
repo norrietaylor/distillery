@@ -72,7 +72,7 @@ logger = logging.getLogger(__name__)
 _username_cache: dict[str, str] = {}
 
 
-def _get_authenticated_user() -> str:
+def _get_authenticated_user() -> str:  # pragma: no cover — requires live OAuth context
     """Return the authenticated GitHub username, or ``""`` if auth is not active.
 
     Uses FastMCP's ``get_access_token()`` to retrieve the current request's

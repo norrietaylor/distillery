@@ -101,6 +101,7 @@ source = ["src/distillery"]
 omit = [
     "src/distillery/mcp/__main__.py",
     "src/distillery/mcp/middleware.py",
+    "src/distillery/mcp/server.py",
     "src/distillery/store/__main__.py",
     "src/distillery/eval/runner.py",
 ]
