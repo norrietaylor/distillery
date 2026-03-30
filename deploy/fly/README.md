@@ -89,10 +89,37 @@ Claude Code will trigger the GitHub OAuth flow on first connection.
 
 - **Transport**: Streamable HTTP (FastMCP) on port 8000
 - **Storage**: Local DuckDB on a Fly Volume (`/data/distillery.db`)
-- **Auth**: GitHub OAuth via FastMCP's `GitHubProvider`
+- **Auth**: GitHub OAuth via FastMCP's `GitHubProvider` (identity gate only — see below)
 - **Scaling**: Single machine, scale-to-zero when idle
+- **Concurrency**: hard_limit=10, soft_limit=5 requests (configured in `fly.toml`)
 - **Memory**: 512 MB minimum (256 MB causes OOM with DuckDB + FastMCP)
 - **Cost**: ~$3-5/month (512 MB shared CPU + 1 GB volume)
+
+### Authentication model
+
+GitHub OAuth is used **purely as an identity gate** — it verifies who the caller is, not what they can access on GitHub. The server never gains access to the user's repositories, organizations, or other GitHub resources.
+
+How it works (handled by FastMCP's [`GitHubProvider`](https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/github.py)):
+
+1. OAuth flow requests only the `user` scope (read-only public profile)
+2. `GitHubTokenVerifier` calls `https://api.github.com/user` to verify tokens
+3. Identity claims extracted: `login`, `name`, `email`, `avatar_url`
+4. Claims are available to tool handlers via FastMCP's `Context` object
+5. The raw GitHub token is never exposed to application code
+
+**Not included**: organization membership checks (`read:org` scope not requested), repository access, or any write permissions. To restrict access by org membership, extend `required_scopes` to `["user", "read:org"]` and add org-checking middleware.
+
+### Rate limiting
+
+Resource protection is configured via the `rate_limit` section in `distillery-fly.yaml`:
+
+| Guard | Default | Purpose |
+|-------|---------|---------|
+| `embedding_budget_daily` | 500 | Max Jina API calls/day (0=unlimited) |
+| `max_db_size_mb` | 900 | Reject writes above this DB size |
+| `warn_db_size_pct` | 80 | Warn in `distillery_status` at this % |
+
+Budget counters are stored in DuckDB's `_meta` table and survive scale-to-zero restarts.
 
 ## Backup
 
