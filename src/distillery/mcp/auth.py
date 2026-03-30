@@ -76,42 +76,36 @@ def _patch_cimd_localhost_redirect() -> None:
 
     CIMDFetcher.validate_redirect_uri = _validate_redirect_uri  # type: ignore[method-assign]
 
-    # Also patch the MCP SDK's OAuthClientMetadata.validate_redirect_uri which
-    # performs the actual check in the authorize handler (mcp/shared/auth.py).
+    # Patch the redirect_validation.matches_allowed_pattern function used by
+    # ProxyDCRClient.validate_redirect_uri (oauth_proxy/models.py line 218).
+    # The CIMD document declares "http://localhost/callback" but Claude Code
+    # sends "http://localhost:<port>/callback". matches_allowed_pattern does
+    # exact comparison unless wildcards are present.  We wrap it to treat
+    # loopback hosts as port-agnostic per RFC 8252 §7.3.
     try:
-        from mcp.shared.auth import (
-            InvalidRedirectUriError,
-            OAuthClientMetadata,
+        import fastmcp.server.auth.oauth_proxy.models as proxy_models
+        from fastmcp.server.auth.redirect_validation import (
+            matches_allowed_pattern as _original_matches,
         )
-        from pydantic import AnyUrl
     except ImportError:
-        logger.info("Patched CIMDFetcher only (MCP SDK auth not found)")
+        logger.info("Patched CIMDFetcher only (proxy models not found)")
         return
 
-    _original_validate = OAuthClientMetadata.validate_redirect_uri
+    def _patched_matches(uri: str, pattern: str) -> bool:
+        if _original_matches(uri, pattern):
+            return True
+        # RFC 8252 §7.3: loopback — ignore port differences
+        uri_parsed = urlparse(uri)
+        pattern_parsed = urlparse(pattern)
+        return (
+            uri_parsed.hostname in _LOOPBACK_HOSTS
+            and pattern_parsed.hostname in _LOOPBACK_HOSTS
+            and uri_parsed.scheme == pattern_parsed.scheme
+            and uri_parsed.path == pattern_parsed.path
+        )
 
-    def _patched_validate(self: OAuthClientMetadata, redirect_uri: AnyUrl | None) -> AnyUrl:
-        try:
-            return _original_validate(self, redirect_uri)
-        except InvalidRedirectUriError:
-            # RFC 8252 §7.3: retry with loopback port-agnostic matching
-            if redirect_uri is None or self.redirect_uris is None:
-                raise
-            parsed = urlparse(str(redirect_uri))
-            if parsed.hostname not in _LOOPBACK_HOSTS:
-                raise
-            for allowed in self.redirect_uris:
-                allowed_parsed = urlparse(str(allowed))
-                if (
-                    allowed_parsed.hostname in _LOOPBACK_HOSTS
-                    and parsed.scheme == allowed_parsed.scheme
-                    and parsed.path == allowed_parsed.path
-                ):
-                    return redirect_uri
-            raise
-
-    OAuthClientMetadata.validate_redirect_uri = _patched_validate  # type: ignore[method-assign]
-    logger.info("Patched CIMD and MCP SDK redirect validation for RFC 8252 localhost port handling")
+    proxy_models.matches_allowed_pattern = _patched_matches  # type: ignore[attr-defined]
+    logger.info("Patched CIMD and proxy redirect validation for RFC 8252 localhost port handling")
 
 
 def build_github_auth(config: DistilleryConfig) -> GitHubProvider:
