@@ -72,8 +72,8 @@ Add Fly.io as a deployment target for the Distillery MCP server and reorganize t
 - No links or references in the codebase shall point to the old root-level `prefect.yaml` or `distillery.yaml` paths
 
 **Proof Artifacts:**
-- CLI: `grep -r 'prefect\.yaml' --include='*.md' --include='*.py' .` returns zero hits outside `deploy/prefect/`
-- CLI: `grep -rn 'distillery\.yaml' --include='*.md' . | grep -v deploy/ | grep -v dev | grep -v example | grep -v specs/` returns only appropriate references (dev config, example template)
+- CLI: `rg -n --glob '*.md' --glob '*.py' '\bprefect\.yaml\b' . | rg -v 'deploy/prefect/|docs/specs/'` returns zero hits
+- CLI: `rg -n --glob '*.md' '\bdistillery\.yaml\b' . | rg -v 'deploy/|distillery-dev\.yaml|distillery\.yaml\.example|docs/specs/'` returns only approved references
 - Test: `pytest` passes
 - Test: `ruff check src/ tests/` passes
 - Test: `mypy --strict src/` passes
@@ -125,4 +125,4 @@ No UI/UX requirements. This is infrastructure and documentation only.
 
 ## Open Questions
 
-- Should we add a `.dockerignore` file at repo root to exclude tests, docs, .git, etc. from the Docker build context? (Reduces image size but not blocking.)
+No open questions at this time. (`.dockerignore` has been added to the repo root.)

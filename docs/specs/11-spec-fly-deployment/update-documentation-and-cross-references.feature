@@ -23,9 +23,9 @@ Feature: Update documentation and cross-references
 
   Scenario: No stale references to root-level prefect.yaml
     Given the deployment files have been fully reorganized
-    When the user runs "grep -r 'prefect\.yaml' --include='*.md' --include='*.py' ." from the repo root
-    Then all matches are within the deploy/prefect/ directory
-    And no matches reference a root-level prefect.yaml path
+    When the user runs "rg -n --glob '*.md' --glob '*.py' '\bprefect\.yaml\b' . | rg -v 'deploy/prefect/|docs/specs/'" from the repo root
+    Then the command returns zero matches
+    And no references point to a root-level prefect.yaml path
 
   Scenario: No stale references to root-level distillery.yaml in docs
     Given the deployment files have been fully reorganized
