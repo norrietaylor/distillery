@@ -3595,20 +3595,19 @@ async def _handle_poll(
 
     source_url: str | None = arguments.get("source_url")
 
-    # When a specific source_url is requested, verify it exists in DB.
-    if source_url is not None:
-        db_sources = await store.list_feed_sources()
-        matching = [s for s in db_sources if s["url"] == source_url]
-        if not matching:
-            return error_response(
-                "NOT_FOUND",
-                f"No configured source found with url {source_url!r}. "
-                "Use distillery_watch(action='list') to see available sources.",
-            )
-
-    poller = FeedPoller(store=store, config=config)
-
     try:
+        # When a specific source_url is requested, verify it exists in DB.
+        if source_url is not None:
+            db_sources = await store.list_feed_sources()
+            matching = [s for s in db_sources if s["url"] == source_url]
+            if not matching:
+                return error_response(
+                    "NOT_FOUND",
+                    f"No configured source found with url {source_url!r}. "
+                    "Use distillery_watch(action='list') to see available sources.",
+                )
+
+        poller = FeedPoller(store=store, config=config)
         summary = await poller.poll(source_url=source_url)
     except Exception as exc:  # noqa: BLE001
         logger.exception("distillery_poll: unexpected error during poll cycle")

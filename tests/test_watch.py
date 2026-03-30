@@ -16,9 +16,6 @@ import pytest
 
 from distillery.models import TYPE_METADATA_SCHEMAS, EntryType, validate_metadata
 
-pytestmark = pytest.mark.unit
-
-
 # ---------------------------------------------------------------------------
 # Fake store for feed source tests
 # ---------------------------------------------------------------------------
@@ -64,6 +61,7 @@ class FakeSourceStore:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestFeedEntryType:
     def test_feed_enum_value(self) -> None:
         assert EntryType.FEED == "feed"
@@ -92,6 +90,7 @@ class TestFeedEntryType:
         assert set(constraints["source_type"]) == {"rss", "github"}
 
 
+@pytest.mark.unit
 class TestFeedMetadataValidation:
     def test_valid_rss_feed_metadata(self) -> None:
         validate_metadata("feed", {"source_url": "https://example.com/rss", "source_type": "rss"})
@@ -141,6 +140,7 @@ class TestFeedMetadataValidation:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestHandleWatchList:
     async def test_list_empty_sources(self) -> None:
         from distillery.mcp.server import _handle_watch
@@ -194,6 +194,7 @@ class TestHandleWatchList:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestHandleWatchAdd:
     async def test_add_rss_source(self) -> None:
         from distillery.mcp.server import _handle_watch
@@ -396,6 +397,7 @@ class TestHandleWatchAdd:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestHandleWatchRemove:
     async def test_remove_existing_source(self) -> None:
         from distillery.mcp.server import _handle_watch
@@ -480,6 +482,7 @@ class TestHandleWatchRemove:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestHandleWatchInvalidAction:
     async def test_invalid_action_returns_error(self) -> None:
         from distillery.mcp.server import _handle_watch

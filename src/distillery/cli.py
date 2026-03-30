@@ -331,17 +331,6 @@ def _cmd_poll(config_path: str | None, fmt: str, source_url: str | None) -> int:
         print(f"Error loading configuration: {exc}", file=sys.stderr)
         return 1
 
-    # Quick pre-flight check: if YAML has no sources and no source_url was
-    # given, skip store init entirely.  DB-only sources will be caught by
-    # the store after init.
-    if not cfg.feeds.sources and source_url is None:
-        msg = "No feed sources configured. Add sources via distillery_watch or distillery.yaml."
-        if fmt == "json":
-            print(json.dumps({"error": msg, "sources_polled": 0}))
-        else:
-            print(msg)
-        return 0
-
     async def _run() -> Any:
         import contextlib
 
@@ -374,12 +363,12 @@ def _cmd_poll(config_path: str | None, fmt: str, source_url: str | None) -> int:
         # Check sources from DB.
         db_sources = await store.list_feed_sources()
         if not db_sources:
-            return None  # signal: no sources
+            return "no-sources"
 
         if source_url is not None:
             matching = [s for s in db_sources if s["url"] == source_url]
             if not matching:
-                return source_url  # signal: not found
+                return f"not-found:{source_url}"
 
         poller = FeedPoller(store=store, config=cfg)
         return await poller.poll(source_url=source_url)
@@ -390,7 +379,7 @@ def _cmd_poll(config_path: str | None, fmt: str, source_url: str | None) -> int:
         print(f"Error during poll: {exc}", file=sys.stderr)
         return 1
 
-    if result is None:
+    if result == "no-sources":
         msg = "No feed sources configured. Add sources via distillery_watch or distillery.yaml."
         if fmt == "json":
             print(json.dumps({"error": msg, "sources_polled": 0}))
@@ -398,8 +387,9 @@ def _cmd_poll(config_path: str | None, fmt: str, source_url: str | None) -> int:
             print(msg)
         return 0
 
-    if isinstance(result, str):
-        msg = f"No configured source found with url {result!r}."
+    if isinstance(result, str) and result.startswith("not-found:"):
+        not_found_url = result[len("not-found:"):]
+        msg = f"No configured source found with url {not_found_url!r}."
         print(f"Error: {msg}", file=sys.stderr)
         return 1
 

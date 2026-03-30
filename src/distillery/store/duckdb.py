@@ -1195,17 +1195,15 @@ class DuckDBStore:
     ) -> dict[str, Any]:
         """Add a feed source. Raises ValueError if URL already exists."""
         assert self._conn is not None
-        # Check for duplicate.
-        existing = self._conn.execute(
-            "SELECT 1 FROM feed_sources WHERE url = ?", [url]
-        ).fetchone()
-        if existing is not None:
-            raise ValueError(f"Feed source with URL {url!r} already exists.")
-        self._conn.execute(
-            "INSERT INTO feed_sources (url, source_type, label, poll_interval_minutes, trust_weight) "
-            "VALUES (?, ?, ?, ?, ?)",
-            [url, source_type, label, poll_interval_minutes, trust_weight],
-        )
+        try:
+            self._conn.execute(
+                "INSERT INTO feed_sources "
+                "(url, source_type, label, poll_interval_minutes, trust_weight) "
+                "VALUES (?, ?, ?, ?, ?)",
+                [url, source_type, label, poll_interval_minutes, trust_weight],
+            )
+        except duckdb.ConstraintException as exc:
+            raise ValueError(f"Feed source with URL {url!r} already exists.") from exc
         return {
             "url": url,
             "source_type": source_type,

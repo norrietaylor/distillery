@@ -511,20 +511,28 @@ class TestCLIPollSubcommand:
     def test_no_sources_exits_zero(self) -> None:
         from distillery.cli import _cmd_poll
 
-        with patch("distillery.cli.load_config") as mock_load:
+        with (
+            patch("distillery.cli.load_config") as mock_load,
+            patch("distillery.cli.asyncio") as mock_asyncio,
+        ):
             cfg = _make_config(sources=[])
             mock_load.return_value = cfg
+            mock_asyncio.run.return_value = "no-sources"
             code = _cmd_poll(config_path=None, fmt="text", source_url=None)
             assert code == 0
 
     def test_source_not_found_exits_one(self) -> None:
         from distillery.cli import _cmd_poll
 
-        with patch("distillery.cli.load_config") as mock_load:
+        with (
+            patch("distillery.cli.load_config") as mock_load,
+            patch("distillery.cli.asyncio") as mock_asyncio,
+        ):
             cfg = _make_config(
                 sources=[FeedSourceConfig(url="https://real.com/rss", source_type="rss")]
             )
             mock_load.return_value = cfg
+            mock_asyncio.run.return_value = "not-found:https://nonexistent.com/rss"
             code = _cmd_poll(
                 config_path=None, fmt="text", source_url="https://nonexistent.com/rss"
             )
