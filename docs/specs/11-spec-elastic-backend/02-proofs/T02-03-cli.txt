@@ -1,0 +1,7 @@
+Type: cli
+Command: .venv/bin/mypy --strict src/distillery/store/elasticsearch.py
+Expected: Success: no issues found in 1 source file
+Timestamp: 2026-03-28T23:50:00Z
+Status: PASS
+
+Result: Success: no issues found in 1 source file

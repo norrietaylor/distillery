@@ -44,6 +44,9 @@ dev = [
     "types-PyYAML>=6.0",
     "types-defusedxml>=0.7.0",
 ]
+elasticsearch = [
+    "elasticsearch[async]>=9.0.0",
+]
 eval = []
 
 [project.scripts]
@@ -83,6 +86,12 @@ disable_error_code = ["untyped-decorator"]
 # The eval module has optional dependencies (anthropic) that are not installed
 # in the base dev environment. Suppress import-not-found for the eval sub-package.
 module = "distillery.eval.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# The elasticsearch package is an optional dependency and may not have complete
+# type stubs. Suppress import-not-found for the ES store module.
+module = "elasticsearch.*"
 ignore_missing_imports = true
 
 [tool.ruff]
