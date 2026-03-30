@@ -182,6 +182,25 @@ class FeedsConfig:
 
 
 @dataclass
+class RateLimitConfig:
+    """Rate limiting and resource budget configuration.
+
+    Attributes:
+        embedding_budget_daily: Maximum embedding API calls per calendar day.
+            Set to ``0`` to disable the budget (unlimited).  Default ``500``.
+        max_db_size_mb: Maximum database file size in megabytes before new
+            writes are rejected.  Set to ``0`` to disable.  Default ``900``
+            (leaves ~100 MB headroom on a 1 GB Fly volume).
+        warn_db_size_pct: Percentage of *max_db_size_mb* at which a warning is
+            surfaced in ``distillery_status``.  Default ``80``.
+    """
+
+    embedding_budget_daily: int = 500
+    max_db_size_mb: int = 900
+    warn_db_size_pct: int = 80
+
+
+@dataclass
 class ServerAuthConfig:
     """Server authentication configuration.
 
@@ -220,6 +239,7 @@ class DistilleryConfig:
         classification: Classification threshold settings.
         tags: Tag namespace enforcement settings.
         feeds: Ambient feed monitoring settings.
+        rate_limit: Rate limiting and resource budget settings.
         server: Server (HTTP transport) settings.
     """
 
@@ -229,6 +249,7 @@ class DistilleryConfig:
     classification: ClassificationConfig = field(default_factory=ClassificationConfig)
     tags: TagsConfig = field(default_factory=TagsConfig)
     feeds: FeedsConfig = field(default_factory=FeedsConfig)
+    rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
 
 
@@ -558,6 +579,35 @@ def _parse_feeds(raw: dict[str, Any]) -> FeedsConfig:
     )
 
 
+def _parse_rate_limit(raw: dict[str, Any]) -> RateLimitConfig:
+    """Parse the ``rate_limit`` section from a raw YAML mapping.
+
+    Args:
+        raw: Mapping containing optional keys ``embedding_budget_daily``,
+            ``max_db_size_mb``, ``warn_db_size_pct``.
+
+    Returns:
+        A populated :class:`RateLimitConfig` instance.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError(f"rate_limit must be a YAML mapping, got: {type(raw).__name__}")
+
+    return RateLimitConfig(
+        embedding_budget_daily=_parse_strict_int(
+            raw.get("embedding_budget_daily", 500),
+            "rate_limit.embedding_budget_daily",
+        ),
+        max_db_size_mb=_parse_strict_int(
+            raw.get("max_db_size_mb", 900),
+            "rate_limit.max_db_size_mb",
+        ),
+        warn_db_size_pct=_parse_strict_int(
+            raw.get("warn_db_size_pct", 80),
+            "rate_limit.warn_db_size_pct",
+        ),
+    )
+
+
 def _parse_server(raw: dict[str, Any]) -> ServerConfig:
     """Parse the ``server`` section from a raw YAML mapping.
 
@@ -715,6 +765,23 @@ def _validate(config: DistilleryConfig) -> None:
             f"feeds.thresholds.digest ({digest}) must not exceed feeds.thresholds.alert ({alert})"
         )
 
+    # Validate rate_limit settings.
+    rl = config.rate_limit
+    if rl.embedding_budget_daily < 0:
+        raise ValueError(
+            "rate_limit.embedding_budget_daily must be >= 0 (0 = unlimited), "
+            f"got: {rl.embedding_budget_daily}"
+        )
+    if rl.max_db_size_mb < 0:
+        raise ValueError(
+            "rate_limit.max_db_size_mb must be >= 0 (0 = unlimited), "
+            f"got: {rl.max_db_size_mb}"
+        )
+    if not (0 <= rl.warn_db_size_pct <= 100):
+        raise ValueError(
+            f"rate_limit.warn_db_size_pct must be between 0 and 100, got: {rl.warn_db_size_pct}"
+        )
+
     # Validate server.auth.provider
     valid_auth_providers = {"github", "none"}
     if config.server.auth.provider not in valid_auth_providers:
@@ -778,6 +845,7 @@ def load_config(config_path: str | None = None) -> DistilleryConfig:
     classification_raw = raw.get("classification", {}) or {}
     tags_raw = raw.get("tags", {}) or {}
     feeds_raw = raw.get("feeds", {}) or {}
+    rate_limit_raw = raw.get("rate_limit", {}) or {}
     server_raw = raw.get("server", {})
     if server_raw is None:
         server_raw = {}
@@ -789,6 +857,7 @@ def load_config(config_path: str | None = None) -> DistilleryConfig:
         classification=_parse_classification(classification_raw),
         tags=_parse_tags(tags_raw),
         feeds=_parse_feeds(feeds_raw),
+        rate_limit=_parse_rate_limit(rate_limit_raw),
         server=_parse_server(server_raw),
     )
 

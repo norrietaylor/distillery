@@ -22,6 +22,11 @@ embedding:
 team:
   name: ""
 
+rate_limit:
+  embedding_budget_daily: 500
+  max_db_size_mb: 900
+  warn_db_size_pct: 80
+
 server:
   auth:
     provider: github

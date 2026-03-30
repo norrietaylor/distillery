@@ -60,6 +60,7 @@ from fastmcp import Context, FastMCP  # noqa: F401  # Context used by tool wrapp
 from mcp import types
 
 from distillery.config import DistilleryConfig, load_config
+from distillery.mcp.budget import EmbeddingBudgetError, record_and_check
 
 logger = logging.getLogger(__name__)
 
@@ -608,6 +609,7 @@ def create_server(
         return await _handle_search(
             store=lc["store"],
             arguments=arguments,
+            cfg=lc["config"],
         )
 
     @server.tool
@@ -636,6 +638,7 @@ def create_server(
         return await _handle_find_similar(
             store=lc["store"],
             arguments={"content": content, "threshold": threshold, "limit": limit},
+            cfg=lc["config"],
         )
 
     @server.tool
@@ -1281,7 +1284,39 @@ def _sync_gather_stats(
     model_name = getattr(embedding_provider, "model_name", "unknown")
     embedding_dimensions = getattr(embedding_provider, "dimensions", None)
 
-    return {
+    # Embedding budget usage.
+    from distillery.mcp.budget import get_daily_usage
+
+    embedding_usage_today = 0
+    embedding_budget_daily = config.rate_limit.embedding_budget_daily
+    with contextlib.suppress(Exception):
+        embedding_usage_today = get_daily_usage(conn)
+
+    # Storage warnings.
+    warnings: list[str] = []
+    rl = config.rate_limit
+    if database_size_bytes is not None and rl.max_db_size_mb > 0:
+        size_mb = database_size_bytes / (1024 * 1024)
+        warn_threshold_mb = rl.max_db_size_mb * rl.warn_db_size_pct / 100
+        if size_mb >= rl.max_db_size_mb:
+            warnings.append(
+                f"Database size ({size_mb:.1f} MB) has reached the limit "
+                f"({rl.max_db_size_mb} MB). New writes will be rejected."
+            )
+        elif size_mb >= warn_threshold_mb:
+            warnings.append(
+                f"Database size ({size_mb:.1f} MB) is at "
+                f"{size_mb / rl.max_db_size_mb * 100:.0f}% of the "
+                f"{rl.max_db_size_mb} MB limit."
+            )
+
+    if embedding_budget_daily > 0 and embedding_usage_today >= embedding_budget_daily:
+        warnings.append(
+            f"Daily embedding budget exhausted: {embedding_usage_today}/{embedding_budget_daily} "
+            "calls used."
+        )
+
+    result: dict[str, Any] = {
         "status": "ok",
         "total_entries": total_entries,
         "entries_by_type": entries_by_type,
@@ -1290,7 +1325,12 @@ def _sync_gather_stats(
         "embedding_model": model_name,
         "embedding_dimensions": embedding_dimensions,
         "database_path": db_path,
+        "embedding_usage_today": embedding_usage_today,
+        "embedding_budget_daily": embedding_budget_daily,
     }
+    if warnings:
+        result["warnings"] = warnings
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1395,6 +1435,29 @@ async def _handle_store(
                         f"Tag {tag!r} uses reserved prefix {top!r}. "
                         "Only internal sources may use this namespace.",
                     )
+
+    # --- db size check (cheap, run first) ------------------------------------
+    if cfg is not None and cfg.rate_limit.max_db_size_mb > 0:
+        db_path = _normalize_db_path(cfg.storage.database_path)
+        if db_path != ":memory:" and not _is_remote_db_path(db_path):
+            try:
+                size_mb = Path(db_path).stat().st_size / (1024 * 1024)
+                if size_mb >= cfg.rate_limit.max_db_size_mb:
+                    return error_response(
+                        "DB_SIZE_EXCEEDED",
+                        f"Database size ({size_mb:.1f} MB) exceeds limit "
+                        f"({cfg.rate_limit.max_db_size_mb} MB). "
+                        "Delete old entries or increase rate_limit.max_db_size_mb.",
+                    )
+            except OSError:
+                pass  # can't stat, skip check
+
+    # --- embedding budget check (store + dedup + conflict = 3 embeds) ------
+    if cfg is not None:
+        try:
+            record_and_check(store.connection, cfg.rate_limit.embedding_budget_daily, count=3)
+        except EmbeddingBudgetError as exc:
+            return error_response("BUDGET_EXCEEDED", str(exc))
 
     # --- build entry --------------------------------------------------------
     try:
@@ -1713,6 +1776,7 @@ def _build_filters_from_arguments(arguments: dict[str, Any]) -> dict[str, Any] |
 async def _handle_search(
     store: Any,
     arguments: dict[str, Any],
+    cfg: DistilleryConfig | None = None,
 ) -> list[types.TextContent]:
     """
     Search stored entries for a text query and return matching entries ranked by similarity.
@@ -1748,6 +1812,13 @@ async def _handle_search(
     if limit > 200:
         return error_response("VALIDATION_ERROR", "Field 'limit' must be <= 200")
 
+    # --- embedding budget check (1 embed call per search) -------------------
+    if cfg is not None:
+        try:
+            record_and_check(store.connection, cfg.rate_limit.embedding_budget_daily)
+        except EmbeddingBudgetError as exc:
+            return error_response("BUDGET_EXCEEDED", str(exc))
+
     filters = _build_filters_from_arguments(arguments)
 
     try:
@@ -1777,6 +1848,7 @@ async def _handle_search(
 async def _handle_find_similar(
     store: Any,
     arguments: dict[str, Any],
+    cfg: DistilleryConfig | None = None,
 ) -> list[types.TextContent]:
     """Implement the ``distillery_find_similar`` tool.
 
@@ -1813,6 +1885,13 @@ async def _handle_find_similar(
         return error_response("VALIDATION_ERROR", "Field 'limit' must be >= 1")
     if limit > 200:
         return error_response("VALIDATION_ERROR", "Field 'limit' must be <= 200")
+
+    # --- embedding budget check (1 embed call) ----------------------------
+    if cfg is not None:
+        try:
+            record_and_check(store.connection, cfg.rate_limit.embedding_budget_daily)
+        except EmbeddingBudgetError as exc:
+            return error_response("BUDGET_EXCEEDED", str(exc))
 
     try:
         search_results = await store.find_similar(content=content, threshold=threshold, limit=limit)
@@ -2333,6 +2412,12 @@ async def _handle_check_dedup(
         return error_response("INVALID_INPUT", err)
 
     content = str(arguments["content"])
+
+    # --- embedding budget check (1 embed call for find_similar) -------------
+    try:
+        record_and_check(store.connection, config.rate_limit.embedding_budget_daily)
+    except EmbeddingBudgetError as exc:
+        return error_response("BUDGET_EXCEEDED", str(exc))
 
     # --- run dedup checker --------------------------------------------------
     from distillery.classification.dedup import DeduplicationChecker
