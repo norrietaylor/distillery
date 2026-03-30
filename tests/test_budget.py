@@ -96,6 +96,11 @@ class TestRecordAndCheck:
         with pytest.raises(EmbeddingBudgetError):
             record_and_check(conn, daily_limit=10, count=1)
 
+    def test_raises_when_count_would_exceed_budget(self, conn: duckdb.DuckDBPyConnection) -> None:
+        increment_usage(conn, count=499)
+        with pytest.raises(EmbeddingBudgetError):
+            record_and_check(conn, daily_limit=500, count=2)
+
     def test_tracks_even_when_unlimited(self, conn: duckdb.DuckDBPyConnection) -> None:
         result = record_and_check(conn, daily_limit=0, count=3)
         assert result == 3

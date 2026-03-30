@@ -70,20 +70,21 @@ def increment_usage(conn: Any, count: int = 1) -> int:
     return int(row[0]) if row else count
 
 
-def check_budget(conn: Any, daily_limit: int) -> None:
-    """Check whether the daily embedding budget allows another call.
+def check_budget(conn: Any, daily_limit: int, count: int = 1) -> None:
+    """Check whether the daily embedding budget allows more calls.
 
     Args:
         conn: An open DuckDB connection.
         daily_limit: Maximum calls per day.  ``0`` means unlimited.
+        count: Number of calls about to be made.
 
     Raises:
-        EmbeddingBudgetError: If the budget is exhausted.
+        EmbeddingBudgetError: If the budget would be exceeded.
     """
     if daily_limit <= 0:
         return  # unlimited
     used = get_daily_usage(conn)
-    if used >= daily_limit:
+    if used + count > daily_limit:
         raise EmbeddingBudgetError(used, daily_limit)
 
 
@@ -106,5 +107,5 @@ def record_and_check(conn: Any, daily_limit: int, count: int = 1) -> int:
     """
     if daily_limit <= 0:
         return increment_usage(conn, count)  # unlimited, still track
-    check_budget(conn, daily_limit)
+    check_budget(conn, daily_limit, count)
     return increment_usage(conn, count)

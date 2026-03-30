@@ -593,9 +593,18 @@ def _parse_rate_limit(raw: dict[str, Any]) -> RateLimitConfig:
         raise ValueError(f"rate_limit must be a YAML mapping, got: {type(raw).__name__}")
 
     return RateLimitConfig(
-        embedding_budget_daily=int(raw.get("embedding_budget_daily", 500)),
-        max_db_size_mb=int(raw.get("max_db_size_mb", 900)),
-        warn_db_size_pct=int(raw.get("warn_db_size_pct", 80)),
+        embedding_budget_daily=_parse_strict_int(
+            raw.get("embedding_budget_daily", 500),
+            "rate_limit.embedding_budget_daily",
+        ),
+        max_db_size_mb=_parse_strict_int(
+            raw.get("max_db_size_mb", 900),
+            "rate_limit.max_db_size_mb",
+        ),
+        warn_db_size_pct=_parse_strict_int(
+            raw.get("warn_db_size_pct", 80),
+            "rate_limit.warn_db_size_pct",
+        ),
     )
 
 

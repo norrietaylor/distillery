@@ -1437,7 +1437,7 @@ async def _handle_store(
                     )
 
     # --- embedding budget check (store=1 embed + dedup=1 embed) -------------
-    if cfg is not None and cfg.rate_limit.embedding_budget_daily > 0:
+    if cfg is not None and cfg.rate_limit.embedding_budget_daily >= 0:
         try:
             record_and_check(store.connection, cfg.rate_limit.embedding_budget_daily, count=2)
         except EmbeddingBudgetError as exc:
@@ -1813,7 +1813,7 @@ async def _handle_search(
         return error_response("VALIDATION_ERROR", "Field 'limit' must be <= 200")
 
     # --- embedding budget check (1 embed call per search) -------------------
-    if cfg is not None and cfg.rate_limit.embedding_budget_daily > 0:
+    if cfg is not None and cfg.rate_limit.embedding_budget_daily >= 0:
         try:
             record_and_check(store.connection, cfg.rate_limit.embedding_budget_daily)
         except EmbeddingBudgetError as exc:
@@ -1887,7 +1887,7 @@ async def _handle_find_similar(
         return error_response("VALIDATION_ERROR", "Field 'limit' must be <= 200")
 
     # --- embedding budget check (1 embed call) ----------------------------
-    if cfg is not None and cfg.rate_limit.embedding_budget_daily > 0:
+    if cfg is not None and cfg.rate_limit.embedding_budget_daily >= 0:
         try:
             record_and_check(store.connection, cfg.rate_limit.embedding_budget_daily)
         except EmbeddingBudgetError as exc:
@@ -2414,7 +2414,7 @@ async def _handle_check_dedup(
     content = str(arguments["content"])
 
     # --- embedding budget check (1 embed call for find_similar) -------------
-    if config.rate_limit.embedding_budget_daily > 0:
+    if config.rate_limit.embedding_budget_daily >= 0:
         try:
             record_and_check(store.connection, config.rate_limit.embedding_budget_daily)
         except EmbeddingBudgetError as exc:
