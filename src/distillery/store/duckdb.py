@@ -497,8 +497,17 @@ class DuckDBStore:
         await asyncio.to_thread(self._sync_initialize)
 
     async def close(self) -> None:
-        """Close the database connection and release resources."""
+        """Close the database connection and release resources.
+
+        Issues a ``CHECKPOINT`` before closing to flush the WAL to disk,
+        ensuring all tables and writes survive process restarts (important
+        for Fly.io scale-to-zero where SIGINT precedes volume unmount).
+        """
         if self._conn is not None:
+            try:
+                self._conn.execute("CHECKPOINT")
+            except duckdb.Error as exc:  # pragma: no cover
+                logger.warning("CHECKPOINT before close failed: %s", exc)
             await asyncio.to_thread(self._conn.close)
             self._conn = None
             self._initialized = False
