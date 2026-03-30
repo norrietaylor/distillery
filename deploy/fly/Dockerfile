@@ -24,5 +24,6 @@ RUN chown -R appuser:appuser /app
 
 EXPOSE 8000
 
-# Fix volume ownership at runtime (Fly mounts as root), then drop to appuser
-CMD ["sh", "-c", "chown -R appuser:appuser /data && exec su -s /bin/sh appuser -c 'distillery-mcp --transport http'"]
+# Fix volume ownership at runtime (Fly mounts as root), then drop to appuser.
+# One-time DB reset: remove corrupt WAL and stale DB to start fresh.
+CMD ["sh", "-c", "chown -R appuser:appuser /data && if [ ! -f /data/.db-reset-v1 ]; then rm -f /data/distillery.db /data/distillery.db.wal && touch /data/.db-reset-v1; fi && exec su -s /bin/sh appuser -c 'distillery-mcp --transport http'"]
