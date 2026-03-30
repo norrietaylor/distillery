@@ -5,231 +5,95 @@ description: "Captures session knowledge and stores distilled decisions and insi
 
 # Distill — Session Knowledge Capture
 
-Distill captures the decisions, architectural insights, and action items from a working session and stores them as a distilled knowledge entry in Distillery.
-
-## Prerequisites
-
-- The Distillery MCP server must be configured in your Claude Code settings
-- See docs/mcp-setup.md for setup instructions
-
-If the server is not available, the skill will display a setup message with next steps.
+Distill captures decisions, architectural insights, and action items from a working session and stores them as knowledge entries in Distillery.
 
 ## When to Use
 
-- At the end of a productive session that produced decisions or insights worth preserving
+- At the end of a productive session with decisions or insights worth preserving
 - When asked to "capture this", "save knowledge", or "log learnings"
-- When `/distill` is invoked, optionally with explicit content: `/distill "We decided to use DuckDB for local storage"`
-- When `/distill --project <name>` is used to record knowledge under a specific project
+- When `/distill` is invoked, optionally with content: `/distill "We decided to use DuckDB for local storage"`
+- When `/distill --project <name>` targets a specific project
 
 ## Process
 
-### Step 1: Check MCP Availability
+### Step 1: Check MCP
 
-Call `distillery_status` to confirm the Distillery MCP server is running.
+See CONVENTIONS.md — skip if already confirmed this conversation.
 
-If the tool is unavailable or returns an error, display:
+### Step 2: Determine Author & Project
 
-```
-Warning: Distillery MCP Server Not Available
+See CONVENTIONS.md for resolution order. Cache for the session.
 
-The Distillery MCP server is not configured or not running.
+### Step 3: Gather Content
 
-To set up the server:
-1. Ensure Distillery is installed: https://github.com/norrie-distillery/distillery
-2. Configure the server in your Claude Code settings: see docs/mcp-setup.md
-3. Restart Claude Code or reload MCP servers
-
-For detailed setup instructions, see: docs/mcp-setup.md
-```
-
-Stop here if MCP is unavailable.
-
-### Step 2: Determine Author
-
-Determine the author for the stored entry using this priority order:
-
-1. Run `git config user.name` — use the result if non-empty
-2. Check the `DISTILLERY_AUTHOR` environment variable — use it if set
-3. Ask the user: "What is your name (for author attribution)?"
-
-Cache the author for the remainder of the session.
-
-### Step 3: Determine Project
-
-Determine the project context using this priority order:
-
-1. If `--project <name>` was passed as an argument, use that value
-2. Otherwise, run `git rev-parse --show-toplevel` to get the repository root, then extract the directory name as the project name
-3. If neither is available, ask: "What project is this for?"
-
-Cache the project for the remainder of the session.
-
-Example: `/distill --project my-api` records entries under the "my-api" project.
-
-### Step 4: Gather Content
-
-**If explicit content was provided** (e.g., `/distill "We decided to use DuckDB"`), use that content directly.
+**If explicit content was provided** (e.g., `/distill "We decided to use DuckDB"`), use it directly.
 
 **Otherwise, gather from the current session context:**
 
-Collect and summarize:
-- Project name and brief context
-- Key decisions made during the session (with rationale)
+- Key decisions made (with rationale)
 - Architectural insights and design choices
 - Action items and next steps
 - Open questions or unresolved concerns
 - Key files modified or created
 
-If session context is unclear or thin, ask the user:
+If session context is thin, ask what to capture. Do not proceed without at least one concrete decision, insight, or action item.
 
-```
-What should I capture from this session? For example:
-- A specific decision or insight?
-- Action items?
-- Architectural notes?
-```
+### Step 4: Construct Distilled Summary
 
-Do not proceed without at least one concrete decision, insight, or action item.
+Synthesize gathered content into a focused summary:
 
-### Step 5: Construct Distilled Summary
+- **Lead with decisions**: State what was decided, not what was discussed
+- **Include rationale**: Trade-offs and constraints behind decisions
+- **Be concise**: Dense, scannable content — not a transcript
+- **Structure clearly**: Short paragraphs or bullet points
 
-Synthesize the gathered content into a focused distilled summary. Follow these guidelines:
-
-- **Lead with decisions**: State what was decided, not just what was discussed
-- **Include rationale**: Why this decision was made (trade-offs, constraints)
-- **Be concise**: Aim for dense, scannable content — not a raw transcript
-- **Structure clearly**: Use short paragraphs or bullet points
-
-Show the draft summary to the user before storing:
+Show the draft to the user before storing:
 
 ```
 ## Distilled Summary (preview)
-
-[summary content here]
-
+[summary content]
 Ready to store? (yes / edit / skip)
 ```
 
-If the user wants to edit, accept their revised version.
+Accept revisions if the user wants to edit.
 
-### Step 6: Check for Duplicates
+### Step 5: Check for Duplicates
 
-Call `distillery_check_dedup` with the distilled content:
+Call `distillery_check_dedup(content="<distilled summary>")`. Handle by `action` field:
 
-```
-distillery_check_dedup(content="<distilled summary>")
-```
+**`"create"`:** No similar entries. Proceed to Step 6.
 
-This tool returns an `action` field that tells you what to do next:
-
-**If `action` is `"create"`:**
-No similar entries were found. Proceed directly to Step 7.
-
-**If `action` is `"skip"`:**
-The content is a near-exact duplicate. Display:
+**`"skip"`:** Near-exact duplicate. Show similarity table and offer: (1) Store anyway, (2) Skip. Display table format:
 
 ```
-Near-duplicate detected (similarity: <highest_score * 100>%)
-
-Reasoning: <reasoning from tool>
-
-Similar entry:
 | Entry ID | Similarity | Preview |
 |----------|-----------|---------|
 | <id>     | <score%>  | <content_preview> |
-
-How would you like to proceed?
-1. Store anyway — save as a new entry
-2. Skip — do not store this entry
-
-Enter 1 or 2:
 ```
 
-If the user chooses skip (2): Confirm "Skipped. No new entry was stored." and stop.
-If the user chooses store anyway (1): Continue to Step 7.
+**`"merge"`:** Very similar entry exists. Show similarity table and offer: (1) Store anyway, (2) Merge with existing, (3) Skip.
 
-**If `action` is `"merge"`:**
-The content is very similar to an existing entry. Display:
+For merge: combine new summary with the most similar entry's content, call `distillery_update` with the entry ID and merged content, confirm and stop.
 
-```
-Very similar entry found (similarity: <highest_score * 100>%)
+**`"link"`:** Related but distinct. Show similarity table, note new entry will be linked. Ask to proceed or skip. If proceeding, include `"related_entries": ["<id1>", ...]` in metadata at Step 7.
 
-Reasoning: <reasoning from tool>
+For skip in any case: confirm "Skipped. No new entry was stored." and stop.
 
-Similar entries:
-| Entry ID | Similarity | Preview |
-|----------|-----------|---------|
-| <id>     | <score%>  | <content_preview> |
+### Step 6: Extract Tags
 
-How would you like to proceed?
-1. Store anyway — save as a new entry
-2. Merge with existing — combine with the most similar entry
-3. Skip — do not store this entry
+Auto-extract 2-5 keywords from the summary. Prefer hierarchical tags:
 
-Enter 1, 2, or 3:
-```
+- `project/{repo-name}/sessions` as base tag for the current project
+- `project/{repo-name}/decisions` for decision entries
+- `project/{repo-name}/architecture` for architectural insights
+- `domain/{topic}` for domain-specific tags (e.g., `domain/storage`, `domain/api-design`)
+- Fall back to flat tags only when no project context is available
 
-If the user chooses merge (2):
-- Combine the new summary with the most similar entry's content
-- Call `distillery_update` with the entry ID and merged content
-- Confirm: "Updated entry `<id>` with merged content."
-- Stop here.
+Repo name sanitization: lowercase, replace non-`[a-z0-9-]` chars with hyphens, collapse consecutive hyphens, trim leading/trailing hyphens, prefix with `repo-` if result doesn't start with `[a-z0-9]`. Final segment must match `[a-z0-9][a-z0-9\-]*`.
 
-If the user chooses skip (3): Confirm "Skipped. No new entry was stored." and stop.
-If the user chooses store anyway (1): Continue to Step 7.
+Merge with any explicit `#tag` arguments (strip leading `#`). Tags are lowercase, hyphen-separated within segments.
 
-**If `action` is `"link"`:**
-The content is related but distinct. Display the similar entries and note that the new entry will be linked:
-
-```
-Related entries found (similarity: <highest_score * 100>%)
-
-Reasoning: <reasoning from tool>
-
-| Entry ID | Similarity | Preview |
-|----------|-----------|---------|
-| <id>     | <score%>  | <content_preview> |
-
-A new entry will be created and linked to these related entries.
-Proceed? (yes / skip)
-```
-
-If the user chooses skip: Confirm "Skipped. No new entry was stored." and stop.
-If yes: Continue to Step 7. When calling `distillery_store` (Step 8), include the related entry IDs in the metadata:
-```
-metadata={
-  "session_id": "sess-<YYYY-MM-DD>-<short-random-id>",
-  "related_entries": ["<id1>", "<id2>"]
-}
-```
-
-### Step 7: Extract Tags
-
-Automatically extract 2–5 relevant keywords from the distilled summary as tags.
-
-Prefer hierarchical tags that reflect project context:
-
-- Use `project/{repo-name}/sessions` as a base tag for the current project (e.g. `project/billing-v2/sessions`)
-  - Sanitize repo names derived from `git rev-parse --show-toplevel`:
-    1. Convert to lowercase
-    2. Replace any characters not in `[a-z0-9-]` (including underscores, dots, spaces, uppercase) with hyphens
-    3. Collapse consecutive hyphens into a single hyphen
-    4. Trim leading and trailing hyphens
-    5. If the result doesn't start with `[a-z0-9]`, prefix with `repo-` to ensure validity
-  - The final segment must pass the validation regex `[a-z0-9][a-z0-9\-]*`
-  - Example: repo name `_internal.tools` becomes `repo-internal-tools` in `project/repo-internal-tools/sessions`
-- Use `project/{repo-name}/decisions` for decision entries
-- Use `project/{repo-name}/architecture` for architectural insights
-- Supplement with domain-specific tags (e.g. `domain/storage`, `domain/api-design`)
-- Fall back to flat tags (e.g., `storage-decision`) only when no project context is available
-
-Tag format rules:
-- Tags are lowercase and hyphen-separated within each segment (e.g., `project/billing-v2/sessions`, `domain/api-design`)
-- The user may also provide explicit tags via `#tag` syntax in the original invocation (e.g., `/distill #caching #architecture`)
-- Explicit tags are merged with auto-extracted tags
-- Strip any leading `#` characters from user-provided tags
-
-### Step 8: Store Entry
+### Step 7: Store Entry
 
 Call `distillery_store` with:
 
@@ -237,42 +101,17 @@ Call `distillery_store` with:
 distillery_store(
   content="<distilled summary>",
   entry_type="session",
-  author="<determined in Step 2>",
-  project="<determined in Step 3>",
+  author="<from Step 2>",
+  project="<from Step 2>",
   tags=["<tag1>", "<tag2>", ...],
-  metadata={
-    "session_id": "sess-<YYYY-MM-DD>-<short-random-id>"
-  }
+  metadata={"session_id": "sess-<YYYY-MM-DD>-<short-random-id>"}
 )
 ```
 
-Generate `session_id` as a timestamp-based identifier (e.g., `sess-2026-03-22-a3f9`).
+The `session_id` must be unique per invocation (timestamp + short random suffix).
 
-### Step 9: Confirm
+### Step 8: Confirm
 
-Display the result to the user:
-
-```
-Stored as entry <entry-id> in project <project>
-
-Summary:
-<first 200 chars of distilled summary>...
-
-Tags: <tag1>, <tag2>, ...
-```
-
-If an error is returned by `distillery_store`, display it clearly (see Rules below).
-
-## Output Format
-
-**Before storing** — preview panel:
-```
-## Distilled Summary (preview)
-<summary text>
-Ready to store? (yes / edit / skip)
-```
-
-**After storing** — confirmation:
 ```
 Stored as entry <entry-id> in project <project>
 
@@ -282,42 +121,37 @@ Summary:
 Tags: tag1, tag2, tag3
 ```
 
-**When duplicates found** — comparison table:
+## Output Format
+
+**Preview** (before storing):
+```
+## Distilled Summary (preview)
+<summary text>
+Ready to store? (yes / edit / skip)
+```
+
+**Confirmation** (after storing):
+```
+Stored as entry <entry-id> in project <project>
+Summary: <first 200 chars>...
+Tags: tag1, tag2, tag3
+```
+
+**Duplicate comparison table:**
 ```
 | Entry ID | Similarity | Preview |
 |----------|-----------|---------|
 | abc-123  | 92%       | We decided to use DuckDB... |
 ```
 
-**When skipped:**
-```
-Skipped. No new entry was stored.
-```
-
-**When merged:**
-```
-Updated entry <id> with merged content.
-```
-
 ## Rules
 
 - Never store raw session dumps — always distill to decisions, rationale, and insights
-- Always show the distilled summary to the user before storing, so they can review and edit
+- Always show the summary to the user before storing for review/edit
 - Always check for duplicates before storing using `distillery_check_dedup`
 - Always respect the user's choice on duplicate handling (store / merge / skip)
-- If session context is unclear, ask the user what to capture rather than guessing
-- If MCP is unavailable, display the setup message and stop immediately
-- If `distillery_store` or any MCP tool returns an error, display it clearly:
-
-```
-Error: <error message from MCP tool>
-
-Suggested Action:
-- If "API key invalid" → Re-check the embedding provider API key in your config
-- If "Database error" → Ensure the database path is writable and the file exists
-- If "No such entry" (on merge) → The entry may have been deleted; try storing anyway
-```
-
-- Do not enter infinite retry loops — if a store fails after one retry, report the error and stop
-- Tags must be lowercase and hyphen-separated; strip any leading `#` characters from user-provided tags
-- The `session_id` metadata field must be unique per invocation — use a timestamp with a short random suffix
+- If session context is unclear, ask what to capture rather than guessing
+- On MCP errors, see CONVENTIONS.md error handling — display and stop
+- Do not enter retry loops — if a store fails after one attempt, report and stop
+- Tags must be lowercase and hyphen-separated; strip leading `#` from user-provided tags
+- The `session_id` metadata field must be unique per invocation

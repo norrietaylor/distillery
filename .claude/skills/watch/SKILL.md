@@ -5,48 +5,22 @@ description: "Manages monitored feed sources in the Distillery source registry. 
 
 # Watch — Feed Source Registry
 
-Watch lists, adds, and removes the feed sources that Distillery monitors for ambient intelligence. Changes are applied to the in-memory source registry for the current session; to persist them, update the `feeds.sources` section of `distillery.yaml`.
-
-## Prerequisites
-
-- The Distillery MCP server must be configured in your Claude Code settings
-- See docs/mcp-setup.md for setup instructions
-
-If the server is not available, the skill will display a setup message with next steps.
+Lists, adds, and removes feed sources that Distillery monitors for ambient intelligence. Changes apply to the in-memory source registry for the current session; to persist them, update `feeds.sources` in `distillery.yaml`.
 
 ## When to Use
 
-- When you want to see which feed sources are currently registered (`/watch list`)
-- When you want to add a new feed source to monitor (`/watch add <url>`)
-- When you want to remove a feed source (`/watch remove <url>`)
-- When asked to "list my sources", "add a feed", "stop watching X", or "remove source"
+- See registered feed sources (`/watch list`)
+- Add a new feed source (`/watch add <url>`)
+- Remove a feed source (`/watch remove <url>`)
+- Natural language: "list my sources", "add a feed", "stop watching X", "remove source"
 
 ## Process
 
-### Step 1: Check MCP Availability
+### Step 1: Check MCP
 
-Call `distillery_status` to confirm the Distillery MCP server is running.
-
-If the tool is unavailable or returns an error, display:
-
-```
-Warning: Distillery MCP Server Not Available
-
-The Distillery MCP server is not configured or not running.
-
-To set up the server:
-1. Ensure Distillery is installed: https://github.com/norrie-distillery/distillery
-2. Configure the server in your Claude Code settings: see docs/mcp-setup.md
-3. Restart Claude Code or reload MCP servers
-
-For detailed setup instructions, see: docs/mcp-setup.md
-```
-
-Stop here if MCP is unavailable.
+See CONVENTIONS.md — skip if already confirmed this conversation.
 
 ### Step 2: Parse Arguments
-
-Determine the subcommand and its arguments from the invocation:
 
 | Invocation pattern | Action | Extra args |
 |--------------------|--------|------------|
@@ -54,226 +28,81 @@ Determine the subcommand and its arguments from the invocation:
 | `/watch add <url> [--type TYPE] [--label LABEL]` | `add` | url, optional source_type, label |
 | `/watch remove <url>` | `remove` | url |
 
-If no subcommand is recognizable, default to `list`.
+Default to `list` if no subcommand is recognizable.
 
-For the `add` subcommand, parse:
-- **First non-flag argument**: the source URL (required)
-- **`--type TYPE`** or `source_type=TYPE`: the adapter type (default: `rss`)
-- **`--label LABEL`**: a human-readable label (optional)
+For `add`, parse:
+- **First non-flag argument**: source URL (required)
+- **`--type TYPE`**: adapter type (default: `rss`). Valid: `rss`, `github`, `hackernews`, `webhook`
+- **`--label LABEL`**: human-readable label (optional)
 - **`--interval N`**: poll interval in minutes (default: 60)
 - **`--trust N`**: trust weight in [0.0, 1.0] (default: 1.0)
 
-Valid source types are: `rss`, `github`, `hackernews`, `webhook`.
-
-If the `add` action is requested but no URL is provided, ask the user:
-
-```
-Please provide the URL of the feed source to add:
->
-```
-
-Do not proceed without a URL.
+If `add` is requested without a URL, ask the user before proceeding.
 
 ### Step 3: Execute Action
 
-Call `distillery_watch` with the parsed arguments.
+Call `distillery_watch` with the parsed arguments:
 
-**For `list`:**
+- **list**: `distillery_watch(action="list")`
+- **add**: `distillery_watch(action="add", url=..., source_type=..., label=..., poll_interval_minutes=..., trust_weight=...)`
+- **remove**: `distillery_watch(action="remove", url="<url>")`
 
-```
-distillery_watch(action="list")
-```
+- On MCP errors, see CONVENTIONS.md error handling — display and stop
 
-**For `add`:**
+### Step 4: Auto-Poll Schedule (after `add` only)
 
-```
-distillery_watch(
-  action="add",
-  url="<url>",
-  source_type="<type>",
-  label="<label>",
-  poll_interval_minutes=<N>,
-  trust_weight=<W>
-)
-```
+After a successful `add`, ensure automatic polling is configured. Never create duplicate poll jobs.
 
-**For `remove`:**
+**4a. Check existing schedule:** Use `CronList` to look for any job whose prompt contains `distillery_poll`. If found, skip to Step 5.
 
-```
-distillery_watch(action="remove", url="<url>")
-```
-
-If the tool returns an error, display it clearly (see Rules below).
-
-### Step 4: Ensure Auto-Poll Schedule (after `add` only)
-
-After a successful `add` action, set up automatic polling so the user doesn't have to manually trigger `distillery_poll`. Only create the schedule if one doesn't already exist.
-
-**4a. Check for existing schedule:**
-
-Use `CronList` to check if a poll cron job already exists in this session. Look for any job whose prompt contains `distillery_poll`. If one already exists, skip to Step 5 — do not create a duplicate.
-
-**4b. Determine scheduling mechanism:**
-
-Read the `.mcp.json` file in the project root to determine the Distillery MCP server URL:
-
-- If the URL contains `localhost`, `127.0.0.1`, or the transport is `stdio` → **local server** → use `CronCreate`
-- If the URL is a remote host (e.g., `*.fastmcp.app`, any non-localhost domain) → **deployed server** → use `RemoteTrigger`
+**4b. Determine scheduling mechanism:** Read `.mcp.json` in the project root:
+- URL contains `localhost`, `127.0.0.1`, or transport is `stdio` → **local** → use `CronCreate`
+- Remote host (e.g., `*.fastmcp.app`) → **deployed** → use `RemoteTrigger`
 
 **4c. Create the schedule:**
 
-**For local servers (CronCreate):**
-
+**Local (CronCreate):**
 ```
-CronCreate(
-  cron="23 * * * *",
-  prompt="Use distillery_poll to poll all configured feed sources. Report a one-line summary of items fetched and stored.",
-  recurring=true,
-  durable=true
-)
+CronCreate(cron="23 * * * *", prompt="Use distillery_poll to poll all configured feed sources. Report a one-line summary of items fetched and stored.", recurring=true, durable=true)
 ```
+Pick an off-peak minute (not :00 or :30). Durable jobs survive restarts but auto-expire after 7 days.
 
-- Pick an off-peak minute (not :00 or :30) to avoid fleet congestion
-- Use `durable: true` so the job survives Claude Code restarts
-- Note: durable cron jobs auto-expire after 7 days
-
-Display:
-
+**Deployed (RemoteTrigger):**
 ```
-Auto-poll scheduled: feeds will be polled every hour while Claude Code is active.
-(Durable cron job — survives restarts, expires after 7 days.)
+RemoteTrigger(action="create", body={"name": "distillery-feed-poll", "description": "Poll all Distillery feed sources for new items", "schedule": "23 * * * *", "prompt": "Use distillery_poll to poll all configured feed sources. Report a one-line summary of items fetched and stored.", "max_turns": 3})
 ```
 
-**For deployed servers (RemoteTrigger):**
+If `RemoteTrigger` fails, fall back to `CronCreate` and note the limitation.
 
-```
-RemoteTrigger(
-  action="create",
-  body={
-    "name": "distillery-feed-poll",
-    "description": "Poll all Distillery feed sources for new items",
-    "schedule": "23 * * * *",
-    "prompt": "Use distillery_poll to poll all configured feed sources. Report a one-line summary of items fetched and stored.",
-    "max_turns": 3
-  }
-)
-```
-
-Display:
-
-```
-Auto-poll scheduled: feeds will be polled every hour via remote trigger.
-Trigger ID: <trigger_id>
-```
-
-If `RemoteTrigger` fails (e.g., not authenticated), fall back to `CronCreate` and note the limitation:
-
-```
-Remote trigger unavailable — falling back to local cron.
-Auto-poll scheduled: feeds will be polled every hour while Claude Code is active.
-```
-
-**4d. On `remove` — clean up schedule if no sources remain:**
-
-After a successful `remove`, check the updated sources list. If it is now empty (no sources configured), delete the auto-poll schedule:
-
-- For CronCreate: use `CronDelete` with the stored job ID
-- For RemoteTrigger: use `RemoteTrigger(action="list")` to find the `distillery-feed-poll` trigger, then `RemoteTrigger(action="update", trigger_id=..., body={"paused": true})`
-
-Display:
-
-```
-Auto-poll paused: no feed sources remaining.
-```
+**4d. Cleanup on `remove`:** After a successful `remove`, if no sources remain, delete/pause the auto-poll schedule via `CronDelete` (local) or `RemoteTrigger(action="update", ..., body={"paused": true})` (deployed). Display: "Auto-poll paused: no feed sources remaining."
 
 ### Step 5: Confirm
 
-Display results based on the action performed.
-
-**For `list`:** Display the source table (see Output Format).
-
-**For `add`:** Display a confirmation with the newly added source details, then show the updated source table, then the auto-poll status from Step 4.
-
-**For `remove`:** Confirm whether the source was found and removed, then show the updated source table.
-
-Always include the persistence reminder when changes are made:
-
-```
-Note: Changes are applied to the current session only.
-To persist across restarts, update the feeds.sources section of distillery.yaml.
-```
-
-## Output Format
-
-**Source table (list and after add/remove):**
+**Source table format (used for list and after add/remove):**
 
 ```
 Feed Sources (N configured)
 
 | # | URL | Type | Label | Poll (min) | Trust |
 |---|-----|------|-------|-----------|-------|
-| 1 | https://news.ycombinator.com/rss | rss | Hacker News RSS | 60 | 1.0 |
-| 2 | openai/openai-python | github | OpenAI Python SDK | 120 | 0.8 |
+| 1 | https://example.com/rss | rss | Example | 60 | 1.0 |
 ```
 
-If there are no sources configured:
+If no sources: show "No feed sources configured." with usage hint.
 
-```
-No feed sources configured.
-
-Add a source with: /watch add <url> [--type rss|github|hackernews|webhook]
-```
-
-**After `add`:**
-
-```
-Added: <url>
-  Type:     <source_type>
-  Label:    <label or "(none)">
-  Interval: <N> minutes
-  Trust:    <weight>
-
-Note: Changes are applied to the current session only.
-To persist across restarts, update the feeds.sources section of distillery.yaml.
-```
-
-**After `remove` (found):**
-
-```
-Removed: <url>
-
-Note: Changes are applied to the current session only.
-To persist across restarts, update the feeds.sources section of distillery.yaml.
-```
-
-**After `remove` (not found):**
-
-```
-No source with URL "<url>" was found in the registry.
-```
+- **After `add`**: show added source details, updated table, and auto-poll status
+- **After `remove`**: confirm removal, show updated table
+- **Persistence reminder** (on any change): "Note: Changes apply to the current session only. To persist, update `feeds.sources` in `distillery.yaml`."
 
 ## Rules
 
-- Always call `distillery_status` first to verify MCP availability
 - Default subcommand is `list` when no arguments are provided
-- When adding a source, validate `source_type` is one of: `rss`, `github`, `hackernews`, `webhook`
-- Do not proceed with `add` without a URL; prompt the user if missing
+- Validate `source_type` is one of: `rss`, `github`, `hackernews`, `webhook`
+- Do not proceed with `add` without a URL
 - Always show the updated source table after `add` or `remove`
 - Always include the persistence reminder when changes are made
-- **Auto-poll scheduling**: After a successful `add`, always check `CronList` before creating a new schedule — never create duplicate poll jobs
-- **Schedule cleanup**: After a successful `remove` that leaves zero sources, pause or delete the auto-poll schedule
-- **Scheduling fallback**: If `RemoteTrigger` fails for a deployed server, fall back to `CronCreate` gracefully
-- If `distillery_watch` returns an error, display it clearly:
-
-```
-Error: <error message from MCP tool>
-
-Suggested Action:
-- If "INVALID_SOURCE_TYPE" -> Use one of: rss, github, hackernews, webhook
-- If "MISSING_FIELD" -> Provide the required field (url or source_type)
-- If "Connection error" -> Verify the Distillery MCP server is running
-```
-
-- Do not enter infinite retry loops — if a call fails, report the error and stop
-- Trust weight must be between 0.0 and 1.0; default is 1.0
-- Poll interval must be a positive integer (minutes); default is 60
+- After `add`, always check `CronList` before creating a schedule — no duplicates
+- After `remove` that leaves zero sources, pause/delete the auto-poll schedule
+- If `RemoteTrigger` fails for a deployed server, fall back to `CronCreate`
+- On errors, display clearly and stop — no retry loops
+- Trust weight: 0.0–1.0 (default 1.0); poll interval: positive integer minutes (default 60)

@@ -2,7 +2,31 @@
   "permissions": {
     "allow": [
       "Bash(python3:*)",
-      "Bash(grep -r GitHubProvider /home/norrie.guest/code/distillery/.worktrees/feature-git-hub-team-oauth/.venv/lib/python3.13/site-packages/fastmcp/ --include=*.py)"
+      "Bash(git config:*)",
+      "mcp__plugin_distillery_distillery__distillery_check_conflicts",
+      "mcp__plugin_distillery_distillery__distillery_check_dedup",
+      "mcp__plugin_distillery_distillery__distillery_classify",
+      "mcp__plugin_distillery_distillery__distillery_find_similar",
+      "mcp__plugin_distillery_distillery__distillery_get",
+      "mcp__plugin_distillery_distillery__distillery_interests",
+      "mcp__plugin_distillery_distillery__distillery_list",
+      "mcp__plugin_distillery_distillery__distillery_metrics",
+      "mcp__plugin_distillery_distillery__distillery_poll",
+      "mcp__plugin_distillery_distillery__distillery_quality",
+      "mcp__plugin_distillery_distillery__distillery_rescore",
+      "mcp__plugin_distillery_distillery__distillery_resolve_review",
+      "mcp__plugin_distillery_distillery__distillery_review_queue",
+      "mcp__plugin_distillery_distillery__distillery_search",
+      "mcp__plugin_distillery_distillery__distillery_stale",
+      "mcp__plugin_distillery_distillery__distillery_status",
+      "mcp__plugin_distillery_distillery__distillery_store",
+      "mcp__plugin_distillery_distillery__distillery_suggest_sources",
+      "mcp__plugin_distillery_distillery__distillery_tag_tree",
+      "mcp__plugin_distillery_distillery__distillery_type_schemas",
+      "mcp__plugin_distillery_distillery__distillery_update",
+      "mcp__plugin_distillery_distillery__distillery_watch",
+      "Bash(wc:*)",
+      "Bash(git add:*)"
     ]
   }
 }
