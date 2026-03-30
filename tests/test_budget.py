@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import datetime
-from unittest.mock import patch
 
 import duckdb
 import pytest
 
 from distillery.config import DistilleryConfig, RateLimitConfig, _validate, load_config
 from distillery.mcp.budget import (
-    EmbeddingBudgetExceeded,
+    EmbeddingBudgetError,
     check_budget,
     get_daily_usage,
     increment_usage,
@@ -72,14 +71,14 @@ class TestCheckBudget:
 
     def test_raises_when_at_limit(self, conn: duckdb.DuckDBPyConnection) -> None:
         increment_usage(conn, count=10)
-        with pytest.raises(EmbeddingBudgetExceeded) as exc_info:
+        with pytest.raises(EmbeddingBudgetError) as exc_info:
             check_budget(conn, daily_limit=10)
         assert exc_info.value.used == 10
         assert exc_info.value.limit == 10
 
     def test_raises_when_over_limit(self, conn: duckdb.DuckDBPyConnection) -> None:
         increment_usage(conn, count=15)
-        with pytest.raises(EmbeddingBudgetExceeded):
+        with pytest.raises(EmbeddingBudgetError):
             check_budget(conn, daily_limit=10)
 
     def test_unlimited_when_zero(self, conn: duckdb.DuckDBPyConnection) -> None:
@@ -95,7 +94,7 @@ class TestRecordAndCheck:
 
     def test_raises_when_budget_exhausted(self, conn: duckdb.DuckDBPyConnection) -> None:
         increment_usage(conn, count=10)
-        with pytest.raises(EmbeddingBudgetExceeded):
+        with pytest.raises(EmbeddingBudgetError):
             record_and_check(conn, daily_limit=10, count=1)
 
     def test_tracks_even_when_unlimited(self, conn: duckdb.DuckDBPyConnection) -> None:

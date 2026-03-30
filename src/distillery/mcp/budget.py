@@ -14,7 +14,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-class EmbeddingBudgetExceeded(Exception):
+class EmbeddingBudgetError(Exception):
     """Raised when the daily embedding budget has been exhausted."""
 
     def __init__(self, used: int, limit: int) -> None:
@@ -78,13 +78,13 @@ def check_budget(conn: Any, daily_limit: int) -> None:
         daily_limit: Maximum calls per day.  ``0`` means unlimited.
 
     Raises:
-        EmbeddingBudgetExceeded: If the budget is exhausted.
+        EmbeddingBudgetError: If the budget is exhausted.
     """
     if daily_limit <= 0:
         return  # unlimited
     used = get_daily_usage(conn)
     if used >= daily_limit:
-        raise EmbeddingBudgetExceeded(used, daily_limit)
+        raise EmbeddingBudgetError(used, daily_limit)
 
 
 def record_and_check(conn: Any, daily_limit: int, count: int = 1) -> int:
@@ -102,7 +102,7 @@ def record_and_check(conn: Any, daily_limit: int, count: int = 1) -> int:
         The new total for today.
 
     Raises:
-        EmbeddingBudgetExceeded: If the budget would be exceeded.
+        EmbeddingBudgetError: If the budget would be exceeded.
     """
     if daily_limit <= 0:
         return increment_usage(conn, count)  # unlimited, still track

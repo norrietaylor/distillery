@@ -60,7 +60,7 @@ from fastmcp import Context, FastMCP  # noqa: F401  # Context used by tool wrapp
 from mcp import types
 
 from distillery.config import DistilleryConfig, load_config
-from distillery.mcp.budget import EmbeddingBudgetExceeded, record_and_check
+from distillery.mcp.budget import EmbeddingBudgetError, record_and_check
 
 logger = logging.getLogger(__name__)
 
@@ -1289,10 +1289,8 @@ def _sync_gather_stats(
 
     embedding_usage_today = 0
     embedding_budget_daily = config.rate_limit.embedding_budget_daily
-    try:
+    with contextlib.suppress(Exception):
         embedding_usage_today = get_daily_usage(conn)
-    except Exception:  # noqa: BLE001
-        pass  # _meta table may not exist yet
 
     # Storage warnings.
     warnings: list[str] = []
@@ -1442,7 +1440,7 @@ async def _handle_store(
     if cfg is not None and cfg.rate_limit.embedding_budget_daily > 0:
         try:
             record_and_check(store.connection, cfg.rate_limit.embedding_budget_daily, count=2)
-        except EmbeddingBudgetExceeded as exc:
+        except EmbeddingBudgetError as exc:
             return error_response("BUDGET_EXCEEDED", str(exc))
 
     # --- db size check ------------------------------------------------------
@@ -1818,7 +1816,7 @@ async def _handle_search(
     if cfg is not None and cfg.rate_limit.embedding_budget_daily > 0:
         try:
             record_and_check(store.connection, cfg.rate_limit.embedding_budget_daily)
-        except EmbeddingBudgetExceeded as exc:
+        except EmbeddingBudgetError as exc:
             return error_response("BUDGET_EXCEEDED", str(exc))
 
     filters = _build_filters_from_arguments(arguments)
@@ -1892,7 +1890,7 @@ async def _handle_find_similar(
     if cfg is not None and cfg.rate_limit.embedding_budget_daily > 0:
         try:
             record_and_check(store.connection, cfg.rate_limit.embedding_budget_daily)
-        except EmbeddingBudgetExceeded as exc:
+        except EmbeddingBudgetError as exc:
             return error_response("BUDGET_EXCEEDED", str(exc))
 
     try:
@@ -2419,7 +2417,7 @@ async def _handle_check_dedup(
     if config.rate_limit.embedding_budget_daily > 0:
         try:
             record_and_check(store.connection, config.rate_limit.embedding_budget_daily)
-        except EmbeddingBudgetExceeded as exc:
+        except EmbeddingBudgetError as exc:
             return error_response("BUDGET_EXCEEDED", str(exc))
 
     # --- run dedup checker --------------------------------------------------
