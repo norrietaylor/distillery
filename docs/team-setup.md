@@ -59,11 +59,29 @@ When you invoke your first Distillery skill (e.g., `/recall`, `/distill`), Claud
 
 ### What permissions are requested?
 
-The GitHub OAuth flow requests only `user` scope, which allows reading:
+The GitHub OAuth flow requests only the `user` scope, which allows reading:
 - Your GitHub username and public profile
 - Your email address (if public on your profile)
 
-**No write access is requested.** Your repositories, issues, and other data are never accessed.
+**No write access is requested.** Your repositories, organizations, issues, and other GitHub data are never accessed or modified.
+
+### How authentication works (technical detail)
+
+GitHub OAuth is used purely as an **identity gate** — it proves who you are so the MCP server can grant access. It does **not** give the server access to your GitHub account.
+
+The flow is handled by FastMCP's `GitHubProvider` ([source](https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/server/auth/providers/github.py)):
+
+1. Claude Code redirects to GitHub's OAuth authorization endpoint
+2. User approves the `user` scope (read-only profile access)
+3. GitHub returns an access token to FastMCP via callback
+4. FastMCP's `GitHubTokenVerifier` calls `https://api.github.com/user` to verify the token and extract identity claims (`login`, `name`, `email`, `avatar_url`)
+5. The token is wrapped in an internal `AccessToken` object — tool handlers can read the caller's identity via FastMCP's `Context` object but never see the raw GitHub token
+
+**What this means in practice:**
+- The server knows *who* is calling (GitHub username) but cannot act on their behalf
+- No GitHub API calls are made beyond `/user` for identity verification
+- Organization membership is **not** queried (would require `read:org` scope)
+- The `required_scopes` parameter defaults to `["user"]` and is not extended in the current configuration
 
 ### Token expiration and refresh
 
