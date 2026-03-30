@@ -629,3 +629,39 @@ class TestAccessedAt:
         assert fetched is not None
         assert fetched.accessed_at is not None
         assert isinstance(fetched.accessed_at, datetime)
+
+
+class TestClose:
+    """DuckDBStore.close() checkpoints the WAL and releases the connection."""
+
+    async def test_close_checkpoints_wal(
+        self, deterministic_embedding_provider: object
+    ) -> None:
+        """After close(), tables created in-session are persisted to the DB file."""
+        import tempfile
+        from pathlib import Path
+
+        import duckdb
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "test.db")
+            store = DuckDBStore(
+                db_path=db_path,
+                embedding_provider=deterministic_embedding_provider,
+            )
+            await store.initialize()
+            # feed_sources table should exist in the live connection.
+            assert store.connection.execute(
+                "SELECT count(*) FROM feed_sources"
+            ).fetchone() == (0,)
+            await store.close()
+
+            # Re-open read-only to verify the table was checkpointed to disk.
+            conn = duckdb.connect(db_path, read_only=True)
+            assert conn.execute("SELECT count(*) FROM feed_sources").fetchone() == (0,)
+            conn.close()
+
+    async def test_close_is_idempotent(self, store: DuckDBStore) -> None:
+        """Calling close() twice does not raise."""
+        await store.close()
+        await store.close()  # should be a no-op
