@@ -220,23 +220,23 @@ class FeedPoller:
             else config.feeds.thresholds.digest
         )
 
-    async def poll(self) -> PollerSummary:
-        """Execute a full poll cycle across all configured sources.
+    async def poll(self, *, source_url: str | None = None) -> PollerSummary:
+        """Execute a full poll cycle across configured sources.
 
-        For each source in ``config.feeds.sources``:
-
-        1. Instantiate the appropriate adapter.
-        2. Fetch items via ``adapter.fetch()`` (synchronous, run in a thread).
-        3. For each item, check deduplication using ``find_similar(0.95)``.
-        4. Score non-duplicate items via :class:`~distillery.feeds.scorer.RelevanceScorer`.
-        5. Store items whose score meets ``relevance_threshold``.
+        When *source_url* is given, only that single source is polled.
+        Otherwise all persisted feed sources are polled.
 
         Returns:
             A :class:`PollerSummary` with per-source and aggregate statistics.
         """
         summary = PollerSummary(started_at=datetime.now(tz=UTC))
 
-        sources = self._config.feeds.sources
+        from distillery.config import FeedSourceConfig
+
+        db_sources = await self._store.list_feed_sources()
+        if source_url is not None:
+            db_sources = [s for s in db_sources if s["url"] == source_url]
+        sources = [FeedSourceConfig(**s) for s in db_sources]
         if not sources:
             logger.debug("FeedPoller: no sources configured — skipping poll")
             summary.finished_at = datetime.now(tz=UTC)
@@ -249,7 +249,6 @@ class FeedPoller:
 
             extractor = InterestExtractor(
                 store=self._store,
-                feeds_config=self._config.feeds,
             )
             interest_profile = await extractor.extract()
             logger.debug(
@@ -413,7 +412,6 @@ class FeedPoller:
 
             extractor = InterestExtractor(
                 store=self._store,
-                feeds_config=self._config.feeds,
             )
             interest_profile = await extractor.extract()
         except Exception:  # noqa: BLE001
@@ -430,9 +428,10 @@ class FeedPoller:
             offset=0,
         )
 
-        # Build a source trust_weight lookup from config.
+        # Build a source trust_weight lookup from DB.
+        db_sources = await self._store.list_feed_sources()
         trust_weights: dict[str, float] = {
-            s.url: s.trust_weight for s in self._config.feeds.sources
+            s["url"]: s["trust_weight"] for s in db_sources
         }
 
         stats: dict[str, int] = {

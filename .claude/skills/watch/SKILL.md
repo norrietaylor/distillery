@@ -5,7 +5,7 @@ description: "Manages monitored feed sources in the Distillery source registry. 
 
 # Watch — Feed Source Registry
 
-Lists, adds, and removes feed sources that Distillery monitors for ambient intelligence. Changes apply to the in-memory source registry for the current session; to persist them, update `feeds.sources` in `distillery.yaml`.
+Lists, adds, and removes feed sources that Distillery monitors for ambient intelligence. Changes are persisted to the database and survive server restarts. Sources defined in `distillery.yaml` are seeded into the database on first startup.
 
 ## When to Use
 
@@ -62,13 +62,13 @@ After a successful `add`, ensure automatic polling is configured. Never create d
 **4c. Create the schedule:**
 
 **Local (CronCreate):**
-```
+```text
 CronCreate(cron="23 * * * *", prompt="Use distillery_poll to poll all configured feed sources. Report a one-line summary of items fetched and stored.", recurring=true, durable=true)
 ```
 Pick an off-peak minute (not :00 or :30). Durable jobs survive restarts but auto-expire after 7 days.
 
 **Deployed (RemoteTrigger):**
-```
+```text
 RemoteTrigger(action="create", body={"name": "distillery-feed-poll", "description": "Poll all Distillery feed sources for new items", "schedule": "23 * * * *", "prompt": "Use distillery_poll to poll all configured feed sources. Report a one-line summary of items fetched and stored.", "max_turns": 3})
 ```
 
@@ -80,7 +80,7 @@ If `RemoteTrigger` fails, fall back to `CronCreate` and note the limitation.
 
 **Source table format (used for list and after add/remove):**
 
-```
+```text
 Feed Sources (N configured)
 
 | # | URL | Type | Label | Poll (min) | Trust |
@@ -92,7 +92,8 @@ If no sources: show "No feed sources configured." with usage hint.
 
 - **After `add`**: show added source details, updated table, and auto-poll status
 - **After `remove`**: confirm removal, show updated table
-- **Persistence reminder** (on any change): "Note: Changes apply to the current session only. To persist, update `feeds.sources` in `distillery.yaml`."
+
+Changes are persisted to the database automatically — no manual YAML editing required.
 
 ## Rules
 
@@ -100,9 +101,8 @@ If no sources: show "No feed sources configured." with usage hint.
 - Validate `source_type` is one of: `rss`, `github`, `hackernews`, `webhook`
 - Do not proceed with `add` without a URL
 - Always show the updated source table after `add` or `remove`
-- Always include the persistence reminder when changes are made
 - After `add`, always check `CronList` before creating a schedule — no duplicates
 - After `remove` that leaves zero sources, pause/delete the auto-poll schedule
 - If `RemoteTrigger` fails for a deployed server, fall back to `CronCreate`
-- On errors, display clearly and stop — no retry loops
+- On MCP errors, see CONVENTIONS.md error handling — display and stop
 - Trust weight: 0.0–1.0 (default 1.0); poll interval: positive integer minutes (default 60)

@@ -13,11 +13,9 @@ RUN pip install --no-cache-dir .
 # Flatten config path so DISTILLERY_CONFIG=/app/distillery-fly.yaml works
 COPY deploy/fly/distillery-fly.yaml /app/distillery-fly.yaml
 
-# Create /data for the volume mount and set ownership
-RUN mkdir -p /data && chown -R appuser:appuser /app /data
-
-USER appuser
+RUN chown -R appuser:appuser /app
 
 EXPOSE 8000
 
-CMD ["distillery-mcp", "--transport", "http"]
+# Fix volume ownership at runtime (Fly mounts as root), then drop to appuser
+CMD ["sh", "-c", "chown -R appuser:appuser /data && exec su -s /bin/sh appuser -c 'distillery-mcp --transport http'"]

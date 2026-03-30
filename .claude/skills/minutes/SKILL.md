@@ -71,7 +71,7 @@ Determine author & project per CONVENTIONS.md. Auto-extract 2-5 lowercase, hyphe
 
 ### Step 7a: Store Entry
 
-```
+```python
 distillery_store(
   content="<formatted notes>",
   entry_type="minutes",
@@ -98,7 +98,7 @@ Display: entry ID, meeting ID, version (1), project, and first 200 chars of note
 
 ### Step 3b: Find Existing Meeting
 
-```
+```python
 distillery_search(query="<meeting_id>", entry_type="minutes", limit=5)
 ```
 
@@ -136,7 +136,7 @@ Display: entry ID, meeting ID, new version, and first 200 chars of the update se
 
 ### Step 3c: List Recent Meetings
 
-```
+```python
 distillery_list(entry_type="minutes", limit=10)
 ```
 
@@ -144,7 +144,7 @@ If none found: "No meeting entries found. Use /minutes to capture your first mee
 
 Otherwise display a compact table:
 
-```
+```text
 Recent Meetings (10 most recent):
 
 | Meeting ID                   | Title                | Date       | Attendees |

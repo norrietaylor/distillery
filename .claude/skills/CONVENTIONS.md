@@ -80,6 +80,8 @@ Setup: see docs/mcp-setup.md
 
 Stop immediately if MCP is unavailable.
 
+**Authentication errors** (HTTP transport with OAuth): If `distillery_status` returns an authentication error rather than a connection failure, direct the user to run `/setup` or complete the OAuth flow via the MCP server menu.
+
 ## Error Handling
 
 If any MCP tool returns an error, display it and stop (no retry loops):

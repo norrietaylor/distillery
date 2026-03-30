@@ -89,5 +89,5 @@ Separate results with `---`.
 - Show full entry content — do not truncate
 - Omit the Tags line for entries with no tags; do not show `Tags: (none)`
 - On MCP errors, see CONVENTIONS.md error handling — display and stop
-- Do not enter infinite retry loops — if search fails after one retry, report and stop
+- No retry loops — if search fails, report and stop (per CONVENTIONS.md)
 - If `--type` is given an invalid value, list valid types before calling the API

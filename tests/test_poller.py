@@ -65,12 +65,30 @@ def _make_search_result(score: float = 0.8, external_id: str = "") -> SearchResu
 
 def _make_store(
     find_similar_results: list[SearchResult] | None = None,
+    feed_sources: list[dict[str, object]] | None = None,
 ) -> AsyncMock:
     store = AsyncMock()
     store.find_similar.return_value = find_similar_results or []
     store.list_entries.return_value = []  # default: no external_id matches
     store.store.return_value = "new-entry-id"
+    _sources = feed_sources or []
+
+    async def _list_feed_sources() -> list[dict[str, object]]:
+        return list(_sources)
+
+    store.list_feed_sources = AsyncMock(side_effect=_list_feed_sources)
     return store
+
+
+def _source_to_dict(source: FeedSourceConfig) -> dict[str, object]:
+    """Convert a FeedSourceConfig to a dict matching store output."""
+    return {
+        "url": source.url,
+        "source_type": source.source_type,
+        "label": source.label,
+        "poll_interval_minutes": source.poll_interval_minutes,
+        "trust_weight": source.trust_weight,
+    }
 
 
 def _make_config(
@@ -167,7 +185,7 @@ class TestItemText:
 
 class TestFeedPollerEmptySources:
     async def test_empty_sources_returns_empty_summary(self) -> None:
-        store = _make_store()
+        store = _make_store(feed_sources=[])
         cfg = _make_config(sources=[])
         poller = FeedPoller(store=store, config=cfg)
         summary = await poller.poll()
@@ -192,8 +210,12 @@ class TestFeedPollerRSS:
 
     async def test_items_above_threshold_are_stored(self) -> None:
         items = [_make_feed_item(item_id="id1", title="Python news", content="Details")]
-        store = _make_store(find_similar_results=[_make_search_result(score=0.9)])
-        cfg = _make_config(sources=[self._rss_source()], digest_threshold=0.5)
+        src = self._rss_source()
+        store = _make_store(
+            find_similar_results=[_make_search_result(score=0.9)],
+            feed_sources=[_source_to_dict(src)],
+        )
+        cfg = _make_config(sources=[src], digest_threshold=0.5)
 
         with patch("distillery.feeds.poller._build_adapter") as mock_build:
             mock_adapter = MagicMock()
@@ -220,8 +242,9 @@ class TestFeedPollerRSS:
 
     async def test_items_below_threshold_not_stored(self) -> None:
         items = [_make_feed_item(item_id="id1", title="Irrelevant item", content="Unrelated")]
-        store = _make_store()
-        cfg = _make_config(sources=[self._rss_source()], digest_threshold=0.8)
+        src = self._rss_source()
+        store = _make_store(feed_sources=[_source_to_dict(src)])
+        cfg = _make_config(sources=[src], digest_threshold=0.8)
 
         with patch("distillery.feeds.poller._build_adapter") as mock_build:
             mock_adapter = MagicMock()
@@ -246,8 +269,9 @@ class TestFeedPollerRSS:
 
     async def test_duplicate_items_are_skipped(self) -> None:
         items = [_make_feed_item(item_id="id1", title="Dup title", content="Dup content")]
-        store = _make_store()
-        cfg = _make_config(sources=[self._rss_source()], digest_threshold=0.0)
+        src = self._rss_source()
+        store = _make_store(feed_sources=[_source_to_dict(src)])
+        cfg = _make_config(sources=[src], digest_threshold=0.0)
 
         with patch("distillery.feeds.poller._build_adapter") as mock_build:
             mock_adapter = MagicMock()
@@ -269,8 +293,9 @@ class TestFeedPollerRSS:
         store.store.assert_not_called()
 
     async def test_adapter_fetch_error_recorded(self) -> None:
-        store = _make_store()
-        cfg = _make_config(sources=[self._rss_source()])
+        src = self._rss_source()
+        store = _make_store(feed_sources=[_source_to_dict(src)])
+        cfg = _make_config(sources=[src])
 
         with patch("distillery.feeds.poller._build_adapter") as mock_build:
             mock_adapter = MagicMock()
@@ -289,7 +314,7 @@ class TestFeedPollerRSS:
             url="https://webhooks.example.com",
             source_type="hackernews",
         )
-        store = _make_store()
+        store = _make_store(feed_sources=[_source_to_dict(source)])
         cfg = _make_config(sources=[source])
         poller = FeedPoller(store=store, config=cfg)
         summary = await poller.poll()
@@ -304,7 +329,7 @@ class TestFeedPollerRSS:
             trust_weight=0.5,
         )
         items = [_make_feed_item(item_id="id1")]
-        store = _make_store()
+        store = _make_store(feed_sources=[_source_to_dict(source)])
         cfg = _make_config(sources=[source], digest_threshold=0.8)
 
         with patch("distillery.feeds.poller._build_adapter") as mock_build:
@@ -327,8 +352,9 @@ class TestFeedPollerRSS:
 
     async def test_item_with_no_text_skipped(self) -> None:
         items = [_make_feed_item(title=None, content=None)]
-        store = _make_store()
-        cfg = _make_config(sources=[self._rss_source()], digest_threshold=0.0)
+        src = self._rss_source()
+        store = _make_store(feed_sources=[_source_to_dict(src)])
+        cfg = _make_config(sources=[src], digest_threshold=0.0)
 
         with patch("distillery.feeds.poller._build_adapter") as mock_build:
             mock_adapter = MagicMock()
@@ -362,6 +388,9 @@ class TestFeedPollerMultipleSources:
         store = AsyncMock()
         store.store.return_value = "eid"
         store.list_entries.return_value = []  # no external_id matches
+        store.list_feed_sources = AsyncMock(
+            return_value=[_source_to_dict(s) for s in sources]
+        )
 
         source_items_map = {
             "https://a.com/rss": items_a,
@@ -410,10 +439,9 @@ class TestHandlePoll:
     async def test_source_url_filter_not_found_returns_error(self) -> None:
         from distillery.mcp.server import _handle_poll
 
-        store = _make_store()
-        cfg = _make_config(
-            sources=[FeedSourceConfig(url="https://real.com/rss", source_type="rss")]
-        )
+        src = FeedSourceConfig(url="https://real.com/rss", source_type="rss")
+        store = _make_store(feed_sources=[_source_to_dict(src)])
+        cfg = _make_config(sources=[src])
         result = await _handle_poll(
             store=store, config=cfg, arguments={"source_url": "https://nonexistent.com/rss"}
         )
@@ -429,7 +457,7 @@ class TestHandlePoll:
             FeedSourceConfig(url="https://b.com/rss", source_type="rss"),
         ]
         cfg = _make_config(sources=sources, digest_threshold=0.0)
-        store = _make_store()
+        store = _make_store(feed_sources=[_source_to_dict(s) for s in sources])
 
         items = [_make_feed_item(item_id="x1", source_url="https://a.com/rss")]
 
@@ -483,20 +511,28 @@ class TestCLIPollSubcommand:
     def test_no_sources_exits_zero(self) -> None:
         from distillery.cli import _cmd_poll
 
-        with patch("distillery.cli.load_config") as mock_load:
+        with (
+            patch("distillery.cli.load_config") as mock_load,
+            patch("distillery.cli.asyncio") as mock_asyncio,
+        ):
             cfg = _make_config(sources=[])
             mock_load.return_value = cfg
+            mock_asyncio.run.return_value = "no-sources"
             code = _cmd_poll(config_path=None, fmt="text", source_url=None)
             assert code == 0
 
     def test_source_not_found_exits_one(self) -> None:
         from distillery.cli import _cmd_poll
 
-        with patch("distillery.cli.load_config") as mock_load:
+        with (
+            patch("distillery.cli.load_config") as mock_load,
+            patch("distillery.cli.asyncio") as mock_asyncio,
+        ):
             cfg = _make_config(
                 sources=[FeedSourceConfig(url="https://real.com/rss", source_type="rss")]
             )
             mock_load.return_value = cfg
+            mock_asyncio.run.return_value = "not-found:https://nonexistent.com/rss"
             code = _cmd_poll(
                 config_path=None, fmt="text", source_url="https://nonexistent.com/rss"
             )

@@ -58,7 +58,7 @@ Report: `Retrieved X unique entries across Y search passes.`
 
 **Fewer than 2 entries:** Fall back to recall-style display showing full provenance (ID, type badge, author, date, similarity, content) per entry, then:
 
-```
+```text
 Only <N> entry found for this topic. Showing results directly instead of synthesizing.
 Tip: Use /distill to capture more knowledge about this topic.
 ```
