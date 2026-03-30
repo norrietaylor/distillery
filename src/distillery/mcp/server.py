@@ -305,7 +305,7 @@ def create_server(
             # successful seed we write a persistent sentinel so restarts never
             # re-insert sources — even when the user has /watch-removed them
             # all and the feed_sources table is empty.
-            if not await store.get_metadata("feeds_seeded"):
+            if await store.get_metadata("feeds_seeded") != "true":
                 for source in config.feeds.sources:
                     with contextlib.suppress(ValueError):
                         await store.add_feed_source(
