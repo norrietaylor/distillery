@@ -114,7 +114,7 @@ class RateLimitMiddleware:
         self._windows: dict[str, _IPWindow] = {}
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] not in ("http", "websocket"):
+        if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
 
@@ -127,6 +127,12 @@ class RateLimitMiddleware:
             self._windows[ip] = window
 
         window.prune(now)
+
+        # Evict idle buckets to prevent unbounded memory growth.
+        if window.count_minute() == 0 and window.count_hour() == 0:
+            del self._windows[ip]
+            await self.app(scope, receive, send)
+            return
 
         minute_count = window.count_minute()
         hour_count = window.count_hour()
@@ -248,11 +254,12 @@ def apply_http_middleware(
     requests_per_hour: int = 600,
     max_body_bytes: int = 1_048_576,
 ) -> ASGIApp:
-    """Wrap *app* with body-size and rate-limit middleware.
+    """Wrap *app* with rate-limit and body-size middleware.
 
     Middleware is applied in outermost-to-innermost order:
-    1. :class:`BodySizeLimitMiddleware` (outermost — reject oversized bodies first)
-    2. :class:`RateLimitMiddleware` (innermost — count only body-OK requests)
+    1. :class:`RateLimitMiddleware` (outermost — count every request including
+       oversized bodies so they still consume quota)
+    2. :class:`BodySizeLimitMiddleware` (innermost — reject oversized bodies)
 
     Args:
         app: The ASGI application to wrap.
@@ -263,10 +270,10 @@ def apply_http_middleware(
     Returns:
         A new ASGI app with both middleware layers applied.
     """
+    app = BodySizeLimitMiddleware(app, max_bytes=max_body_bytes)
     app = RateLimitMiddleware(
         app,
         requests_per_minute=requests_per_minute,
         requests_per_hour=requests_per_hour,
     )
-    app = BodySizeLimitMiddleware(app, max_bytes=max_body_bytes)
     return app

@@ -68,17 +68,12 @@ logger = logging.getLogger(__name__)
 # User identity helpers
 # ---------------------------------------------------------------------------
 
-# Cache resolved GitHub usernames so we don't call the API on every tool call.
-_username_cache: dict[str, str] = {}
-
-
 def _get_authenticated_user() -> str:  # pragma: no cover — requires live OAuth context
     """Return the authenticated GitHub username, or ``""`` if auth is not active.
 
     Uses FastMCP's ``get_access_token()`` to retrieve the current request's
     access token.  The GitHub username is extracted from the JWT claims
-    (``login`` field populated by the GitHubProvider).  Results are cached
-    by token string to avoid repeated lookups.
+    (``login`` field populated by the GitHubProvider).
     """
     try:
         from fastmcp.server.dependencies import get_access_token
@@ -89,20 +84,11 @@ def _get_authenticated_user() -> str:  # pragma: no cover — requires live OAut
     if token is None:
         return ""
 
-    # Check cache first.
-    cached = _username_cache.get(token.token)
-    if cached is not None:
-        return cached
-
-    # GitHubProvider populates claims with the GitHub user profile fields.
+    # Extract username directly from claims — no caching needed since
+    # claims are already parsed from the JWT (no API call involved).
     username = str(token.claims.get("login", ""))
-    if username:
-        _username_cache[token.token] = username
-        return username
-
-    # Fallback: try "sub" claim (some OAuth flows use this).
-    username = str(token.claims.get("sub", ""))
-    _username_cache[token.token] = username
+    if not username:
+        username = str(token.claims.get("sub", ""))
     return username
 
 
@@ -477,11 +463,14 @@ def create_server(
             cfg=lc["config"],
             created_by=user,
         )
-        # Audit log (fire-and-forget).
-        response_data = json.loads(result[0].text) if result else {}
-        entry_id = response_data.get("entry_id", "")
-        outcome = "error" if response_data.get("error") else "success"
-        await lc["store"].write_audit_log(user, "distillery_store", entry_id, "store", outcome)
+        # Audit log (best-effort, never masks the result).
+        try:
+            response_data = json.loads(result[0].text) if result else {}
+            eid = response_data.get("entry_id", "")
+            outcome = "error" if response_data.get("error") else "success"
+            await lc["store"].write_audit_log(user, "distillery_store", eid, "store", outcome)
+        except Exception:  # noqa: BLE001
+            logger.debug("audit_log write failed for distillery_store (ignored)", exc_info=True)
         return result
 
     @server.tool
@@ -536,8 +525,14 @@ def create_server(
         if user:
             existing = await lc["store"].get(entry_id)
             if existing is None:
+                await lc["store"].write_audit_log(
+                    user, "distillery_update", entry_id, "update", "not_found",
+                )
                 return error_response("NOT_FOUND", f"No entry found with id={entry_id!r}.")
             if existing.created_by and existing.created_by != user:
+                await lc["store"].write_audit_log(
+                    user, "distillery_update", entry_id, "update", "forbidden",
+                )
                 return error_response(
                     "FORBIDDEN",
                     f"User {user!r} cannot modify entry owned by {existing.created_by!r}.",
@@ -563,9 +558,15 @@ def create_server(
             arguments=arguments,
             last_modified_by=user,
         )
-        response_data = json.loads(result[0].text) if result else {}
-        outcome = "error" if response_data.get("error") else "success"
-        await lc["store"].write_audit_log(user, "distillery_update", entry_id, "update", outcome)
+        # Audit log (best-effort).
+        try:
+            response_data = json.loads(result[0].text) if result else {}
+            outcome = "error" if response_data.get("error") else "success"
+            await lc["store"].write_audit_log(
+                user, "distillery_update", entry_id, "update", outcome,
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("audit_log write failed for distillery_update (ignored)", exc_info=True)
         return result
 
     @server.tool
@@ -811,8 +812,14 @@ def create_server(
         if user:
             existing = await lc["store"].get(entry_id)
             if existing is None:
+                await lc["store"].write_audit_log(
+                    user, "distillery_resolve_review", entry_id, action, "not_found",
+                )
                 return error_response("NOT_FOUND", f"No entry found with id={entry_id!r}.")
             if existing.created_by and existing.created_by != user:
+                await lc["store"].write_audit_log(
+                    user, "distillery_resolve_review", entry_id, action, "forbidden",
+                )
                 return error_response(
                     "FORBIDDEN",
                     f"User {user!r} cannot modify entry owned by {existing.created_by!r}.",
@@ -823,10 +830,20 @@ def create_server(
             arguments["new_entry_type"] = new_entry_type
         if reviewer is not None:
             arguments["reviewer"] = reviewer
-        return await _handle_resolve_review(
+        result = await _handle_resolve_review(
             store=lc["store"],
             arguments=arguments,
         )
+        # Audit log (best-effort).
+        try:
+            response_data = json.loads(result[0].text) if result else {}
+            outcome = "error" if response_data.get("error") else "success"
+            await lc["store"].write_audit_log(
+                user, "distillery_resolve_review", entry_id, action, outcome,
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("audit_log write failed for resolve_review (ignored)", exc_info=True)
+        return result
 
     @server.tool
     async def distillery_check_dedup(
