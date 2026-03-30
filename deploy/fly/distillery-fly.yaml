@@ -1,0 +1,29 @@
+# Fly.io Distillery configuration — local DuckDB on persistent volume, GitHub OAuth.
+#
+# The database file lives on a Fly volume mounted at /data so it persists
+# across deploys and machine restarts (including scale-to-zero).
+#
+# Secrets (set via `fly secrets set`):
+#   JINA_API_KEY          — Jina embedding API key
+#   GITHUB_CLIENT_ID      — GitHub OAuth app client ID
+#   GITHUB_CLIENT_SECRET  — GitHub OAuth app client secret
+#   DISTILLERY_BASE_URL   — Public server URL for OAuth callbacks (e.g. https://<app>.fly.dev)
+
+storage:
+  backend: duckdb
+  database_path: /data/distillery.db
+
+embedding:
+  provider: jina
+  model: jina-embeddings-v3
+  dimensions: 1024
+  api_key_env: JINA_API_KEY
+
+team:
+  name: ""
+
+server:
+  auth:
+    provider: github
+    client_id_env: GITHUB_CLIENT_ID
+    client_secret_env: GITHUB_CLIENT_SECRET
