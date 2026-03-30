@@ -7,11 +7,9 @@ on:
   pull_request:
     branches: [main]
 
+# Minimal default permissions; write permissions scoped per-job.
 permissions:
-  contents: write
-  packages: write
-  id-token: write
-  attestations: write
+  contents: read
 
 env:
   REGISTRY: ghcr.io
@@ -21,6 +19,11 @@ jobs:
   supply-chain:
     name: Scan (${{ matrix.target }})
     runs-on: ubuntu-latest
+    permissions:
+      contents: write      # release asset uploads (softprops/action-gh-release)
+      packages: write      # GHCR push
+      id-token: write      # Sigstore OIDC / Cosign keyless
+      attestations: write  # actions/attest-build-provenance
 
     strategy:
       fail-fast: false

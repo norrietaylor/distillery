@@ -18,7 +18,7 @@ Add supply chain security to the Distillery CI pipeline: dependency and containe
 - As a **consumer of the image**, I want to run `cosign verify` against the published image so that I can confirm its provenance.
 - As a **security auditor**, I want CycloneDX SBOMs attached to GitHub Releases so that I can inspect the software bill of materials for any release.
 - As a **maintainer**, I want false-positive vulnerabilities suppressed via `.grype.yaml` so that the pipeline doesn't block on known non-issues.
-- As a **operator**, I want Fly.io to deploy from the same signed image that CI built so that there is no divergence between what was scanned and what runs in production.
+- As an **operator**, I want Fly.io to deploy from the same signed image that CI built so that there is no divergence between what was scanned and what runs in production.
 
 ## Demoable Units of Work
 
@@ -35,7 +35,7 @@ Add supply chain security to the Distillery CI pipeline: dependency and containe
 - The workflow shall scan the SBOM using `anchore/scan-action@v4` (Grype) with `fail-build: true` and `severity-cutoff: high`.
 - The workflow shall upload the SBOM and Grype scan report as CI artifacts using `actions/upload-artifact@v4` with 30-day retention.
 - The workflow shall provide a `.grype.yaml` configuration file at the repository root for false-positive suppression (initially empty ignores list with documentation comments).
-- The workflow shall use `GITHUB_TOKEN` permissions: `contents: read`, `packages: write`, `id-token: write`, `attestations: write`.
+- The workflow shall use `GITHUB_TOKEN` permissions: `contents: write` (required for release asset uploads), `packages: write`, `id-token: write`, `attestations: write`.
 
 **Proof Artifacts:**
 
@@ -51,7 +51,7 @@ Add supply chain security to the Distillery CI pipeline: dependency and containe
 **Functional Requirements:**
 
 - The workflow shall, on push to `main` or `v*` tags, push the built image to `ghcr.io/norrietaylor/distillery` using `docker/build-push-action@v5` with `push: true`.
-- The workflow shall tag images as: `latest` (main branch), `{git-sha}` (always), and `{tag}` (on tag push, e.g., `v1.2.3`).
+- The workflow shall tag images as: `latest` (main branch), `sha-{7char}` (always), and `{tag}` (on tag push, e.g., `v1.2.3`).
 - The workflow shall install Cosign using `sigstore/cosign-installer@v3`.
 - The workflow shall sign the pushed image digest using `cosign sign --yes ghcr.io/norrietaylor/distillery@${DIGEST}` (keyless via Sigstore OIDC — no manual keys).
 - The workflow shall attach an in-toto SBOM attestation using `cosign attest --yes --type cyclonedx --predicate sbom-{target}.cdx.json ghcr.io/norrietaylor/distillery@${DIGEST}`.

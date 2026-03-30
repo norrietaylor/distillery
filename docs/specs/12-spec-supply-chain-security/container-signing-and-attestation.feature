@@ -10,7 +10,7 @@ Feature: Container Signing and Attestation (Main/Tag Push)
     When the push step executes
     Then the Docker image is pushed to ghcr.io/norrietaylor/distillery
     And the image is tagged as latest
-    And the image is tagged with the git commit SHA
+    And the image is tagged as sha-{7char} derived from the git commit SHA
 
   Scenario: Image is tagged with version on tag push
     Given a tag v1.2.3 is pushed to the repository
@@ -18,7 +18,7 @@ Feature: Container Signing and Attestation (Main/Tag Push)
     When the push step executes
     Then the Docker image is pushed to ghcr.io/norrietaylor/distillery
     And the image is tagged as v1.2.3
-    And the image is tagged with the git commit SHA
+    And the image is tagged as sha-{7char} derived from the git commit SHA
 
   Scenario: Pushed image is signed with Cosign keyless signing
     Given the Docker image has been pushed to ghcr.io/norrietaylor/distillery
