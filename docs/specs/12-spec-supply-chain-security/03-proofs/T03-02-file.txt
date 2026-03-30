@@ -1,9 +1,0 @@
-Type: file
-Command: grep 'remote-only' .github/workflows/fly-deploy.yml
-Expected: No matches (removed)
-Timestamp: 2026-03-30T00:00:00Z
-
-Output:
-(no output — --remote-only has been removed)
-
-Status: PASS
