@@ -1,0 +1,41 @@
+# Fly.io deployment configuration for the Distillery MCP server.
+#
+# Deploy from the repository root:
+#   fly deploy -c deploy/fly/fly.toml
+#
+# Prerequisites:
+#   fly apps create <app-name>
+#   fly volumes create distillery_data --size 1
+#   fly secrets set JINA_API_KEY=... GITHUB_CLIENT_ID=... GITHUB_CLIENT_SECRET=... DISTILLERY_BASE_URL=https://<app-name>.fly.dev
+
+# Replace with your app name from `fly apps create <app-name>`
+app = "distillery-mcp"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  DISTILLERY_CONFIG = "/app/distillery-fly.yaml"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    path = "/.well-known/oauth-authorization-server"
+    timeout = "5s"
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
+
+[mounts]
+  source = "distillery_data"
+  destination = "/data"

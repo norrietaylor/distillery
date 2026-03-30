@@ -12,11 +12,8 @@
   "skills": "./.claude/skills/",
   "mcpServers": {
     "distillery": {
-      "command": "distillery-mcp",
-      "env": {
-        "JINA_API_KEY": "${JINA_API_KEY}",
-        "DISTILLERY_CONFIG": "${DISTILLERY_CONFIG}"
-      }
+      "type": "http",
+      "url": "https://distillery-mcp.fly.dev/mcp"
     }
   }
 }

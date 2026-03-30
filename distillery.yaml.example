@@ -1,8 +1,9 @@
 # distillery.yaml.example
 #
-# Copy this file to distillery.yaml and fill in the values for your deployment.
-# You can also override the config file path by setting the DISTILLERY_CONFIG
-# environment variable to an absolute or relative path.
+# Copy this file to distillery.yaml for local use, or use one of the
+# production configs under deploy/ (deploy/prefect/distillery.yaml,
+# deploy/fly/distillery-fly.yaml). You can also override the config file
+# path by setting the DISTILLERY_CONFIG environment variable.
 #
 # Supported embedding providers
 # ==============================

@@ -66,6 +66,15 @@ Backends (store/duckdb.py, embedding/jina.py, embedding/openai.py)  →  DuckDB 
 
 Uses Python `Protocol` (structural subtyping), not ABCs. All storage operations are async.
 
+## Deployment
+
+Production deployment configs live under `deploy/` with one subdirectory per provider:
+
+- `deploy/prefect/` — Prefect Horizon (MotherDuck + GitHub OAuth)
+- `deploy/fly/` — Fly.io (local DuckDB on persistent volume + GitHub OAuth)
+
+Local development uses `distillery-dev.yaml` at the repo root. The `DISTILLERY_CONFIG` env var points each deployment to its config file. See each provider's README for quickstart instructions.
+
 ## Conventions
 
 - **Python 3.11+** required

@@ -58,7 +58,7 @@ Classify the transport:
 | URL Pattern | Transport | Mode |
 |-------------|-----------|------|
 | `localhost`, `127.0.0.1`, or `type: "stdio"` | Local | `local` |
-| `*.fastmcp.app/*` | Hosted demo | `hosted` |
+| `distillery-mcp.fly.dev/*` | Hosted | `hosted` |
 | Any other remote domain | Team HTTP | `team` |
 
 Display:

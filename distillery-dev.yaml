@@ -4,7 +4,8 @@
 # testing and development. It uses a local DuckDB file for storage (no cloud dependencies)
 # and no authentication (open access for convenience).
 #
-# For production deployment, use distillery.yaml instead (MotherDuck storage, GitHub OAuth).
+# For production deployment, see deploy/prefect/distillery.yaml (Horizon/MotherDuck)
+# or deploy/fly/distillery-fly.yaml (Fly.io/local DuckDB).
 #
 storage:
   backend: duckdb

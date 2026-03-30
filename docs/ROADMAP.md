@@ -77,7 +77,8 @@ Scale from single user to team. Six new skills, richer metadata, optional Elasti
 - [x] **HTTP transport** — `distillery-mcp --transport http` for streamable-HTTP MCP server (Spec 10)
 - [x] **GitHub OAuth** — team authentication via FastMCP `GitHubProvider` (Spec 10)
 - [x] **MotherDuck validation** — strict `md:` prefix and token checks at startup (Spec 10)
-- [ ] **Prefect Horizon deployment** — `prefect.yaml` manifest for managed hosting
+- [x] **Prefect Horizon deployment** — `deploy/prefect/` manifest for managed hosting (Spec 11)
+- [x] **Fly.io deployment** — `deploy/fly/` with persistent DuckDB on volume (Spec 11)
 - [ ] **Elasticsearch migration** — `ElasticsearchStore` backend via `DistilleryStore` protocol
   - Native `semantic_text` for auto-embedding
   - Hybrid search (BM25 + kNN + RRF)
