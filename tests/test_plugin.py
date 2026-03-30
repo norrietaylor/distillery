@@ -219,36 +219,23 @@ class TestPluginMCPServers:
         manifest = load_plugin_manifest()
         assert "distillery" in manifest["mcpServers"]
 
-    def test_distillery_server_has_command(self) -> None:
-        """The distillery server must have a 'command' field."""
+    def test_distillery_server_has_type_http(self) -> None:
+        """The distillery server must use HTTP transport."""
         manifest = load_plugin_manifest()
         server = manifest["mcpServers"]["distillery"]
-        assert "command" in server
+        assert server.get("type") == "http"
 
-    def test_distillery_server_command_is_distillery_mcp(self) -> None:
-        """The distillery server command must be 'distillery-mcp'."""
+    def test_distillery_server_has_url(self) -> None:
+        """The distillery server must have a 'url' field."""
         manifest = load_plugin_manifest()
         server = manifest["mcpServers"]["distillery"]
-        assert server["command"] == "distillery-mcp"
+        assert "url" in server
 
-    def test_distillery_server_has_env(self) -> None:
-        """The distillery server must have an 'env' field."""
+    def test_distillery_server_url_is_fly_endpoint(self) -> None:
+        """The distillery server URL must point to the Fly.io hosted endpoint."""
         manifest = load_plugin_manifest()
         server = manifest["mcpServers"]["distillery"]
-        assert "env" in server
-        assert isinstance(server["env"], dict)
-
-    def test_distillery_server_env_has_jina_api_key(self) -> None:
-        """The distillery server env must declare JINA_API_KEY."""
-        manifest = load_plugin_manifest()
-        server = manifest["mcpServers"]["distillery"]
-        assert "JINA_API_KEY" in server["env"]
-
-    def test_distillery_server_env_has_distillery_config(self) -> None:
-        """The distillery server env must declare DISTILLERY_CONFIG."""
-        manifest = load_plugin_manifest()
-        server = manifest["mcpServers"]["distillery"]
-        assert "DISTILLERY_CONFIG" in server["env"]
+        assert server["url"] == "https://distillery-mcp.fly.dev/mcp"
 
     def test_distillery_server_no_unsupported_fields(self) -> None:
         """The distillery server must not contain fields unsupported by the plugin schema."""
@@ -397,10 +384,10 @@ class TestPluginDocumentationContent:
         content = load_plugin_doc()
         assert "```json" in content
 
-    def test_contains_yaml_code_block(self) -> None:
-        """docs/plugin.md must contain a YAML code block for the config example."""
+    def test_contains_json_settings_snippet(self) -> None:
+        """docs/plugin.md must contain a JSON settings snippet for MCP configuration."""
         content = load_plugin_doc()
-        assert "```yaml" in content
+        assert '"mcpServers"' in content
 
     def test_mentions_mcp_server_verification(self) -> None:
         """docs/plugin.md must describe how to verify the MCP server is running."""
@@ -436,7 +423,7 @@ class TestPluginDocumentationContent:
     def test_hosted_url_present(self) -> None:
         """docs/plugin.md must include the hosted MCP server URL."""
         content = load_plugin_doc()
-        assert "fastmcp.app" in content
+        assert "distillery-mcp.fly.dev" in content
 
     def test_mcp_unavailability_warning_message_present(self) -> None:
         """docs/plugin.md must include the MCP unavailability warning text."""
