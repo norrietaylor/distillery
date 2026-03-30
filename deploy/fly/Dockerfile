@@ -5,6 +5,10 @@ WORKDIR /app
 ARG BUILD_SHA=unknown
 ENV DISTILLERY_BUILD_SHA=${BUILD_SHA}
 
+# Persist FastMCP OAuth state (client registrations, tokens) on the Fly volume
+# so tokens survive machine autostop/restart cycles.
+ENV FASTMCP_HOME=/data/fastmcp
+
 # Install Python 3.13 and pip
 RUN apk add --no-cache python-3.13 py3.13-pip
 
