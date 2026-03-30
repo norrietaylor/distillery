@@ -307,6 +307,10 @@ class Entry:
     metadata: dict[str, Any] = field(default_factory=dict)
     accessed_at: datetime | None = None
 
+    # --- ownership (populated when auth is enabled) ---
+    created_by: str = ""
+    last_modified_by: str = ""
+
     def __post_init__(self) -> None:
         """Validate all tags on construction.
 
@@ -343,6 +347,8 @@ class Entry:
             "version": self.version,
             "metadata": dict(self.metadata),
             "accessed_at": self.accessed_at.isoformat() if self.accessed_at is not None else None,
+            "created_by": self.created_by,
+            "last_modified_by": self.last_modified_by,
         }
 
     @classmethod
@@ -400,6 +406,8 @@ class Entry:
             version=int(data.get("version", 1)),
             metadata=dict(data.get("metadata", {})),
             accessed_at=accessed_at,
+            created_by=str(data.get("created_by", "")),
+            last_modified_by=str(data.get("last_modified_by", "")),
         )
 
 
