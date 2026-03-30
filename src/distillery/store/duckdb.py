@@ -62,7 +62,9 @@ CREATE TABLE IF NOT EXISTS entries (
     created_at      TIMESTAMP NOT NULL DEFAULT current_timestamp,
     updated_at      TIMESTAMP NOT NULL DEFAULT current_timestamp,
     version         INTEGER NOT NULL DEFAULT 1,
-    embedding       FLOAT[{dimensions}]
+    embedding       FLOAT[{dimensions}],
+    created_by      VARCHAR DEFAULT '',
+    last_modified_by VARCHAR DEFAULT ''
 );
 """
 
@@ -84,6 +86,11 @@ _ADD_ACCESSED_AT_COLUMN = """
 ALTER TABLE entries ADD COLUMN IF NOT EXISTS accessed_at TIMESTAMP;
 """
 
+_ADD_OWNERSHIP_COLUMNS = """
+ALTER TABLE entries ADD COLUMN IF NOT EXISTS created_by VARCHAR DEFAULT '';
+ALTER TABLE entries ADD COLUMN IF NOT EXISTS last_modified_by VARCHAR DEFAULT '';
+"""
+
 _CREATE_SEARCH_LOG_TABLE = """
 CREATE TABLE IF NOT EXISTS search_log (
     id                 VARCHAR PRIMARY KEY,
@@ -102,6 +109,18 @@ CREATE TABLE IF NOT EXISTS feedback_log (
     entry_id    VARCHAR NOT NULL,
     signal      VARCHAR NOT NULL,
     timestamp   TIMESTAMP NOT NULL DEFAULT current_timestamp
+);
+"""
+
+_CREATE_AUDIT_LOG_TABLE = """
+CREATE TABLE IF NOT EXISTS audit_log (
+    id         VARCHAR PRIMARY KEY,
+    timestamp  TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
+    user_id    VARCHAR NOT NULL DEFAULT '',
+    tool       VARCHAR NOT NULL,
+    entry_id   VARCHAR NOT NULL DEFAULT '',
+    action     VARCHAR NOT NULL,
+    outcome    VARCHAR NOT NULL
 );
 """
 
@@ -354,13 +373,14 @@ class DuckDBStore:
         conn.execute(_CREATE_META_TABLE)
 
     def _create_log_tables(self, conn: duckdb.DuckDBPyConnection) -> None:
-        """Create the ``search_log`` and ``feedback_log`` tables if they don't exist."""
+        """Create the ``search_log``, ``feedback_log``, and ``audit_log`` tables."""
         conn.execute(_CREATE_SEARCH_LOG_TABLE)
         conn.execute(_CREATE_FEEDBACK_LOG_TABLE)
+        conn.execute(_CREATE_AUDIT_LOG_TABLE)
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_search_log_timestamp ON search_log (timestamp)"
         )
-        logger.info("search_log and feedback_log tables ready")
+        logger.info("search_log, feedback_log, and audit_log tables ready")
 
     def _create_feed_sources_table(self, conn: duckdb.DuckDBPyConnection) -> None:
         """Create the ``feed_sources`` table if it doesn't exist."""
@@ -431,6 +451,17 @@ class DuckDBStore:
         conn.execute(_ADD_ACCESSED_AT_COLUMN)
         logger.debug("accessed_at column ready on entries table")
 
+    def _add_ownership_columns(self, conn: duckdb.DuckDBPyConnection) -> None:
+        """Ensure ``created_by`` and ``last_modified_by`` columns exist.
+
+        Idempotent — uses ``ADD COLUMN IF NOT EXISTS``.
+        """
+        for stmt in _ADD_OWNERSHIP_COLUMNS.strip().split(";"):
+            stmt = stmt.strip()
+            if stmt:
+                conn.execute(stmt)
+        logger.debug("ownership columns ready on entries table")
+
     def _sync_initialize(self) -> None:
         """
         Initialize the DuckDB connection and ensure the database is ready for use.
@@ -462,6 +493,7 @@ class DuckDBStore:
             try:
                 self._create_schema(conn)
                 self._add_accessed_at_column(conn)
+                self._add_ownership_columns(conn)
                 self._create_log_tables(conn)
                 self._create_feed_sources_table(conn)
                 self._create_meta_table(conn)
@@ -497,17 +529,8 @@ class DuckDBStore:
         await asyncio.to_thread(self._sync_initialize)
 
     async def close(self) -> None:
-        """Close the database connection and release resources.
-
-        Issues a ``CHECKPOINT`` before closing to flush the WAL to disk,
-        ensuring all tables and writes survive process restarts (important
-        for Fly.io scale-to-zero where SIGINT precedes volume unmount).
-        """
+        """Close the database connection and release resources."""
         if self._conn is not None:
-            try:
-                self._conn.execute("CHECKPOINT")
-            except duckdb.Error as exc:  # pragma: no cover
-                logger.warning("CHECKPOINT before close failed: %s", exc)
             await asyncio.to_thread(self._conn.close)
             self._conn = None
             self._initialized = False
@@ -540,6 +563,16 @@ class DuckDBStore:
     # Fields that callers may never overwrite via update().
     _IMMUTABLE_FIELDS = frozenset({"id", "created_at", "source"})
 
+    # Columns that may be updated via _sync_update().  Any key not in this set
+    # is rejected *after* the immutable-field check, closing the SQL-injection
+    # vector where dynamic column names are interpolated into the UPDATE clause.
+    _ALLOWED_UPDATE_COLUMNS = frozenset(
+        {
+            "content", "entry_type", "author", "project", "tags",
+            "status", "metadata", "last_modified_by",
+        }
+    )
+
     def _sync_store(self, entry: Entry) -> str:
         """Synchronous implementation of store(); called via asyncio.to_thread."""
         validate_metadata(entry.entry_type.value, entry.metadata)
@@ -549,8 +582,9 @@ class DuckDBStore:
         sql = (
             "INSERT INTO entries "
             "(id, content, entry_type, source, author, project, tags, status, "
-            " metadata, created_at, updated_at, version, embedding) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " metadata, created_at, updated_at, version, embedding, "
+            " created_by, last_modified_by) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         params = [
             entry.id,
@@ -566,6 +600,8 @@ class DuckDBStore:
             entry.updated_at,
             entry.version,
             embedding,
+            entry.created_by,
+            entry.last_modified_by,
         ]
         conn.execute(sql, params)
         logger.debug("Stored entry id=%s", entry.id)
@@ -652,6 +688,14 @@ class DuckDBStore:
         bad_keys = self._IMMUTABLE_FIELDS & updates.keys()
         if bad_keys:
             raise ValueError(f"Cannot update immutable field(s): {', '.join(sorted(bad_keys))}")
+
+        # Reject column names not in the whitelist (defence-in-depth against
+        # SQL injection via dynamic SET clause construction).
+        unknown_keys = updates.keys() - self._ALLOWED_UPDATE_COLUMNS
+        if unknown_keys:
+            raise ValueError(
+                f"Cannot update unknown column(s): {', '.join(sorted(unknown_keys))}"
+            )
 
         conn = self.connection
 
@@ -903,7 +947,8 @@ class DuckDBStore:
     # Column list used by search / find_similar (excludes ``embedding``).
     _ENTRY_COLUMNS = (
         "id, content, entry_type, source, author, project, "
-        "tags, status, metadata, created_at, updated_at, version, accessed_at"
+        "tags, status, metadata, created_at, updated_at, version, accessed_at, "
+        "created_by, last_modified_by"
     )
 
     # ------------------------------------------------------------------
@@ -1088,6 +1133,37 @@ class DuckDBStore:
             return [self._row_to_entry(row, col_names) for row in rows]
 
         return await asyncio.to_thread(_sync)
+
+    # ------------------------------------------------------------------
+    # Audit logging
+    # ------------------------------------------------------------------
+
+    async def write_audit_log(
+        self,
+        user_id: str,
+        tool: str,
+        entry_id: str,
+        action: str,
+        outcome: str,
+    ) -> None:
+        """Write a record to the ``audit_log`` table.
+
+        Fire-and-forget — failures are logged but never raised.
+        """
+        import uuid as _uuid
+
+        def _sync() -> None:
+            conn = self.connection
+            conn.execute(
+                "INSERT INTO audit_log (id, user_id, tool, entry_id, action, outcome) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                [str(_uuid.uuid4()), user_id, tool, entry_id, action, outcome],
+            )
+
+        try:
+            await asyncio.to_thread(_sync)
+        except Exception:  # noqa: BLE001
+            logger.debug("audit_log write failed (ignored)", exc_info=True)
 
     # ------------------------------------------------------------------
     # Feedback logging (T01.2)

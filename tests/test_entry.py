@@ -225,6 +225,8 @@ class TestEntryToDict:
             "version",
             "metadata",
             "accessed_at",
+            "created_by",
+            "last_modified_by",
         }
         assert set(d.keys()) == expected_keys
 
