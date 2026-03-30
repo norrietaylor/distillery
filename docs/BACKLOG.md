@@ -45,7 +45,8 @@ Prioritized work items derived from [ROADMAP.md](ROADMAP.md) and spec research. 
 | 34 | HTTP transport | Streamable-HTTP via `--transport http` CLI flag | Done (spec 10) |
 | 35 | GitHub OAuth | Team auth via FastMCP `GitHubProvider`, `server.auth` config | Done (spec 10) |
 | 36 | MotherDuck validation | `backend=motherduck` requires `md:` prefix + token at startup | Done (spec 10) |
-| 37 | Prefect Horizon deploy | `prefect.yaml` deployment manifest for managed MCP hosting | Not started |
+| 37 | Prefect Horizon deploy | `deploy/prefect/` deployment manifest for managed MCP hosting | Done (spec 11) |
+| 38 | Fly.io deploy | `deploy/fly/` with persistent DuckDB on volume, scale-to-zero | Done (spec 11) |
 
 ### Quality
 

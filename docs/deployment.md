@@ -370,16 +370,21 @@ Most deployment platforms log to stdout. Check your platform's logs:
 - [ ] Team members use strong GitHub accounts with 2FA enabled
 - [ ] OAuth callback URL in GitHub App matches deployment URL exactly
 
-## Next Steps: Horizon Deployment (Future)
+## Platform-Specific Deployment Guides
 
-Prefect Horizon is a managed hosting platform optimized for Distillery deployments. Configuration and deployment instructions will be added in a follow-up spec.
+Production deployment configs live under `deploy/` in the repository root, with one directory per provider:
 
-For now, deploy to your preferred platform:
-- Docker/Container Registry
-- Kubernetes
-- AWS/GCP/Azure cloud service
-- PaaS platform (Heroku, Railway, Fly.io, etc.)
-- Traditional VPS
+### Prefect Horizon (managed hosting)
+
+See [`deploy/prefect/README.md`](../deploy/prefect/README.md) for quickstart instructions. Uses MotherDuck for shared cloud storage and the Horizon Gateway for RBAC.
+
+### Fly.io (self-hosted, persistent volume)
+
+See [`deploy/fly/README.md`](../deploy/fly/README.md) for quickstart instructions. Uses local DuckDB on a persistent NVMe volume with scale-to-zero billing.
+
+### Other platforms
+
+You can also deploy to Docker, Kubernetes, AWS/GCP/Azure, or any PaaS that runs containers. Use `deploy/fly/Dockerfile` as a starting point.
 
 ## Questions or Issues?
 
