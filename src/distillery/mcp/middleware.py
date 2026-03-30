@@ -150,6 +150,9 @@ class RateLimitMiddleware:
         # for IPs that already had a window (not brand-new ones).
         if was_existing and window.count_minute() == 0 and window.count_hour() == 0:
             del self._windows[ip]
+            # Create a fresh window so record() below persists this request.
+            window = _IPWindow()
+            self._windows[ip] = window
 
         minute_count = window.count_minute()
         hour_count = window.count_hour()
