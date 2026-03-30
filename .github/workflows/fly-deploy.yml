@@ -1,27 +1,35 @@
 name: Deploy to Fly.io
 
 on:
-  push:
+  workflow_run:
+    workflows: ["Supply Chain Security"]
+    types: [completed]
     branches: [main]
-    paths:
-      - "src/**"
-      - "deploy/fly/**"
-      - "pyproject.toml"
-      - ".dockerignore"
   workflow_dispatch:
 
 jobs:
   deploy:
     name: Deploy
     runs-on: ubuntu-latest
+    # Only deploy if the supply-chain workflow succeeded (or manual trigger)
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
     concurrency:
       group: fly-deploy
       cancel-in-progress: true
+
     steps:
       - uses: actions/checkout@v4
 
       - uses: superfly/flyctl-actions/setup-flyctl@master
 
-      - run: flyctl deploy -c deploy/fly/fly.toml --remote-only --build-arg BUILD_SHA=${{ github.sha }}
+      - name: Deploy from GHCR image
+        run: |
+          SHORT_SHA="${{ github.event.workflow_run.head_sha || github.sha }}"
+          SHORT_SHA="${SHORT_SHA::7}"
+          flyctl deploy \
+            -c deploy/fly/fly.toml \
+            --image "ghcr.io/norrietaylor/distillery:sha-${SHORT_SHA}"
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

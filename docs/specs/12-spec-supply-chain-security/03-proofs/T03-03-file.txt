@@ -1,0 +1,14 @@
+Type: file
+Command: grep 'action-gh-release' .github/workflows/supply-chain.yml
+Expected: Contains softprops/action-gh-release step
+Timestamp: 2026-03-30T00:00:00Z
+
+Output:
+        uses: softprops/action-gh-release@v2
+
+Release attachment step includes:
+  - sbom-${{ matrix.target }}.cdx.json
+  - grype-report-${{ matrix.target }}.json
+  - Conditional on: startsWith(github.ref, 'refs/tags/v')
+
+Status: PASS
