@@ -437,6 +437,11 @@ class TestMCPStoreConflictDetection:
         mock_store = AsyncMock()
         mock_store.store.return_value = "test-entry-id"
         mock_store.find_similar.side_effect = RuntimeError("Simulated find_similar failure")
+        # budget.py calls conn.execute(...).fetchone() synchronously, so
+        # connection must be a regular MagicMock (not AsyncMock).
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value.fetchone.return_value = None  # no prior usage
+        mock_store.connection = mock_conn
 
         config = _make_config(conflict_threshold=0.60)
         response = await _handle_store(
