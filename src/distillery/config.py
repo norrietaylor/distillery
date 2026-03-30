@@ -218,31 +218,14 @@ class ServerAuthConfig:
 
 
 @dataclass
-class HttpRateLimitConfig:
-    """HTTP transport rate limiting configuration.
-
-    Attributes:
-        requests_per_minute: Maximum requests per IP per minute.
-        requests_per_hour: Maximum requests per IP per hour.
-        max_body_bytes: Maximum request body size in bytes.
-    """
-
-    requests_per_minute: int = 60
-    requests_per_hour: int = 600
-    max_body_bytes: int = 1_048_576  # 1 MB
-
-
-@dataclass
 class ServerConfig:
     """Server configuration.
 
     Attributes:
         auth: Authentication settings for HTTP transport.
-        http_rate_limit: HTTP transport rate limiting settings.
     """
 
     auth: ServerAuthConfig = field(default_factory=ServerAuthConfig)
-    http_rate_limit: HttpRateLimitConfig = field(default_factory=HttpRateLimitConfig)
 
 
 @dataclass
@@ -645,24 +628,11 @@ def _parse_server(raw: dict[str, Any]) -> ServerConfig:
     if not isinstance(auth_raw, dict):
         raise ValueError(f"server.auth must be a YAML mapping, got: {type(auth_raw).__name__}")
 
-    rl_raw = raw.get("http_rate_limit", {})
-    if rl_raw is None:
-        rl_raw = {}
-    if not isinstance(rl_raw, dict):
-        raise ValueError(
-            f"server.http_rate_limit must be a YAML mapping, got: {type(rl_raw).__name__}"
-        )
-
     return ServerConfig(
         auth=ServerAuthConfig(
             provider=str(auth_raw.get("provider", "none")),
             client_id_env=str(auth_raw.get("client_id_env", "GITHUB_CLIENT_ID")),
             client_secret_env=str(auth_raw.get("client_secret_env", "GITHUB_CLIENT_SECRET")),
-        ),
-        http_rate_limit=HttpRateLimitConfig(
-            requests_per_minute=int(rl_raw.get("requests_per_minute", 60)),
-            requests_per_hour=int(rl_raw.get("requests_per_hour", 600)),
-            max_body_bytes=int(rl_raw.get("max_body_bytes", 1_048_576)),
         ),
     )
 

@@ -65,48 +65,6 @@ from distillery.mcp.budget import EmbeddingBudgetError, record_and_check
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# User identity helpers
-# ---------------------------------------------------------------------------
-
-# Cache resolved GitHub usernames so we don't call the API on every tool call.
-_username_cache: dict[str, str] = {}
-
-
-def _get_authenticated_user() -> str:
-    """Return the authenticated GitHub username, or ``""`` if auth is not active.
-
-    Uses FastMCP's ``get_access_token()`` to retrieve the current request's
-    access token.  The GitHub username is extracted from the JWT claims
-    (``login`` field populated by the GitHubProvider).  Results are cached
-    by token string to avoid repeated lookups.
-    """
-    try:
-        from fastmcp.server.dependencies import get_access_token
-    except ImportError:
-        return ""
-
-    token = get_access_token()
-    if token is None:
-        return ""
-
-    # Check cache first.
-    cached = _username_cache.get(token.token)
-    if cached is not None:
-        return cached
-
-    # GitHubProvider populates claims with the GitHub user profile fields.
-    username = str(token.claims.get("login", ""))
-    if username:
-        _username_cache[token.token] = username
-        return username
-
-    # Fallback: try "sub" claim (some OAuth flows use this).
-    username = str(token.claims.get("sub", ""))
-    _username_cache[token.token] = username
-    return username
-
-
-# ---------------------------------------------------------------------------
 # Error response helpers
 # ---------------------------------------------------------------------------
 
@@ -124,9 +82,6 @@ def error_response(
     Returns:
         A single-element list of :class:`~mcp.types.TextContent` with a JSON payload.
     """
-    from distillery.security import sanitize_error
-
-    message = sanitize_error(message)
     payload: dict[str, Any] = {"error": True, "code": code, "message": message}
     if details:
         payload["details"] = details
@@ -367,6 +322,24 @@ def create_server(
             _shared["config"] = config
             _shared["embedding_provider"] = embedding_provider
 
+            # Register an atexit handler to checkpoint and close the store
+            # on process shutdown (SIGINT/SIGTERM from Fly.io autostop).
+            # This ensures the WAL is flushed so tables like feed_sources
+            # survive machine restarts.  We use synchronous calls because
+            # the async event loop is typically closed by the time atexit
+            # handlers run.
+            import atexit
+
+            def _close_store() -> None:  # pragma: no cover
+                conn = store._conn
+                if conn is not None:
+                    with contextlib.suppress(Exception):
+                        conn.execute("CHECKPOINT")
+                    with contextlib.suppress(Exception):
+                        conn.close()
+
+            atexit.register(_close_store)
+
             logger.info(
                 "Distillery MCP server ready (db=%s, embedding=%s)",
                 db_path,
@@ -470,19 +443,11 @@ def create_server(
             arguments["metadata"] = metadata
         arguments["dedup_threshold"] = dedup_threshold
         arguments["dedup_limit"] = dedup_limit
-        user = _get_authenticated_user()
-        result = await _handle_store(
+        return await _handle_store(
             store=lc["store"],
             arguments=arguments,
             cfg=lc["config"],
-            created_by=user,
         )
-        # Audit log (fire-and-forget).
-        response_data = json.loads(result[0].text) if result else {}
-        entry_id = response_data.get("entry_id", "")
-        outcome = "error" if response_data.get("error") else "success"
-        await lc["store"].write_audit_log(user, "distillery_store", entry_id, "store", outcome)
-        return result
 
     @server.tool
     async def distillery_get(
@@ -530,19 +495,6 @@ def create_server(
         reference, idea, inbox.
         """
         lc = _get_lifespan_context(ctx)
-        user = _get_authenticated_user()
-
-        # Ownership check: if auth is active, verify the caller owns the entry.
-        if user:
-            existing = await lc["store"].get(entry_id)
-            if existing is None:
-                return error_response("NOT_FOUND", f"No entry found with id={entry_id!r}.")
-            if existing.created_by and existing.created_by != user:
-                return error_response(
-                    "FORBIDDEN",
-                    f"User {user!r} cannot modify entry owned by {existing.created_by!r}.",
-                )
-
         arguments: dict[str, Any] = {"entry_id": entry_id}
         if content is not None:
             arguments["content"] = content
@@ -558,15 +510,10 @@ def create_server(
             arguments["status"] = status
         if metadata is not None:
             arguments["metadata"] = metadata
-        result = await _handle_update(
+        return await _handle_update(
             store=lc["store"],
             arguments=arguments,
-            last_modified_by=user,
         )
-        response_data = json.loads(result[0].text) if result else {}
-        outcome = "error" if response_data.get("error") else "success"
-        await lc["store"].write_audit_log(user, "distillery_update", entry_id, "update", outcome)
-        return result
 
     @server.tool
     async def distillery_list(  # noqa: PLR0913
@@ -805,19 +752,6 @@ def create_server(
             list[types.TextContent]: A one-element MCP TextContent list containing the updated entry as a JSON-serializable object on success, or an error payload on failure.
         """
         lc = _get_lifespan_context(ctx)
-        user = _get_authenticated_user()
-
-        # Ownership check: if auth is active, verify the caller owns the entry.
-        if user:
-            existing = await lc["store"].get(entry_id)
-            if existing is None:
-                return error_response("NOT_FOUND", f"No entry found with id={entry_id!r}.")
-            if existing.created_by and existing.created_by != user:
-                return error_response(
-                    "FORBIDDEN",
-                    f"User {user!r} cannot modify entry owned by {existing.created_by!r}.",
-                )
-
         arguments: dict[str, Any] = {"entry_id": entry_id, "action": action}
         if new_entry_type is not None:
             arguments["new_entry_type"] = new_entry_type
@@ -1400,8 +1334,12 @@ def _sync_gather_stats(
             "calls used."
         )
 
+    from distillery import __build_sha__, __version__
+
     result: dict[str, Any] = {
         "status": "ok",
+        "version": __version__,
+        "build_sha": __build_sha__,
         "total_entries": total_entries,
         "entries_by_type": entries_by_type,
         "entries_by_status": entries_by_status,
@@ -1452,7 +1390,6 @@ async def _handle_store(
     store: Any,
     arguments: dict[str, Any],
     cfg: DistilleryConfig | None = None,
-    created_by: str = "",
 ) -> list[types.TextContent]:
     """
     Create and persist a new Entry from the provided arguments, run deduplication and a non-fatal conflict check, and return the stored entry id along with any warnings or conflict candidates.
@@ -1560,7 +1497,6 @@ async def _handle_store(
             project=arguments.get("project"),
             tags=list(arguments.get("tags") or []),
             metadata=dict(arguments.get("metadata") or {}),
-            created_by=created_by,
         )
     except Exception as exc:  # noqa: BLE001
         return error_response("INVALID_INPUT", f"Failed to construct entry: {exc}")
@@ -1737,7 +1673,6 @@ async def _handle_get(
 async def _handle_update(
     store: Any,
     arguments: dict[str, Any],
-    last_modified_by: str = "",
 ) -> list[types.TextContent]:
     """Implement the ``distillery_update`` tool.
 
@@ -1771,10 +1706,6 @@ async def _handle_update(
             "INVALID_INPUT",
             f"Cannot update immutable field(s): {', '.join(sorted(bad_keys))}.",
         )
-
-    # Inject last_modified_by if auth provided a user identity.
-    if last_modified_by:
-        updates["last_modified_by"] = last_modified_by
 
     if not updates:
         return error_response(

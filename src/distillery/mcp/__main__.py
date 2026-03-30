@@ -37,10 +37,6 @@ def _configure_logging() -> None:
         format="%(asctime)s %(levelname)-8s %(name)s %(message)s",
         stream=sys.stderr,
     )
-    # Attach secret redaction filter to prevent API keys leaking into logs.
-    from distillery.security import SecretRedactFilter
-
-    logging.getLogger("distillery").addFilter(SecretRedactFilter())
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -141,33 +137,13 @@ def main(argv: list[str] | None = None) -> int:
                 )
 
             server = create_server(config=config, auth=auth)
-            http_app = server.http_app(
-                path="/mcp",
+            server.run(
                 transport="streamable-http",
-                stateless_http=True,
-            )
-
-            # Wrap ASGI app with rate limiting and body size middleware.
-            rl = config.server.http_rate_limit
-            from distillery.mcp.middleware import apply_http_middleware
-
-            wrapped_app = apply_http_middleware(
-                http_app,
-                requests_per_minute=rl.requests_per_minute,
-                requests_per_hour=rl.requests_per_hour,
-                max_body_bytes=rl.max_body_bytes,
-            )
-
-            import uvicorn as _uvicorn
-
-            uv_config = _uvicorn.Config(
-                app=wrapped_app,
                 host=host,
                 port=port,
-                log_level="info",
+                path="/mcp",
+                stateless_http=True,
             )
-            uv_server = _uvicorn.Server(uv_config)
-            uv_server.run()
         else:
             server = create_server(config=config)
             asyncio.run(server.run_stdio_async(show_banner=False))
