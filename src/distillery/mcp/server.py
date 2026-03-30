@@ -322,6 +322,26 @@ def create_server(
             _shared["config"] = config
             _shared["embedding_provider"] = embedding_provider
 
+            # Register an atexit handler to checkpoint and close the store
+            # on process shutdown (SIGINT/SIGTERM from Fly.io autostop).
+            # This ensures the WAL is flushed so tables like feed_sources
+            # survive machine restarts.
+            import atexit
+
+            def _close_store() -> None:
+                try:
+                    asyncio.get_event_loop().run_until_complete(store.close())
+                except Exception:  # noqa: BLE001
+                    # Fallback: checkpoint synchronously if the loop is gone.
+                    if store._conn is not None:
+                        try:
+                            store._conn.execute("CHECKPOINT")
+                            store._conn.close()
+                        except Exception:  # noqa: BLE001
+                            pass
+
+            atexit.register(_close_store)
+
             logger.info(
                 "Distillery MCP server ready (db=%s, embedding=%s)",
                 db_path,
