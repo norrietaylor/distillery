@@ -102,6 +102,7 @@ jobs:
           fail-build: true
           severity-cutoff: high
           output-format: json
+          cache: false
 
       - name: Save Grype report
         if: always()
