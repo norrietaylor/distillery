@@ -33,6 +33,9 @@ jobs:
           #   dockerfile: deploy/prefect/Dockerfile
           #   context: .
 
+    # NOTE: With a matrix strategy, outputs capture only the last job's value.
+    # Currently only one matrix entry (fly) exists. When adding Prefect,
+    # switch to per-target output keys or use artifacts for digest passing.
     outputs:
       digest-fly: ${{ steps.push.outputs.digest }}
 
@@ -54,6 +57,7 @@ jobs:
 
       # --- Determine image tags ---
       - name: Determine image tags
+        if: github.event_name == 'push'
         id: tags
         run: |
           TAGS="${{ env.IMAGE_NAME }}:sha-${GITHUB_SHA::7}"
@@ -75,6 +79,8 @@ jobs:
           load: true
           push: false
           tags: distillery-${{ matrix.target }}:scan
+          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,scope=${{ matrix.target }},mode=max
           build-args: |
             BUILD_SHA=${{ github.sha }}
 
@@ -130,6 +136,7 @@ jobs:
           file: ${{ matrix.dockerfile }}
           push: true
           tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha,scope=${{ matrix.target }}
           build-args: |
             BUILD_SHA=${{ github.sha }}
 
