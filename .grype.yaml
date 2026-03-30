@@ -9,7 +9,16 @@
 #     - vulnerability: CVE-2024-XXXXX
 #       reason: "Not exploitable in our context — we don't use the affected API"
 
-ignore: []
+ignore:
+  # --- Upstream CVEs with no fix available anywhere ---
+  # These affect glibc and CPython across all distros (Debian, Wolfi, Alpine).
+  # Reviewed: 2026-03-30
+
+  - vulnerability: CVE-2026-4437
+    reason: "glibc — no upstream fix available in any distro"
+
+  - vulnerability: CVE-2026-4519
+    reason: "CPython 3.13 — no upstream fix available in any distro"
 
 # Fail on critical and high severity vulnerabilities.
 # This is also enforced in the CI workflow via --severity-cutoff=high,
