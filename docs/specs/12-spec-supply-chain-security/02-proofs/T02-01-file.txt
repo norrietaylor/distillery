@@ -1,0 +1,14 @@
+Type: file
+Command: grep -n -E 'cosign sign|cosign attest|attest-build-provenance' .github/workflows/supply-chain.yml
+Expected: Contains cosign sign, cosign attest --type cyclonedx, cosign attest --type vuln, and attest-build-provenance steps
+Timestamp: 2026-03-30T00:00:00Z
+
+Output:
+146:          cosign sign --yes "${{ env.IMAGE_NAME }}@${DIGEST}"
+154:          cosign attest --yes \
+155:            --type cyclonedx \
+164:          cosign attest --yes \
+165:            --type vuln \
+172:        uses: actions/attest-build-provenance@v2
+
+Status: PASS

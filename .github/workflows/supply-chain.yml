@@ -13,6 +13,10 @@ permissions:
   id-token: write
   attestations: write
 
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/norrietaylor/distillery
+
 jobs:
   supply-chain:
     name: Scan (${{ matrix.target }})
@@ -29,6 +33,9 @@ jobs:
           #   dockerfile: deploy/prefect/Dockerfile
           #   context: .
 
+    outputs:
+      digest-fly: ${{ steps.push.outputs.digest }}
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -36,6 +43,30 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # --- GHCR login (push events only) ---
+      - name: Log in to GitHub Container Registry
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # --- Determine image tags ---
+      - name: Determine image tags
+        id: tags
+        run: |
+          TAGS="${{ env.IMAGE_NAME }}:sha-${GITHUB_SHA::7}"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            TAGS="${TAGS},${{ env.IMAGE_NAME }}:${TAG}"
+          fi
+          if [[ "$GITHUB_REF" == refs/heads/main ]]; then
+            TAGS="${TAGS},${{ env.IMAGE_NAME }}:latest"
+          fi
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+
+      # --- Build image (always load locally for scanning) ---
       - name: Build image (local load)
         uses: docker/build-push-action@v5
         with:
@@ -47,6 +78,7 @@ jobs:
           build-args: |
             BUILD_SHA=${{ github.sha }}
 
+      # --- SBOM generation ---
       - name: Generate SBOM (CycloneDX)
         uses: anchore/sbom-action@v0
         with:
@@ -55,6 +87,7 @@ jobs:
           output-file: sbom-${{ matrix.target }}.cdx.json
           artifact-name: sbom-${{ matrix.target }}
 
+      # --- Vulnerability scanning ---
       - name: Scan for vulnerabilities (Grype)
         uses: anchore/scan-action@v4
         id: grype
@@ -86,3 +119,58 @@ jobs:
           name: grype-report-${{ matrix.target }}.json
           path: grype-report-${{ matrix.target }}.json
           retention-days: 30
+
+      # --- Push to GHCR (main/tags only, after scan passes) ---
+      - name: Push image to GHCR
+        if: github.event_name == 'push'
+        id: push
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          build-args: |
+            BUILD_SHA=${{ github.sha }}
+
+      # --- Container signing (Cosign keyless via Sigstore OIDC) ---
+      - name: Install Cosign
+        if: github.event_name == 'push'
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign container image
+        if: github.event_name == 'push'
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          cosign sign --yes "${{ env.IMAGE_NAME }}@${DIGEST}"
+
+      # --- In-toto attestations ---
+      - name: Attest SBOM (CycloneDX)
+        if: github.event_name == 'push'
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          cosign attest --yes \
+            --type cyclonedx \
+            --predicate sbom-${{ matrix.target }}.cdx.json \
+            "${{ env.IMAGE_NAME }}@${DIGEST}"
+
+      - name: Attest vulnerability scan
+        if: github.event_name == 'push'
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          cosign attest --yes \
+            --type vuln \
+            --predicate grype-report-${{ matrix.target }}.json \
+            "${{ env.IMAGE_NAME }}@${DIGEST}"
+
+      # --- SLSA provenance ---
+      - name: Attest build provenance (SLSA)
+        if: github.event_name == 'push'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
