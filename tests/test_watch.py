@@ -4,19 +4,59 @@ Covers:
   - _handle_watch: list, add, remove actions
   - EntryType.FEED enum value
   - feed metadata schema validation
-  - FeedsConfig dataclass
+  - Database-backed feed source persistence
 """
 
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import pytest
 
-from distillery.config import DistilleryConfig, FeedSourceConfig
 from distillery.models import TYPE_METADATA_SCHEMAS, EntryType, validate_metadata
 
 pytestmark = pytest.mark.unit
+
+
+# ---------------------------------------------------------------------------
+# Fake store for feed source tests
+# ---------------------------------------------------------------------------
+
+
+class FakeSourceStore:
+    """In-memory fake implementing the feed source store methods."""
+
+    def __init__(self) -> None:
+        self._sources: list[dict[str, Any]] = []
+
+    async def list_feed_sources(self) -> list[dict[str, Any]]:
+        return list(self._sources)
+
+    async def add_feed_source(
+        self,
+        url: str,
+        source_type: str,
+        label: str = "",
+        poll_interval_minutes: int = 60,
+        trust_weight: float = 1.0,
+    ) -> dict[str, Any]:
+        if any(s["url"] == url for s in self._sources):
+            raise ValueError(f"Feed source with URL {url!r} already exists.")
+        d: dict[str, Any] = {
+            "url": url,
+            "source_type": source_type,
+            "label": label,
+            "poll_interval_minutes": poll_interval_minutes,
+            "trust_weight": trust_weight,
+        }
+        self._sources.append(d)
+        return d
+
+    async def remove_feed_source(self, url: str) -> bool:
+        before = len(self._sources)
+        self._sources = [s for s in self._sources if s["url"] != url]
+        return len(self._sources) < before
 
 
 # ---------------------------------------------------------------------------
@@ -105,8 +145,8 @@ class TestHandleWatchList:
     async def test_list_empty_sources(self) -> None:
         from distillery.mcp.server import _handle_watch
 
-        cfg = DistilleryConfig()
-        result = await _handle_watch(config=cfg, arguments={"action": "list"})
+        store = FakeSourceStore()
+        result = await _handle_watch(store=store, arguments={"action": "list"})
         assert len(result) == 1
         data = json.loads(result[0].text)
         assert data["sources"] == []
@@ -115,17 +155,15 @@ class TestHandleWatchList:
     async def test_list_with_preconfigured_sources(self) -> None:
         from distillery.mcp.server import _handle_watch
 
-        cfg = DistilleryConfig()
-        cfg.feeds.sources = [
-            FeedSourceConfig(
-                url="https://example.com/rss",
-                source_type="rss",
-                label="Example",
-                poll_interval_minutes=60,
-                trust_weight=1.0,
-            )
-        ]
-        result = await _handle_watch(config=cfg, arguments={"action": "list"})
+        store = FakeSourceStore()
+        await store.add_feed_source(
+            url="https://example.com/rss",
+            source_type="rss",
+            label="Example",
+            poll_interval_minutes=60,
+            trust_weight=1.0,
+        )
+        result = await _handle_watch(store=store, arguments={"action": "list"})
         data = json.loads(result[0].text)
         assert data["count"] == 1
         assert data["sources"][0]["url"] == "https://example.com/rss"
@@ -133,17 +171,15 @@ class TestHandleWatchList:
     async def test_list_source_fields(self) -> None:
         from distillery.mcp.server import _handle_watch
 
-        cfg = DistilleryConfig()
-        cfg.feeds.sources = [
-            FeedSourceConfig(
-                url="https://example.com/rss",
-                source_type="rss",
-                label="My Feed",
-                poll_interval_minutes=30,
-                trust_weight=0.8,
-            )
-        ]
-        result = await _handle_watch(config=cfg, arguments={"action": "list"})
+        store = FakeSourceStore()
+        await store.add_feed_source(
+            url="https://example.com/rss",
+            source_type="rss",
+            label="My Feed",
+            poll_interval_minutes=30,
+            trust_weight=0.8,
+        )
+        result = await _handle_watch(store=store, arguments={"action": "list"})
         data = json.loads(result[0].text)
         src = data["sources"][0]
         assert src["url"] == "https://example.com/rss"
@@ -162,9 +198,9 @@ class TestHandleWatchAdd:
     async def test_add_rss_source(self) -> None:
         from distillery.mcp.server import _handle_watch
 
-        cfg = DistilleryConfig()
+        store = FakeSourceStore()
         result = await _handle_watch(
-            config=cfg,
+            store=store,
             arguments={
                 "action": "add",
                 "url": "https://news.ycombinator.com/rss",
@@ -177,30 +213,32 @@ class TestHandleWatchAdd:
         assert data["added"]["url"] == "https://news.ycombinator.com/rss"
         assert data["added"]["source_type"] == "rss"
         assert data["added"]["label"] == "Hacker News"
-        # Source should be in config
-        assert len(cfg.feeds.sources) == 1
+        # Source should be persisted in store.
+        db_sources = await store.list_feed_sources()
+        assert len(db_sources) == 1
 
     async def test_add_appends_to_existing_sources(self) -> None:
         from distillery.mcp.server import _handle_watch
 
-        cfg = DistilleryConfig()
-        cfg.feeds.sources = [FeedSourceConfig(url="https://existing.com/rss", source_type="rss")]
+        store = FakeSourceStore()
+        await store.add_feed_source(url="https://existing.com/rss", source_type="rss")
         await _handle_watch(
-            config=cfg,
+            store=store,
             arguments={
                 "action": "add",
                 "url": "https://new.com/rss",
                 "source_type": "rss",
             },
         )
-        assert len(cfg.feeds.sources) == 2
+        db_sources = await store.list_feed_sources()
+        assert len(db_sources) == 2
 
     async def test_add_default_poll_interval(self) -> None:
         from distillery.mcp.server import _handle_watch
 
-        cfg = DistilleryConfig()
+        store = FakeSourceStore()
         result = await _handle_watch(
-            config=cfg,
+            store=store,
             arguments={"action": "add", "url": "https://example.com/rss", "source_type": "rss"},
         )
         data = json.loads(result[0].text)
@@ -209,9 +247,9 @@ class TestHandleWatchAdd:
     async def test_add_custom_poll_interval(self) -> None:
         from distillery.mcp.server import _handle_watch
 
-        cfg = DistilleryConfig()
+        store = FakeSourceStore()
         result = await _handle_watch(
-            config=cfg,
+            store=store,
             arguments={
                 "action": "add",
                 "url": "https://example.com/rss",
@@ -225,9 +263,9 @@ class TestHandleWatchAdd:
     async def test_add_custom_trust_weight(self) -> None:
         from distillery.mcp.server import _handle_watch
 
-        cfg = DistilleryConfig()
+        store = FakeSourceStore()
         result = await _handle_watch(
-            config=cfg,
+            store=store,
             arguments={
                 "action": "add",
                 "url": "https://example.com/rss",
@@ -241,9 +279,9 @@ class TestHandleWatchAdd:
     async def test_add_github_source_type(self) -> None:
         from distillery.mcp.server import _handle_watch
 
-        cfg = DistilleryConfig()
+        store = FakeSourceStore()
         result = await _handle_watch(
-            config=cfg,
+            store=store,
             arguments={
                 "action": "add",
                 "url": "org/repo",
@@ -256,9 +294,9 @@ class TestHandleWatchAdd:
     async def test_add_missing_url_returns_error(self) -> None:
         from distillery.mcp.server import _handle_watch
 
-        cfg = DistilleryConfig()
+        store = FakeSourceStore()
         result = await _handle_watch(
-            config=cfg,
+            store=store,
             arguments={"action": "add", "source_type": "rss"},
         )
         data = json.loads(result[0].text)
@@ -268,9 +306,9 @@ class TestHandleWatchAdd:
     async def test_add_missing_source_type_returns_error(self) -> None:
         from distillery.mcp.server import _handle_watch
 
-        cfg = DistilleryConfig()
+        store = FakeSourceStore()
         result = await _handle_watch(
-            config=cfg,
+            store=store,
             arguments={"action": "add", "url": "https://example.com/rss"},
         )
         data = json.loads(result[0].text)
@@ -280,9 +318,9 @@ class TestHandleWatchAdd:
     async def test_add_invalid_source_type_returns_error(self) -> None:
         from distillery.mcp.server import _handle_watch
 
-        cfg = DistilleryConfig()
+        store = FakeSourceStore()
         result = await _handle_watch(
-            config=cfg,
+            store=store,
             arguments={
                 "action": "add",
                 "url": "https://example.com/rss",
@@ -296,9 +334,9 @@ class TestHandleWatchAdd:
     async def test_add_trust_weight_out_of_range_returns_error(self) -> None:
         from distillery.mcp.server import _handle_watch
 
-        cfg = DistilleryConfig()
+        store = FakeSourceStore()
         result = await _handle_watch(
-            config=cfg,
+            store=store,
             arguments={
                 "action": "add",
                 "url": "https://example.com/rss",
@@ -312,9 +350,9 @@ class TestHandleWatchAdd:
     async def test_add_negative_poll_interval_returns_error(self) -> None:
         from distillery.mcp.server import _handle_watch
 
-        cfg = DistilleryConfig()
+        store = FakeSourceStore()
         result = await _handle_watch(
-            config=cfg,
+            store=store,
             arguments={
                 "action": "add",
                 "url": "https://example.com/rss",
@@ -325,17 +363,32 @@ class TestHandleWatchAdd:
         data = json.loads(result[0].text)
         assert data.get("error") is True
 
-    async def test_add_response_includes_note(self) -> None:
+    async def test_add_duplicate_returns_error(self) -> None:
         from distillery.mcp.server import _handle_watch
 
-        cfg = DistilleryConfig()
+        store = FakeSourceStore()
+        await _handle_watch(
+            store=store,
+            arguments={"action": "add", "url": "https://example.com/rss", "source_type": "rss"},
+        )
         result = await _handle_watch(
-            config=cfg,
+            store=store,
             arguments={"action": "add", "url": "https://example.com/rss", "source_type": "rss"},
         )
         data = json.loads(result[0].text)
-        assert "note" in data
-        assert "distillery.yaml" in data["note"].lower() or "persist" in data["note"].lower()
+        assert data.get("error") is True
+        assert data["code"] == "DUPLICATE_SOURCE"
+
+    async def test_add_response_has_no_yaml_note(self) -> None:
+        from distillery.mcp.server import _handle_watch
+
+        store = FakeSourceStore()
+        result = await _handle_watch(
+            store=store,
+            arguments={"action": "add", "url": "https://example.com/rss", "source_type": "rss"},
+        )
+        data = json.loads(result[0].text)
+        assert "note" not in data
 
 
 # ---------------------------------------------------------------------------
@@ -347,25 +400,24 @@ class TestHandleWatchRemove:
     async def test_remove_existing_source(self) -> None:
         from distillery.mcp.server import _handle_watch
 
-        cfg = DistilleryConfig()
-        cfg.feeds.sources = [
-            FeedSourceConfig(url="https://example.com/rss", source_type="rss"),
-        ]
+        store = FakeSourceStore()
+        await store.add_feed_source(url="https://example.com/rss", source_type="rss")
         result = await _handle_watch(
-            config=cfg,
+            store=store,
             arguments={"action": "remove", "url": "https://example.com/rss"},
         )
         data = json.loads(result[0].text)
         assert data["removed"] is True
         assert data["removed_url"] == "https://example.com/rss"
-        assert len(cfg.feeds.sources) == 0
+        db_sources = await store.list_feed_sources()
+        assert len(db_sources) == 0
 
     async def test_remove_nonexistent_source_returns_removed_false(self) -> None:
         from distillery.mcp.server import _handle_watch
 
-        cfg = DistilleryConfig()
+        store = FakeSourceStore()
         result = await _handle_watch(
-            config=cfg,
+            store=store,
             arguments={"action": "remove", "url": "https://not-registered.com/rss"},
         )
         data = json.loads(result[0].text)
@@ -374,24 +426,23 @@ class TestHandleWatchRemove:
     async def test_remove_only_matching_source(self) -> None:
         from distillery.mcp.server import _handle_watch
 
-        cfg = DistilleryConfig()
-        cfg.feeds.sources = [
-            FeedSourceConfig(url="https://keep.com/rss", source_type="rss"),
-            FeedSourceConfig(url="https://remove.com/rss", source_type="rss"),
-        ]
+        store = FakeSourceStore()
+        await store.add_feed_source(url="https://keep.com/rss", source_type="rss")
+        await store.add_feed_source(url="https://remove.com/rss", source_type="rss")
         await _handle_watch(
-            config=cfg,
+            store=store,
             arguments={"action": "remove", "url": "https://remove.com/rss"},
         )
-        assert len(cfg.feeds.sources) == 1
-        assert cfg.feeds.sources[0].url == "https://keep.com/rss"
+        db_sources = await store.list_feed_sources()
+        assert len(db_sources) == 1
+        assert db_sources[0]["url"] == "https://keep.com/rss"
 
     async def test_remove_missing_url_returns_error(self) -> None:
         from distillery.mcp.server import _handle_watch
 
-        cfg = DistilleryConfig()
+        store = FakeSourceStore()
         result = await _handle_watch(
-            config=cfg,
+            store=store,
             arguments={"action": "remove"},
         )
         data = json.loads(result[0].text)
@@ -401,17 +452,27 @@ class TestHandleWatchRemove:
     async def test_remove_response_includes_updated_sources(self) -> None:
         from distillery.mcp.server import _handle_watch
 
-        cfg = DistilleryConfig()
-        cfg.feeds.sources = [
-            FeedSourceConfig(url="https://example.com/rss", source_type="rss"),
-        ]
+        store = FakeSourceStore()
+        await store.add_feed_source(url="https://example.com/rss", source_type="rss")
         result = await _handle_watch(
-            config=cfg,
+            store=store,
             arguments={"action": "remove", "url": "https://example.com/rss"},
         )
         data = json.loads(result[0].text)
         assert "sources" in data
         assert data["sources"] == []
+
+    async def test_remove_response_has_no_yaml_note(self) -> None:
+        from distillery.mcp.server import _handle_watch
+
+        store = FakeSourceStore()
+        await store.add_feed_source(url="https://example.com/rss", source_type="rss")
+        result = await _handle_watch(
+            store=store,
+            arguments={"action": "remove", "url": "https://example.com/rss"},
+        )
+        data = json.loads(result[0].text)
+        assert "note" not in data
 
 
 # ---------------------------------------------------------------------------
@@ -423,9 +484,9 @@ class TestHandleWatchInvalidAction:
     async def test_invalid_action_returns_error(self) -> None:
         from distillery.mcp.server import _handle_watch
 
-        cfg = DistilleryConfig()
+        store = FakeSourceStore()
         result = await _handle_watch(
-            config=cfg,
+            store=store,
             arguments={"action": "purge"},
         )
         data = json.loads(result[0].text)
@@ -435,10 +496,50 @@ class TestHandleWatchInvalidAction:
     async def test_missing_action_returns_error(self) -> None:
         from distillery.mcp.server import _handle_watch
 
-        cfg = DistilleryConfig()
+        store = FakeSourceStore()
         result = await _handle_watch(
-            config=cfg,
+            store=store,
             arguments={},
         )
         data = json.loads(result[0].text)
         assert data.get("error") is True
+
+
+# ---------------------------------------------------------------------------
+# DuckDB integration: feed source persistence round-trip
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestFeedSourceDuckDBPersistence:
+    async def test_add_list_remove_round_trip(self, store: Any) -> None:
+        """Sources added via the store survive a list and can be removed."""
+        added = await store.add_feed_source(
+            url="https://example.com/rss",
+            source_type="rss",
+            label="Example",
+            poll_interval_minutes=30,
+            trust_weight=0.9,
+        )
+        assert added["url"] == "https://example.com/rss"
+
+        sources = await store.list_feed_sources()
+        assert len(sources) == 1
+        assert sources[0]["label"] == "Example"
+        assert sources[0]["poll_interval_minutes"] == 30
+        assert sources[0]["trust_weight"] == pytest.approx(0.9)
+
+        removed = await store.remove_feed_source("https://example.com/rss")
+        assert removed is True
+
+        sources = await store.list_feed_sources()
+        assert len(sources) == 0
+
+    async def test_add_duplicate_raises(self, store: Any) -> None:
+        await store.add_feed_source(url="https://example.com/rss", source_type="rss")
+        with pytest.raises(ValueError, match="already exists"):
+            await store.add_feed_source(url="https://example.com/rss", source_type="rss")
+
+    async def test_remove_nonexistent_returns_false(self, store: Any) -> None:
+        removed = await store.remove_feed_source("https://nonexistent.com/rss")
+        assert removed is False

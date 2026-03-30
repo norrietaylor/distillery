@@ -5,7 +5,7 @@ description: "Manages monitored feed sources in the Distillery source registry. 
 
 # Watch — Feed Source Registry
 
-Watch lists, adds, and removes the feed sources that Distillery monitors for ambient intelligence. Changes are applied to the in-memory source registry for the current session; to persist them, update the `feeds.sources` section of `distillery.yaml`.
+Watch lists, adds, and removes the feed sources that Distillery monitors for ambient intelligence. Changes are persisted to the database and survive server restarts. Sources defined in `distillery.yaml` are seeded into the database on first startup.
 
 ## Prerequisites
 
@@ -196,12 +196,7 @@ Display results based on the action performed.
 
 **For `remove`:** Confirm whether the source was found and removed, then show the updated source table.
 
-Always include the persistence reminder when changes are made:
-
-```
-Note: Changes are applied to the current session only.
-To persist across restarts, update the feeds.sources section of distillery.yaml.
-```
+Changes are persisted to the database automatically — no manual YAML editing required.
 
 ## Output Format
 
@@ -232,18 +227,12 @@ Added: <url>
   Label:    <label or "(none)">
   Interval: <N> minutes
   Trust:    <weight>
-
-Note: Changes are applied to the current session only.
-To persist across restarts, update the feeds.sources section of distillery.yaml.
 ```
 
 **After `remove` (found):**
 
 ```
 Removed: <url>
-
-Note: Changes are applied to the current session only.
-To persist across restarts, update the feeds.sources section of distillery.yaml.
 ```
 
 **After `remove` (not found):**
@@ -259,7 +248,6 @@ No source with URL "<url>" was found in the registry.
 - When adding a source, validate `source_type` is one of: `rss`, `github`, `hackernews`, `webhook`
 - Do not proceed with `add` without a URL; prompt the user if missing
 - Always show the updated source table after `add` or `remove`
-- Always include the persistence reminder when changes are made
 - **Auto-poll scheduling**: After a successful `add`, always check `CronList` before creating a new schedule — never create duplicate poll jobs
 - **Schedule cleanup**: After a successful `remove` that leaves zero sources, pause or delete the auto-poll schedule
 - **Scheduling fallback**: If `RemoteTrigger` fails for a deployed server, fall back to `CronCreate` gracefully

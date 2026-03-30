@@ -187,6 +187,10 @@ classification:
 # knowledge. Items above the alert threshold trigger immediate alerts;
 # items above the digest threshold are included in the next /radar digest.
 #
+# Sources listed here are seeded into the database on first startup.
+# After that, the database is the source of truth — use /watch add and
+# /watch remove to manage sources at runtime (changes persist in DuckDB).
+#
 # Supported source_type values:
 #   - rss        : Atom/RSS feed at the given URL
 #   - github     : GitHub repository (issues, PRs, releases) — url = "org/repo"

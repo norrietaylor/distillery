@@ -59,7 +59,7 @@ Backends (store/duckdb.py, embedding/jina.py, embedding/openai.py)  →  DuckDB 
 ```
 
 - **Entry** (`models.py`): core data model — UUID id, content, entry_type, source, status, tags, metadata, version
-- **DistilleryStore** (`store/protocol.py`): async protocol for CRUD + semantic search + similarity
+- **DistilleryStore** (`store/protocol.py`): async protocol for CRUD + semantic search + similarity + feed source persistence
 - **EmbeddingProvider** (`embedding/protocol.py`): protocol for embed/embed_batch
 - **ClassificationEngine** (`classification/engine.py`): LLM-based entry classification
 - **DeduplicationChecker** (`classification/dedup.py`): similarity threshold logic (skip: 0.95, merge: 0.80, link: 0.60)

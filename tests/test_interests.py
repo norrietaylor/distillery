@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from distillery.config import DistilleryConfig, FeedsConfig, FeedSourceConfig
+from distillery.config import DistilleryConfig
 from distillery.feeds.interests import InterestExtractor, InterestProfile
 from distillery.models import Entry, EntrySource, EntryType
 
@@ -51,13 +51,14 @@ def _make_entry(
     )
 
 
-def _make_feeds_config(sources: list[FeedSourceConfig] | None = None) -> FeedsConfig:
-    return FeedsConfig(sources=sources or [])
 
-
-def _make_store(entries: list[Entry]) -> AsyncMock:
+def _make_store(
+    entries: list[Entry],
+    feed_sources: list[dict[str, object]] | None = None,
+) -> AsyncMock:
     """Return a mock DistilleryStore that yields *entries* from list_entries."""
     store = AsyncMock()
+    _feed_sources: list[dict[str, object]] = feed_sources or []
 
     async def _list_entries(
         filters: dict | None, limit: int, offset: int
@@ -65,7 +66,11 @@ def _make_store(entries: list[Entry]) -> AsyncMock:
         batch = entries[offset : offset + limit]
         return batch
 
+    async def _list_feed_sources() -> list[dict[str, object]]:
+        return list(_feed_sources)
+
     store.list_entries.side_effect = _list_entries
+    store.list_feed_sources.side_effect = _list_feed_sources
     return store
 
 
@@ -100,11 +105,9 @@ class TestInterestProfile:
 
 class TestRecencyWeight:
     def _extractor(self, recency_days: int = 90) -> InterestExtractor:
-        return InterestExtractor(
-            store=AsyncMock(),
-            feeds_config=_make_feeds_config(),
-            recency_days=recency_days,
-        )
+        mock = AsyncMock()
+        mock.list_feed_sources = AsyncMock(return_value=[])
+        return InterestExtractor(store=mock, recency_days=recency_days)
 
     def test_recent_entry_gets_full_weight(self) -> None:
         ext = self._extractor()
@@ -140,7 +143,9 @@ class TestRecencyWeight:
 
 class TestExtractDomain:
     def _ext(self) -> InterestExtractor:
-        return InterestExtractor(store=AsyncMock(), feeds_config=_make_feeds_config())
+        mock = AsyncMock()
+        mock.list_feed_sources = AsyncMock(return_value=[])
+        return InterestExtractor(store=mock)
 
     def test_url_from_metadata(self) -> None:
         domain = self._ext()._extract_domain({"url": "https://example.com/path"}, "")
@@ -171,7 +176,9 @@ class TestExtractDomain:
 
 class TestExtractRepos:
     def _ext(self) -> InterestExtractor:
-        return InterestExtractor(store=AsyncMock(), feeds_config=_make_feeds_config())
+        mock = AsyncMock()
+        mock.list_feed_sources = AsyncMock(return_value=[])
+        return InterestExtractor(store=mock)
 
     def _counter(self) -> defaultdict[str, int]:
         from collections import Counter
@@ -254,7 +261,7 @@ class TestNormaliseTopN:
 class TestInterestExtractorExtract:
     async def test_empty_store_returns_empty_profile(self) -> None:
         store = _make_store([])
-        ext = InterestExtractor(store=store, feeds_config=_make_feeds_config())
+        ext = InterestExtractor(store=store)
         profile = await ext.extract()
         assert profile.top_tags == []
         assert profile.entry_count == 0
@@ -265,7 +272,7 @@ class TestInterestExtractorExtract:
             _make_entry(tags=["python", "fastapi"]),
         ]
         store = _make_store(entries)
-        ext = InterestExtractor(store=store, feeds_config=_make_feeds_config())
+        ext = InterestExtractor(store=store)
         profile = await ext.extract()
         tag_names = [t for t, _ in profile.top_tags]
         assert "python" in tag_names
@@ -278,7 +285,7 @@ class TestInterestExtractorExtract:
             _make_entry(tags=["rust"]),
         ]
         store = _make_store(entries)
-        ext = InterestExtractor(store=store, feeds_config=_make_feeds_config())
+        ext = InterestExtractor(store=store)
         profile = await ext.extract()
         assert profile.top_tags[0] == ("python", 1.0)
 
@@ -290,7 +297,7 @@ class TestInterestExtractorExtract:
             )
         ]
         store = _make_store(entries)
-        ext = InterestExtractor(store=store, feeds_config=_make_feeds_config())
+        ext = InterestExtractor(store=store)
         profile = await ext.extract()
         assert "github.com" in profile.bookmark_domains
 
@@ -302,7 +309,7 @@ class TestInterestExtractorExtract:
             )
         ]
         store = _make_store(entries)
-        ext = InterestExtractor(store=store, feeds_config=_make_feeds_config())
+        ext = InterestExtractor(store=store)
         profile = await ext.extract()
         assert "fastapi/fastapi" in profile.tracked_repos
 
@@ -314,26 +321,25 @@ class TestInterestExtractorExtract:
             )
         ]
         store = _make_store(entries)
-        ext = InterestExtractor(store=store, feeds_config=_make_feeds_config())
+        ext = InterestExtractor(store=store)
         profile = await ext.extract()
         assert "python" in profile.expertise_areas
         assert "distributed systems" in profile.expertise_areas
 
-    async def test_watched_sources_populated_from_config(self) -> None:
-        source = FeedSourceConfig(
-            url="https://example.com/rss",
-            source_type="rss",
+    async def test_watched_sources_populated_from_store(self) -> None:
+        store = _make_store(
+            [],
+            feed_sources=[{"url": "https://example.com/rss", "source_type": "rss",
+                           "label": "", "poll_interval_minutes": 60, "trust_weight": 1.0}],
         )
-        feeds = _make_feeds_config(sources=[source])
-        store = _make_store([])
-        ext = InterestExtractor(store=store, feeds_config=feeds)
+        ext = InterestExtractor(store=store)
         profile = await ext.extract()
         assert "https://example.com/rss" in profile.watched_sources
 
     async def test_entry_count_reflects_analysed_entries(self) -> None:
         entries = [_make_entry() for _ in range(5)]
         store = _make_store(entries)
-        ext = InterestExtractor(store=store, feeds_config=_make_feeds_config())
+        ext = InterestExtractor(store=store)
         profile = await ext.extract()
         assert profile.entry_count == 5
 
@@ -345,9 +351,7 @@ class TestInterestExtractorExtract:
             _make_entry(tags=["current-topic"]),
         ]
         store = _make_store(entries)
-        ext = InterestExtractor(
-            store=store, feeds_config=_make_feeds_config(), recency_days=90
-        )
+        ext = InterestExtractor(store=store, recency_days=90)
         profile = await ext.extract()
         tag_names = [t for t, _ in profile.top_tags]
         assert "current-topic" in tag_names
@@ -356,15 +360,17 @@ class TestInterestExtractorExtract:
     async def test_suggestion_context_contains_tags(self) -> None:
         entries = [_make_entry(tags=["python", "async"])]
         store = _make_store(entries)
-        ext = InterestExtractor(store=store, feeds_config=_make_feeds_config())
+        ext = InterestExtractor(store=store)
         profile = await ext.extract()
         assert "python" in profile.suggestion_context
 
     async def test_suggestion_context_mentions_exclusion(self) -> None:
-        source = FeedSourceConfig(url="https://myfeed.com/rss", source_type="rss")
-        feeds = _make_feeds_config(sources=[source])
-        store = _make_store([_make_entry(tags=["python"])])
-        ext = InterestExtractor(store=store, feeds_config=feeds)
+        store = _make_store(
+            [_make_entry(tags=["python"])],
+            feed_sources=[{"url": "https://myfeed.com/rss", "source_type": "rss",
+                           "label": "", "poll_interval_minutes": 60, "trust_weight": 1.0}],
+        )
+        ext = InterestExtractor(store=store)
         profile = await ext.extract()
         assert "myfeed.com" in profile.suggestion_context
 
@@ -513,12 +519,11 @@ class TestHandleSuggestSources:
                     entry_type="github",
                     metadata={"repo": "tiangolo/fastapi", "ref_type": "pr", "ref_number": 1},
                 )
-            ]
+            ],
+            feed_sources=[{"url": "tiangolo/fastapi", "source_type": "github",
+                           "label": "", "poll_interval_minutes": 60, "trust_weight": 1.0}],
         )
         cfg = DistilleryConfig()
-        cfg.feeds.sources = [
-            FeedSourceConfig(url="tiangolo/fastapi", source_type="github")
-        ]
         result = await _handle_suggest_sources(store=store, config=cfg, arguments={})
         data = json.loads(result[0].text)
         suggestion_urls = [s["url"] for s in data["suggestions"]]

@@ -225,3 +225,51 @@ class DistilleryStore(Protocol):
             The UUID string of the newly created ``feedback_log`` row.
         """
         ...
+
+    async def list_feed_sources(self) -> list[dict[str, Any]]:
+        """Return all persisted feed sources as dicts.
+
+        Each dict contains keys: ``url``, ``source_type``, ``label``,
+        ``poll_interval_minutes``, ``trust_weight``.
+
+        Returns:
+            List of feed source dicts ordered by creation time.
+        """
+        ...
+
+    async def add_feed_source(
+        self,
+        url: str,
+        source_type: str,
+        label: str = "",
+        poll_interval_minutes: int = 60,
+        trust_weight: float = 1.0,
+    ) -> dict[str, Any]:
+        """Persist a new feed source and return it as a dict.
+
+        Args:
+            url: Feed URL (used as primary key).
+            source_type: Adapter type (e.g. ``"rss"``, ``"github"``).
+            label: Human-readable label.
+            poll_interval_minutes: Poll frequency in minutes.
+            trust_weight: Relevance multiplier in ``[0.0, 1.0]``.
+
+        Returns:
+            Dict with the stored feed source fields.
+
+        Raises:
+            ValueError: If a source with the same URL already exists.
+        """
+        ...
+
+    async def remove_feed_source(self, url: str) -> bool:
+        """Remove a feed source by URL.
+
+        Args:
+            url: The exact URL of the source to remove.
+
+        Returns:
+            ``True`` if the source existed and was removed, ``False``
+            otherwise.
+        """
+        ...

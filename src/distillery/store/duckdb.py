@@ -105,6 +105,17 @@ CREATE TABLE IF NOT EXISTS feedback_log (
 );
 """
 
+_CREATE_FEED_SOURCES_TABLE = """
+CREATE TABLE IF NOT EXISTS feed_sources (
+    url                    VARCHAR PRIMARY KEY,
+    source_type            VARCHAR NOT NULL,
+    label                  VARCHAR NOT NULL DEFAULT '',
+    poll_interval_minutes  INTEGER NOT NULL DEFAULT 60,
+    trust_weight           FLOAT NOT NULL DEFAULT 1.0,
+    created_at             TIMESTAMP NOT NULL DEFAULT current_timestamp
+);
+"""
+
 
 class DuckDBStore:
     """DuckDB-backed implementation of the ``DistilleryStore`` protocol.
@@ -328,6 +339,11 @@ class DuckDBStore:
         conn.execute(_CREATE_FEEDBACK_LOG_TABLE)
         logger.info("search_log and feedback_log tables ready")
 
+    def _create_feed_sources_table(self, conn: duckdb.DuckDBPyConnection) -> None:
+        """Create the ``feed_sources`` table if it doesn't exist."""
+        conn.execute(_CREATE_FEED_SOURCES_TABLE)
+        logger.info("feed_sources table ready")
+
     def _validate_or_record_meta(self, conn: duckdb.DuckDBPyConnection) -> None:
         """Validate or record the embedding model metadata.
 
@@ -424,6 +440,7 @@ class DuckDBStore:
                 self._create_schema(conn)
                 self._add_accessed_at_column(conn)
                 self._create_log_tables(conn)
+                self._create_feed_sources_table(conn)
                 self._create_meta_table(conn)
                 self._validate_or_record_meta(conn)
                 self._create_index(conn)
@@ -1144,3 +1161,84 @@ class DuckDBStore:
             str: UUID string of the created `feedback_log` row.
         """
         return await asyncio.to_thread(self._sync_log_feedback, search_id, entry_id, signal)
+
+    # ------------------------------------------------------------------
+    # Feed source persistence
+    # ------------------------------------------------------------------
+
+    def _sync_list_feed_sources(self) -> list[dict[str, Any]]:
+        """Return all persisted feed sources as dicts."""
+        assert self._conn is not None
+        result = self._conn.execute(
+            "SELECT url, source_type, label, poll_interval_minutes, trust_weight "
+            "FROM feed_sources ORDER BY created_at"
+        )
+        rows = result.fetchall()
+        return [
+            {
+                "url": row[0],
+                "source_type": row[1],
+                "label": row[2],
+                "poll_interval_minutes": row[3],
+                "trust_weight": row[4],
+            }
+            for row in rows
+        ]
+
+    def _sync_add_feed_source(
+        self,
+        url: str,
+        source_type: str,
+        label: str = "",
+        poll_interval_minutes: int = 60,
+        trust_weight: float = 1.0,
+    ) -> dict[str, Any]:
+        """Add a feed source. Raises ValueError if URL already exists."""
+        assert self._conn is not None
+        # Check for duplicate.
+        existing = self._conn.execute(
+            "SELECT 1 FROM feed_sources WHERE url = ?", [url]
+        ).fetchone()
+        if existing is not None:
+            raise ValueError(f"Feed source with URL {url!r} already exists.")
+        self._conn.execute(
+            "INSERT INTO feed_sources (url, source_type, label, poll_interval_minutes, trust_weight) "
+            "VALUES (?, ?, ?, ?, ?)",
+            [url, source_type, label, poll_interval_minutes, trust_weight],
+        )
+        return {
+            "url": url,
+            "source_type": source_type,
+            "label": label,
+            "poll_interval_minutes": poll_interval_minutes,
+            "trust_weight": trust_weight,
+        }
+
+    def _sync_remove_feed_source(self, url: str) -> bool:
+        """Remove a feed source by URL. Returns True if it existed."""
+        assert self._conn is not None
+        result = self._conn.execute(
+            "DELETE FROM feed_sources WHERE url = ? RETURNING url", [url]
+        )
+        return len(result.fetchall()) > 0
+
+    async def list_feed_sources(self) -> list[dict[str, Any]]:
+        """Return all persisted feed sources as dicts."""
+        return await asyncio.to_thread(self._sync_list_feed_sources)
+
+    async def add_feed_source(
+        self,
+        url: str,
+        source_type: str,
+        label: str = "",
+        poll_interval_minutes: int = 60,
+        trust_weight: float = 1.0,
+    ) -> dict[str, Any]:
+        """Add a feed source. Raises ValueError if URL already exists."""
+        return await asyncio.to_thread(
+            self._sync_add_feed_source, url, source_type, label, poll_interval_minutes, trust_weight
+        )
+
+    async def remove_feed_source(self, url: str) -> bool:
+        """Remove a feed source by URL. Returns True if it existed."""
+        return await asyncio.to_thread(self._sync_remove_feed_source, url)

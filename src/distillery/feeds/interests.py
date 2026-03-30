@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 if TYPE_CHECKING:
-    from distillery.config import FeedsConfig
     from distillery.store.protocol import DistilleryStore
 
 # ---------------------------------------------------------------------------
@@ -78,11 +77,8 @@ class InterestExtractor:
     ----------
     store:
         An initialised :class:`~distillery.store.protocol.DistilleryStore`
-        instance to query.
-    feeds_config:
-        The :class:`~distillery.config.FeedsConfig` section from
-        :class:`~distillery.config.DistilleryConfig`, used to populate the
-        ``watched_sources`` exclusion list.
+        instance to query.  Also used to read the persisted feed sources
+        for the ``watched_sources`` exclusion list.
     recency_days:
         Number of days back from *now* to consider for full recency weighting.
         Entries older than this receive a linearly reduced weight down to
@@ -102,14 +98,13 @@ class InterestExtractor:
 
         from distillery.feeds.interests import InterestExtractor
 
-        extractor = InterestExtractor(store=my_store, feeds_config=config.feeds)
+        extractor = InterestExtractor(store=my_store)
         profile = await extractor.extract()
     """
 
     def __init__(
         self,
         store: DistilleryStore,
-        feeds_config: FeedsConfig,
         *,
         recency_days: int = _DEFAULT_RECENCY_DAYS,
         top_n: int = _DEFAULT_TOP_N,
@@ -118,7 +113,6 @@ class InterestExtractor:
         max_entries: int = 2000,
     ) -> None:
         self._store = store
-        self._feeds_config = feeds_config
         self._recency_days = recency_days
         self._top_n = top_n
         self._min_weight = min_weight
@@ -215,7 +209,7 @@ class InterestExtractor:
         tracked_repos = [r for r, _ in repo_counts.most_common(20)]
         expertise_areas = [e for e, _ in expertise_counts.most_common(20)]
 
-        watched_sources = [s.url for s in self._feeds_config.sources]
+        watched_sources = [s["url"] for s in await self._store.list_feed_sources()]
 
         suggestion_context = self._build_suggestion_context(
             top_tags=top_tags,

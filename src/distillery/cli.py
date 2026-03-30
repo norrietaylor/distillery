@@ -331,7 +331,10 @@ def _cmd_poll(config_path: str | None, fmt: str, source_url: str | None) -> int:
         print(f"Error loading configuration: {exc}", file=sys.stderr)
         return 1
 
-    if not cfg.feeds.sources:
+    # Quick pre-flight check: if YAML has no sources and no source_url was
+    # given, skip store init entirely.  DB-only sources will be caught by
+    # the store after init.
+    if not cfg.feeds.sources and source_url is None:
         msg = "No feed sources configured. Add sources via distillery_watch or distillery.yaml."
         if fmt == "json":
             print(json.dumps({"error": msg, "sources_polled": 0}))
@@ -339,17 +342,9 @@ def _cmd_poll(config_path: str | None, fmt: str, source_url: str | None) -> int:
             print(msg)
         return 0
 
-    if source_url is not None:
-        from distillery.config import FeedsConfig
-
-        matching = [s for s in cfg.feeds.sources if s.url == source_url]
-        if not matching:
-            msg = f"No configured source found with url {source_url!r}."
-            print(f"Error: {msg}", file=sys.stderr)
-            return 1
-        cfg.feeds = FeedsConfig(sources=matching, thresholds=cfg.feeds.thresholds)
-
     async def _run() -> Any:
+        import contextlib
+
         from distillery.feeds.poller import FeedPoller
         from distillery.mcp.server import _create_embedding_provider, _normalize_db_path
         from distillery.store.duckdb import DuckDBStore
@@ -365,14 +360,50 @@ def _cmd_poll(config_path: str | None, fmt: str, source_url: str | None) -> int:
         )
         await store.initialize()
 
+        # Seed YAML sources into DB (idempotent).
+        for source in cfg.feeds.sources:
+            with contextlib.suppress(ValueError):
+                await store.add_feed_source(
+                    url=source.url,
+                    source_type=source.source_type,
+                    label=source.label,
+                    poll_interval_minutes=source.poll_interval_minutes,
+                    trust_weight=source.trust_weight,
+                )
+
+        # Check sources from DB.
+        db_sources = await store.list_feed_sources()
+        if not db_sources:
+            return None  # signal: no sources
+
+        if source_url is not None:
+            matching = [s for s in db_sources if s["url"] == source_url]
+            if not matching:
+                return source_url  # signal: not found
+
         poller = FeedPoller(store=store, config=cfg)
-        return await poller.poll()
+        return await poller.poll(source_url=source_url)
 
     try:
-        summary = asyncio.run(_run())
+        result = asyncio.run(_run())
     except Exception as exc:
         print(f"Error during poll: {exc}", file=sys.stderr)
         return 1
+
+    if result is None:
+        msg = "No feed sources configured. Add sources via distillery_watch or distillery.yaml."
+        if fmt == "json":
+            print(json.dumps({"error": msg, "sources_polled": 0}))
+        else:
+            print(msg)
+        return 0
+
+    if isinstance(result, str):
+        msg = f"No configured source found with url {result!r}."
+        print(f"Error: {msg}", file=sys.stderr)
+        return 1
+
+    summary = result
 
     if fmt == "json":
         results_data = [
