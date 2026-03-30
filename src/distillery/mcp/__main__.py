@@ -118,8 +118,12 @@ def main(argv: list[str] | None = None) -> int:
             auth = None
             provider_name = config.server.auth.provider
             if provider_name == "github":
-                from distillery.mcp.auth import build_github_auth
+                from distillery.mcp.auth import (
+                    _patch_cimd_localhost_redirect,
+                    build_github_auth,
+                )
 
+                _patch_cimd_localhost_redirect()
                 auth = build_github_auth(config)
             elif provider_name == "none":
                 logger.warning(
