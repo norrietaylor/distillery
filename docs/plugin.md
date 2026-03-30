@@ -14,7 +14,7 @@ enabling direct installation from the GitHub repo.
 The manifest specifies:
 
 - **Skills directory** — auto-discovered from `.claude/skills/`
-- **MCP server dependency** — local stdio transport with configurable environment variables
+- **MCP server dependency** — HTTP transport to the hosted Distillery server (GitHub OAuth)
 
 ## Installation
 
@@ -55,45 +55,38 @@ ln -s ~/.claude/distillery/.claude/skills/classify  ~/.claude/skills/classify
 
 ## MCP Configuration
 
-The skills require the Distillery MCP server.  Choose one of the three transport options:
+The skills require the Distillery MCP server.  The plugin defaults to the hosted
+Distillery server at `https://distillery-mcp.fly.dev/mcp` with GitHub OAuth
+authentication.  No local installation or API key required.
 
-### Transport A — Local stdio (recommended)
+### Default — Hosted HTTP (GitHub OAuth)
 
-Runs the MCP server as a subprocess.  Requires Python 3.11+ and a local Distillery installation.
+The plugin manifest configures this automatically on install.  On first use, Claude Code
+opens a browser for GitHub OAuth login.  After authorization, all MCP tools are available.
 
-**1. Install Distillery:**
+If you need to configure it manually, add to `~/.claude/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "distillery": {
+      "type": "http",
+      "url": "https://distillery-mcp.fly.dev/mcp"
+    }
+  }
+}
+```
+
+### Alternative — Local stdio
+
+For offline use or a private knowledge base, run the MCP server locally.  Requires
+Python 3.11+ and a local Distillery installation.
 
 ```bash
 pip install distillery
-# Or, for the latest development version:
-pip install git+https://github.com/norrietaylor/distillery.git
 ```
 
-**2. Create `~/.distillery/distillery.yaml`:**
-
-```yaml
-storage:
-  backend: duckdb
-  database_path: ~/.distillery/distillery.db
-
-embedding:
-  provider: jina
-  model: jina-embeddings-v3
-  dimensions: 1024
-  api_key_env: JINA_API_KEY
-```
-
-See [`distillery.yaml.example`](../distillery.yaml.example) for all configuration options,
-including the OpenAI embedding provider.
-
-**3. Set your API key:**
-
-```bash
-export JINA_API_KEY=jina_...
-# Or add to your shell profile (.bashrc / .zshrc)
-```
-
-**4. Add to `~/.claude/settings.json`:**
+Add to `~/.claude/settings.json`:
 
 ```json
 {
@@ -109,85 +102,31 @@ export JINA_API_KEY=jina_...
 }
 ```
 
-If `DISTILLERY_CONFIG` is unset, Distillery looks for `distillery.yaml` in the current
-working directory, then falls back to built-in defaults.
+See [`distillery.yaml.example`](../distillery.yaml.example) for configuration options and
+[mcp-setup.md](mcp-setup.md) for the full local setup guide.
+
+### Alternative — Self-hosted HTTP
+
+Deploy your own Distillery server with GitHub OAuth.  See [deployment.md](deployment.md) for
+operator setup and [deploy/fly/README.md](../deploy/fly/README.md) or
+[deploy/prefect/README.md](../deploy/prefect/README.md) for platform-specific guides.
 
 ---
 
-### Transport B — Team HTTP (GitHub OAuth)
+## Remote Auto-Poll Setup
 
-Connect to a team-hosted Distillery instance secured with GitHub OAuth.  No local
-installation or API key required — authentication uses your GitHub account.
-
-**Add to `~/.claude/settings.json`:**
-
-```json
-{
-  "mcpServers": {
-    "distillery": {
-      "transport": "http",
-      "url": "https://your-distillery-host.example.com/mcp"
-    }
-  }
-}
-```
-
-On first use, Claude Code opens a browser for GitHub OAuth login.  After
-authorization, all 17 MCP tools are available through the remote server.
-
-See [team-setup.md](team-setup.md) for the full team member guide and
-[deployment.md](deployment.md) for operator setup (GitHub OAuth App
-registration, environment variables, server configuration).
-
-### Transport C — Hosted demo (unauthenticated)
-
-Connect to the shared demonstration server.  No local installation or API key required.
-
-**Add to `~/.claude/settings.json`:**
-
-```json
-{
-  "mcpServers": {
-    "distillery": {
-      "transport": "http",
-      "url": "https://able-red-cougar.fastmcp.app/mcp"
-    }
-  }
-}
-```
-
-> **Note:** The hosted instance is a shared demonstration server.  Do not store sensitive or
-> proprietary knowledge there.
-
----
-
-## Remote Auto-Poll Setup (Hosted / Team HTTP only)
-
-When using a hosted or team HTTP transport, you can enable **remote auto-polling** so feed
-sources are polled automatically even when Claude Code is not running.  This uses Claude Code's
-scheduled remote agents (triggers) which run on Anthropic's infrastructure on a cron schedule.
-
-### Prerequisites
-
-Remote triggers need an **MCP connector** registered at claude.ai to connect to your
-Distillery server.  Without this, `/watch add` falls back to local cron polling (which only
-runs while Claude Code is active).
+You can enable **remote auto-polling** so feed sources are polled automatically even when
+Claude Code is not running.  This uses Claude Code's scheduled remote agents (triggers).
 
 ### Step 1 — Register the MCP Connector
 
 1. Open **https://claude.ai/settings/connectors**
 2. Click **"Add connector"**
-3. Enter the Distillery MCP server URL:
-   - Hosted demo: `https://able-red-cougar.fastmcp.app/mcp`
-   - Team HTTP: your team's Distillery URL (e.g. `https://distillery.yourcompany.com/mcp`)
+3. Enter the Distillery MCP server URL: `https://distillery-mcp.fly.dev/mcp`
 4. Name it: `distillery`
 5. Click **Save**
 
-This generates a `connector_uuid` that Claude Code uses when creating scheduled triggers.
-
 ### Step 2 — Run `/setup`
-
-After registering the connector, run the setup wizard in Claude Code:
 
 ```text
 /setup
@@ -199,19 +138,11 @@ https://claude.ai/code/scheduled.
 
 ### Step 3 — Verify
 
-Check that the trigger was created:
-
 ```text
 /watch list
 ```
 
 You should see your feed sources and a note about the active remote trigger.
-
-### What if I skip this?
-
-If you don't register the MCP connector, everything still works — but auto-polling falls back
-to a local cron job that only fires while Claude Code is running.  You can always register the
-connector later and run `/setup` again.
 
 ---
 
