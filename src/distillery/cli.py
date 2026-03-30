@@ -362,13 +362,12 @@ def _cmd_poll(config_path: str | None, fmt: str, source_url: str | None) -> int:
 
         # Check sources from DB.
         db_sources = await store.list_feed_sources()
-        if not db_sources:
-            return "no-sources"
-
         if source_url is not None:
             matching = [s for s in db_sources if s["url"] == source_url]
             if not matching:
                 return f"not-found:{source_url}"
+        elif not db_sources:
+            return "no-sources"
 
         poller = FeedPoller(store=store, config=cfg)
         return await poller.poll(source_url=source_url)
