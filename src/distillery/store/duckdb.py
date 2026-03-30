@@ -229,11 +229,33 @@ class DuckDBStore:
         If the VSS extension is unavailable (e.g. in constrained environments
         like AWS Lambda), we log a warning and continue without it.  Vector
         search will still work via brute-force cosine distance — just slower.
+
+        ``INSTALL vss`` downloads from the network and can block indefinitely
+        when connectivity is unavailable.  To avoid hangs we first check if
+        the extension is already installed; if not, we attempt ``LOAD vss``
+        (which fails fast) so we never issue a blocking download.
         """
+        cursor = conn.cursor()
         try:
-            conn.execute("INSTALL vss;")
-            conn.execute("LOAD vss;")
-            conn.execute("SET hnsw_enable_experimental_persistence = true;")
+            row = cursor.execute(
+                "SELECT installed, loaded FROM duckdb_extensions() WHERE extension_name = 'vss'"
+            ).fetchone()
+            already_installed = row[0] if row else False
+            already_loaded = row[1] if row else False
+
+            if not already_installed:
+                # LOAD fails fast with IOException when files are missing,
+                # whereas INSTALL can block indefinitely on a network fetch.
+                logger.info(
+                    "VSS extension not pre-installed — attempting LOAD "
+                    "(will fail fast if files are missing; pre-install vss "
+                    "during image build to guarantee availability)"
+                )
+                cursor.execute("LOAD vss;")
+            elif not already_loaded:
+                cursor.execute("LOAD vss;")
+
+            cursor.execute("SET hnsw_enable_experimental_persistence = true;")
             self._vss_available = True
             logger.info("VSS extension loaded with HNSW persistence enabled")
         except (duckdb.IOException, duckdb.CatalogException, duckdb.Error) as exc:
@@ -243,6 +265,8 @@ class DuckDBStore:
                 "falling back to brute-force vector search: %s",
                 exc,
             )
+        finally:
+            cursor.close()
 
     def _setup_httpfs(self, conn: duckdb.DuckDBPyConnection) -> None:
         """Install and load the httpfs extension, then configure S3 credentials.
