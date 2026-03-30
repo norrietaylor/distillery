@@ -74,6 +74,11 @@ def _get_authenticated_user() -> str:  # pragma: no cover — requires live OAut
     Uses FastMCP's ``get_access_token()`` to retrieve the current request's
     access token.  The GitHub username is extracted from the JWT claims
     (``login`` field populated by the GitHubProvider).
+
+    Returns ``""`` only when no auth is configured (stdio transport or
+    ``auth=None``).  When a token is present but identity cannot be
+    resolved, raises ``RuntimeError`` to fail closed rather than silently
+    treating an authenticated-but-unresolvable request as anonymous.
     """
     try:
         from fastmcp.server.dependencies import get_access_token
@@ -89,6 +94,12 @@ def _get_authenticated_user() -> str:  # pragma: no cover — requires live OAut
     username = str(token.claims.get("login", ""))
     if not username:
         username = str(token.claims.get("sub", ""))
+    if not username:
+        # Token present but no identity claim — fail closed.
+        raise RuntimeError(
+            "Authenticated request has no 'login' or 'sub' claim in access token. "
+            "Cannot determine user identity for ownership checks."
+        )
     return username
 
 
@@ -1789,10 +1800,6 @@ async def _handle_update(
             f"Cannot update immutable field(s): {', '.join(sorted(bad_keys))}.",
         )
 
-    # Inject last_modified_by if auth provided a user identity.
-    if last_modified_by:
-        updates["last_modified_by"] = last_modified_by
-
     if not updates:
         return error_response(
             "INVALID_INPUT",
@@ -1800,6 +1807,11 @@ async def _handle_update(
             + ", ".join(sorted(updatable_keys))
             + ".",
         )
+
+    # Inject last_modified_by *after* the emptiness check so auth metadata
+    # alone cannot satisfy the "at least one field" requirement.
+    if last_modified_by:
+        updates["last_modified_by"] = last_modified_by
 
     # --- validate individual fields ----------------------------------------
     if "entry_type" in updates:
