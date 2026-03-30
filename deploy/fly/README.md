@@ -91,7 +91,8 @@ Claude Code will trigger the GitHub OAuth flow on first connection.
 - **Storage**: Local DuckDB on a Fly Volume (`/data/distillery.db`)
 - **Auth**: GitHub OAuth via FastMCP's `GitHubProvider`
 - **Scaling**: Single machine, scale-to-zero when idle
-- **Cost**: ~$2-5/month (256 MB shared CPU + 1 GB volume)
+- **Memory**: 512 MB minimum (256 MB causes OOM with DuckDB + FastMCP)
+- **Cost**: ~$3-5/month (512 MB shared CPU + 1 GB volume)
 
 ## Backup
 
