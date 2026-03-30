@@ -8,6 +8,7 @@
 #   fly volumes create distillery_data --size 1
 #   fly secrets set JINA_API_KEY=... GITHUB_CLIENT_ID=... GITHUB_CLIENT_SECRET=... DISTILLERY_BASE_URL=https://<app-name>.fly.dev
 
+# Replace with your app name from `fly apps create <app-name>`
 app = "distillery-mcp"
 
 [build]

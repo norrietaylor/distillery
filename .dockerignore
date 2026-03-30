@@ -1,0 +1,19 @@
+# Exclude files not needed in the production Docker image
+.git
+.github
+.claude
+.venv
+.mypy_cache
+.ruff_cache
+.pytest_cache
+__pycache__
+tests/
+docs/
+issues/
+*.md
+!deploy/**/*.md
+uv.lock
+Makefile
+.gitignore
+.dockerignore
+.mcp.json

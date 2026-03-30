@@ -8,7 +8,7 @@ COPY . .
 # Install the package (production only, no dev deps)
 RUN pip install --no-cache-dir .
 
-# Copy the Fly-specific config into a known path
+# Flatten config path so DISTILLERY_CONFIG=/app/distillery-fly.yaml works
 COPY deploy/fly/distillery-fly.yaml /app/distillery-fly.yaml
 
 EXPOSE 8000

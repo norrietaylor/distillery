@@ -26,6 +26,8 @@ All commands run from the **repository root**.
 fly apps create <app-name>
 ```
 
+Then update the `app` value in `deploy/fly/fly.toml` to match your app name.
+
 ### 2. Create a persistent volume
 
 ```bash
