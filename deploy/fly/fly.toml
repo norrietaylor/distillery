@@ -12,7 +12,7 @@
 app = "distillery-mcp"
 
 [build]
-  dockerfile = "deploy/fly/Dockerfile"
+  dockerfile = "Dockerfile"
 
 [env]
   DISTILLERY_CONFIG = "/app/distillery-fly.yaml"
@@ -28,7 +28,7 @@ app = "distillery-mcp"
     grace_period = "10s"
     interval = "30s"
     method = "GET"
-    path = "/mcp"
+    path = "/.well-known/oauth-authorization-server"
     timeout = "5s"
 
 [mounts]
