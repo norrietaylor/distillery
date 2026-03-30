@@ -546,3 +546,49 @@ class TestFeedSourceDuckDBPersistence:
     async def test_remove_nonexistent_returns_false(self, store: Any) -> None:
         removed = await store.remove_feed_source("https://nonexistent.com/rss")
         assert removed is False
+
+    async def test_yaml_seed_skipped_when_db_has_sources(self, store: Any) -> None:
+        """Removed sources must not be re-created by YAML seeding.
+
+        Regression: if seeding runs unconditionally, a /watch remove is
+        undone on next startup when the same URL is in distillery.yaml.
+        """
+        import contextlib
+
+        from distillery.config import FeedSourceConfig
+
+        yaml_source = FeedSourceConfig(
+            url="https://example.com/rss", source_type="rss", label="YAML"
+        )
+
+        # First seed: table is empty → source is inserted.
+        if not await store.list_feed_sources():
+            with contextlib.suppress(ValueError):
+                await store.add_feed_source(
+                    url=yaml_source.url,
+                    source_type=yaml_source.source_type,
+                    label=yaml_source.label,
+                )
+        assert len(await store.list_feed_sources()) == 1
+
+        # User removes the source via /watch remove.
+        await store.remove_feed_source("https://example.com/rss")
+        assert len(await store.list_feed_sources()) == 0
+
+        # Add a different source so the table is non-empty.
+        await store.add_feed_source(url="https://other.com/rss", source_type="rss")
+
+        # Second seed: table is non-empty → seeding is skipped entirely.
+        if not await store.list_feed_sources():
+            with contextlib.suppress(ValueError):
+                await store.add_feed_source(
+                    url=yaml_source.url,
+                    source_type=yaml_source.source_type,
+                    label=yaml_source.label,
+                )
+
+        sources = await store.list_feed_sources()
+        urls = [s["url"] for s in sources]
+        assert "https://example.com/rss" not in urls, (
+            "Removed source was re-created by YAML seeding"
+        )

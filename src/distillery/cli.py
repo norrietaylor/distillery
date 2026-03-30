@@ -349,16 +349,17 @@ def _cmd_poll(config_path: str | None, fmt: str, source_url: str | None) -> int:
         )
         await store.initialize()
 
-        # Seed YAML sources into DB (idempotent).
-        for source in cfg.feeds.sources:
-            with contextlib.suppress(ValueError):
-                await store.add_feed_source(
-                    url=source.url,
-                    source_type=source.source_type,
-                    label=source.label,
-                    poll_interval_minutes=source.poll_interval_minutes,
-                    trust_weight=source.trust_weight,
-                )
+        # Seed YAML sources into DB only when the table is empty (first run).
+        if not await store.list_feed_sources():
+            for source in cfg.feeds.sources:
+                with contextlib.suppress(ValueError):
+                    await store.add_feed_source(
+                        url=source.url,
+                        source_type=source.source_type,
+                        label=source.label,
+                        poll_interval_minutes=source.poll_interval_minutes,
+                        trust_weight=source.trust_weight,
+                    )
 
         # Check sources from DB.
         db_sources = await store.list_feed_sources()

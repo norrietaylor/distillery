@@ -301,16 +301,20 @@ def create_server(
             )
             await store.initialize()
 
-            # Seed YAML feed sources into DB (idempotent — skips duplicates).
-            for source in config.feeds.sources:
-                with contextlib.suppress(ValueError):
-                    await store.add_feed_source(
-                        url=source.url,
-                        source_type=source.source_type,
-                        label=source.label,
-                        poll_interval_minutes=source.poll_interval_minutes,
-                        trust_weight=source.trust_weight,
-                    )
+            # Seed YAML feed sources into DB only when the table is empty
+            # (first run).  Once the user has managed sources via /watch,
+            # the DB is the sole source of truth — re-seeding would undo
+            # any /watch remove operations.
+            if not await store.list_feed_sources():
+                for source in config.feeds.sources:
+                    with contextlib.suppress(ValueError):
+                        await store.add_feed_source(
+                            url=source.url,
+                            source_type=source.source_type,
+                            label=source.label,
+                            poll_interval_minutes=source.poll_interval_minutes,
+                            trust_weight=source.trust_weight,
+                        )
 
             _shared["store"] = store
             _shared["config"] = config
