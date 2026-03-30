@@ -273,3 +273,23 @@ class DistilleryStore(Protocol):
             otherwise.
         """
         ...
+
+    async def get_metadata(self, key: str) -> str | None:
+        """Read a value from the ``_meta`` key-value table.
+
+        Args:
+            key: Metadata key to look up.
+
+        Returns:
+            The stored string value, or ``None`` if the key does not exist.
+        """
+        ...
+
+    async def set_metadata(self, key: str, value: str) -> None:
+        """Write a value to the ``_meta`` key-value table (upsert).
+
+        Args:
+            key: Metadata key.
+            value: String value to store.
+        """
+        ...

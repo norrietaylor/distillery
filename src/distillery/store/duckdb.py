@@ -268,9 +268,7 @@ class DuckDBStore:
 
         # Region: config > AWS_DEFAULT_REGION > AWS_REGION
         region = (
-            self._s3_region
-            or os.environ.get("AWS_DEFAULT_REGION")
-            or os.environ.get("AWS_REGION")
+            self._s3_region or os.environ.get("AWS_DEFAULT_REGION") or os.environ.get("AWS_REGION")
         )
         if region:
             conn.execute(f"SET s3_region = '{_sql_escape(region)}';")
@@ -325,9 +323,7 @@ class DuckDBStore:
             # Index already exists -- safe to ignore.
             logger.debug("HNSW index already exists, skipping creation")
         except duckdb.BinderException:
-            logger.warning(
-                "HNSW index type not recognized — skipping index creation"
-            )
+            logger.warning("HNSW index type not recognized — skipping index creation")
 
     def _create_meta_table(self, conn: duckdb.DuckDBPyConnection) -> None:
         """Create the ``_meta`` table if it does not exist."""
@@ -1215,9 +1211,7 @@ class DuckDBStore:
     def _sync_remove_feed_source(self, url: str) -> bool:
         """Remove a feed source by URL. Returns True if it existed."""
         assert self._conn is not None
-        result = self._conn.execute(
-            "DELETE FROM feed_sources WHERE url = ? RETURNING url", [url]
-        )
+        result = self._conn.execute("DELETE FROM feed_sources WHERE url = ? RETURNING url", [url])
         return len(result.fetchall()) > 0
 
     async def list_feed_sources(self) -> list[dict[str, Any]]:
@@ -1240,3 +1234,31 @@ class DuckDBStore:
     async def remove_feed_source(self, url: str) -> bool:
         """Remove a feed source by URL. Returns True if it existed."""
         return await asyncio.to_thread(self._sync_remove_feed_source, url)
+
+    # ------------------------------------------------------------------
+    # Metadata helpers
+    # ------------------------------------------------------------------
+
+    def _sync_get_metadata(self, key: str) -> str | None:
+        """Read a value from the ``_meta`` table."""
+        assert self._conn is not None
+        result = self._conn.execute("SELECT value FROM _meta WHERE key = ?", [key])
+        row = result.fetchone()
+        return row[0] if row else None
+
+    def _sync_set_metadata(self, key: str, value: str) -> None:
+        """Upsert a value into the ``_meta`` table."""
+        assert self._conn is not None
+        self._conn.execute(
+            "INSERT INTO _meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+            [key, value],
+        )
+
+    async def get_metadata(self, key: str) -> str | None:
+        """Read a value from the ``_meta`` key-value table."""
+        return await asyncio.to_thread(self._sync_get_metadata, key)
+
+    async def set_metadata(self, key: str, value: str) -> None:
+        """Write a value to the ``_meta`` key-value table (upsert)."""
+        await asyncio.to_thread(self._sync_set_metadata, key, value)

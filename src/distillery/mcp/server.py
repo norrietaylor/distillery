@@ -301,11 +301,11 @@ def create_server(
             )
             await store.initialize()
 
-            # Seed YAML feed sources into DB only when the table is empty
-            # (first run).  Once the user has managed sources via /watch,
-            # the DB is the sole source of truth — re-seeding would undo
-            # any /watch remove operations.
-            if not await store.list_feed_sources():
+            # Seed YAML feed sources into DB exactly once.  After the first
+            # successful seed we write a persistent sentinel so restarts never
+            # re-insert sources — even when the user has /watch-removed them
+            # all and the feed_sources table is empty.
+            if await store.get_metadata("feeds_seeded") != "true":
                 for source in config.feeds.sources:
                     with contextlib.suppress(ValueError):
                         await store.add_feed_source(
@@ -315,6 +315,7 @@ def create_server(
                             poll_interval_minutes=source.poll_interval_minutes,
                             trust_weight=source.trust_weight,
                         )
+                await store.set_metadata("feeds_seeded", "true")
 
             _shared["store"] = store
             _shared["config"] = config
@@ -3134,7 +3135,6 @@ def _sync_gather_stale(
 # ---------------------------------------------------------------------------
 
 _VALID_SOURCE_TYPES = {"rss", "github"}
-
 
 
 async def _handle_watch(
