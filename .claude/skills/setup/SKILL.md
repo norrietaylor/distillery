@@ -21,9 +21,64 @@ Run this once after installing the plugin. It is safe to run again at any time t
 
 ### Step 1: Check MCP Availability
 
-Call `distillery_status` to confirm the Distillery MCP server is running.
+This step determines the MCP server state, which can be one of three outcomes: **connected**, **needs authentication**, or **not configured**.
 
-If the tool is unavailable or returns an error, display the error message and the setup summary (Step 6) with `MCP Server: not connected`. Do not proceed with Steps 2-5.
+**1a. Detect server presence:**
+
+Use `ToolSearch` to check whether any `distillery` MCP tools are available. Also read the plugin manifest (`.claude-plugin/plugin.json` in the plugin directory) and any `.mcp.json` or `~/.claude/settings.json` entries to determine if a Distillery MCP server is configured.
+
+**1b. Attempt connection:**
+
+Call `distillery_status` to confirm the Distillery MCP server is running and authenticated.
+
+**1c. Determine state and respond:**
+
+Evaluate the result based on what was found in 1a and 1b:
+
+---
+
+**State: Connected** — `distillery_status` returned successfully.
+
+Display using the actual fields from `distillery_status`:
+
+```text
+MCP server connected.
+  Entries:  <total_entries>
+  Model:    <embedding_model>
+  DB Size:  <database_size_bytes / 1048576> MB
+```
+
+Proceed to Step 2.
+
+---
+
+**State: Needs Authentication** — A Distillery MCP server entry exists (in `plugin.json`, `.mcp.json`, or `settings.json`) but `distillery_status` is unavailable or returns an auth error. This typically means the server is configured with HTTP transport and GitHub OAuth, but the user has not completed the OAuth flow yet.
+
+Display:
+
+```text
+Distillery MCP Server — Authentication Required
+
+The MCP server is configured but needs authentication.
+  Server: <URL from config>
+
+To authenticate:
+1. Press Ctrl+. (or Cmd+.) to open the MCP server menu
+2. Select the Distillery server (it will show "needs authentication")
+3. Press Enter — your browser will open for GitHub OAuth
+4. Authorize the app in your browser
+5. Return here and run /distillery:setup again
+
+Alternatively, you can type: ! claude mcp authenticate distillery
+```
+
+Then skip to Step 6 (Summary) with `MCP Server: needs authentication`.
+
+---
+
+**State: Not Configured** — No Distillery MCP server entry was found anywhere.
+
+Display:
 
 ```text
 Distillery MCP Server Not Available
@@ -39,15 +94,6 @@ For detailed setup instructions, see: docs/mcp-setup.md
 ```
 
 Then skip to Step 6 (Summary) with `MCP Server: not connected`.
-
-If connected, display using the actual fields from `distillery_status`:
-
-```text
-MCP server connected.
-  Entries:  <total_entries>
-  Model:    <embedding_model>
-  DB Size:  <database_size_bytes / 1048576> MB
-```
 
 ### Step 2: Detect Transport Mode
 
@@ -237,7 +283,7 @@ Always display the configuration summary, regardless of which steps were complet
 ```text
 Distillery Setup Complete
 
-  MCP Server:    <connected | not connected>
+  MCP Server:    <connected | needs authentication | not connected>
   Transport:     <Local | Hosted | Team HTTP | unknown>
   Entries:       <total_entries | N/A>
   Feed Sources:  <N> configured
@@ -259,8 +305,9 @@ The setup wizard uses a sequential, conversational format. Each step prints its 
 
 ## Rules
 
-- Always start by checking MCP availability
-- Always show the Step 6 summary — even on early exits (MCP unavailable, user defers connector registration)
+- Always start by checking MCP availability — distinguish between "not configured", "needs authentication", and "connected"
+- When an MCP server entry exists but tools are unavailable, treat this as "needs authentication" rather than "not configured" — guide the user through the OAuth flow
+- Always show the Step 6 summary — even on early exits (MCP unavailable, auth needed, user defers connector registration)
 - Never create duplicate cron jobs — always check `CronList` first
 - Never create duplicate remote triggers — always check `RemoteTrigger(action="list")` first
 - For remote trigger creation, include `mcp__distillery__distillery_poll` in `allowed_tools`

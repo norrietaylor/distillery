@@ -357,6 +357,9 @@ class DuckDBStore:
         """Create the ``search_log`` and ``feedback_log`` tables if they don't exist."""
         conn.execute(_CREATE_SEARCH_LOG_TABLE)
         conn.execute(_CREATE_FEEDBACK_LOG_TABLE)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_search_log_timestamp ON search_log (timestamp)"
+        )
         logger.info("search_log and feedback_log tables ready")
 
     def _create_feed_sources_table(self, conn: duckdb.DuckDBPyConnection) -> None:
@@ -1181,6 +1184,37 @@ class DuckDBStore:
             str: UUID string of the created `feedback_log` row.
         """
         return await asyncio.to_thread(self._sync_log_feedback, search_id, entry_id, signal)
+
+    # ------------------------------------------------------------------
+    # Search log queries for implicit feedback
+    # ------------------------------------------------------------------
+
+    def _sync_get_searches_for_entry(self, entry_id: str, since: datetime) -> list[str]:
+        """Return IDs of search_log rows that include entry_id and are newer than since."""
+        conn = self.connection
+        sql = (
+            "SELECT id FROM search_log "
+            "WHERE timestamp >= ? AND list_contains(result_entry_ids, ?)"
+        )
+        rows = conn.execute(sql, [since, entry_id]).fetchall()
+        return [row[0] for row in rows]
+
+    async def get_searches_for_entry(self, entry_id: str, since: datetime) -> list[str]:
+        """
+        Return IDs of recent searches that returned entry_id.
+
+        Queries ``search_log`` directly so the result is durable across process restarts
+        (e.g. Lambda invocations). This replaces the former in-memory ``recent_searches``
+        list for implicit feedback correlation.
+
+        Parameters:
+            entry_id (str): UUID of the entry to look up.
+            since (datetime): Inclusive lower bound on ``search_log.timestamp``.
+
+        Returns:
+            list[str]: Search IDs (UUIDs) of matching ``search_log`` rows.
+        """
+        return await asyncio.to_thread(self._sync_get_searches_for_entry, entry_id, since)
 
     # ------------------------------------------------------------------
     # Feed source persistence
