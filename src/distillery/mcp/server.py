@@ -1334,8 +1334,12 @@ def _sync_gather_stats(
             "calls used."
         )
 
+    from distillery import __build_sha__, __version__
+
     result: dict[str, Any] = {
         "status": "ok",
+        "version": __version__,
+        "build_sha": __build_sha__,
         "total_entries": total_entries,
         "entries_by_type": entries_by_type,
         "entries_by_status": entries_by_status,

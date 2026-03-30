@@ -2,6 +2,9 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
+ARG BUILD_SHA=unknown
+ENV DISTILLERY_BUILD_SHA=${BUILD_SHA}
+
 RUN useradd --create-home --uid 10001 appuser
 
 # Copy the full repo (build context is repo root)
