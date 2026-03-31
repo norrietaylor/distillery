@@ -1,13 +1,329 @@
----
-layout: null
----
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta http-equiv="refresh" content="0; url=presentation.html">
-  <title>Distillery</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Distillery — Team Knowledge, Distilled</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+  :root {
+    --bg: #0f0f0f;
+    --surface: #1a1a1a;
+    --surface2: #242424;
+    --text: #e8e8e8;
+    --text-muted: #888;
+    --amber: #EF9F27;
+    --amber-dim: #BA7517;
+    --amber-glow: rgba(239, 159, 39, 0.15);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+    height: 100vh;
+  }
+
+  .slide {
+    display: none;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    padding: 60px 100px;
+    position: relative;
+  }
+  .slide.active { display: flex; }
+  .slide.left { align-items: flex-start; }
+
+  .progress {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 3px;
+    background: var(--amber);
+    transition: width 0.3s ease;
+    z-index: 100;
+  }
+
+  .slide-counter {
+    position: fixed;
+    bottom: 30px;
+    left: 40px;
+    font-size: 13px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .nav {
+    position: fixed;
+    bottom: 30px;
+    right: 40px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    z-index: 100;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+  .nav kbd {
+    background: var(--surface2);
+    border: 1px solid #333;
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-family: 'Inter', sans-serif;
+    font-size: 11px;
+  }
+  .nav a {
+    color: var(--amber);
+    text-decoration: none;
+    margin-left: 12px;
+  }
+  .nav a:hover { text-decoration: underline; }
+
+  h1 {
+    font-size: 56px;
+    font-weight: 700;
+    letter-spacing: -1.5px;
+    line-height: 1.1;
+    margin-bottom: 20px;
+  }
+  h2 {
+    font-size: 42px;
+    font-weight: 600;
+    letter-spacing: -1px;
+    line-height: 1.2;
+    margin-bottom: 24px;
+  }
+  h3 {
+    font-size: 24px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    color: var(--amber);
+  }
+  p, li {
+    font-size: 22px;
+    line-height: 1.6;
+    color: var(--text);
+  }
+  .subtitle {
+    font-size: 26px;
+    color: var(--text-muted);
+    font-weight: 300;
+    margin-bottom: 12px;
+  }
+  .small { font-size: 16px; color: var(--text-muted); }
+
+  .logo { margin-bottom: 32px; }
+  .logo img { height: 140px; }
+
+  ul { list-style: none; padding: 0; }
+  ul li {
+    padding: 10px 0;
+    padding-left: 28px;
+    position: relative;
+  }
+  ul li::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 18px;
+    width: 10px;
+    height: 10px;
+    background: var(--amber);
+    border-radius: 50%;
+  }
+
+  .grid-3 {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 24px;
+    width: 100%;
+    max-width: 1100px;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid #2a2a2a;
+    border-radius: 12px;
+    padding: 28px;
+  }
+  .card h3 { font-size: 20px; margin-bottom: 12px; }
+  .card p { font-size: 17px; }
+
+  .slide.active .fade-in {
+    animation: fadeUp 0.5s ease forwards;
+    opacity: 0;
+  }
+  .slide.active .fade-in:nth-child(1) { animation-delay: 0.1s; }
+  .slide.active .fade-in:nth-child(2) { animation-delay: 0.25s; }
+  .slide.active .fade-in:nth-child(3) { animation-delay: 0.4s; }
+  .slide.active .fade-in:nth-child(4) { animation-delay: 0.55s; }
+  .slide.active .fade-in:nth-child(5) { animation-delay: 0.7s; }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Fade-out transition before redirect */
+  body.fade-out {
+    animation: fadeOut 0.6s ease forwards;
+  }
+  @keyframes fadeOut {
+    to { opacity: 0; }
+  }
+
+  @media (max-width: 768px) {
+    .slide {
+      padding: 32px 20px;
+      overflow-y: auto;
+      justify-content: flex-start;
+      padding-top: 48px;
+    }
+    .slide.left { padding: 32px 20px; padding-top: 48px; }
+    h1 { font-size: 32px; letter-spacing: -0.5px; }
+    h2 { font-size: 26px; letter-spacing: -0.5px; margin-bottom: 16px; }
+    h3 { font-size: 18px; margin-bottom: 10px; }
+    p, li { font-size: 16px; line-height: 1.5; }
+    .subtitle { font-size: 18px; }
+    .small { font-size: 13px; }
+    .logo img { height: 80px; }
+    .logo { margin-bottom: 20px; }
+    .grid-3 { grid-template-columns: 1fr; gap: 16px; }
+    .card { padding: 18px; }
+    .card h3 { font-size: 17px; }
+    .card p { font-size: 15px; }
+    .slide-counter { bottom: 16px; left: 20px; font-size: 12px; }
+    .nav { bottom: 16px; right: 20px; font-size: 12px; }
+    .nav .desktop-nav { display: none; }
+    .nav .mobile-nav { display: inline; }
+  }
+  @media (min-width: 769px) {
+    .nav .mobile-nav { display: none; }
+  }
+</style>
 </head>
 <body>
-  <p><a href="presentation.html">View Distillery Presentation</a></p>
+
+<div class="progress" id="progress"></div>
+<div class="slide-counter" id="counter"></div>
+<div class="nav">
+  <span class="desktop-nav"><kbd>&larr;</kbd> <kbd>&rarr;</kbd></span>
+  <span class="mobile-nav">swipe</span>
+  <a href="home/">skip to docs &rarr;</a>
+</div>
+
+<!-- SLIDE 1: Title -->
+<div class="slide active" id="s1">
+  <div class="logo fade-in">
+    <img src="assets/distillery-logo-dark-512.png" alt="Distillery">
+  </div>
+  <h1 class="fade-in">Distillery</h1>
+  <p class="subtitle fade-in">Team Knowledge, Distilled</p>
+  <p class="small fade-in" style="margin-top: 40px;">A team knowledge base powered by Claude Code</p>
+</div>
+
+<!-- SLIDE 2: The Problem -->
+<div class="slide left" id="s2">
+  <h2 class="fade-in">Teams create knowledge.<br>Then lose it.</h2>
+  <div style="height: 20px;"></div>
+  <ul>
+    <li class="fade-in">Architecture decisions made in coding sessions &mdash; never written down</li>
+    <li class="fade-in">Meeting outcomes discussed but not recorded anywhere searchable</li>
+    <li class="fade-in">Useful articles shared in Slack &mdash; buried in days</li>
+    <li class="fade-in">New team members start from zero because context evaporated</li>
+  </ul>
+  <p class="fade-in" style="margin-top: 32px; color: var(--amber); font-size: 24px; font-weight: 500;">
+    Knowledge gets created, then lost. Decisions get relitigated. New hires ramp slower.
+  </p>
+  <p class="fade-in" style="margin-top: 16px; color: var(--text-muted); font-size: 20px;">
+    The problem isn't generating knowledge. It's retaining it.
+  </p>
+</div>
+
+<!-- SLIDE 3: The Idea -->
+<div class="slide" id="s3">
+  <h2 class="fade-in">What if your AI coding tool<br>was also your team's memory?</h2>
+  <div style="height: 32px;"></div>
+  <div class="grid-3 fade-in">
+    <div class="card">
+      <h3>Capture</h3>
+      <p>Knowledge flows from where work happens &mdash; no context switching</p>
+    </div>
+    <div class="card">
+      <h3>Classify</h3>
+      <p>LLM auto-classifies entries with confidence scoring and team review</p>
+    </div>
+    <div class="card">
+      <h3>Retrieve</h3>
+      <p>Semantic search and multi-entry synthesis &mdash; not keyword matching</p>
+    </div>
+  </div>
+  <p class="small fade-in" style="margin-top: 32px;">
+    Capture knowledge where work happens. Retrieve it when you need it.
+  </p>
+</div>
+
+<script>
+  const slides = document.querySelectorAll('.slide');
+  const total = slides.length;
+  let current = 0;
+
+  function show(n) {
+    slides.forEach(s => s.classList.remove('active'));
+    slides[n].classList.add('active');
+    document.getElementById('progress').style.width = ((n + 1) / total * 100) + '%';
+    document.getElementById('counter').textContent = (n + 1) + ' / ' + total;
+  }
+
+  function next() {
+    if (current < total - 1) {
+      current++;
+      show(current);
+    } else {
+      // After last slide, fade out and redirect to docs
+      document.body.classList.add('fade-out');
+      setTimeout(function() {
+        window.location.href = 'home/';
+      }, 600);
+    }
+  }
+
+  function prev() {
+    if (current > 0) {
+      current--;
+      show(current);
+    }
+  }
+
+  // Keyboard navigation
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); next(); }
+    if (e.key === 'ArrowLeft') { e.preventDefault(); prev(); }
+  });
+
+  // Touch/swipe navigation
+  let touchStartX = 0;
+  document.addEventListener('touchstart', function(e) { touchStartX = e.touches[0].clientX; });
+  document.addEventListener('touchend', function(e) {
+    const diff = touchStartX - e.changedTouches[0].clientX;
+    if (Math.abs(diff) > 50) {
+      if (diff > 0) next(); else prev();
+    }
+  });
+
+  // Click navigation
+  document.addEventListener('click', function(e) {
+    if (e.target.closest('a') || e.target.closest('kbd')) return;
+    const x = e.clientX / window.innerWidth;
+    if (x > 0.5) next(); else prev();
+  });
+
+  show(0);
+</script>
 </body>
 </html>

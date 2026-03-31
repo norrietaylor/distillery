@@ -58,11 +58,12 @@ Core Protocols (store/protocol.py, embedding/protocol.py)  →  typed Protocol i
 Backends (store/duckdb.py, embedding/jina.py, embedding/openai.py)  →  DuckDB + VSS, embedding APIs
 ```
 
-- **Entry** (`models.py`): core data model — UUID id, content, entry_type, source, status, tags, metadata, version
+- **Entry** (`models.py`): core data model — str id (UUID4), content, entry_type, source, status, tags, metadata, version, project (str | None)
 - **DistilleryStore** (`store/protocol.py`): async protocol for CRUD + semantic search + similarity + feed source persistence
 - **EmbeddingProvider** (`embedding/protocol.py`): protocol for embed/embed_batch
 - **ClassificationEngine** (`classification/engine.py`): LLM-based entry classification
-- **DeduplicationChecker** (`classification/dedup.py`): similarity threshold logic (skip: 0.95, merge: 0.80, link: 0.60)
+- **DeduplicationChecker** (`classification/dedup.py`): similarity threshold logic (skip: >= 0.95, merge: >= 0.80, link: >= 0.60)
+- **ClassificationConfig**: `confidence_threshold` default 0.6 (60%) — entries below this go to review queue
 
 Uses Python `Protocol` (structural subtyping), not ABCs. All storage operations are async.
 
@@ -98,5 +99,22 @@ Local development uses `distillery-dev.yaml` at the repo root. The `DISTILLERY_C
 
 - **Knowledge capture**: `/distill`, `/bookmark`, `/minutes`
 - **Knowledge retrieval**: `/recall`, `/pour`, `/classify`
-- **Ambient intelligence**: `/watch` (manage feed sources), `/radar` (digest + source suggestions), `/tune` (adjust thresholds)
-- **Onboarding**: `/setup` (MCP connectivity wizard)
+- **Ambient intelligence**: `/watch` (manage feed sources — `rss` and `github` types only), `/radar` (digest + source suggestions), `/tune` (adjust thresholds — alert >= digest)
+- **Onboarding**: `/setup` (MCP connectivity wizard — uses `CronCreate`/`RemoteTrigger` Claude Code platform primitives)
+
+## Documentation
+
+User-facing documentation is built with [MkDocs Material](https://squidfunk.github.io/mkdocs-material/) and lives in `docs/`. Configuration is in `mkdocs.yml`.
+
+```bash
+# Build docs locally
+make docs-build          # or: mkdocs build --strict
+
+# Serve docs locally (hot reload)
+make docs-serve          # or: mkdocs serve
+
+# Install docs dependencies
+pip install .[docs]
+```
+
+The docs site is deployed to GitHub Pages via `.github/workflows/pages.yml` on push to `main`. The `docs/` directory contains only MkDocs source files — legacy docs and specs have been removed. SKILL.md files in `.claude-plugin/skills/` are Claude-facing instructions; the `docs/skills/` pages are human-readable rewrites.

@@ -44,6 +44,9 @@ dev = [
     "types-PyYAML>=6.0",
     "types-defusedxml>=0.7.0",
 ]
+docs = [
+    "mkdocs-material>=9.5",
+]
 eval = []
 
 [project.scripts]
