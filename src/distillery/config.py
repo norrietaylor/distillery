@@ -694,6 +694,20 @@ def _parse_server(raw: dict[str, Any]) -> ServerConfig:
     )
 
 
+def parse_env_allowed_orgs() -> list[str]:
+    """Parse ``DISTILLERY_ALLOWED_ORGS`` env var into a list of org slugs.
+
+    Shared by :func:`_validate` and
+    :func:`~distillery.mcp.auth.build_org_checker` to avoid duplicating
+    the parsing logic.
+    """
+    return [
+        org.strip()
+        for org in os.environ.get("DISTILLERY_ALLOWED_ORGS", "").split(",")
+        if org.strip()
+    ]
+
+
 def _validate(config: DistilleryConfig) -> None:
     """
     Validate a DistilleryConfig instance and raise a ValueError for any invalid setting.
@@ -848,13 +862,8 @@ def _validate(config: DistilleryConfig) -> None:
         )
 
     # Validate allowed_orgs: non-empty list requires GitHub auth provider.
-    env_allowed_orgs = [
-        org.strip()
-        for org in os.environ.get("DISTILLERY_ALLOWED_ORGS", "").split(",")
-        if org.strip()
-    ]
     if (
-        config.server.auth.allowed_orgs or env_allowed_orgs
+        config.server.auth.allowed_orgs or parse_env_allowed_orgs()
     ) and config.server.auth.provider != "github":
         raise ValueError(
             "server.auth.allowed_orgs requires server.auth.provider = 'github', "

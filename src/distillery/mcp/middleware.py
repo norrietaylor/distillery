@@ -296,8 +296,9 @@ class OrgMembershipMiddleware:
     :meth:`~distillery.mcp.org_membership.OrgMembershipChecker.is_allowed`.
     Non-members receive a JSON 403 response with a clear error message.
 
-    If the token is not a JWT (e.g. an opaque token), the middleware cannot
-    determine the username and passes the request through to FastMCP.
+    If the token is not a JWT (e.g. an opaque token) or the JWT does not
+    contain a ``login``/``sub`` claim, the middleware rejects the request
+    with a 403 (fail-closed) rather than passing it through unenforced.
 
     Args:
         app: The wrapped ASGI application.
@@ -343,30 +344,21 @@ class OrgMembershipMiddleware:
         from distillery.mcp.org_membership import _try_decode_jwt_claims
 
         claims = _try_decode_jwt_claims(bearer_token)
-        username = ""
-        hint_token: str | None = None
         if claims:
             raw = claims.get("login") or claims.get("sub") or ""
-            if isinstance(raw, str):
-                username = raw.strip()
-        else:
-            # Opaque token (not a JWT) — pass it as a hint so the checker
-            # can use it for API calls to resolve org membership.
-            hint_token = bearer_token
+            username = raw.strip() if isinstance(raw, str) else ""
+            if username:
+                if not await self.checker.is_allowed(username):
+                    await self._send_403(send, username, list(self.checker.allowed_orgs))
+                    return
+                await self.app(scope, receive, send)
+                return
 
-        if not username:
-            # Cannot identify the user from the token — fail closed.
-            # Passing through would silently skip org enforcement.
-            await self._send_403(
-                send, "<unknown>", list(self.checker._allowed_orgs)
-            )
-            return
-
-        if not await self.checker.is_allowed(username, hint_token=hint_token):
-            await self._send_403(send, username, list(self.checker._allowed_orgs))
-            return
-
-        await self.app(scope, receive, send)
+        # Cannot identify the user (opaque token or JWT without
+        # login/sub claim) — fail closed.
+        await self._send_403(
+            send, "<unknown>", list(self.checker.allowed_orgs)
+        )
 
     @staticmethod
     async def _send_403(send: Send, username: str, orgs: list[str]) -> None:

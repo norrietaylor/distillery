@@ -55,7 +55,7 @@ def _try_decode_jwt_claims(token: str) -> dict[str, Any] | None:
         padding = (4 - len(payload_b64) % 4) % 4
         payload = json.loads(base64.urlsafe_b64decode(payload_b64 + "=" * padding))
         if isinstance(payload, dict):
-            return payload  # type: ignore[return-value]
+            return payload
         return None
     except Exception:  # noqa: BLE001
         return None
@@ -111,6 +111,11 @@ class OrgMembershipChecker:
     def enabled(self) -> bool:
         """``True`` when org restrictions are configured."""
         return bool(self._allowed_orgs)
+
+    @property
+    def allowed_orgs(self) -> list[str]:
+        """Return the list of allowed GitHub org slugs (read-only copy)."""
+        return list(self._allowed_orgs)
 
     # ------------------------------------------------------------------
     # User-token store

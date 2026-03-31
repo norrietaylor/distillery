@@ -27,7 +27,7 @@ from urllib.parse import urlparse
 import httpx
 from fastmcp.server.auth.providers.github import GitHubProvider
 
-from distillery.config import DistilleryConfig
+from distillery.config import DistilleryConfig, parse_env_allowed_orgs
 from distillery.mcp.org_membership import OrgMembershipChecker
 
 logger = logging.getLogger(__name__)
@@ -278,13 +278,11 @@ def build_org_checker(config: DistilleryConfig) -> OrgMembershipChecker | None:
     """
     allowed_orgs: list[str] = list(config.server.auth.allowed_orgs)
 
-    env_orgs_raw = os.environ.get("DISTILLERY_ALLOWED_ORGS", "").strip()
-    if env_orgs_raw:
-        seen = set(allowed_orgs)
-        for org in (o.strip() for o in env_orgs_raw.split(",") if o.strip()):
-            if org not in seen:
-                allowed_orgs.append(org)
-                seen.add(org)
+    seen = set(allowed_orgs)
+    for org in parse_env_allowed_orgs():
+        if org not in seen:
+            allowed_orgs.append(org)
+            seen.add(org)
 
     if not allowed_orgs:
         return None
