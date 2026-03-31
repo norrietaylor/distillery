@@ -210,11 +210,21 @@ class ServerAuthConfig:
             client ID.
         client_secret_env: Name of the environment variable holding the OAuth
             client secret.
+        allowed_orgs: GitHub organisation login names (slugs) whose members
+            are permitted to access the server.  Empty list (default) means
+            any GitHub user can authenticate (open-access mode).  Can also be
+            set via the ``DISTILLERY_ALLOWED_ORGS`` environment variable
+            (comma-separated); env values are merged with YAML values.
+        membership_cache_ttl_seconds: How long to cache org-membership results
+            in seconds.  Default is 3600 (1 hour).  Set to a smaller value if
+            you need revoked memberships to take effect sooner.
     """
 
     provider: str = "none"
     client_id_env: str = "GITHUB_CLIENT_ID"
     client_secret_env: str = "GITHUB_CLIENT_SECRET"
+    allowed_orgs: list[str] = field(default_factory=list)
+    membership_cache_ttl_seconds: int = 3600
 
 
 @dataclass
@@ -657,11 +667,23 @@ def _parse_server(raw: dict[str, Any]) -> ServerConfig:
             f"server.http_rate_limit must be a YAML mapping, got: {type(rl_raw).__name__}"
         )
 
+    allowed_orgs_raw = auth_raw.get("allowed_orgs", []) or []
+    if not isinstance(allowed_orgs_raw, list):
+        raise ValueError("server.auth.allowed_orgs must be a YAML list")
+    allowed_orgs = [str(o).strip() for o in allowed_orgs_raw if str(o).strip()]
+
+    ttl_raw = auth_raw.get("membership_cache_ttl_seconds", 3600)
+    membership_cache_ttl_seconds = _parse_strict_int(
+        ttl_raw, "server.auth.membership_cache_ttl_seconds"
+    )
+
     return ServerConfig(
         auth=ServerAuthConfig(
             provider=str(auth_raw.get("provider", "none")),
             client_id_env=str(auth_raw.get("client_id_env", "GITHUB_CLIENT_ID")),
             client_secret_env=str(auth_raw.get("client_secret_env", "GITHUB_CLIENT_SECRET")),
+            allowed_orgs=allowed_orgs,
+            membership_cache_ttl_seconds=membership_cache_ttl_seconds,
         ),
         http_rate_limit=HttpRateLimitConfig(
             requests_per_minute=int(rl_raw.get("requests_per_minute", 60)),
@@ -823,6 +845,19 @@ def _validate(config: DistilleryConfig) -> None:
         raise ValueError(
             f"server.auth.provider must be one of {sorted(valid_auth_providers)}, "
             f"got: {config.server.auth.provider!r}"
+        )
+
+    # Validate allowed_orgs: non-empty list requires GitHub auth provider.
+    if config.server.auth.allowed_orgs and config.server.auth.provider != "github":
+        raise ValueError(
+            "server.auth.allowed_orgs requires server.auth.provider = 'github', "
+            f"got: {config.server.auth.provider!r}"
+        )
+
+    if config.server.auth.membership_cache_ttl_seconds <= 0:
+        raise ValueError(
+            "server.auth.membership_cache_ttl_seconds must be a positive integer, "
+            f"got: {config.server.auth.membership_cache_ttl_seconds}"
         )
 
 

@@ -1,8 +1,9 @@
 """ASGI middleware for the Distillery HTTP transport.
 
-Provides per-IP sliding-window rate limiting and request body size limiting
-for the FastMCP HTTP server.  Both middleware classes follow the standard
-ASGI 3.0 interface and are compatible with Starlette's middleware stack.
+Provides per-IP sliding-window rate limiting, request body size limiting,
+and GitHub org membership enforcement for the FastMCP HTTP server.  All
+middleware classes follow the standard ASGI 3.0 interface and are compatible
+with Starlette's middleware stack.
 
 Neither middleware applies to the stdio transport — they are only wired in
 when ``--transport http`` is selected.
@@ -10,13 +11,17 @@ when ``--transport http`` is selected.
 
 from __future__ import annotations
 
+import json
 import time
 from collections import deque
 from collections.abc import MutableMapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
+
+if TYPE_CHECKING:
+    from distillery.mcp.org_membership import OrgMembershipChecker
 
 # ---------------------------------------------------------------------------
 # Type aliases
@@ -273,6 +278,120 @@ class _BodyTooLargeError(Exception):
 
 
 # ---------------------------------------------------------------------------
+# OrgMembershipMiddleware
+# ---------------------------------------------------------------------------
+
+
+class OrgMembershipMiddleware:
+    """ASGI middleware that enforces GitHub org membership for MCP requests.
+
+    OAuth-related paths (``/oauth/``, ``/.well-known/``) are always passed
+    through so that the auth flow itself is never blocked.  Requests without
+    an ``Authorization: Bearer`` header are also passed through — FastMCP
+    will reject them with 401 anyway.
+
+    For requests bearing a JWT access token, the middleware decodes the JWT
+    payload (without re-verifying the signature — FastMCP already did that)
+    to extract the ``login`` claim and then calls
+    :meth:`~distillery.mcp.org_membership.OrgMembershipChecker.is_allowed`.
+    Non-members receive a JSON 403 response with a clear error message.
+
+    If the token is not a JWT (e.g. an opaque token), the middleware cannot
+    determine the username and passes the request through to FastMCP.
+
+    Args:
+        app: The wrapped ASGI application.
+        checker: Configured :class:`~distillery.mcp.org_membership.OrgMembershipChecker`.
+    """
+
+    # Paths that handle the OAuth dance — never block these.
+    _OAUTH_PREFIXES = (
+        "/oauth/",
+        "/.well-known/",
+        "/mcp/auth",
+    )
+
+    def __init__(
+        self,
+        app: ASGIApp,
+        checker: "OrgMembershipChecker",
+    ) -> None:
+        self.app = app
+        self.checker = checker
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or not self.checker.enabled:
+            await self.app(scope, receive, send)
+            return
+
+        path: str = scope.get("path", "")
+        if any(path.startswith(p) for p in self._OAUTH_PREFIXES):
+            await self.app(scope, receive, send)
+            return
+
+        headers = Headers(scope=scope)
+        auth = headers.get("authorization", "")
+        if not auth.lower().startswith("bearer "):
+            # No bearer token — pass through; FastMCP will issue 401.
+            await self.app(scope, receive, send)
+            return
+
+        bearer_token = auth[7:]
+
+        # Attempt to decode the JWT to get the GitHub login claim.
+        # FastMCP 3.x may include GitHub identity claims in the JWT payload.
+        from distillery.mcp.org_membership import _try_decode_jwt_claims
+
+        claims = _try_decode_jwt_claims(bearer_token)
+        username = ""
+        if claims:
+            raw = claims.get("login") or claims.get("sub") or ""
+            if isinstance(raw, str):
+                username = raw.strip()
+
+        if not username:
+            # Cannot identify the user from the token — pass through.
+            # FastMCP will handle auth; we just can't enforce org restriction.
+            await self.app(scope, receive, send)
+            return
+
+        # hint_token: if the bearer token is NOT a JWT (opaque token / GitHub
+        # token passthrough mode), pass it as a hint so the checker can use it
+        # for API calls.  When it IS a JWT, ``claims`` is set and hint is None.
+        hint_token: str | None = None if claims else bearer_token
+
+        if not await self.checker.is_allowed(username, hint_token=hint_token):
+            await self._send_403(send, username, list(self.checker._allowed_orgs))
+            return
+
+        await self.app(scope, receive, send)
+
+    @staticmethod
+    async def _send_403(send: Send, username: str, orgs: list[str]) -> None:
+        org_list = ", ".join(f"'{o}'" for o in orgs)
+        body = json.dumps(
+            {
+                "error": "forbidden",
+                "message": (
+                    f"User '{username}' is not a member of any required GitHub org. "
+                    f"Must be a member of at least one of: {org_list}."
+                ),
+            }
+        ).encode()
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 403,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode()),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})
+
+
+# ---------------------------------------------------------------------------
 # Convenience factory
 # ---------------------------------------------------------------------------
 
@@ -283,13 +402,16 @@ def apply_http_middleware(
     requests_per_hour: int = 600,
     max_body_bytes: int = 1_048_576,
     trust_proxy: bool = False,
+    org_checker: "OrgMembershipChecker | None" = None,
 ) -> ASGIApp:
-    """Wrap *app* with rate-limit and body-size middleware.
+    """Wrap *app* with rate-limit, body-size, and (optionally) org-membership middleware.
 
     Middleware is applied in outermost-to-innermost order:
-    1. :class:`RateLimitMiddleware` (outermost — count every request including
-       oversized bodies so they still consume quota)
-    2. :class:`BodySizeLimitMiddleware` (innermost — reject oversized bodies)
+    1. :class:`RateLimitMiddleware` (outermost — counts every request so denied
+       requests still consume quota)
+    2. :class:`OrgMembershipMiddleware` (when *org_checker* is provided and
+       enabled — blocks non-members before body is read)
+    3. :class:`BodySizeLimitMiddleware` (innermost — rejects oversized bodies)
 
     Args:
         app: The ASGI application to wrap.
@@ -297,11 +419,16 @@ def apply_http_middleware(
         requests_per_hour: Per-IP hour limit (default 600).
         max_body_bytes: Maximum body size in bytes (default 1 MB).
         trust_proxy: Prefer ``X-Forwarded-For`` for client IP extraction.
+        org_checker: Optional org membership checker.  When provided and
+            :attr:`~distillery.mcp.org_membership.OrgMembershipChecker.enabled`
+            is ``True``, :class:`OrgMembershipMiddleware` is added.
 
     Returns:
-        A new ASGI app with both middleware layers applied.
+        A new ASGI app with all requested middleware layers applied.
     """
     app = BodySizeLimitMiddleware(app, max_bytes=max_body_bytes)
+    if org_checker is not None and org_checker.enabled:
+        app = OrgMembershipMiddleware(app, org_checker)
     app = RateLimitMiddleware(
         app,
         requests_per_minute=requests_per_minute,

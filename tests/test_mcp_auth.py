@@ -12,7 +12,7 @@ from distillery.config import (
     ServerConfig,
     StorageConfig,
 )
-from distillery.mcp.auth import build_github_auth
+from distillery.mcp.auth import build_github_auth, build_org_checker
 from distillery.mcp.server import create_server
 
 pytestmark = pytest.mark.unit
@@ -27,6 +27,7 @@ def _make_config(
     provider: str = "github",
     client_id_env: str = "GITHUB_CLIENT_ID",
     client_secret_env: str = "GITHUB_CLIENT_SECRET",
+    allowed_orgs: list[str] | None = None,
 ) -> DistilleryConfig:
     """Return a DistilleryConfig with the given server auth settings."""
     return DistilleryConfig(
@@ -36,6 +37,7 @@ def _make_config(
                 provider=provider,
                 client_id_env=client_id_env,
                 client_secret_env=client_secret_env,
+                allowed_orgs=allowed_orgs or [],
             ),
         ),
     )
@@ -147,3 +149,37 @@ class TestNoSecretsInLogs:
         assert client_id not in log_output, (
             f"Client ID value found in logs: {log_output}"
         )
+
+
+class TestBuildOrgCheckerIntegration:
+    def test_returns_none_when_no_orgs_configured(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """build_org_checker() returns None when allowed_orgs is empty."""
+        monkeypatch.delenv("DISTILLERY_ALLOWED_ORGS", raising=False)
+        config = _make_config()
+        assert build_org_checker(config) is None
+
+    def test_returns_checker_when_orgs_configured(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """build_org_checker() returns OrgMembershipChecker when orgs are set."""
+        monkeypatch.delenv("DISTILLERY_ALLOWED_ORGS", raising=False)
+        from distillery.mcp.org_membership import OrgMembershipChecker
+
+        config = _make_config(allowed_orgs=["my-company"])
+        checker = build_org_checker(config)
+        assert isinstance(checker, OrgMembershipChecker)
+        assert checker.enabled
+
+    def test_env_var_alone_produces_checker(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """DISTILLERY_ALLOWED_ORGS env var alone is sufficient to produce a checker."""
+        monkeypatch.setenv("DISTILLERY_ALLOWED_ORGS", "env-company")
+        from distillery.mcp.org_membership import OrgMembershipChecker
+
+        config = _make_config()
+        checker = build_org_checker(config)
+        assert isinstance(checker, OrgMembershipChecker)
+        assert "env-company" in checker._allowed_orgs

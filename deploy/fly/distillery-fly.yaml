@@ -32,3 +32,12 @@ server:
     provider: github
     client_id_env: GITHUB_CLIENT_ID
     client_secret_env: GITHUB_CLIENT_SECRET
+    # Restrict access to GitHub org members (optional).
+    # Users must be a member of at least one listed org to access the server.
+    # Also configurable via DISTILLERY_ALLOWED_ORGS=my-org,other-org env var
+    # (env values are merged with YAML values).
+    # For private org support, set the GITHUB_ORG_CHECK_TOKEN secret to a PAT
+    # with read:org scope: `fly secrets set GITHUB_ORG_CHECK_TOKEN=ghp_...`
+    # allowed_orgs:
+    #   - my-company
+    # membership_cache_ttl_seconds: 3600  # default: 1 hour

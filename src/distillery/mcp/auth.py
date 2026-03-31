@@ -26,6 +26,7 @@ from urllib.parse import urlparse
 from fastmcp.server.auth.providers.github import GitHubProvider
 
 from distillery.config import DistilleryConfig
+from distillery.mcp.org_membership import OrgMembershipChecker
 
 logger = logging.getLogger(__name__)
 
@@ -173,4 +174,47 @@ def build_github_auth(config: DistilleryConfig) -> GitHubProvider:
         client_id=client_id,
         client_secret=client_secret,
         base_url=base_url,
+    )
+
+
+def build_org_checker(config: DistilleryConfig) -> OrgMembershipChecker | None:
+    """Build an :class:`~distillery.mcp.org_membership.OrgMembershipChecker`.
+
+    Merges ``allowed_orgs`` from the YAML config with orgs supplied via the
+    ``DISTILLERY_ALLOWED_ORGS`` environment variable (comma-separated).
+
+    Returns ``None`` when no orgs are configured (open-access mode).
+
+    Args:
+        config: Distillery configuration.
+
+    Returns:
+        A configured :class:`OrgMembershipChecker`, or ``None`` if
+        ``allowed_orgs`` is empty after merging config and env.
+    """
+    allowed_orgs: list[str] = list(config.server.auth.allowed_orgs)
+
+    env_orgs_raw = os.environ.get("DISTILLERY_ALLOWED_ORGS", "").strip()
+    if env_orgs_raw:
+        seen = set(allowed_orgs)
+        for org in (o.strip() for o in env_orgs_raw.split(",") if o.strip()):
+            if org not in seen:
+                allowed_orgs.append(org)
+                seen.add(org)
+
+    if not allowed_orgs:
+        return None
+
+    server_token = os.environ.get("GITHUB_ORG_CHECK_TOKEN", "").strip() or None
+
+    logger.info(
+        "Org membership restriction enabled: %s (cache_ttl=%ds)",
+        allowed_orgs,
+        config.server.auth.membership_cache_ttl_seconds,
+    )
+
+    return OrgMembershipChecker(
+        allowed_orgs=allowed_orgs,
+        cache_ttl_seconds=config.server.auth.membership_cache_ttl_seconds,
+        server_token=server_token,
     )
