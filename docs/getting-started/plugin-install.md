@@ -52,6 +52,9 @@ ln -s ~/.claude/distillery/.claude-plugin/skills/setup     ~/.claude/skills/setu
 
 The skills require the Distillery MCP server. The plugin defaults to the hosted server at `https://distillery-mcp.fly.dev/mcp` with GitHub OAuth authentication — no local installation or API key required.
 
+!!! warning "Demo Server"
+    The hosted instance at `distillery-mcp.fly.dev` is a **demo server** for evaluation and testing only. Do not store sensitive, proprietary, or confidential data. There are no uptime guarantees and data may be reset without notice. For production use, [deploy your own instance](../team/fly.md) or use [local setup](local-setup.md).
+
 ### Default — Hosted HTTP (GitHub OAuth)
 
 The plugin manifest configures this automatically on install. On first use, Claude Code opens a browser for GitHub OAuth login. After authorization, all MCP tools are available.

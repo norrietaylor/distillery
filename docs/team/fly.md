@@ -2,6 +2,9 @@
 
 Deploy the Distillery MCP server to [Fly.io](https://fly.io) with persistent DuckDB storage on a volume, GitHub OAuth, and scale-to-zero billing.
 
+!!! warning "Demo Server"
+    The hosted instance at `distillery-mcp.fly.dev` is a **demo server** for evaluation and testing only. Do not store sensitive, proprietary, or confidential data. There are no uptime guarantees, data may be reset without notice, and storage is not encrypted at rest. For production use, deploy your own instance using the instructions below.
+
 ## Prerequisites
 
 - [Fly CLI](https://fly.io/docs/flyctl/install/) installed
