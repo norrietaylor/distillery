@@ -106,10 +106,10 @@ def main(argv: list[str] | None = None) -> int:
     def _sigterm_handler(signum: int, frame: object) -> None:  # pragma: no cover
         raise KeyboardInterrupt
 
-    signal.signal(signal.SIGTERM, _sigterm_handler)
-
     _configure_logging()
     logger = logging.getLogger(__name__)
+
+    signal.signal(signal.SIGTERM, _sigterm_handler)
 
     args = _parse_args(argv)
 
