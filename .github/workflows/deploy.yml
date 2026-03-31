@@ -107,6 +107,7 @@ jobs:
       - name: Build Docker image
         run: |
           docker build \
+            --file deploy/aws/Dockerfile \
             --tag "${{ steps.image-tag.outputs.image_uri }}" \
             --tag "${{ steps.image-tag.outputs.latest_uri }}" \
             --label "git.sha=${{ github.sha }}" \

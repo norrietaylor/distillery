@@ -1,7 +1,7 @@
 # Distillery MCP — AWS Lambda container image
 #
 # Build:
-#   docker build -t distillery-mcp .
+#   docker build -f deploy/aws/Dockerfile -t distillery-mcp .
 #
 # Run locally (Lambda RIE):
 #   docker run -p 9000:8080 \
@@ -30,7 +30,7 @@ RUN pip install --no-cache-dir .
 # Copy the container-specific configuration.
 # This must come AFTER pip install so the file is picked up at runtime rather
 # than baked into the wheel.
-COPY distillery.lambda.yaml /var/task/distillery.yaml
+COPY deploy/aws/distillery.lambda.yaml /var/task/distillery.yaml
 
 # The Lambda handler entrypoint: <module>.<function>
 CMD ["distillery.mcp.lambda_handler.handler"]

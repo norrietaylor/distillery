@@ -27,10 +27,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 class TestTerraform:
     """Validate Terraform configuration files."""
 
-    terraform_dir = REPO_ROOT / "terraform"
+    terraform_dir = REPO_ROOT / "deploy" / "aws" / "terraform"
 
     def test_terraform_directory_exists(self) -> None:
-        assert self.terraform_dir.is_dir(), "terraform/ directory must exist"
+        assert self.terraform_dir.is_dir(), "deploy/aws/terraform/ directory must exist"
 
     @pytest.mark.parametrize(
         "filename",
@@ -38,11 +38,11 @@ class TestTerraform:
     )
     def test_terraform_required_files_exist(self, filename: str) -> None:
         filepath = self.terraform_dir / filename
-        assert filepath.is_file(), f"terraform/{filename} must exist"
+        assert filepath.is_file(), f"deploy/aws/terraform/{filename} must exist"
 
     def test_terraform_bootstrap_exists(self) -> None:
         bootstrap_main = self.terraform_dir / "bootstrap" / "main.tf"
-        assert bootstrap_main.is_file(), "terraform/bootstrap/main.tf must exist"
+        assert bootstrap_main.is_file(), "deploy/aws/terraform/bootstrap/main.tf must exist"
 
     @pytest.mark.parametrize(
         "key",
@@ -102,16 +102,16 @@ class TestDockerfile:
     """Validate Dockerfile and .dockerignore."""
 
     def test_dockerfile_exists(self) -> None:
-        assert (REPO_ROOT / "Dockerfile").is_file(), "Dockerfile must exist at repo root"
+        assert (REPO_ROOT / "deploy" / "aws" / "Dockerfile").is_file(), "deploy/aws/Dockerfile must exist"
 
     def test_dockerfile_uses_lambda_base_image(self) -> None:
-        content = (REPO_ROOT / "Dockerfile").read_text()
+        content = (REPO_ROOT / "deploy" / "aws" / "Dockerfile").read_text()
         assert "public.ecr.aws/lambda/python" in content, (
             "Dockerfile must use the AWS Lambda Python base image"
         )
 
     def test_dockerfile_no_dev_dependencies(self) -> None:
-        content = (REPO_ROOT / "Dockerfile").read_text()
+        content = (REPO_ROOT / "deploy" / "aws" / "Dockerfile").read_text()
         assert ".[dev]" not in content, (
             "Dockerfile must not install dev dependencies (.[dev])"
         )
@@ -201,7 +201,7 @@ class TestSmokeScript:
 class TestLambdaConfig:
     """Validate the Lambda deployment config."""
 
-    config_path = REPO_ROOT / "distillery.lambda.yaml"
+    config_path = REPO_ROOT / "deploy" / "aws" / "distillery.lambda.yaml"
 
     def test_lambda_config_no_hardcoded_secrets(self) -> None:
         """Ensure the Lambda config references env vars, not actual API keys."""
