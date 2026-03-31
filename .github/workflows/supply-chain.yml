@@ -1,0 +1,261 @@
+name: Supply Chain Security
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+# Minimal default — each job declares its own permissions.
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/norrietaylor/distillery
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────
+  # Job 1: Build, SBOM, and scan (runs on PRs and pushes)
+  # ──────────────────────────────────────────────────────────────────
+  scan:
+    name: Scan (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: fly
+            dockerfile: deploy/fly/Dockerfile
+            context: .
+          # - target: prefect
+          #   dockerfile: deploy/prefect/Dockerfile
+          #   context: .
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
+
+      - name: Build image (local load)
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          load: true
+          push: false
+          tags: distillery-${{ matrix.target }}:scan
+          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,scope=${{ matrix.target }},mode=max
+          build-args: |
+            BUILD_SHA=${{ github.sha }}
+
+      - name: Generate SBOM (CycloneDX)
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          image: distillery-${{ matrix.target }}:scan
+          format: cyclonedx-json
+          output-file: sbom-${{ matrix.target }}.cdx.json
+          artifact-name: sbom-${{ matrix.target }}
+
+      - name: Summarize SBOM
+        run: |
+          COMPONENTS=$(python3 -c "import json; print(len(json.load(open('sbom-${{ matrix.target }}.cdx.json')).get('components', [])))")
+          echo "### 📦 SBOM: \`${{ matrix.target }}\` — ${COMPONENTS} components" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Scan for vulnerabilities (Grype)
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7
+        id: grype
+        with:
+          sbom: sbom-${{ matrix.target }}.cdx.json
+          fail-build: true
+          severity-cutoff: high
+          output-format: json
+
+      - name: Save Grype report and generate summary
+        if: always()
+        run: |
+          if [ -f "${{ steps.grype.outputs.json }}" ]; then
+            cp "${{ steps.grype.outputs.json }}" grype-report-${{ matrix.target }}.json
+
+            # Generate markdown summary for the PR
+            python3 - <<'PYEOF'
+          import json, os
+
+          with open("grype-report-${{ matrix.target }}.json") as f:
+              data = json.load(f)
+
+          SEV_ORDER = ["Critical","High","Medium","Low","Negligible","Unknown"]
+
+          matches = data.get("matches", [])
+          ignored_matches = data.get("ignoredMatches", [])
+
+          # Tag each match with suppression status
+          all_matches = [(m, False) for m in matches] + [(m, True) for m in ignored_matches]
+
+          if not all_matches:
+              summary = "### 🛡️ Grype Scan: `${{ matrix.target }}`\n\n✅ No vulnerabilities found.\n"
+          else:
+              by_sev = {}
+              for m, _ in all_matches:
+                  sev = m.get("vulnerability", {}).get("severity", "Unknown")
+                  by_sev.setdefault(sev, []).append(m)
+
+              counts = " · ".join(f"**{s}**: {len(v)}" for s, v in sorted(by_sev.items(), key=lambda x: SEV_ORDER.index(x[0]) if x[0] in SEV_ORDER else 99))
+              summary = f"### 🛡️ Grype Scan: `${{ matrix.target }}`\n\n{counts}\n\n"
+              summary += "| Severity | CVE | Package | Version | Fixed In | Status |\n"
+              summary += "|----------|-----|---------|---------|----------|--------|\n"
+              for m, is_suppressed in sorted(all_matches, key=lambda x: SEV_ORDER.index(x[0].get("vulnerability",{}).get("severity","Unknown")) if x[0].get("vulnerability",{}).get("severity","Unknown") in SEV_ORDER else 99):
+                  v = m.get("vulnerability", {})
+                  pkg = m.get("artifact", {}).get("name", "?")
+                  ver = m.get("artifact", {}).get("version", "?")
+                  fix = v.get("fix", {})
+                  fixed = ", ".join(fix.get("versions", [])) if fix.get("state") == "fixed" else "—"
+                  ignored = "🔇 suppressed" if is_suppressed or m.get("appliedIgnoreRules") else ""
+                  summary += f"| {v.get('severity','?')} | {v.get('id','?')} | {pkg} | {ver} | {fixed} | {ignored} |\n"
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write(summary)
+          PYEOF
+          fi
+
+      - name: Upload SBOM artifact
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        with:
+          name: sbom-${{ matrix.target }}.cdx.json
+          path: sbom-${{ matrix.target }}.cdx.json
+          retention-days: 30
+
+      - name: Upload Grype report artifact
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        with:
+          name: grype-report-${{ matrix.target }}.json
+          path: grype-report-${{ matrix.target }}.json
+          retention-days: 30
+
+  # ──────────────────────────────────────────────────────────────────
+  # Job 2: Push, sign, attest, release (runs on push to main/tags only)
+  # ──────────────────────────────────────────────────────────────────
+  publish:
+    name: Publish (${{ matrix.target }})
+    needs: scan
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write      # release asset uploads (softprops/action-gh-release)
+      packages: write      # GHCR push
+      id-token: write      # Sigstore OIDC / Cosign keyless
+      attestations: write  # actions/attest-build-provenance
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: fly
+            dockerfile: deploy/fly/Dockerfile
+            context: .
+
+    # NOTE: With a matrix strategy, outputs capture only the last job's value.
+    # Currently only one matrix entry (fly) exists. When adding Prefect,
+    # switch to per-target output keys or use artifacts for digest passing.
+    outputs:
+      digest-fly: ${{ steps.push.outputs.digest }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine image tags
+        id: tags
+        run: |
+          TAGS="${{ env.IMAGE_NAME }}:sha-${GITHUB_SHA::7}"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            TAGS="${TAGS},${{ env.IMAGE_NAME }}:${TAG}"
+          fi
+          if [[ "$GITHUB_REF" == refs/heads/main ]]; then
+            TAGS="${TAGS},${{ env.IMAGE_NAME }}:latest"
+          fi
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+
+      - name: Push image to GHCR
+        id: push
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha,scope=${{ matrix.target }}
+          build-args: |
+            BUILD_SHA=${{ github.sha }}
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@f713795cb21599bc4e5c4b58cbad1da852d7eeb9 # v3
+
+      - name: Sign container image
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          cosign sign --yes "${{ env.IMAGE_NAME }}@${DIGEST}"
+
+      - name: Download SBOM artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: sbom-${{ matrix.target }}.cdx.json
+
+      - name: Download Grype report artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: grype-report-${{ matrix.target }}.json
+
+      - name: Attest SBOM (CycloneDX)
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          cosign attest --yes \
+            --type cyclonedx \
+            --predicate sbom-${{ matrix.target }}.cdx.json \
+            "${{ env.IMAGE_NAME }}@${DIGEST}"
+
+      - name: Attest vulnerability scan
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          cosign attest --yes \
+            --type vuln \
+            --predicate grype-report-${{ matrix.target }}.json \
+            "${{ env.IMAGE_NAME }}@${DIGEST}"
+
+      - name: Attest build provenance (SLSA)
+        uses: actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45 # v2
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attach artifacts to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
+        with:
+          files: |
+            sbom-${{ matrix.target }}.cdx.json
+            grype-report-${{ matrix.target }}.json
