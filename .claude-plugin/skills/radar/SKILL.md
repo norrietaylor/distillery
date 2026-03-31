@@ -31,7 +31,7 @@ See CONVENTIONS.md — skip if already confirmed this conversation.
 
 ### Step 3: Retrieve Recent Feed Entries
 
-Call `distillery_list(entry_type="feed", limit=<limit>)`. If `--days N` was specified, also pass `date_from` as ISO 8601 date N days before today.
+Call `distillery_list(entry_type="feed", limit=<limit>, output_mode="summary")`. If `--days N` was specified, also pass `date_from` as ISO 8601 date N days before today.
 
 If no feed entries are found, display:
 

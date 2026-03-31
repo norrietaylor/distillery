@@ -1134,6 +1134,56 @@ class DuckDBStore:
 
         return await asyncio.to_thread(_sync)
 
+    async def aggregate_entries(
+        self,
+        group_by: str,
+        filters: dict[str, Any] | None,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        """Return entry counts grouped by *group_by*, sorted by count descending.
+
+        Parameters:
+            group_by: Logical field name.  Supported values:
+                ``"entry_type"``, ``"status"``, ``"author"``, ``"project"``,
+                ``"source"``, ``"metadata.source_url"``, ``"metadata.source_type"``.
+                The SQL expression is resolved here so that callers only ever pass
+                the logical name (validated by the MCP layer against an allowlist).
+            filters: Optional metadata constraints (see ``_build_filter_clauses``).
+            limit: Maximum number of groups to return.
+
+        Returns:
+            List of ``{"value": <group_value>, "count": <int>}`` dicts ordered by
+            ``count`` descending.
+        """
+        _GROUP_EXPR_MAP: dict[str, str] = {
+            "entry_type": "entry_type",
+            "status": "status",
+            "author": "author",
+            "project": "project",
+            "source": "source",
+            "metadata.source_url": "json_extract_string(metadata, '$.source_url')",
+            "metadata.source_type": "json_extract_string(metadata, '$.source_type')",
+        }
+        group_expr = _GROUP_EXPR_MAP[group_by]
+
+        def _sync() -> list[dict[str, Any]]:
+            conn = self.connection
+            where_clauses, params = self._build_filter_clauses(filters)
+            where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+            sql = (
+                f"SELECT {group_expr} AS value, COUNT(*) AS count "
+                f"FROM entries "
+                f"{where_sql} "
+                f"GROUP BY value "
+                f"ORDER BY count DESC "
+                f"LIMIT ?"
+            )
+            result = conn.execute(sql, params + [limit])
+            rows = result.fetchall()
+            return [{"value": row[0], "count": row[1]} for row in rows]
+
+        return await asyncio.to_thread(_sync)
+
     # ------------------------------------------------------------------
     # Audit logging
     # ------------------------------------------------------------------

@@ -32,6 +32,7 @@ from distillery.config import (
 from distillery.eval.models import SeedEntry
 from distillery.mcp._stub_embedding import HashEmbeddingProvider
 from distillery.mcp.server import (
+    _handle_aggregate,
     _handle_check_conflicts,
     _handle_check_dedup,
     _handle_classify,
@@ -418,6 +419,8 @@ class MCPBridge:
             return await _handle_update(store=store, arguments=args)
         if name == "distillery_list":
             return await _handle_list(store=store, arguments=args)
+        if name == "distillery_aggregate":
+            return await _handle_aggregate(store=store, arguments=args)
         if name == "distillery_search":
             return await _handle_search(store=store, arguments=args)
         if name == "distillery_find_similar":
