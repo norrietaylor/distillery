@@ -196,7 +196,7 @@ Options:
 
 ### Verifying startup
 
-The server logs configuration details to stderr via Python logging. Check your platform's log viewer (Docker logs, journalctl, etc.) to confirm the server started with the expected transport, auth, and storage settings.
+The server logs to stderr via Python logging. On startup you will reliably see database initialization and embedding provider details. Transport and auth configuration are not currently emitted as structured log lines — verify those by checking the config file and testing connectivity (see Step 5).
 
 ## Step 5: Verify the Server is Running
 

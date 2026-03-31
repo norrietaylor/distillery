@@ -4,7 +4,7 @@ Prioritized work items derived from [ROADMAP.md](ROADMAP.md) and spec research. 
 
 **Completed specs:** 01 (storage/data model), 02 (core skills), 03 (classification), 04 (public release), 05 (developer experience), 06 (MVP maturity), 07 (FastMCP migration), 08 (infrastructure improvements), 09 (CLI eval runner), 10 (ambient intelligence), 10b (GitHub team OAuth).
 
-**Current state:** 22 MCP tools, 10 skills, FastMCP 2.12+, stdio + HTTP transport, GitHub OAuth, request middleware (logging, rate limiting, security headers), embedding budget tracking, SIGTERM/WAL handling, Python 3.11-3.13 CI matrix, 80% coverage threshold, 1000+ tests.
+**Current state:** 22 MCP tools, 10 skills, FastMCP 2.12+, stdio + HTTP transport, GitHub OAuth, request middleware (logging, rate limiting, security headers), embedding budget tracking, SIGTERM/WAL handling, Python 3.11-3.13 CI matrix, 80% coverage threshold, 1100+ tests.
 
 ---
 

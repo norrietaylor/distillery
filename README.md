@@ -226,12 +226,12 @@ distillery/
 │   │   ├── models.py        # ClassificationResult, DeduplicationResult
 │   │   ├── engine.py        # ClassificationEngine
 │   │   └── dedup.py         # DeduplicationChecker
-│   └── mcp/
-│       ├── server.py        # MCP server (22 tools, FastMCP 2.x/3.x)
-│       ├── auth.py          # GitHub OAuth via FastMCP GitHubProvider
-│       ├── middleware.py    # Request logging, rate limiting, security headers
-│       ├── budget.py        # Embedding API budget tracking
-│       └── __main__.py      # CLI: --transport stdio|http, --host, --port
+│   ├── mcp/
+│   │   ├── server.py        # MCP server (22 tools, FastMCP 2.x/3.x)
+│   │   ├── auth.py          # GitHub OAuth via FastMCP GitHubProvider
+│   │   ├── middleware.py    # Request logging, rate limiting, security headers
+│   │   ├── budget.py        # Embedding API budget tracking
+│   │   └── __main__.py      # CLI: --transport stdio|http, --host, --port
 │   ├── security.py          # Input sanitization and content validation
 │   └── feeds/
 │       ├── github.py        # GitHub event adapter

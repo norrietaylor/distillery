@@ -51,6 +51,10 @@ ln -s ~/.claude/distillery/.claude-plugin/skills/pour      ~/.claude/skills/pour
 ln -s ~/.claude/distillery/.claude-plugin/skills/bookmark  ~/.claude/skills/bookmark
 ln -s ~/.claude/distillery/.claude-plugin/skills/minutes   ~/.claude/skills/minutes
 ln -s ~/.claude/distillery/.claude-plugin/skills/classify  ~/.claude/skills/classify
+ln -s ~/.claude/distillery/.claude-plugin/skills/watch     ~/.claude/skills/watch
+ln -s ~/.claude/distillery/.claude-plugin/skills/radar     ~/.claude/skills/radar
+ln -s ~/.claude/distillery/.claude-plugin/skills/tune      ~/.claude/skills/tune
+ln -s ~/.claude/distillery/.claude-plugin/skills/setup     ~/.claude/skills/setup
 ```
 
 ## MCP Configuration
