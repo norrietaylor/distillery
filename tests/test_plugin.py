@@ -24,7 +24,8 @@ pytestmark = pytest.mark.unit
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).parent.parent
-PLUGIN_JSON_PATH = REPO_ROOT / ".claude-plugin" / "plugin.json"
+PLUGIN_DIR = REPO_ROOT / ".claude-plugin"
+PLUGIN_JSON_PATH = PLUGIN_DIR / "plugin.json"
 PLUGIN_DOC_PATH = REPO_ROOT / "docs" / "plugin.md"
 
 EXPECTED_SKILL_NAMES = {"distill", "recall", "pour", "bookmark", "minutes", "classify", "watch", "radar", "tune", "setup"}
@@ -159,15 +160,15 @@ class TestPluginSkills:
         assert manifest["skills"].startswith("./")
 
     def test_skills_directory_value(self) -> None:
-        """skills must point to './.claude/skills/'."""
+        """skills must point to './skills/'."""
         manifest = load_plugin_manifest()
-        assert manifest["skills"] == "./.claude/skills/"
+        assert manifest["skills"] == "./skills/"
 
     def test_skills_directory_exists(self) -> None:
         """The skills directory referenced in the manifest must exist."""
         manifest = load_plugin_manifest()
         skills_path = manifest["skills"].removeprefix("./")
-        skills_dir = REPO_ROOT / skills_path
+        skills_dir = PLUGIN_DIR / skills_path
         assert skills_dir.exists(), f"Skills directory not found at {skills_dir}"
         assert skills_dir.is_dir(), f"{skills_dir} is not a directory"
 
@@ -175,7 +176,7 @@ class TestPluginSkills:
         """Each expected skill must have a subdirectory with a SKILL.md file."""
         manifest = load_plugin_manifest()
         skills_path = manifest["skills"].removeprefix("./")
-        skills_dir = REPO_ROOT / skills_path
+        skills_dir = PLUGIN_DIR / skills_path
         for skill_name in EXPECTED_SKILL_NAMES:
             skill_file = skills_dir / skill_name / "SKILL.md"
             assert skill_file.exists(), f"Skill file missing: {skill_file}"
@@ -184,7 +185,7 @@ class TestPluginSkills:
         """Each SKILL.md must start with YAML frontmatter."""
         manifest = load_plugin_manifest()
         skills_path = manifest["skills"].removeprefix("./")
-        skills_dir = REPO_ROOT / skills_path
+        skills_dir = PLUGIN_DIR / skills_path
         for skill_name in EXPECTED_SKILL_NAMES:
             skill_file = skills_dir / skill_name / "SKILL.md"
             assert skill_file.read_text(encoding="utf-8").lstrip().startswith("---"), (
@@ -195,7 +196,7 @@ class TestPluginSkills:
         """The skills directory must contain exactly ten skill subdirectories with SKILL.md files."""
         manifest = load_plugin_manifest()
         skills_path = manifest["skills"].removeprefix("./")
-        skills_dir = REPO_ROOT / skills_path
+        skills_dir = PLUGIN_DIR / skills_path
         found = {
             d.name for d in skills_dir.iterdir()
             if d.is_dir() and (d / "SKILL.md").exists()

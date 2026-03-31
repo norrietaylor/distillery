@@ -940,10 +940,11 @@ Options:
         <span class="arch-skill">/watch</span>
         <span class="arch-skill">/radar</span>
         <span class="arch-skill">/tune</span>
+        <span class="arch-skill">/setup</span>
       </div>
       <div class="arch-mcp">
         <div class="arch-mcp-title">MCP Server</div>
-        <div class="arch-mcp-sub">FastMCP 2.x/3.x &middot; stdio + HTTP &middot; 21 tools</div>
+        <div class="arch-mcp-sub">FastMCP 2.x/3.x &middot; stdio + HTTP &middot; 22 tools</div>
       </div>
     </div>
     <div class="arch-connector">
@@ -1024,94 +1025,116 @@ $ distillery-mcp --transport http --port 8000
 <!-- SLIDE 11: What we've built -->
 <!-- ============================================================ -->
 <div class="slide" id="s11">
-  <h2 class="fade-in">What we've built</h2>
+  <h2 class="fade-in">By the numbers</h2>
   <div style="height: 24px;"></div>
   <div style="display: flex; gap: 64px; justify-content: center;" class="fade-in">
     <div class="stat">
-      <div class="number">9</div>
+      <div class="number">10</div>
       <div class="label">Claude Code skills</div>
     </div>
     <div class="stat">
-      <div class="number">21</div>
+      <div class="number">22</div>
       <div class="label">MCP server tools</div>
     </div>
     <div class="stat">
-      <div class="number">860+</div>
+      <div class="number">1100+</div>
       <div class="label">tests passing</div>
     </div>
     <div class="stat">
       <div class="number">2</div>
-      <div class="label">phases shipped</div>
+      <div class="label">deploy targets</div>
     </div>
   </div>
   <div style="height: 40px;"></div>
   <div class="grid-3 fade-in">
     <div class="card accent">
-      <h3>Foundation</h3>
-      <ul>
-        <li>Entry data model</li>
-        <li>DuckDB + HNSW index</li>
-        <li>Embedding providers</li>
-        <li>MCP server (21 tools)</li>
-      </ul>
-    </div>
-    <div class="card accent">
-      <h3>9 Skills</h3>
+      <h3>Knowledge</h3>
       <ul>
         <li>/distill, /recall, /pour</li>
         <li>/bookmark, /minutes, /classify</li>
-        <li>/radar, /watch, /tune</li>
-        <li>Shared conventions</li>
+        <li>LLM classification + semantic dedup</li>
       </ul>
     </div>
     <div class="card accent">
-      <h3>Classification &amp; Feeds</h3>
+      <h3>Ambient Intelligence</h3>
       <ul>
-        <li>Classification engine</li>
-        <li>Semantic dedup</li>
-        <li>Review queue</li>
-        <li>Feed polling (GitHub + RSS)</li>
+        <li>/radar, /watch, /tune</li>
+        <li>GitHub + RSS feed polling</li>
+        <li>Embedding-based relevance scoring</li>
+      </ul>
+    </div>
+    <div class="card accent">
+      <h3>Team &amp; Ops</h3>
+      <ul>
+        <li>HTTP transport + GitHub OAuth</li>
+        <li>Fly.io + Prefect Horizon</li>
+        <li>Rate limiting, budget tracking</li>
       </ul>
     </div>
   </div>
 </div>
 
 <!-- ============================================================ -->
-<!-- SLIDE 12: Roadmap -->
+<!-- SLIDE 12: Roadmap — Shipped -->
 <!-- ============================================================ -->
 <div class="slide left" id="s12">
-  <h2 class="fade-in">Status &amp; what's next</h2>
-  <div style="height: 20px;"></div>
-  <div class="timeline">
-    <div class="timeline-item done fade-in">
-      <h3>Phase 1 &mdash; Foundation <span style="color: var(--green); font-size: 16px; font-weight: 400;">✓ Shipped</span></h3>
-      <p>9 skills, 21 MCP tools, DuckDB + HNSW, classification pipeline, semantic deduplication. 860+ tests passing.</p>
+  <h2 class="fade-in">What's shipped</h2>
+  <div style="height: 16px;"></div>
+  <div class="grid-2 fade-in">
+    <div class="card">
+      <h3>Core Platform</h3>
+      <ul>
+        <li style="color: var(--green);">10 skills, 22 MCP tools</li>
+        <li style="color: var(--green);">DuckDB + HNSW vector search</li>
+        <li style="color: var(--green);">LLM classification + semantic dedup</li>
+        <li style="color: var(--green);">Retrieval quality metrics + stale detection</li>
+        <li style="color: var(--green);">Hierarchical tag namespaces</li>
+        <li style="color: var(--green);">1100+ tests, mypy strict, 80% coverage</li>
+      </ul>
     </div>
-    <div class="timeline-item done fade-in">
-      <h3>Phase 3 &mdash; Ambient Intelligence <span style="color: var(--green); font-size: 16px; font-weight: 400;">✓ Shipped</span></h3>
-      <p>Feed polling (GitHub + RSS), relevance scoring, interest extraction. <span style="color: var(--text);">/radar</span>, <span style="color: var(--text);">/watch</span>, <span style="color: var(--text);">/tune</span> live.</p>
+    <div class="card">
+      <h3>Team &amp; Infrastructure</h3>
+      <ul>
+        <li style="color: var(--green);">HTTP transport + GitHub OAuth</li>
+        <li style="color: var(--green);">Fly.io + Prefect Horizon deployments</li>
+        <li style="color: var(--green);">MotherDuck shared storage</li>
+        <li style="color: var(--green);">Request middleware (rate limiting, logging)</li>
+        <li style="color: var(--green);">Embedding budget tracking</li>
+        <li style="color: var(--green);">SIGTERM/WAL handling, OAuth persistence</li>
+      </ul>
     </div>
-    <div class="timeline-item fade-in">
-      <h3>Phase 2 &mdash; Team Expansion <span style="color: var(--amber); font-size: 16px; font-weight: 400;">In Progress</span></h3>
-      <p><strong style="color: var(--green);">Infrastructure shipped:</strong> HTTP transport, GitHub OAuth, MotherDuck shared storage, namespace taxonomy.<br>
-      <strong>Team skills up next:</strong> <span style="color: var(--text);">/whois</span> (expertise map), <span style="color: var(--text);">/digest</span> (activity summaries), <span style="color: var(--text);">/investigate</span> (deep domain context), <span style="color: var(--text);">/gh-sync</span>, <span style="color: var(--text);">/briefing</span>, <span style="color: var(--text);">/process</span>.<br>
-      Also: Elasticsearch backend, access control, session capture hooks.</p>
+    <div class="card">
+      <h3>Ambient Intelligence</h3>
+      <ul>
+        <li style="color: var(--green);">Feed polling (GitHub + RSS)</li>
+        <li style="color: var(--green);">Embedding-based relevance scoring</li>
+        <li style="color: var(--green);">Interest extraction + source suggestions</li>
+        <li style="color: var(--green);"><span style="color: var(--text);">/radar</span> &middot; <span style="color: var(--text);">/watch</span> &middot; <span style="color: var(--text);">/tune</span></li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Plugin &amp; Distribution</h3>
+      <ul>
+        <li style="color: var(--green);">Claude Code plugin manifest</li>
+        <li style="color: var(--green);">Marketplace install (<code>claude plugin install</code>)</li>
+        <li style="color: var(--green);"><span style="color: var(--text);">/setup</span> onboarding wizard</li>
+        <li style="color: var(--green);">Input sanitization + security hardening</li>
+      </ul>
     </div>
   </div>
 </div>
 
 <!-- ============================================================ -->
-<!-- SLIDE 13: Phase 2 detail -->
+<!-- SLIDE 13: Roadmap — What's next -->
 <!-- ============================================================ -->
-<div class="slide" id="s13">
-  <h2 class="fade-in">Phase 2: Team Expansion</h2>
-  <p class="subtitle fade-in">Scale from single user to team-wide adoption</p>
-  <div style="height: 20px;"></div>
+<div class="slide left" id="s13">
+  <h2 class="fade-in">What's next</h2>
+  <div style="height: 16px;"></div>
   <div class="grid-2 fade-in">
     <div class="card">
-      <h3>New Skills</h3>
+      <h3>Team Skills</h3>
       <table style="width: 100%; font-size: 16px;">
-        <tr><td class="cmd" style="padding: 6px 12px; font-size: 15px;">/whois</td><td style="padding: 6px; color: var(--text-muted);">Who knows about distributed caching?</td></tr>
+        <tr><td class="cmd" style="padding: 6px 12px; font-size: 15px;">/whois</td><td style="padding: 6px; color: var(--text-muted);">Evidence-backed expertise map</td></tr>
         <tr><td class="cmd" style="padding: 6px 12px; font-size: 15px;">/investigate</td><td style="padding: 6px; color: var(--text-muted);">Deep domain context builder</td></tr>
         <tr><td class="cmd" style="padding: 6px 12px; font-size: 15px;">/digest</td><td style="padding: 6px; color: var(--text-muted);">Team activity summaries</td></tr>
         <tr><td class="cmd" style="padding: 6px 12px; font-size: 15px;">/briefing</td><td style="padding: 6px; color: var(--text-muted);">Team knowledge dashboard</td></tr>
@@ -1122,58 +1145,20 @@ $ distillery-mcp --transport http --port 8000
     <div class="card">
       <h3>Infrastructure</h3>
       <ul>
-        <li style="color: var(--green);"><strong>HTTP transport + GitHub OAuth</strong><br><span class="dim">Streamable-HTTP, FastMCP GitHubProvider</span></li>
-        <li style="color: var(--green);"><strong>MotherDuck shared storage</strong><br><span class="dim">md: prefix, team-shared DuckDB</span></li>
-        <li style="color: var(--green);"><strong>Namespace taxonomy</strong><br><span class="dim">project/billing-v2/decisions</span></li>
         <li><strong>Access control</strong><br><span class="dim">Team/private visibility flag</span></li>
-        <li><strong>Elasticsearch migration</strong><br><span class="dim">Native hybrid search, ES|QL analytics</span></li>
+        <li><strong>Elasticsearch migration</strong><br><span class="dim">Hybrid search (BM25 + kNN + RRF), ES|QL analytics</span></li>
+        <li><strong>More feed adapters</strong><br><span class="dim">Slack, Hacker News, webhooks</span></li>
+        <li><strong>Session capture hooks</strong><br><span class="dim">Auto-distill on session end</span></li>
+        <li><strong>Provenance tracking</strong><br><span class="dim">Full version history, source chain</span></li>
       </ul>
     </div>
   </div>
 </div>
 
 <!-- ============================================================ -->
-<!-- SLIDE 14: Phase 3 detail -->
+<!-- SLIDE 14: Differentiators -->
 <!-- ============================================================ -->
 <div class="slide" id="s14">
-  <h2 class="fade-in">Ambient Intelligence <span style="color: var(--green); font-size: 28px; font-weight: 400;">✓ Shipped</span></h2>
-  <p class="subtitle fade-in">The knowledge base watches the world — automatically</p>
-  <div style="height: 20px;"></div>
-  <div class="code-block fade-in" style="max-width: 760px;"><span class="comment"># How the relevance scoring pipeline works</span>
-
-For each new feed item:
-  <span class="label">1.</span> Embed item (title + summary)
-  <span class="label">2.</span> Compare against active project embeddings
-  <span class="label">3.</span> Score = similarity x priority x tag overlap
-                       x recency x source trust
-  <span class="label">4.</span> score > <span class="result">0.65</span>  &rarr;  include in digest
-  <span class="label">5.</span> score > <span class="warn">0.90</span>  &rarr;  immediate alert
-
-<span class="comment"># Feed sources (live)</span>
-  <span class="result">✓</span> GitHub events (REST API)
-  <span class="result">✓</span> RSS / Atom feeds
-  <span class="comment">  Slack / Hacker News / Webhooks — coming next</span></div>
-  <div style="height: 24px;"></div>
-  <div class="grid-3 fade-in">
-    <div class="card" style="text-align: center;">
-      <h3>/radar</h3>
-      <p style="font-size: 15px;">View latest ambient feed digest</p>
-    </div>
-    <div class="card" style="text-align: center;">
-      <h3>/watch</h3>
-      <p style="font-size: 15px;">Manage monitored sources</p>
-    </div>
-    <div class="card" style="text-align: center;">
-      <h3>/tune</h3>
-      <p style="font-size: 15px;">Adjust relevance thresholds</p>
-    </div>
-  </div>
-</div>
-
-<!-- ============================================================ -->
-<!-- SLIDE 15: Differentiators -->
-<!-- ============================================================ -->
-<div class="slide" id="s15">
   <h2 class="fade-in">What makes this different</h2>
   <div style="height: 24px;"></div>
   <div class="grid-2 fade-in">
@@ -1205,9 +1190,9 @@ For each new feed item:
 </div>
 
 <!-- ============================================================ -->
-<!-- SLIDE 16: Close -->
+<!-- SLIDE 15: Close -->
 <!-- ============================================================ -->
-<div class="slide" id="s16">
+<div class="slide" id="s15">
   <div class="logo fade-in">
     <img src="assets/distillery-logo-dark-512.png" alt="Distillery">
   </div>

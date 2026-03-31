@@ -143,7 +143,8 @@ This is normal if the knowledge base is empty. The connection is still working. 
 4. **Check server status** — Ask your operator if the server is running
    ```bash
    # Operator can check with:
-   curl https://distillery.myteam.com/mcp/health
+   curl -I https://distillery.myteam.com/mcp
+   # Expected: HTTP 200, 401, or 405
    ```
 
 ### Issue: "Authentication failed" or "GitHub OAuth error"

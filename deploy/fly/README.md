@@ -76,8 +76,8 @@ Add to your MCP client configuration:
 {
   "mcpServers": {
     "distillery": {
-      "type": "http",
-      "url": "https://<app-name>.fly.dev/mcp"
+      "url": "https://<app-name>.fly.dev/mcp",
+      "transport": "http"
     }
   }
 }
