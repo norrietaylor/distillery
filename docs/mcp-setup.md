@@ -280,6 +280,11 @@ MCP server settings with explicit credentials:
 
 ### Option B: MotherDuck
 
+> **Known limitation:** MotherDuck does not support the DuckDB VSS extension.
+> HNSW vector index creation will fail, which means semantic search will not work.
+> Use S3-backed DuckDB (Option A) for deployments that require search.
+> MotherDuck can be used for basic CRUD operations (store, get, list) only.
+
 [MotherDuck](https://motherduck.com) is DuckDB's managed cloud service.  Databases
 are stored in your MotherDuck account and accessed via the `md:` URI prefix.
 

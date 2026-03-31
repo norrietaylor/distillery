@@ -1,21 +1,58 @@
-# Exclude files not needed in the production Docker image
+# Secrets — never bake these into the image
+.env
+.env.*
+*.env
+credentials
+credentials.json
+*.pem
+*.key
+
+# Git internals
 .git
-.github
-.claude
-.venv
+.gitignore
+.gitattributes
+.worktrees
+
+# Tests and CI
+tests/
+.github/
+.claude/
+issues/
+docs/
+terraform/
+
+# Python build artefacts
+__pycache__
+*.py[cod]
+*.pyo
+*.pyc
+.pytest_cache
 .mypy_cache
 .ruff_cache
-.pytest_cache
-__pycache__
-tests/
-docs/
-issues/
+*.egg-info
+dist/
+build/
+.venv/
+venv/
+*.egg
+
+# Editor and OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# Runtime / test databases
+*.duckdb
+*.duckdb.wal
+
+# Misc project files not needed in the image
 CHANGELOG.md
-CONTRIBUTING.md
 CLAUDE.md
+CONTRIBUTING.md
 LICENSE
-uv.lock
 Makefile
-.gitignore
-.dockerignore
+plugin.json
+uv.lock
 .mcp.json

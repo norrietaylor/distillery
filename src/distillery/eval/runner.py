@@ -396,11 +396,31 @@ class ClaudeEvalRunner:
             results = await store.list_entries(filters=None, limit=2147483647, offset=0)
             entries_stored = max(0, len(results) - seed_count)
 
-            # Count search results from tool calls.
+            # Count search results from tool calls.  The stream-json format
+            # does not include tool responses (response is always {}), so we
+            # query the search_log table which records every search with its
+            # result count.  Fall back to tool call response parsing if available.
             last_search_count = 0
-            for tc in tool_calls:
-                if tc.tool_name == "distillery_search" and isinstance(tc.response, dict):
-                    last_search_count = tc.response.get("count", 0)
+            try:
+                conn = store._conn
+                if conn is not None:
+                    row = conn.execute(
+                        "SELECT len(result_entry_ids) FROM search_log ORDER BY timestamp DESC LIMIT 1"
+                    ).fetchone()
+                    if row:
+                        last_search_count = int(row[0])
+            except Exception:
+                # search_log may not exist or be empty — fall back to tool calls.
+                for tc in tool_calls:
+                    bare_name = tc.tool_name
+                    if bare_name.startswith("mcp__distillery__"):
+                        bare_name = bare_name[len("mcp__distillery__"):]
+                    if bare_name == "distillery_search" and isinstance(tc.response, dict):
+                        last_search_count = (
+                            tc.response.get("count", 0)
+                            or tc.response.get("total_results", 0)
+                            or len(tc.response.get("results", []))
+                        )
 
             await store.close()
 
