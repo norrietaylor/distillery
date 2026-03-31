@@ -14,11 +14,13 @@ claude plugin install distillery
 
 This installs the skill definitions globally and configures the MCP server connection to the hosted Distillery instance.
 
-After installation, restart Claude Code and verify by calling the `distillery_status` MCP tool:
+After installation, restart Claude Code and run the onboarding wizard:
 
 ```text
-distillery_status
+/setup
 ```
+
+This verifies MCP connectivity, detects your transport, and configures auto-poll for ambient intelligence.
 
 !!! note "Claude Desktop"
     The Claude desktop app does not support Claude Code skills or the plugin install system. Desktop users can connect the MCP server directly (all 22 tools are available) but slash commands like `/distill` and `/recall` are CLI-only features.
