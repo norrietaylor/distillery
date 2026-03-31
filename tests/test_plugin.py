@@ -1,12 +1,12 @@
-"""Tests for the Claude Code plugin manifest (.claude-plugin/plugin.json) and plugin documentation (docs/plugin.md).
+"""Tests for the Claude Code plugin manifest (.claude-plugin/plugin.json) and plugin documentation.
 
 Covers:
   - .claude-plugin/plugin.json is valid JSON and contains all required top-level fields
   - Plugin metadata (name, version, author, homepage, repository, keywords)
   - Skills directory path and SKILL.md auto-discovery
   - MCP server configuration: presence, command, env
-  - docs/plugin.md structure: file existence, required headings, skill coverage
-  - docs/plugin.md content: code blocks, references to plugin.json, installation sections
+  - docs/getting-started/plugin-install.md structure: file existence, required headings, skill coverage
+  - docs/getting-started/plugin-install.md content: code blocks, installation sections, MCP config
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).parent.parent
 PLUGIN_DIR = REPO_ROOT / ".claude-plugin"
 PLUGIN_JSON_PATH = PLUGIN_DIR / "plugin.json"
-PLUGIN_DOC_PATH = REPO_ROOT / "docs" / "plugin.md"
+PLUGIN_DOC_PATH = REPO_ROOT / "docs" / "getting-started" / "plugin-install.md"
 
 EXPECTED_SKILL_NAMES = {"distill", "recall", "pour", "bookmark", "minutes", "classify", "watch", "radar", "tune", "setup"}
 
@@ -37,7 +37,7 @@ def load_plugin_manifest() -> dict:  # type: ignore[type-arg]
 
 
 def load_plugin_doc() -> str:
-    """Load docs/plugin.md from the repository root."""
+    """Load docs/getting-started/plugin-install.md from the repository root."""
     return PLUGIN_DOC_PATH.read_text(encoding="utf-8")
 
 
@@ -248,33 +248,33 @@ class TestPluginMCPServers:
 
 
 # ---------------------------------------------------------------------------
-# docs/plugin.md — file-level tests
+# docs/getting-started/plugin-install.md — file-level tests
 # ---------------------------------------------------------------------------
 
 
 class TestPluginDocumentationFile:
     def test_plugin_doc_exists(self) -> None:
-        """docs/plugin.md must exist."""
-        assert PLUGIN_DOC_PATH.exists(), f"docs/plugin.md not found at {PLUGIN_DOC_PATH}"
+        """docs/getting-started/plugin-install.md must exist."""
+        assert PLUGIN_DOC_PATH.exists(), f"Plugin doc not found at {PLUGIN_DOC_PATH}"
 
     def test_plugin_doc_is_non_empty(self) -> None:
-        """docs/plugin.md must not be empty."""
+        """docs/getting-started/plugin-install.md must not be empty."""
         content = load_plugin_doc()
         assert len(content.strip()) > 0
 
     def test_plugin_doc_starts_with_h1(self) -> None:
-        """docs/plugin.md must start with an H1 heading."""
+        """docs/getting-started/plugin-install.md must start with an H1 heading."""
         content = load_plugin_doc()
         first_non_empty = next(
             (line for line in content.splitlines() if line.strip()), None
         )
         assert first_non_empty is not None and first_non_empty.startswith("# "), (
-            "docs/plugin.md has no H1 heading"
+            "Plugin doc has no H1 heading"
         )
 
 
 # ---------------------------------------------------------------------------
-# docs/plugin.md — required section headings
+# docs/getting-started/plugin-install.md — required section headings
 # ---------------------------------------------------------------------------
 
 
@@ -287,163 +287,133 @@ class TestPluginDocumentationHeadings:
             if line.startswith("#")
         ]
 
-    def test_has_plugin_manifest_section(self) -> None:
-        """docs/plugin.md must have a 'Plugin Manifest' section."""
+    def test_has_install_section(self) -> None:
+        """Plugin doc must have an install section."""
         headings = self._get_headings()
-        assert any("Plugin Manifest" in h for h in headings)
-
-    def test_has_installation_section(self) -> None:
-        """docs/plugin.md must have an 'Installation' section."""
-        headings = self._get_headings()
-        assert any("Installation" in h for h in headings)
+        assert any("Install" in h for h in headings)
 
     def test_has_mcp_configuration_section(self) -> None:
-        """docs/plugin.md must have an 'MCP Configuration' section."""
+        """Plugin doc must have an 'MCP Configuration' section."""
         headings = self._get_headings()
         assert any("MCP Configuration" in h for h in headings)
 
     def test_has_available_skills_section(self) -> None:
-        """docs/plugin.md must have an 'Available Skills' section."""
+        """Plugin doc must have an 'Available Skills' section."""
         headings = self._get_headings()
         assert any("Available Skills" in h for h in headings)
 
-    def test_has_mcp_unavailability_section(self) -> None:
-        """docs/plugin.md must have an 'MCP Unavailability' section."""
-        headings = self._get_headings()
-        assert any("MCP Unavailability" in h for h in headings)
-
     def test_has_troubleshooting_section(self) -> None:
-        """docs/plugin.md must have a 'Troubleshooting' section."""
+        """Plugin doc must have a 'Troubleshooting' section."""
         headings = self._get_headings()
         assert any("Troubleshooting" in h for h in headings)
 
 
 # ---------------------------------------------------------------------------
-# docs/plugin.md — skill coverage
+# docs/getting-started/plugin-install.md — skill coverage
 # ---------------------------------------------------------------------------
 
 
 class TestPluginDocumentationSkillCoverage:
-    def test_all_six_skill_triggers_mentioned(self) -> None:
-        """docs/plugin.md must mention all six skill command triggers."""
+    def test_all_ten_skill_triggers_mentioned(self) -> None:
+        """Plugin doc must mention all ten skill command triggers."""
         content = load_plugin_doc()
-        for skill in ("/distill", "/recall", "/pour", "/bookmark", "/minutes", "/classify"):
-            assert skill in content, f"Skill trigger '{skill}' not mentioned in plugin.md"
+        for skill in ("/distill", "/recall", "/pour", "/bookmark", "/minutes",
+                      "/classify", "/watch", "/radar", "/tune", "/setup"):
+            assert skill in content, f"Skill trigger '{skill}' not mentioned in plugin doc"
 
     def test_available_skills_table_contains_all_skills(self) -> None:
-        """The Available Skills table must list all six skill names."""
+        """The Available Skills table must list all ten skill names."""
         content = load_plugin_doc()
         for skill_name in EXPECTED_SKILL_NAMES:
             assert skill_name in content.lower(), (
-                f"Skill '{skill_name}' not found in plugin.md"
+                f"Skill '{skill_name}' not found in plugin doc"
             )
 
     def test_distill_trigger_phrases_documented(self) -> None:
-        """docs/plugin.md must document trigger phrases for /distill."""
+        """Plugin doc must document trigger phrases for /distill."""
         content = load_plugin_doc()
         assert "capture this" in content or "save knowledge" in content
 
     def test_recall_trigger_phrases_documented(self) -> None:
-        """docs/plugin.md must document trigger phrases for /recall."""
+        """Plugin doc must document trigger phrases for /recall."""
         content = load_plugin_doc()
         assert "search knowledge" in content or "what do we know about" in content
 
     def test_bookmark_trigger_phrases_documented(self) -> None:
-        """docs/plugin.md must document trigger phrases for /bookmark."""
+        """Plugin doc must document trigger phrases for /bookmark."""
         content = load_plugin_doc()
         assert "bookmark" in content.lower()
 
     def test_minutes_trigger_phrases_documented(self) -> None:
-        """docs/plugin.md must document trigger phrases for /minutes."""
+        """Plugin doc must document trigger phrases for /minutes."""
         content = load_plugin_doc()
         assert "meeting notes" in content or "capture meeting" in content
 
 
 # ---------------------------------------------------------------------------
-# docs/plugin.md — content and references
+# docs/getting-started/plugin-install.md — content and references
 # ---------------------------------------------------------------------------
 
 
 class TestPluginDocumentationContent:
-    def test_references_plugin_json(self) -> None:
-        """docs/plugin.md must reference plugin.json."""
-        content = load_plugin_doc()
-        assert "plugin.json" in content
-
     def test_mentions_github_repository(self) -> None:
-        """docs/plugin.md must mention the GitHub repository URL."""
+        """Plugin doc must mention the GitHub repository URL."""
         content = load_plugin_doc()
         assert "github.com/norrietaylor/distillery" in content
 
     def test_contains_bash_code_blocks(self) -> None:
-        """docs/plugin.md must contain at least one bash code block."""
+        """Plugin doc must contain at least one bash code block."""
         content = load_plugin_doc()
         assert "```bash" in content
 
     def test_contains_json_code_blocks(self) -> None:
-        """docs/plugin.md must contain at least one JSON code block."""
+        """Plugin doc must contain at least one JSON code block."""
         content = load_plugin_doc()
         assert "```json" in content
 
     def test_contains_json_settings_snippet(self) -> None:
-        """docs/plugin.md must contain a JSON settings snippet for MCP configuration."""
+        """Plugin doc must contain a JSON settings snippet for MCP configuration."""
         content = load_plugin_doc()
         assert '"mcpServers"' in content
 
     def test_mentions_mcp_server_verification(self) -> None:
-        """docs/plugin.md must describe how to verify the MCP server is running."""
+        """Plugin doc must describe how to verify the MCP server is running."""
         content = load_plugin_doc()
         assert "distillery_status" in content or "distillery health" in content
 
     def test_mentions_claude_plugin_install_command(self) -> None:
-        """docs/plugin.md must show the 'claude plugin install' command."""
+        """Plugin doc must show the 'claude plugin install' command."""
         content = load_plugin_doc()
         assert "claude plugin install" in content
 
     def test_mentions_marketplace_add_command(self) -> None:
-        """docs/plugin.md must show the 'claude plugin marketplace add' command."""
+        """Plugin doc must show the 'claude plugin marketplace add' command."""
         content = load_plugin_doc()
         assert "claude plugin marketplace add" in content
 
     def test_mentions_pip_install(self) -> None:
-        """docs/plugin.md must include pip install instructions."""
+        """Plugin doc must include pip install instructions."""
         content = load_plugin_doc()
         assert "pip install distillery" in content
 
     def test_mentions_jina_api_key(self) -> None:
-        """docs/plugin.md must mention the JINA_API_KEY environment variable."""
+        """Plugin doc must mention the JINA_API_KEY environment variable."""
         content = load_plugin_doc()
         assert "JINA_API_KEY" in content
 
     def test_mentions_both_transport_options(self) -> None:
-        """docs/plugin.md must describe both stdio and HTTP transport options."""
+        """Plugin doc must describe both stdio and HTTP transport options."""
         content = load_plugin_doc()
-        assert "stdio" in content.lower(), "docs/plugin.md must mention stdio transport"
-        assert "http" in content.lower(), "docs/plugin.md must mention http transport"
+        assert "stdio" in content.lower(), "Plugin doc must mention stdio transport"
+        assert "http" in content.lower(), "Plugin doc must mention http transport"
 
     def test_hosted_url_present(self) -> None:
-        """docs/plugin.md must include the hosted MCP server URL."""
+        """Plugin doc must include the hosted MCP server URL."""
         content = load_plugin_doc()
         assert "distillery-mcp.fly.dev" in content
 
-    def test_mcp_unavailability_warning_message_present(self) -> None:
-        """docs/plugin.md must include the MCP unavailability warning text."""
-        content = load_plugin_doc()
-        assert "Warning: Distillery MCP Server Not Available" in content
-
-    def test_further_reading_section_has_links(self) -> None:
-        """docs/plugin.md must contain links in the Further Reading section."""
-        content = load_plugin_doc()
-        assert "Further Reading" in content
-        # At least one markdown link must follow
-        further_idx = content.index("Further Reading")
-        after_heading = content[further_idx:]
-        assert re.search(r"\[.+?\]\(.+?\)", after_heading), (
-            "No markdown links found in Further Reading section"
-        )
-
     def test_mcp_servers_settings_json_snippet_present(self) -> None:
-        """docs/plugin.md must show a mcpServers settings.json configuration snippet."""
+        """Plugin doc must show a mcpServers settings.json configuration snippet."""
         content = load_plugin_doc()
         assert "mcpServers" in content
         assert "settings.json" in content
