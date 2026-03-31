@@ -127,15 +127,29 @@ def _mock_response(status_code: int, json_body: object = None) -> MagicMock:
     return resp
 
 
+def _make_async_client_mock(
+    default_response: MagicMock | None = None,
+) -> AsyncMock:
+    """Create an ``httpx.AsyncClient`` mock wired as an async context manager.
+
+    Args:
+        default_response: If provided, ``client.get`` returns this value by
+            default. Callers can replace ``client.get`` after construction for
+            more complex scenarios.
+    """
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    if default_response is not None:
+        mock_client.get = AsyncMock(return_value=default_response)
+    return mock_client
+
+
 class TestOrgMembershipApiMember:
     async def test_204_returns_true(self) -> None:
         checker = OrgMembershipChecker(allowed_orgs=["acme"])
         with patch("httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client.get = AsyncMock(return_value=_mock_response(204))
-            mock_client_cls.return_value = mock_client
+            mock_client_cls.return_value = _make_async_client_mock(_mock_response(204))
             result = await checker.is_allowed("alice", hint_token="tok")
         assert result is True
 
@@ -144,11 +158,7 @@ class TestOrgMembershipApiNonMember:
     async def test_404_returns_false(self) -> None:
         checker = OrgMembershipChecker(allowed_orgs=["acme"])
         with patch("httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client.get = AsyncMock(return_value=_mock_response(404))
-            mock_client_cls.return_value = mock_client
+            mock_client_cls.return_value = _make_async_client_mock(_mock_response(404))
             result = await checker.is_allowed("alice", hint_token="tok")
         assert result is False
 
@@ -157,11 +167,7 @@ class TestOrgMembershipApiPrivateOrg:
     async def test_302_without_token_returns_false(self) -> None:
         checker = OrgMembershipChecker(allowed_orgs=["private-corp"])
         with patch("httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client.get = AsyncMock(return_value=_mock_response(302))
-            mock_client_cls.return_value = mock_client
+            mock_client_cls.return_value = _make_async_client_mock(_mock_response(302))
             result = await checker.is_allowed("alice")
         assert result is False
 
@@ -173,18 +179,12 @@ class TestOrgMembershipApiPrivateOrg:
         user_orgs_resp = _mock_response(200, [{"login": "private-corp"}])
 
         with patch("httpx.AsyncClient") as mock_client_cls:
-            call_count = 0
-
             async def fake_get(url: str, **kwargs: object) -> MagicMock:
-                nonlocal call_count
-                call_count += 1
                 if "members" in url:
                     return members_resp
                 return user_orgs_resp
 
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client = _make_async_client_mock()
             mock_client.get = fake_get
             mock_client_cls.return_value = mock_client
 
@@ -203,9 +203,7 @@ class TestOrgMembershipApiPrivateOrg:
                     return members_resp
                 return user_orgs_resp
 
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client = _make_async_client_mock()
             mock_client.get = fake_get
             mock_client_cls.return_value = mock_client
 
@@ -217,11 +215,7 @@ class TestOrgMembershipApiErrorHandling:
     async def test_unexpected_status_returns_false(self) -> None:
         checker = OrgMembershipChecker(allowed_orgs=["acme"])
         with patch("httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client.get = AsyncMock(return_value=_mock_response(500))
-            mock_client_cls.return_value = mock_client
+            mock_client_cls.return_value = _make_async_client_mock(_mock_response(500))
             result = await checker.is_allowed("alice", hint_token="tok")
         assert result is False
 
@@ -230,9 +224,7 @@ class TestOrgMembershipApiErrorHandling:
 
         checker = OrgMembershipChecker(allowed_orgs=["acme"])
         with patch("httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client = _make_async_client_mock()
             mock_client.get = AsyncMock(side_effect=httpx.ConnectError("timeout"))
             mock_client_cls.return_value = mock_client
             result = await checker.is_allowed("alice", hint_token="tok")
@@ -248,9 +240,7 @@ class TestOrgMembershipApiErrorHandling:
                 captured_headers.update(headers)
                 return _mock_response(204)
 
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client = _make_async_client_mock()
             mock_client.get = fake_get
             mock_client_cls.return_value = mock_client
 
@@ -278,9 +268,7 @@ class TestMultiOrgShortCircuit:
                     return _mock_response(404)
                 return _mock_response(204)
 
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client = _make_async_client_mock()
             mock_client.get = fake_get
             mock_client_cls.return_value = mock_client
 
@@ -291,11 +279,7 @@ class TestMultiOrgShortCircuit:
     async def test_no_match_across_all_orgs_returns_false(self) -> None:
         checker = OrgMembershipChecker(allowed_orgs=["acme", "partner"])
         with patch("httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client.get = AsyncMock(return_value=_mock_response(404))
-            mock_client_cls.return_value = mock_client
+            mock_client_cls.return_value = _make_async_client_mock(_mock_response(404))
             result = await checker.is_allowed("alice", hint_token="tok")
         assert result is False
 
@@ -316,9 +300,7 @@ class TestOrgMembershipCaching:
                 api_call_count += 1
                 return _mock_response(204)
 
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client = _make_async_client_mock()
             mock_client.get = fake_get
             mock_client_cls.return_value = mock_client
 
@@ -333,25 +315,31 @@ class TestOrgMembershipCaching:
         checker = OrgMembershipChecker(allowed_orgs=["acme"], cache_ttl_seconds=1)
         api_call_count = 0
 
-        with patch("httpx.AsyncClient") as mock_client_cls:
-            async def fake_get(url: str, **kwargs: object) -> MagicMock:
-                nonlocal api_call_count
-                api_call_count += 1
-                return _mock_response(204)
+        async def fake_get(url: str, **kwargs: object) -> MagicMock:
+            nonlocal api_call_count
+            api_call_count += 1
+            return _mock_response(204)
 
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client = _make_async_client_mock()
             mock_client.get = fake_get
             mock_client_cls.return_value = mock_client
 
             await checker.is_allowed("alice", hint_token="tok")
 
-            # Manually expire the cache entry.
-            for key in list(checker._cache):
-                entry = checker._cache[key]
-                checker._cache[key].__class__.__init__(entry, entry.is_member, 0.0)
-                entry.expires_at = 0.0
+        assert api_call_count == 1
+
+        # Advance the clock past the TTL so the cache entry expires.
+        with (
+            patch("httpx.AsyncClient") as mock_client_cls,
+            patch(
+                "distillery.mcp.org_membership.time.monotonic",
+                return_value=time.monotonic() + 10,
+            ),
+        ):
+            mock_client = _make_async_client_mock()
+            mock_client.get = fake_get
+            mock_client_cls.return_value = mock_client
 
             await checker.is_allowed("alice", hint_token="tok")
 
@@ -367,9 +355,7 @@ class TestOrgMembershipCaching:
                 api_call_count += 1
                 return _mock_response(404)
 
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client = _make_async_client_mock()
             mock_client.get = fake_get
             mock_client_cls.return_value = mock_client
 
@@ -428,6 +414,22 @@ class TestOrgMembershipConfig:
                     provider="none",
                     allowed_orgs=["acme"],
                 )
+            ),
+        )
+        from distillery.config import _validate
+
+        with pytest.raises(ValueError, match="allowed_orgs requires"):
+            _validate(config)
+
+    def test_env_allowed_orgs_requires_github_provider(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """DISTILLERY_ALLOWED_ORGS env var with provider='none' should fail."""
+        monkeypatch.setenv("DISTILLERY_ALLOWED_ORGS", "acme")
+        config = DistilleryConfig(
+            storage=StorageConfig(database_path=":memory:"),
+            server=ServerConfig(
+                auth=ServerAuthConfig(provider="none"),
             ),
         )
         from distillery.config import _validate

@@ -314,7 +314,7 @@ class OrgMembershipMiddleware:
     def __init__(
         self,
         app: ASGIApp,
-        checker: "OrgMembershipChecker",
+        checker: OrgMembershipChecker,
     ) -> None:
         self.app = app
         self.checker = checker
@@ -344,21 +344,23 @@ class OrgMembershipMiddleware:
 
         claims = _try_decode_jwt_claims(bearer_token)
         username = ""
+        hint_token: str | None = None
         if claims:
             raw = claims.get("login") or claims.get("sub") or ""
             if isinstance(raw, str):
                 username = raw.strip()
+        else:
+            # Opaque token (not a JWT) — pass it as a hint so the checker
+            # can use it for API calls to resolve org membership.
+            hint_token = bearer_token
 
         if not username:
-            # Cannot identify the user from the token — pass through.
-            # FastMCP will handle auth; we just can't enforce org restriction.
-            await self.app(scope, receive, send)
+            # Cannot identify the user from the token — fail closed.
+            # Passing through would silently skip org enforcement.
+            await self._send_403(
+                send, "<unknown>", list(self.checker._allowed_orgs)
+            )
             return
-
-        # hint_token: if the bearer token is NOT a JWT (opaque token / GitHub
-        # token passthrough mode), pass it as a hint so the checker can use it
-        # for API calls.  When it IS a JWT, ``claims`` is set and hint is None.
-        hint_token: str | None = None if claims else bearer_token
 
         if not await self.checker.is_allowed(username, hint_token=hint_token):
             await self._send_403(send, username, list(self.checker._allowed_orgs))
@@ -402,7 +404,7 @@ def apply_http_middleware(
     requests_per_hour: int = 600,
     max_body_bytes: int = 1_048_576,
     trust_proxy: bool = False,
-    org_checker: "OrgMembershipChecker | None" = None,
+    org_checker: OrgMembershipChecker | None = None,
 ) -> ASGIApp:
     """Wrap *app* with rate-limit, body-size, and (optionally) org-membership middleware.
 

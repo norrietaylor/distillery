@@ -12,7 +12,7 @@ from distillery.config import (
     ServerConfig,
     StorageConfig,
 )
-from distillery.mcp.auth import build_github_auth, build_org_checker
+from distillery.mcp.auth import OrgRestrictedGitHubProvider, build_github_auth, build_org_checker
 from distillery.mcp.server import create_server
 
 pytestmark = pytest.mark.unit
@@ -149,6 +149,39 @@ class TestNoSecretsInLogs:
         assert client_id not in log_output, (
             f"Client ID value found in logs: {log_output}"
         )
+
+
+class TestBuildGithubAuthWithOrgChecker:
+    def test_returns_org_restricted_provider_when_checker_provided(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """build_github_auth() returns OrgRestrictedGitHubProvider when org_checker is set."""
+        monkeypatch.setenv("GITHUB_CLIENT_ID", "test-id")
+        monkeypatch.setenv("GITHUB_CLIENT_SECRET", "test-secret")
+        monkeypatch.setenv("DISTILLERY_BASE_URL", "https://example.com")
+
+        from distillery.mcp.org_membership import OrgMembershipChecker
+
+        checker = OrgMembershipChecker(allowed_orgs=["acme"])
+        config = _make_config(allowed_orgs=["acme"])
+        provider = build_github_auth(config, org_checker=checker)
+
+        assert isinstance(provider, OrgRestrictedGitHubProvider)
+
+    def test_returns_plain_provider_when_no_checker(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """build_github_auth() returns plain GitHubProvider when org_checker is None."""
+        monkeypatch.setenv("GITHUB_CLIENT_ID", "test-id")
+        monkeypatch.setenv("GITHUB_CLIENT_SECRET", "test-secret")
+        monkeypatch.setenv("DISTILLERY_BASE_URL", "https://example.com")
+
+        config = _make_config()
+        provider = build_github_auth(config, org_checker=None)
+
+        from fastmcp.server.auth.providers.github import GitHubProvider
+
+        assert type(provider) is GitHubProvider
 
 
 class TestBuildOrgCheckerIntegration:

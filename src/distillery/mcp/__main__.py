@@ -139,8 +139,8 @@ def main(argv: list[str] | None = None) -> int:
                 )
 
                 _patch_cimd_localhost_redirect()
-                auth = build_github_auth(config)
                 org_checker = build_org_checker(config)
+                auth = build_github_auth(config, org_checker=org_checker)
             elif provider_name == "none":
                 logger.warning(
                     "HTTP server running without authentication "

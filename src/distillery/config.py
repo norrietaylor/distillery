@@ -848,7 +848,14 @@ def _validate(config: DistilleryConfig) -> None:
         )
 
     # Validate allowed_orgs: non-empty list requires GitHub auth provider.
-    if config.server.auth.allowed_orgs and config.server.auth.provider != "github":
+    env_allowed_orgs = [
+        org.strip()
+        for org in os.environ.get("DISTILLERY_ALLOWED_ORGS", "").split(",")
+        if org.strip()
+    ]
+    if (
+        config.server.auth.allowed_orgs or env_allowed_orgs
+    ) and config.server.auth.provider != "github":
         raise ValueError(
             "server.auth.allowed_orgs requires server.auth.provider = 'github', "
             f"got: {config.server.auth.provider!r}"
