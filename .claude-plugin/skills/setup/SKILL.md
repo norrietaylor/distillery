@@ -200,7 +200,7 @@ If transport is hosted or team HTTP, and the user has registered the MCP connect
         "sources": [
           {"git_repository": {"url": "https://github.com/norrietaylor/distillery"}}
         ],
-        "allowed_tools": ["Bash", "Read", "Glob", "Grep", "mcp__distillery__distillery_poll"]
+        "allowed_tools": ["Bash", "Read", "Glob", "Grep", "mcp__plugin_distillery_distillery__distillery_poll"]
       },
       "events": [
         {"data": {
@@ -376,7 +376,7 @@ The setup wizard uses a sequential, conversational format. Each step prints its 
 - Always show the Step 6 summary — even on early exits (MCP unavailable, auth needed, user defers connector registration)
 - Never create duplicate cron jobs — always check `CronList` first for each job type (poll, rescore, maintenance)
 - Never create duplicate remote triggers — always check `RemoteTrigger(action="list")` first
-- For remote trigger creation, include `mcp__distillery__distillery_poll` in `allowed_tools`
+- For remote trigger creation, include `mcp__plugin_distillery_distillery__distillery_poll` in `allowed_tools`
 - Pick an off-peak cron minute (not :00 or :30) for all schedules; use different random minutes for each job
 - If the user has no feed sources, skip feed poll and rescore but still offer weekly maintenance
 - If `RemoteTrigger` calls fail, fall back to `CronCreate` gracefully and explain the limitation
