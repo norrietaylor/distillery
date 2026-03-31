@@ -1,9 +1,0 @@
-Type: cli
-Command: ruff check src/ tests/ && mypy --strict src/distillery/
-Expected: No lint or type errors
-Timestamp: 2026-03-28T23:00:10Z
-Status: PASS
----
-All checks passed!
----
-Success: no issues found in 35 source files
