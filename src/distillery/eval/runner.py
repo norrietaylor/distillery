@@ -222,7 +222,7 @@ class ClaudeEvalRunner:
 
     Args:
         claude_cli: Path or name of the Claude CLI binary (default ``"claude"``).
-        skills_dir: Override the path to the ``.claude/skills/`` directory.
+        skills_dir: Override the path to the ``.claude-plugin/skills/`` directory.
     """
 
     def __init__(

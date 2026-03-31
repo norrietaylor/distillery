@@ -158,6 +158,7 @@ Once connected, the following tools are available:
 | `distillery_poll` | Trigger a feed poll cycle and return results (fetched, scored, stored counts) |
 | `distillery_interests` | Return the user's interest profile (top tags, domains, repos, expertise) |
 | `distillery_suggest_sources` | Return interest profile with suggestion context for source discovery |
+| `distillery_rescore` | Re-score feed entries against current interest profile |
 
 ## Verifying the Server Works
 

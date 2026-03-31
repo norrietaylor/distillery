@@ -13,7 +13,7 @@ enabling direct installation from the GitHub repo.
 
 The manifest specifies:
 
-- **Skills directory** — auto-discovered from `.claude/skills/`
+- **Skills directory** — loaded from `.claude-plugin/skills/` (only when installed as a plugin)
 - **MCP server dependency** — HTTP transport to the hosted Distillery server (GitHub OAuth)
 
 ## Installation
@@ -38,19 +38,19 @@ Copy the skills directory into any project that should have access to the skills
 ```bash
 # From inside the target project
 mkdir -p ~/.claude/skills
-cp -r /path/to/distillery/.claude/skills/* ~/.claude/skills/
+cp -r /path/to/distillery/.claude-plugin/skills/* ~/.claude/skills/
 ```
 
 Or clone this repo and symlink:
 
 ```bash
 git clone https://github.com/norrietaylor/distillery.git ~/.claude/distillery
-ln -s ~/.claude/distillery/.claude/skills/distill   ~/.claude/skills/distill
-ln -s ~/.claude/distillery/.claude/skills/recall    ~/.claude/skills/recall
-ln -s ~/.claude/distillery/.claude/skills/pour      ~/.claude/skills/pour
-ln -s ~/.claude/distillery/.claude/skills/bookmark  ~/.claude/skills/bookmark
-ln -s ~/.claude/distillery/.claude/skills/minutes   ~/.claude/skills/minutes
-ln -s ~/.claude/distillery/.claude/skills/classify  ~/.claude/skills/classify
+ln -s ~/.claude/distillery/.claude-plugin/skills/distill   ~/.claude/skills/distill
+ln -s ~/.claude/distillery/.claude-plugin/skills/recall    ~/.claude/skills/recall
+ln -s ~/.claude/distillery/.claude-plugin/skills/pour      ~/.claude/skills/pour
+ln -s ~/.claude/distillery/.claude-plugin/skills/bookmark  ~/.claude/skills/bookmark
+ln -s ~/.claude/distillery/.claude-plugin/skills/minutes   ~/.claude/skills/minutes
+ln -s ~/.claude/distillery/.claude-plugin/skills/classify  ~/.claude/skills/classify
 ```
 
 ## MCP Configuration
@@ -70,8 +70,8 @@ If you need to configure it manually, add to `~/.claude/settings.json`:
 {
   "mcpServers": {
     "distillery": {
-      "type": "http",
-      "url": "https://distillery-mcp.fly.dev/mcp"
+      "url": "https://distillery-mcp.fly.dev/mcp",
+      "transport": "http"
     }
   }
 }
@@ -205,5 +205,5 @@ and solutions.
 - [MCP Server Setup](mcp-setup.md) — full MCP configuration reference
 - [Team Setup](team-setup.md) — connecting to a hosted Distillery instance
 - [Deployment Guide](deployment.md) — running Distillery as a team HTTP service with GitHub OAuth
-- [Skills README](./../.claude/skills/README.md) — skill authoring and conventions
-- [CONVENTIONS.md](./../.claude/skills/CONVENTIONS.md) — shared patterns across all skills
+- [Skills README](../.claude-plugin/skills/README.md) — skill authoring and conventions
+- [CONVENTIONS.md](../.claude-plugin/skills/CONVENTIONS.md) — shared patterns across all skills

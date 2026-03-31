@@ -80,7 +80,7 @@ After installation, restart Claude Code and verify with:
 distillery_status
 ```
 
-> **Note:** The Claude desktop app does not support Claude Code skills or the plugin install system. Desktop users can connect the MCP server directly (all 17 tools are available) but `/distill`, `/recall`, and other slash commands are CLI-only features.
+> **Note:** The Claude desktop app does not support Claude Code skills or the plugin install system. Desktop users can connect the MCP server directly (all 22 tools are available) but `/distill`, `/recall`, and other slash commands are CLI-only features.
 
 See [docs/plugin.md](docs/plugin.md) for full plugin documentation including manual install, transport options, and troubleshooting.
 
@@ -200,13 +200,17 @@ On first use, Claude Code opens a browser for GitHub OAuth login. See [docs/team
 
 ```
 distillery/
-├── .claude/skills/          # Claude Code skill definitions
+├── .claude-plugin/skills/   # Claude Code skill definitions (loaded via plugin)
 │   ├── distill/SKILL.md
 │   ├── recall/SKILL.md
 │   ├── pour/SKILL.md
 │   ├── bookmark/SKILL.md
 │   ├── minutes/SKILL.md
 │   ├── classify/SKILL.md
+│   ├── watch/SKILL.md
+│   ├── radar/SKILL.md
+│   ├── tune/SKILL.md
+│   ├── setup/SKILL.md
 │   └── CONVENTIONS.md
 ├── src/distillery/
 │   ├── models.py            # Entry, SearchResult, enums
@@ -223,16 +227,19 @@ distillery/
 │   │   ├── engine.py        # ClassificationEngine
 │   │   └── dedup.py         # DeduplicationChecker
 │   └── mcp/
-│       ├── server.py        # MCP server (21 tools, FastMCP 2.x/3.x)
+│       ├── server.py        # MCP server (22 tools, FastMCP 2.x/3.x)
 │       ├── auth.py          # GitHub OAuth via FastMCP GitHubProvider
+│       ├── middleware.py    # Request logging, rate limiting, security headers
+│       ├── budget.py        # Embedding API budget tracking
 │       └── __main__.py      # CLI: --transport stdio|http, --host, --port
+│   ├── security.py          # Input sanitization and content validation
 │   └── feeds/
 │       ├── github.py        # GitHub event adapter
 │       ├── rss.py           # RSS/Atom feed adapter
 │       ├── scorer.py        # Embedding-based relevance scorer
 │       ├── poller.py        # Background feed poller
 │       └── interests.py     # Interest extractor for source suggestions
-├── tests/                   # 1000+ tests
+├── tests/                   # 1100+ tests
 ├── docs/
 │   ├── mcp-setup.md
 │   ├── ROADMAP.md

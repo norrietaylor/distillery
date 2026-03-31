@@ -53,7 +53,7 @@ The foundation: storage layer, 6 core skills, classification pipeline.
 ### Infrastructure Improvements (Spec 08)
 - [x] Hierarchical tag namespace — slash-separated tags with validation and `distillery_tag_tree` tool
 - [x] 4 new entry types — `person`, `project`, `digest`, `github` with strict metadata validation
-- [x] `distillery_type_schemas` MCP tool for schema discovery (17 tools total)
+- [x] `distillery_type_schemas` MCP tool for schema discovery
 - [x] `TagsConfig` — `enforce_namespaces`, `reserved_prefixes` in `distillery.yaml`
 
 ### Remaining MVP Items
@@ -112,7 +112,17 @@ The knowledge base starts watching the world. Feed polling, relevance scoring, p
 - [x] **Source adapters** — GitHub events (REST API) and RSS/Atom (stdlib ElementTree)
 - [x] **Relevance scoring pipeline** — embedding-based cosine similarity (no LLM in poller)
 - [x] **Interest extractor** — mines entries for tags, domains, repos, expertise; feeds source suggestions
-- [x] 4 new MCP tools: `distillery_watch`, `distillery_poll`, `distillery_interests`, `distillery_suggest_sources`
+- [x] 5 new MCP tools: `distillery_watch`, `distillery_poll`, `distillery_interests`, `distillery_suggest_sources`, `distillery_rescore`
+
+### Onboarding
+- [x] `/setup` skill — MCP connectivity wizard, transport detection, auto-poll configuration
+
+### Security & Operations
+- [x] **Request middleware** — structured logging, per-user rate limiting, security headers (middleware.py)
+- [x] **Embedding budget tracking** — daily/monthly API call limits with configurable thresholds (budget.py)
+- [x] **Input sanitization** — content validation and size limits (security.py)
+- [x] **SIGTERM handling** — DuckDB WAL checkpoint on Fly.io shutdown
+- [x] **OAuth token persistence** — tokens survive Fly.io restarts
 
 ### Remaining Phase 3 Items
 - [ ] **Slack, Hacker News, webhook adapters** — only GitHub + RSS implemented so far
@@ -157,6 +167,6 @@ thresholds:
 | Storage | DuckDB + VSS | + MotherDuck (shared) / Elasticsearch | Same |
 | Embeddings | Jina v3 / OpenAI | ES native or external | Same |
 | Language | Python 3.11+ | Same | Same |
-| Hosting | Local | + Prefect Horizon | Same |
+| Hosting | Local | + Prefect Horizon / Fly.io | Same |
 | Orchestration | Skill invocation | Same | + scheduled polling |
 | Config | `distillery.yaml` | + `server.auth` section | + feed config |
