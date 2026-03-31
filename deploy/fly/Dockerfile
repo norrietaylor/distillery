@@ -14,6 +14,7 @@ RUN apk add --no-cache python-3.13 py3.13-pip
 
 # Create non-root user
 RUN adduser --disabled-password --uid 10001 appuser
+RUN useradd --create-home --uid 10001 appuser
 
 # Copy the full repo (build context is repo root)
 COPY . .
