@@ -1,3 +1,7 @@
+<div style="text-align: center; margin: 2rem 0 1rem;">
+  <img src="assets/distillery-logo-dark-512.png" alt="Distillery" width="256" style="max-width: 100%;">
+</div>
+
 # Distillery
 
 **Team Knowledge, Distilled**
@@ -39,30 +43,15 @@ claude plugin marketplace add norrietaylor/distillery
 claude plugin install distillery
 ```
 
-Then verify the connection by calling the `distillery_status` MCP tool:
+Then run the onboarding wizard in Claude Code:
 
 ```text
-distillery_status
+/setup
 ```
 
+This verifies MCP connectivity, detects your transport, and configures auto-poll for ambient intelligence.
+
 For other installation options, see [Plugin Install](getting-started/plugin-install.md) or [Local Setup](getting-started/local-setup.md).
-
-## Architecture at a Glance
-
-<picture>
-  <img alt="Distillery Architecture" src="assets/architecture.svg" style="max-width: 100%; height: auto;" width="720">
-</picture>
-
-Distillery is built as a 4-layer system:
-
-| Layer | What it does |
-|-------|-------------|
-| **Skills** | 10 SKILL.md files — portable, version-controlled slash commands |
-| **MCP Server** | 22 tools over stdio (local) or HTTP (team), built on FastMCP 2.x |
-| **Core Protocols** | `DistilleryStore`, `EmbeddingProvider`, `ClassificationEngine` — typed Protocol interfaces |
-| **Backends** | DuckDB + VSS for vector search, Jina/OpenAI for embeddings |
-
-See [Architecture](architecture.md) for the full design.
 
 ## License
 

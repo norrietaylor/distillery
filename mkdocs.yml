@@ -6,21 +6,21 @@ repo_name: norrietaylor/distillery
 
 theme:
   name: material
-  logo: assets/distillery-logo-light.svg
+  logo: assets/distillery-logo-dark.svg
   favicon: assets/distillery-favicon.svg
   palette:
-    - scheme: default
-      primary: amber
-      accent: amber
-      toggle:
-        icon: material/brightness-7
-        name: Switch to dark mode
     - scheme: slate
-      primary: amber
+      primary: black
       accent: amber
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
+    - scheme: default
+      primary: black
+      accent: amber
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
   features:
     - navigation.tabs
     - navigation.sections
@@ -29,6 +29,9 @@ theme:
     - search.highlight
     - content.code.copy
     - content.tabs.link
+
+exclude_docs: |
+  specs/
 
 plugins:
   - search
@@ -43,8 +46,13 @@ markdown_extensions:
       anchor_linenums: true
   - attr_list
   - md_in_html
+  - pymdownx.tasklist:
+      custom_checkbox: true
   - toc:
       permalink: true
+
+extra_css:
+  - stylesheets/custom.css
 
 extra:
   social:
@@ -52,7 +60,7 @@ extra:
       link: https://github.com/norrietaylor/distillery
 
 nav:
-  - Home: index.md
+  - Home: home.md
   - Getting Started:
     - Plugin Install: getting-started/plugin-install.md
     - Local Setup: getting-started/local-setup.md

@@ -58,11 +58,13 @@ claude plugin marketplace add norrietaylor/distillery
 claude plugin install distillery
 ```
 
-Verify the connection:
+Then run the onboarding wizard in Claude Code:
 
 ```
-distillery_status
+/setup
 ```
+
+This verifies MCP connectivity, detects your transport, and configures auto-poll for ambient intelligence.
 
 ### Local Setup
 
