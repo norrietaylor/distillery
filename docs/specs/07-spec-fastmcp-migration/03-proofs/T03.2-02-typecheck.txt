@@ -1,9 +1,0 @@
-Type: cli
-Command: .venv/bin/mypy --strict src/
-Expected: Success: no issues found
-Timestamp: 2026-03-27T00:00:00Z
-
---- OUTPUT ---
-Success: no issues found in 21 source files
-
-Status: PASS

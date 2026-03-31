@@ -1,0 +1,44 @@
+/* Distillery dark theme with amber accents */
+
+:root {
+  --md-primary-fg-color: #1a1a1a;
+  --md-primary-fg-color--light: #2a2a2a;
+  --md-primary-fg-color--dark: #111111;
+  --md-accent-fg-color: #e8a838;
+  --md-accent-fg-color--transparent: rgba(232, 168, 56, 0.1);
+}
+
+/* Dark header */
+.md-header {
+  background-color: #1a1a1a;
+}
+
+/* Tabs bar */
+.md-tabs {
+  background-color: #222222;
+}
+
+/* Links use amber */
+.md-typeset a {
+  color: #e8a838;
+}
+
+.md-typeset a:hover {
+  color: #f0be5a;
+}
+
+/* Nav active items */
+.md-nav__link--active,
+.md-nav__link:is([data-md-state="active"]) {
+  color: #e8a838 !important;
+}
+
+/* Slate scheme overrides */
+[data-md-color-scheme="slate"] {
+  --md-default-bg-color: #1a1a1a;
+  --md-default-bg-color--light: #222222;
+  --md-default-bg-color--lighter: #2a2a2a;
+  --md-default-bg-color--lightest: #333333;
+  --md-primary-fg-color: #1a1a1a;
+  --md-accent-fg-color: #e8a838;
+}

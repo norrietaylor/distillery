@@ -1,0 +1,87 @@
+site_name: Distillery
+site_url: https://norrietaylor.github.io/distillery/
+site_description: Team Knowledge, Distilled — A team-accessible Second Brain powered by Claude Code
+repo_url: https://github.com/norrietaylor/distillery
+repo_name: norrietaylor/distillery
+
+theme:
+  name: material
+  logo: assets/distillery-logo-dark.svg
+  favicon: assets/distillery-favicon.svg
+  palette:
+    - scheme: slate
+      primary: black
+      accent: amber
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+    - scheme: default
+      primary: black
+      accent: amber
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.tabs.link
+
+exclude_docs: |
+  specs/
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - attr_list
+  - md_in_html
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - toc:
+      permalink: true
+
+extra_css:
+  - stylesheets/custom.css
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/norrietaylor/distillery
+
+nav:
+  - Home: home.md
+  - Getting Started:
+    - Plugin Install: getting-started/plugin-install.md
+    - Local Setup: getting-started/local-setup.md
+    - MCP Server Reference: getting-started/mcp-setup.md
+  - Skills Reference:
+    - Overview: skills/index.md
+    - /distill: skills/distill.md
+    - /recall: skills/recall.md
+    - /pour: skills/pour.md
+    - /bookmark: skills/bookmark.md
+    - /minutes: skills/minutes.md
+    - /classify: skills/classify.md
+    - /watch: skills/watch.md
+    - /radar: skills/radar.md
+    - /tune: skills/tune.md
+    - /setup: skills/setup.md
+  - Team Access:
+    - Team Member Guide: team/team-setup.md
+    - Operator Deployment: team/deployment.md
+    - Fly.io: team/fly.md
+    - Prefect Horizon: team/prefect.md
+  - Architecture: architecture.md
+  - Contributing: contributing.md
+  - Roadmap: roadmap.md

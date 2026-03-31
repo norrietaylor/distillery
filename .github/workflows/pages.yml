@@ -1,12 +1,12 @@
-name: Deploy Slides to GitHub Pages
+name: Deploy Documentation to GitHub Pages
 
 on:
   push:
     branches: [main]
     paths:
-      - 'docs/presentation.html'
-      - 'docs/assets/**'
-      - 'docs/_config.yml'
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - 'pyproject.toml'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -26,19 +26,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          enablement: true
+          python-version: '3.13'
 
-      - name: Build with Jekyll
-        uses: actions/jekyll-build-pages@v1
-        with:
-          source: ./docs
-          destination: ./_site
+      - name: Install docs dependencies
+        run: pip install .[docs]
+
+      - name: Build documentation
+        run: mkdocs build --strict
+
+      - name: Copy presentation to site
+        run: cp docs/presentation.html site/presentation.html || true
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
 
   deploy:
     environment:

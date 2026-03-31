@@ -15,14 +15,11 @@
 </p>
 
 <p align="center">
+  <a href="https://norrietaylor.github.io/distillery/">Documentation</a> &middot;
   <a href="#skills">Skills</a> &middot;
-  <a href="#plugin-install">Plugin Install</a> &middot;
   <a href="#quick-start">Quick Start</a> &middot;
-  <a href="#architecture">Architecture</a> &middot;
-  <a href="#team-access">Team Access</a> &middot;
-  <a href="docs/ROADMAP.md">Roadmap</a> &middot;
-  <a href="docs/mcp-setup.md">MCP Setup</a> &middot;
-  <a href="https://norrietaylor.github.io/distillery/">Slides</a>
+  <a href="https://norrietaylor.github.io/distillery/roadmap/">Roadmap</a> &middot;
+  <a href="https://norrietaylor.github.io/distillery/presentation.html">Slides</a>
 </p>
 
 ---
@@ -32,6 +29,8 @@
 Distillery is a team knowledge base accessed through Claude Code skills. It refines raw information from working sessions, meetings, bookmarks, and conversations into concentrated, searchable knowledge — stored as vector embeddings in DuckDB and retrieved through natural language. Runs locally over stdio or as a hosted HTTP service with GitHub OAuth for team access.
 
 Inspired by Tiago Forte's **Building a Second Brain** methodology (CODE: Capture, Organize, Distill, Express), Distillery maps the "Distill" step — the highest-value transformation from noise to signal — into a tool the whole team can use.
+
+> **Full documentation:** [norrietaylor.github.io/distillery](https://norrietaylor.github.io/distillery/)
 
 ## Skills
 
@@ -50,219 +49,43 @@ Distillery provides 10 Claude Code slash commands:
 | `/tune` | Adjust feed relevance thresholds | `/tune relevance 0.4` |
 | `/setup` | Onboarding wizard for MCP connectivity and config | `/setup` |
 
-### How `/pour` works
+## Quick Start
 
-Pour performs multi-pass retrieval to build a complete picture:
-
-1. **Broad search** — initial semantic search across the knowledge base
-2. **Follow-up** — searches for related concepts found in pass 1
-3. **Gap-filling** — targeted queries for referenced but missing topics
-
-The output is a structured synthesis with **Summary**, **Timeline**, **Key Decisions**, **Contradictions**, and **Knowledge Gaps** — all with inline citations linking back to source entries.
-
-## Plugin Install
-
-The fastest way to use Distillery in any project is via the Claude Code plugin system:
+### Plugin Install (Recommended)
 
 ```bash
-# Step 1 — Add the Distillery marketplace
 claude plugin marketplace add norrietaylor/distillery
-
-# Step 2 — Install the plugin
 claude plugin install distillery
 ```
 
-This installs all ten skills (available in every project) and configures the MCP server connection.
-
-After installation, restart Claude Code and verify with:
+Then run the onboarding wizard in Claude Code:
 
 ```
-distillery_status
+/setup
 ```
 
-> **Note:** The Claude desktop app does not support Claude Code skills or the plugin install system. Desktop users can connect the MCP server directly (all 22 tools are available) but `/distill`, `/recall`, and other slash commands are CLI-only features.
+This verifies MCP connectivity, detects your transport, and configures auto-poll for ambient intelligence.
 
-See [docs/plugin.md](docs/plugin.md) for full plugin documentation including manual install, transport options, and troubleshooting.
-
----
-
-## Quick Start
-
-### Prerequisites
-
-- Python 3.11+
-- An embedding API key ([Jina AI](https://jina.ai) or OpenAI)
-
-### Install
+### Local Setup
 
 ```bash
-git clone https://github.com/distillery/distillery.git
+git clone https://github.com/norrietaylor/distillery.git
 cd distillery
 pip install -e .
 ```
 
-### Configure
-
-Create `distillery.yaml`:
-
-```yaml
-storage:
-  backend: duckdb
-  database_path: ~/.distillery/distillery.db
-
-embedding:
-  provider: jina
-  model: jina-embeddings-v3
-  dimensions: 1024
-  api_key_env: JINA_API_KEY
-
-classification:
-  confidence_threshold: 0.6
-  dedup_skip_threshold: 0.95
-  dedup_merge_threshold: 0.80
-  dedup_link_threshold: 0.60
-```
-
-Set your API key:
-
-```bash
-export JINA_API_KEY=jina_...
-```
-
-### Connect to Claude Code
-
-Add to your Claude Code MCP settings (`~/.claude/settings.json`):
-
-```json
-{
-  "mcpServers": {
-    "distillery": {
-      "command": "python",
-      "args": ["-m", "distillery.mcp"],
-      "env": {
-        "JINA_API_KEY": "your-jina-api-key",
-        "DISTILLERY_CONFIG": "/path/to/distillery.yaml"
-      }
-    }
-  }
-}
-```
-
-Restart Claude Code. Verify with:
-
-```
-distillery_status
-```
-
-See [docs/mcp-setup.md](docs/mcp-setup.md) for detailed setup instructions.
-
-## Team Access
-
-Distillery supports remote team access via streamable-HTTP transport with GitHub OAuth authentication. Team members connect from their Claude Code installation — no local server needed.
-
-```bash
-# Operator: start the HTTP server (--transport http enables HTTP;
-# GitHub OAuth is configured separately in distillery.yaml server.auth)
-distillery-mcp --transport http --port 8000
-```
-
-Team member `~/.claude/settings.json`:
-
-```json
-{
-  "mcpServers": {
-    "distillery": {
-      "url": "https://your-distillery-host.example.com/mcp",
-      "transport": "http"
-    }
-  }
-}
-```
-
-On first use, Claude Code opens a browser for GitHub OAuth login. See [docs/team-setup.md](docs/team-setup.md) for the team member guide and [docs/deployment.md](docs/deployment.md) for operator deployment instructions.
-
-## Architecture
-
-<picture>
-  <img alt="Distillery Architecture" src="docs/assets/architecture.svg" width="720">
-</picture>
-
-### Key design decisions
-
-- **Skills are SKILL.md files**, not Python code — portable, version-controlled, team-shareable
-- **MCP server is the sole runtime interface** — all storage access goes through the protocol, over stdio (local) or HTTP (team)
-- **Storage abstraction** via `DistilleryStore` protocol — enables future migration to Elasticsearch without rewriting skills
-- **Configurable embedding providers** — swap between Jina v3, OpenAI, or a zero-vector stub for testing
-- **Semantic deduplication** — prevents knowledge base pollution with configurable skip/merge/link/create thresholds
-- **Classification with confidence scoring** — LLM-based type assignment with team review queue for low-confidence results
-
-## Project Structure
-
-```
-distillery/
-├── .claude-plugin/skills/   # Claude Code skill definitions (loaded via plugin)
-│   ├── distill/SKILL.md
-│   ├── recall/SKILL.md
-│   ├── pour/SKILL.md
-│   ├── bookmark/SKILL.md
-│   ├── minutes/SKILL.md
-│   ├── classify/SKILL.md
-│   ├── watch/SKILL.md
-│   ├── radar/SKILL.md
-│   ├── tune/SKILL.md
-│   ├── setup/SKILL.md
-│   └── CONVENTIONS.md
-├── src/distillery/
-│   ├── models.py            # Entry, SearchResult, enums
-│   ├── config.py            # YAML config loading
-│   ├── store/
-│   │   ├── protocol.py      # DistilleryStore protocol
-│   │   └── duckdb.py        # DuckDB + VSS backend
-│   ├── embedding/
-│   │   ├── protocol.py      # EmbeddingProvider protocol
-│   │   ├── jina.py          # Jina v3 adapter
-│   │   └── openai.py        # OpenAI adapter
-│   ├── classification/
-│   │   ├── models.py        # ClassificationResult, DeduplicationResult
-│   │   ├── engine.py        # ClassificationEngine
-│   │   └── dedup.py         # DeduplicationChecker
-│   ├── mcp/
-│   │   ├── server.py        # MCP server (22 tools, FastMCP 2.x/3.x)
-│   │   ├── auth.py          # GitHub OAuth via FastMCP GitHubProvider
-│   │   ├── middleware.py    # Request logging, rate limiting, security headers
-│   │   ├── budget.py        # Embedding API budget tracking
-│   │   └── __main__.py      # CLI: --transport stdio|http, --host, --port
-│   ├── security.py          # Input sanitization and content validation
-│   └── feeds/
-│       ├── github.py        # GitHub event adapter
-│       ├── rss.py           # RSS/Atom feed adapter
-│       ├── scorer.py        # Embedding-based relevance scorer
-│       ├── poller.py        # Background feed poller
-│       └── interests.py     # Interest extractor for source suggestions
-├── tests/                   # 1100+ tests
-├── docs/
-│   ├── mcp-setup.md
-│   ├── ROADMAP.md
-│   └── specs/               # Specifications
-├── distillery.yaml.example
-└── pyproject.toml
-```
+See the [Local Setup Guide](https://norrietaylor.github.io/distillery/getting-started/local-setup/) for configuration and MCP server connection.
 
 ## Development
 
 ```bash
-# Install dev dependencies
 pip install -e ".[dev]"
-
-# Run tests
-pytest
-
-# Type checking
-mypy --strict src/distillery/
-
-# Lint
-ruff check src/ tests/
+pytest                              # run tests
+mypy --strict src/distillery/       # type check
+ruff check src/ tests/              # lint
 ```
+
+See [Contributing](https://norrietaylor.github.io/distillery/contributing/) for the full guide.
 
 ## License
 
