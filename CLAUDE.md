@@ -76,6 +76,10 @@ Production deployment configs live under `deploy/` with one subdirectory per pro
 
 Local development uses `distillery-dev.yaml` at the repo root. The `DISTILLERY_CONFIG` env var points each deployment to its config file. See each provider's README for quickstart instructions.
 
+## Git Workflow
+
+Always create a pull request for changes — never push directly to `main`. Create a branch, commit, push the branch, then open a PR via `mcp__github__create_pull_request`.
+
 ## Conventions
 
 - **Python 3.11+** required
