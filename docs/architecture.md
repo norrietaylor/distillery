@@ -3,86 +3,148 @@
 Distillery is built as a 4-layer system where skills (SKILL.md files) drive all user interaction, the MCP server mediates all storage access, and backends are swappable through typed Protocol interfaces.
 
 <div markdown="0">
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 420" font-family="Inter, -apple-system, system-ui, sans-serif" style="max-width: 720px; width: 100%; height: auto;">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 560" font-family="Inter, -apple-system, system-ui, sans-serif" style="max-width: 760px; width: 100%; height: auto;">
   <defs>
     <style>
-      .layer-bg { fill: #1a1a1a; }
-      .layer-label { fill: #888; font-size: 11px; font-weight: 500; letter-spacing: 0.5px; text-transform: uppercase; }
-      .skill { fill: #242424; }
-      .skill-text { fill: #e8e8e8; font-size: 13px; font-weight: 500; }
-      .mcp-bg { fill: #BA7517; }
-      .mcp-title { fill: #fff; font-size: 16px; font-weight: 600; }
-      .mcp-sub { fill: rgba(255,255,255,0.7); font-size: 11px; }
-      .backend-bg { fill: #242424; stroke: #BA7517; stroke-width: 1.5; }
-      .backend-title { fill: #EF9F27; font-size: 14px; font-weight: 600; }
-      .backend-sub { fill: #888; font-size: 11px; }
-      .connector { stroke: #444; stroke-width: 2; }
+      .d-bg { fill: #0f0f0f; }
+      .d-layer { fill: #1a1a1a; }
+      .d-label { fill: #888; font-size: 11px; font-weight: 500; letter-spacing: 0.5px; text-transform: uppercase; }
+      .d-pill { fill: #242424; }
+      .d-pill-text { fill: #e8e8e8; font-size: 12px; font-weight: 500; }
+      .d-amber-bg { fill: #BA7517; }
+      .d-amber-text { fill: #EF9F27; }
+      .d-white { fill: #fff; font-size: 15px; font-weight: 600; }
+      .d-white-sub { fill: rgba(255,255,255,0.7); font-size: 11px; }
+      .d-box { fill: #242424; stroke: #BA7517; stroke-width: 1.5; }
+      .d-box-title { fill: #EF9F27; font-size: 13px; font-weight: 600; }
+      .d-box-sub { fill: #888; font-size: 10px; }
+      .d-line { stroke: #444; stroke-width: 2; }
+      .d-auth { fill: #242424; stroke: #4ade80; stroke-width: 1.5; }
+      .d-auth-title { fill: #4ade80; font-size: 13px; font-weight: 600; }
+      .d-feed { fill: #242424; stroke: #60a5fa; stroke-width: 1.5; }
+      .d-feed-title { fill: #60a5fa; font-size: 13px; font-weight: 600; }
+      .d-type-text { fill: #e8e8e8; font-size: 10px; }
+      .d-tag-text { fill: #EF9F27; font-size: 10px; }
     </style>
   </defs>
-  <rect width="720" height="420" fill="#0f0f0f" rx="16"/>
-  <rect class="layer-bg" x="40" y="20" width="640" height="160" rx="12"/>
-  <text class="layer-label" x="60" y="44">Claude Code</text>
-  <rect class="skill" x="60" y="54" width="72" height="30" rx="6"/><text class="skill-text" x="96" y="74" text-anchor="middle">/distill</text>
-  <rect class="skill" x="142" y="54" width="68" height="30" rx="6"/><text class="skill-text" x="176" y="74" text-anchor="middle">/recall</text>
-  <rect class="skill" x="220" y="54" width="60" height="30" rx="6"/><text class="skill-text" x="250" y="74" text-anchor="middle">/pour</text>
-  <rect class="skill" x="290" y="54" width="84" height="30" rx="6"/><text class="skill-text" x="332" y="74" text-anchor="middle">/bookmark</text>
-  <rect class="skill" x="384" y="54" width="78" height="30" rx="6"/><text class="skill-text" x="423" y="74" text-anchor="middle">/minutes</text>
-  <rect class="skill" x="472" y="54" width="74" height="30" rx="6"/><text class="skill-text" x="509" y="74" text-anchor="middle">/classify</text>
-  <rect class="skill" x="556" y="54" width="62" height="30" rx="6"/><text class="skill-text" x="587" y="74" text-anchor="middle">/watch</text>
-  <rect class="skill" x="60" y="88" width="62" height="30" rx="6"/><text class="skill-text" x="91" y="108" text-anchor="middle" font-size="11">/radar</text>
-  <rect class="skill" x="132" y="88" width="54" height="30" rx="6"/><text class="skill-text" x="159" y="108" text-anchor="middle" font-size="11">/tune</text>
-  <rect class="mcp-bg" x="60" y="100" width="600" height="64" rx="8"/>
-  <text class="mcp-title" x="360" y="128" text-anchor="middle">MCP Server</text>
-  <text class="mcp-sub" x="360" y="148" text-anchor="middle">FastMCP 2.x/3.x  ·  stdio + HTTP  ·  22 tools</text>
-  <line class="connector" x1="360" y1="180" x2="360" y2="195"/>
-  <line class="connector" x1="200" y1="195" x2="520" y2="195"/>
-  <line class="connector" x1="200" y1="195" x2="200" y2="210"/>
-  <line class="connector" x1="360" y1="195" x2="360" y2="210"/>
-  <line class="connector" x1="520" y1="195" x2="520" y2="210"/>
-  <rect class="backend-bg" x="60" y="210" width="200" height="80" rx="8"/>
-  <text class="backend-title" x="160" y="238" text-anchor="middle">DuckDB + VSS</text>
-  <text class="backend-sub" x="160" y="258" text-anchor="middle">HNSW cosine similarity</text>
-  <text class="backend-sub" x="160" y="274" text-anchor="middle">Vector search + SQL</text>
-  <rect class="backend-bg" x="280" y="210" width="160" height="80" rx="8"/>
-  <text class="backend-title" x="360" y="238" text-anchor="middle">Embedding</text>
-  <text class="backend-sub" x="360" y="258" text-anchor="middle">Jina v3 / OpenAI</text>
-  <text class="backend-sub" x="360" y="274" text-anchor="middle">Configurable provider</text>
-  <rect class="backend-bg" x="460" y="210" width="220" height="80" rx="8"/>
-  <text class="backend-title" x="570" y="238" text-anchor="middle">Classification</text>
-  <text class="backend-sub" x="570" y="258" text-anchor="middle">LLM engine + Dedup</text>
-  <text class="backend-sub" x="570" y="274" text-anchor="middle">Conflicts + Tag validation</text>
-  <text class="layer-label" x="60" y="324">11 Entry Types</text>
-  <rect class="skill" x="60" y="334" width="66" height="24" rx="6"/><text class="backend-sub" x="93" y="350" text-anchor="middle" fill="#e8e8e8">session</text>
-  <rect class="skill" x="134" y="334" width="74" height="24" rx="6"/><text class="backend-sub" x="171" y="350" text-anchor="middle" fill="#e8e8e8">bookmark</text>
-  <rect class="skill" x="216" y="334" width="66" height="24" rx="6"/><text class="backend-sub" x="249" y="350" text-anchor="middle" fill="#e8e8e8">minutes</text>
-  <rect class="skill" x="290" y="334" width="72" height="24" rx="6"/><text class="backend-sub" x="326" y="350" text-anchor="middle" fill="#e8e8e8">reference</text>
-  <rect class="skill" x="370" y="334" width="46" height="24" rx="6"/><text class="backend-sub" x="393" y="350" text-anchor="middle" fill="#e8e8e8">idea</text>
-  <rect class="skill" x="424" y="334" width="60" height="24" rx="6"/><text class="backend-sub" x="454" y="350" text-anchor="middle" fill="#e8e8e8">person</text>
-  <rect class="skill" x="492" y="334" width="62" height="24" rx="6"/><text class="backend-sub" x="523" y="350" text-anchor="middle" fill="#e8e8e8">project</text>
-  <rect class="skill" x="562" y="334" width="56" height="24" rx="6"/><text class="backend-sub" x="590" y="350" text-anchor="middle" fill="#e8e8e8">github</text>
-  <text class="layer-label" x="60" y="386">Hierarchical Tags</text>
-  <text class="backend-sub" x="60" y="404" fill="#EF9F27">project/distillery/sessions  ·  domain/storage  ·  source/bookmark/duckdb-org  ·  team/distillery</text>
+
+  <!-- Background -->
+  <rect class="d-bg" width="760" height="560" rx="16"/>
+
+  <!-- Layer 1: Skills -->
+  <rect class="d-layer" x="30" y="16" width="700" height="72" rx="12"/>
+  <text class="d-label" x="50" y="36">10 Claude Code Skills</text>
+  <rect class="d-pill" x="50" y="44" width="62" height="26" rx="6"/><text class="d-pill-text" x="81" y="61" text-anchor="middle">/distill</text>
+  <rect class="d-pill" x="120" y="44" width="56" height="26" rx="6"/><text class="d-pill-text" x="148" y="61" text-anchor="middle">/recall</text>
+  <rect class="d-pill" x="184" y="44" width="50" height="26" rx="6"/><text class="d-pill-text" x="209" y="61" text-anchor="middle">/pour</text>
+  <rect class="d-pill" x="242" y="44" width="74" height="26" rx="6"/><text class="d-pill-text" x="279" y="61" text-anchor="middle">/bookmark</text>
+  <rect class="d-pill" x="324" y="44" width="68" height="26" rx="6"/><text class="d-pill-text" x="358" y="61" text-anchor="middle">/minutes</text>
+  <rect class="d-pill" x="400" y="44" width="66" height="26" rx="6"/><text class="d-pill-text" x="433" y="61" text-anchor="middle">/classify</text>
+  <rect class="d-pill" x="474" y="44" width="56" height="26" rx="6"/><text class="d-pill-text" x="502" y="61" text-anchor="middle">/watch</text>
+  <rect class="d-pill" x="538" y="44" width="54" height="26" rx="6"/><text class="d-pill-text" x="565" y="61" text-anchor="middle">/radar</text>
+  <rect class="d-pill" x="600" y="44" width="50" height="26" rx="6"/><text class="d-pill-text" x="625" y="61" text-anchor="middle">/tune</text>
+  <rect class="d-pill" x="658" y="44" width="54" height="26" rx="6"/><text class="d-pill-text" x="685" y="61" text-anchor="middle">/setup</text>
+
+  <!-- Connector -->
+  <line class="d-line" x1="380" y1="88" x2="380" y2="104"/>
+
+  <!-- Layer 2: MCP Server -->
+  <rect class="d-amber-bg" x="30" y="104" width="700" height="52" rx="10"/>
+  <text class="d-white" x="380" y="128" text-anchor="middle">MCP Server</text>
+  <text class="d-white-sub" x="380" y="144" text-anchor="middle">FastMCP 2.x/3.x  ·  stdio + streamable-HTTP  ·  22 tools  ·  @server.tool decorators</text>
+
+  <!-- Connector: MCP to Auth + Protocols -->
+  <line class="d-line" x1="380" y1="156" x2="380" y2="168"/>
+  <line class="d-line" x1="190" y1="168" x2="570" y2="168"/>
+  <line class="d-line" x1="190" y1="168" x2="190" y2="180"/>
+  <line class="d-line" x1="380" y1="168" x2="380" y2="180"/>
+  <line class="d-line" x1="570" y1="168" x2="570" y2="180"/>
+
+  <!-- Layer 3a: Auth -->
+  <rect class="d-auth" x="30" y="180" width="220" height="64" rx="8"/>
+  <text class="d-auth-title" x="140" y="202" text-anchor="middle">GitHub OAuth</text>
+  <text class="d-box-sub" x="140" y="218" text-anchor="middle">OrgRestrictedGitHubProvider</text>
+  <text class="d-box-sub" x="140" y="232" text-anchor="middle">Middleware · Budget · Rate limits</text>
+
+  <!-- Layer 3b: Core Protocols -->
+  <rect class="d-box" x="268" y="180" width="224" height="64" rx="8"/>
+  <text class="d-box-title" x="380" y="202" text-anchor="middle">Core Protocols</text>
+  <text class="d-box-sub" x="380" y="218" text-anchor="middle">DistilleryStore · EmbeddingProvider</text>
+  <text class="d-box-sub" x="380" y="232" text-anchor="middle">Typed Protocol interfaces (async)</text>
+
+  <!-- Layer 3c: Feeds -->
+  <rect class="d-feed" x="510" y="180" width="220" height="64" rx="8"/>
+  <text class="d-feed-title" x="620" y="202" text-anchor="middle">Feed System</text>
+  <text class="d-box-sub" x="620" y="218" text-anchor="middle">GitHub · RSS/Atom adapters</text>
+  <text class="d-box-sub" x="620" y="232" text-anchor="middle">Poller · Scorer · Interests</text>
+
+  <!-- Connector: Protocols to Backends -->
+  <line class="d-line" x1="380" y1="244" x2="380" y2="256"/>
+  <line class="d-line" x1="140" y1="256" x2="620" y2="256"/>
+  <line class="d-line" x1="140" y1="256" x2="140" y2="268"/>
+  <line class="d-line" x1="285" y1="256" x2="285" y2="268"/>
+  <line class="d-line" x1="475" y1="256" x2="475" y2="268"/>
+  <line class="d-line" x1="620" y1="256" x2="620" y2="268"/>
+
+  <!-- Layer 4: Backends -->
+  <rect class="d-box" x="30" y="268" width="210" height="72" rx="8"/>
+  <text class="d-box-title" x="135" y="290" text-anchor="middle">DuckDB + VSS</text>
+  <text class="d-box-sub" x="135" y="306" text-anchor="middle">HNSW cosine similarity</text>
+  <text class="d-box-sub" x="135" y="320" text-anchor="middle">Vector search + SQL storage</text>
+
+  <rect class="d-box" x="254" y="268" width="152" height="72" rx="8"/>
+  <text class="d-box-title" x="330" y="290" text-anchor="middle">Embedding</text>
+  <text class="d-box-sub" x="330" y="306" text-anchor="middle">Jina v3 / OpenAI</text>
+  <text class="d-box-sub" x="330" y="320" text-anchor="middle">Configurable provider</text>
+
+  <rect class="d-box" x="420" y="268" width="160" height="72" rx="8"/>
+  <text class="d-box-title" x="500" y="290" text-anchor="middle">Classification</text>
+  <text class="d-box-sub" x="500" y="306" text-anchor="middle">LLM engine + Dedup</text>
+  <text class="d-box-sub" x="500" y="320" text-anchor="middle">Conflicts + Tag validation</text>
+
+  <rect class="d-box" x="594" y="268" width="136" height="72" rx="8"/>
+  <text class="d-box-title" x="662" y="290" text-anchor="middle">Config</text>
+  <text class="d-box-sub" x="662" y="306" text-anchor="middle">distillery.yaml</text>
+  <text class="d-box-sub" x="662" y="320" text-anchor="middle">Security · Validation</text>
+
+  <!-- Entry Types -->
+  <text class="d-label" x="50" y="370">12 Entry Types</text>
+  <rect class="d-pill" x="50" y="380" width="56" height="22" rx="5"/><text class="d-type-text" x="78" y="395" text-anchor="middle">session</text>
+  <rect class="d-pill" x="114" y="380" width="66" height="22" rx="5"/><text class="d-type-text" x="147" y="395" text-anchor="middle">bookmark</text>
+  <rect class="d-pill" x="188" y="380" width="58" height="22" rx="5"/><text class="d-type-text" x="217" y="395" text-anchor="middle">minutes</text>
+  <rect class="d-pill" x="254" y="380" width="60" height="22" rx="5"/><text class="d-type-text" x="284" y="395" text-anchor="middle">meeting</text>
+  <rect class="d-pill" x="322" y="380" width="66" height="22" rx="5"/><text class="d-type-text" x="355" y="395" text-anchor="middle">reference</text>
+  <rect class="d-pill" x="396" y="380" width="38" height="22" rx="5"/><text class="d-type-text" x="415" y="395" text-anchor="middle">idea</text>
+  <rect class="d-pill" x="442" y="380" width="42" height="22" rx="5"/><text class="d-type-text" x="463" y="395" text-anchor="middle">inbox</text>
+  <rect class="d-pill" x="492" y="380" width="52" height="22" rx="5"/><text class="d-type-text" x="518" y="395" text-anchor="middle">person</text>
+  <rect class="d-pill" x="552" y="380" width="52" height="22" rx="5"/><text class="d-type-text" x="578" y="395" text-anchor="middle">project</text>
+  <rect class="d-pill" x="612" y="380" width="48" height="22" rx="5"/><text class="d-type-text" x="636" y="395" text-anchor="middle">digest</text>
+  <rect class="d-pill" x="668" y="380" width="48" height="22" rx="5"/><text class="d-type-text" x="692" y="395" text-anchor="middle">github</text>
+  <rect class="d-pill" x="50" y="408" width="40" height="22" rx="5"/><text class="d-type-text" x="70" y="423" text-anchor="middle">feed</text>
+
+  <!-- Dedup Thresholds -->
+  <text class="d-label" x="50" y="456">Dedup Thresholds</text>
+  <rect class="d-pill" x="50" y="466" width="140" height="22" rx="5"/><text class="d-type-text" x="120" y="481" text-anchor="middle">skip >= 0.95</text>
+  <rect class="d-pill" x="200" y="466" width="140" height="22" rx="5"/><text class="d-type-text" x="270" y="481" text-anchor="middle">merge >= 0.80</text>
+  <rect class="d-pill" x="350" y="466" width="140" height="22" rx="5"/><text class="d-type-text" x="420" y="481" text-anchor="middle">link >= 0.60</text>
+  <rect class="d-pill" x="500" y="466" width="140" height="22" rx="5"/><text class="d-type-text" x="570" y="481" text-anchor="middle">unique &lt; 0.60</text>
+
+  <!-- Tag Namespaces -->
+  <text class="d-label" x="50" y="516">Hierarchical Tags</text>
+  <text class="d-tag-text" x="50" y="536">project/distillery/sessions  ·  domain/storage  ·  source/bookmark/duckdb-org  ·  team/distillery</text>
 </svg>
 </div>
 
 ## Layers
 
-```text
-Skills (.claude-plugin/skills/<name>/SKILL.md)  →  slash commands users invoke
-    ↓
-MCP Server (src/distillery/mcp/server.py)  →  22 tools over stdio or HTTP (FastMCP 2.x)
-    ↓
-Core Protocols (store/protocol.py, embedding/protocol.py)  →  typed Protocol interfaces
-    ↓
-Backends (store/duckdb.py, embedding/jina.py, embedding/openai.py)  →  DuckDB + VSS, embedding APIs
-```
-
 | Layer | What it does | Key files |
 |-------|-------------|-----------|
 | **Skills** | 10 SKILL.md files — portable, version-controlled slash commands. Not Python code. | `.claude-plugin/skills/*/SKILL.md` |
-| **MCP Server** | 22 tools exposed over stdio (local) or HTTP (team). Built on FastMCP 2.x with `@server.tool` decorators. | `src/distillery/mcp/server.py` |
-| **Core Protocols** | Typed `Protocol` interfaces (structural subtyping, not ABCs). All storage operations are async. | `src/distillery/store/protocol.py`, `src/distillery/embedding/protocol.py` |
-| **Backends** | DuckDB with VSS extension for vector search (HNSW index, cosine similarity). Jina v3 and OpenAI embedding adapters. | `src/distillery/store/duckdb.py`, `src/distillery/embedding/jina.py` |
+| **MCP Server** | 22 tools exposed over stdio (local) or streamable-HTTP (team). Built on FastMCP 2.x/3.x with `@server.tool` decorators. | `src/distillery/mcp/server.py` |
+| **Auth** | GitHub OAuth with org-restricted access. Middleware handles logging, rate limiting, security headers, budget tracking. | `src/distillery/mcp/auth.py`, `middleware.py`, `budget.py` |
+| **Core Protocols** | Typed `Protocol` interfaces (structural subtyping, not ABCs). All storage operations are async. | `src/distillery/store/protocol.py`, `embedding/protocol.py` |
+| **Feeds** | GitHub events and RSS/Atom polling. Relevance scoring via embeddings. Interest extraction for source suggestions. | `src/distillery/feeds/` |
+| **Backends** | DuckDB + VSS (HNSW cosine similarity), Jina v3 / OpenAI embeddings, LLM classification with dedup + conflict detection. | `src/distillery/store/duckdb.py`, `embedding/`, `classification/` |
 
 ## Key Design Decisions
 

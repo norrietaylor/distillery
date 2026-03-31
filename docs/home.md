@@ -1,5 +1,5 @@
 <div style="text-align: center; margin: 2rem 0 1rem;">
-  <img src="assets/distillery-logo-dark-512.png" alt="Distillery" width="256" style="max-width: 100%;">
+  <img src="../assets/distillery-logo-dark-512.png" alt="Distillery" width="256" style="max-width: 100%;">
 </div>
 
 # Distillery
