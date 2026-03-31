@@ -1,11 +1,11 @@
 ---
 name: setup
-description: "Onboarding wizard for Distillery plugin — verifies MCP connectivity, detects transport, prompts for MCP connector registration, and configures auto-poll. Triggered by: 'setup', '/setup', 'configure distillery', 'set up distillery'."
+description: "Onboarding wizard for Distillery plugin — verifies MCP connectivity, detects transport, prompts for MCP connector registration, and configures scheduled tasks (hourly poll, daily rescore, weekly maintenance). Triggered by: 'setup', '/setup', 'configure distillery', 'set up distillery'."
 ---
 
 # Setup — Distillery Onboarding
 
-Setup walks you through first-time Distillery configuration: verifying MCP connectivity, detecting your transport mode, registering the MCP connector for remote polling, and optionally enabling auto-poll.
+Setup walks you through first-time Distillery configuration: verifying MCP connectivity, detecting your transport mode, registering the MCP connector for remote polling, and configuring scheduled tasks (hourly feed polling, daily relevance rescoring, weekly KB maintenance).
 
 Run this once after installing the plugin. It is safe to run again at any time to verify or update your configuration.
 
@@ -177,9 +177,13 @@ If the user says no (they'll register), display the summary (Step 6) noting remo
 After registering the connector at claude.ai, run /setup again to complete configuration.
 ```
 
-### Step 5: Auto-Poll Configuration
+### Step 5: Scheduled Tasks Configuration
 
-**5a. Remote trigger creation (hosted/team with connector):**
+Distillery uses three tiers of scheduled tasks: hourly feed polling, daily feed rescoring, and weekly knowledge base maintenance. Each tier is configured independently — check for existing jobs before creating to maintain idempotency.
+
+**5a. Hourly — Feed Polling**
+
+**Remote trigger creation (hosted/team with connector):**
 
 If transport is hosted or team HTTP, and the user has registered the MCP connector (confirmed via `RemoteTrigger(action="list")` returning a connector UUID), and no existing trigger was found in Step 4a, create the remote trigger:
 
@@ -231,7 +235,7 @@ Remote trigger created: distillery-feed-poll
   Manage at: https://claude.ai/code/scheduled/<trigger_id>
 ```
 
-**5b. Local cron fallback:**
+**Local cron fallback:**
 
 If transport is local, or if RemoteTrigger creation failed, use `CronCreate` for local auto-polling.
 
@@ -248,7 +252,10 @@ Auto-poll: active (cron job <job_id>, every hour at :<minute>)
 Ask the user:
 
 ```text
-Enable auto-poll? Feeds will be polled every hour while Claude Code is active.
+Enable scheduled tasks? This includes:
+  • Feed polling — every hour
+  • Feed rescoring — daily (re-evaluates relevance after new knowledge)
+  • KB maintenance — weekly (metrics, quality, stale entries, source suggestions)
 (yes / no)
 ```
 
@@ -276,6 +283,61 @@ Auto-poll: skipped (no feed sources configured)
   Add sources with /watch add <url> — auto-poll will be set up automatically.
 ```
 
+**5b. Daily — Feed Rescoring**
+
+After new knowledge entries are added, previously-scored feed items may have stale relevance scores. A daily rescore pass re-evaluates them against the current interest profile.
+
+Skip this step if the user declined scheduled tasks or if no feed sources are configured.
+
+Check `CronList` for an existing rescore job. If none exists, create one:
+
+```python
+CronCreate(
+  cron="<random minute> 6 * * *",
+  prompt="Use distillery_rescore(limit=200) to re-score feed entries against the current knowledge base. Report: rescored, upgraded, downgraded, archived counts.",
+  recurring=True,
+  durable=True
+)
+```
+
+Display:
+
+```text
+Daily rescore enabled: 06:<minute> UTC (cron job <job_id>)
+```
+
+**5c. Weekly — Knowledge Base Maintenance**
+
+A weekly maintenance pass collects metrics, checks search quality, identifies stale entries, and refreshes source suggestions. Results are stored as a digest entry for longitudinal tracking.
+
+Skip this step if the user declined scheduled tasks.
+
+Check `CronList` for an existing maintenance job. If none exists, create one:
+
+```python
+CronCreate(
+  cron="<random minute> 7 * * 1",
+  prompt="""Run weekly Distillery maintenance:
+1. Call distillery_metrics(period_days=7) — note entry growth, search volume, storage usage.
+2. Call distillery_quality() — note positive feedback rate and avg result count.
+3. Call distillery_stale(days=30, limit=10) — note count and oldest entries.
+4. Call distillery_interests(recency_days=30, top_n=10) — note top tags and domains.
+5. Call distillery_suggest_sources(max_suggestions=3) — note any new recommendations.
+6. Store a digest: distillery_store(content=<one-paragraph summary of findings>, entry_type="session", author="distillery-maintenance", tags=["digest", "weekly", "maintenance"], metadata={"period_start": "<7 days ago ISO>", "period_end": "<today ISO>"}).
+Report: entry counts, search quality trend, stale entry count, top interests, suggested sources.""",
+  recurring=True,
+  durable=True
+)
+```
+
+Display:
+
+```text
+Weekly maintenance enabled: Mondays at 07:<minute> UTC (cron job <job_id>)
+  Collects: metrics, search quality, stale entries, interests, source suggestions
+  Stores: weekly digest entry for tracking trends
+```
+
 ### Step 6: Summary
 
 Always display the configuration summary, regardless of which steps were completed or skipped. Use "not connected" or "N/A" for fields that could not be determined.
@@ -287,7 +349,11 @@ Distillery Setup Complete
   Transport:     <Local | Hosted | Team HTTP | unknown>
   Entries:       <total_entries | N/A>
   Feed Sources:  <N> configured
-  Auto-Poll:     <active (cron) | active (remote trigger) | inactive | pending connector>
+
+  Scheduled Tasks:
+    Feed poll:     <active (hourly) | inactive | pending connector>
+    Feed rescore:  <active (daily 06:XX UTC) | inactive>
+    KB maintenance:<active (weekly Mon 07:XX UTC) | inactive>
 
 Available skills:
   /distill   — capture knowledge      /recall   — search knowledge
@@ -308,11 +374,13 @@ The setup wizard uses a sequential, conversational format. Each step prints its 
 - Always start by checking MCP availability — distinguish between "not configured", "needs authentication", and "connected"
 - When an MCP server entry exists but tools are unavailable, treat this as "needs authentication" rather than "not configured" — guide the user through the OAuth flow
 - Always show the Step 6 summary — even on early exits (MCP unavailable, auth needed, user defers connector registration)
-- Never create duplicate cron jobs — always check `CronList` first
+- Never create duplicate cron jobs — always check `CronList` first for each job type (poll, rescore, maintenance)
 - Never create duplicate remote triggers — always check `RemoteTrigger(action="list")` first
 - For remote trigger creation, include `mcp__distillery__distillery_poll` in `allowed_tools`
-- Pick an off-peak cron minute (not :00 or :30) for auto-poll schedules
-- If the user has no feed sources, skip auto-poll setup but explain how to enable it later
+- Pick an off-peak cron minute (not :00 or :30) for all schedules; use different random minutes for each job
+- If the user has no feed sources, skip feed poll and rescore but still offer weekly maintenance
 - If `RemoteTrigger` calls fail, fall back to `CronCreate` gracefully and explain the limitation
 - This skill is idempotent — running it multiple times should not create duplicates
 - Use actual field names from `distillery_status` response (`total_entries`, `embedding_model`, `database_size_bytes`)
+- The weekly maintenance job stores its output as a digest entry — this creates a longitudinal record of KB health
+- Ask the user once about enabling scheduled tasks; their answer applies to all three tiers (poll, rescore, maintenance)
