@@ -129,15 +129,18 @@ def main(argv: list[str] | None = None) -> int:
             port = args.port if args.port is not None else (int(port_env) if port_env else 8000)
 
             auth = None
+            org_checker = None
             provider_name = config.server.auth.provider
             if provider_name == "github":
                 from distillery.mcp.auth import (
                     _patch_cimd_localhost_redirect,
                     build_github_auth,
+                    build_org_checker,
                 )
 
                 _patch_cimd_localhost_redirect()
-                auth = build_github_auth(config)
+                org_checker = build_org_checker(config)
+                auth = build_github_auth(config, org_checker=org_checker)
             elif provider_name == "none":
                 logger.warning(
                     "HTTP server running without authentication "
@@ -166,6 +169,7 @@ def main(argv: list[str] | None = None) -> int:
                 requests_per_hour=rl.requests_per_hour,
                 max_body_bytes=rl.max_body_bytes,
                 trust_proxy=rl.trust_proxy,
+                org_checker=org_checker,
             )
 
             import uvicorn as _uvicorn
