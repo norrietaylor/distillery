@@ -91,26 +91,33 @@ jobs:
           with open("grype-report-${{ matrix.target }}.json") as f:
               data = json.load(f)
 
+          SEV_ORDER = ["Critical","High","Medium","Low","Negligible","Unknown"]
+
           matches = data.get("matches", [])
-          if not matches:
+          ignored_matches = data.get("ignoredMatches", [])
+
+          # Tag each match with suppression status
+          all_matches = [(m, False) for m in matches] + [(m, True) for m in ignored_matches]
+
+          if not all_matches:
               summary = "### 🛡️ Grype Scan: `${{ matrix.target }}`\n\n✅ No vulnerabilities found.\n"
           else:
               by_sev = {}
-              for m in matches:
+              for m, _ in all_matches:
                   sev = m.get("vulnerability", {}).get("severity", "Unknown")
                   by_sev.setdefault(sev, []).append(m)
 
-              counts = " · ".join(f"**{s}**: {len(v)}" for s, v in sorted(by_sev.items(), key=lambda x: ["Critical","High","Medium","Low","Negligible","Unknown"].index(x[0]) if x[0] in ["Critical","High","Medium","Low","Negligible","Unknown"] else 99))
+              counts = " · ".join(f"**{s}**: {len(v)}" for s, v in sorted(by_sev.items(), key=lambda x: SEV_ORDER.index(x[0]) if x[0] in SEV_ORDER else 99))
               summary = f"### 🛡️ Grype Scan: `${{ matrix.target }}`\n\n{counts}\n\n"
               summary += "| Severity | CVE | Package | Version | Fixed In | Status |\n"
               summary += "|----------|-----|---------|---------|----------|--------|\n"
-              for m in sorted(matches, key=lambda x: ["Critical","High","Medium","Low","Negligible","Unknown"].index(x.get("vulnerability",{}).get("severity","Unknown")) if x.get("vulnerability",{}).get("severity","Unknown") in ["Critical","High","Medium","Low","Negligible","Unknown"] else 99):
+              for m, is_suppressed in sorted(all_matches, key=lambda x: SEV_ORDER.index(x[0].get("vulnerability",{}).get("severity","Unknown")) if x[0].get("vulnerability",{}).get("severity","Unknown") in SEV_ORDER else 99):
                   v = m.get("vulnerability", {})
                   pkg = m.get("artifact", {}).get("name", "?")
                   ver = m.get("artifact", {}).get("version", "?")
                   fix = v.get("fix", {})
                   fixed = ", ".join(fix.get("versions", [])) if fix.get("state") == "fixed" else "—"
-                  ignored = "🔇 suppressed" if m.get("matchDetails", [{}])[0].get("ignored", False) else ""
+                  ignored = "🔇 suppressed" if is_suppressed or m.get("appliedIgnoreRules") else ""
                   summary += f"| {v.get('severity','?')} | {v.get('id','?')} | {pkg} | {ver} | {fixed} | {ignored} |\n"
 
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
