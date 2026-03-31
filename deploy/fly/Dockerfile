@@ -5,6 +5,10 @@ WORKDIR /app
 ARG BUILD_SHA=unknown
 ENV DISTILLERY_BUILD_SHA=${BUILD_SHA}
 
+# Persist FastMCP OAuth state (client registrations, tokens) on the Fly volume
+# so tokens survive machine autostop/restart cycles.
+ENV FASTMCP_HOME=/data/fastmcp
+
 RUN useradd --create-home --uid 10001 appuser
 
 # Copy the full repo (build context is repo root)
