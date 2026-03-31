@@ -35,7 +35,7 @@ from distillery.eval.scorer import score_effectiveness
 logger = logging.getLogger(__name__)
 
 # Path to the skills directory (relative to the repo root).
-_SKILLS_DIR = Path(__file__).parents[4] / ".claude" / "skills"
+_SKILLS_DIR = Path(__file__).parents[4] / ".claude-plugin" / "skills"
 
 
 def _load_skill_prompt(skill_name: str) -> str:
@@ -222,7 +222,7 @@ class ClaudeEvalRunner:
 
     Args:
         claude_cli: Path or name of the Claude CLI binary (default ``"claude"``).
-        skills_dir: Override the path to the ``.claude/skills/`` directory.
+        skills_dir: Override the path to the ``.claude-plugin/skills/`` directory.
     """
 
     def __init__(

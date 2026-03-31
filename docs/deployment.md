@@ -109,7 +109,7 @@ classification:
 
 ### Configuration sections
 
-**server** (NEW in this spec)
+**server**
 - `auth.provider`: `"github"` or `"none"` (default `"none"`)
   - `"github"` requires valid GitHub OAuth credentials
   - `"none"` allows HTTP without auth (development only)
@@ -194,19 +194,9 @@ Options:
   --help                   Show this help message
 ```
 
-### Expected startup output
+### Verifying startup
 
-```text
-Starting Distillery MCP server in HTTP mode
-Host: 0.0.0.0
-Port: 8000
-Path: /mcp
-Auth: GitHub OAuth enabled
-Storage: MotherDuck (distillery)
-Embedding: Jina (1024 dimensions)
-```
-
-If you don't see all fields, check that environment variables and `distillery.yaml` are configured correctly.
+The server logs to stderr via Python logging. On startup you will reliably see database initialization and embedding provider details. Transport and auth configuration are not currently emitted as structured log lines — verify those by checking the config file and testing connectivity (see Step 5).
 
 ## Step 5: Verify the Server is Running
 

@@ -9,7 +9,7 @@
   "homepage": "https://github.com/norrietaylor/distillery",
   "repository": "https://github.com/norrietaylor/distillery",
   "keywords": ["knowledge-base", "second-brain", "mcp", "embeddings", "distillery"],
-  "skills": "./.claude/skills/",
+  "skills": "./skills/",
   "mcpServers": {
     "distillery": {
       "type": "http",
