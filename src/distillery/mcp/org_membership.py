@@ -284,24 +284,35 @@ class OrgMembershipChecker:
         Used when ``GET /orgs/{org}/members/{username}`` returns 302 (private
         org; token cannot see direct member list).  The user's own token with
         ``read:org`` scope *can* list their private org memberships here.
+
+        Paginates through all pages (100 per page) to handle users who are
+        members of more than 100 organisations.
         """
         headers = {
             "Authorization": f"Bearer {token}",
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
         }
+        org_lower = org.lower()
+        # Cap at 50 pages (5 000 orgs) to avoid infinite loops.
+        max_pages = 50
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.get(
-                    f"{GITHUB_API}/user/orgs",
-                    headers=headers,
-                    params={"per_page": 100},
-                )
-            if resp.status_code != 200:
-                logger.warning("GET /user/orgs returned %s", resp.status_code)
-                return False
-            orgs: list[dict[str, Any]] = resp.json()
-            return any(o.get("login", "").lower() == org.lower() for o in orgs)
+                for page in range(1, max_pages + 1):
+                    resp = await client.get(
+                        f"{GITHUB_API}/user/orgs",
+                        headers=headers,
+                        params={"per_page": 100, "page": page},
+                    )
+                    if resp.status_code != 200:
+                        logger.warning("GET /user/orgs returned %s", resp.status_code)
+                        return False
+                    orgs: list[dict[str, Any]] = resp.json()
+                    if not orgs:
+                        break
+                    if any(o.get("login", "").lower() == org_lower for o in orgs):
+                        return True
         except (httpx.HTTPError, ValueError) as exc:
             logger.error("GitHub /user/orgs API error: %s", exc)
             return False
+        return False
