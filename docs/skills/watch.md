@@ -4,7 +4,7 @@ Manages the feed sources that Distillery monitors for ambient intelligence. Sour
 
 ## Usage
 
-```
+```text
 /watch                                          # List all sources
 /watch list                                     # List all sources
 /watch add https://github.com/duckdb/duckdb     # Add a GitHub source
@@ -20,7 +20,7 @@ Manages the feed sources that Distillery monitors for ambient intelligence. Sour
 
 Displays all configured feed sources:
 
-```
+```text
 ## Feed Sources (3 configured)
 
 | # | URL | Type | Label | Poll (min) | Trust |

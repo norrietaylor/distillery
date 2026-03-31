@@ -4,7 +4,7 @@ Performs multi-pass retrieval and synthesizes findings into a structured narrati
 
 ## Usage
 
-```
+```text
 /pour how does our auth system work?
 /pour --project billing payment processing
 ```

@@ -4,7 +4,7 @@ Captures decisions, architectural insights, and action items from a working sess
 
 ## Usage
 
-```
+```text
 /distill
 /distill "We decided to use DuckDB for local storage"
 ```
@@ -45,7 +45,7 @@ A markdown preview of the distilled entry including title, content summary, tags
 
 ### Confirmation (after storing)
 
-```
+```text
 Stored: <entry-id>
 Summary: <first line of content>
 Tags: domain/caching, project/distillery/decisions

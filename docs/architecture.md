@@ -67,7 +67,7 @@ The `Entry` dataclass (`src/distillery/models.py`) is the fundamental unit of kn
 
 ## Project Structure
 
-```
+```text
 distillery/
 ├── .claude-plugin/skills/   # Claude Code skill definitions (loaded via plugin)
 │   ├── distill/SKILL.md

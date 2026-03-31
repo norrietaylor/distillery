@@ -74,7 +74,7 @@ Key fixtures in `tests/conftest.py`:
 
 Distillery follows [Conventional Commits](https://www.conventionalcommits.org/).
 
-```
+```text
 <type>(<scope>): <description>
 ```
 
@@ -95,7 +95,7 @@ Distillery follows [Conventional Commits](https://www.conventionalcommits.org/).
 
 ### Examples
 
-```
+```text
 feat(store): add DuckDB vector search with cosine similarity
 fix(mcp): handle missing embedding provider in distillery_recall
 docs: update CONTRIBUTING.md with new test markers

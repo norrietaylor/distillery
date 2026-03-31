@@ -16,7 +16,7 @@ This installs the skill definitions globally and configures the MCP server conne
 
 After installation, restart Claude Code and verify by calling the `distillery_status` MCP tool:
 
-```
+```text
 distillery_status
 ```
 
@@ -113,7 +113,7 @@ Enable remote auto-polling so feed sources are polled automatically even when Cl
 
 ### Step 2 — Run `/setup`
 
-```
+```text
 /setup
 ```
 
@@ -121,7 +121,7 @@ The wizard detects your transport, finds the registered connector, and creates a
 
 ### Step 3 — Verify
 
-```
+```text
 /watch list
 ```
 
@@ -131,7 +131,7 @@ You should see your feed sources and a note about the active remote trigger.
 
 After saving the settings file, restart Claude Code or reload MCP servers, then check connectivity by calling the `distillery_status` MCP tool:
 
-```
+```text
 distillery_status
 ```
 

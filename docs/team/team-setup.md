@@ -51,7 +51,7 @@ GitHub OAuth tokens are valid indefinitely until revoked. Claude Code handles re
 
 ## Step 3: Verify the Connection
 
-```
+```text
 /recall test
 ```
 

@@ -69,7 +69,7 @@ See [`distillery.yaml.example`](https://github.com/norrietaylor/distillery/blob/
 
 Call the `distillery_status` MCP tool from within Claude Code:
 
-```
+```text
 distillery_status
 ```
 

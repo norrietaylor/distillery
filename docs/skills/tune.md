@@ -4,7 +4,7 @@ Displays and adjusts the alert and digest thresholds that control which feed ent
 
 ## Usage
 
-```
+```text
 /tune                           # Display current thresholds (read-only)
 /tune --alert 0.90              # Set alert threshold
 /tune --digest 0.50             # Set digest threshold
@@ -36,7 +36,7 @@ Feed entries with relevance scores at or above the **alert** threshold are flagg
 
 ### Read-Only Mode (no flags)
 
-```
+```text
 ## Feed Relevance Thresholds
 
 | Threshold | Value | Meaning |

@@ -4,7 +4,7 @@ Searches the knowledge base using natural language queries and returns ranked re
 
 ## Usage
 
-```
+```text
 /recall distributed caching strategies
 /recall --type bookmark --limit 5 API design
 /recall --author alice --project billing authentication
@@ -39,7 +39,7 @@ Each result includes:
 - **Provenance** — entry ID, author, project, creation date
 - **Tags** — if any are present
 
-```
+```text
 ## Results (3 found)
 
 ### 92% [session] Caching Strategy Decision

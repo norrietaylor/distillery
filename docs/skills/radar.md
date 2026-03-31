@@ -4,7 +4,7 @@ Surfaces recent feed entries, synthesizes them into a grouped digest, and option
 
 ## Usage
 
-```
+```text
 /radar                         # Default: last 7 days, up to 20 entries
 /radar --days 3                # Last 3 days
 /radar --limit 10              # Limit to 10 entries

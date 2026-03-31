@@ -4,7 +4,7 @@ Captures structured meeting notes, stores them in the knowledge base, and suppor
 
 ## Usage
 
-```
+```text
 /minutes
 /minutes --update standup-2026-03-22
 /minutes --list
@@ -32,7 +32,7 @@ The entry is stored with a generated `meeting_id` in the format `<slugified-titl
 
 Appends new content to an existing meeting entry. Updates are timestamped and the version is incremented. Previous content is never overwritten.
 
-```
+```text
 /minutes --update sprint-planning-2026-03-22
 ```
 
@@ -42,7 +42,7 @@ Each update is appended under a `## Update — <timestamp>` heading.
 
 Displays a compact table of recent meetings:
 
-```
+```text
 | Meeting ID                    | Title            | Date       | Attendees     |
 |-------------------------------|------------------|------------|---------------|
 | sprint-planning-2026-03-22    | Sprint Planning  | 2026-03-22 | alice, bob    |

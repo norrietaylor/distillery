@@ -4,7 +4,7 @@ Fetches a URL, generates a concise summary, checks for duplicates, and stores th
 
 ## Usage
 
-```
+```text
 /bookmark https://example.com/article
 /bookmark https://redis.io/docs/best-practices #caching #redis
 ```
@@ -38,7 +38,7 @@ If the URL is inaccessible, you're asked to provide a manual summary.
 
 ### Preview
 
-```
+```text
 ## Bookmark Preview
 
 **URL:** https://redis.io/docs/best-practices
@@ -59,7 +59,7 @@ Store this bookmark? (y/n)
 
 ### Confirmation
 
-```
+```text
 Stored: e5f6g7h8
 URL: https://redis.io/docs/best-practices | Project: billing
 Summary: Redis recommends using connection pooling with a maximum...

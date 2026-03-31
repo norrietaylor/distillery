@@ -87,7 +87,7 @@ Or use the installed entry point:
 
 Restart Claude Code and verify:
 
-```
+```text
 distillery_status
 ```
 

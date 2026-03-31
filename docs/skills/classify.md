@@ -4,7 +4,7 @@ Runs the classification engine on knowledge entries and lets you triage the revi
 
 ## Usage
 
-```
+```text
 /classify <entry-id>       # Classify a specific entry
 /classify --inbox          # Batch classify all inbox entries
 /classify --review         # Triage the review queue
@@ -19,7 +19,7 @@ Runs the classification engine on knowledge entries and lets you triage the revi
 
 Classifies a specific entry and displays the result:
 
-```
+```text
 Entry: a1b2c3d4
 Type: session
 Confidence: 92% (high)

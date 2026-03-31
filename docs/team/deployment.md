@@ -94,10 +94,8 @@ classification:
 
 Distillery validates configuration at startup:
 
-- **MotherDuck**: `database_path` must start with `md:`, token env var must be set
-- **GitHub OAuth**: `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, and `DISTILLERY_BASE_URL` must be set
-
-If validation fails, the server logs a warning. For MotherDuck, a missing token is logged as a warning but the server continues (falling back to local DuckDB). For GitHub OAuth, missing credentials prevent HTTP transport from starting.
+- **MotherDuck**: `database_path` must start with `md:`; if the token env var is not set, a warning is logged and the server continues (it will attempt to connect without authentication)
+- **GitHub OAuth**: `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, and `DISTILLERY_BASE_URL` must be set; missing credentials prevent HTTP transport from starting
 
 ## Step 4: Start the Server
 
@@ -182,5 +180,5 @@ For other platforms (Docker, Kubernetes, AWS/GCP/Azure), use `deploy/fly/Dockerf
 |-------|-------|-----|
 | `GITHUB_CLIENT_ID not set` | Missing OAuth credentials | Set the environment variable |
 | `database_path must start with 'md:'` | MotherDuck config mismatch | Use `md:distillery` as the path |
-| `MOTHERDUCK_TOKEN not set` | Missing token | Set `MOTHERDUCK_TOKEN` env var |
+| `MOTHERDUCK_TOKEN not set` (warning) | Missing token for MotherDuck | Set `MOTHERDUCK_TOKEN` env var for authenticated access |
 | `Server failed to start on port 8000` | Port in use | Use `--port 9000` or check `lsof -i :8000` |

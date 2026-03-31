@@ -4,7 +4,7 @@ Walks through first-time Distillery configuration: verifying MCP connectivity, d
 
 ## Usage
 
-```
+```text
 /setup
 ```
 
@@ -72,7 +72,7 @@ Configures up to three tiers of recurring jobs:
 
 Always displayed, even if the wizard exits early:
 
-```
+```text
 ## Distillery Setup Summary
 
 | Setting | Value |

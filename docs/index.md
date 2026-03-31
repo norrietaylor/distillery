@@ -26,7 +26,7 @@ Distillery provides 10 Claude Code slash commands:
 | [`/classify`](skills/classify.md) | Classify entries and triage review queue | `/classify --inbox` |
 | [`/watch`](skills/watch.md) | Manage monitored feed sources | `/watch add github:duckdb/duckdb` |
 | [`/radar`](skills/radar.md) | Ambient feed digest with source suggestions | `/radar --days 7` |
-| [`/tune`](skills/tune.md) | Adjust feed relevance thresholds | `/tune relevance 0.4` |
+| [`/tune`](skills/tune.md) | Adjust feed relevance thresholds | `/tune --digest 0.40` |
 | [`/setup`](skills/setup.md) | Onboarding wizard for MCP connectivity and config | `/setup` |
 
 ## Quick Start
@@ -41,7 +41,7 @@ claude plugin install distillery
 
 Then verify the connection by calling the `distillery_status` MCP tool:
 
-```
+```text
 distillery_status
 ```
 
