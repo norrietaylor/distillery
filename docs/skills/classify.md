@@ -36,7 +36,7 @@ Classifies all entries with type `inbox` (up to 50 at a time). Results are displ
 | a1b2c3d4 | "We decided to use..." | session | 92% (high) | classified |
 | e5f6g7h8 | "Meeting with the..." | minutes | 45% (low) | needs review |
 
-Entries with low confidence (<50%) are sent to the review queue.
+Entries with confidence below the `confidence_threshold` (default: 60%) are sent to the review queue.
 
 ### Review Queue (`--review`)
 
@@ -62,8 +62,8 @@ After triage, a summary shows counts: approved, reclassified, archived, skipped.
 | Level | Range | Meaning |
 |-------|-------|---------|
 | High | >= 80% | Confident classification, auto-applied |
-| Medium | 50-79% | Reasonable guess, auto-applied |
-| Low | < 50% | Uncertain, sent to review queue |
+| Medium | 60-79% | Reasonable guess, auto-applied |
+| Low | < 60% | Below `confidence_threshold` (default), sent to review queue |
 
 ## Valid Entry Types
 

@@ -39,7 +39,7 @@ claude plugin marketplace add norrietaylor/distillery
 claude plugin install distillery
 ```
 
-Then verify the connection:
+Then verify the connection by calling the `distillery_status` MCP tool:
 
 ```
 distillery_status
@@ -50,7 +50,7 @@ For other installation options, see [Plugin Install](getting-started/plugin-inst
 ## Architecture at a Glance
 
 <picture>
-  <img alt="Distillery Architecture" src="assets/architecture.svg" width="720">
+  <img alt="Distillery Architecture" src="assets/architecture.svg" style="max-width: 100%; height: auto;" width="720">
 </picture>
 
 Distillery is built as a 4-layer system:

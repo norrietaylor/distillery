@@ -14,7 +14,7 @@ claude plugin install distillery
 
 This installs the skill definitions globally and configures the MCP server connection to the hosted Distillery instance.
 
-After installation, restart Claude Code and verify:
+After installation, restart Claude Code and verify by calling the `distillery_status` MCP tool:
 
 ```
 distillery_status
@@ -129,7 +129,7 @@ You should see your feed sources and a note about the active remote trigger.
 
 ## Verifying the Setup
 
-After saving the settings file, restart Claude Code or reload MCP servers, then check connectivity:
+After saving the settings file, restart Claude Code or reload MCP servers, then check connectivity by calling the `distillery_status` MCP tool:
 
 ```
 distillery_status

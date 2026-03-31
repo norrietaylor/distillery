@@ -6,6 +6,7 @@ on:
     paths:
       - 'docs/**'
       - 'mkdocs.yml'
+      - 'pyproject.toml'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -30,14 +31,14 @@ jobs:
         with:
           python-version: '3.13'
 
-      - name: Install MkDocs Material
-        run: pip install mkdocs-material
+      - name: Install docs dependencies
+        run: pip install .[docs]
 
       - name: Build documentation
         run: mkdocs build --strict
 
       - name: Copy presentation to site
-        run: cp docs/presentation.html site/presentation.html
+        run: cp docs/presentation.html site/presentation.html || true
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

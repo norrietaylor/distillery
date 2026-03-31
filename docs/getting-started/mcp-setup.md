@@ -67,6 +67,8 @@ See [`distillery.yaml.example`](https://github.com/norrietaylor/distillery/blob/
 
 ## Verifying the Server
 
+Call the `distillery_status` MCP tool from within Claude Code:
+
 ```
 distillery_status
 ```

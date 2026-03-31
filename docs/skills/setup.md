@@ -49,7 +49,7 @@ Lists any configured feed sources from `/watch`.
 
 ### Step 4: MCP Connector Registration (hosted/team only)
 
-For remote transports, checks for an existing MCP connector at `claude.ai/settings/connectors`. If none exists, prompts you to register one for remote auto-polling.
+For remote transports, checks for an existing MCP connector at [`https://claude.ai/settings/connectors`](https://claude.ai/settings/connectors). If none exists, prompts you to register one for remote auto-polling.
 
 Skipped for local transport.
 
@@ -63,8 +63,8 @@ Configures up to three tiers of recurring jobs:
 | **Daily** | Feed rescoring | Re-score entries against updated interest profile |
 | **Weekly** | KB maintenance | Collect metrics, quality, stale entries, interests, suggestions |
 
-- **Local transport** — creates cron jobs via `CronCreate`
-- **Hosted/team transport** — creates remote triggers via `RemoteTrigger`, falling back to cron if triggers fail
+- **Local transport** — creates cron jobs via `CronCreate` (a Claude Code platform primitive for scheduling recurring tasks)
+- **Hosted/team transport** — creates remote triggers via `RemoteTrigger` (a Claude Code platform primitive for server-side scheduling), falling back to cron if triggers fail
 - Checks for existing jobs before creating (no duplicates)
 - If no feed sources exist, poll/rescore are skipped but weekly maintenance is still offered
 

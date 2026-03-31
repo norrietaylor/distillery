@@ -3,7 +3,7 @@
 Distillery is built as a 4-layer system where skills (SKILL.md files) drive all user interaction, the MCP server mediates all storage access, and backends are swappable through typed Protocol interfaces.
 
 <picture>
-  <img alt="Distillery Architecture" src="assets/architecture.svg" width="720">
+  <img alt="Distillery Architecture" src="assets/architecture.svg" style="max-width: 100%; height: auto;" width="720">
 </picture>
 
 ## Layers
@@ -44,7 +44,7 @@ Backends (store/duckdb.py, embedding/jina.py, embedding/openai.py)  →  DuckDB 
 | Link | 0.60 | Related — store with cross-reference |
 | Below 0.60 | — | Unique — store normally |
 
-**Classification with confidence scoring.** LLM-based type assignment with a team review queue for low-confidence results (below 50%).
+**Classification with confidence scoring.** LLM-based type assignment with a team review queue for low-confidence results (below the configurable `confidence_threshold`, default: 60%).
 
 ## Core Data Model
 
@@ -52,7 +52,7 @@ The `Entry` dataclass (`src/distillery/models.py`) is the fundamental unit of kn
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | UUID | Unique identifier |
+| `id` | str (UUID4) | Unique identifier |
 | `content` | str | The knowledge content |
 | `entry_type` | EntryType | session, bookmark, minutes, meeting, reference, idea, inbox, person, project, digest, github, feed |
 | `source` | EntrySource | claude_code, manual, import |
@@ -61,7 +61,7 @@ The `Entry` dataclass (`src/distillery/models.py`) is the fundamental unit of kn
 | `metadata` | dict | Type-specific fields (validated per entry type) |
 | `version` | int | Incremented on updates |
 | `author` | str | Who created the entry |
-| `project` | str | Which project context |
+| `project` | str \| None | Which project context |
 | `created_at` | datetime | Creation timestamp |
 | `updated_at` | datetime | Last modification |
 

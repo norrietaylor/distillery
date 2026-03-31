@@ -20,7 +20,7 @@ Displays and adjusts the alert and digest thresholds that control which feed ent
 | **Alert** | 0.85 | High-priority items flagged for immediate attention |
 | **Digest** | 0.60 | Regular items included in the `/radar` digest |
 
-Feed entries with relevance scores above the **alert** threshold are flagged as high-priority. Entries above the **digest** threshold (but below alert) are included in the regular digest. Entries below the digest threshold are stored but not surfaced.
+Feed entries with relevance scores at or above the **alert** threshold are flagged as high-priority. Entries at or above the **digest** threshold (but below alert) are included in the regular digest. Entries below the digest threshold are stored but not surfaced.
 
 ## Options
 
@@ -30,7 +30,7 @@ Feed entries with relevance scores above the **alert** threshold are flagged as 
 | `--digest <value>` | Set digest threshold (0.0-1.0) |
 
 !!! note "Validation"
-    The alert threshold must be higher than the digest threshold. Both values must be between 0.0 and 1.0.
+    The alert threshold must be greater than or equal to the digest threshold. Both values must be between 0.0 and 1.0.
 
 ## Output
 

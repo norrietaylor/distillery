@@ -37,15 +37,15 @@ Adds a new feed source and optionally configures auto-poll scheduling.
 | Option | Description | Default |
 |--------|-------------|---------|
 | URL (required) | The feed URL to monitor | — |
-| `--type <type>` | Source type: `rss`, `github`, `hackernews`, `webhook` | Auto-detected |
+| `--type <type>` | Source type: `rss`, `github` | Auto-detected |
 | `--label <name>` | Human-readable label | URL-derived |
 | `--interval <minutes>` | Poll interval in minutes | 60 |
 | `--trust <weight>` | Trust weight 0.0-1.0 | 1.0 |
 
-After adding a source, auto-poll scheduling is configured:
+After adding a source, the skill offers to configure auto-poll scheduling:
 
-- **Local transport** — creates a recurring cron job via `CronCreate`
-- **Hosted/team transport** — creates a remote trigger via `RemoteTrigger`
+- **Local transport** — creates a recurring cron job via `CronCreate` (a Claude Code platform primitive)
+- **Hosted/team transport** — creates a remote trigger via `RemoteTrigger` (a Claude Code platform primitive)
 
 ### Remove
 
@@ -57,8 +57,6 @@ Removes a source by URL. If no sources remain after removal, the auto-poll sched
 |------|-----------------|
 | `github` | Repository events via GitHub REST API |
 | `rss` | RSS/Atom feed entries |
-| `hackernews` | Hacker News items (planned) |
-| `webhook` | Incoming webhook payloads (planned) |
 
 ## Tips
 

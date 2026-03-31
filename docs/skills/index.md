@@ -34,7 +34,7 @@ Distillery provides 10 Claude Code slash commands organized into three categorie
 
 ## How Skills Work
 
-Skills are defined as `SKILL.md` files in `.claude-plugin/skills/`. When you invoke a slash command, Claude Code loads the markdown and follows the instructions — no Python code is executed by the skill itself. All data operations go through the Distillery MCP server's 22 tools.
+Skills are defined as `SKILL.md` files in `.claude-plugin/skills/`. When you invoke a slash command, Claude Code loads the markdown and follows the instructions — no Python code is executed by the skill itself. All data operations go through the Distillery MCP server's tools.
 
 ### Common Patterns
 

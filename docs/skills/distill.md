@@ -22,10 +22,10 @@ Captures decisions, architectural insights, and action items from a working sess
 1. **Gathers content** from the current conversation — decisions, insights, action items
 2. **Constructs a distilled summary** (not a raw dump of the conversation)
 3. **Checks for duplicates** using semantic similarity:
-    - **Skip** (>95% similar) — near-duplicate exists, don't store
-    - **Merge** (>80%) — combine with existing entry
-    - **Link** (>60%) — store with cross-reference to related entry
-    - **Create** (<60%) — store as new entry
+    - **Skip** (>= 95% similar) — near-duplicate exists, don't store
+    - **Merge** (>= 80%) — combine with existing entry
+    - **Link** (>= 60%) — store with cross-reference to related entry
+    - **Create** (< 60%) — store as new entry
 4. **Shows a preview** and asks for confirmation before storing
 5. **Extracts tags** automatically from the content (2-5 keywords)
 6. **Stores** the entry and confirms with the entry ID

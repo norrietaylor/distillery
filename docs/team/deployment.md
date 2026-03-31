@@ -97,7 +97,7 @@ Distillery validates configuration at startup:
 - **MotherDuck**: `database_path` must start with `md:`, token env var must be set
 - **GitHub OAuth**: `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, and `DISTILLERY_BASE_URL` must be set
 
-If validation fails, the server prints an error and exits.
+If validation fails, the server logs a warning. For MotherDuck, a missing token is logged as a warning but the server continues (falling back to local DuckDB). For GitHub OAuth, missing credentials prevent HTTP transport from starting.
 
 ## Step 4: Start the Server
 
