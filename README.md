@@ -9,7 +9,7 @@
 <h1 align="center">Distillery</h1>
 
 <p align="center">
-  <strong>A team-accessible Second Brain powered by Claude Code</strong>
+  <strong>Team Knowledge, Distilled</strong>
   <br>
   Capture, classify, connect, and surface team knowledge through conversational commands.
 </p>
@@ -28,7 +28,7 @@
 
 Distillery is a team knowledge base accessed through Claude Code skills. It refines raw information from working sessions, meetings, bookmarks, and conversations into concentrated, searchable knowledge — stored as vector embeddings in DuckDB and retrieved through natural language. Runs locally over stdio or as a hosted HTTP service with GitHub OAuth for team access.
 
-Inspired by Tiago Forte's **Building a Second Brain** methodology (CODE: Capture, Organize, Distill, Express), Distillery maps the "Distill" step — the highest-value transformation from noise to signal — into a tool the whole team can use.
+Distillery captures the highest-value transformation — from noise to signal — and makes it a tool the whole team can use.
 
 > **Full documentation:** [norrietaylor.github.io/distillery](https://norrietaylor.github.io/distillery/)
 

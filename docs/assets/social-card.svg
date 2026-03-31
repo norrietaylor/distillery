@@ -29,7 +29,7 @@
   <text x="640" y="420" text-anchor="middle" fill="#888" font-size="28" font-weight="300">Team Knowledge, Distilled</text>
 
   <!-- Description -->
-  <text x="640" y="480" text-anchor="middle" fill="#EF9F27" font-size="20" font-weight="400">A team-accessible Second Brain powered by Claude Code</text>
+  <text x="640" y="480" text-anchor="middle" fill="#EF9F27" font-size="20" font-weight="400">A team knowledge base powered by Claude Code</text>
 
   <!-- Skill pills row -->
   <g transform="translate(640, 530)" text-anchor="middle">

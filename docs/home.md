@@ -14,7 +14,7 @@ Runs locally over stdio or as a hosted HTTP service with GitHub OAuth for team a
 
 - **Developers and teams** who use Claude Code and want to capture, organize, and retrieve knowledge without leaving their workflow.
 - **Team leads and operators** who want a shared knowledge base their team can access through a hosted MCP server with GitHub authentication.
-- **Anyone building a Second Brain** — inspired by Tiago Forte's [Building a Second Brain](https://www.buildingasecondbrain.com/) methodology (CODE: Capture, Organize, Distill, Express), Distillery maps the "Distill" step into a tool the whole team can use.
+- **Anyone who wants to stop losing context** — capture decisions, insights, and references as they happen, and retrieve them through natural language when you need them.
 
 ## Skills
 
