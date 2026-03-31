@@ -1,8 +1,0 @@
-Type: test
-Command: .venv/bin/python -m pytest tests/test_mcp_server.py -v --tb=short
-Expected: All 50 tests pass (no regressions from adding analytics tool wrappers)
-Timestamp: 2026-03-27T00:00:00Z
-Status: PASS
-
-50 tests collected, 50 passed, 0 failures.
-Full test suite for test_mcp_server.py passes with all 15 tool wrappers registered.

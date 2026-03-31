@@ -1,8 +1,0 @@
-Type: cli
-Command: .venv/bin/ruff check tests/test_e2e_mcp.py
-Expected: No lint errors in updated test file
-Timestamp: 2026-03-27T00:00:00Z
-
-All checks passed!
-
-Status: PASS

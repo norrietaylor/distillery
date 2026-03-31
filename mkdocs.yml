@@ -33,17 +33,6 @@ theme:
 plugins:
   - search
 
-exclude_docs: |
-  /BACKLOG.md
-  /ROADMAP.md
-  /demo-deck.md
-  /deployment.md
-  /distillery-brainstorm.md
-  /mcp-setup.md
-  /plugin.md
-  /team-setup.md
-  specs/
-
 markdown_extensions:
   - admonition
   - pymdownx.details
