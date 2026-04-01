@@ -1,0 +1,8 @@
+Type: file
+Command: test -f .env.example && echo exists
+Expected: exists
+Timestamp: 2026-04-01T18:43:52Z
+---
+Output:
+exists
+Status: PASS

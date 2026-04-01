@@ -1,0 +1,8 @@
+Type: file
+Command: test -f docs/assets/distillery-demo.gif && echo exists
+Expected: exists
+Timestamp: 2026-04-01T18:43:47Z
+---
+Output:
+exists
+Status: PASS
