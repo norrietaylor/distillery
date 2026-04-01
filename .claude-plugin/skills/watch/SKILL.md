@@ -1,12 +1,14 @@
 ---
 name: watch
-description: "Manages monitored feed sources in the Distillery source registry. Triggered by: 'watch', '/watch list', '/watch add <url>', '/watch remove <url>', 'show my sources', 'add feed source', 'remove feed source'."
+description: "Add, remove, or list monitored feed sources (RSS and GitHub)"
 allowed-tools:
   - "mcp__*__distillery_watch"
   - "mcp__*__distillery_status"
 disable-model-invocation: true
 effort: medium
 ---
+
+<!-- Trigger phrases: watch, /watch list, /watch add <url>, /watch remove <url>, show my sources, add feed source, remove feed source -->
 
 # Watch — Feed Source Registry
 

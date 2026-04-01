@@ -1,11 +1,13 @@
 ---
 name: tune
-description: "Displays and adjusts Distillery feed relevance thresholds. Triggered by: 'tune', '/tune', 'adjust thresholds', 'change alert threshold', 'set digest threshold', 'tune my feed', 'show thresholds'."
+description: "Display and adjust feed relevance thresholds for alerts and digests"
 allowed-tools:
   - "mcp__*__distillery_status"
   - "mcp__*__distillery_update"
 effort: low
 ---
+
+<!-- Trigger phrases: tune, /tune, adjust thresholds, change alert threshold, set digest threshold, tune my feed, show thresholds -->
 
 # Tune -- Feed Relevance Threshold Management
 

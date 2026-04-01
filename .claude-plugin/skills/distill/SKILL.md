@@ -1,6 +1,6 @@
 ---
 name: distill
-description: "Captures session knowledge and stores distilled decisions and insights. Triggered by: 'distill', 'capture this', 'save knowledge', 'log learnings', or '/distill [content]'."
+description: "Capture decisions, insights, and action items from the current session into the knowledge base"
 allowed-tools:
   - "mcp__*__distillery_store"
   - "mcp__*__distillery_check_dedup"
@@ -10,6 +10,8 @@ allowed-tools:
 disable-model-invocation: true
 effort: medium
 ---
+
+<!-- Trigger phrases: distill, capture this, save knowledge, log learnings, /distill [content] -->
 
 # Distill — Session Knowledge Capture
 

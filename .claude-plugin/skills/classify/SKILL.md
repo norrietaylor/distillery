@@ -1,6 +1,6 @@
 ---
 name: classify
-description: "Classifies knowledge entries and manages the manual review queue. Triggered by: 'classify', 'classify entry', 'review queue', 'triage inbox', or '/classify [entry_id|--inbox|--review]'."
+description: "Classify knowledge entries by type and manage the manual review queue"
 allowed-tools:
   - "mcp__*__distillery_classify"
   - "mcp__*__distillery_review_queue"
@@ -10,6 +10,8 @@ allowed-tools:
   - "mcp__*__distillery_status"
 effort: medium
 ---
+
+<!-- Trigger phrases: classify, classify entry, review queue, triage inbox, /classify [entry_id|--inbox|--review] -->
 
 # Classify — Manual Classification & Review Queue
 

@@ -1,6 +1,6 @@
 ---
 name: pour
-description: "Synthesizes knowledge from multiple entries into a cohesive narrative with citations. Triggered by: 'pour', 'synthesize', 'what's the full picture on', 'deep dive into', or '/pour <topic>'."
+description: "Synthesize multiple knowledge entries into a cohesive narrative with citations"
 allowed-tools:
   - "mcp__*__distillery_search"
   - "mcp__*__distillery_get"
@@ -9,6 +9,8 @@ allowed-tools:
 context: fork
 effort: high
 ---
+
+<!-- Trigger phrases: pour, synthesize, what's the full picture on, deep dive into, /pour <topic> -->
 
 # Pour -- Multi-Entry Knowledge Synthesis
 

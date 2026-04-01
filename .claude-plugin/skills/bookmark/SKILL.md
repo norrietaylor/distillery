@@ -1,6 +1,6 @@
 ---
 name: bookmark
-description: "Saves a URL and its auto-generated summary to the knowledge base. Triggered by: 'bookmark', 'save this link', 'store this URL', 'remember this page', or '/bookmark <url> [#tags]'."
+description: "Save a URL with an auto-generated summary to the knowledge base"
 allowed-tools:
   - "mcp__*__distillery_store"
   - "mcp__*__distillery_check_dedup"
@@ -9,6 +9,8 @@ allowed-tools:
 disable-model-invocation: true
 effort: medium
 ---
+
+<!-- Trigger phrases: bookmark, save this link, store this URL, remember this page, /bookmark <url> [#tags] -->
 
 # Bookmark — URL Knowledge Capture
 
