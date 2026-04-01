@@ -249,7 +249,7 @@ Distillery Setup Complete
   Scheduled Tasks:
     Feed poll:     <active (hourly) | inactive | managed by GitHub Actions>
     Feed rescore:  <active (daily 06:XX UTC) | inactive | managed by GitHub Actions>
-    KB maintenance:<active (weekly Mon 07:XX UTC) | inactive>
+    KB maintenance:<active (weekly Mon 07:XX UTC) | inactive | managed by GitHub Actions>
 
 Available skills:
   /distill   — capture knowledge      /recall   — search knowledge

@@ -181,9 +181,12 @@ def main(argv: list[str] | None = None) -> int:
                 from starlette.applications import Starlette
                 from starlette.routing import Mount
 
+                from distillery.mcp.middleware import BodySizeLimitMiddleware
                 from distillery.mcp.webhooks import create_webhook_app
 
                 webhook_app = create_webhook_app(server._distillery_shared, config)  # type: ignore[attr-defined]
+                # Apply the same body-size guard as the MCP endpoint.
+                webhook_app = BodySizeLimitMiddleware(webhook_app, max_bytes=rl.max_body_bytes)  # type: ignore[assignment]
                 final_app = Starlette(
                     routes=[
                         Mount("/api", app=webhook_app),

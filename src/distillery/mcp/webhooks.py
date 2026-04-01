@@ -12,6 +12,7 @@ webhook secret is configured.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import hmac
 import json
@@ -40,6 +41,15 @@ _COOLDOWN_SECONDS: dict[str, int] = {
     "maintenance": 21600,  # 6 hours
 }
 
+# Per-endpoint locks to serialize dispatch and prevent TOCTOU races on
+# cooldown checks.  Created lazily in the app factory.
+_endpoint_locks: dict[str, asyncio.Lock] = {}
+
+# Lock to serialize cold-start store initialisation so that concurrent
+# first-hit requests (e.g. workflow_dispatch "all") don't each create a
+# separate DuckDBStore.
+_init_lock = asyncio.Lock()
+
 # ---------------------------------------------------------------------------
 # Store initialisation helper
 # ---------------------------------------------------------------------------
@@ -56,8 +66,9 @@ async def _ensure_store(
     initialisation logic from the MCP lifespan so that webhook handlers
     always have a valid store.
 
-    Because asyncio is single-threaded there is no true race condition --
-    this simply checks whether init has already occurred and runs it if not.
+    A module-level :data:`_init_lock` serialises entry so that concurrent
+    first-hit requests (e.g. the ``operation: all`` workflow dispatch)
+    cannot each create a separate ``DuckDBStore``.
 
     Args:
         shared_state: The mutable shared-state dict (same object passed to
@@ -70,57 +81,62 @@ async def _ensure_store(
     if shared_state:
         return shared_state
 
-    logger.info("Webhook: initialising store (no MCP client connected yet)")
+    async with _init_lock:
+        # Double-check after acquiring the lock.
+        if shared_state:
+            return shared_state
 
-    from distillery.mcp.server import _create_embedding_provider, _normalize_db_path
+        logger.info("Webhook: initialising store (no MCP client connected yet)")
 
-    embedding_provider = _create_embedding_provider(config)
-    db_path = _normalize_db_path(config.storage.database_path)
+        from distillery.mcp.server import _create_embedding_provider, _normalize_db_path
 
-    # Apply MotherDuck token from the configured env var name if set.
-    if db_path.startswith("md:"):
-        token = os.environ.get(config.storage.motherduck_token_env)
-        if token:
-            os.environ["MOTHERDUCK_TOKEN"] = token
-        else:
-            logger.warning(
-                "motherduck_token_env is set to %r but the environment variable is not set",
-                config.storage.motherduck_token_env,
-            )
+        embedding_provider = _create_embedding_provider(config)
+        db_path = _normalize_db_path(config.storage.database_path)
 
-    from distillery.store.duckdb import DuckDBStore
-
-    store = DuckDBStore(
-        db_path=db_path,
-        embedding_provider=embedding_provider,
-        s3_region=config.storage.s3_region,
-        s3_endpoint=config.storage.s3_endpoint,
-    )
-    await store.initialize()
-
-    # Seed YAML feed sources into DB exactly once.
-    if await store.get_metadata("feeds_seeded") != "true":
-        for source in config.feeds.sources:
-            with contextlib.suppress(ValueError):
-                await store.add_feed_source(
-                    url=source.url,
-                    source_type=source.source_type,
-                    label=source.label,
-                    poll_interval_minutes=source.poll_interval_minutes,
-                    trust_weight=source.trust_weight,
+        # Apply MotherDuck token from the configured env var name if set.
+        if db_path.startswith("md:"):
+            token = os.environ.get(config.storage.motherduck_token_env)
+            if token:
+                os.environ["MOTHERDUCK_TOKEN"] = token
+            else:
+                logger.warning(
+                    "motherduck_token_env is set to %r but the environment variable is not set",
+                    config.storage.motherduck_token_env,
                 )
-        await store.set_metadata("feeds_seeded", "true")
 
-    shared_state["store"] = store
-    shared_state["config"] = config
-    shared_state["embedding_provider"] = embedding_provider
+        from distillery.store.duckdb import DuckDBStore
 
-    logger.info(
-        "Webhook: store ready (db=%s, embedding=%s)",
-        db_path,
-        getattr(embedding_provider, "model_name", "unknown"),
-    )
-    return shared_state
+        store = DuckDBStore(
+            db_path=db_path,
+            embedding_provider=embedding_provider,
+            s3_region=config.storage.s3_region,
+            s3_endpoint=config.storage.s3_endpoint,
+        )
+        await store.initialize()
+
+        # Seed YAML feed sources into DB exactly once.
+        if await store.get_metadata("feeds_seeded") != "true":
+            for source in config.feeds.sources:
+                with contextlib.suppress(ValueError):
+                    await store.add_feed_source(
+                        url=source.url,
+                        source_type=source.source_type,
+                        label=source.label,
+                        poll_interval_minutes=source.poll_interval_minutes,
+                        trust_weight=source.trust_weight,
+                    )
+            await store.set_metadata("feeds_seeded", "true")
+
+        shared_state["store"] = store
+        shared_state["config"] = config
+        shared_state["embedding_provider"] = embedding_provider
+
+        logger.info(
+            "Webhook: store ready (db=%s, embedding=%s)",
+            db_path,
+            getattr(embedding_provider, "model_name", "unknown"),
+        )
+        return shared_state
 
 
 # ---------------------------------------------------------------------------
@@ -325,7 +341,13 @@ async def _handle_rescore(request: Request, state: dict[str, Any]) -> JSONRespon
                 status_code=400,
             )
         if "limit" in payload:
-            limit = int(payload["limit"])
+            raw_limit = payload["limit"]
+            if not isinstance(raw_limit, int) or isinstance(raw_limit, bool):
+                return JSONResponse(
+                    {"ok": False, "error": "limit must be an integer"},
+                    status_code=400,
+                )
+            limit = raw_limit
 
     store = state["store"]
     config = state["config"]
@@ -566,24 +588,27 @@ def create_webhook_app(
         state = await _ensure_store(shared_state, config)
         store = state["store"]
 
-        # --- Cooldown -------------------------------------------------------
-        retry_after = await _check_cooldown(store, endpoint)
-        if retry_after is not None:
-            return JSONResponse(
-                {"ok": False, "error": "too_early", "retry_after": retry_after},
-                status_code=429,
-                headers={"Retry-After": str(retry_after)},
-            )
+        # --- Per-endpoint lock (serialise cooldown check + handler) ---------
+        lock = _endpoint_locks.setdefault(endpoint, asyncio.Lock())
+        async with lock:
+            # --- Cooldown ---------------------------------------------------
+            retry_after = await _check_cooldown(store, endpoint)
+            if retry_after is not None:
+                return JSONResponse(
+                    {"ok": False, "error": "too_early", "retry_after": retry_after},
+                    status_code=429,
+                    headers={"Retry-After": str(retry_after)},
+                )
 
-        # --- Dispatch -------------------------------------------------------
-        handler = _HANDLERS[endpoint]
-        response: JSONResponse = await handler(request, state)
-
-        # Record cooldown only on success.
-        if response.status_code < 400:
+            # Reserve the cooldown slot before running the handler so that
+            # a second request arriving during execution sees the reservation.
             await _set_cooldown(store, endpoint)
 
-        return response
+            # --- Dispatch ---------------------------------------------------
+            handler = _HANDLERS[endpoint]
+            response: JSONResponse = await handler(request, state)
+
+            return response
 
     async def poll_route(request: Request) -> JSONResponse:
         """Route handler for ``POST /poll``."""
