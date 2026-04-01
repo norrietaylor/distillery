@@ -1,0 +1,41 @@
+Type: cli
+Command: python3 -c "import ast; f=open('src/distillery/cli.py'); src=f.read(); tree=ast.parse(src); funcs=[n.name for n in ast.walk(tree) if isinstance(n,ast.FunctionDef)]; print('\n'.join(funcs))"
+Expected: Shows retrieval metrics helper functions in cli.py
+Timestamp: 2026-04-01T18:43:02Z
+
+--- Output ---
+_build_parser
+_resolve_args
+_query_status
+_check_health
+_cmd_status
+_cmd_health
+_cmd_poll
+_load_golden_retrieval_labels
+_build_retrieval_tool_calls
+_apply_retrieval_scoring
+_format_retrieval_metrics_text
+_cmd_eval
+main
+
+--- Verification ---
+Functions present:
+  _load_golden_retrieval_labels   (line 466)  -- loads retrieval.yaml golden labels
+  _build_retrieval_tool_calls     (line 528)  -- remaps tool call IDs to content fingerprints
+  _apply_retrieval_scoring        (line 571)  -- computes metrics and enforces thresholds
+  _format_retrieval_metrics_text  (line 616)  -- formats retrieval line for text output
+
+Thresholds defined:
+  _MRR_THRESHOLD      = 0.7   (line 459)
+  _PRECISION_THRESHOLD = 0.6   (line 461)
+  _RETRIEVAL_K        = 5     (line 463)
+
+Integration in _cmd_eval:
+  golden_dir = Path(__file__).parents[2] / "tests" / "eval" / "golden"
+  golden_labels_by_name = _load_golden_retrieval_labels(golden_dir)
+  _apply_retrieval_scoring(results, golden_labels_by_name)
+
+Text output: prints retrieval_line after r.summary() when metrics available
+JSON output: includes retrieval_metrics dict per scenario result
+
+Status: PASS

@@ -452,6 +452,187 @@ def _cmd_poll(config_path: str | None, fmt: str, source_url: str | None) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Retrieval metrics helpers
+# ---------------------------------------------------------------------------
+
+#: MRR threshold — scenarios below this value are marked failed.
+_MRR_THRESHOLD: float = 0.7
+#: Precision@5 threshold — scenarios below this value are marked failed.
+_PRECISION_THRESHOLD: float = 0.6
+#: Number of top results to consider for precision/recall.
+_RETRIEVAL_K: int = 5
+
+
+def _load_golden_retrieval_labels(
+    golden_dir: Path,
+) -> dict[str, list[dict[str, Any]]]:
+    """Load golden retrieval labels from *golden_dir*/retrieval.yaml.
+
+    Returns a mapping of scenario name → list of golden label dicts with
+    ``"entry_id"`` (a content fingerprint) and ``"relevant"`` (bool).
+
+    The content fingerprint is the first 100 characters of each seed entry's
+    content, used to match against tool call response content fields since
+    actual UUIDs are not predictable at golden-data authoring time.
+
+    Returns an empty dict when the golden file is not found or cannot be parsed.
+    """
+    golden_path = golden_dir / "retrieval.yaml"
+    if not golden_path.exists():
+        return {}
+
+    try:
+        import yaml
+    except ImportError:
+        return {}
+
+    try:
+        raw: Any = yaml.safe_load(golden_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+    if not isinstance(raw, dict) or "scenarios" not in raw:
+        return {}
+
+    labels_by_name: dict[str, list[dict[str, Any]]] = {}
+    for scenario_data in raw.get("scenarios", []):
+        if not isinstance(scenario_data, dict):
+            continue
+        name: str = scenario_data.get("name", "")
+        if not name:
+            continue
+        seed_entries: list[Any] = scenario_data.get("seed_entries", [])
+        judgments: list[Any] = scenario_data.get("relevance_judgments", [])
+
+        golden_labels: list[dict[str, Any]] = []
+        for judgment in judgments:
+            if not isinstance(judgment, dict):
+                continue
+            idx = judgment.get("entry_index")
+            relevant = judgment.get("relevant", False)
+            if not isinstance(idx, int) or idx >= len(seed_entries):
+                continue
+            entry = seed_entries[idx]
+            if not isinstance(entry, dict):
+                continue
+            content: str = str(entry.get("content", ""))
+            # Use a 100-char content fingerprint as the entry_id for matching.
+            fingerprint = content[:100]
+            golden_labels.append({"entry_id": fingerprint, "relevant": relevant})
+
+        labels_by_name[name] = golden_labels
+
+    return labels_by_name
+
+
+def _build_retrieval_tool_calls(
+    result: Any,
+) -> list[Any]:
+    """Return ToolCallRecord copies with ``id`` replaced by a content fingerprint.
+
+    The ``distillery_search`` response contains a ``results`` list where each
+    item has both an ``id`` (UUID) and a ``content`` field.  This function
+    rebuilds the response so ``id = content[:100]``, enabling comparison
+    against content-fingerprint golden labels produced by
+    :func:`_load_golden_retrieval_labels`.
+    """
+    from distillery.eval.models import ToolCallRecord
+
+    translated: list[ToolCallRecord] = []
+    for tc in result.tool_calls:
+        if tc.tool_name != "distillery_search":
+            translated.append(tc)
+            continue
+
+        raw_results: Any = tc.response.get("results", [])
+        new_results: list[dict[str, Any]] = []
+        if isinstance(raw_results, list):
+            for item in raw_results:
+                if isinstance(item, dict):
+                    content_fp = str(item.get("content", ""))[:100]
+                    new_item = dict(item)
+                    new_item["id"] = content_fp
+                    new_results.append(new_item)
+
+        new_response = dict(tc.response)
+        new_response["results"] = new_results
+        translated.append(
+            ToolCallRecord(
+                tool_name=tc.tool_name,
+                arguments=tc.arguments,
+                response=new_response,
+                latency_ms=tc.latency_ms,
+                error=tc.error,
+            )
+        )
+    return translated
+
+
+def _apply_retrieval_scoring(
+    results: list[Any],
+    golden_labels_by_name: dict[str, list[dict[str, Any]]],
+) -> None:
+    """Compute retrieval metrics for results that have golden labels.
+
+    Mutates each :class:`~distillery.eval.models.ScenarioResult` in *results*:
+
+    - Sets ``retrieval_metrics`` to a :class:`~distillery.eval.retrieval_scorer.RetrievalMetrics`
+      instance when golden labels are available for the scenario.
+    - Appends to ``effectiveness.failure_reasons`` and sets ``passed = False``
+      when MRR < :data:`_MRR_THRESHOLD` or precision@5 < :data:`_PRECISION_THRESHOLD`.
+    """
+    try:
+        from distillery.eval.retrieval_scorer import score_retrieval
+    except ImportError:
+        return
+
+    for result in results:
+        golden_labels = golden_labels_by_name.get(result.scenario_name)
+        if not golden_labels:
+            continue
+
+        translated_calls = _build_retrieval_tool_calls(result)
+        metrics = score_retrieval(
+            results=translated_calls,
+            golden_labels=golden_labels,
+            k=_RETRIEVAL_K,
+        )
+        result.retrieval_metrics = metrics
+
+        # Enforce thresholds — only when the metric could actually be computed.
+        if metrics.mrr is not None and metrics.mrr < _MRR_THRESHOLD:
+            result.effectiveness.failure_reasons.append(
+                f"MRR {metrics.mrr:.3f} below threshold {_MRR_THRESHOLD}"
+            )
+            result.passed = False
+
+        if metrics.precision is not None and metrics.precision < _PRECISION_THRESHOLD:
+            result.effectiveness.failure_reasons.append(
+                f"precision@{_RETRIEVAL_K} {metrics.precision:.3f} below threshold {_PRECISION_THRESHOLD}"
+            )
+            result.passed = False
+
+
+def _format_retrieval_metrics_text(result: Any) -> str | None:
+    """Return a retrieval metrics line for text output, or ``None`` if unavailable."""
+    m = result.retrieval_metrics
+    if m is None:
+        return None
+    parts: list[str] = []
+    if m.mrr is not None:
+        parts.append(f"MRR={m.mrr:.3f}")
+    if m.precision is not None:
+        parts.append(f"P@{_RETRIEVAL_K}={m.precision:.3f}")
+    if m.recall is not None:
+        parts.append(f"R@{_RETRIEVAL_K}={m.recall:.3f}")
+    if m.faithfulness is not None:
+        parts.append(f"faith={m.faithfulness:.3f}")
+    if not parts:
+        return None
+    return "  retrieval: " + "  ".join(parts)
+
+
+# ---------------------------------------------------------------------------
 # Eval subcommand
 # ---------------------------------------------------------------------------
 
@@ -521,12 +702,30 @@ def _cmd_eval(
 
     results = asyncio.run(_run_all())
 
+    # Load golden retrieval labels and apply retrieval scoring/thresholds.
+    golden_dir = Path(__file__).parents[2] / "tests" / "eval" / "golden"
+    golden_labels_by_name = _load_golden_retrieval_labels(golden_dir)
+    _apply_retrieval_scoring(results, golden_labels_by_name)
+
     passed = sum(1 for r in results if r.passed)
     total = len(results)
     pass_rate = passed / total if total > 0 else 0.0
 
-    json_output: list[dict[str, Any]] = [
-        {
+    def _retrieval_metrics_dict(result: Any) -> dict[str, Any] | None:
+        m = result.retrieval_metrics
+        if m is None:
+            return None
+        return {
+            "mrr": round(m.mrr, 4) if m.mrr is not None else None,
+            "precision_at_k": round(m.precision, 4) if m.precision is not None else None,
+            "recall_at_k": round(m.recall, 4) if m.recall is not None else None,
+            "faithfulness": round(m.faithfulness, 4) if m.faithfulness is not None else None,
+            "k": _RETRIEVAL_K,
+        }
+
+    json_output: list[dict[str, Any]] = []
+    for r in results:
+        entry: dict[str, Any] = {
             "name": r.scenario_name,
             "skill": r.skill,
             "passed": r.passed,
@@ -537,8 +736,11 @@ def _cmd_eval(
             "tools_called": r.effectiveness.tools_called,
             "failure_reasons": r.effectiveness.failure_reasons,
         }
-        for r in results
-    ]
+        rm = _retrieval_metrics_dict(r)
+        if rm is not None:
+            entry["retrieval_metrics"] = rm
+        json_output.append(entry)
+
     summary: dict[str, Any] = {
         "results": json_output,
         "passed": passed,
@@ -553,6 +755,9 @@ def _cmd_eval(
     else:
         for r in results:
             print(r.summary())
+            retrieval_line = _format_retrieval_metrics_text(r)
+            if retrieval_line is not None:
+                print(retrieval_line)
         print(f"\n{'=' * 60}")
         print(f"Results: {passed}/{total} passed ({pass_rate:.0%})")
 
