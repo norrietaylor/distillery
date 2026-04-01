@@ -251,7 +251,7 @@ The ambient intelligence system monitors external sources and scores relevance:
 
 ## Webhook Endpoints
 
-REST endpoints mounted at `/api/*` alongside the MCP server in HTTP mode. Enabled when `DISTILLERY_WEBHOOK_SECRET` is set.
+REST endpoints mounted at `/api/*` alongside the MCP server in HTTP mode. Enabled when both `DISTILLERY_WEBHOOK_SECRET` is set and the runtime flag `config.server.webhooks.enabled` is true.
 
 | Endpoint | Operation | Cooldown | Schedule |
 |----------|-----------|----------|----------|
@@ -261,6 +261,6 @@ REST endpoints mounted at `/api/*` alongside the MCP server in HTTP mode. Enable
 
 **Auth:** `Authorization: Bearer <DISTILLERY_WEBHOOK_SECRET>` with `hmac.compare_digest`.
 
-**Hardening:** Per-endpoint `asyncio.Lock` serializes cooldown checks. `BodySizeLimitMiddleware` + `RateLimitMiddleware` (10 req/min). Cooldown timestamps persisted to DuckDB via `get_metadata`/`set_metadata`.
+**Hardening:** Per-endpoint `asyncio.Lock` serializes cooldown checks. `BodySizeLimitMiddleware` + `RateLimitMiddleware` (10 req/min, 100 req/hour). Cooldown timestamps persisted to DuckDB via `get_metadata`/`set_metadata`.
 
 **Audit:** Each invocation stores a `webhook_audit:{endpoint}` metadata record with timestamp, status, and response data.
