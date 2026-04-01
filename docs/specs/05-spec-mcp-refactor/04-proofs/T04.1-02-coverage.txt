@@ -1,0 +1,10 @@
+Type: cli
+Command: python3 -m pytest tests/test_middleware.py --cov=distillery.mcp.middleware --cov-report=term-missing -q
+Expected: >= 95% coverage on middleware.py
+Timestamp: 2026-04-01T16:31:00Z
+
+Result:
+middleware.py: 177 statements, 3 missed, 98% coverage
+Missing lines: 58, 69, 75 (retry_after edge cases for empty deques and count_hour)
+
+Status: PASS
