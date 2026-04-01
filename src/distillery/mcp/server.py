@@ -2166,6 +2166,9 @@ async def _handle_list(
         return error_response("VALIDATION_ERROR", "Field 'offset' must be >= 0")
 
     output_mode = arguments.get("output_mode", "full")
+    err_output_mode = validate_type(arguments, "output_mode", str, "string")
+    if err_output_mode:
+        return error_response("VALIDATION_ERROR", err_output_mode)
     if output_mode not in _VALID_OUTPUT_MODES:
         return error_response(
             "VALIDATION_ERROR",
@@ -2233,6 +2236,9 @@ async def _handle_aggregate(
         ``groups``, ``total_entries``, and ``total_groups``.
     """
     group_by = arguments.get("group_by", "")
+    err_group_by = validate_type(arguments, "group_by", str, "string")
+    if err_group_by:
+        return error_response("VALIDATION_ERROR", err_group_by)
     if not group_by:
         return error_response("VALIDATION_ERROR", "Missing required field: group_by")
     if group_by not in _AGGREGATE_GROUP_BY_MAP:
@@ -2253,7 +2259,7 @@ async def _handle_aggregate(
     filters = _build_filters_from_arguments(arguments)
 
     try:
-        groups = await store.aggregate_entries(
+        result = await store.aggregate_entries(
             group_by=group_by,
             filters=filters,
             limit=limit,
@@ -2262,13 +2268,12 @@ async def _handle_aggregate(
         logger.exception("Error in distillery_aggregate")
         return error_response("AGGREGATE_ERROR", f"aggregate_entries failed: {exc}")
 
-    total_entries = sum(g["count"] for g in groups)
     return success_response(
         {
             "group_by": group_by,
-            "groups": groups,
-            "total_entries": total_entries,
-            "total_groups": len(groups),
+            "groups": result["groups"],
+            "total_entries": result["total_entries"],
+            "total_groups": result["total_groups"],
         }
     )
 

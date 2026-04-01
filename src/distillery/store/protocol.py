@@ -296,7 +296,7 @@ class DistilleryStore(Protocol):
         group_by: str,
         filters: dict[str, Any] | None,
         limit: int,
-    ) -> list[dict[str, Any]]:
+    ) -> dict[str, Any]:
         """Return entry counts grouped by a field, sorted by count descending.
 
         Args:
@@ -308,8 +308,8 @@ class DistilleryStore(Protocol):
             limit: Maximum number of groups to return.
 
         Returns:
-            List of ``{"value": <group_value>, "count": <int>}`` dicts,
-            ordered by ``count`` descending.
+            Dict with ``"groups"`` (limited list of ``{"value": ..., "count": ...}``),
+            ``"total_groups"`` (int), and ``"total_entries"`` (int).
         """
         ...
 

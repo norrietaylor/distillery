@@ -143,8 +143,38 @@ DISTILLERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
                 "status": {"type": "string"},
                 "limit": {"type": "integer", "description": "Max results (default 10)."},
                 "offset": {"type": "integer"},
+                "output_mode": {
+                    "type": "string",
+                    "description": "Output mode: 'full' (default), 'summary' (no content), 'ids'.",
+                },
+                "content_max_length": {
+                    "type": "integer",
+                    "description": "Truncate content to this many characters (full mode only).",
+                },
             },
             "required": [],
+        },
+    },
+    {
+        "name": "distillery_aggregate",
+        "description": "Count entries grouped by a field (e.g. entry_type, source, author).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "group_by": {
+                    "type": "string",
+                    "description": (
+                        "Field to group by. One of: entry_type, status, author, "
+                        "project, source, metadata.source_url, metadata.source_type."
+                    ),
+                },
+                "entry_type": {"type": "string"},
+                "author": {"type": "string"},
+                "project": {"type": "string"},
+                "status": {"type": "string"},
+                "limit": {"type": "integer", "description": "Max groups (default 50)."},
+            },
+            "required": ["group_by"],
         },
     },
     {

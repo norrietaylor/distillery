@@ -14,26 +14,7 @@ import pytest
 
 from distillery.mcp.server import _handle_aggregate, _handle_list
 from distillery.models import EntrySource, EntryType
-from distillery.store.duckdb import DuckDBStore
 from tests.conftest import make_entry, parse_mcp_response
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def embedding_provider(mock_embedding_provider):
-    return mock_embedding_provider
-
-
-@pytest.fixture
-async def store(embedding_provider):  # type: ignore[return]
-    s = DuckDBStore(db_path=":memory:", embedding_provider=embedding_provider)
-    await s.initialize()
-    yield s
-    await s.close()
 
 
 @pytest.fixture

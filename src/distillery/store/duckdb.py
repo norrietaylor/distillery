@@ -136,6 +136,17 @@ CREATE TABLE IF NOT EXISTS feed_sources (
 """
 
 
+_AGGREGATE_EXPR_MAP: dict[str, str] = {
+    "entry_type": "entry_type",
+    "status": "status",
+    "author": "author",
+    "project": "project",
+    "source": "source",
+    "metadata.source_url": "json_extract_string(metadata, '$.source_url')",
+    "metadata.source_type": "json_extract_string(metadata, '$.source_type')",
+}
+
+
 class DuckDBStore:
     """DuckDB-backed implementation of the ``DistilleryStore`` protocol.
 
@@ -1152,24 +1163,30 @@ class DuckDBStore:
             limit: Maximum number of groups to return.
 
         Returns:
-            List of ``{"value": <group_value>, "count": <int>}`` dicts ordered by
-            ``count`` descending.
+            Dict with ``"groups"`` (limited list of ``{"value": ..., "count": ...}``
+            dicts), ``"total_groups"`` (int), and ``"total_entries"`` (int).  The
+            totals reflect the full result set before ``limit`` is applied.
         """
-        _GROUP_EXPR_MAP: dict[str, str] = {
-            "entry_type": "entry_type",
-            "status": "status",
-            "author": "author",
-            "project": "project",
-            "source": "source",
-            "metadata.source_url": "json_extract_string(metadata, '$.source_url')",
-            "metadata.source_type": "json_extract_string(metadata, '$.source_type')",
-        }
-        group_expr = _GROUP_EXPR_MAP[group_by]
+        group_expr = _AGGREGATE_EXPR_MAP[group_by]
 
-        def _sync() -> list[dict[str, Any]]:
+        def _sync() -> dict[str, Any]:
             conn = self.connection
             where_clauses, params = self._build_filter_clauses(filters)
             where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+            # Unconstrained query for true totals.
+            totals_sql = (
+                f"SELECT COUNT(*) AS total_groups, SUM(cnt) AS total_entries FROM ("
+                f"SELECT COUNT(*) AS cnt "
+                f"FROM entries {where_sql} "
+                f"GROUP BY {group_expr}"
+                f")"
+            )
+            totals_row = conn.execute(totals_sql, list(params)).fetchone()
+            total_groups = int(totals_row[0]) if totals_row and totals_row[0] else 0
+            total_entries = int(totals_row[1]) if totals_row and totals_row[1] else 0
+
+            # Limited query for the top-N groups.
             sql = (
                 f"SELECT {group_expr} AS value, COUNT(*) AS count "
                 f"FROM entries "
@@ -1178,9 +1195,14 @@ class DuckDBStore:
                 f"ORDER BY count DESC "
                 f"LIMIT ?"
             )
-            result = conn.execute(sql, params + [limit])
+            result = conn.execute(sql, list(params) + [limit])
             rows = result.fetchall()
-            return [{"value": row[0], "count": row[1]} for row in rows]
+            groups = [{"value": row[0], "count": row[1]} for row in rows]
+            return {
+                "groups": groups,
+                "total_groups": total_groups,
+                "total_entries": total_entries,
+            }
 
         return await asyncio.to_thread(_sync)
 
