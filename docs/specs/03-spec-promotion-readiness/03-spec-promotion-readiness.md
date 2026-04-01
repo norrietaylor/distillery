@@ -8,8 +8,8 @@ Prepare the Distillery repository for external promotion by filling quality gaps
 
 1. README communicates project maturity at a glance via badges and a demo recording
 2. Security policy exists for responsible vulnerability disclosure via GitHub Security Advisories
-3. A publishable blog post draft exists for cross-posting to dev.to, Hashnode, and Hacker News
-4. Supporting files (`.env.example`, `docs/drafts/` structure) are in place for the promotion plan
+3. Supporting files (`.env.example`) are in place for the promotion plan
+4. Blog draft and `docs/drafts/` are tracked for a follow-up PR
 
 ## User Stories
 
@@ -44,19 +44,19 @@ Prepare the Distillery repository for external promotion by filling quality gaps
 
 **Functional Requirements:**
 - The repository shall include a `SECURITY.md` file at the root following GitHub's [security policy format](https://docs.github.com/en/code-security/getting-started/adding-a-security-policy-to-your-repository).
-- The policy shall direct reporters to use GitHub Security Advisories (Settings → Security → Advisories → "Report a vulnerability") as the primary disclosure channel.
+- The policy shall direct reporters to use GitHub Security Advisories (Security tab → "Report a vulnerability") as the primary disclosure channel.
 - The policy shall state which versions are supported (currently: v0.1.x on the `main` branch).
 - The policy shall include a "What to report" section listing: authentication/authorization bypasses, data exposure (knowledge entries accessible without authorization), injection vulnerabilities in DuckDB queries, MCP transport security issues, and dependency vulnerabilities.
 - The policy shall include a "What NOT to report" section noting: the demo server at `distillery-mcp.fly.dev` is explicitly not production-grade and known-limitation issues are not security vulnerabilities.
 - The policy shall commit to an initial response time (e.g., 72 hours) and a resolution target (e.g., 30 days for confirmed issues).
-- GitHub's private vulnerability reporting shall be enabled in repository settings (Settings → Code security → Private vulnerability reporting → Enable).
+- GitHub's private vulnerability reporting shall be enabled in repository settings (Security tab → enable private vulnerability reporting).
 
 **Proof Artifacts:**
 - File: `SECURITY.md` exists at repository root with disclosure instructions
 - File: `SECURITY.md` references GitHub Security Advisories as the reporting mechanism
-- URL: Repository Settings → Code security shows "Private vulnerability reporting" enabled
+- URL: Repository Security tab shows "Private vulnerability reporting" enabled
 
-### Unit 3: Launch Blog Post Draft
+### Unit 3: Launch Blog Post Draft (Deferred to follow-up PR)
 
 **Purpose:** Create a publishable blog post that serves as the narrative content for the promotion plan — shareable on dev.to, Hashnode, Hacker News, and social media.
 
