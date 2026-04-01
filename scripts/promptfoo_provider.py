@@ -60,6 +60,7 @@ def call_api(
                 mcp_path,
                 "--allowedTools",
                 "mcp__distillery__*",
+                "--dangerously-skip-permissions",
                 "--max-turns",
                 "5",
                 "-p",
