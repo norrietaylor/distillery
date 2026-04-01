@@ -6,9 +6,29 @@ on:
       - main
 
 jobs:
+  # Hard gate — validates config syntax, always blocks merge on failure.
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Validate promptfoo config
+        run: npx promptfoo@latest validate config --config promptfooconfig.yaml
+
+  # Informational — runs live eval, does not block merge.
   eval:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
+    if: ${{ !cancelled() }}
+    needs: validate
+    continue-on-error: true
     permissions:
       contents: read
       id-token: write
@@ -33,23 +53,8 @@ jobs:
           pip install -e ".[dev]"
           npm install -g @anthropic-ai/claude-code
 
-      - name: Validate promptfoo config
-        run: npx promptfoo@latest validate config --config promptfooconfig.yaml
-
       - name: Run promptfoo eval
-        id: eval
-        continue-on-error: true
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
         run: npx promptfoo@latest eval --config promptfooconfig.yaml
-
-      - name: Report eval results
-        if: always() && steps.eval.outcome != 'skipped'
-        run: |
-          if [ "${{ steps.eval.outcome }}" = "success" ]; then
-            echo "✅ All promptfoo eval scenarios passed"
-          else
-            echo "⚠️ Some promptfoo eval scenarios failed"
-            echo "This is informational — eval failures do not block merge."
-          fi
