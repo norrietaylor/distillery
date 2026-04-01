@@ -220,7 +220,7 @@ distillery/
 │   │   └── dedup.py         # DeduplicationChecker
 │   ├── mcp/
 │   │   ├── server.py        # MCP server (22 tools, FastMCP 2.x)
-│   │   ├── webhooks.py      # REST webhook endpoints (/api/poll, /rescore, /maintenance)
+│   │   ├── webhooks.py      # REST webhook endpoints (/api/poll, /api/rescore, /api/maintenance)
 │   │   ├── auth.py          # GitHub OAuth via FastMCP GitHubProvider
 │   │   ├── middleware.py     # Request logging, rate limiting, security headers
 │   │   ├── budget.py        # Embedding API budget tracking
