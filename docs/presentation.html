@@ -727,7 +727,7 @@
 <!-- SLIDE 5: The 6 Skills -->
 <!-- ============================================================ -->
 <div class="slide" id="s5">
-  <h2 class="fade-in">9 conversational commands</h2>
+  <h2 class="fade-in">10 conversational commands</h2>
   <div style="height: 16px;"></div>
   <table class="skill-table fade-in">
     <tr><th>Skill</th><th>Purpose</th><th>Example</th></tr>
@@ -774,7 +774,12 @@
     <tr>
       <td class="cmd">/tune</td>
       <td>Adjust relevance thresholds</td>
-      <td class="dim">/tune relevance 0.4</td>
+      <td class="dim">/tune --digest 0.40</td>
+    </tr>
+    <tr>
+      <td class="cmd">/setup</td>
+      <td>Onboarding wizard</td>
+      <td class="dim">/setup</td>
     </tr>
   </table>
 </div>
@@ -893,7 +898,7 @@ Options:
     <div>
       <div class="card" style="margin-bottom: 20px;">
         <h3>Auto-classify</h3>
-        <p>Every entry gets a type (session, bookmark, minutes, reference, idea) with a confidence score.</p>
+        <p>Every entry gets one of 12 types (session, bookmark, minutes, meeting, reference, idea, inbox, person, project, digest, github, feed) with a confidence score.</p>
         <p style="margin-top: 12px;">Confidence &ge; 60% &rarr; <span style="color: var(--green);">Active</span></p>
         <p>Confidence &lt; 60% &rarr; <span style="color: var(--amber);">Review Queue</span></p>
       </div>
@@ -944,22 +949,30 @@ Options:
       </div>
       <div class="arch-mcp">
         <div class="arch-mcp-title">MCP Server</div>
-        <div class="arch-mcp-sub">FastMCP 2.x/3.x &middot; stdio + HTTP &middot; 22 tools</div>
+        <div class="arch-mcp-sub">FastMCP 2.x/3.x &middot; stdio + streamable-HTTP &middot; 22 tools</div>
       </div>
     </div>
     <div class="arch-connector">
       <div class="arch-connector-line"></div>
     </div>
-    <div class="arch-connector-fan">
-      <div class="arch-fan-leg"></div>
-      <div class="arch-fan-leg"></div>
-      <div class="arch-fan-leg"></div>
+    <div class="arch-backends" style="margin-bottom: 12px;">
+      <div class="arch-backend" style="border-color: var(--green);">
+        <div class="arch-backend-title" style="color: var(--green);">GitHub OAuth</div>
+        <div class="arch-backend-sub">OrgRestricted provider<br>Middleware &middot; Budget</div>
+      </div>
+      <div class="arch-backend" style="border-color: var(--amber);">
+        <div class="arch-backend-title" style="color: var(--amber);">Core Protocols</div>
+        <div class="arch-backend-sub">DistilleryStore<br>EmbeddingProvider</div>
+      </div>
+      <div class="arch-backend" style="border-color: var(--blue);">
+        <div class="arch-backend-title" style="color: var(--blue);">Feed System</div>
+        <div class="arch-backend-sub">GitHub &middot; RSS adapters<br>Poller &middot; Scorer</div>
+      </div>
     </div>
-    <div style="height: 4px;"></div>
     <div class="arch-backends">
       <div class="arch-backend">
-        <div class="arch-backend-title">DuckDB</div>
-        <div class="arch-backend-sub">+ HNSW index<br>Vector similarity</div>
+        <div class="arch-backend-title">DuckDB + VSS</div>
+        <div class="arch-backend-sub">HNSW cosine similarity<br>Vector search + SQL</div>
       </div>
       <div class="arch-backend">
         <div class="arch-backend-title">Embedding</div>
@@ -1019,6 +1032,9 @@ $ distillery-mcp --transport http --port 8000
       <p style="font-size: 15px;"><strong>stdio unchanged</strong><br><span class="dim">Local mode works<br>exactly as before</span></p>
     </div>
   </div>
+  <p class="small fade-in" style="margin-top: 20px; color: var(--red);">
+    Note: distillery-mcp.fly.dev is a demo server &mdash; do not store sensitive data. Deploy your own instance for production use.
+  </p>
 </div>
 
 <!-- ============================================================ -->
@@ -1210,15 +1226,15 @@ $ distillery-mcp --transport http --port 8000
   <div class="grid-3 fade-in" style="max-width: 700px;">
     <div style="text-align: center;">
       <p class="small" style="margin-bottom: 4px; color: var(--amber);">Install</p>
-      <p style="font-family: 'JetBrains Mono', monospace; font-size: 15px;">pip install -e .</p>
+      <p style="font-family: 'JetBrains Mono', monospace; font-size: 14px;">claude plugin install distillery</p>
     </div>
     <div style="text-align: center;">
-      <p class="small" style="margin-bottom: 4px; color: var(--amber);">Setup Guide</p>
-      <p style="font-size: 15px;">docs/mcp-setup.md</p>
+      <p class="small" style="margin-bottom: 4px; color: var(--amber);">Get Started</p>
+      <p style="font-family: 'JetBrains Mono', monospace; font-size: 15px;">/setup</p>
     </div>
     <div style="text-align: center;">
-      <p class="small" style="margin-bottom: 4px; color: var(--amber);">Roadmap</p>
-      <p style="font-size: 15px;">docs/ROADMAP.md</p>
+      <p class="small" style="margin-bottom: 4px; color: var(--amber);">Documentation</p>
+      <p style="font-size: 15px;"><a href="home/" style="color: var(--amber); text-decoration: none;">norrietaylor.github.io/distillery</a></p>
     </div>
   </div>
 </div>
