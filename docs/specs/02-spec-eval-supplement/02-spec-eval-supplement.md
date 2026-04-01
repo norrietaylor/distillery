@@ -146,8 +146,8 @@ No specific design requirements identified. CLI output follows existing patterns
 | Cost tracking coverage | All scenarios in baseline JSON |
 | Cost regression detection threshold | >20% per-skill increase flagged |
 
-## Open Questions
+## Resolved Questions
 
-1. **promptfoo MCP provider**: Does promptfoo natively support MCP tool-call providers, or will a custom provider wrapper be needed to bridge promptfoo → Distillery MCP? This affects Unit 1 implementation complexity.
-2. **RAGAS faithfulness**: Should faithfulness scoring (LLM-judge) be included in the initial implementation, or deferred until a dedicated API key management story is in place?
-3. **Adversarial concurrency**: The current eval runner (`ClaudeEvalRunner`) runs scenarios sequentially. True concurrency testing may require a new runner mode or manual async orchestration within a single scenario. Clarify: is "concurrent" in the issue about rapid sequential calls within one prompt, or actual parallel execution?
+1. **promptfoo MCP provider**: promptfoo supports MCP stdio providers natively via `config.mcp.servers`. However, the direct `anthropic:messages:*` provider requires `ANTHROPIC_API_KEY` which is unavailable in CI (only `CLAUDE_CODE_OAUTH_TOKEN`). Resolved by using a custom Python provider (`scripts/promptfoo_provider.py`) that invokes the Claude CLI, which handles OAuth natively.
+2. **RAGAS faithfulness**: Deferred. Faithfulness scoring requires an LLM judge API key. The `retrieval_scorer.py` module supports it optionally when RAGAS is installed and a key is available, but it is not included in the initial thresholds.
+3. **Adversarial concurrency**: "Concurrent" means rapid sequential calls within a single prompt (e.g., store then immediately search). The eval runner executes scenarios sequentially; concurrency is tested within the LLM's multi-turn interaction, not via parallel runners.

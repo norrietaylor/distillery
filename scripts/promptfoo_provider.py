@@ -104,10 +104,20 @@ def call_api(
             input_tokens = usage.get("input_tokens", 0)
             output_tokens = usage.get("output_tokens", 0)
 
-        if result.returncode != 0 and not response_text:
+        if result.returncode != 0:
+            error_msg = (
+                f"Claude CLI exited with code {result.returncode}: "
+                f"{result.stderr[:500]}"
+            )
+            if not response_text:
+                return {"error": error_msg}
+            # Partial output with non-zero exit — return output but flag it.
             return {
-                "error": f"Claude CLI exited with code {result.returncode}: "
-                f"{result.stderr[:500]}",
+                "output": {
+                    "text": f"[PARTIAL - CLI error] {response_text}",
+                    "tool_calls": tool_calls,
+                },
+                "error": error_msg,
             }
 
         return {

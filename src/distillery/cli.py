@@ -897,6 +897,11 @@ def _cmd_eval(
                         print("\nCost warnings:")
                         print("\n".join(cost_warnings))
 
+    # Ensure deferred JSON output is always printed when compare_cost was active.
+    if fmt == "json" and compare_cost and "cost_comparison" not in summary:
+        summary["cost_comparison"] = {"note": "no baseline provided for cost comparison"}
+        print(json.dumps(summary, indent=2))
+
     return 0 if passed == total else 1
 
 

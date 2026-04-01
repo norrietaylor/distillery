@@ -252,6 +252,7 @@ scenarios:
         entry_type: bookmark
         author: alice
         tags: [reference, anthropic, tool-use]
+        project: distillery
         metadata:
           url: "https://docs.anthropic.com/en/docs/tool-use"
           summary: "Anthropic tool use API reference"
