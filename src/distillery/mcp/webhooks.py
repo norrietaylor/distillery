@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import contextlib
 import hmac
+import json
 import logging
 import os
 from datetime import UTC, datetime
@@ -199,48 +200,142 @@ async def _set_cooldown(store: Any, endpoint: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Stub route handlers
+# Route handlers
 # ---------------------------------------------------------------------------
 
 
-async def _handle_poll(request: Request) -> JSONResponse:
-    """Stub handler for ``POST /poll``.
+async def _handle_poll(request: Request, state: dict[str, Any]) -> JSONResponse:
+    """Handler for ``POST /poll``.
 
-    The actual polling logic is implemented by the handler task (T02).
-    This stub returns a success response with an empty data payload.
-
-    Args:
-        request: The incoming Starlette request.
-
-    Returns:
-        JSON response with ``{"ok": true, "data": {}}``.
-    """
-    return JSONResponse({"ok": True, "data": {}})
-
-
-async def _handle_rescore(request: Request) -> JSONResponse:
-    """Stub handler for ``POST /rescore``.
-
-    The actual rescoring logic is implemented by the handler task (T02).
-    This stub returns a success response with an empty data payload.
+    Instantiates :class:`~distillery.feeds.poller.FeedPoller` using the
+    initialised store, config, and embedding provider from *state*, runs a
+    full poll cycle, and returns aggregate statistics.
 
     Args:
-        request: The incoming Starlette request.
+        request: The incoming Starlette request (unused beyond signature
+            compatibility with the dispatcher).
+        state: The populated shared-state dict containing ``"store"``,
+            ``"config"``, and ``"embedding_provider"`` keys.
 
     Returns:
-        JSON response with ``{"ok": true, "data": {}}``.
+        JSON response with ``{"ok": true, "data": {"sources_polled": N,
+        "items_fetched": N, "items_stored": N, "errors": [...]}}``, or
+        ``{"ok": false, "error": "<message>"}`` with status 500 on failure.
     """
-    return JSONResponse({"ok": True, "data": {}})
+    from distillery.feeds.poller import FeedPoller
+
+    store = state["store"]
+    config = state["config"]
+
+    logger.info("Webhook poll: starting poll cycle")
+    try:
+        poller = FeedPoller(store=store, config=config)
+        summary = await poller.poll()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Webhook poll: poll cycle failed")
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+    # Collect errors from all per-source results.
+    errors: list[str] = []
+    for result in summary.results:
+        errors.extend(result.errors)
+
+    logger.info(
+        "Webhook poll: completed — sources=%d fetched=%d stored=%d errors=%d",
+        summary.sources_polled,
+        summary.total_fetched,
+        summary.total_stored,
+        len(errors),
+    )
+    return JSONResponse(
+        {
+            "ok": True,
+            "data": {
+                "sources_polled": summary.sources_polled,
+                "items_fetched": summary.total_fetched,
+                "items_stored": summary.total_stored,
+                "errors": errors,
+            },
+        }
+    )
 
 
-async def _handle_maintenance(request: Request) -> JSONResponse:
+async def _handle_rescore(request: Request, state: dict[str, Any]) -> JSONResponse:
+    """Handler for ``POST /rescore``.
+
+    Accepts an optional JSON body ``{"limit": N}`` (default 200) and
+    re-scores up to *N* existing feed entries against the current store.
+
+    Args:
+        request: The incoming Starlette request.  The body is read and
+            parsed for the optional ``limit`` parameter.
+        state: The populated shared-state dict containing ``"store"`` and
+            ``"config"`` keys.
+
+    Returns:
+        JSON response with ``{"ok": true, "data": {"rescored": N,
+        "upgraded": N, "downgraded": N}}``, or an error response with
+        status 400 (malformed body) or 500 (internal error).
+    """
+    from distillery.feeds.poller import FeedPoller
+
+    # Parse optional body for limit parameter.
+    limit = 200
+    body = await request.body()
+    if body:
+        try:
+            payload = json.loads(body)
+        except (json.JSONDecodeError, ValueError) as exc:
+            return JSONResponse(
+                {"ok": False, "error": f"malformed JSON body: {exc}"},
+                status_code=400,
+            )
+        if not isinstance(payload, dict):
+            return JSONResponse(
+                {"ok": False, "error": "request body must be a JSON object"},
+                status_code=400,
+            )
+        if "limit" in payload:
+            limit = int(payload["limit"])
+
+    store = state["store"]
+    config = state["config"]
+
+    logger.info("Webhook rescore: starting rescore (limit=%d)", limit)
+    try:
+        poller = FeedPoller(store=store, config=config)
+        stats = await poller.rescore(limit=limit)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Webhook rescore: rescore failed")
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+    logger.info(
+        "Webhook rescore: completed — rescored=%d upgraded=%d downgraded=%d",
+        stats.get("rescored", 0),
+        stats.get("upgraded", 0),
+        stats.get("downgraded", 0),
+    )
+    return JSONResponse(
+        {
+            "ok": True,
+            "data": {
+                "rescored": stats.get("rescored", 0),
+                "upgraded": stats.get("upgraded", 0),
+                "downgraded": stats.get("downgraded", 0),
+            },
+        }
+    )
+
+
+async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONResponse:
     """Stub handler for ``POST /maintenance``.
 
-    The actual maintenance logic is implemented by the handler task (T02).
+    The maintenance logic is implemented by a separate handler task.
     This stub returns a success response with an empty data payload.
 
     Args:
         request: The incoming Starlette request.
+        state: The populated shared-state dict (unused by this stub).
 
     Returns:
         JSON response with ``{"ok": true, "data": {}}``.
@@ -249,6 +344,8 @@ async def _handle_maintenance(request: Request) -> JSONResponse:
 
 
 # Mapping of endpoint names to their handler callables.
+# Each handler receives (request, state) where state is the populated
+# shared-state dict containing "store", "config", and "embedding_provider".
 _HANDLERS: dict[str, Any] = {
     "poll": _handle_poll,
     "rescore": _handle_rescore,
@@ -327,7 +424,7 @@ def create_webhook_app(
 
         # --- Dispatch -------------------------------------------------------
         handler = _HANDLERS[endpoint]
-        response: JSONResponse = await handler(request)
+        response: JSONResponse = await handler(request, state)
 
         # Record cooldown only on success.
         if response.status_code < 400:

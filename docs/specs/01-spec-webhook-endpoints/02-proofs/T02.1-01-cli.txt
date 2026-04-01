@@ -1,0 +1,9 @@
+Type: cli
+Command: mypy --strict src/distillery/mcp/webhooks.py
+Expected: Success: no issues found
+Timestamp: 2026-03-31T00:00:00Z
+
+--- OUTPUT ---
+Success: no issues found in 1 source file
+
+Status: PASS
