@@ -41,3 +41,6 @@ server:
     # allowed_orgs:
     #   - my-company
     # membership_cache_ttl_seconds: 3600  # default: 1 hour
+  webhooks:
+    enabled: true
+    secret_env: DISTILLERY_WEBHOOK_SECRET

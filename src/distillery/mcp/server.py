@@ -383,6 +383,7 @@ def create_server(
             pass
 
     server = FastMCP("distillery", lifespan=lifespan, auth=auth)
+    server._distillery_shared = _shared  # type: ignore[attr-defined]
 
     def _get_lifespan_context(ctx: Context) -> dict[str, Any]:
         """Extract the lifespan context dict from a FastMCP Context.

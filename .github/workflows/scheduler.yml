@@ -1,0 +1,95 @@
+name: Distillery Scheduler
+
+on:
+  schedule:
+    - cron: "23 * * * *"  # Hourly poll (at minute 23)
+    - cron: "17 6 * * *"  # Daily rescore (06:17 UTC)
+    - cron: "41 7 * * 1"  # Weekly maintenance (07:41 UTC Monday)
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: "Operation to run"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - poll
+          - rescore
+          - maintenance
+          - all
+
+jobs:
+  poll:
+    name: Poll Feed Sources
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: >
+      github.event_name == 'workflow_dispatch' && (github.event.inputs.operation == 'poll' || github.event.inputs.operation == 'all') ||
+      github.event_name == 'schedule' && github.event.schedule == '23 * * * *'
+    steps:
+      - name: Trigger poll webhook
+        env:
+          DISTILLERY_WEBHOOK_SECRET: ${{ secrets.DISTILLERY_WEBHOOK_SECRET }}
+          DISTILLERY_URL: ${{ vars.DISTILLERY_URL }}
+        run: |
+          http_code=$(curl -s -o /tmp/response.json -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer ${DISTILLERY_WEBHOOK_SECRET}" \
+            "${DISTILLERY_URL}/api/poll")
+          cat /tmp/response.json >> "${GITHUB_STEP_SUMMARY}"
+          if [ "$http_code" = "429" ]; then
+            echo "::warning::Endpoint in cooldown (429) — skipping"
+            exit 0
+          elif [ "$http_code" -ge 400 ]; then
+            echo "::error::Webhook returned HTTP ${http_code}"
+            exit 1
+          fi
+
+  rescore:
+    name: Rescore Feed Entries
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: >
+      github.event_name == 'workflow_dispatch' && (github.event.inputs.operation == 'rescore' || github.event.inputs.operation == 'all') ||
+      github.event_name == 'schedule' && github.event.schedule == '17 6 * * *'
+    steps:
+      - name: Trigger rescore webhook
+        env:
+          DISTILLERY_WEBHOOK_SECRET: ${{ secrets.DISTILLERY_WEBHOOK_SECRET }}
+          DISTILLERY_URL: ${{ vars.DISTILLERY_URL }}
+        run: |
+          http_code=$(curl -s -o /tmp/response.json -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer ${DISTILLERY_WEBHOOK_SECRET}" \
+            "${DISTILLERY_URL}/api/rescore")
+          cat /tmp/response.json >> "${GITHUB_STEP_SUMMARY}"
+          if [ "$http_code" = "429" ]; then
+            echo "::warning::Endpoint in cooldown (429) — skipping"
+            exit 0
+          elif [ "$http_code" -ge 400 ]; then
+            echo "::error::Webhook returned HTTP ${http_code}"
+            exit 1
+          fi
+
+  maintenance:
+    name: Weekly KB Maintenance
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: >
+      github.event_name == 'workflow_dispatch' && (github.event.inputs.operation == 'maintenance' || github.event.inputs.operation == 'all') ||
+      github.event_name == 'schedule' && github.event.schedule == '41 7 * * 1'
+    steps:
+      - name: Trigger maintenance webhook
+        env:
+          DISTILLERY_WEBHOOK_SECRET: ${{ secrets.DISTILLERY_WEBHOOK_SECRET }}
+          DISTILLERY_URL: ${{ vars.DISTILLERY_URL }}
+        run: |
+          http_code=$(curl -s -o /tmp/response.json -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer ${DISTILLERY_WEBHOOK_SECRET}" \
+            "${DISTILLERY_URL}/api/maintenance")
+          cat /tmp/response.json >> "${GITHUB_STEP_SUMMARY}"
+          if [ "$http_code" = "429" ]; then
+            echo "::warning::Endpoint in cooldown (429) — skipping"
+            exit 0
+          elif [ "$http_code" -ge 400 ]; then
+            echo "::error::Webhook returned HTTP ${http_code}"
+            exit 1
+          fi

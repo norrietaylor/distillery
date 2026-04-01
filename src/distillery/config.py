@@ -247,16 +247,32 @@ class HttpRateLimitConfig:
 
 
 @dataclass
+class WebhookConfig:
+    """Webhook endpoint configuration.
+
+    Attributes:
+        enabled: Whether to enable webhook endpoints. Defaults to ``True``.
+        secret_env: Name of the environment variable holding the webhook
+            bearer token secret. Defaults to ``'DISTILLERY_WEBHOOK_SECRET'``.
+    """
+
+    enabled: bool = True
+    secret_env: str = "DISTILLERY_WEBHOOK_SECRET"
+
+
+@dataclass
 class ServerConfig:
     """Server configuration.
 
     Attributes:
         auth: Authentication settings for HTTP transport.
         http_rate_limit: HTTP transport rate limiting settings.
+        webhooks: Webhook endpoint settings.
     """
 
     auth: ServerAuthConfig = field(default_factory=ServerAuthConfig)
     http_rate_limit: HttpRateLimitConfig = field(default_factory=HttpRateLimitConfig)
+    webhooks: WebhookConfig = field(default_factory=WebhookConfig)
 
 
 @dataclass
@@ -646,6 +662,8 @@ def _parse_server(raw: dict[str, Any]) -> ServerConfig:
         raw: Mapping (typically from YAML) containing:
             - ``auth`` (mapping with ``provider``, ``client_id_env``,
               ``client_secret_env``)
+            - ``http_rate_limit`` (mapping with rate limit settings)
+            - ``webhooks`` (mapping with webhook settings)
 
     Returns:
         A populated :class:`ServerConfig` instance.
@@ -665,6 +683,14 @@ def _parse_server(raw: dict[str, Any]) -> ServerConfig:
     if not isinstance(rl_raw, dict):
         raise ValueError(
             f"server.http_rate_limit must be a YAML mapping, got: {type(rl_raw).__name__}"
+        )
+
+    webhooks_raw = raw.get("webhooks", {})
+    if webhooks_raw is None:
+        webhooks_raw = {}
+    if not isinstance(webhooks_raw, dict):
+        raise ValueError(
+            f"server.webhooks must be a YAML mapping, got: {type(webhooks_raw).__name__}"
         )
 
     allowed_orgs_raw = auth_raw.get("allowed_orgs", []) or []
@@ -690,6 +716,10 @@ def _parse_server(raw: dict[str, Any]) -> ServerConfig:
             requests_per_hour=int(rl_raw.get("requests_per_hour", 600)),
             max_body_bytes=int(rl_raw.get("max_body_bytes", 1_048_576)),
             trust_proxy=bool(rl_raw.get("trust_proxy", False)),
+        ),
+        webhooks=WebhookConfig(
+            enabled=bool(webhooks_raw.get("enabled", True)),
+            secret_env=str(webhooks_raw.get("secret_env", "DISTILLERY_WEBHOOK_SECRET")),
         ),
     )
 
@@ -845,8 +875,7 @@ def _validate(config: DistilleryConfig) -> None:
         )
     if rl.max_db_size_mb < 0:
         raise ValueError(
-            "rate_limit.max_db_size_mb must be >= 0 (0 = unlimited), "
-            f"got: {rl.max_db_size_mb}"
+            f"rate_limit.max_db_size_mb must be >= 0 (0 = unlimited), got: {rl.max_db_size_mb}"
         )
     if not (0 <= rl.warn_db_size_pct <= 100):
         raise ValueError(

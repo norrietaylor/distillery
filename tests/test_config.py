@@ -16,6 +16,7 @@ from distillery.config import (
     ServerAuthConfig,
     ServerConfig,
     TagsConfig,
+    WebhookConfig,
     load_config,
 )
 
@@ -909,4 +910,119 @@ class TestServerMalformedValues:
         """
         p = write_yaml(tmp_path, yaml_content)
         with pytest.raises(ValueError, match="server.auth must be a YAML mapping"):
+            load_config(str(p))
+
+
+class TestWebhookConfigDefaults:
+    """Tests for WebhookConfig dataclass defaults."""
+
+    def test_webhook_config_dataclass_defaults(self) -> None:
+        """WebhookConfig has correct defaults."""
+        wc = WebhookConfig()
+        assert wc.enabled is True
+        assert wc.secret_env == "DISTILLERY_WEBHOOK_SECRET"
+
+    def test_webhook_config_enabled_true(self) -> None:
+        """WebhookConfig can be created with enabled=True."""
+        wc = WebhookConfig(enabled=True)
+        assert wc.enabled is True
+
+    def test_webhook_config_enabled_false(self) -> None:
+        """WebhookConfig can be created with enabled=False."""
+        wc = WebhookConfig(enabled=False)
+        assert wc.enabled is False
+
+    def test_webhook_config_custom_secret_env(self) -> None:
+        """WebhookConfig can have a custom secret_env."""
+        wc = WebhookConfig(secret_env="MY_WEBHOOK_SECRET")
+        assert wc.secret_env == "MY_WEBHOOK_SECRET"
+
+
+class TestWebhookConfigParsing:
+    """Tests for webhook config parsing in _parse_server."""
+
+    def test_webhooks_defaults_when_section_absent(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """When no webhooks section is present, defaults are applied."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        cfg = load_config()
+        assert cfg.server.webhooks.enabled is True
+        assert cfg.server.webhooks.secret_env == "DISTILLERY_WEBHOOK_SECRET"
+
+    def test_webhooks_enabled_true(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Webhooks can be explicitly enabled."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        yaml_content = """\
+            server:
+              webhooks:
+                enabled: true
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.server.webhooks.enabled is True
+
+    def test_webhooks_enabled_false(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Webhooks can be disabled."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        yaml_content = """\
+            server:
+              webhooks:
+                enabled: false
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.server.webhooks.enabled is False
+
+    def test_webhooks_custom_secret_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Webhooks can have a custom secret_env."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        yaml_content = """\
+            server:
+              webhooks:
+                secret_env: MY_CUSTOM_WEBHOOK_SECRET
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.server.webhooks.secret_env == "MY_CUSTOM_WEBHOOK_SECRET"
+
+    def test_webhooks_all_fields(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """All webhook fields can be configured together."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        yaml_content = """\
+            server:
+              webhooks:
+                enabled: false
+                secret_env: CUSTOM_SECRET_ENV
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.server.webhooks.enabled is False
+        assert cfg.server.webhooks.secret_env == "CUSTOM_SECRET_ENV"
+
+    def test_server_webhooks_as_list_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Webhooks section must be a mapping, not a list."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        yaml_content = """\
+            server:
+              webhooks: []
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="server.webhooks must be a YAML mapping"):
             load_config(str(p))
