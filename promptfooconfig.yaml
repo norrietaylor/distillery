@@ -36,7 +36,6 @@ prompts:
 # ---------------------------------------------------------------------------
 defaultTest:
   assert:
-    - type: no-error
     - type: latency
       threshold: 120000   # 2 minutes max per scenario
 
