@@ -1,0 +1,37 @@
+Type: test
+Command: pytest -m unit tests/eval/test_cost_tracking.py -v
+Expected: All tests pass with mock data
+Timestamp: 2026-04-01T12:00:00Z
+
+============================= test session starts ==============================
+platform linux -- Python 3.13.7, pytest-9.0.2, pluggy-1.6.0
+rootdir: /home/norrie.guest/code/distillery/.worktrees/feature-eval-supplement
+configfile: pyproject.toml
+asyncio: mode=Mode.AUTO
+
+collected 20 items
+
+tests/eval/test_cost_tracking.py::TestBaselineSaveFormat::test_baseline_has_scenarios_and_cost_summary_keys PASSED [  5%]
+tests/eval/test_cost_tracking.py::TestBaselineSaveFormat::test_cost_summary_has_required_keys PASSED [ 10%]
+tests/eval/test_cost_tracking.py::TestBaselineSaveFormat::test_per_scenario_cost_fields_present PASSED [ 15%]
+tests/eval/test_cost_tracking.py::TestBaselineSaveFormat::test_per_scenario_name_and_skill PASSED [ 20%]
+tests/eval/test_cost_tracking.py::TestBaselineSaveFormat::test_cost_summary_total_cost_is_sum_of_scenarios PASSED [ 25%]
+tests/eval/test_cost_tracking.py::TestPerSkillAggregation::test_per_skill_keys_match_skills_in_results PASSED [ 30%]
+tests/eval/test_cost_tracking.py::TestPerSkillAggregation::test_per_skill_cost_is_summed_per_skill PASSED [ 35%]
+tests/eval/test_cost_tracking.py::TestPerSkillAggregation::test_per_skill_scenario_count PASSED [ 40%]
+tests/eval/test_cost_tracking.py::TestPerSkillAggregation::test_per_skill_token_sum PASSED [ 45%]
+tests/eval/test_cost_tracking.py::TestCostComparison::test_compare_cost_delta_is_current_minus_baseline PASSED [ 50%]
+tests/eval/test_cost_tracking.py::TestCostComparison::test_compare_cost_per_skill_delta PASSED [ 55%]
+tests/eval/test_cost_tracking.py::TestCostComparison::test_compare_cost_delta_pct_calculated PASSED [ 60%]
+tests/eval/test_cost_tracking.py::TestCostWarning::test_warning_emitted_when_cost_increases_more_than_20_pct PASSED [ 65%]
+tests/eval/test_cost_tracking.py::TestCostWarning::test_no_warning_when_cost_increase_is_below_20_pct PASSED [ 70%]
+tests/eval/test_cost_tracking.py::TestCostWarning::test_no_warning_when_cost_decreases PASSED [ 75%]
+tests/eval/test_cost_tracking.py::TestCostWarning::test_warning_boundary_exactly_20_pct_no_warning PASSED [ 80%]
+tests/eval/test_cost_tracking.py::TestBackwardCompatibility::test_old_format_flat_list_does_not_crash PASSED [ 85%]
+tests/eval/test_cost_tracking.py::TestBackwardCompatibility::test_old_format_reports_no_cost_baseline_available PASSED [ 90%]
+tests/eval/test_cost_tracking.py::TestMissingCostSummary::test_missing_cost_summary_reports_no_cost_baseline PASSED [ 95%]
+tests/eval/test_cost_tracking.py::TestMissingCostSummary::test_missing_cost_summary_does_not_raise PASSED [100%]
+
+============================== 20 passed in 0.51s ==============================
+
+Status: PASS
