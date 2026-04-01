@@ -7,7 +7,7 @@ We take security seriously. If you discover a vulnerability in Distillery, pleas
 ### How to Report
 
 1. Go to the [Distillery repository](https://github.com/norrietaylor/distillery)
-2. Navigate to **Settings → Security → Advisories**
+2. Click the **Security** tab on the repository page
 3. Click **"Report a vulnerability"**
 4. Fill in the details and submit
 

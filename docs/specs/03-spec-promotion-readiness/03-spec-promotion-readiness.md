@@ -109,7 +109,7 @@ Prepare the Distillery repository for external promotion by filling quality gaps
 
 - **asciinema + agg**: `asciinema rec` captures terminal sessions as `.cast` files; `agg` converts to GIF. Both are available via pip/cargo. The `.cast` file should be kept in `docs/assets/` for re-recording.
 - **shields.io badges**: Static badges, no CI integration needed. PyPI badge auto-updates once the package is published; until then it will show "not found" — this is acceptable and expected.
-- **Blog frontmatter**: dev.to imports posts from markdown with YAML frontmatter. The `canonical_url` field should point to the GitHub Pages version once published.
+- **Blog frontmatter**: dev.to imports posts from Markdown with YAML frontmatter. The `canonical_url` field should point to the GitHub Pages version once published.
 - **Demo recording content**: The recording should use the local stdio transport against a seeded test database, not the production demo server, to ensure consistent output.
 
 ## Security Considerations

@@ -1,8 +1,0 @@
-Type: file
-Command: test -f SECURITY.md && echo exists
-Expected: exists
-Timestamp: 2026-04-01T11:45:00Z
-Status: PASS
-
-Output:
-exists

@@ -1,8 +1,0 @@
-Type: file
-Command: grep 'distillery-demo' README.md
-Expected: contains demo reference
-Timestamp: 2026-04-01T18:43:41Z
----
-Output:
-  <img src="docs/assets/distillery-demo.gif" alt="Distillery demo: /distill captures a decision, /recall retrieves it by semantic search" width="700">
-Status: PASS

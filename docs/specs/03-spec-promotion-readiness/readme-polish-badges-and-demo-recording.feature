@@ -17,7 +17,7 @@ Feature: README Polish -- Badges and Demo Recording
     And a demo recording asset exists at docs/assets/distillery-demo.gif or .svg
     When a user opens the README.md on GitHub
     Then a demo section appears after "What is Distillery?" and before "Skills"
-    And the section contains an embedded image referencing docs/assets/distillery-demo.gif
+    And the section contains an embedded image referencing docs/assets/distillery-demo.gif or .svg
     And a caption below the image explains what the recording shows
 
   Scenario: Demo recording asset is a valid viewable file under 2MB
