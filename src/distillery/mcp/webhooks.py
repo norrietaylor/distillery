@@ -281,6 +281,7 @@ def _parse_mcp_response(result: Any) -> dict[str, Any]:
     try:
         return dict(json.loads(result[0].text))
     except Exception:  # noqa: BLE001
+        logger.warning("Failed to parse MCP response: %r", result)
         return {}
 
 
@@ -648,8 +649,11 @@ def create_webhook_app(
             handler = _HANDLERS[endpoint]
             response: JSONResponse = await handler(request, state)
 
-            # --- Audit record -----------------------------------------------
-            await _record_audit(store, endpoint, response)
+            # --- Audit record (best-effort) ---------------------------------
+            try:
+                await _record_audit(store, endpoint, response)
+            except Exception:  # noqa: BLE001
+                logger.exception("Webhook %s: failed to persist audit record", endpoint)
 
             return response
 

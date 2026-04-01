@@ -13,7 +13,7 @@ Run this once after installing the plugin. It is safe to run again at any time t
 
 - After installing the Distillery plugin for the first time
 - When switching between local and hosted MCP transports
-- When you want to configure scheduled tasks for feed polling and maintenance
+- When you want to configure scheduled tasks for feed polling, rescoring, and maintenance
 - When invoked via `/setup` or "configure distillery"
 
 ## Process

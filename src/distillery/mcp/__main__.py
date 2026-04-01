@@ -187,11 +187,14 @@ def main(argv: list[str] | None = None) -> int:
                 webhook_app = create_webhook_app(server._distillery_shared, config)  # type: ignore[attr-defined]
                 # Apply the same body-size guard as the MCP endpoint.
                 webhook_app = BodySizeLimitMiddleware(webhook_app, max_bytes=rl.max_body_bytes)  # type: ignore[assignment]
+                # Propagate the MCP http_app's lifespan to the parent so
+                # FastMCP's session manager initialises on startup.
                 final_app = Starlette(
                     routes=[
                         Mount("/api", app=webhook_app),
                         Mount("/", app=wrapped_app),
-                    ]
+                    ],
+                    lifespan=http_app.router.lifespan_context,
                 )
 
             import uvicorn as _uvicorn
