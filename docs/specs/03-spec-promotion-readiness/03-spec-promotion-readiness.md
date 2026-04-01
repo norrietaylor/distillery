@@ -2,21 +2,18 @@
 
 ## Introduction/Overview
 
-Prepare the Distillery repository for external promotion by filling quality gaps that affect first impressions. This covers three areas: README polish (badges, demo recording), a security policy, and a launch blog post. These are the gaps between "working project" and "project ready for Hacker News, PyPI, and MCP directory listings."
+Prepare the Distillery repository for external promotion by filling quality gaps that affect first impressions. This covers two areas: README polish (badges, demo recording) and a security policy. These are the gaps between "working project" and "project ready for Hacker News, PyPI, and MCP directory listings."
 
 ## Goals
 
 1. README communicates project maturity at a glance via badges and a demo recording
 2. Security policy exists for responsible vulnerability disclosure via GitHub Security Advisories
 3. Supporting files (`.env.example`) are in place for the promotion plan
-4. Blog draft and `docs/drafts/` are tracked for a follow-up PR
 
 ## User Stories
 
 - As a **visitor from Hacker News or PyPI**, I want to see badges and a demo recording in the README so that I can quickly assess project maturity and understand what it does.
 - As a **security researcher**, I want a SECURITY.md file so that I know how to responsibly report vulnerabilities.
-- As the **project maintainer**, I want a launch blog post draft so that I have content ready to publish on dev.to, Hashnode, and share on social media.
-
 ## Demoable Units of Work
 
 ### Unit 1: README Polish — Badges and Demo Recording
@@ -56,33 +53,6 @@ Prepare the Distillery repository for external promotion by filling quality gaps
 - File: `SECURITY.md` references GitHub Security Advisories as the reporting mechanism
 - URL: Repository Security tab shows "Private vulnerability reporting" enabled
 
-### Unit 3: Launch Blog Post Draft (Deferred to follow-up PR)
-
-**Purpose:** Create a publishable blog post that serves as the narrative content for the promotion plan — shareable on dev.to, Hashnode, Hacker News, and social media.
-
-**Functional Requirements:**
-- The blog post shall be saved at `docs/blog/building-a-second-brain-for-claude-code.md`.
-- The `docs/blog/` directory shall be created if it does not exist.
-- The post shall be written in a personal, technical-but-accessible tone suitable for dev.to and Hacker News audiences.
-- The post shall cover these sections (in roughly this order):
-  1. **The problem:** Teams lose knowledge — decisions, rationale, context — every day. Chat is ephemeral, docs rot, wikis go stale.
-  2. **The insight:** Capture knowledge where work already happens — inside the coding assistant.
-  3. **What Distillery does:** 10 skills, semantic search with DuckDB + vector embeddings, deduplication, multi-pass synthesis (`/pour`), ambient intelligence (feed polling + relevance scoring).
-  4. **Architecture in brief:** Four-layer design (skills → MCP → protocols → backends), why MCP was chosen, stdio vs HTTP transport.
-  5. **Team access:** GitHub OAuth, shared knowledge base, multi-user deployment on Fly.io.
-  6. **Demo flow:** Walk through a `/distill` → `/recall` → `/pour` sequence with example output.
-  7. **What's next:** Roadmap highlights (link to roadmap page).
-  8. **Try it:** Installation instructions (plugin marketplace + pip).
-- The post shall be 1,500–2,500 words (draft quality — polished enough to publish but doesn't need to be perfect).
-- The post shall include YAML frontmatter compatible with dev.to (`title`, `published`, `description`, `tags`, `canonical_url`).
-- The `docs/drafts/` directory shall be created to support the promotion plan's automated draft pipeline.
-
-**Proof Artifacts:**
-- File: `docs/blog/building-a-second-brain-for-claude-code.md` exists with ≥1,500 words
-- File: `docs/blog/building-a-second-brain-for-claude-code.md` contains dev.to-compatible YAML frontmatter
-- File: `docs/drafts/` directory exists
-- CLI: `wc -w docs/blog/building-a-second-brain-for-claude-code.md` returns ≥1,500
-
 ## Non-Goals (Out of Scope)
 
 - Increasing test coverage (already at 83%, above the 80% CI threshold)
@@ -97,11 +67,9 @@ Prepare the Distillery repository for external promotion by filling quality gaps
 
 - Badge row should use HTML `<p align="center">` to match the existing README header style
 - Demo GIF should be ≤2MB to avoid slow loading on GitHub (use `agg` with optimized settings or animated SVG)
-- Blog post tone: first-person, technical but not academic, concise paragraphs, code examples inline
-
 ## Repository Standards
 
-- **Conventional Commits**: `docs(readme):`, `docs(security):`, `docs(blog):`
+- **Conventional Commits**: `docs(readme):`, `docs(security):`
 - **Markdown**: Follow existing README formatting (centered HTML headers, GFM tables)
 - **Assets**: Store in `docs/assets/` alongside existing logos and diagrams
 
@@ -109,15 +77,12 @@ Prepare the Distillery repository for external promotion by filling quality gaps
 
 - **asciinema + agg**: `asciinema rec` captures terminal sessions as `.cast` files; `agg` converts to GIF. Both are available via pip/cargo. The `.cast` file should be kept in `docs/assets/` for re-recording.
 - **shields.io badges**: Static badges, no CI integration needed. PyPI badge auto-updates once the package is published; until then it will show "not found" — this is acceptable and expected.
-- **Blog frontmatter**: dev.to imports posts from Markdown with YAML frontmatter. The `canonical_url` field should point to the GitHub Pages version once published.
 - **Demo recording content**: The recording should use the local stdio transport against a seeded test database, not the production demo server, to ensure consistent output.
 
 ## Security Considerations
 
 - The `.env.example` file must contain only placeholder values (e.g., `your-api-key-here`), never real credentials.
 - The SECURITY.md must not disclose specific vulnerability details or attack vectors — it's a policy document, not a vulnerability report.
-- The blog post should not include real API keys, tokens, or internal URLs in code examples.
-
 ## Success Metrics
 
 | Metric | Target |
@@ -125,7 +90,6 @@ Prepare the Distillery repository for external promotion by filling quality gaps
 | README badges | 3 badges visible (PyPI, License, Python) |
 | Demo recording | ≤2MB GIF/SVG embedded in README |
 | SECURITY.md | Present with GitHub Security Advisories link |
-| Blog post word count | 1,500–2,500 words |
 | .env.example | All required env vars documented |
 
 ## Open Questions
