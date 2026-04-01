@@ -1,6 +1,11 @@
 ---
 name: setup
 description: "Onboarding wizard for Distillery plugin — verifies MCP connectivity, detects transport, and configures scheduled tasks (hourly poll, daily rescore, weekly maintenance). Triggered by: 'setup', '/setup', 'configure distillery', 'set up distillery'."
+allowed-tools:
+  - "mcp__*__distillery_status"
+  - "CronCreate"
+  - "RemoteTrigger"
+effort: low
 ---
 
 # Setup — Distillery Onboarding

@@ -1,6 +1,15 @@
 ---
 name: radar
 description: "Generates an ambient intelligence digest from recent feed entries, suggests new sources, and stores the digest. Triggered by: 'radar', '/radar', 'what's new', 'show my digest', 'ambient digest', 'what have I missed', 'feed digest'."
+allowed-tools:
+  - "mcp__*__distillery_search"
+  - "mcp__*__distillery_list"
+  - "mcp__*__distillery_store"
+  - "mcp__*__distillery_interests"
+  - "mcp__*__distillery_suggest_sources"
+  - "mcp__*__distillery_status"
+context: fork
+effort: high
 ---
 
 # Radar — Ambient Intelligence Digest

@@ -1,6 +1,13 @@
 ---
 name: bookmark
 description: "Saves a URL and its auto-generated summary to the knowledge base. Triggered by: 'bookmark', 'save this link', 'store this URL', 'remember this page', or '/bookmark <url> [#tags]'."
+allowed-tools:
+  - "mcp__*__distillery_store"
+  - "mcp__*__distillery_check_dedup"
+  - "mcp__*__distillery_status"
+  - "WebFetch"
+disable-model-invocation: true
+effort: medium
 ---
 
 # Bookmark — URL Knowledge Capture

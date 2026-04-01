@@ -1,6 +1,11 @@
 ---
 name: recall
 description: "Performs semantic search over the Distillery knowledge base. Triggered by: 'recall', 'search knowledge', 'what do we know about', 'find in knowledge base', or '/recall <query>'."
+allowed-tools:
+  - "mcp__*__distillery_search"
+  - "mcp__*__distillery_get"
+  - "mcp__*__distillery_status"
+effort: low
 ---
 
 # Recall — Semantic Knowledge Search

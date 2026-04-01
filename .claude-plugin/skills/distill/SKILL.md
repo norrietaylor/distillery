@@ -1,6 +1,14 @@
 ---
 name: distill
 description: "Captures session knowledge and stores distilled decisions and insights. Triggered by: 'distill', 'capture this', 'save knowledge', 'log learnings', or '/distill [content]'."
+allowed-tools:
+  - "mcp__*__distillery_store"
+  - "mcp__*__distillery_check_dedup"
+  - "mcp__*__distillery_find_similar"
+  - "mcp__*__distillery_status"
+  - "Bash(git config *)"
+disable-model-invocation: true
+effort: medium
 ---
 
 # Distill — Session Knowledge Capture
