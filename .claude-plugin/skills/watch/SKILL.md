@@ -53,28 +53,20 @@ Call `distillery_watch` with the parsed arguments:
 
 After a successful `add`, ensure automatic polling is configured. Never create duplicate poll jobs.
 
-**4a. Check existing schedule:** Use `CronList` to look for any job whose prompt contains `distillery_poll`. If found, skip to Step 5.
-
-**4b. Determine scheduling mechanism:** Read `.mcp.json` in the project root:
+**4a. Determine scheduling mechanism:** Read `.mcp.json` in the project root:
 - URL contains `localhost`, `127.0.0.1`, or transport is `stdio` → **local** → use `CronCreate`
-- Remote host (e.g., `*.fastmcp.app`) → **deployed** → use `RemoteTrigger`
+- Remote host (e.g., `distillery-mcp.fly.dev`) → **deployed** → scheduling is handled by the GitHub Actions workflow at `.github/workflows/scheduler.yml`. Display: "Auto-poll managed by GitHub Actions (hourly at :23 UTC)." and skip to Step 5.
 
-**4c. Create the schedule:**
+**4b. Local schedule (CronCreate):**
 
-**Local (CronCreate):**
+Check `CronList` for any job whose prompt contains `distillery_poll`. If found, skip to Step 5.
+
 ```text
 CronCreate(cron="23 * * * *", prompt="Use distillery_poll to poll all configured feed sources. Report a one-line summary of items fetched and stored.", recurring=true, durable=true)
 ```
 Pick an off-peak minute (not :00 or :30). Durable jobs survive restarts but auto-expire after 7 days.
 
-**Deployed (RemoteTrigger):**
-```text
-RemoteTrigger(action="create", body={"name": "distillery-feed-poll", "description": "Poll all Distillery feed sources for new items", "schedule": "23 * * * *", "prompt": "Use distillery_poll to poll all configured feed sources. Report a one-line summary of items fetched and stored.", "max_turns": 3})
-```
-
-If `RemoteTrigger` fails, fall back to `CronCreate` and note the limitation.
-
-**4d. Cleanup on `remove`:** After a successful `remove`, if no sources remain, delete/pause the auto-poll schedule via `CronDelete` (local) or `RemoteTrigger(action="update", ..., body={"paused": true})` (deployed). Display: "Auto-poll paused: no feed sources remaining."
+**4c. Cleanup on `remove`:** After a successful `remove`, if no sources remain, delete/pause the auto-poll schedule via `CronDelete` (local only). Display: "Auto-poll paused: no feed sources remaining."
 
 ### Step 5: Confirm
 
@@ -101,8 +93,8 @@ Changes are persisted to the database automatically — no manual YAML editing r
 - Validate `source_type` is one of: `rss`, `github`, `hackernews`, `webhook`
 - Do not proceed with `add` without a URL
 - Always show the updated source table after `add` or `remove`
-- After `add`, always check `CronList` before creating a schedule — no duplicates
-- After `remove` that leaves zero sources, pause/delete the auto-poll schedule
-- If `RemoteTrigger` fails for a deployed server, fall back to `CronCreate`
+- After `add` on local transport, always check `CronList` before creating a schedule — no duplicates
+- After `remove` that leaves zero sources on local transport, pause/delete the auto-poll schedule
+- For hosted/team transport, scheduling is managed by GitHub Actions — do not create local cron jobs
 - On MCP errors, see CONVENTIONS.md error handling — display and stop
 - Trust weight: 0.0–1.0 (default 1.0); poll interval: positive integer minutes (default 60)

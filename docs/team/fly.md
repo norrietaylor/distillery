@@ -67,6 +67,38 @@ curl -X POST https://<app-name>.fly.dev/mcp \
   -d '{"jsonrpc":"2.0","method":"tools/list","id":1}'
 ```
 
+### 6. Configure webhook scheduling (optional)
+
+Set up automated feed polling, rescoring, and KB maintenance via the webhook endpoints:
+
+```bash
+# Generate a shared secret
+SECRET=$(openssl rand -hex 32)
+
+# Set on Fly.io
+fly secrets set DISTILLERY_WEBHOOK_SECRET=$SECRET --app <app-name>
+
+# Set on GitHub (for the Actions cron workflow)
+gh secret set DISTILLERY_WEBHOOK_SECRET --body "$SECRET"
+gh variable set DISTILLERY_URL --body "https://<app-name>.fly.dev"
+```
+
+The GitHub Actions workflow at `.github/workflows/scheduler.yml` runs:
+
+| Schedule | Endpoint | Operation |
+|----------|----------|-----------|
+| Hourly (:23) | `POST /api/poll` | Poll all feed sources |
+| Daily (06:17 UTC) | `POST /api/rescore` | Re-score feed entries |
+| Weekly (Mon 07:41 UTC) | `POST /api/maintenance` | KB metrics, quality, stale detection, digest |
+
+Verify manually:
+
+```bash
+curl -sf -X POST \
+  -H "Authorization: Bearer $SECRET" \
+  https://<app-name>.fly.dev/api/poll
+```
+
 ## Connecting from Claude Code
 
 ```json
@@ -86,7 +118,7 @@ Claude Code triggers the GitHub OAuth flow on first connection.
 
 | Aspect | Details |
 |--------|---------|
-| **Transport** | Streamable HTTP (FastMCP) on port 8000 |
+| **Transport** | Streamable HTTP (FastMCP) on port 8000 + REST webhooks at `/api/*` |
 | **Storage** | Local DuckDB on Fly Volume (`/data/distillery.db`) |
 | **Auth** | GitHub OAuth via FastMCP `GitHubProvider` (identity gate only) |
 | **Scaling** | Single machine, scale-to-zero when idle |
