@@ -2116,7 +2116,7 @@ _AGGREGATE_GROUP_BY_MAP: dict[str, str] = {
 
 def _entry_to_summary_dict(entry: Any) -> dict[str, Any]:
     """Serialise *entry* without the ``content`` field (summary mode)."""
-    d = entry.to_dict()
+    d: dict[str, Any] = entry.to_dict()
     d.pop("content", None)
     return d
 

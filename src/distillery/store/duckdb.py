@@ -1150,7 +1150,7 @@ class DuckDBStore:
         group_by: str,
         filters: dict[str, Any] | None,
         limit: int,
-    ) -> list[dict[str, Any]]:
+    ) -> dict[str, Any]:
         """Return entry counts grouped by *group_by*, sorted by count descending.
 
         Parameters:
