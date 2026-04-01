@@ -15,6 +15,10 @@ from distillery.mcp.tools.crud import (
     _handle_store,
     _handle_update,
 )
+from distillery.mcp.tools.quality import (
+    _handle_check_conflicts,
+    _handle_check_dedup,
+)
 from distillery.mcp.tools.search import (
     _handle_aggregate,
     _handle_find_similar,
@@ -30,6 +34,8 @@ __all__ = [
     "_handle_status",
     "_handle_store",
     "_handle_update",
+    "_handle_check_dedup",
+    "_handle_check_conflicts",
     "_handle_search",
     "_handle_find_similar",
     "_handle_aggregate",
