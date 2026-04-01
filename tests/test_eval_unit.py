@@ -835,8 +835,8 @@ class TestMCPBridgeAsync:
 
         bridge = await MCPBridge.create()
         schemas = bridge.get_tool_schemas()
-        # All 17 distillery tools must be present.
-        assert len(schemas) == 17
+        # All 18 distillery tools must be present.
+        assert len(schemas) == 18
         names = {s["name"] for s in schemas}
         assert "distillery_store" in names
         assert "distillery_search" in names

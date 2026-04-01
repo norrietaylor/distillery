@@ -55,7 +55,7 @@ Show entry ID, type, confidence (as `<n%> (<level>)`), status, reasoning, and su
 
 ### Step B1: List Inbox Entries
 
-Call `distillery_list` with `filters={"entry_type": "inbox"}, limit=50`. If empty, tell the user and stop.
+Call `distillery_list(entry_type="inbox", limit=50, output_mode="full", content_max_length=300)`. If empty, tell the user and stop.
 
 ### Step B2: Classify Each Entry
 

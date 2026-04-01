@@ -291,6 +291,28 @@ class DistilleryStore(Protocol):
         """
         ...
 
+    async def aggregate_entries(
+        self,
+        group_by: str,
+        filters: dict[str, Any] | None,
+        limit: int,
+    ) -> dict[str, Any]:
+        """Return entry counts grouped by a field, sorted by count descending.
+
+        Args:
+            group_by: Logical field name to group by (e.g. ``"entry_type"``,
+                ``"metadata.source_url"``).  The caller is responsible for
+                validating this against an allowlist before passing it in.
+            filters: Optional metadata constraints (same format as
+                :meth:`list_entries`).
+            limit: Maximum number of groups to return.
+
+        Returns:
+            Dict with ``"groups"`` (limited list of ``{"value": ..., "count": ...}``),
+            ``"total_groups"`` (int), and ``"total_entries"`` (int).
+        """
+        ...
+
     async def get_metadata(self, key: str) -> str | None:
         """Read a value from the ``_meta`` key-value table.
 
