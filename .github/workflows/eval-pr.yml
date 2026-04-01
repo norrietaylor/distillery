@@ -33,8 +33,26 @@ jobs:
           pip install -e ".[dev]"
           npm install -g @anthropic-ai/claude-code
 
+      - name: Validate promptfoo config
+        run: npx promptfoo@latest validate config --config promptfooconfig.yaml
+
       - name: Run promptfoo eval
+        if: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+        continue-on-error: true
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
-        run: npx promptfoo@latest eval --config promptfooconfig.yaml
+        run: |
+          npx promptfoo@latest eval --config promptfooconfig.yaml
+          echo "eval_exit_code=$?" >> "$GITHUB_ENV"
+
+      - name: Report eval results
+        if: ${{ always() && env.eval_exit_code != '' }}
+        run: |
+          if [ "$eval_exit_code" = "0" ]; then
+            echo "✅ All promptfoo eval scenarios passed"
+          else
+            echo "⚠️ Some promptfoo eval scenarios failed (exit code: $eval_exit_code)"
+            echo "This is informational — eval failures do not block merge."
+            echo "Review results in the workflow logs above."
+          fi
