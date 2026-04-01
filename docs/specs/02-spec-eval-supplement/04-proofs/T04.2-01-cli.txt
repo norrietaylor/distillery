@@ -1,0 +1,74 @@
+Type: cli
+Command: distillery eval --baseline baseline.json --compare-cost
+Expected: Shows cost delta and per-skill breakdown
+Timestamp: 2026-04-01T00:00:00Z
+
+=== TEST 1: --compare-cost flag present in eval argument parser ===
+
+Executed:
+  python3 -c "import sys; sys.path.insert(0,'src'); from distillery.cli import _build_parser; p = _build_parser(); ns = p.parse_args(['eval','--baseline','b.json','--compare-cost']); print(ns.compare_cost, ns.baseline)"
+Output:
+  True b.json
+
+Result: PASS -- flag parsed correctly with compare_cost=True
+
+=== TEST 2: text format output with cost comparison block ===
+
+Executed: _cmd_eval() with mocked results, fmt="text", compare_cost=True
+  results: s1/recall cost=0.002 (baseline 0.001, +100%), s2/distill cost=0.001
+
+Output:
+  ============================================================
+  Results: 2/2 passed (100%)
+  ============================================================
+  Cost Comparison:
+    Total: $0.003000 (baseline: $0.003000, delta: +0.000000 / +0.0%)
+    recall: $0.002000 (delta: +0.001000 / +100.0%)
+    distill: $0.001000 (delta: -0.001000 / -50.0%)
+
+  Cost warnings:
+    WARNING: recall cost increased by 100.0% ($0.001000 -> $0.002000)
+
+Result: PASS
+  - Cost Comparison block present after pass/fail summary
+  - Per-skill deltas shown with absolute and percentage
+  - recall flagged as WARNING (100% > 20% threshold)
+  - distill NOT flagged (-50%, decrease)
+
+=== TEST 3: JSON format contains cost_comparison key ===
+
+Executed: _cmd_eval() with mocked results, fmt="json", compare_cost=True
+
+Output (abbreviated):
+  {
+    "results": [...],
+    "passed": 2,
+    "total": 2,
+    "pass_rate": 1.0,
+    "cost_comparison": {
+      "current_total_usd": 0.003,
+      "baseline_total_usd": 0.003,
+      "total_delta_usd": 0.0,
+      "total_delta_pct": 0.0,
+      "per_skill": {
+        "recall": {"current_usd": 0.002, "baseline_usd": 0.001, "delta_usd": 0.001, "delta_pct": 100.0},
+        "distill": {"current_usd": 0.001, "baseline_usd": 0.002, "delta_usd": -0.001, "delta_pct": -50.0}
+      },
+      "warnings": ["  WARNING: recall cost increased by 100.0% ($0.001000 -> $0.002000)"]
+    }
+  }
+
+Result: PASS
+  - cost_comparison key present at top level
+  - per_skill deltas with current_usd, baseline_usd, delta_usd, delta_pct
+  - warnings list populated for >20% increases
+
+=== TEST 4: cost warnings alone do NOT change exit code ===
+
+Executed: _cmd_eval() with all scenarios passing, compare_cost=True, >20% cost increase
+Exit code: 0  -- PASS (cost warnings are informational only)
+
+Executed: _cmd_eval() with one scenario failing, compare_cost=True
+Exit code: 1  -- PASS (exit code 1 driven by scenario failure, not cost)
+
+Overall Status: PASS

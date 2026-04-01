@@ -130,6 +130,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default="claude-haiku-4-5-20251001",
         help="Claude model to use for eval runs (default: claude-haiku-4-5-20251001)",
     )
+    eval_parser.add_argument(
+        "--compare-cost",
+        action="store_true",
+        default=False,
+        help="Compare current run cost against baseline (requires --baseline)",
+    )
 
     return parser
 
@@ -457,6 +463,7 @@ def _cmd_eval(
     baseline: str | None,
     model: str,
     fmt: str,
+    compare_cost: bool = False,
 ) -> int:
     """Implement the ``eval`` subcommand.
 
@@ -518,24 +525,31 @@ def _cmd_eval(
     total = len(results)
     pass_rate = passed / total if total > 0 else 0.0
 
+    json_output: list[dict[str, Any]] = [
+        {
+            "name": r.scenario_name,
+            "skill": r.skill,
+            "passed": r.passed,
+            "latency_ms": round(r.performance.total_latency_ms, 1),
+            "input_tokens": r.performance.input_tokens,
+            "output_tokens": r.performance.output_tokens,
+            "tool_call_count": r.performance.tool_call_count,
+            "tools_called": r.effectiveness.tools_called,
+            "failure_reasons": r.effectiveness.failure_reasons,
+        }
+        for r in results
+    ]
+    summary: dict[str, Any] = {
+        "results": json_output,
+        "passed": passed,
+        "total": total,
+        "pass_rate": pass_rate,
+    }
+
     if fmt == "json":
-        output = []
-        for r in results:
-            output.append(
-                {
-                    "name": r.scenario_name,
-                    "skill": r.skill,
-                    "passed": r.passed,
-                    "latency_ms": round(r.performance.total_latency_ms, 1),
-                    "input_tokens": r.performance.input_tokens,
-                    "output_tokens": r.performance.output_tokens,
-                    "tool_call_count": r.performance.tool_call_count,
-                    "tools_called": r.effectiveness.tools_called,
-                    "failure_reasons": r.effectiveness.failure_reasons,
-                }
-            )
-        summary = {"results": output, "passed": passed, "total": total, "pass_rate": pass_rate}
-        print(json.dumps(summary, indent=2))
+        # Defer printing when compare_cost is active so we can append cost_comparison.
+        if not compare_cost:
+            print(json.dumps(summary, indent=2))
     else:
         for r in results:
             print(r.summary())
@@ -600,6 +614,84 @@ def _cmd_eval(
             print("\n".join(regressions))
             return 1
 
+        # Cost comparison if requested.
+        if compare_cost:
+            baseline_cost_summary = (
+                baseline_data_loaded.get("cost_summary")
+                if isinstance(baseline_data_loaded, dict)
+                else None
+            )
+            current_total_cost = sum(r.performance.total_cost_usd for r in results)
+            current_per_skill: dict[str, float] = {}
+            for r in results:
+                current_per_skill[r.skill] = (
+                    current_per_skill.get(r.skill, 0.0) + r.performance.total_cost_usd
+                )
+
+            if baseline_cost_summary is None:
+                if fmt == "json":
+                    summary["cost_comparison"] = {"note": "no cost baseline available"}
+                    print(json.dumps(summary, indent=2))
+                else:
+                    print("\nCost comparison: no cost baseline available")
+            else:
+                baseline_total = float(baseline_cost_summary.get("total_cost_usd", 0.0))
+                total_delta = current_total_cost - baseline_total
+                total_pct = (total_delta / baseline_total * 100) if baseline_total > 0 else 0.0
+
+                baseline_per_skill: dict[str, Any] = baseline_cost_summary.get("per_skill", {})
+                per_skill_deltas: dict[str, dict[str, float]] = {}
+                cost_warnings: list[str] = []
+                for skill, current_skill_cost in current_per_skill.items():
+                    prev_skill_data = baseline_per_skill.get(skill)
+                    prev_skill_cost = (
+                        float(prev_skill_data.get("cost_usd", 0.0))
+                        if isinstance(prev_skill_data, dict)
+                        else 0.0
+                    )
+                    skill_delta = current_skill_cost - prev_skill_cost
+                    skill_pct = (
+                        (skill_delta / prev_skill_cost * 100) if prev_skill_cost > 0 else 0.0
+                    )
+                    per_skill_deltas[skill] = {
+                        "current_usd": round(current_skill_cost, 6),
+                        "baseline_usd": round(prev_skill_cost, 6),
+                        "delta_usd": round(skill_delta, 6),
+                        "delta_pct": round(skill_pct, 1),
+                    }
+                    if skill_pct > 20.0:
+                        cost_warnings.append(
+                            f"  WARNING: {skill} cost increased by {skill_pct:.1f}%"
+                            f" (${prev_skill_cost:.6f} -> ${current_skill_cost:.6f})"
+                        )
+
+                if fmt == "json":
+                    summary["cost_comparison"] = {
+                        "current_total_usd": round(current_total_cost, 6),
+                        "baseline_total_usd": round(baseline_total, 6),
+                        "total_delta_usd": round(total_delta, 6),
+                        "total_delta_pct": round(total_pct, 1),
+                        "per_skill": per_skill_deltas,
+                        "warnings": cost_warnings,
+                    }
+                    print(json.dumps(summary, indent=2))
+                else:
+                    print(f"\n{'=' * 60}")
+                    print("Cost Comparison:")
+                    print(
+                        f"  Total: ${current_total_cost:.6f}"
+                        f" (baseline: ${baseline_total:.6f},"
+                        f" delta: {total_delta:+.6f} / {total_pct:+.1f}%)"
+                    )
+                    for skill, deltas in per_skill_deltas.items():
+                        print(
+                            f"  {skill}: ${deltas['current_usd']:.6f}"
+                            f" (delta: {deltas['delta_usd']:+.6f} / {deltas['delta_pct']:+.1f}%)"
+                        )
+                    if cost_warnings:
+                        print("\nCost warnings:")
+                        print("\n".join(cost_warnings))
+
     return 0 if passed == total else 1
 
 
@@ -645,6 +737,7 @@ def main(argv: list[str] | None = None) -> None:
                 baseline=getattr(args, "baseline", None),
                 model=getattr(args, "model", "claude-haiku-4-5-20251001"),
                 fmt=fmt,
+                compare_cost=getattr(args, "compare_cost", False),
             )
         )
     else:  # pragma: no cover – argparse rejects unknown subcommands
