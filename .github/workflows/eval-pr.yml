@@ -29,7 +29,9 @@ jobs:
           node-version: "20"
 
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        run: |
+          pip install -e ".[dev]"
+          npm install -g @anthropic-ai/claude-code
 
       - name: Run promptfoo eval
         env:

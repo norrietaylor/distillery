@@ -3,7 +3,7 @@
 # Fast smoke-test suite (5-10 scenarios) covering critical skill paths.
 # Runs on every PR via .github/workflows/eval-pr.yml.
 #
-# Provider: Claude claude-sonnet-4-5-latest with Distillery MCP server (stdio)
+# Provider: Claude CLI (OAuth) with Distillery MCP server (stdio)
 # Run: npx promptfoo@latest eval --config promptfooconfig.yaml
 #
 # Each scenario asserts:
@@ -14,26 +14,22 @@
 description: "Distillery MCP smoke-test suite for PR CI gate"
 
 # ---------------------------------------------------------------------------
-# Provider: Claude with Distillery MCP server attached via stdio transport
+# Provider: Claude CLI with Distillery MCP server (uses CLAUDE_CODE_OAUTH_TOKEN)
+#
+# We use a script provider that invokes the `claude` CLI, which authenticates
+# via CLAUDE_CODE_OAUTH_TOKEN (OAuth). The direct `anthropic:messages:*`
+# provider requires ANTHROPIC_API_KEY which we don't have in CI.
 # ---------------------------------------------------------------------------
 providers:
-  - id: anthropic:messages:claude-sonnet-4-5-latest
+  - id: "python:scripts/promptfoo_provider.py"
     label: claude-with-distillery-mcp
-    config:
-      mcp:
-        enabled: true
-        servers:
-          - name: distillery
-            command: distillery-mcp
-            args: []
-            env:
-              DISTILLERY_CONFIG: distillery-dev.yaml
 
 # ---------------------------------------------------------------------------
-# System prompt that configures Claude as a Distillery skill assistant
+# Prompt template — passed to the Python provider's call_api(prompt, ...)
+# The Claude CLI has MCP tools available; no system prompt override needed.
 # ---------------------------------------------------------------------------
 prompts:
-  - "You are a Distillery knowledge assistant. The user will invoke skills like /distill, /recall, /bookmark, /pour, and /watch. Use the available distillery MCP tools to fulfill their requests. Always call distillery_status first to confirm connectivity before other operations.\n\nUser message: {{prompt}}"
+  - "You are a Distillery knowledge assistant. Use the available distillery MCP tools to fulfill the user's request. Always call distillery_status first to confirm connectivity.\n\n{{prompt}}"
 
 # ---------------------------------------------------------------------------
 # Default assertions applied to every test (can be overridden per test)
