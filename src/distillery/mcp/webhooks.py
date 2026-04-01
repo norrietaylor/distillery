@@ -216,6 +216,46 @@ async def _set_cooldown(store: Any, endpoint: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Audit helper
+# ---------------------------------------------------------------------------
+
+
+async def _record_audit(store: Any, endpoint: str, response: JSONResponse) -> None:
+    """Persist a lightweight audit record for the last webhook invocation.
+
+    Stores a JSON object under ``webhook_audit:{endpoint}`` containing the
+    timestamp, HTTP status, and response data (on success) or error message
+    (on failure).  Only the most recent invocation per endpoint is kept —
+    previous records are overwritten.
+
+    Args:
+        store: A :class:`~distillery.store.protocol.DistilleryStore` instance.
+        endpoint: The endpoint name (``"poll"``, ``"rescore"``, or
+            ``"maintenance"``).
+        response: The :class:`~starlette.responses.JSONResponse` returned
+            by the handler.
+    """
+    try:
+        body = json.loads(bytes(response.body).decode())
+    except Exception:  # noqa: BLE001
+        body = {}
+
+    record: dict[str, Any] = {
+        "timestamp": datetime.now(UTC).isoformat(),
+        "status": response.status_code,
+        "ok": body.get("ok", False),
+    }
+
+    if body.get("ok"):
+        record["data"] = body.get("data", {})
+    else:
+        record["error"] = body.get("error", "unknown")
+
+    key = f"webhook_audit:{endpoint}"
+    await store.set_metadata(key, json.dumps(record))
+
+
+# ---------------------------------------------------------------------------
 # Maintenance helpers
 # ---------------------------------------------------------------------------
 
@@ -607,6 +647,9 @@ def create_webhook_app(
             # --- Dispatch ---------------------------------------------------
             handler = _HANDLERS[endpoint]
             response: JSONResponse = await handler(request, state)
+
+            # --- Audit record -----------------------------------------------
+            await _record_audit(store, endpoint, response)
 
             return response
 
