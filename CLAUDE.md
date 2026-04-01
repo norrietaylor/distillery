@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is Distillery
 
-Distillery is a knowledge-base system for Claude Code. It stores, searches, and classifies knowledge entries using DuckDB with vector similarity search (VSS/HNSW). It includes ambient intelligence features that poll external feeds (GitHub, RSS) and score relevance using embeddings. It exposes functionality via an MCP server (stdio or streamable-HTTP transport) with 22 tools, orchestrated by 10 Claude Code skills (`/distill`, `/recall`, `/pour`, `/bookmark`, `/minutes`, `/classify`, `/watch`, `/radar`, `/tune`, `/setup`). HTTP transport supports GitHub OAuth for team access.
+Distillery is a knowledge-base system for Claude Code. It stores, searches, and classifies knowledge entries using DuckDB with vector similarity search (VSS/HNSW). It includes ambient intelligence features that poll external feeds (GitHub, RSS) and score relevance using embeddings. It exposes functionality via an MCP server (stdio or streamable-HTTP transport) with 22 tools, orchestrated by 10 Claude Code skills (`/distill`, `/recall`, `/pour`, `/bookmark`, `/minutes`, `/classify`, `/watch`, `/radar`, `/tune`, `/setup`). HTTP transport supports GitHub OAuth for team access. REST webhook endpoints (`/api/poll`, `/api/rescore`, `/api/maintenance`) run alongside the MCP server for automated scheduling via GitHub Actions cron.
 
 ## Commands
 
@@ -52,6 +52,7 @@ Four-layer design:
 Skills (.claude-plugin/skills/<name>/SKILL.md)  →  slash commands users invoke
     ↓
 MCP Server (src/distillery/mcp/server.py)  →  22 tools over stdio or HTTP (FastMCP 2.x/3.x)
+Webhook API (src/distillery/mcp/webhooks.py) →  /api/poll, /api/rescore, /api/maintenance (bearer auth)
     ↓
 Core Protocols (store/protocol.py, embedding/protocol.py)  →  typed Protocol interfaces
     ↓
@@ -104,7 +105,7 @@ Always create a pull request for changes — never push directly to `main`. Crea
 - **Knowledge capture**: `/distill`, `/bookmark`, `/minutes`
 - **Knowledge retrieval**: `/recall`, `/pour`, `/classify`
 - **Ambient intelligence**: `/watch` (manage feed sources — `rss` and `github` types only), `/radar` (digest + source suggestions), `/tune` (adjust thresholds — alert >= digest)
-- **Onboarding**: `/setup` (MCP connectivity wizard — uses `CronCreate`/`RemoteTrigger` Claude Code platform primitives)
+- **Onboarding**: `/setup` (MCP connectivity wizard — local transport uses `CronCreate`; hosted/team uses GitHub Actions webhook scheduler)
 
 ## Documentation
 
