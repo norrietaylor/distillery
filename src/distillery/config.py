@@ -76,6 +76,27 @@ class TeamConfig:
 
 
 @dataclass
+class DefaultsConfig:
+    """Handler-level defaults configuration.
+
+    These are operational defaults used by MCP handlers, distinct from
+    ClassificationConfig which contains classification engine thresholds.
+
+    Attributes:
+        dedup_threshold: Default similarity threshold for deduplication checks
+            in MCP handlers. Default ``0.92``.
+        dedup_limit: Default maximum number of similar entries to retrieve
+            during deduplication checks. Default ``3``.
+        stale_days: Default number of days without access after which an entry
+            is considered stale. Default ``30``.
+    """
+
+    dedup_threshold: float = 0.92
+    dedup_limit: int = 3
+    stale_days: int = 30
+
+
+@dataclass
 class ClassificationConfig:
     """Classification configuration.
 
@@ -283,6 +304,7 @@ class DistilleryConfig:
         storage: Storage backend settings.
         embedding: Embedding provider settings.
         team: Team-level metadata settings.
+        defaults: Handler-level operational defaults.
         classification: Classification threshold settings.
         tags: Tag namespace enforcement settings.
         feeds: Ambient feed monitoring settings.
@@ -293,6 +315,7 @@ class DistilleryConfig:
     storage: StorageConfig = field(default_factory=StorageConfig)
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     team: TeamConfig = field(default_factory=TeamConfig)
+    defaults: DefaultsConfig = field(default_factory=DefaultsConfig)
     classification: ClassificationConfig = field(default_factory=ClassificationConfig)
     tags: TagsConfig = field(default_factory=TagsConfig)
     feeds: FeedsConfig = field(default_factory=FeedsConfig)
@@ -375,6 +398,25 @@ def _parse_embedding(raw: dict[str, Any]) -> EmbeddingConfig:
 
 def _parse_team(raw: dict[str, Any]) -> TeamConfig:
     return TeamConfig(name=str(raw.get("name", "")))
+
+
+def _parse_defaults(raw: dict[str, Any]) -> DefaultsConfig:
+    dedup_threshold = _parse_float_field(raw, "dedup_threshold", 0.92, "defaults.dedup_threshold")
+
+    dedup_limit_raw = raw.get("dedup_limit", 3)
+    try:
+        dedup_limit = int(dedup_limit_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"defaults.dedup_limit must be an integer, got: {dedup_limit_raw!r}") from exc
+
+    stale_days_raw = raw.get("stale_days", 30)
+    stale_days = _parse_strict_int(stale_days_raw, "defaults.stale_days")
+
+    return DefaultsConfig(
+        dedup_threshold=dedup_threshold,
+        dedup_limit=dedup_limit,
+        stale_days=stale_days,
+    )
 
 
 def _parse_float_field(raw: dict[str, Any], key: str, default: float, label: str) -> float:
@@ -957,6 +999,7 @@ def load_config(config_path: str | None = None) -> DistilleryConfig:
     storage_raw = raw.get("storage", {}) or {}
     embedding_raw = raw.get("embedding", {}) or {}
     team_raw = raw.get("team", {}) or {}
+    defaults_raw = raw.get("defaults", {}) or {}
     classification_raw = raw.get("classification", {}) or {}
     tags_raw = raw.get("tags", {}) or {}
     feeds_raw = raw.get("feeds", {}) or {}
@@ -969,6 +1012,7 @@ def load_config(config_path: str | None = None) -> DistilleryConfig:
         storage=_parse_storage(storage_raw),
         embedding=_parse_embedding(embedding_raw),
         team=_parse_team(team_raw),
+        defaults=_parse_defaults(defaults_raw),
         classification=_parse_classification(classification_raw),
         tags=_parse_tags(tags_raw),
         feeds=_parse_feeds(feeds_raw),

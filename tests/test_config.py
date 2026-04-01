@@ -9,6 +9,7 @@ import pytest
 
 from distillery.config import (
     CONFIG_ENV_VAR,
+    DefaultsConfig,
     DistilleryConfig,
     FeedsConfig,
     FeedSourceConfig,
@@ -87,6 +88,14 @@ class TestDefaultConfig:
         assert cfg.classification.dedup_link_threshold == pytest.approx(0.60)
         assert cfg.classification.dedup_limit == 5
 
+    def test_defaults_defaults(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        cfg = load_config()
+        assert cfg.defaults.dedup_threshold == pytest.approx(0.92)
+        assert cfg.defaults.dedup_limit == 3
+        assert cfg.defaults.stale_days == 30
+
 
 # ---------------------------------------------------------------------------
 # YAML loading: all fields
@@ -107,6 +116,11 @@ class TestYAMLLoading:
 
         team:
           name: Engineering
+
+        defaults:
+          dedup_threshold: 0.85
+          dedup_limit: 5
+          stale_days: 45
 
         classification:
           confidence_threshold: 0.75
@@ -148,6 +162,14 @@ class TestYAMLLoading:
         assert cfg.classification.dedup_link_threshold == pytest.approx(0.55)
         assert cfg.classification.dedup_limit == 10
 
+
+    def test_loads_defaults(self, tmp_path: Path) -> None:
+        p = write_yaml(tmp_path, self.FULL_YAML)
+        cfg = load_config(str(p))
+        assert cfg.defaults.dedup_threshold == pytest.approx(0.85)
+        assert cfg.defaults.dedup_limit == 5
+        assert cfg.defaults.stale_days == 45
+
     def test_openai_provider(self, tmp_path: Path) -> None:
         yaml_content = """\
             embedding:
@@ -182,6 +204,9 @@ class TestYAMLLoading:
         cfg = load_config(str(p))
         assert isinstance(cfg, DistilleryConfig)
         assert cfg.storage.backend == "duckdb"
+        assert cfg.defaults.dedup_threshold == pytest.approx(0.92)
+        assert cfg.defaults.dedup_limit == 3
+        assert cfg.defaults.stale_days == 30
 
 
 # ---------------------------------------------------------------------------
