@@ -1,0 +1,212 @@
+# Eval scenarios for adversarial and edge-case conditions.
+# Covers malformed input, empty store behaviour, and deduplication boundary conditions.
+
+# ── Malformed input ──────────────────────────────────────────────────────────
+
+- name: adversarial-distill-empty-string
+  skill: distill
+  category: malformed_input
+  description: "Empty string prompt to /distill — Claude should explain there is nothing to store"
+  prompt: '/distill ""'
+  seed_entries: []
+  expected_tools:
+    - distillery_status
+  response_must_contain:
+    - nothing to store
+  response_must_not_contain:
+    - Traceback
+    - Exception
+    - internal error
+    - "Error:"
+  max_latency_ms: 60000
+  max_total_tokens: 8000
+
+- name: adversarial-distill-long-content
+  skill: distill
+  category: malformed_input
+  description: "Extremely long content (>10k chars) to /distill — should be handled without crashing"
+  prompt: >
+    /distill "Lorem ipsum dolor sit amet, consectetur adipiscing elit.
+    Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+    Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi
+    ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit
+    in voluptate velit esse cillum dolore eu fugiat nulla pariatur.
+    Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia
+    deserunt mollit anim id est laborum. Curabitur pretium tincidunt lacus.
+    Nulla gravida orci a odio. Nullam varius, turpis molestie dictum semper,
+    ex justo gravida sem, vitae condimentum enim erat in diam. Integer malesuada
+    ligula et nulla tincidunt, vel aliquam quam varius. Praesent eu tellus et
+    arcu sollicitudin vestibulum. Phasellus a orci at ligula porta feugiat.
+    Fusce accumsan nisl ac odio aliquam, et posuere odio pharetra. Vestibulum
+    ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia curae;
+    Aliquam erat volutpat. Suspendisse faucibus, nunc et pellentesque egestas,
+    lacus ante convallis tellus, vitae iaculis lacus elit id tortor. Vivamus
+    aliquet elit ac nisl. Fusce fermentum. Nullam varius nulla eu ante pharetra
+    iaculis. Curabitur nec ligula a arcu ultrices porta. Aliquam ornare, velit
+    euismod cursus vulputate, enim enim euismod orci, sit amet consequat arcu
+    sem nec nibh. Suspendisse potenti. Nunc fermentum tortor ac porta dapibus.
+    Donec a arcu. Quisque luctus lobortis libero. Duis faucibus accumsan odio.
+    Curabitur odio. Proin quam nisl, tincidunt et, mattis eget, convallis nec,
+    purus. Cum sociis natoque penatibus et magnis dis parturient montes nascetur
+    ridiculus mus. In dui magna, posuere eget, vestibulum et, tempor auctor,
+    justo. In ac felis quis tortor malesuada pretium. Pellentesque auctor neque.
+    Nulla consequat massa quis enim. Donec pede justo, fringilla vel, aliquet
+    nec, vulputate eget, arcu. In enim justo, rhoncus ut, imperdiet a, venenatis
+    vitae, justo. Nullam dictum felis eu pede mollis pretium. Integer tincidunt.
+    Cras dapibus. Vivamus elementum semper nisi. Aenean vulputate eleifend tellus.
+    Aenean leo ligula, porttitor eu, consequat vitae, eleifend ac, enim.
+    Aliquam lorem ante, dapibus in, viverra quis, feugiat a, tellus. Phasellus
+    viverra nulla ut metus varius laoreet. Quisque rutrum. Aenean imperdiet.
+    Etiam ultricies nisi vel augue. Curabitur ullamcorper ultricies nisi.
+    Nam eget dui. Etiam rhoncus. Maecenas tempus, tellus eget condimentum
+    rhoncus, sem quam semper libero, sit amet adipiscing sem neque sed ipsum."
+  seed_entries: []
+  expected_tools:
+    - distillery_status
+    - distillery_store
+  response_must_contain:
+    - stored
+  response_must_not_contain:
+    - Traceback
+    - Exception
+    - internal error
+    - "Error:"
+  max_latency_ms: 90000
+  max_total_tokens: 12000
+
+- name: adversarial-recall-unicode-edge-cases
+  skill: recall
+  category: malformed_input
+  description: "Unicode edge cases (RTL text, zero-width chars, emoji sequences) to /recall — should not crash"
+  prompt: "/recall \u202Edesign decisions\u202C with \u200Bzero-width spaces and emoji \U0001F4DA\U0001F50D"
+  seed_entries:
+    - content: "Decided to use DuckDB for local storage because it has excellent Python bindings."
+      entry_type: session
+      author: alice
+      tags: [architecture, storage]
+  expected_tools:
+    - distillery_status
+    - distillery_search
+  response_must_contain:
+    - DuckDB
+  response_must_not_contain:
+    - Traceback
+    - Exception
+    - internal error
+    - "Error:"
+  min_entries_retrieved: 0
+  max_latency_ms: 60000
+  max_total_tokens: 8000
+
+# ── Empty store ───────────────────────────────────────────────────────────────
+
+- name: adversarial-recall-empty-store
+  skill: recall
+  category: empty_store
+  description: "/recall search against empty knowledge base — expect helpful 'no results' message"
+  prompt: "what caching strategies have we discussed?"
+  seed_entries: []
+  expected_tools:
+    - distillery_status
+    - distillery_search
+  response_must_contain:
+    - no results
+  response_must_not_contain:
+    - Traceback
+    - Exception
+    - internal error
+    - "Error:"
+  min_entries_retrieved: 0
+  max_latency_ms: 60000
+  max_total_tokens: 8000
+
+- name: adversarial-pour-empty-store
+  skill: pour
+  category: empty_store
+  description: "/pour synthesis with no matching entries — expect graceful 'insufficient data' message"
+  prompt: "/pour what patterns exist in our authentication decisions?"
+  seed_entries: []
+  expected_tools:
+    - distillery_status
+    - distillery_search
+  response_must_contain:
+    - insufficient
+  response_must_not_contain:
+    - Traceback
+    - Exception
+    - internal error
+    - "Error:"
+  min_entries_retrieved: 0
+  max_latency_ms: 60000
+  max_total_tokens: 8000
+
+# ── Boundary conditions ───────────────────────────────────────────────────────
+
+- name: adversarial-boundary-link-threshold
+  skill: distill
+  category: boundary_condition
+  description: "Entries at exact 0.60 similarity (link threshold) — dedup should classify as 'link'"
+  prompt: '/distill "We use Python 3.11 as the minimum supported runtime version for this project."'
+  seed_entries:
+    - content: "Python 3.11 is the minimum runtime version required for type-narrowing features."
+      entry_type: session
+      author: alice
+      tags: [python, requirements]
+  expected_tools:
+    - distillery_status
+    - distillery_check_dedup
+  response_must_contain:
+    - similar
+  response_must_not_contain:
+    - Traceback
+    - Exception
+    - internal error
+    - "Error:"
+  max_latency_ms: 90000
+  max_total_tokens: 10000
+
+- name: adversarial-boundary-merge-threshold
+  skill: distill
+  category: boundary_condition
+  description: "Entries at exact 0.80 similarity (merge threshold) — dedup should classify as 'merge'"
+  prompt: '/distill "Decided to use DuckDB for local storage because it needs no server process."'
+  seed_entries:
+    - content: "Decided to use DuckDB for local storage because it requires no separate server process."
+      entry_type: session
+      author: alice
+      tags: [architecture, duckdb]
+  expected_tools:
+    - distillery_status
+    - distillery_check_dedup
+  response_must_contain:
+    - duplicate
+  response_must_not_contain:
+    - Traceback
+    - Exception
+    - internal error
+    - "Error:"
+  max_latency_ms: 90000
+  max_total_tokens: 10000
+
+- name: adversarial-boundary-skip-threshold
+  skill: distill
+  category: boundary_condition
+  description: "Entries at exact 0.95 similarity (skip threshold) — dedup should classify as 'skip'"
+  prompt: '/distill "Decided to use DuckDB for local storage because it requires no separate server process."'
+  seed_entries:
+    - content: "Decided to use DuckDB for local storage because it requires no separate server process."
+      entry_type: session
+      author: alice
+      tags: [architecture, duckdb]
+  expected_tools:
+    - distillery_status
+    - distillery_check_dedup
+  response_must_contain:
+    - already
+  response_must_not_contain:
+    - Traceback
+    - Exception
+    - internal error
+    - "Error:"
+  max_latency_ms: 90000
+  max_total_tokens: 10000

@@ -1,0 +1,34 @@
+Type: file
+Command: test -f tests/eval/scenarios/adversarial.yaml
+Expected: File exists with >=6 scenarios
+Timestamp: 2026-04-01T00:00:00Z
+
+Result:
+File exists: YES
+Line count: 212 lines
+
+Scenario count (from loader):
+  8 scenarios loaded
+
+Scenarios by category:
+  malformed_input (3):
+    - adversarial-distill-empty-string
+    - adversarial-distill-long-content
+    - adversarial-recall-unicode-edge-cases
+  empty_store (2):
+    - adversarial-recall-empty-store
+    - adversarial-pour-empty-store
+  boundary_condition (3):
+    - adversarial-boundary-link-threshold
+    - adversarial-boundary-merge-threshold
+    - adversarial-boundary-skip-threshold
+
+Requirements satisfied:
+  R03.1: >=2 malformed input scenarios — PASS (3 present)
+  R03.2: >=2 empty store scenarios — PASS (2 present)
+  R03.3: >=2 boundary condition scenarios — PASS (3 present)
+  R03.6: All scenarios use response_must_not_contain for stack traces — PASS
+  R03.7: All scenarios use response_must_contain for user-friendly messaging — PASS
+  R03.8: All scenarios tagged with category metadata — PASS
+
+Status: PASS
