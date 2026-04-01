@@ -1,6 +1,0 @@
-Type: cli
-Command: grep -c 'connector_uuid' .claude-plugin/skills/setup/SKILL.md
-Expected: 0
-Timestamp: 2026-04-01T04:15:04Z
-Output: 0
-Status: PASS

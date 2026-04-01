@@ -1,9 +1,0 @@
-Type: cli
-Command: ruff check src/distillery/mcp/
-Expected: No errors
-Timestamp: 2026-03-31T21:40:00Z
-
-Output:
-All checks passed!
-
-Status: PASS
