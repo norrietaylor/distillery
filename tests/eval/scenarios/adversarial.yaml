@@ -1,5 +1,6 @@
 # Eval scenarios for adversarial and edge-case conditions.
-# Covers malformed input, empty store behaviour, and deduplication boundary conditions.
+# Covers malformed input, empty store behaviour, deduplication boundary conditions,
+# concurrent operations, and missing dependency / failure scenarios.
 
 # ── Malformed input ──────────────────────────────────────────────────────────
 
@@ -210,3 +211,93 @@
     - "Error:"
   max_latency_ms: 90000
   max_total_tokens: 10000
+
+# ── Concurrent operations ─────────────────────────────────────────────────────
+
+- name: adversarial-concurrent-store-then-search
+  skill: distill
+  category: concurrent_operations
+  description: "Rapid sequential store then search in single prompt — search must return the just-stored entry"
+  prompt: >
+    /distill "The team agreed to enforce 100% test coverage on the payments module as of Q2."
+    Then immediately: /recall "payments module test coverage"
+  seed_entries: []
+  expected_tools:
+    - distillery_status
+    - distillery_store
+    - distillery_search
+  response_must_contain:
+    - payments
+  response_must_not_contain:
+    - Traceback
+    - Exception
+    - internal error
+    - "Error:"
+  min_entries_stored: 1
+  max_latency_ms: 90000
+  max_total_tokens: 12000
+
+- name: adversarial-concurrent-multiple-stores
+  skill: distill
+  category: concurrent_operations
+  description: "Multiple store calls in a single prompt — all entries must be persisted with no data loss"
+  prompt: >
+    /distill "Decision: use Redis for session storage."
+    /distill "Decision: use PostgreSQL for persistent data."
+    /distill "Decision: use S3 for blob storage."
+  seed_entries: []
+  expected_tools:
+    - distillery_status
+    - distillery_store
+  response_must_contain:
+    - stored
+  response_must_not_contain:
+    - Traceback
+    - Exception
+    - internal error
+    - "Error:"
+  min_entries_stored: 3
+  max_latency_ms: 120000
+  max_total_tokens: 14000
+
+# ── Missing dependencies / failure modes ──────────────────────────────────────
+
+- name: adversarial-mcp-tool-error-graceful
+  skill: recall
+  category: missing_dependency
+  description: "Simulated MCP tool error response — skill must return a user-friendly error, not a raw traceback"
+  prompt: "/recall architecture decisions"
+  seed_entries: []
+  expected_tools:
+    - distillery_status
+  response_must_contain:
+    - unable
+  response_must_not_contain:
+    - Traceback
+    - Exception
+    - "raise "
+    - "File \""
+    - internal error
+  min_entries_retrieved: 0
+  max_latency_ms: 60000
+  max_total_tokens: 8000
+
+- name: adversarial-timeout-graceful-degradation
+  skill: recall
+  category: missing_dependency
+  description: "Timeout or transient failure condition — skill must degrade gracefully with a clear user message"
+  prompt: "/recall what were the performance benchmarks we ran last sprint?"
+  seed_entries: []
+  expected_tools:
+    - distillery_status
+  response_must_contain:
+    - try again
+  response_must_not_contain:
+    - Traceback
+    - Exception
+    - "raise "
+    - "File \""
+    - internal error
+  min_entries_retrieved: 0
+  max_latency_ms: 60000
+  max_total_tokens: 8000
