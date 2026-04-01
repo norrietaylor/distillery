@@ -26,6 +26,8 @@
 
 ## What is Distillery?
 
+[![SafeSkill 92/100](https://img.shields.io/badge/SafeSkill-92%2F100_Verified%20Safe-brightgreen)](https://safeskill.dev/scan/norrietaylor-distillery)
+
 Distillery is a team knowledge base accessed through Claude Code skills. It refines raw information from working sessions, meetings, bookmarks, and conversations into concentrated, searchable knowledge — stored as vector embeddings in DuckDB and retrieved through natural language. Runs locally over stdio or as a hosted HTTP service with GitHub OAuth for team access.
 
 Distillery captures the highest-value transformation — from noise to signal — and makes it a tool the whole team can use.
