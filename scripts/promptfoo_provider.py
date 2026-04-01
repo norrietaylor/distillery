@@ -55,7 +55,7 @@ def call_api(
                 "--output-format",
                 "json",
                 "--model",
-                "claude-sonnet-4-5-latest",
+                "claude-haiku-4-5-20251001",
                 "--mcp-config",
                 mcp_path,
                 "--allowedTools",
