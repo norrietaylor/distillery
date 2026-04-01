@@ -23,6 +23,7 @@ from distillery.eval.models import (
     SeedEntry,
     ToolCallRecord,
 )
+from distillery.eval.retrieval_scorer import RetrievalMetrics, score_retrieval
 from distillery.eval.runner import ClaudeEvalRunner
 from distillery.eval.scenarios import load_scenario, load_scenarios_from_dir
 
@@ -31,9 +32,11 @@ __all__ = [
     "EffectivenessScore",
     "EvalScenario",
     "PerformanceMetrics",
+    "RetrievalMetrics",
     "ScenarioResult",
     "SeedEntry",
     "ToolCallRecord",
     "load_scenario",
     "load_scenarios_from_dir",
+    "score_retrieval",
 ]
