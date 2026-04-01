@@ -1,0 +1,22 @@
+Type: cli
+Command: head -5 docs/blog/building-a-second-brain-for-claude-code.md
+Expected: contains YAML frontmatter (--- delimiter and title/published/description/tags/canonical_url fields)
+Timestamp: 2026-04-01T18:44:12Z
+
+Output:
+---
+title: "Building a Second Brain for Claude Code"
+published: false
+description: "How I built Distillery — a knowledge base that lives inside your coding assistant, capturing decisions and context before they disappear into chat history."
+tags: [claudecode, devtools, knowledgemanagement, python]
+canonical_url: https://norrietaylor.github.io/distillery/blog/building-a-second-brain-for-claude-code/
+---
+
+Frontmatter fields present:
+- title: 1 (expected: 1)
+- published: 1 (expected: 1)
+- description: 1 (expected: 1)
+- tags: 1 (expected: 1)
+- canonical_url: 1 (expected: 1)
+
+Status: PASS

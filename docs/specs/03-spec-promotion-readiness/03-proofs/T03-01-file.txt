@@ -1,0 +1,9 @@
+Type: file
+Command: test -f docs/blog/building-a-second-brain-for-claude-code.md && echo exists
+Expected: exists
+Timestamp: 2026-04-01T18:43:58Z
+
+Output:
+exists
+
+Status: PASS
