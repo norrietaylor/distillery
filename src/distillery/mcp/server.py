@@ -2123,11 +2123,12 @@ def _entry_to_summary_dict(entry: Any) -> dict[str, Any]:
 
 def _entry_to_id_dict(entry: Any) -> dict[str, Any]:
     """Serialise *entry* as id/entry_type/created_at only (ids mode)."""
-    return {
+    result: dict[str, Any] = {
         "id": entry.id,
         "entry_type": entry.entry_type.value,
         "created_at": entry.created_at.isoformat(),
     }
+    return result
 
 
 async def _handle_list(

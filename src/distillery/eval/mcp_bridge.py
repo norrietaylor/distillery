@@ -172,6 +172,18 @@ DISTILLERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
                 "author": {"type": "string"},
                 "project": {"type": "string"},
                 "status": {"type": "string"},
+                "date_from": {
+                    "type": "string",
+                    "description": "ISO 8601 start date (inclusive).",
+                },
+                "date_to": {
+                    "type": "string",
+                    "description": "ISO 8601 end date (inclusive).",
+                },
+                "tag_prefix": {
+                    "type": "string",
+                    "description": "Filter to entries under this tag namespace prefix.",
+                },
                 "limit": {"type": "integer", "description": "Max groups (default 50)."},
             },
             "required": ["group_by"],

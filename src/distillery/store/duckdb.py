@@ -1174,29 +1174,25 @@ class DuckDBStore:
             where_clauses, params = self._build_filter_clauses(filters)
             where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
-            # Unconstrained query for true totals.
-            totals_sql = (
-                f"SELECT COUNT(*) AS total_groups, SUM(cnt) AS total_entries FROM ("
-                f"SELECT COUNT(*) AS cnt "
-                f"FROM entries {where_sql} "
-                f"GROUP BY {group_expr}"
-                f")"
-            )
-            totals_row = conn.execute(totals_sql, list(params)).fetchone()
-            total_groups = int(totals_row[0]) if totals_row and totals_row[0] else 0
-            total_entries = int(totals_row[1]) if totals_row and totals_row[1] else 0
-
-            # Limited query for the top-N groups.
+            # Single CTE query: window functions compute true totals over the
+            # full grouped result set, while LIMIT returns only the top-N rows.
             sql = (
-                f"SELECT {group_expr} AS value, COUNT(*) AS count "
+                f"WITH grouped AS ("
+                f"SELECT {group_expr} AS value, COUNT(*) AS group_count "
                 f"FROM entries "
                 f"{where_sql} "
-                f"GROUP BY value "
-                f"ORDER BY count DESC "
+                f"GROUP BY 1"
+                f") "
+                f"SELECT value, group_count, "
+                f"COUNT(*) OVER () AS total_groups, "
+                f"COALESCE(SUM(group_count) OVER (), 0) AS total_entries "
+                f"FROM grouped "
+                f"ORDER BY group_count DESC, value ASC NULLS LAST "
                 f"LIMIT ?"
             )
-            result = conn.execute(sql, list(params) + [limit])
-            rows = result.fetchall()
+            rows = conn.execute(sql, list(params) + [limit]).fetchall()
+            total_groups = int(rows[0][2]) if rows else 0
+            total_entries = int(rows[0][3]) if rows else 0
             groups = [{"value": row[0], "count": row[1]} for row in rows]
             return {
                 "groups": groups,

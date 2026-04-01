@@ -2,7 +2,7 @@
 
 Tests verify:
 - HTTP server starts and responds to MCP initialize
-- All 17 tools are accessible over HTTP transport
+- All 23 tools are accessible over HTTP transport
 - Stateless HTTP singleton: two requests share same store instance
 - stdio mode (no flags) backward compatibility
 """
@@ -32,7 +32,7 @@ MCP_HEADERS = {
     "Accept": "application/json, text/event-stream",
 }
 
-# All 17 tools that the Distillery MCP server exposes.
+# All 23 tools that the Distillery MCP server exposes.
 EXPECTED_TOOLS = {
     "distillery_status",
     "distillery_store",
@@ -152,7 +152,7 @@ class TestHttpServerStarts:
 
 class TestAllToolsAccessibleOverHttp:
     async def test_all_tools_accessible_over_http(self) -> None:
-        """All 17 tools appear in tools/list response over HTTP."""
+        """All 23 tools appear in tools/list response over HTTP."""
         port = _free_port()
         config = _make_server_config()
         uv_server, task = await _start_http_server(port, config)
