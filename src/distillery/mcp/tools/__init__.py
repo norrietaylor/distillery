@@ -3,6 +3,15 @@
 This package contains domain-specific MCP tool handlers and shared utilities.
 """
 
+from distillery.mcp.tools.analytics import (
+    _DEFAULT_STALE_DAYS,
+    _handle_interests,
+    _handle_metrics,
+    _handle_quality,
+    _handle_stale,
+    _handle_tag_tree,
+    _handle_type_schemas,
+)
 from distillery.mcp.tools.classify import (
     _handle_classify,
     _handle_resolve_review,
@@ -26,6 +35,7 @@ from distillery.mcp.tools.search import (
 )
 
 __all__ = [
+    "_DEFAULT_STALE_DAYS",
     "_handle_classify",
     "_handle_resolve_review",
     "_handle_review_queue",
@@ -39,4 +49,10 @@ __all__ = [
     "_handle_search",
     "_handle_find_similar",
     "_handle_aggregate",
+    "_handle_interests",
+    "_handle_metrics",
+    "_handle_quality",
+    "_handle_stale",
+    "_handle_tag_tree",
+    "_handle_type_schemas",
 ]
