@@ -20,7 +20,7 @@ from distillery.config import (
     EmbeddingConfig,
     StorageConfig,
 )
-from distillery.mcp.server import (
+from distillery.mcp.tools.classify import (
     _handle_classify,
     _handle_resolve_review,
     _handle_review_queue,

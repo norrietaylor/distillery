@@ -3,6 +3,11 @@
 This package contains domain-specific MCP tool handlers and shared utilities.
 """
 
+from distillery.mcp.tools.classify import (
+    _handle_classify,
+    _handle_resolve_review,
+    _handle_review_queue,
+)
 from distillery.mcp.tools.crud import (
     _handle_get,
     _handle_list,
@@ -17,6 +22,9 @@ from distillery.mcp.tools.search import (
 )
 
 __all__ = [
+    "_handle_classify",
+    "_handle_resolve_review",
+    "_handle_review_queue",
     "_handle_get",
     "_handle_list",
     "_handle_status",
