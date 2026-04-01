@@ -1,0 +1,40 @@
+Type: requirements
+Timestamp: 2026-04-01T11:45:00Z
+Status: PASS
+
+Verification of all requirements:
+
+R02.1 - SECURITY.md exists at repository root
+  Status: PASS
+  Evidence: File exists at /home/norrie.guest/code/distillery/.worktrees/feature-promotion-readiness/SECURITY.md
+
+R02.2 - Policy directs to GitHub Security Advisories as primary disclosure channel
+  Status: PASS
+  Evidence: Section "Reporting a Vulnerability" directs reporters to "GitHub Security Advisories"
+  Line: "We take security seriously. If you discover a vulnerability in Distillery, please report it responsibly through **GitHub Security Advisories** rather than opening a public issue."
+
+R02.3 - States supported versions: v0.1.x on main branch
+  Status: PASS
+  Evidence: Supported Versions table shows "0.1.x | Yes"
+  Line: "| 0.1.x   | Yes       |"
+
+R02.4 - Includes 'What to report' section with specified items
+  Status: PASS
+  Evidence: Section "What to Report" contains:
+    - Authentication/Authorization bypasses
+    - Data exposure (knowledge entries accessible without authorization)
+    - Injection vulnerabilities in DuckDB queries
+    - MCP transport security issues
+    - Dependency vulnerabilities
+
+R02.5 - Includes 'What NOT to report' section noting demo server and known limitations
+  Status: PASS
+  Evidence: Section "What NOT to Report" contains:
+    - Demo server issues at distillery-mcp.fly.dev
+    - Known limitations (e.g., no end-to-end encryption)
+
+R02.6 - States 72-hour initial response time and 30-day resolution target
+  Status: PASS
+  Evidence: "We commit to: Initial response: Within 72 hours, Resolution target: Within 30 days for confirmed security issues"
+
+All requirements verified: 6/6 PASS

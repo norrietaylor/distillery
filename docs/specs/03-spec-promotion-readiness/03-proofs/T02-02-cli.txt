@@ -1,0 +1,10 @@
+Type: cli
+Command: grep -i 'security advisory' SECURITY.md
+Expected: contains advisory reference
+Timestamp: 2026-04-01T11:45:00Z
+Status: PASS
+
+Output:
+We take security seriously. If you discover a vulnerability in Distillery, please report it responsibly through **GitHub Security Advisories** rather than opening a public issue.
+
+Note: The file contains multiple references to "GitHub Security Advisories" throughout the policy.
