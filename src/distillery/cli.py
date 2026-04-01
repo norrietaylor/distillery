@@ -544,24 +544,52 @@ def _cmd_eval(
 
     # Save baseline if requested.
     if save_baseline:
-        baseline_data = [
+        baseline_scenarios = [
             {
                 "name": r.scenario_name,
                 "skill": r.skill,
                 "passed": r.passed,
                 "latency_ms": r.performance.total_latency_ms,
                 "total_tokens": r.performance.total_tokens,
+                "input_tokens": r.performance.input_tokens,
+                "output_tokens": r.performance.output_tokens,
+                "total_cost_usd": r.performance.total_cost_usd,
                 "tool_call_count": r.performance.tool_call_count,
             }
             for r in results
         ]
-        Path(save_baseline).write_text(json.dumps(baseline_data, indent=2), encoding="utf-8")
+        per_skill: dict[str, dict[str, float | int]] = {}
+        for r in results:
+            skill_key = r.skill
+            if skill_key not in per_skill:
+                per_skill[skill_key] = {"cost_usd": 0.0, "tokens": 0, "scenario_count": 0}
+            per_skill[skill_key]["cost_usd"] = (
+                float(per_skill[skill_key]["cost_usd"]) + r.performance.total_cost_usd
+            )
+            per_skill[skill_key]["tokens"] = (
+                int(per_skill[skill_key]["tokens"]) + r.performance.total_tokens
+            )
+            per_skill[skill_key]["scenario_count"] = (
+                int(per_skill[skill_key]["scenario_count"]) + 1
+            )
+        cost_summary = {
+            "total_cost_usd": sum(r.performance.total_cost_usd for r in results),
+            "total_tokens": sum(r.performance.total_tokens for r in results),
+            "per_skill": per_skill,
+        }
+        baseline_output = {"scenarios": baseline_scenarios, "cost_summary": cost_summary}
+        Path(save_baseline).write_text(json.dumps(baseline_output, indent=2), encoding="utf-8")
         print(f"Baseline saved to {save_baseline}")
 
     # Regression check if baseline provided.
     if baseline and Path(baseline).exists():
         baseline_data_loaded = json.loads(Path(baseline).read_text(encoding="utf-8"))
-        baseline_by_name = {e["name"]: e for e in baseline_data_loaded}
+        # Support both old format (flat list) and new format (dict with "scenarios" key).
+        if isinstance(baseline_data_loaded, list):
+            loaded_scenarios = baseline_data_loaded
+        else:
+            loaded_scenarios = baseline_data_loaded.get("scenarios", [])
+        baseline_by_name = {e["name"]: e for e in loaded_scenarios}
         regressions = []
         for r in results:
             prev = baseline_by_name.get(r.scenario_name)

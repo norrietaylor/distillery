@@ -1,0 +1,17 @@
+Type: file
+Command: python3 - (inline script testing backward compat: old flat-list format still loads correctly)
+Expected: Old baselines (flat list without cost_summary) still work for regression detection
+Timestamp: 2026-04-01T00:00:00Z
+
+=== BACKWARD COMPAT (flat list) ===
+Old format data (flat list with no cost_summary):
+  [{"name": "old-scenario", "skill": "distill", "passed": true, "latency_ms": 100.0, "total_tokens": 150, "tool_call_count": 2}]
+
+After format detection (isinstance check):
+  loaded_scenarios count: 1
+  baseline_by_name keys: ['old-scenario']
+
+Regression check correctly uses loaded_scenarios for old format without error.
+No KeyError, no crash, backward compatibility maintained.
+
+Status: PASS

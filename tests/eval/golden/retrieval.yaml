@@ -1,0 +1,340 @@
+# Golden retrieval dataset for evaluating distillery_search precision, recall, and MRR.
+#
+# Each scenario specifies:
+#   - query:               the search query
+#   - seed_entries:        entries to load into the store before searching
+#   - relevance_judgments: per-entry relevance label (entry index, content snippet, relevant flag)
+#
+# Scenarios are designed to cover different retrieval difficulty levels and
+# content types present in the Distillery knowledge base.
+
+scenarios:
+  # -------------------------------------------------------------------
+  # Scenario 1: DuckDB architecture decisions
+  # Query targets specific storage decisions; non-DuckDB entries should
+  # not surface in top results.
+  # -------------------------------------------------------------------
+  - name: duckdb_architecture_decisions
+    query: "Why did we choose DuckDB for storage over alternatives?"
+    seed_entries:
+      - content: "Decided to use DuckDB for local storage because it requires no separate server process, supports SQL queries natively, and has excellent Python bindings. SQLite was considered but lacks columnar storage benefits needed for embedding queries."
+        entry_type: session
+        author: alice
+        tags: [architecture, storage, duckdb]
+        project: distillery
+
+      - content: "Implemented HNSW vector similarity search using DuckDB VSS extension. Chose cosine similarity over L2 distance after benchmarking on 10k entries — cosine was 15% more accurate for semantic search queries."
+        entry_type: session
+        author: alice
+        tags: [architecture, search, embeddings]
+        project: distillery
+
+      - content: "Evaluate whether to support pgvector as an alternative backend. Would enable cloud-hosted deployments but adds operational complexity."
+        entry_type: inbox
+        author: alice
+        tags: [todo, storage, pgvector]
+        project: distillery
+
+      - content: "DuckDB VSS extension documentation — covers HNSW index creation, cosine similarity queries, and persistence. Essential reference for the vector search implementation."
+        entry_type: bookmark
+        author: alice
+        tags: [reference, duckdb, vector-search]
+        project: distillery
+        metadata:
+          url: "https://duckdb.org/docs/extensions/vss"
+          summary: "Official DuckDB VSS extension docs"
+
+      - content: "Decided to use FastMCP for the MCP server layer. Provides clean decorator-based tool registration and handles stdio transport automatically. Rejected raw MCP SDK as too verbose."
+        entry_type: session
+        author: bob
+        tags: [architecture, mcp, fastmcp]
+        project: distillery
+
+      - content: "Sprint planning 2026-03-17. Team: Alice, Bob. Stories: implement dedup checker (3pts), add classification engine (5pts), write skill eval framework (8pts). Velocity: 13pts last sprint."
+        entry_type: minutes
+        author: bob
+        tags: [meeting, planning, sprint]
+        project: distillery
+
+    relevance_judgments:
+      # DuckDB storage decision — directly relevant
+      - entry_index: 0
+        relevant: true
+      # HNSW/VSS — relevant (DuckDB storage architecture)
+      - entry_index: 1
+        relevant: true
+      # pgvector alternative — somewhat relevant (storage alternatives discussion)
+      - entry_index: 2
+        relevant: true
+      # DuckDB VSS docs — relevant reference
+      - entry_index: 3
+        relevant: true
+      # FastMCP decision — not relevant (MCP layer, not storage)
+      - entry_index: 4
+        relevant: false
+      # Sprint planning — not relevant
+      - entry_index: 5
+        relevant: false
+
+  # -------------------------------------------------------------------
+  # Scenario 2: Embedding provider architecture
+  # Query targets the embedding abstraction layer.
+  # -------------------------------------------------------------------
+  - name: embedding_provider_architecture
+    query: "How is the embedding provider abstracted in the codebase?"
+    seed_entries:
+      - content: "Refactored embedding pipeline to support multiple providers (Jina, OpenAI) via a Protocol interface. This decouples storage from embedding so we can swap providers without changing the store layer."
+        entry_type: session
+        author: alice
+        tags: [refactor, embedding, architecture]
+        project: distillery
+
+      - content: "Python Protocol (PEP 544) enables structural subtyping without explicit inheritance. Used throughout Distillery for EmbeddingProvider and DistilleryStore protocols. Key benefit: test doubles can be simple classes that satisfy the interface without importing from src."
+        entry_type: reference
+        author: alice
+        tags: [python, protocols, testing]
+        project: distillery
+
+      - content: "Jina AI embeddings v3 model card — 1024-dimensional multilingual embeddings, 8192 token context, strong performance on semantic similarity benchmarks."
+        entry_type: bookmark
+        author: alice
+        tags: [reference, embeddings, jina]
+        project: distillery
+        metadata:
+          url: "https://jina.ai/embeddings/"
+          summary: "Jina embeddings v3 model overview"
+
+      - content: "1:1 Alice and Bob 2026-03-20. Discussed: embedding provider abstraction is blocking the eval framework. Action: Alice to finish Protocol interface by EOD. Bob to start scenario YAML format design."
+        entry_type: minutes
+        author: alice
+        tags: [meeting, action-items]
+        project: distillery
+        metadata:
+          meeting_id: "1on1-2026-03-20"
+
+      - content: "Architecture review meeting 2026-03-10. Attendees: Alice, Bob, Carol. Decided: (1) DuckDB is the storage backend, no alternatives considered going forward. (2) Embedding dimensions fixed at 1024 for production. (3) MCP server uses stdio transport only in v1."
+        entry_type: minutes
+        author: carol
+        tags: [meeting, architecture]
+        project: distillery
+        metadata:
+          meeting_id: "arch-2026-03-10"
+
+      - content: "Added deduplication checker with three thresholds: skip (0.95 similarity), merge (0.80), link (0.60). Prevents knowledge base bloat while allowing related but distinct entries to coexist."
+        entry_type: session
+        author: bob
+        tags: [deduplication, classification]
+        project: distillery
+
+    relevance_judgments:
+      # Embedding pipeline refactor — directly relevant
+      - entry_index: 0
+        relevant: true
+      # Protocol reference — relevant (how EmbeddingProvider protocol works)
+      - entry_index: 1
+        relevant: true
+      # Jina model card — relevant (embedding provider details)
+      - entry_index: 2
+        relevant: true
+      # 1:1 meeting mentioning embedding abstraction — relevant context
+      - entry_index: 3
+        relevant: true
+      # Architecture meeting — partially relevant (embedding dimensions mentioned)
+      - entry_index: 4
+        relevant: true
+      # Dedup checker — not relevant (separate feature)
+      - entry_index: 5
+        relevant: false
+
+  # -------------------------------------------------------------------
+  # Scenario 3: Meeting action items and decisions
+  # Query focuses on decisions from meetings; session and reference
+  # entries should rank lower.
+  # -------------------------------------------------------------------
+  - name: meeting_action_items
+    query: "What action items came out of the 1:1 between Alice and Bob?"
+    seed_entries:
+      - content: "1:1 Alice and Bob 2026-03-20. Discussed: embedding provider abstraction is blocking the eval framework. Action: Alice to finish Protocol interface by EOD. Bob to start scenario YAML format design."
+        entry_type: minutes
+        author: alice
+        tags: [meeting, action-items]
+        project: distillery
+        metadata:
+          meeting_id: "1on1-2026-03-20"
+
+      - content: "Architecture review meeting 2026-03-10. Attendees: Alice, Bob, Carol. Decided: (1) DuckDB is the storage backend, no alternatives considered going forward. (2) Embedding dimensions fixed at 1024 for production. (3) MCP server uses stdio transport only in v1."
+        entry_type: minutes
+        author: carol
+        tags: [meeting, architecture]
+        project: distillery
+        metadata:
+          meeting_id: "arch-2026-03-10"
+
+      - content: "Sprint planning 2026-03-17. Team: Alice, Bob. Stories: implement dedup checker (3pts), add classification engine (5pts), write skill eval framework (8pts). Velocity: 13pts last sprint."
+        entry_type: minutes
+        author: bob
+        tags: [meeting, planning, sprint]
+        project: distillery
+        metadata:
+          meeting_id: "sprint-2026-03-17"
+
+      - content: "Refactored embedding pipeline to support multiple providers (Jina, OpenAI) via a Protocol interface. This decouples storage from embedding so we can swap providers without changing the store layer."
+        entry_type: session
+        author: alice
+        tags: [refactor, embedding, architecture]
+        project: distillery
+
+      - content: "Alice Smith — lead engineer on Distillery. Deep expertise in Python, DuckDB, and vector search. Owns the storage and embedding layers."
+        entry_type: person
+        author: carol
+        tags: [team]
+        project: distillery
+        metadata:
+          expertise: [python, duckdb, vector-search, embeddings]
+          github_username: alice-smith
+          role: lead-engineer
+
+    relevance_judgments:
+      # The 1:1 meeting — directly relevant (exact match)
+      - entry_index: 0
+        relevant: true
+      # Architecture meeting — not about the 1:1
+      - entry_index: 1
+        relevant: false
+      # Sprint planning — not about the 1:1
+      - entry_index: 2
+        relevant: false
+      # Embedding refactor — context but not the meeting record
+      - entry_index: 3
+        relevant: false
+      # Alice person entry — not relevant
+      - entry_index: 4
+        relevant: false
+
+  # -------------------------------------------------------------------
+  # Scenario 4: Ideas for future features
+  # Query targets idea entries specifically.
+  # -------------------------------------------------------------------
+  - name: future_feature_ideas
+    query: "What ideas have been proposed for improving the knowledge base with LLM capabilities?"
+    seed_entries:
+      - content: "Idea: add an LLM-powered conflict detection pass — when storing a new entry, check for factual contradictions with similar existing entries. Could use a lightweight haiku call with a focused prompt."
+        entry_type: idea
+        author: bob
+        tags: [ideas, llm, conflict-detection]
+        project: distillery
+
+      - content: "Idea: stream skill eval results to a dashboard so you can watch tool calls happen in real time. Would help debug why a skill chose the wrong tool sequence."
+        entry_type: idea
+        author: alice
+        tags: [ideas, eval, ui]
+        project: distillery
+
+      - content: "GitHub issue #17: feat(testing): build a skill evaluation framework. Proposes eval scenarios in YAML, a runner harness, scoring metrics, golden dataset, and distillery eval CLI command."
+        entry_type: github
+        author: bot
+        tags: [github, issue, eval]
+        project: distillery
+        metadata:
+          repo: norrietaylor/distillery
+          ref_type: issue
+          ref_number: 17
+          title: "feat(testing): build a skill evaluation framework"
+          state: open
+
+      - content: "Added deduplication checker with three thresholds: skip (0.95 similarity), merge (0.80), link (0.60). Prevents knowledge base bloat while allowing related but distinct entries to coexist."
+        entry_type: session
+        author: bob
+        tags: [deduplication, classification]
+        project: distillery
+
+      - content: "Anthropic tool use documentation — describes the messages API tool_use and tool_result blocks, including parallel tool calls and error handling patterns."
+        entry_type: bookmark
+        author: alice
+        tags: [reference, anthropic, tool-use]
+        metadata:
+          url: "https://docs.anthropic.com/en/docs/tool-use"
+          summary: "Anthropic tool use API reference"
+
+    relevance_judgments:
+      # LLM conflict detection idea — directly relevant
+      - entry_index: 0
+        relevant: true
+      # Dashboard streaming idea — relevant (LLM eval improvement idea)
+      - entry_index: 1
+        relevant: true
+      # GitHub issue about eval framework — relevant (related LLM capability)
+      - entry_index: 2
+        relevant: true
+      # Dedup checker — not an LLM idea, existing feature
+      - entry_index: 3
+        relevant: false
+      # Anthropic docs — reference, not an idea
+      - entry_index: 4
+        relevant: false
+
+  # -------------------------------------------------------------------
+  # Scenario 5: Deduplication thresholds
+  # Query specifically targets the dedup thresholds configuration.
+  # -------------------------------------------------------------------
+  - name: deduplication_thresholds
+    query: "What are the similarity thresholds used for deduplication?"
+    seed_entries:
+      - content: "Added deduplication checker with three thresholds: skip (0.95 similarity), merge (0.80), link (0.60). Prevents knowledge base bloat while allowing related but distinct entries to coexist."
+        entry_type: session
+        author: bob
+        tags: [deduplication, classification]
+        project: distillery
+
+      - content: "Weekly digest 2026-03-24. Completed: dedup checker, classification engine, conflict detection. In progress: eval framework. Blocked: nothing. Velocity: 16pts. Key decision: use haiku model for eval runs to keep costs low."
+        entry_type: digest
+        author: alice
+        tags: [digest, weekly]
+        project: distillery
+        metadata:
+          period_start: "2026-03-18"
+          period_end: "2026-03-24"
+
+      - content: "Implemented HNSW vector similarity search using DuckDB VSS extension. Chose cosine similarity over L2 distance after benchmarking on 10k entries — cosine was 15% more accurate for semantic search queries."
+        entry_type: session
+        author: alice
+        tags: [architecture, search, embeddings]
+        project: distillery
+
+      - content: "Check if DuckDB 0.10+ changed the HNSW index API — the VSS extension had breaking changes in the 0.9→0.10 migration that may affect our persistence layer."
+        entry_type: inbox
+        author: bob
+        tags: [todo, duckdb]
+        project: distillery
+
+      - content: "Python Protocol (PEP 544) enables structural subtyping without explicit inheritance. Used throughout Distillery for EmbeddingProvider and DistilleryStore protocols. Key benefit: test doubles can be simple classes that satisfy the interface without importing from src."
+        entry_type: reference
+        author: alice
+        tags: [python, protocols, testing]
+        project: distillery
+
+      - content: "Conventional Commits format: type(scope): description. Types: feat, fix, docs, test, refactor, chore. Scopes for Distillery: store, mcp, embedding, classification, config, skills, cli."
+        entry_type: reference
+        author: bob
+        tags: [conventions, git, commits]
+        project: distillery
+
+    relevance_judgments:
+      # Dedup thresholds session entry — directly relevant
+      - entry_index: 0
+        relevant: true
+      # Weekly digest mentioning dedup completion — somewhat relevant
+      - entry_index: 1
+        relevant: true
+      # HNSW similarity — related to similarity but not dedup thresholds
+      - entry_index: 2
+        relevant: false
+      # DuckDB HNSW migration — not relevant
+      - entry_index: 3
+        relevant: false
+      # Python Protocol — not relevant
+      - entry_index: 4
+        relevant: false
+      # Conventional Commits — not relevant
+      - entry_index: 5
+        relevant: false
