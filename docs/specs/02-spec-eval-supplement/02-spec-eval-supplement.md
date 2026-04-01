@@ -16,7 +16,7 @@ Supplement the existing Distillery eval framework with four improvements: a fast
 - As a **contributor**, I want a fast eval check on my PR so that I know if my changes break skill behavior before merging.
 - As a **maintainer**, I want retrieval quality metrics so that I can detect degradation in search relevance beyond "correct tools were called."
 - As a **developer**, I want adversarial test scenarios so that edge cases and failure modes are covered by the eval suite.
-- As a **operator**, I want cost tracking per eval run so that I can detect prompt bloat or unnecessary tool calls driving up spend.
+- As an **operator**, I want cost tracking per eval run so that I can detect prompt bloat or unnecessary tool calls driving up spend.
 
 ## Demoable Units of Work
 

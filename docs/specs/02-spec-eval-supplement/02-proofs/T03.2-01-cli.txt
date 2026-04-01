@@ -1,9 +1,0 @@
-Type: cli
-Command: python3 -c "from distillery.eval.scenarios import load_scenarios; s=load_scenarios('tests/eval/scenarios/adversarial.yaml'); print(f'{len(s)} scenarios loaded'); assert len(s) >= 10"
-Expected: >=10 scenarios loaded
-Timestamp: 2026-04-01T00:00:00Z
-
---- OUTPUT ---
-12 scenarios loaded
-
-Status: PASS

@@ -53,7 +53,7 @@ def call_api(
             [
                 "claude",
                 "--output-format",
-                "stream-json",
+                "json",
                 "--model",
                 "claude-sonnet-4-5-latest",
                 "--mcp-config",
@@ -68,36 +68,41 @@ def call_api(
             capture_output=True,
             text=True,
             timeout=120,
+            stdin=subprocess.DEVNULL,
             env={**os.environ, "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"},
         )
 
-        # Parse stream-json output
+        # Parse JSON output (single JSON object with result, tool calls, usage)
         response_text = ""
         tool_calls: list[dict[str, object]] = []
         input_tokens = 0
         output_tokens = 0
 
-        for line in result.stdout.strip().splitlines():
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                continue
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            data = {}
 
-            # Capture tool use events
-            if event.get("type") == "tool_use":
-                tool_calls.append(
-                    {"name": event.get("name", ""), "input": event.get("input", {})}
-                )
+        # --output-format json returns {result, messages, ...}
+        if isinstance(data, dict):
+            response_text = data.get("result", "")
 
-            # Final result
-            if "result" in event:
-                response_text = event["result"]
+            # Extract tool calls from the messages array
+            for msg in data.get("messages", []):
+                if msg.get("role") == "assistant":
+                    for block in msg.get("content", []):
+                        if block.get("type") == "tool_use":
+                            tool_calls.append(
+                                {
+                                    "name": block.get("name", ""),
+                                    "input": block.get("input", {}),
+                                }
+                            )
 
-            # Token usage
-            if "usage" in event:
-                usage = event["usage"]
-                input_tokens += usage.get("input_tokens", 0)
-                output_tokens += usage.get("output_tokens", 0)
+            # Token usage from top-level or nested
+            usage = data.get("usage", {})
+            input_tokens = usage.get("input_tokens", 0)
+            output_tokens = usage.get("output_tokens", 0)
 
         if result.returncode != 0 and not response_text:
             return {
