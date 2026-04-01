@@ -1,8 +1,0 @@
-Type: cli
-Command: .venv/bin/python -m ruff check src/distillery/mcp/webhooks.py
-Expected: no errors
-Timestamp: 2026-03-31T12:00:00Z
-Status: PASS
-
-Output:
-All checks passed!

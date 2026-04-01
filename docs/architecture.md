@@ -51,7 +51,7 @@ Distillery is built as a 4-layer system where skills (SKILL.md files) drive all 
   <!-- Layer 2: MCP Server -->
   <rect class="d-amber-bg" x="30" y="104" width="700" height="52" rx="10"/>
   <text class="d-white" x="380" y="128" text-anchor="middle">MCP Server</text>
-  <text class="d-white-sub" x="380" y="144" text-anchor="middle">FastMCP 2.x/3.x  ·  stdio + streamable-HTTP  ·  22 tools  ·  @server.tool decorators</text>
+  <text class="d-white-sub" x="380" y="144" text-anchor="middle">FastMCP 2.x/3.x  ·  stdio + streamable-HTTP  ·  22 tools  ·  REST webhooks (/api/*)</text>
 
   <!-- Connector: MCP to Auth + Protocols -->
   <line class="d-line" x1="380" y1="156" x2="380" y2="168"/>
@@ -141,7 +141,8 @@ Distillery is built as a 4-layer system where skills (SKILL.md files) drive all 
 |-------|-------------|-----------|
 | **Skills** | 10 SKILL.md files — portable, version-controlled slash commands. Not Python code. | `.claude-plugin/skills/*/SKILL.md` |
 | **MCP Server** | 22 tools exposed over stdio (local) or streamable-HTTP (team). Built on FastMCP 2.x/3.x with `@server.tool` decorators. | `src/distillery/mcp/server.py` |
-| **Auth** | GitHub OAuth with org-restricted access. Middleware handles logging, rate limiting, security headers, budget tracking. | `src/distillery/mcp/auth.py`, `middleware.py`, `budget.py` |
+| **Webhook API** | REST endpoints (`/api/poll`, `/api/rescore`, `/api/maintenance`) for automated scheduling. Bearer token auth, per-endpoint cooldowns persisted to DuckDB. Mounted alongside MCP in HTTP mode. | `src/distillery/mcp/webhooks.py` |
+| **Auth** | MCP: GitHub OAuth with org-restricted access. Webhooks: bearer token via `DISTILLERY_WEBHOOK_SECRET`. Middleware handles logging, rate limiting, security headers, budget tracking. | `src/distillery/mcp/auth.py`, `middleware.py`, `budget.py` |
 | **Core Protocols** | Typed `Protocol` interfaces (structural subtyping, not ABCs). All storage operations are async. | `src/distillery/store/protocol.py`, `embedding/protocol.py` |
 | **Feeds** | GitHub events and RSS/Atom polling. Relevance scoring via embeddings. Interest extraction for source suggestions. | `src/distillery/feeds/` |
 | **Backends** | DuckDB + VSS (HNSW cosine similarity), Jina v3 / OpenAI embeddings, LLM classification with dedup + conflict detection. | `src/distillery/store/duckdb.py`, `embedding/`, `classification/` |
@@ -150,7 +151,7 @@ Distillery is built as a 4-layer system where skills (SKILL.md files) drive all 
 
 **Skills are SKILL.md files, not Python code.** They are portable, version-controlled, and team-shareable. Claude Code loads the markdown and follows the instructions — no compilation or import required.
 
-**MCP server is the sole runtime interface.** All storage access goes through the protocol, over stdio (local) or HTTP (team). Skills never access the database directly.
+**MCP server is the primary runtime interface.** All storage access goes through the protocol, over stdio (local) or HTTP (team). Skills never access the database directly. REST webhook endpoints provide a secondary interface for automated scheduling — they share the same DuckDB store and run in the same uvicorn process.
 
 **Storage abstraction via `DistilleryStore` protocol.** Enables future migration to Elasticsearch without rewriting skills or the MCP server.
 
@@ -219,10 +220,11 @@ distillery/
 │   │   └── dedup.py         # DeduplicationChecker
 │   ├── mcp/
 │   │   ├── server.py        # MCP server (22 tools, FastMCP 2.x)
+│   │   ├── webhooks.py      # REST webhook endpoints (/api/poll, /api/rescore, /api/maintenance)
 │   │   ├── auth.py          # GitHub OAuth via FastMCP GitHubProvider
 │   │   ├── middleware.py     # Request logging, rate limiting, security headers
 │   │   ├── budget.py        # Embedding API budget tracking
-│   │   └── __main__.py      # CLI: --transport stdio|http
+│   │   └── __main__.py      # CLI: --transport stdio|http (composes MCP + webhooks)
 │   └── feeds/
 │       ├── github.py        # GitHub event adapter
 │       ├── rss.py           # RSS/Atom feed adapter
@@ -245,3 +247,20 @@ The ambient intelligence system monitors external sources and scores relevance:
 3. **Relevance scoring** — embedding-based cosine similarity against user interest profile
 4. **Interest extraction** — mines existing entries for tags, domains, repos, expertise
 5. **Digest generation** — `/radar` synthesizes recent feed entries into grouped summaries
+6. **Automated scheduling** — webhook endpoints (`/api/poll`, `/api/rescore`, `/api/maintenance`) called by GitHub Actions cron workflow (`.github/workflows/scheduler.yml`). Bearer token auth, per-endpoint cooldowns, and audit records in DuckDB metadata.
+
+## Webhook Endpoints
+
+REST endpoints mounted at `/api/*` alongside the MCP server in HTTP mode. Enabled when both `DISTILLERY_WEBHOOK_SECRET` is set and the runtime flag `config.server.webhooks.enabled` is true.
+
+| Endpoint | Operation | Cooldown | Schedule |
+|----------|-----------|----------|----------|
+| `POST /api/poll` | Poll all feed sources | 5 min | Hourly (:23) |
+| `POST /api/rescore` | Re-score feed entries | 1 hour | Daily (06:17 UTC) |
+| `POST /api/maintenance` | Metrics + quality + stale + interests + suggestions + digest | 6 hours | Weekly (Mon 07:41 UTC) |
+
+**Auth:** `Authorization: Bearer <DISTILLERY_WEBHOOK_SECRET>` with `hmac.compare_digest`.
+
+**Hardening:** Per-endpoint `asyncio.Lock` serializes cooldown checks. `BodySizeLimitMiddleware` + `RateLimitMiddleware` (10 req/min, 100 req/hour). Cooldown timestamps persisted to DuckDB via `get_metadata`/`set_metadata`.
+
+**Audit:** Each invocation stores a `webhook_audit:{endpoint}` metadata record with timestamp, status, and response data.
