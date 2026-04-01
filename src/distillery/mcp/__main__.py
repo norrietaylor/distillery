@@ -172,10 +172,29 @@ def main(argv: list[str] | None = None) -> int:
                 org_checker=org_checker,
             )
 
+            from starlette.types import ASGIApp
+
+            final_app: ASGIApp = wrapped_app
+            if config.server.webhooks.enabled and os.environ.get(
+                config.server.webhooks.secret_env
+            ):
+                from starlette.applications import Starlette
+                from starlette.routing import Mount
+
+                from distillery.mcp.webhooks import create_webhook_app
+
+                webhook_app = create_webhook_app(server._distillery_shared, config)  # type: ignore[attr-defined]
+                final_app = Starlette(
+                    routes=[
+                        Mount("/api", app=webhook_app),
+                        Mount("/", app=wrapped_app),
+                    ]
+                )
+
             import uvicorn as _uvicorn
 
             uv_config = _uvicorn.Config(
-                app=wrapped_app,
+                app=final_app,
                 host=host,
                 port=port,
                 log_level="info",
