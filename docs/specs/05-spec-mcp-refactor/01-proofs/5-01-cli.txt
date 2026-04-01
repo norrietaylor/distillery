@@ -1,0 +1,14 @@
+Type: cli
+Command: mypy --strict src/distillery/mcp/tools/
+Expected: No errors
+Timestamp: 2026-04-01T16:12:00Z
+
+Output:
+Success: no issues found in 2 source files
+
+Status: PASS
+
+Verification Details:
+- Ran mypy with --strict mode on src/distillery/mcp/tools/
+- Both __init__.py and _common.py passed type checking
+- No errors found
