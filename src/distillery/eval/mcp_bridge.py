@@ -32,6 +32,7 @@ from distillery.config import (
 from distillery.eval.models import SeedEntry
 from distillery.mcp._stub_embedding import HashEmbeddingProvider
 from distillery.mcp.server import (
+    _handle_aggregate,
     _handle_check_conflicts,
     _handle_check_dedup,
     _handle_classify,
@@ -142,8 +143,50 @@ DISTILLERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
                 "status": {"type": "string"},
                 "limit": {"type": "integer", "description": "Max results (default 10)."},
                 "offset": {"type": "integer"},
+                "output_mode": {
+                    "type": "string",
+                    "description": "Output mode: 'full' (default), 'summary' (no content), 'ids'.",
+                },
+                "content_max_length": {
+                    "type": "integer",
+                    "description": "Truncate content to this many characters (full mode only).",
+                },
             },
             "required": [],
+        },
+    },
+    {
+        "name": "distillery_aggregate",
+        "description": "Count entries grouped by a field (e.g. entry_type, source, author).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "group_by": {
+                    "type": "string",
+                    "description": (
+                        "Field to group by. One of: entry_type, status, author, "
+                        "project, source, metadata.source_url, metadata.source_type."
+                    ),
+                },
+                "entry_type": {"type": "string"},
+                "author": {"type": "string"},
+                "project": {"type": "string"},
+                "status": {"type": "string"},
+                "date_from": {
+                    "type": "string",
+                    "description": "ISO 8601 start date (inclusive).",
+                },
+                "date_to": {
+                    "type": "string",
+                    "description": "ISO 8601 end date (inclusive).",
+                },
+                "tag_prefix": {
+                    "type": "string",
+                    "description": "Filter to entries under this tag namespace prefix.",
+                },
+                "limit": {"type": "integer", "description": "Max groups (default 50)."},
+            },
+            "required": ["group_by"],
         },
     },
     {
@@ -418,6 +461,8 @@ class MCPBridge:
             return await _handle_update(store=store, arguments=args)
         if name == "distillery_list":
             return await _handle_list(store=store, arguments=args)
+        if name == "distillery_aggregate":
+            return await _handle_aggregate(store=store, arguments=args)
         if name == "distillery_search":
             return await _handle_search(store=store, arguments=args)
         if name == "distillery_find_similar":

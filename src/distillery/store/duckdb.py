@@ -136,6 +136,17 @@ CREATE TABLE IF NOT EXISTS feed_sources (
 """
 
 
+_AGGREGATE_EXPR_MAP: dict[str, str] = {
+    "entry_type": "entry_type",
+    "status": "status",
+    "author": "author",
+    "project": "project",
+    "source": "source",
+    "metadata.source_url": "json_extract_string(metadata, '$.source_url')",
+    "metadata.source_type": "json_extract_string(metadata, '$.source_type')",
+}
+
+
 class DuckDBStore:
     """DuckDB-backed implementation of the ``DistilleryStore`` protocol.
 
@@ -1131,6 +1142,63 @@ class DuckDBStore:
 
             rows = result.fetchall()
             return [self._row_to_entry(row, col_names) for row in rows]
+
+        return await asyncio.to_thread(_sync)
+
+    async def aggregate_entries(
+        self,
+        group_by: str,
+        filters: dict[str, Any] | None,
+        limit: int,
+    ) -> dict[str, Any]:
+        """Return entry counts grouped by *group_by*, sorted by count descending.
+
+        Parameters:
+            group_by: Logical field name.  Supported values:
+                ``"entry_type"``, ``"status"``, ``"author"``, ``"project"``,
+                ``"source"``, ``"metadata.source_url"``, ``"metadata.source_type"``.
+                The SQL expression is resolved here so that callers only ever pass
+                the logical name (validated by the MCP layer against an allowlist).
+            filters: Optional metadata constraints (see ``_build_filter_clauses``).
+            limit: Maximum number of groups to return.
+
+        Returns:
+            Dict with ``"groups"`` (limited list of ``{"value": ..., "count": ...}``
+            dicts), ``"total_groups"`` (int), and ``"total_entries"`` (int).  The
+            totals reflect the full result set before ``limit`` is applied.
+        """
+        group_expr = _AGGREGATE_EXPR_MAP[group_by]
+
+        def _sync() -> dict[str, Any]:
+            conn = self.connection
+            where_clauses, params = self._build_filter_clauses(filters)
+            where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+            # Single CTE query: window functions compute true totals over the
+            # full grouped result set, while LIMIT returns only the top-N rows.
+            sql = (
+                f"WITH grouped AS ("
+                f"SELECT {group_expr} AS value, COUNT(*) AS group_count "
+                f"FROM entries "
+                f"{where_sql} "
+                f"GROUP BY 1"
+                f") "
+                f"SELECT value, group_count, "
+                f"COUNT(*) OVER () AS total_groups, "
+                f"COALESCE(SUM(group_count) OVER (), 0) AS total_entries "
+                f"FROM grouped "
+                f"ORDER BY group_count DESC, value ASC NULLS LAST "
+                f"LIMIT ?"
+            )
+            rows = conn.execute(sql, list(params) + [limit]).fetchall()
+            total_groups = int(rows[0][2]) if rows else 0
+            total_entries = int(rows[0][3]) if rows else 0
+            groups = [{"value": row[0], "count": row[1]} for row in rows]
+            return {
+                "groups": groups,
+                "total_groups": total_groups,
+                "total_entries": total_entries,
+            }
 
         return await asyncio.to_thread(_sync)
 

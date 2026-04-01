@@ -600,6 +600,8 @@ def create_server(
         limit: int = 20,
         offset: int = 0,
         tag_prefix: str | None = None,
+        output_mode: str = "full",
+        content_max_length: int | None = None,
     ) -> list[types.TextContent]:
         """
         List knowledge entries with optional filters and pagination.
@@ -616,6 +618,13 @@ def create_server(
             tag_prefix (str | None): Namespace prefix filter — returns only entries whose
                 tags fall under this prefix (e.g. "source/bookmark" matches
                 "source/bookmark/rss" but not "source/bookmark-old").
+            output_mode (str): Controls how much data is returned per entry. One of:
+                "full" (default) — all fields including content;
+                "summary" — all fields except content (metadata, tags, timestamps);
+                "ids" — id, entry_type, and created_at only.
+            content_max_length (int | None): When output_mode is "full", truncates the
+                content field to this many characters (appends "…" if truncated).
+                Default None means no truncation.
 
         Returns:
             list[types.TextContent]: MCP TextContent blocks containing a JSON object with
@@ -623,7 +632,11 @@ def create_server(
             "limit", and "offset".
         """
         lc = _get_lifespan_context(ctx)
-        arguments: dict[str, Any] = {"limit": limit, "offset": offset}
+        arguments: dict[str, Any] = {
+            "limit": limit,
+            "offset": offset,
+            "output_mode": output_mode,
+        }
         if entry_type is not None:
             arguments["entry_type"] = entry_type
         if author is not None:
@@ -640,7 +653,58 @@ def create_server(
             arguments["date_to"] = date_to
         if tag_prefix is not None:
             arguments["tag_prefix"] = tag_prefix
+        if content_max_length is not None:
+            arguments["content_max_length"] = content_max_length
         return await _handle_list(
+            store=lc["store"],
+            arguments=arguments,
+        )
+
+    @server.tool
+    async def distillery_aggregate(  # noqa: PLR0913
+        ctx: Context,
+        group_by: str,
+        entry_type: str | None = None,
+        status: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        tag_prefix: str | None = None,
+        limit: int = 50,
+    ) -> list[types.TextContent]:
+        """
+        Aggregate entry counts grouped by a field.
+
+        Returns count-by-group results without fetching full entry payloads.
+        Useful for answering "how many entries per source?" style questions.
+
+        Parameters:
+            group_by (str): Field to group by. Supported values:
+                "entry_type", "status", "author", "project", "source",
+                "metadata.source_url", "metadata.source_type".
+            entry_type (str | None): Filter to a specific entry type.
+            status (str | None): Filter to a specific status.
+            date_from (str | None): ISO 8601 start date (inclusive).
+            date_to (str | None): ISO 8601 end date (inclusive).
+            tag_prefix (str | None): Filter to entries whose tags fall under this prefix.
+            limit (int): Maximum number of groups to return (default 50).
+
+        Returns:
+            list[types.TextContent]: JSON with "group_by", "groups" (list of
+            {value, count}), "total_entries", and "total_groups".
+        """
+        lc = _get_lifespan_context(ctx)
+        arguments: dict[str, Any] = {"group_by": group_by, "limit": limit}
+        if entry_type is not None:
+            arguments["entry_type"] = entry_type
+        if status is not None:
+            arguments["status"] = status
+        if date_from is not None:
+            arguments["date_from"] = date_from
+        if date_to is not None:
+            arguments["date_to"] = date_to
+        if tag_prefix is not None:
+            arguments["tag_prefix"] = tag_prefix
+        return await _handle_aggregate(
             store=lc["store"],
             arguments=arguments,
         )
@@ -2038,6 +2102,36 @@ async def _handle_find_similar(
     return success_response({"results": results, "count": len(results), "threshold": threshold})
 
 
+_VALID_OUTPUT_MODES = frozenset({"full", "summary", "ids"})
+
+_AGGREGATE_GROUP_BY_MAP: dict[str, str] = {
+    "entry_type": "entry_type",
+    "status": "status",
+    "author": "author",
+    "project": "project",
+    "source": "source",
+    "metadata.source_url": "json_extract_string(metadata, '$.source_url')",
+    "metadata.source_type": "json_extract_string(metadata, '$.source_type')",
+}
+
+
+def _entry_to_summary_dict(entry: Any) -> dict[str, Any]:
+    """Serialise *entry* without the ``content`` field (summary mode)."""
+    d: dict[str, Any] = entry.to_dict()
+    d.pop("content", None)
+    return d
+
+
+def _entry_to_id_dict(entry: Any) -> dict[str, Any]:
+    """Serialise *entry* as id/entry_type/created_at only (ids mode)."""
+    result: dict[str, Any] = {
+        "id": entry.id,
+        "entry_type": entry.entry_type.value,
+        "created_at": entry.created_at.isoformat(),
+    }
+    return result
+
+
 async def _handle_list(
     store: Any,
     arguments: dict[str, Any],
@@ -2073,6 +2167,25 @@ async def _handle_list(
     if offset < 0:
         return error_response("VALIDATION_ERROR", "Field 'offset' must be >= 0")
 
+    output_mode = arguments.get("output_mode", "full")
+    err_output_mode = validate_type(arguments, "output_mode", str, "string")
+    if err_output_mode:
+        return error_response("VALIDATION_ERROR", err_output_mode)
+    if output_mode not in _VALID_OUTPUT_MODES:
+        return error_response(
+            "VALIDATION_ERROR",
+            f"Field 'output_mode' must be one of: {', '.join(sorted(_VALID_OUTPUT_MODES))}",
+        )
+
+    content_max_length_raw = arguments.get("content_max_length")
+    content_max_length: int | None = None
+    if content_max_length_raw is not None:
+        if not isinstance(content_max_length_raw, int):
+            return error_response("VALIDATION_ERROR", "Field 'content_max_length' must be an integer")
+        if content_max_length_raw < 1:
+            return error_response("VALIDATION_ERROR", "Field 'content_max_length' must be >= 1")
+        content_max_length = content_max_length_raw
+
     filters = _build_filters_from_arguments(arguments)
 
     try:
@@ -2081,12 +2194,88 @@ async def _handle_list(
         logger.exception("Error in distillery_list")
         return error_response("LIST_ERROR", f"list_entries failed: {exc}")
 
+    if output_mode == "summary":
+        serialised = [_entry_to_summary_dict(e) for e in entries]
+    elif output_mode == "ids":
+        serialised = [_entry_to_id_dict(e) for e in entries]
+    else:
+        if content_max_length is not None:
+            result_dicts = []
+            for e in entries:
+                d = e.to_dict()
+                if isinstance(d.get("content"), str) and len(d["content"]) > content_max_length:
+                    d["content"] = d["content"][:content_max_length] + "…"
+                result_dicts.append(d)
+            serialised = result_dicts
+        else:
+            serialised = [e.to_dict() for e in entries]
+
     return success_response(
         {
-            "entries": [entry.to_dict() for entry in entries],
+            "entries": serialised,
             "count": len(entries),
             "limit": limit,
             "offset": offset,
+            "output_mode": output_mode,
+        }
+    )
+
+
+async def _handle_aggregate(
+    store: Any,
+    arguments: dict[str, Any],
+) -> list[types.TextContent]:
+    """Implement the ``distillery_aggregate`` tool.
+
+    Returns count-by-group aggregates without fetching full entry payloads.
+
+    Args:
+        store: Initialised :class:`~distillery.store.duckdb.DuckDBStore`.
+        arguments: Tool argument dict.
+
+    Returns:
+        MCP content list with a JSON payload containing ``group_by``,
+        ``groups``, ``total_entries``, and ``total_groups``.
+    """
+    group_by = arguments.get("group_by", "")
+    err_group_by = validate_type(arguments, "group_by", str, "string")
+    if err_group_by:
+        return error_response("VALIDATION_ERROR", err_group_by)
+    if not group_by:
+        return error_response("VALIDATION_ERROR", "Missing required field: group_by")
+    if group_by not in _AGGREGATE_GROUP_BY_MAP:
+        return error_response(
+            "VALIDATION_ERROR",
+            f"Field 'group_by' must be one of: {', '.join(sorted(_AGGREGATE_GROUP_BY_MAP))}",
+        )
+
+    limit_raw = arguments.get("limit", 50)
+    if not isinstance(limit_raw, int):
+        return error_response("VALIDATION_ERROR", "Field 'limit' must be an integer")
+    limit = int(limit_raw)
+    if limit < 1:
+        return error_response("VALIDATION_ERROR", "Field 'limit' must be >= 1")
+    if limit > 500:
+        return error_response("VALIDATION_ERROR", "Field 'limit' must be <= 500")
+
+    filters = _build_filters_from_arguments(arguments)
+
+    try:
+        result = await store.aggregate_entries(
+            group_by=group_by,
+            filters=filters,
+            limit=limit,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error in distillery_aggregate")
+        return error_response("AGGREGATE_ERROR", f"aggregate_entries failed: {exc}")
+
+    return success_response(
+        {
+            "group_by": group_by,
+            "groups": result["groups"],
+            "total_entries": result["total_entries"],
+            "total_groups": result["total_groups"],
         }
     )
 
