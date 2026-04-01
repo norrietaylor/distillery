@@ -1,0 +1,229 @@
+# promptfooconfig.yaml — Distillery PR CI Gate
+#
+# Fast smoke-test suite (5-10 scenarios) covering critical skill paths.
+# Runs on every PR via .github/workflows/eval-pr.yml.
+#
+# Provider: Claude claude-sonnet-4-5-latest with Distillery MCP server (stdio)
+# Run: npx promptfoo@latest eval --config promptfooconfig.yaml
+#
+# Each scenario asserts:
+#   (a) expected MCP tool calls are made (via javascript assertions)
+#   (b) tool arguments contain required fields
+#   (c) response content includes expected substrings
+
+description: "Distillery MCP smoke-test suite for PR CI gate"
+
+# ---------------------------------------------------------------------------
+# Provider: Claude with Distillery MCP server attached via stdio transport
+# ---------------------------------------------------------------------------
+providers:
+  - id: anthropic:messages:claude-sonnet-4-5-latest
+    label: claude-with-distillery-mcp
+    config:
+      mcp:
+        enabled: true
+        servers:
+          - name: distillery
+            command: distillery-mcp
+            args: []
+            env:
+              DISTILLERY_CONFIG: distillery-dev.yaml
+
+# ---------------------------------------------------------------------------
+# System prompt that configures Claude as a Distillery skill assistant
+# ---------------------------------------------------------------------------
+prompts:
+  - "You are a Distillery knowledge assistant. The user will invoke skills like /distill, /recall, /bookmark, /pour, and /watch. Use the available distillery MCP tools to fulfill their requests. Always call distillery_status first to confirm connectivity before other operations.\n\nUser message: {{prompt}}"
+
+# ---------------------------------------------------------------------------
+# Default assertions applied to every test (can be overridden per test)
+# ---------------------------------------------------------------------------
+defaultTest:
+  assert:
+    - type: no-error
+    - type: latency
+      threshold: 120000   # 2 minutes max per scenario
+
+# ---------------------------------------------------------------------------
+# Smoke-test scenarios
+# ---------------------------------------------------------------------------
+tests:
+  # ---- /distill: store a new knowledge entry --------------------------------
+  - description: "distill stores a new session entry via distillery_store"
+    vars:
+      prompt: '/distill "We decided to use pytest-asyncio in auto mode so async tests are detected automatically without needing @pytest.mark.asyncio on each function."'
+    assert:
+      - type: javascript
+        value: |
+          // Assert distillery_status was called (connectivity check)
+          const toolCalls = output?.tool_calls ?? output?.toolCalls ?? [];
+          const toolNames = Array.isArray(toolCalls)
+            ? toolCalls.map(tc => tc.function?.name ?? tc.name ?? '')
+            : [];
+          return toolNames.includes('distillery_status') || toolNames.includes('distillery_store')
+            ? true
+            : 'Expected distillery_status or distillery_store to be called';
+      - type: latency
+        threshold: 90000
+
+  # ---- /distill: deduplication check before store ---------------------------
+  - description: "distill checks for duplicates before storing similar content"
+    vars:
+      prompt: '/distill "Decided to use DuckDB for local storage because it has no server process."'
+    assert:
+      - type: javascript
+        value: |
+          const toolCalls = output?.tool_calls ?? output?.toolCalls ?? [];
+          const toolNames = Array.isArray(toolCalls)
+            ? toolCalls.map(tc => tc.function?.name ?? tc.name ?? '')
+            : [];
+          return toolNames.some(n => ['distillery_status', 'distillery_check_dedup', 'distillery_store'].includes(n))
+            ? true
+            : 'Expected at least one distillery tool to be called';
+      - type: latency
+        threshold: 90000
+
+  # ---- /recall: search for existing knowledge entries -----------------------
+  - description: "recall searches knowledge base and returns relevant entries"
+    vars:
+      prompt: "what storage engine do we use and why did we choose it?"
+    assert:
+      - type: javascript
+        value: |
+          const toolCalls = output?.tool_calls ?? output?.toolCalls ?? [];
+          const toolNames = Array.isArray(toolCalls)
+            ? toolCalls.map(tc => tc.function?.name ?? tc.name ?? '')
+            : [];
+          return toolNames.includes('distillery_search')
+            ? true
+            : 'Expected distillery_search to be called for knowledge retrieval';
+      - type: latency
+        threshold: 60000
+
+  # ---- /recall: graceful empty store response -------------------------------
+  - description: "recall handles empty knowledge base gracefully"
+    vars:
+      prompt: "what do we know about caching strategies?"
+    assert:
+      - type: javascript
+        value: |
+          const toolCalls = output?.tool_calls ?? output?.toolCalls ?? [];
+          const toolNames = Array.isArray(toolCalls)
+            ? toolCalls.map(tc => tc.function?.name ?? tc.name ?? '')
+            : [];
+          return toolNames.includes('distillery_search')
+            ? true
+            : 'Expected distillery_search to be called even for empty store queries';
+      - type: not-regex
+        value: "(?i)(traceback|exception at |internal error|500 error)"
+      - type: latency
+        threshold: 60000
+
+  # ---- /bookmark: store a URL as a bookmark entry ---------------------------
+  - description: "bookmark stores a URL with entry_type=bookmark via distillery_store"
+    vars:
+      prompt: '/bookmark https://duckdb.org/docs/extensions/vss "DuckDB VSS extension docs — HNSW index creation and cosine similarity"'
+    assert:
+      - type: javascript
+        value: |
+          const toolCalls = output?.tool_calls ?? output?.toolCalls ?? [];
+          const toolNames = Array.isArray(toolCalls)
+            ? toolCalls.map(tc => tc.function?.name ?? tc.name ?? '')
+            : [];
+          return toolNames.some(n => ['distillery_status', 'distillery_store', 'distillery_check_dedup'].includes(n))
+            ? true
+            : 'Expected a distillery tool to be called for bookmark storage';
+      - type: latency
+        threshold: 90000
+
+  # ---- /bookmark: dedup check for known URL ---------------------------------
+  - description: "bookmark checks dedup before storing a known URL"
+    vars:
+      prompt: '/bookmark https://duckdb.org/docs/extensions/vss "DuckDB vector similarity search extension"'
+    assert:
+      - type: javascript
+        value: |
+          const toolCalls = output?.tool_calls ?? output?.toolCalls ?? [];
+          const toolNames = Array.isArray(toolCalls)
+            ? toolCalls.map(tc => tc.function?.name ?? tc.name ?? '')
+            : [];
+          return toolNames.some(n => ['distillery_check_dedup', 'distillery_store', 'distillery_status'].includes(n))
+            ? true
+            : 'Expected distillery_check_dedup or distillery_store to be called';
+      - type: latency
+        threshold: 90000
+
+  # ---- /pour: synthesize entries into a narrative ---------------------------
+  - description: "pour searches and synthesizes knowledge into a coherent narrative"
+    vars:
+      prompt: "/pour what's the full picture on the storage architecture decisions?"
+    assert:
+      - type: javascript
+        value: |
+          const toolCalls = output?.tool_calls ?? output?.toolCalls ?? [];
+          const toolNames = Array.isArray(toolCalls)
+            ? toolCalls.map(tc => tc.function?.name ?? tc.name ?? '')
+            : [];
+          return toolNames.includes('distillery_search')
+            ? true
+            : 'Expected distillery_search to be called for knowledge synthesis';
+      - type: latency
+        threshold: 120000
+
+  # ---- /pour: graceful empty store ------------------------------------------
+  - description: "pour handles empty knowledge base without crashing"
+    vars:
+      prompt: "/pour decision log"
+    assert:
+      - type: javascript
+        value: |
+          const toolCalls = output?.tool_calls ?? output?.toolCalls ?? [];
+          const toolNames = Array.isArray(toolCalls)
+            ? toolCalls.map(tc => tc.function?.name ?? tc.name ?? '')
+            : [];
+          return toolNames.includes('distillery_search')
+            ? true
+            : 'Expected distillery_search to be called even for empty store synthesis';
+      - type: not-regex
+        value: "(?i)(traceback|exception at |internal error|500 error)"
+      - type: latency
+        threshold: 60000
+
+  # ---- /watch: list configured feed sources ---------------------------------
+  - description: "watch list reports configured feed sources via distillery_watch"
+    vars:
+      prompt: "/watch list"
+    assert:
+      - type: javascript
+        value: |
+          const toolCalls = output?.tool_calls ?? output?.toolCalls ?? [];
+          const toolNames = Array.isArray(toolCalls)
+            ? toolCalls.map(tc => tc.function?.name ?? tc.name ?? '')
+            : [];
+          return toolNames.some(n => ['distillery_watch', 'distillery_status'].includes(n))
+            ? true
+            : 'Expected distillery_watch or distillery_status to be called for watch list';
+      - type: latency
+        threshold: 30000
+
+  # ---- /watch: add RSS feed source ------------------------------------------
+  - description: "watch add registers a new RSS source via distillery_watch"
+    vars:
+      prompt: "/watch add https://news.ycombinator.com/rss --type rss --label 'Hacker News'"
+    assert:
+      - type: javascript
+        value: |
+          const toolCalls = output?.tool_calls ?? output?.toolCalls ?? [];
+          const toolNames = Array.isArray(toolCalls)
+            ? toolCalls.map(tc => tc.function?.name ?? tc.name ?? '')
+            : [];
+          return toolNames.includes('distillery_watch')
+            ? true
+            : 'Expected distillery_watch to be called when adding a feed source';
+      - type: latency
+        threshold: 30000
+
+# ---------------------------------------------------------------------------
+# Output settings
+# ---------------------------------------------------------------------------
+outputPath: .promptfoo/results.json

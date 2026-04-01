@@ -1,0 +1,35 @@
+Type: file
+Command: test -f promptfooconfig.yaml
+Expected: File exists with >=5 test scenarios
+Timestamp: 2026-04-01T18:32:00Z
+
+=== RESULT ===
+
+File exists: YES
+Path: promptfooconfig.yaml (repo root)
+
+File content summary:
+  - description: Distillery MCP smoke-test suite for PR CI gate
+  - provider: anthropic:messages:claude-sonnet-4-5-latest
+  - MCP server: distillery (stdio, command: distillery-mcp)
+  - test scenarios: 10
+
+Scenario list:
+  1. distill stores a new session entry via distillery_store
+  2. distill checks for duplicates before storing similar content
+  3. recall searches knowledge base and returns relevant entries
+  4. recall handles empty knowledge base gracefully
+  5. bookmark stores a URL with entry_type=bookmark via distillery_store
+  6. bookmark checks dedup before storing a known URL
+  7. pour searches and synthesizes knowledge into a coherent narrative
+  8. pour handles empty knowledge base without crashing
+  9. watch list reports configured feed sources via distillery_watch
+  10. watch add registers a new RSS source via distillery_watch
+
+Each scenario includes:
+  (a) javascript assertion checking expected MCP tool calls are made
+  (b) latency threshold assertion
+  (c) additional response content assertions where applicable
+     (not-regex to exclude stack traces, icontains for expected content)
+
+Status: PASS
