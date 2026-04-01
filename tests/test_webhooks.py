@@ -289,3 +289,207 @@ async def test_webhooks_disabled(store: DuckDBStore, monkeypatch: pytest.MonkeyP
     assert resp2.status_code == 404, (
         f"Expected 404 (no /api routes when no secret), got {resp2.status_code}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Handler tests — poll, rescore, maintenance
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_poll_handler(store: DuckDBStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    """POST /poll returns {ok: true, data: {sources_polled, items_fetched, items_stored, errors}}
+    with values from FeedPoller.poll() summary."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from distillery.feeds.poller import PollerSummary, PollResult
+
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+    config = _make_config()
+    shared = _make_shared_state(store)
+
+    # Build a deterministic summary with one source, no errors.
+    result = PollResult(source_url="https://example.com/feed", source_type="rss", items_fetched=10, items_stored=7)
+    summary = PollerSummary(results=[result], total_fetched=10, total_stored=7, sources_polled=1)
+
+    mock_poller = MagicMock()
+    mock_poller.poll = AsyncMock(return_value=summary)
+
+    # FeedPoller is imported lazily inside _handle_poll; patch it at its source.
+    # Each test receives a fresh in-memory store (no pre-existing cooldowns).
+    with patch("distillery.feeds.poller.FeedPoller", return_value=mock_poller) as mock_cls:
+        app = create_webhook_app(shared, config)
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.post("/poll", headers=_AUTH_HEADER)
+
+    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+    body = resp.json()
+    assert body["ok"] is True
+    data = body["data"]
+    assert data["sources_polled"] == 1
+    assert data["items_fetched"] == 10
+    assert data["items_stored"] == 7
+    assert data["errors"] == []
+    mock_cls.assert_called_once()
+    mock_poller.poll.assert_awaited_once()
+
+
+@pytest.mark.unit
+async def test_rescore_handler(store: DuckDBStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    """POST /rescore with body {limit: 50} passes limit to FeedPoller.rescore()
+    and returns {ok: true, data: {rescored, upgraded, downgraded}}."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+    config = _make_config()
+    shared = _make_shared_state(store)
+
+    rescore_stats = {"rescored": 50, "upgraded": 12, "downgraded": 5, "errors": 0}
+
+    mock_poller = MagicMock()
+    mock_poller.rescore = AsyncMock(return_value=rescore_stats)
+
+    # FeedPoller is imported lazily inside _handle_rescore; patch it at its source.
+    # Each test receives a fresh in-memory store (no pre-existing cooldowns).
+    with patch("distillery.feeds.poller.FeedPoller", return_value=mock_poller):
+        app = create_webhook_app(shared, config)
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.post("/rescore", headers=_AUTH_HEADER, json={"limit": 50})
+
+    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+    body = resp.json()
+    assert body["ok"] is True
+    data = body["data"]
+    assert data["rescored"] == 50
+    assert data["upgraded"] == 12
+    assert data["downgraded"] == 5
+    # Verify the custom limit was forwarded to the poller.
+    mock_poller.rescore.assert_awaited_once_with(limit=50)
+
+
+@pytest.mark.unit
+async def test_maintenance_handler(store: DuckDBStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    """POST /maintenance runs all 5 operations and returns a response that contains
+    metrics, quality, stale_count, top_interests, suggested_sources, and digest_entry_id."""
+    import json as _json
+    from unittest.mock import AsyncMock, patch
+
+    import mcp.types as mcp_types
+
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+    config = _make_config()
+    shared = _make_shared_state(store)
+
+    def _text(data: dict) -> list[mcp_types.TextContent]:
+        return [mcp_types.TextContent(type="text", text=_json.dumps(data))]
+
+    metrics_mock = AsyncMock(return_value=_text({"entries": {"total": 42}}))
+    quality_mock = AsyncMock(return_value=_text({"score": 0.85}))
+    stale_mock = AsyncMock(return_value=_text({"stale_count": 3, "entries": []}))
+    interests_mock = AsyncMock(return_value=_text({"top_tags": [["python", 10], ["ai", 7]]}))
+    suggestions_mock = AsyncMock(return_value=_text({"suggestions": [{"url": "https://news.example.com"}]}))
+
+    # The server handlers are imported lazily in _handle_maintenance; patch at source.
+    # Each test receives a fresh in-memory store (no pre-existing cooldowns).
+    with (
+        patch("distillery.mcp.server._handle_metrics", metrics_mock),
+        patch("distillery.mcp.server._handle_quality", quality_mock),
+        patch("distillery.mcp.server._handle_stale", stale_mock),
+        patch("distillery.mcp.server._handle_interests", interests_mock),
+        patch("distillery.mcp.server._handle_suggest_sources", suggestions_mock),
+    ):
+        app = create_webhook_app(shared, config)
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.post("/maintenance", headers=_AUTH_HEADER)
+
+    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+    body = resp.json()
+    assert body["ok"] is True
+    data = body["data"]
+
+    # All 5 operations ran.
+    metrics_mock.assert_awaited_once()
+    quality_mock.assert_awaited_once()
+    stale_mock.assert_awaited_once()
+    interests_mock.assert_awaited_once()
+    suggestions_mock.assert_awaited_once()
+
+    # Response shape.
+    assert "metrics" in data
+    assert "quality" in data
+    assert "stale_count" in data
+    assert "top_interests" in data
+    assert "suggested_sources" in data
+    assert "digest_entry_id" in data
+    assert isinstance(data["digest_entry_id"], str)
+    assert len(data["digest_entry_id"]) > 0
+
+
+@pytest.mark.unit
+async def test_maintenance_stores_digest(store: DuckDBStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    """POST /maintenance stores a digest Entry with the expected type, author, tags,
+    and period_start/period_end metadata keys."""
+    import json as _json
+    from unittest.mock import AsyncMock, patch
+
+    import mcp.types as mcp_types
+
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+    config = _make_config()
+    shared = _make_shared_state(store)
+
+    def _text(data: dict) -> list[mcp_types.TextContent]:
+        return [mcp_types.TextContent(type="text", text=_json.dumps(data))]
+
+    # The server handlers are imported lazily in _handle_maintenance; patch at source.
+    # Each test receives a fresh in-memory store (no pre-existing cooldowns).
+    with (
+        patch("distillery.mcp.server._handle_metrics", AsyncMock(return_value=_text({"entries": {"total": 0}}))),
+        patch("distillery.mcp.server._handle_quality", AsyncMock(return_value=_text({}))),
+        patch("distillery.mcp.server._handle_stale", AsyncMock(return_value=_text({"stale_count": 0, "entries": []}))),
+        patch("distillery.mcp.server._handle_interests", AsyncMock(return_value=_text({"top_tags": []}))),
+        patch("distillery.mcp.server._handle_suggest_sources", AsyncMock(return_value=_text({"suggestions": []}))),
+    ):
+        app = create_webhook_app(shared, config)
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.post("/maintenance", headers=_AUTH_HEADER)
+
+    assert resp.status_code == 200
+    digest_entry_id = resp.json()["data"]["digest_entry_id"]
+
+    # Retrieve the stored entry and verify its properties.
+    entry = await store.get(digest_entry_id)
+    assert entry is not None, "Digest entry was not found in the store"
+    assert entry.entry_type.value == "session"
+    assert entry.author == "distillery-maintenance"
+    assert "system/digest" in entry.tags
+    assert "system/weekly" in entry.tags
+    assert "system/maintenance" in entry.tags
+    assert "period_start" in entry.metadata
+    assert "period_end" in entry.metadata
+
+
+@pytest.mark.unit
+async def test_handler_error_returns_500(store: DuckDBStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    """When FeedPoller.poll() raises an exception the endpoint returns
+    {ok: false, error: '<message>'} with HTTP status 500."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+    config = _make_config()
+    shared = _make_shared_state(store)
+
+    mock_poller = MagicMock()
+    mock_poller.poll = AsyncMock(side_effect=RuntimeError("feed source unavailable"))
+
+    # FeedPoller is imported lazily inside _handle_poll; patch it at its source.
+    # Each test receives a fresh in-memory store (no pre-existing cooldowns).
+    with patch("distillery.feeds.poller.FeedPoller", return_value=mock_poller):
+        app = create_webhook_app(shared, config)
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.post("/poll", headers=_AUTH_HEADER)
+
+    assert resp.status_code == 500, f"Expected 500, got {resp.status_code}: {resp.text}"
+    body = resp.json()
+    assert body["ok"] is False
+    assert "feed source unavailable" in body["error"]
