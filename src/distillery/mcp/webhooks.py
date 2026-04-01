@@ -17,7 +17,7 @@ import hmac
 import json
 import logging
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from starlette.applications import Starlette
@@ -200,6 +200,35 @@ async def _set_cooldown(store: Any, endpoint: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Maintenance helpers
+# ---------------------------------------------------------------------------
+
+#: The maintenance digest covers a trailing 7-day window.
+_MAINTENANCE_PERIOD = timedelta(days=7)
+
+
+def _parse_mcp_response(result: Any) -> dict[str, Any]:
+    """Extract the JSON payload from an MCP ``TextContent`` response list.
+
+    MCP handler functions return ``list[types.TextContent]``.  Each element
+    has a ``.text`` attribute containing a JSON-serialised string.  This
+    helper parses the first element and returns the dict, falling back to
+    an empty dict on any parse error.
+
+    Args:
+        result: The return value of an ``_handle_*`` function from
+            :mod:`distillery.mcp.server`.
+
+    Returns:
+        The parsed dict, or ``{}`` on failure.
+    """
+    try:
+        return dict(json.loads(result[0].text))
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+# ---------------------------------------------------------------------------
 # Route handlers
 # ---------------------------------------------------------------------------
 
@@ -328,19 +357,143 @@ async def _handle_rescore(request: Request, state: dict[str, Any]) -> JSONRespon
 
 
 async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONResponse:
-    """Stub handler for ``POST /maintenance``.
+    """Handler for ``POST /maintenance``.
 
-    The maintenance logic is implemented by a separate handler task.
-    This stub returns a success response with an empty data payload.
+    Sequentially executes five knowledge-base maintenance operations:
+
+    1. **metrics** -- 7-day usage metrics
+    2. **quality** -- search/feedback quality summary
+    3. **stale_detection** -- entries not accessed in 30 days (limit 10)
+    4. **interests** -- top 10 interests over the past 30 days
+    5. **source_suggestions** -- up to 3 new feed source suggestions
+
+    On success a one-paragraph digest entry is stored in the knowledge base
+    with ``entry_type="session"``, ``author="distillery-maintenance"``, and
+    system tags for downstream retrieval.  The digest entry ID is returned
+    in the response.
 
     Args:
-        request: The incoming Starlette request.
-        state: The populated shared-state dict (unused by this stub).
+        request: The incoming Starlette request (unused beyond signature
+            compatibility with the dispatcher).
+        state: The populated shared-state dict containing ``"store"``,
+            ``"config"``, and ``"embedding_provider"`` keys.
 
     Returns:
-        JSON response with ``{"ok": true, "data": {}}``.
+        JSON response with ``{"ok": true, "data": {"metrics": {...},
+        "quality": {...}, "stale_count": N, "top_interests": [...],
+        "suggested_sources": [...], "digest_entry_id": "..."}}``, or
+        ``{"ok": false, "error": "<message>"}`` with status 500 on failure.
     """
-    return JSONResponse({"ok": True, "data": {}})
+    from distillery.mcp.server import (
+        _handle_interests,
+        _handle_metrics,
+        _handle_quality,
+        _handle_stale,
+        _handle_suggest_sources,
+    )
+    from distillery.models import Entry, EntrySource, EntryType
+
+    store = state["store"]
+    config: DistilleryConfig = state["config"]
+    embedding_provider = state.get("embedding_provider")
+
+    logger.info("Webhook maintenance: starting maintenance cycle")
+    try:
+        # 1. Metrics (7-day period)
+        metrics_result = await _handle_metrics(
+            store=store,
+            config=config,
+            embedding_provider=embedding_provider,
+            arguments={"period_days": 7},
+        )
+        metrics_data = _parse_mcp_response(metrics_result)
+
+        # 2. Quality
+        quality_result = await _handle_quality(
+            store=store,
+            arguments={},
+        )
+        quality_data = _parse_mcp_response(quality_result)
+
+        # 3. Stale detection (30 days, limit 10)
+        stale_result = await _handle_stale(
+            store=store,
+            config=config,
+            arguments={"days": 30, "limit": 10},
+        )
+        stale_data = _parse_mcp_response(stale_result)
+        stale_count: int = stale_data.get("stale_count", 0)
+
+        # 4. Interests (30 days, top 10)
+        interests_result = await _handle_interests(
+            store=store,
+            config=config,
+            arguments={"recency_days": 30, "top_n": 10},
+        )
+        interests_data = _parse_mcp_response(interests_result)
+        top_interests: list[Any] = interests_data.get("top_tags", [])
+
+        # 5. Source suggestions (max 3)
+        suggestions_result = await _handle_suggest_sources(
+            store=store,
+            config=config,
+            arguments={"max_suggestions": 3},
+        )
+        suggestions_data = _parse_mcp_response(suggestions_result)
+        suggested_sources: list[Any] = suggestions_data.get("suggestions", [])
+
+        # Compose digest summary
+        now = datetime.now(UTC)
+        period_start = (now - _MAINTENANCE_PERIOD).isoformat()
+        period_end = now.isoformat()
+
+        total_entries = metrics_data.get("entries", {}).get("total", 0)
+        digest_content = (
+            f"Weekly maintenance completed on {now.strftime('%Y-%m-%d')}. "
+            f"Knowledge base contains {total_entries} entries with "
+            f"{stale_count} stale items detected (30-day threshold). "
+            f"Top interests: {', '.join(t[0] for t in top_interests[:5]) or 'none identified'}. "
+            f"Source suggestions: {len(suggested_sources)} new sources proposed."
+        )
+
+        # Store digest entry
+        entry = Entry(
+            content=digest_content,
+            entry_type=EntryType.SESSION,
+            source=EntrySource.MANUAL,
+            author="distillery-maintenance",
+            tags=["system/digest", "system/weekly", "system/maintenance"],
+            metadata={
+                "period_start": period_start,
+                "period_end": period_end,
+            },
+        )
+        entry_id = await store.store(entry)
+
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Webhook maintenance: maintenance cycle failed")
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+    logger.info(
+        "Webhook maintenance: completed — stale=%d interests=%d suggestions=%d digest=%s",
+        stale_count,
+        len(top_interests),
+        len(suggested_sources),
+        entry_id,
+    )
+    return JSONResponse(
+        {
+            "ok": True,
+            "data": {
+                "metrics": metrics_data,
+                "quality": quality_data,
+                "stale_count": stale_count,
+                "top_interests": top_interests,
+                "suggested_sources": suggested_sources,
+                "digest_entry_id": entry_id,
+            },
+        }
+    )
 
 
 # Mapping of endpoint names to their handler callables.
