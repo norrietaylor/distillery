@@ -1,9 +1,0 @@
-Type: file
-Command: test -d docs/drafts && echo exists
-Expected: exists
-Timestamp: 2026-04-01T18:44:17Z
-
-Output:
-exists
-
-Status: PASS
