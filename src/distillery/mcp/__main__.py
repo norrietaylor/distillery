@@ -172,30 +172,45 @@ def main(argv: list[str] | None = None) -> int:
                 org_checker=org_checker,
             )
 
-            from starlette.types import ASGIApp
+            from starlette.types import ASGIApp, Receive, Scope, Send
 
             final_app: ASGIApp = wrapped_app
             if config.server.webhooks.enabled and os.environ.get(
                 config.server.webhooks.secret_env
             ):
-                from starlette.applications import Starlette
-                from starlette.routing import Mount
-
                 from distillery.mcp.middleware import BodySizeLimitMiddleware
                 from distillery.mcp.webhooks import create_webhook_app
 
-                webhook_app = create_webhook_app(server._distillery_shared, config)  # type: ignore[attr-defined]
-                # Apply the same body-size guard as the MCP endpoint.
-                webhook_app = BodySizeLimitMiddleware(webhook_app, max_bytes=rl.max_body_bytes)  # type: ignore[assignment]
-                # Propagate the MCP http_app's lifespan to the parent so
-                # FastMCP's session manager initialises on startup.
-                final_app = Starlette(
-                    routes=[
-                        Mount("/api", app=webhook_app),
-                        Mount("/", app=wrapped_app),
-                    ],
-                    lifespan=http_app.router.lifespan_context,
+                webhook_app: ASGIApp = create_webhook_app(
+                    server._distillery_shared, config  # type: ignore[attr-defined]
                 )
+                # Apply the same body-size guard as the MCP endpoint.
+                webhook_app = BodySizeLimitMiddleware(
+                    webhook_app, max_bytes=rl.max_body_bytes
+                )
+
+                # Route /api/* to webhooks, everything else to MCP.
+                # Uses a thin ASGI dispatcher instead of Starlette Mount so
+                # that lifespan events propagate naturally to wrapped_app
+                # (which contains the FastMCP lifespan via middleware chain).
+                _mcp_app = wrapped_app
+
+                async def _combined_app(
+                    scope: Scope, receive: Receive, send: Send
+                ) -> None:
+                    if scope["type"] == "http" and scope.get("path", "").startswith(
+                        "/api/"
+                    ):
+                        # Strip /api prefix for the webhook app's routes.
+                        scope = dict(scope)
+                        scope["path"] = scope["path"][4:]  # /api/poll -> /poll
+                        raw = scope.get("root_path", "")
+                        scope["root_path"] = raw + "/api"
+                        await webhook_app(scope, receive, send)
+                    else:
+                        await _mcp_app(scope, receive, send)
+
+                final_app = _combined_app
 
             import uvicorn as _uvicorn
 
