@@ -1,0 +1,22 @@
+Type: file
+Command: test -f tests/eval/golden/retrieval.yaml
+Expected: >=5 retrieval scenarios with relevance judgments
+Timestamp: 2026-04-01T00:00:00Z
+
+--- Output ---
+FILE EXISTS
+
+--- Content Summary ---
+Scenarios: 5
+  - duckdb_architecture_decisions (6 seed entries, 6 judgments)
+  - embedding_provider_architecture (6 seed entries, 6 judgments)
+  - meeting_action_items (5 seed entries, 5 judgments)
+  - future_feature_ideas (5 seed entries, 5 judgments)
+  - deduplication_thresholds (6 seed entries, 6 judgments)
+
+All 5 scenarios have:
+  - query field
+  - seed_entries list
+  - relevance_judgments with per-entry binary labels (relevant: true/false)
+
+Status: PASS
