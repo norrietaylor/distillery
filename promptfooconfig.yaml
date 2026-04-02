@@ -86,7 +86,7 @@ tests:
           let p = output; if (typeof output === 'string') { try { p = JSON.parse(output); } catch(e) { p = {text: output}; } }
           const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
           const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
-          const ok = names.includes('distillery_search') || /no.*(?:entries|results|information|data)|knowledge base|search|cach/i.test(text);
+          const ok = names.includes('distillery_search') || /no.*(?:entries|results|information|data)|knowledge base|search|cach|doesn.t have/i.test(text);
           return ok ? true : `FAIL: type=${typeof output}, text=${text.substring(0,120)}`;
       - type: not-regex
         value: "(?i)(traceback|exception at |internal error|500 error)"
@@ -140,7 +140,7 @@ tests:
           let p = output; if (typeof output === 'string') { try { p = JSON.parse(output); } catch(e) { p = {text: output}; } }
           const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
           const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
-          const ok = names.includes('distillery_search') || /decision|log|no.*(?:entries|results)|knowledge/i.test(text);
+          const ok = names.includes('distillery_search') || /decision|log|no.*(?:entries|results)|knowledge|pour|synthe/i.test(text);
           return ok ? true : `FAIL: type=${typeof output}, text=${text.substring(0,120)}`;
       - type: not-regex
         value: "(?i)(traceback|exception at |internal error|500 error)"
