@@ -9,7 +9,6 @@ import pytest
 
 from distillery.config import (
     CONFIG_ENV_VAR,
-    DefaultsConfig,
     DistilleryConfig,
     FeedsConfig,
     FeedSourceConfig,
