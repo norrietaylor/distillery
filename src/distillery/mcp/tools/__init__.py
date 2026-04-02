@@ -1,6 +1,15 @@
 """Tools package for Distillery MCP server.
 
-This package contains domain-specific MCP tool handlers and shared utilities.
+Domain modules:
+  - crud.py      — status, store, get, update, list
+  - search.py    — search, find_similar, aggregate
+  - classify.py  — classify, review_queue, resolve_review
+  - quality.py   — check_dedup, check_conflicts
+  - analytics.py — metrics, quality, stale, tag_tree, interests, type_schemas
+  - feeds.py     — watch, poll, rescore, suggest_sources
+  - meta.py      — reserved for future cross-cutting tool concerns
+  - _common.py   — shared helpers (error/success response, validation)
+  - _errors.py   — standardized error code constants
 """
 
 from distillery.mcp.tools.analytics import (
