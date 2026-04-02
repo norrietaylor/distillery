@@ -5,6 +5,7 @@ allowed-tools:
   - "mcp__*__distillery_search"
   - "mcp__*__distillery_list"
   - "mcp__*__distillery_store"
+  - "mcp__*__distillery_update"
   - "mcp__*__distillery_check_dedup"
   - "mcp__*__distillery_interests"
   - "mcp__*__distillery_suggest_sources"
