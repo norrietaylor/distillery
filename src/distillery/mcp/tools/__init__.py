@@ -13,7 +13,6 @@ Domain modules:
 """
 
 from distillery.mcp.tools.analytics import (
-    _DEFAULT_STALE_DAYS,
     _handle_interests,
     _handle_metrics,
     _handle_quality,
@@ -50,7 +49,6 @@ from distillery.mcp.tools.search import (
 )
 
 __all__ = [
-    "_DEFAULT_STALE_DAYS",
     "_handle_classify",
     "_handle_resolve_review",
     "_handle_review_queue",

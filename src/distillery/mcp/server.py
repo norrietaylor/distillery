@@ -38,8 +38,6 @@ from distillery.mcp.tools.classify import (
     _handle_review_queue,
 )
 from distillery.mcp.tools.crud import (
-    _DEFAULT_DEDUP_LIMIT,
-    _DEFAULT_DEDUP_THRESHOLD,
     _handle_get,
     _handle_list,
     _handle_status,
@@ -209,8 +207,8 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         ctx: Context, content: str, entry_type: str, author: str,
         project: str | None = None, tags: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
-        dedup_threshold: float = _DEFAULT_DEDUP_THRESHOLD,
-        dedup_limit: int = _DEFAULT_DEDUP_LIMIT,
+        dedup_threshold: float | None = None,
+        dedup_limit: int | None = None,
     ) -> list[types.TextContent]:
         """Store a new knowledge entry and return its ID with dedup/conflict information.
 
@@ -220,8 +218,9 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         c = _lc(ctx)
         user = _get_authenticated_user()
         args: dict[str, Any] = dict(content=content, entry_type=entry_type, author=author,
-                                    dedup_threshold=dedup_threshold, dedup_limit=dedup_limit,
-                                    **_omit_none(project=project, tags=tags, metadata=metadata))
+                                    **_omit_none(project=project, tags=tags, metadata=metadata,
+                                                 dedup_threshold=dedup_threshold,
+                                                 dedup_limit=dedup_limit))
         result = await _handle_store(store=c["store"], arguments=args, cfg=c["config"], created_by=user)
         rd = json.loads(result[0].text) if result else {}
         await _audit(c, user, "distillery_store", rd.get("entry_id", ""), "store", result)

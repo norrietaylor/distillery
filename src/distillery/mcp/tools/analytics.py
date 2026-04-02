@@ -29,9 +29,6 @@ from distillery.mcp.tools._common import (
 
 logger = logging.getLogger(__name__)
 
-# Default stale threshold: entries not accessed in this many days are "stale".
-_DEFAULT_STALE_DAYS = 30
-
 
 # ---------------------------------------------------------------------------
 # Storage path helpers (duplicated here to avoid circular imports with server)
@@ -401,7 +398,7 @@ def _sync_gather_metrics(
     # ------------------------------------------------------------------ #
     # staleness section                                                    #
     # ------------------------------------------------------------------ #
-    stale_days = _DEFAULT_STALE_DAYS
+    stale_days = config.defaults.stale_days
 
     # accessed_at column may not exist yet (added by T02.1).
     # Fall back to updated_at if the column is absent.
@@ -654,7 +651,7 @@ async def _handle_stale(
     if err_days:
         return error_response("INVALID_PARAMS", err_days)
     days_raw = arguments.get("days")
-    days: int = int(days_raw) if days_raw is not None else config.classification.stale_days
+    days: int = int(days_raw) if days_raw is not None else config.defaults.stale_days
     if days < 1:
         return error_response("INVALID_PARAMS", "Field 'days' must be >= 1")
 
@@ -853,7 +850,6 @@ async def _handle_interests(
 
 
 __all__ = [
-    "_DEFAULT_STALE_DAYS",
     "_handle_interests",
     "_handle_metrics",
     "_handle_quality",

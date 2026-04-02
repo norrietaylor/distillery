@@ -74,9 +74,6 @@ _VALID_STATUSES = {"active", "pending_review", "archived"}
 # Fields that callers may never overwrite via distillery_update.
 _IMMUTABLE_FIELDS = {"id", "created_at", "source"}
 
-# Default similarity threshold for deduplication warnings.
-_DEFAULT_DEDUP_THRESHOLD = 0.92
-_DEFAULT_DEDUP_LIMIT = 3
 
 
 # ---------------------------------------------------------------------------
@@ -258,8 +255,11 @@ async def _handle_store(
     if metadata_err:
         return error_response("INVALID_PARAMS", metadata_err)
 
-    dedup_threshold = arguments.get("dedup_threshold", _DEFAULT_DEDUP_THRESHOLD)
-    dedup_limit = arguments.get("dedup_limit", _DEFAULT_DEDUP_LIMIT)
+    from distillery.config import DefaultsConfig
+
+    _defaults = cfg.defaults if cfg is not None else DefaultsConfig()
+    dedup_threshold = arguments.get("dedup_threshold", _defaults.dedup_threshold)
+    dedup_limit = arguments.get("dedup_limit", _defaults.dedup_limit)
 
     if not isinstance(dedup_threshold, (int, float)):
         return error_response("INVALID_PARAMS", "Field 'dedup_threshold' must be a number")
@@ -760,8 +760,6 @@ __all__ = [
     "_VALID_ENTRY_TYPES",
     "_VALID_STATUSES",
     "_IMMUTABLE_FIELDS",
-    "_DEFAULT_DEDUP_THRESHOLD",
-    "_DEFAULT_DEDUP_LIMIT",
     "_VALID_OUTPUT_MODES",
     "_entry_to_summary_dict",
     "_entry_to_id_dict",
