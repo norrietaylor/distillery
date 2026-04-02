@@ -45,10 +45,8 @@ Distillery captures the highest-value transformation — from noise to signal �
 ## Demo
 
 <p align="center">
-  <img src="docs/assets/distillery-demo.gif" alt="Distillery demo: /distill captures a decision, /recall retrieves it by semantic search" width="700">
+  <img src="docs/assets/distillery-demo.gif" alt="Distillery demo — /radar ambient intelligence digest" width="600">
 </p>
-
-*A `/distill` → `/recall` flow: capture a decision from your working session, then retrieve it later with natural language search.*
 
 ## Skills
 

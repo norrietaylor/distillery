@@ -1,7 +1,18 @@
 ---
 name: minutes
-description: "Captures and manages meeting notes in the knowledge base. Triggered by: 'minutes', 'meeting notes', 'capture meeting', 'log meeting', '/minutes', '/minutes --update <meeting_id>', or '/minutes --list'."
+description: "Capture meeting notes or append updates to an existing meeting record"
+allowed-tools:
+  - "mcp__*__distillery_store"
+  - "mcp__*__distillery_search"
+  - "mcp__*__distillery_get"
+  - "mcp__*__distillery_update"
+  - "mcp__*__distillery_list"
+  - "mcp__*__distillery_status"
+disable-model-invocation: true
+effort: medium
 ---
+
+<!-- Trigger phrases: minutes, meeting notes, capture meeting, log meeting, /minutes, /minutes --update <meeting_id>, /minutes --list -->
 
 # Minutes — Meeting Notes with Append Updates
 
