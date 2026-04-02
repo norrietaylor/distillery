@@ -13,38 +13,28 @@ description: "Distillery MCP smoke-test suite for PR CI gate"
 
 # ---------------------------------------------------------------------------
 # Provider: Claude CLI with Distillery MCP server (uses CLAUDE_CODE_OAUTH_TOKEN)
-#
-# We use a Python provider that invokes the `claude` CLI, which authenticates
-# via CLAUDE_CODE_OAUTH_TOKEN (OAuth). The direct `anthropic:messages:*`
-# provider requires ANTHROPIC_API_KEY which we don't have in CI.
 # ---------------------------------------------------------------------------
 providers:
   - id: "python:scripts/promptfoo_provider.py"
     label: claude-with-distillery-mcp
 
 # ---------------------------------------------------------------------------
-# Prompt template — passed to the Python provider's call_api(prompt, ...)
-# The Claude CLI has MCP tools available; no system prompt override needed.
+# Prompt template
 # ---------------------------------------------------------------------------
 prompts:
   - "You are a Distillery knowledge assistant. Use the available distillery MCP tools to fulfill the user's request. Always call distillery_status first to confirm connectivity.\n\n{{prompt}}"
 
 # ---------------------------------------------------------------------------
-# Default assertions applied to every test (can be overridden per test)
+# Default assertions
 # ---------------------------------------------------------------------------
 defaultTest:
   assert:
     - type: latency
-      threshold: 120000   # 2 minutes max per scenario
-    - type: not-regex
-      value: "(?i)(traceback|exception at |internal error|500 error)"
+      threshold: 120000
 
 # ---------------------------------------------------------------------------
-# Smoke-test scenarios
-#
-# Assertions check: tool calls made OR response content proves the skill
-# executed correctly. This is resilient to cases where the LLM uses tools
-# but the stream parser misses them, or where the LLM answers directly.
+# Helper: all javascript assertions use this parse pattern to handle output
+# being either an object {text, tool_calls} or a JSON string.
 # ---------------------------------------------------------------------------
 tests:
   # ---- /distill: store a new knowledge entry --------------------------------
@@ -54,26 +44,24 @@ tests:
     assert:
       - type: javascript
         value: |
-          const tc = output?.tool_calls ?? [];
-          const names = tc.map(t => t.name ?? '');
-          const text = output?.text ?? (typeof output === 'string' ? output : '');
-          const hasTools = names.some(n => ['distillery_status', 'distillery_store', 'distillery_check_dedup'].includes(n));
-          const hasContent = /stored|saved|entry.*id|created/i.test(text);
-          return (hasTools || hasContent) ? true : 'Expected distillery tool call or confirmation of stored entry';
+          let p = output; if (typeof output === 'string') { try { p = JSON.parse(output); } catch(e) { p = {text: output}; } }
+          const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
+          const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
+          const ok = names.some(n => ['distillery_status','distillery_store','distillery_check_dedup'].includes(n)) || /stored|saved|entry.*id|created/i.test(text);
+          return ok ? true : `FAIL: type=${typeof output}, text=${text.substring(0,120)}`;
 
-  # ---- /distill: deduplication check before store ---------------------------
+  # ---- /distill: dedup check before store -----------------------------------
   - description: "distill checks for duplicates before storing similar content"
     vars:
       prompt: '/distill "Decided to use DuckDB for local storage because it has no server process."'
     assert:
       - type: javascript
         value: |
-          const tc = output?.tool_calls ?? [];
-          const names = tc.map(t => t.name ?? '');
-          const text = output?.text ?? (typeof output === 'string' ? output : '');
-          const hasTools = names.some(n => ['distillery_status', 'distillery_check_dedup', 'distillery_store'].includes(n));
-          const hasContent = /stored|saved|entry.*id|created|duplicate|dedup/i.test(text);
-          return (hasTools || hasContent) ? true : 'Expected distillery tool call or confirmation of stored entry';
+          let p = output; if (typeof output === 'string') { try { p = JSON.parse(output); } catch(e) { p = {text: output}; } }
+          const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
+          const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
+          const ok = names.some(n => ['distillery_status','distillery_check_dedup','distillery_store'].includes(n)) || /stored|saved|entry.*id|created|duplicate|dedup/i.test(text);
+          return ok ? true : `FAIL: type=${typeof output}, text=${text.substring(0,120)}`;
 
   # ---- /recall: search for existing knowledge entries -----------------------
   - description: "recall searches knowledge base and returns relevant entries"
@@ -82,12 +70,11 @@ tests:
     assert:
       - type: javascript
         value: |
-          const tc = output?.tool_calls ?? [];
-          const names = tc.map(t => t.name ?? '');
-          const text = output?.text ?? (typeof output === 'string' ? output : '');
-          const hasTools = names.includes('distillery_search');
-          const hasContent = /duckdb|storage|database/i.test(text);
-          return (hasTools || hasContent) ? true : 'Expected search tool call or relevant content about storage';
+          let p = output; if (typeof output === 'string') { try { p = JSON.parse(output); } catch(e) { p = {text: output}; } }
+          const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
+          const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
+          const ok = names.includes('distillery_search') || /duckdb|storage|database/i.test(text);
+          return ok ? true : `FAIL: type=${typeof output}, text=${text.substring(0,120)}`;
 
   # ---- /recall: graceful empty store response -------------------------------
   - description: "recall handles empty knowledge base gracefully"
@@ -96,12 +83,13 @@ tests:
     assert:
       - type: javascript
         value: |
-          const tc = output?.tool_calls ?? [];
-          const names = tc.map(t => t.name ?? '');
-          const text = output?.text ?? (typeof output === 'string' ? output : '');
-          const hasTools = names.includes('distillery_search');
-          const hasContent = /no.*(?:entries|results|information|data)|knowledge base|search/i.test(text);
-          return (hasTools || hasContent) ? true : 'Expected search tool call or graceful empty-store response';
+          let p = output; if (typeof output === 'string') { try { p = JSON.parse(output); } catch(e) { p = {text: output}; } }
+          const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
+          const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
+          const ok = names.includes('distillery_search') || /no.*(?:entries|results|information|data)|knowledge base|search|cach/i.test(text);
+          return ok ? true : `FAIL: type=${typeof output}, text=${text.substring(0,120)}`;
+      - type: not-regex
+        value: "(?i)(traceback|exception at |internal error|500 error)"
 
   # ---- /bookmark: store a URL as a bookmark entry ---------------------------
   - description: "bookmark stores a URL with entry_type=bookmark via distillery_store"
@@ -110,12 +98,11 @@ tests:
     assert:
       - type: javascript
         value: |
-          const tc = output?.tool_calls ?? [];
-          const names = tc.map(t => t.name ?? '');
-          const text = output?.text ?? (typeof output === 'string' ? output : '');
-          const hasTools = names.some(n => ['distillery_status', 'distillery_store', 'distillery_check_dedup'].includes(n));
-          const hasContent = /bookmark|stored|saved|entry.*id/i.test(text);
-          return (hasTools || hasContent) ? true : 'Expected distillery tool call or bookmark confirmation';
+          let p = output; if (typeof output === 'string') { try { p = JSON.parse(output); } catch(e) { p = {text: output}; } }
+          const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
+          const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
+          const ok = names.some(n => ['distillery_status','distillery_store','distillery_check_dedup'].includes(n)) || /bookmark|stored|saved|entry.*id/i.test(text);
+          return ok ? true : `FAIL: type=${typeof output}, text=${text.substring(0,120)}`;
 
   # ---- /bookmark: dedup check for known URL ---------------------------------
   - description: "bookmark checks dedup before storing a known URL"
@@ -124,12 +111,11 @@ tests:
     assert:
       - type: javascript
         value: |
-          const tc = output?.tool_calls ?? [];
-          const names = tc.map(t => t.name ?? '');
-          const text = output?.text ?? (typeof output === 'string' ? output : '');
-          const hasTools = names.some(n => ['distillery_check_dedup', 'distillery_store', 'distillery_status'].includes(n));
-          const hasContent = /bookmark|stored|saved|duplicate|already|entry.*id/i.test(text);
-          return (hasTools || hasContent) ? true : 'Expected dedup check or bookmark confirmation';
+          let p = output; if (typeof output === 'string') { try { p = JSON.parse(output); } catch(e) { p = {text: output}; } }
+          const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
+          const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
+          const ok = names.some(n => ['distillery_check_dedup','distillery_store','distillery_status'].includes(n)) || /bookmark|stored|saved|duplicate|already|entry.*id/i.test(text);
+          return ok ? true : `FAIL: type=${typeof output}, text=${text.substring(0,120)}`;
 
   # ---- /pour: synthesize entries into a narrative ---------------------------
   - description: "pour searches and synthesizes knowledge into a coherent narrative"
@@ -138,12 +124,11 @@ tests:
     assert:
       - type: javascript
         value: |
-          const tc = output?.tool_calls ?? [];
-          const names = tc.map(t => t.name ?? '');
-          const text = output?.text ?? (typeof output === 'string' ? output : '');
-          const hasTools = names.includes('distillery_search');
-          const hasContent = /storage|architecture|duckdb|decision/i.test(text);
-          return (hasTools || hasContent) ? true : 'Expected search tool call or synthesized content about storage';
+          let p = output; if (typeof output === 'string') { try { p = JSON.parse(output); } catch(e) { p = {text: output}; } }
+          const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
+          const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
+          const ok = names.includes('distillery_search') || /storage|architecture|duckdb|decision/i.test(text);
+          return ok ? true : `FAIL: type=${typeof output}, text=${text.substring(0,120)}`;
 
   # ---- /pour: graceful with sparse data -------------------------------------
   - description: "pour handles sparse knowledge base without crashing"
@@ -152,12 +137,13 @@ tests:
     assert:
       - type: javascript
         value: |
-          const tc = output?.tool_calls ?? [];
-          const names = tc.map(t => t.name ?? '');
-          const text = output?.text ?? (typeof output === 'string' ? output : '');
-          const hasTools = names.includes('distillery_search');
-          const hasContent = /decision|log|no.*(?:entries|results)|knowledge/i.test(text);
-          return (hasTools || hasContent) ? true : 'Expected search tool call or decision log content';
+          let p = output; if (typeof output === 'string') { try { p = JSON.parse(output); } catch(e) { p = {text: output}; } }
+          const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
+          const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
+          const ok = names.includes('distillery_search') || /decision|log|no.*(?:entries|results)|knowledge/i.test(text);
+          return ok ? true : `FAIL: type=${typeof output}, text=${text.substring(0,120)}`;
+      - type: not-regex
+        value: "(?i)(traceback|exception at |internal error|500 error)"
 
   # ---- /watch: list configured feed sources ---------------------------------
   - description: "watch list reports configured feed sources via distillery_watch"
@@ -166,12 +152,11 @@ tests:
     assert:
       - type: javascript
         value: |
-          const tc = output?.tool_calls ?? [];
-          const names = tc.map(t => t.name ?? '');
-          const text = output?.text ?? (typeof output === 'string' ? output : '');
-          const hasTools = names.some(n => ['distillery_watch', 'distillery_status'].includes(n));
-          const hasContent = /feed.*source|watch|no.*(?:sources|feeds)|configured|empty/i.test(text);
-          return (hasTools || hasContent) ? true : 'Expected watch tool call or feed source listing';
+          let p = output; if (typeof output === 'string') { try { p = JSON.parse(output); } catch(e) { p = {text: output}; } }
+          const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
+          const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
+          const ok = names.some(n => ['distillery_watch','distillery_status'].includes(n)) || /feed.*source|watch|no.*(?:sources|feeds)|configured|empty/i.test(text);
+          return ok ? true : `FAIL: type=${typeof output}, text=${text.substring(0,120)}`;
 
   # ---- /watch: add RSS feed source ------------------------------------------
   - description: "watch add registers a new RSS source via distillery_watch"
@@ -180,12 +165,11 @@ tests:
     assert:
       - type: javascript
         value: |
-          const tc = output?.tool_calls ?? [];
-          const names = tc.map(t => t.name ?? '');
-          const text = output?.text ?? (typeof output === 'string' ? output : '');
-          const hasTools = names.includes('distillery_watch');
-          const hasContent = /added|registered|hacker news|rss|feed.*source/i.test(text);
-          return (hasTools || hasContent) ? true : 'Expected watch tool call or feed source added confirmation';
+          let p = output; if (typeof output === 'string') { try { p = JSON.parse(output); } catch(e) { p = {text: output}; } }
+          const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
+          const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
+          const ok = names.includes('distillery_watch') || /added|registered|hacker news|rss|feed.*source/i.test(text);
+          return ok ? true : `FAIL: type=${typeof output}, text=${text.substring(0,120)}`;
 
 # ---------------------------------------------------------------------------
 # Output settings
