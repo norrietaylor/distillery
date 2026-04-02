@@ -1,8 +1,9 @@
-"""MCP server for Distillery — 22 tools over stdio or HTTP.
+"""MCP server for Distillery — 23 tools over stdio or HTTP.
 
 Handlers live in ``src/distillery/mcp/tools/`` (crud, search, classify, quality,
-analytics, feeds, meta). This module owns: FastMCP app creation, lifespan,
-shared-state init, tool registration wrappers, and middleware composition.
+analytics, feeds, configure, meta). This module owns: FastMCP app creation,
+lifespan, shared-state init, tool registration wrappers, and middleware
+composition.
 """
 
 from __future__ import annotations
@@ -37,6 +38,7 @@ from distillery.mcp.tools.classify import (
     _handle_resolve_review,
     _handle_review_queue,
 )
+from distillery.mcp.tools.configure import _handle_configure
 from distillery.mcp.tools.crud import (
     _handle_get,
     _handle_list,
@@ -67,6 +69,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "create_server", "error_response", "success_response",
     "_get_authenticated_user", "_normalize_db_path", "_create_embedding_provider",
+    "_handle_configure",
     "_handle_status", "_handle_store", "_handle_get", "_handle_update", "_handle_list",
     "_handle_search", "_handle_find_similar", "_handle_aggregate",
     "_handle_classify", "_handle_review_queue", "_handle_resolve_review",
@@ -477,6 +480,24 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         """Re-score existing feed entries against the current knowledge base."""
         c = _lc(ctx)
         return await _handle_rescore(store=c["store"], config=c["config"], arguments={"limit": limit})
+
+    @server.tool
+    async def distillery_configure(
+        ctx: Context, section: str, key: str, value: str | int | float,
+    ) -> list[types.TextContent]:
+        """Update a runtime configuration value and persist it to distillery.yaml.
+
+        Accepts an allowlisted (section, key) pair and validates ranges and
+        cross-field constraints before applying.  Returns previous and new values.
+
+        section examples: "feeds.thresholds", "defaults", "classification".
+        key examples: "alert", "digest", "dedup_threshold", "confidence_threshold".
+        """
+        c = _lc(ctx)
+        return await _handle_configure(
+            config=c["config"],
+            arguments={"section": section, "key": key, "value": value},
+        )
 
     return server
 

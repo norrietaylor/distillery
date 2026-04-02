@@ -7,6 +7,7 @@ Domain modules:
   - quality.py   — check_dedup, check_conflicts
   - analytics.py — metrics, quality, stale, tag_tree, interests, type_schemas
   - feeds.py     — watch, poll, rescore, suggest_sources
+  - configure.py — distillery_configure runtime config tool
   - meta.py      — reserved for future cross-cutting tool concerns
   - _common.py   — shared helpers (error/success response, validation)
   - _errors.py   — standardized error code constants
@@ -25,6 +26,7 @@ from distillery.mcp.tools.classify import (
     _handle_resolve_review,
     _handle_review_queue,
 )
+from distillery.mcp.tools.configure import _handle_configure
 from distillery.mcp.tools.crud import (
     _handle_get,
     _handle_list,
@@ -49,6 +51,7 @@ from distillery.mcp.tools.search import (
 )
 
 __all__ = [
+    "_handle_configure",
     "_handle_classify",
     "_handle_resolve_review",
     "_handle_review_queue",
