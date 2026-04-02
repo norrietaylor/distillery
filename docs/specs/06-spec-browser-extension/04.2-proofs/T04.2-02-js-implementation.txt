@@ -1,0 +1,40 @@
+Type: file
+Description: Watch tab JavaScript implementation in popup.js
+Timestamp: 2026-04-01T00:00:00Z
+Status: PASS
+
+=== Functions verified in popup.js ===
+
+  buildDetectedFeedItem(feed)          [LINE 568] - builds list item with Watch button
+  buildWatchedSourceItem(source)       [LINE 634] - builds list item with Unwatch button
+  loadDetectedFeeds()                  [LINE 703] - fetches from background via getDetectedFeeds
+  loadWatchedSources()                 [LINE 743] - fetches via background watchList -> distillery_watch
+  initializeWatchTab()                 [LINE 792] - loads both feeds and sources in parallel
+  setupWatchAddForm()                  [LINE 799] - wire up Add Feed form button
+
+=== Behavior verified ===
+
+On tab switch to Watch (line 193):
+  - calls initializeWatchTab()
+  - which calls loadDetectedFeeds() + loadWatchedSources() concurrently
+
+Watch button click on detected feed (line 601):
+  - sends { action: 'watchAdd', url, source_type, label }
+  - on success: marks button as 'Watched', refreshes watched sources
+
+Add Feed form submission (line 828):
+  - validates URL is non-empty
+  - sends { action: 'watchAdd', url, source_type, label: url }
+  - on success: clears input, shows success feedback, refreshes watched sources
+
+Unwatch button click (line 668):
+  - sends { action: 'watchRemove', url }
+  - on success: removes <li> from DOM, shows empty state if list is now empty
+
+=== setupTabNavigation updated ===
+
+Line 193: 'watch' tab triggers initializeWatchTab() on switch.
+
+=== setupWatchAddForm registered in DOMContentLoaded ===
+
+Line 864: setupWatchAddForm() called alongside other tab setup functions.

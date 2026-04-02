@@ -653,6 +653,81 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       sendResponse({ status: 'ok', data: detectedFeeds });
       break;
 
+    case 'watchList': {
+      // Fetch currently watched sources via distillery_watch action:list.
+      mcpClient
+        .callTool('distillery_watch', { action: 'list' })
+        .then((result) => {
+          // The MCP tool returns a text/content response; parse the sources list.
+          // result.content is an array of { type: 'text', text: '...' } items.
+          let sources = [];
+          try {
+            if (Array.isArray(result.content)) {
+              const textContent = result.content
+                .filter((c) => c.type === 'text')
+                .map((c) => c.text)
+                .join('\n');
+              // Attempt to parse JSON-embedded sources from the text response.
+              const jsonMatch = textContent.match(/```json\s*([\s\S]*?)```/);
+              if (jsonMatch) {
+                const parsed = JSON.parse(jsonMatch[1]);
+                if (Array.isArray(parsed)) {
+                  sources = parsed;
+                } else if (parsed && Array.isArray(parsed.sources)) {
+                  sources = parsed.sources;
+                }
+              }
+            }
+          } catch (_parseErr) {
+            // Non-fatal; return empty sources.
+          }
+          sendResponse({ status: 'ok', data: sources });
+        })
+        .catch((err) => {
+          sendResponse({ status: 'error', error: err.message, errorType: err.name });
+        });
+      return true; // Keep message channel open for async response.
+    }
+
+    case 'watchAdd': {
+      // Add a feed source via distillery_watch action:add.
+      const { url: watchUrl, source_type: watchSourceType, label: watchLabel } = request;
+      mcpClient
+        .callTool('distillery_watch', {
+          action: 'add',
+          url: watchUrl,
+          source_type: watchSourceType || 'rss',
+          label: watchLabel || watchUrl,
+        })
+        .then((result) => {
+          sendResponse({ status: 'ok', data: result });
+        })
+        .catch((err) => {
+          if (err.name === 'MCPAuthError') {
+            handleAuthError();
+          }
+          sendResponse({ status: 'error', error: err.message, errorType: err.name });
+        });
+      return true; // Keep message channel open for async response.
+    }
+
+    case 'watchRemove': {
+      // Remove a feed source via distillery_watch action:remove.
+      const { url: removeUrl } = request;
+      mcpClient
+        .callTool('distillery_watch', { action: 'remove', url: removeUrl })
+        .then((result) => {
+          sendResponse({ status: 'ok', data: result });
+        })
+        .catch((err) => {
+          if (err.name === 'MCPAuthError') {
+            handleAuthError();
+          }
+          sendResponse({ status: 'error', error: err.message, errorType: err.name });
+        });
+      return true; // Keep message channel open for async response.
+    }
+
     case 'setAuthToken': {
       const { token, username } = request;
       mcpClient.setAuthToken(token || null);

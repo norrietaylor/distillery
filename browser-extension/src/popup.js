@@ -186,9 +186,11 @@ function setupTabNavigation() {
         tabPanel.classList.add('active');
       }
 
-      // Re-initialize bookmark tab when switching to it.
+      // Re-initialize tabs on switch.
       if (tabName === 'bookmark') {
         initializeBookmarkTab();
+      } else if (tabName === 'watch') {
+        initializeWatchTab();
       }
     });
   });
@@ -553,6 +555,303 @@ function setupBookmarkSaveButton() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Watch Tab
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a DOM element for a detected feed list item.
+ *
+ * @param {{ url: string, title: string, source_type: string }} feed
+ * @returns {HTMLLIElement}
+ */
+function buildDetectedFeedItem(feed) {
+  const li = document.createElement('li');
+  li.className = 'watch-list-item';
+
+  const info = document.createElement('div');
+  info.className = 'watch-list-item-info';
+
+  const label = document.createElement('span');
+  label.className = 'watch-list-item-label';
+  label.textContent = feed.title || feed.url;
+  label.title = feed.title || feed.url;
+
+  const urlSpan = document.createElement('span');
+  urlSpan.className = 'watch-list-item-url';
+  urlSpan.textContent = feed.url;
+  urlSpan.title = feed.url;
+
+  info.appendChild(label);
+  info.appendChild(urlSpan);
+
+  const typeTag = document.createElement('span');
+  typeTag.className = `watch-list-item-type type-${feed.source_type}`;
+  typeTag.textContent = feed.source_type;
+
+  const watchBtn = document.createElement('button');
+  watchBtn.type = 'button';
+  watchBtn.className = 'btn btn-watch';
+  watchBtn.textContent = 'Watch';
+  watchBtn.addEventListener('click', async () => {
+    watchBtn.disabled = true;
+    watchBtn.textContent = '...';
+    try {
+      const resp = await chrome.runtime.sendMessage({
+        action: 'watchAdd',
+        url: feed.url,
+        source_type: feed.source_type === 'atom' ? 'rss' : feed.source_type,
+        label: feed.title || feed.url,
+      });
+      if (resp && resp.status === 'ok') {
+        watchBtn.textContent = 'Watched';
+        // Refresh watched sources list.
+        loadWatchedSources();
+      } else {
+        watchBtn.textContent = 'Watch';
+        watchBtn.disabled = false;
+        console.error('[popup] watchAdd failed:', resp && resp.error);
+      }
+    } catch (err) {
+      watchBtn.textContent = 'Watch';
+      watchBtn.disabled = false;
+      console.error('[popup] watchAdd message failed:', err);
+    }
+  });
+
+  li.appendChild(info);
+  li.appendChild(typeTag);
+  li.appendChild(watchBtn);
+  return li;
+}
+
+/**
+ * Build a DOM element for a watched source list item.
+ *
+ * @param {{ url: string, label?: string, source_type?: string }} source
+ * @returns {HTMLLIElement}
+ */
+function buildWatchedSourceItem(source) {
+  const li = document.createElement('li');
+  li.className = 'watch-list-item';
+
+  const info = document.createElement('div');
+  info.className = 'watch-list-item-info';
+
+  const label = document.createElement('span');
+  label.className = 'watch-list-item-label';
+  label.textContent = source.label || source.url;
+  label.title = source.label || source.url;
+
+  const urlSpan = document.createElement('span');
+  urlSpan.className = 'watch-list-item-url';
+  urlSpan.textContent = source.url;
+  urlSpan.title = source.url;
+
+  info.appendChild(label);
+  info.appendChild(urlSpan);
+
+  const sourceType = source.source_type || 'rss';
+  const typeTag = document.createElement('span');
+  typeTag.className = `watch-list-item-type type-${sourceType}`;
+  typeTag.textContent = sourceType;
+
+  const unwatchBtn = document.createElement('button');
+  unwatchBtn.type = 'button';
+  unwatchBtn.className = 'btn btn-unwatch';
+  unwatchBtn.textContent = 'Unwatch';
+  unwatchBtn.addEventListener('click', async () => {
+    unwatchBtn.disabled = true;
+    unwatchBtn.textContent = '...';
+    try {
+      const resp = await chrome.runtime.sendMessage({
+        action: 'watchRemove',
+        url: source.url,
+      });
+      if (resp && resp.status === 'ok') {
+        li.remove();
+        // Check if list is now empty.
+        const list = document.getElementById('watched-sources-list');
+        if (list && list.children.length === 0) {
+          list.style.display = 'none';
+          const empty = document.getElementById('watched-sources-empty');
+          if (empty) empty.style.display = 'block';
+        }
+      } else {
+        unwatchBtn.textContent = 'Unwatch';
+        unwatchBtn.disabled = false;
+        console.error('[popup] watchRemove failed:', resp && resp.error);
+      }
+    } catch (err) {
+      unwatchBtn.textContent = 'Unwatch';
+      unwatchBtn.disabled = false;
+      console.error('[popup] watchRemove message failed:', err);
+    }
+  });
+
+  li.appendChild(info);
+  li.appendChild(typeTag);
+  li.appendChild(unwatchBtn);
+  return li;
+}
+
+/**
+ * Populate the Detected Feeds section from the background's detectedFeeds store.
+ *
+ * @returns {Promise<void>}
+ */
+async function loadDetectedFeeds() {
+  const loadingEl = document.getElementById('detected-feeds-loading');
+  const listEl = document.getElementById('detected-feeds-list');
+  const emptyEl = document.getElementById('detected-feeds-empty');
+
+  // Show loading.
+  loadingEl.style.display = 'flex';
+  listEl.style.display = 'none';
+  if (emptyEl) emptyEl.style.display = 'none';
+
+  let feeds = [];
+  try {
+    const resp = await chrome.runtime.sendMessage({ action: 'getDetectedFeeds' });
+    if (resp && resp.status === 'ok' && Array.isArray(resp.data)) {
+      feeds = resp.data;
+    }
+  } catch (err) {
+    console.error('[popup] getDetectedFeeds failed:', err);
+  }
+
+  loadingEl.style.display = 'none';
+
+  if (feeds.length === 0) {
+    if (emptyEl) emptyEl.style.display = 'block';
+    listEl.style.display = 'none';
+  } else {
+    listEl.innerHTML = '';
+    feeds.forEach((feed) => {
+      listEl.appendChild(buildDetectedFeedItem(feed));
+    });
+    listEl.style.display = 'flex';
+    if (emptyEl) emptyEl.style.display = 'none';
+  }
+}
+
+/**
+ * Fetch and display the currently watched sources via distillery_watch action:list.
+ *
+ * @returns {Promise<void>}
+ */
+async function loadWatchedSources() {
+  const loadingEl = document.getElementById('watched-sources-loading');
+  const listEl = document.getElementById('watched-sources-list');
+  const emptyEl = document.getElementById('watched-sources-empty');
+  const errorEl = document.getElementById('watched-sources-error');
+
+  // Show loading, hide others.
+  loadingEl.style.display = 'flex';
+  listEl.style.display = 'none';
+  if (emptyEl) emptyEl.style.display = 'none';
+  if (errorEl) errorEl.style.display = 'none';
+
+  try {
+    const resp = await chrome.runtime.sendMessage({ action: 'watchList' });
+
+    loadingEl.style.display = 'none';
+
+    if (!resp || resp.status === 'error') {
+      if (errorEl) errorEl.style.display = 'block';
+      return;
+    }
+
+    const sources = Array.isArray(resp.data) ? resp.data : [];
+
+    if (sources.length === 0) {
+      if (emptyEl) emptyEl.style.display = 'block';
+      listEl.style.display = 'none';
+    } else {
+      listEl.innerHTML = '';
+      sources.forEach((source) => {
+        listEl.appendChild(buildWatchedSourceItem(source));
+      });
+      listEl.style.display = 'flex';
+      if (emptyEl) emptyEl.style.display = 'none';
+    }
+  } catch (err) {
+    console.error('[popup] watchList failed:', err);
+    loadingEl.style.display = 'none';
+    if (errorEl) errorEl.style.display = 'block';
+  }
+}
+
+/**
+ * Initialize the Watch tab: load detected feeds and watched sources.
+ *
+ * Called when the Watch tab becomes active.
+ *
+ * @returns {Promise<void>}
+ */
+async function initializeWatchTab() {
+  await Promise.all([loadDetectedFeeds(), loadWatchedSources()]);
+}
+
+/**
+ * Set up the Add Feed form in the Watch tab.
+ */
+function setupWatchAddForm() {
+  const addBtn = document.getElementById('watch-add-btn');
+  const urlInput = document.getElementById('watch-url-input');
+  const typeSelect = document.getElementById('watch-type-select');
+  const successEl = document.getElementById('watch-add-success');
+  const errorEl = document.getElementById('watch-add-error');
+  const errorMsgEl = document.getElementById('watch-add-error-msg');
+
+  if (!addBtn) return;
+
+  addBtn.addEventListener('click', async () => {
+    const url = (urlInput ? urlInput.value.trim() : '');
+    const sourceType = typeSelect ? typeSelect.value : 'rss';
+
+    // Hide previous feedback.
+    if (successEl) successEl.style.display = 'none';
+    if (errorEl) errorEl.style.display = 'none';
+
+    if (!url) {
+      if (errorMsgEl) errorMsgEl.textContent = 'Please enter a feed URL.';
+      if (errorEl) errorEl.style.display = 'block';
+      return;
+    }
+
+    addBtn.disabled = true;
+    addBtn.textContent = 'Adding...';
+
+    try {
+      const resp = await chrome.runtime.sendMessage({
+        action: 'watchAdd',
+        url,
+        source_type: sourceType,
+        label: url,
+      });
+
+      if (resp && resp.status === 'ok') {
+        if (urlInput) urlInput.value = '';
+        if (successEl) successEl.style.display = 'block';
+        // Refresh watched sources.
+        loadWatchedSources();
+      } else {
+        const errMsg = (resp && resp.error) ? resp.error : 'Failed to add feed.';
+        if (errorMsgEl) errorMsgEl.textContent = errMsg;
+        if (errorEl) errorEl.style.display = 'block';
+      }
+    } catch (err) {
+      console.error('[popup] watchAdd message failed:', err);
+      if (errorMsgEl) errorMsgEl.textContent = err.message || 'Failed to add feed.';
+      if (errorEl) errorEl.style.display = 'block';
+    } finally {
+      addBtn.disabled = false;
+      addBtn.textContent = 'Watch';
+    }
+  });
+}
+
 /**
  * Main entry point
  */
@@ -562,6 +861,7 @@ document.addEventListener('DOMContentLoaded', () => {
   setupSignInButton();
   setupSignOutButton();
   setupBookmarkSaveButton();
+  setupWatchAddForm();
   setupAutoRefresh();
 
   // Initialize bookmark tab immediately since it is the default active tab.

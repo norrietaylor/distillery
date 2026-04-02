@@ -144,7 +144,63 @@
       <!-- Watch Tab -->
       <div id="watch-tab" class="tab-panel" style="display: none;">
         <div class="watch-section">
-          <p>Watch tab content will be added in T04</p>
+
+          <!-- Detected Feeds -->
+          <div class="watch-subsection">
+            <h3 class="watch-subsection-title">Detected Feeds</h3>
+            <div id="detected-feeds-loading" class="watch-loading">
+              <span class="loading-spinner"></span>
+              <span>Detecting feeds...</span>
+            </div>
+            <ul id="detected-feeds-list" class="watch-list" style="display: none;"></ul>
+            <p id="detected-feeds-empty" class="watch-empty" style="display: none;">
+              No feeds detected on this page.
+            </p>
+          </div>
+
+          <!-- Add Feed -->
+          <div class="watch-subsection">
+            <h3 class="watch-subsection-title">Add Feed</h3>
+            <div class="watch-add-form">
+              <input
+                type="url"
+                id="watch-url-input"
+                class="form-input"
+                placeholder="https://example.com/feed.xml"
+                autocomplete="off"
+              />
+              <div class="watch-add-row">
+                <select id="watch-type-select" class="form-select">
+                  <option value="rss">RSS</option>
+                  <option value="github">GitHub</option>
+                </select>
+                <button type="button" id="watch-add-btn" class="btn btn-watch">Watch</button>
+              </div>
+              <div id="watch-add-success" class="watch-feedback watch-feedback-success" style="display: none;">
+                Feed added to watch list.
+              </div>
+              <div id="watch-add-error" class="watch-feedback watch-feedback-error" style="display: none;">
+                <span id="watch-add-error-msg"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Watched Sources -->
+          <div class="watch-subsection">
+            <h3 class="watch-subsection-title">Watched Sources</h3>
+            <div id="watched-sources-loading" class="watch-loading" style="display: none;">
+              <span class="loading-spinner"></span>
+              <span>Loading watched sources...</span>
+            </div>
+            <ul id="watched-sources-list" class="watch-list" style="display: none;"></ul>
+            <p id="watched-sources-empty" class="watch-empty" style="display: none;">
+              No sources being watched yet.
+            </p>
+            <p id="watched-sources-error" class="watch-error" style="display: none;">
+              Could not load watched sources.
+            </p>
+          </div>
+
         </div>
       </div>
     </div>
