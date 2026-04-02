@@ -684,10 +684,10 @@ class TestPeriodDaysParameter:
         config: DistilleryConfig,
         embedding_provider: MockEmbeddingProvider,
     ) -> None:
-        """period_days < 1 must return a VALIDATION_ERROR response."""
+        """period_days < 1 must return a INVALID_PARAMS response."""
         response = await _handle_metrics(store, config, embedding_provider, {"period_days": 0})
         data = parse_mcp_response(response)
-        assert data.get("error") is not None or data.get("code") == "VALIDATION_ERROR"
+        assert data.get("error") is not None or data.get("code") == "INVALID_PARAMS"
 
 
 # ---------------------------------------------------------------------------

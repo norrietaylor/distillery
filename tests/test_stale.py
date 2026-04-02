@@ -22,6 +22,7 @@ import pytest
 
 from distillery.config import (
     ClassificationConfig,
+    DefaultsConfig,
     DistilleryConfig,
     EmbeddingConfig,
     StorageConfig,
@@ -59,18 +60,16 @@ def _make_config(stale_days: int = 30) -> DistilleryConfig:
     Create a DistilleryConfig preconfigured for in-memory testing.
 
     Parameters:
-        stale_days (int): Number of days after which an entry is considered stale; used to set the classification stale_days threshold.
+        stale_days (int): Number of days after which an entry is considered stale; used to set the defaults.stale_days threshold.
 
     Returns:
-        DistilleryConfig: Configuration using in-memory storage, a mock embedding provider, and a classification config with confidence_threshold 0.6 and the specified stale_days.
+        DistilleryConfig: Configuration using in-memory storage, a mock embedding provider, and a defaults config with the specified stale_days.
     """
     return DistilleryConfig(
         storage=StorageConfig(database_path=":memory:"),
         embedding=EmbeddingConfig(provider="", model="mock-hash-4d", dimensions=4),
-        classification=ClassificationConfig(
-            confidence_threshold=0.6,
-            stale_days=stale_days,
-        ),
+        classification=ClassificationConfig(confidence_threshold=0.6),
+        defaults=DefaultsConfig(stale_days=stale_days),
     )
 
 
@@ -515,13 +514,13 @@ class TestValidation:
         response = await _handle_stale(store, config, {"days": "not-an-int"})
         data = parse_mcp_response(response)
         assert data.get("error") is True
-        assert "VALIDATION_ERROR" in data["code"]
+        assert "INVALID_PARAMS" in data["code"]
 
     async def test_invalid_limit_type(self, store: DuckDBStore, config: DistilleryConfig) -> None:
         response = await _handle_stale(store, config, {"limit": "not-an-int"})
         data = parse_mcp_response(response)
         assert data.get("error") is True
-        assert "VALIDATION_ERROR" in data["code"]
+        assert "INVALID_PARAMS" in data["code"]
 
     async def test_days_below_one_is_invalid(
         self, store: DuckDBStore, config: DistilleryConfig

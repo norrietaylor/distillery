@@ -1,0 +1,9 @@
+Type: cli
+Command: grep -r '_DEFAULT_DEDUP_THRESHOLD|_DEFAULT_DEDUP_LIMIT|_DEFAULT_STALE_DAYS' src/distillery/mcp/
+Expected: No output (no hardcoded constants in mcp/ directory)
+Timestamp: 2026-04-01T00:00:00Z
+
+(no output - zero matches found)
+
+Status: PASS - No _DEFAULT_DEDUP_THRESHOLD, _DEFAULT_DEDUP_LIMIT, or _DEFAULT_STALE_DAYS constants
+found in src/distillery/mcp/. All handlers now read from config.defaults.

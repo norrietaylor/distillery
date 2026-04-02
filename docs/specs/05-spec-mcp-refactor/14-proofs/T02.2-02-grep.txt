@@ -1,0 +1,20 @@
+Type: cli
+Command: grep -rn "validate_limit" src/distillery/mcp/tools/ --include="*.py"
+Expected: validate_limit used in search.py (3 times) and crud.py (1 time)
+Timestamp: 2026-04-01T18:00:00Z
+Status: PASS
+
+Output:
+src/distillery/mcp/tools/search.py:23:from distillery.mcp.tools._errors import validate_limit
+src/distillery/mcp/tools/search.py:66:    limit_result = validate_limit(arguments.get("limit", 10), min_val=1, max_val=200, default=10)
+src/distillery/mcp/tools/search.py:143:    limit_result = validate_limit(arguments.get("limit", 10), min_val=1, max_val=200, default=10)
+src/distillery/mcp/tools/search.py:208:    limit_result = validate_limit(arguments.get("limit", 50), min_val=1, max_val=500, default=50)
+src/distillery/mcp/tools/crud.py:30:from distillery.mcp.tools._errors import validate_limit
+src/distillery/mcp/tools/crud.py:652:    limit_result = validate_limit(arguments.get("limit", 20), min_val=1, max_val=500, default=20)
+src/distillery/mcp/tools/_errors.py:61:def validate_limit(
+
+validate_limit() is used in:
+- search.py: _handle_search (line 66), _handle_find_similar (line 143), _handle_aggregate (line 208)
+- crud.py: _handle_list (line 652)
+
+All 4 hardcoded limit-validation patterns replaced with validate_limit() calls.

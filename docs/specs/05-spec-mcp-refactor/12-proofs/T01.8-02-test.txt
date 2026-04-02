@@ -1,0 +1,11 @@
+Type: cli
+Command: pytest -m unit --tb=short -q
+Expected: All pass (895 tests)
+Timestamp: 2026-04-01T17:00:00Z
+Status: PASS
+
+Output:
+895 passed, 2 skipped, 381 deselected, 1 warning in 2.71s
+
+All 895 unit tests pass — no regressions from the server.py slimming.
+Test count matches pre-task baseline (895).

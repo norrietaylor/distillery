@@ -1,0 +1,27 @@
+Type: test
+Command: pytest tests/test_mcp_dedup.py -v
+Expected: All pass
+Timestamp: 2026-04-01T00:00:00Z
+
+============================= test session starts ==============================
+platform linux -- Python 3.13.7, pytest-9.0.2, pluggy-1.6.0 -- /usr/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/norrie.guest/code/distillery/.worktrees/feature-mcp-refactor
+configfile: pyproject.toml
+plugins: asyncio-1.3.0, anyio-4.13.0, cov-7.1.0, typeguard-4.4.2
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 9 items
+
+tests/test_mcp_dedup.py::TestCheckDedupNoEntries::test_empty_store_returns_create PASSED [ 11%]
+tests/test_mcp_dedup.py::TestCheckDedupNoEntries::test_create_result_has_reasoning PASSED [ 22%]
+tests/test_mcp_dedup.py::TestCheckDedupValidation::test_missing_content_returns_error PASSED [ 33%]
+tests/test_mcp_dedup.py::TestCheckDedupSkipAction::test_identical_embedding_returns_skip PASSED [ 44%]
+tests/test_mcp_dedup.py::TestCheckDedupSkipAction::test_skip_result_includes_entry_fields PASSED [ 55%]
+tests/test_mcp_dedup.py::TestCheckDedupMergeAction::test_high_similarity_returns_merge [ 66%]
+tests/test_mcp_dedup.py::TestCheckDedupLinkAction::test_moderate_similarity_returns_link [ 77%]
+tests/test_mcp_dedup.py::TestCheckDedupConfigThresholds::test_custom_skip_threshold_applied [ 88%]
+tests/test_mcp_dedup.py::TestCheckDedupConfigThresholds::test_dedup_limit_controls_similar_entries_returned [100%]
+
+============================== 9 passed in 0.67s ===============================
+
+Status: PASS
