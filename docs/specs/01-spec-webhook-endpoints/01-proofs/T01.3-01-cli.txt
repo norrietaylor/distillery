@@ -1,9 +1,0 @@
-Type: cli
-Command: mypy --strict src/distillery/mcp/server.py src/distillery/mcp/__main__.py
-Expected: Success: no issues found
-Timestamp: 2026-03-31T21:40:00Z
-
-Output:
-Success: no issues found in 2 source files
-
-Status: PASS

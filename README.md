@@ -22,11 +22,13 @@
   <a href="https://norrietaylor.github.io/distillery/presentation.html">Slides</a>
 </p>
 
----
-
 <p align="center">
-  <img src="docs/assets/distillery-demo.gif" alt="Distillery demo — /radar ambient intelligence digest" width="600">
+  <a href="https://pypi.org/project/distillery/"><img src="https://img.shields.io/pypi/v/distillery" alt="PyPI version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/norrietaylor/distillery" alt="License"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python version"></a>
 </p>
+
+---
 
 ## What is Distillery?
 
@@ -35,6 +37,12 @@ Distillery is a team knowledge base accessed through Claude Code skills. It refi
 Distillery captures the highest-value transformation — from noise to signal — and makes it a tool the whole team can use.
 
 > **Full documentation:** [norrietaylor.github.io/distillery](https://norrietaylor.github.io/distillery/)
+
+## Demo
+
+<p align="center">
+  <img src="docs/assets/distillery-demo.gif" alt="Distillery demo — /radar ambient intelligence digest" width="600">
+</p>
 
 ## Skills
 
