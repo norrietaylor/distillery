@@ -1,0 +1,26 @@
+Type: file
+Description: Verify /radar SKILL.md contains Step 6 dedup check before storing
+Command: grep -A 20 "Step 6: Check for Duplicates" .claude-plugin/skills/radar/SKILL.md
+Expected: Step 6 includes distillery_check_dedup call with create/skip/merge/link outcomes
+Timestamp: 2026-04-02T15:00:00Z
+
+=== OUTPUT ===
+### Step 6: Check for Duplicates (if --store specified)
+
+If `--store` was specified, check for duplicate digests before storing.
+
+Call `distillery_check_dedup(content="<digest summary>")`. Handle by `action` field:
+
+**`"create"`:** No similar entries. Proceed to Step 7.
+
+**`"skip"`:** Near-exact duplicate. Show similarity table and offer: (1) Store anyway, (2) Skip.
+
+**`"merge"`:** Very similar entry exists. Show similarity table and offer: (1) Store anyway, (2) Merge with existing, (3) Skip.
+
+For merge: combine new digest with the most similar entry's content, call `distillery_update` with the entry ID and merged content, confirm and stop.
+
+**`"link"`:** Related but distinct. Show similarity table, note new entry will be linked. Ask to proceed or skip. If proceeding, include `"related_entries": ["<id1>", ...]` in metadata at Step 7.
+
+=== VERIFICATION ===
+Step 6 includes distillery_check_dedup call: PASS
+All 4 outcomes (create/skip/merge/link) documented: PASS

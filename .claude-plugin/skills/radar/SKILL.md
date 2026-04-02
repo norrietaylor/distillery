@@ -5,6 +5,7 @@ allowed-tools:
   - "mcp__*__distillery_search"
   - "mcp__*__distillery_list"
   - "mcp__*__distillery_store"
+  - "mcp__*__distillery_check_dedup"
   - "mcp__*__distillery_interests"
   - "mcp__*__distillery_suggest_sources"
   - "mcp__*__distillery_status"
@@ -38,7 +39,7 @@ See CONVENTIONS.md — skip if already confirmed this conversation.
 | `--days N` | Look back N days for recent feed entries (default: 7) |
 | `--limit N` | Maximum number of feed entries to include (default: 20) |
 | `--suggest` | Include source suggestions at end of digest |
-| `--no-store` | Display digest but do not store it as a knowledge entry |
+| `--store` | Store digest as a knowledge entry (default: display-only) |
 
 ### Step 3: Retrieve Recent Feed Entries
 
@@ -74,15 +75,43 @@ You (the executing Claude instance) produce the synthesis — do not dump raw en
 
 Call `distillery_suggest_sources(max_suggestions=5)`. Include suggestions when `--suggest` is specified or when entries were found. Omit silently if the call returns an error or empty results.
 
-### Step 6: Store Digest
+### Step 6: Check for Duplicates (if --store specified)
 
-Unless `--no-store` was specified, store the digest. Determine author & project per CONVENTIONS.md.
+If `--store` was specified, check for duplicate digests before storing.
 
-Call `distillery_store(content="<full digest markdown>", entry_type="digest", author="<author>", tags=["digest", "radar", "ambient"])`. Record the returned `entry_id`.
+Call `distillery_check_dedup(content="<digest summary>")`. Handle by `action` field:
 
-### Step 7: Confirm
+**`"create"`:** No similar entries. Proceed to Step 7.
 
-Display the digest, then `Digest stored: <entry_id>`. Omit the stored line if `--no-store` was used.
+**`"skip"`:** Near-exact duplicate. Show similarity table and offer: (1) Store anyway, (2) Skip.
+
+**`"merge"`:** Very similar entry exists. Show similarity table and offer: (1) Store anyway, (2) Merge with existing, (3) Skip.
+
+For merge: combine new digest with the most similar entry's content, call `distillery_update` with the entry ID and merged content, confirm and stop.
+
+**`"link"`:** Related but distinct. Show similarity table, note new entry will be linked. Ask to proceed or skip. If proceeding, include `"related_entries": ["<id1>", ...]` in metadata at Step 7.
+
+```
+Similar entries found:
+
+| Entry ID | Similarity | Preview |
+|----------|-----------|---------|
+| <id>     | <score%>  | <content_preview> |
+```
+
+On skip in any case: "Skipped. No new entry was stored." and stop.
+
+### Step 7: Store Digest
+
+If `--store` was specified, store the digest. Determine author & project per CONVENTIONS.md.
+
+Call `distillery_store(content="<full digest markdown>", entry_type="digest", author="<author>", project="<project>", tags=["digest", "radar", "ambient"], metadata={"period_start": "<YYYY-MM-DD>", "period_end": "<YYYY-MM-DD>"})`. Record the returned `entry_id`.
+
+On MCP errors, see CONVENTIONS.md error handling — display and stop.
+
+### Step 8: Confirm
+
+Display the digest, then `Digest stored: <entry_id>`. Omit the stored line if `--store` was not specified.
 
 ## Output Format
 
@@ -121,8 +150,11 @@ Digest stored: <entry_id>
 
 - Default lookback is 7 days; default limit is 20 — respect overrides
 - Group entries by source tag when available; fall back to topic grouping
-- Store the digest by default; skip only with `--no-store`
+- Display digest by default; store only with `--store` flag
 - Always include `digest`, `radar`, `ambient` tags when storing
+- Always use `entry_type="digest"` for store calls
+- Metadata must include `period_start` and `period_end` as ISO 8601 dates
+- Follow shared dedup pattern from CONVENTIONS.md (create/skip/merge/link outcomes)
 - On MCP errors, see CONVENTIONS.md error handling — display and stop
 - No retry loops — report errors and stop
 - Omit Suggested Sources section entirely if no results or error

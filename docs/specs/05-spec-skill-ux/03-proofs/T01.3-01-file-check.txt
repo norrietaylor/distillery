@@ -1,0 +1,11 @@
+Type: file
+Description: Verify /radar SKILL.md contains distillery_check_dedup in allowed-tools
+Command: grep -n "distillery_check_dedup" .claude-plugin/skills/radar/SKILL.md
+Expected: Tool is listed in allowed-tools section
+Timestamp: 2026-04-02T15:00:00Z
+
+=== OUTPUT ===
+8:  - "mcp__*__distillery_check_dedup"
+
+=== VERIFICATION ===
+Tool is present in allowed-tools list at line 8: PASS
