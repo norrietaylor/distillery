@@ -37,6 +37,12 @@ Distillery captures the highest-value transformation — from noise to signal �
 
 > **Full documentation:** [norrietaylor.github.io/distillery](https://norrietaylor.github.io/distillery/)
 
+## Demo
+
+<p align="center">
+  <img src="docs/assets/distillery-demo.gif" alt="Distillery demo — /distill captures a decision, /pour synthesizes it" width="600">
+</p>
+
 ## Skills
 
 Distillery provides 10 Claude Code slash commands:
