@@ -14,9 +14,9 @@
 
 /* global MCPClient, MCPNetworkError, OfflineQueue, startOAuthFlow, clearAuth, getStoredAuth */
 
-importScripts('mcp-client.js');
-importScripts('offline-queue.js');
-importScripts('auth.js');
+importScripts('src/mcp-client.js');
+importScripts('src/offline-queue.js');
+importScripts('src/auth.js');
 
 // ---------------------------------------------------------------------------
 // Constants

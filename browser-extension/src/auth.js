@@ -1,9 +1,12 @@
 /**
- * GitHub OAuth Authentication Module for the Distillery Browser Extension.
+ * OAuth Authentication Module for the Distillery Browser Extension.
  *
- * Implements GitHub OAuth 2.0 web application flow using
- * chrome.identity.launchWebAuthFlow to handle the browser-extension-specific
- * redirect URI (chrome-extension://{id}/auth-callback.html).
+ * Implements MCP OAuth 2.1 flow using the server's own authorization and token
+ * endpoints (discovered via RFC 8414 metadata). Uses PKCE (S256) and dynamic
+ * client registration per the MCP spec.
+ *
+ * The server proxies to GitHub OAuth internally — the extension only talks to
+ * the MCP server's OAuth endpoints, never to GitHub directly.
  *
  * Exports (via globalThis for service worker importScripts compatibility):
  *   startOAuthFlow(clientId, serverUrl)  — full OAuth flow; returns {token, username}
@@ -19,11 +22,8 @@
 // Constants
 // ---------------------------------------------------------------------------
 
-/** GitHub OAuth authorization endpoint. */
-const GITHUB_AUTHORIZE_URL = 'https://github.com/login/oauth/authorize';
-
-/** Scope requested from GitHub. */
-const GITHUB_SCOPE = 'user';
+/** Scope requested. */
+const OAUTH_SCOPE = 'user';
 
 /**
  * GitHub user API endpoint — used to fetch the authenticated username
@@ -34,6 +34,8 @@ const GITHUB_USER_API = 'https://api.github.com/user';
 /** Storage keys for persisted auth data. */
 const STORAGE_KEY_TOKEN = 'authToken';
 const STORAGE_KEY_USERNAME = 'authUsername';
+const STORAGE_KEY_CLIENT_ID = 'oauthClientId';
+const STORAGE_KEY_CLIENT_SECRET = 'oauthClientSecret';
 
 // ---------------------------------------------------------------------------
 // Custom error types
@@ -54,34 +56,136 @@ class AuthCancelledError extends Error {
 }
 
 // ---------------------------------------------------------------------------
+// PKCE helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Generate a random code verifier for PKCE (43-128 chars, unreserved charset).
+ * @returns {string}
+ */
+function _generateCodeVerifier() {
+  const array = new Uint8Array(32);
+  crypto.getRandomValues(array);
+  return Array.from(array, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Derive a S256 code challenge from a code verifier.
+ * @param {string} verifier
+ * @returns {Promise<string>} Base64url-encoded SHA-256 hash.
+ */
+async function _deriveCodeChallenge(verifier) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(verifier);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  // Base64url encode
+  const base64 = btoa(String.fromCharCode(...new Uint8Array(digest)));
+  return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+// ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 
 /**
- * Build the GitHub authorization URL for the OAuth flow.
+ * Discover the MCP server's OAuth metadata via RFC 8414.
  *
- * @param {string} clientId - GitHub OAuth app client ID.
- * @param {string} redirectUri - Extension callback URI from chrome.identity.
- * @returns {string} Full authorization URL.
+ * @param {string} serverUrl - Full MCP server URL (e.g. https://distillery-mcp.fly.dev/mcp).
+ * @returns {Promise<{authorization_endpoint: string, token_endpoint: string, registration_endpoint: string|null}>}
  */
-function _buildAuthUrl(clientId, redirectUri) {
+async function _discoverOAuthMetadata(serverUrl) {
+  const baseUrl = serverUrl.replace(/\/mcp\/?$/, '');
+  const metadataUrl = `${baseUrl}/.well-known/oauth-authorization-server`;
+
+  try {
+    const response = await fetch(metadataUrl, {
+      headers: { Accept: 'application/json' },
+    });
+    if (response.ok) {
+      return await response.json();
+    }
+  } catch (_) {
+    // Fall through to defaults.
+  }
+
+  // Fallback if discovery fails — use conventional endpoints.
+  return {
+    authorization_endpoint: `${baseUrl}/authorize`,
+    token_endpoint: `${baseUrl}/token`,
+    registration_endpoint: `${baseUrl}/register`,
+  };
+}
+
+/**
+ * Dynamically register the extension as an OAuth client with the MCP server.
+ *
+ * @param {string} registrationEndpoint
+ * @param {string} redirectUri
+ * @returns {Promise<{client_id: string, client_secret: string|null}>}
+ */
+async function _registerClient(registrationEndpoint, redirectUri) {
+  // Check for cached registration first.
+  const cached = await chrome.storage.local.get([STORAGE_KEY_CLIENT_ID, STORAGE_KEY_CLIENT_SECRET]);
+  if (cached[STORAGE_KEY_CLIENT_ID]) {
+    return {
+      client_id: cached[STORAGE_KEY_CLIENT_ID],
+      client_secret: cached[STORAGE_KEY_CLIENT_SECRET] || null,
+    };
+  }
+
+  const response = await fetch(registrationEndpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({
+      client_name: 'Distillery Browser Extension',
+      redirect_uris: [redirectUri],
+      grant_types: ['authorization_code'],
+      response_types: ['code'],
+      token_endpoint_auth_method: 'client_secret_post',
+    }),
+  });
+
+  if (!response.ok) {
+    throw new AuthError(`Client registration failed (HTTP ${response.status})`);
+  }
+
+  const data = await response.json();
+  if (!data.client_id) {
+    throw new AuthError('Client registration response missing client_id');
+  }
+
+  // Cache registration for future flows.
+  await chrome.storage.local.set({
+    [STORAGE_KEY_CLIENT_ID]: data.client_id,
+    [STORAGE_KEY_CLIENT_SECRET]: data.client_secret || null,
+  });
+
+  return {
+    client_id: data.client_id,
+    client_secret: data.client_secret || null,
+  };
+}
+
+/**
+ * Build the authorization URL using the server's authorize endpoint.
+ */
+function _buildAuthUrl(authorizationEndpoint, clientId, redirectUri, codeChallenge) {
   const params = new URLSearchParams({
     client_id: clientId,
-    scope: GITHUB_SCOPE,
+    response_type: 'code',
+    scope: OAUTH_SCOPE,
     redirect_uri: redirectUri,
+    code_challenge: codeChallenge,
+    code_challenge_method: 'S256',
   });
-  return `${GITHUB_AUTHORIZE_URL}?${params.toString()}`;
+  return `${authorizationEndpoint}?${params.toString()}`;
 }
 
 /**
  * Extract the authorization code from a redirect URI.
- *
- * After GitHub redirects back to the extension, the URI looks like:
- *   https://{ext-id}.chromiumapp.org/?code=abc123&state=...
- *
- * @param {string} redirectedToUrl - The URL GitHub redirected to.
- * @returns {string} The authorization code.
- * @throws {AuthError} If no code is present in the URL.
  */
 function _extractCode(redirectedToUrl) {
   let parsed;
@@ -97,7 +201,7 @@ function _extractCode(redirectedToUrl) {
     const description = parsed.searchParams.get('error_description');
     throw new AuthError(
       error
-        ? `GitHub OAuth error: ${error}${description ? ` — ${description}` : ''}`
+        ? `OAuth error: ${error}${description ? ` — ${description}` : ''}`
         : 'No authorization code in redirect URL'
     );
   }
@@ -106,35 +210,37 @@ function _extractCode(redirectedToUrl) {
 }
 
 /**
- * Exchange an authorization code for an access token via the MCP server.
+ * Exchange an authorization code for an access token via the MCP server's token endpoint.
  *
- * The MCP server's OAuth token endpoint accepts a POST with the code and
- * redirect_uri and returns an access token.
- *
- * Expected request body: { code, redirect_uri }
- * Expected response: { access_token } (or { error, error_description } on failure)
- *
- * @param {string} serverUrl - MCP server base URL (e.g. https://distillery-mcp.fly.dev/mcp).
- * @param {string} code - Authorization code from GitHub.
- * @param {string} redirectUri - The redirect URI used in the initial authorization request.
+ * @param {string} tokenEndpoint - Server's token endpoint URL.
+ * @param {string} code - Authorization code.
+ * @param {string} redirectUri - Redirect URI used in auth request.
+ * @param {string} clientId - OAuth client ID.
+ * @param {string|null} clientSecret - OAuth client secret (if issued).
+ * @param {string} codeVerifier - PKCE code verifier.
  * @returns {Promise<string>} The access token.
- * @throws {AuthError} On exchange failure or network error.
  */
-async function _exchangeCode(serverUrl, code, redirectUri) {
-  // Derive the token endpoint from the MCP server URL.
-  // Convention: /mcp → /oauth/token (strips the /mcp suffix).
-  const baseUrl = serverUrl.replace(/\/mcp\/?$/, '');
-  const tokenUrl = `${baseUrl}/oauth/token`;
+async function _exchangeCode(tokenEndpoint, code, redirectUri, clientId, clientSecret, codeVerifier) {
+  const body = new URLSearchParams({
+    grant_type: 'authorization_code',
+    code,
+    redirect_uri: redirectUri,
+    client_id: clientId,
+    code_verifier: codeVerifier,
+  });
+  if (clientSecret) {
+    body.set('client_secret', clientSecret);
+  }
 
   let response;
   try {
-    response = await fetch(tokenUrl, {
+    response = await fetch(tokenEndpoint, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded',
         Accept: 'application/json',
       },
-      body: JSON.stringify({ code, redirect_uri: redirectUri }),
+      body: body.toString(),
     });
   } catch (err) {
     throw new AuthError(`Token exchange network error: ${err.message}`);
@@ -194,33 +300,53 @@ async function _fetchUsername(token) {
 // ---------------------------------------------------------------------------
 
 /**
- * Run the full GitHub OAuth 2.0 web application flow.
+ * Run the full MCP OAuth 2.1 flow with PKCE and dynamic client registration.
  *
  * Steps:
- * 1. Obtain the extension's redirect URI via chrome.identity.getRedirectURL().
- * 2. Open the GitHub authorization page via chrome.identity.launchWebAuthFlow().
- * 3. Extract the authorization code from the redirect URI.
- * 4. Exchange the code for an access token via the MCP server's token endpoint.
- * 5. Fetch the GitHub username from the GitHub user API.
- * 6. Persist token and username in chrome.storage.local.
- * 7. Return { token, username }.
+ * 1. Discover the server's OAuth metadata (authorization, token, registration endpoints).
+ * 2. Dynamically register the extension as an OAuth client (cached after first use).
+ * 3. Generate PKCE code verifier + challenge (S256).
+ * 4. Open the authorization page via chrome.identity.launchWebAuthFlow().
+ * 5. Extract the authorization code from the redirect URI.
+ * 6. Exchange the code for an access token with PKCE verifier.
+ * 7. Fetch the GitHub username from the GitHub user API.
+ * 8. Persist token and username in chrome.storage.local.
+ * 9. Return { token, username }.
  *
- * @param {string} clientId - GitHub OAuth app client ID.
- * @param {string} serverUrl - Full MCP server URL used to derive the token endpoint.
+ * @param {string} _clientId - Ignored (kept for API compat). Client ID is obtained via dynamic registration.
+ * @param {string} serverUrl - Full MCP server URL (e.g. https://distillery-mcp.fly.dev/mcp).
  * @returns {Promise<{token: string, username: string|null}>}
  * @throws {AuthCancelledError} If the user cancels or closes the auth popup.
  * @throws {AuthError} On any other error during the OAuth flow.
  */
-async function startOAuthFlow(clientId, serverUrl) {
-  if (!clientId) {
-    throw new AuthError('GitHub client ID is required. Configure it in the extension options.');
+async function startOAuthFlow(_clientId, serverUrl) {
+  if (!serverUrl) {
+    throw new AuthError('Server URL is required for OAuth flow.');
   }
 
-  // Step 1: Get the extension redirect URI.
-  const redirectUri = chrome.identity.getRedirectURL('github');
+  // Step 1: Discover OAuth endpoints.
+  const metadata = await _discoverOAuthMetadata(serverUrl);
 
-  // Step 2: Build the authorization URL and launch the web auth flow.
-  const authUrl = _buildAuthUrl(clientId, redirectUri);
+  // Step 2: Get redirect URI and register the extension as a client.
+  const redirectUri = chrome.identity.getRedirectURL('oauth');
+  let registration;
+  if (metadata.registration_endpoint) {
+    registration = await _registerClient(metadata.registration_endpoint, redirectUri);
+  } else {
+    throw new AuthError('Server does not support dynamic client registration.');
+  }
+
+  // Step 3: Generate PKCE code verifier and challenge.
+  const codeVerifier = _generateCodeVerifier();
+  const codeChallenge = await _deriveCodeChallenge(codeVerifier);
+
+  // Step 4: Build the authorization URL and launch the web auth flow.
+  const authUrl = _buildAuthUrl(
+    metadata.authorization_endpoint,
+    registration.client_id,
+    redirectUri,
+    codeChallenge
+  );
 
   let redirectedToUrl;
   try {
@@ -239,9 +365,6 @@ async function startOAuthFlow(clientId, serverUrl) {
       );
     });
   } catch (err) {
-    // chrome.identity.launchWebAuthFlow rejects with a plain Error when the
-    // user closes the popup. The message typically contains "cancelled" or
-    // "user" on Chrome.
     const message = err && err.message ? err.message.toLowerCase() : '';
     if (
       message.includes('cancel') ||
@@ -254,22 +377,29 @@ async function startOAuthFlow(clientId, serverUrl) {
     throw new AuthError(`OAuth flow failed: ${err && err.message ? err.message : String(err)}`);
   }
 
-  // Step 3: Extract the authorization code from the callback URL.
+  // Step 5: Extract the authorization code from the callback URL.
   const code = _extractCode(redirectedToUrl);
 
-  // Step 4: Exchange the code for an access token.
-  const token = await _exchangeCode(serverUrl, code, redirectUri);
+  // Step 6: Exchange the code for an access token with PKCE verifier.
+  const token = await _exchangeCode(
+    metadata.token_endpoint,
+    code,
+    redirectUri,
+    registration.client_id,
+    registration.client_secret,
+    codeVerifier
+  );
 
-  // Step 5: Fetch the GitHub username.
+  // Step 7: Fetch the GitHub username.
   const username = await _fetchUsername(token);
 
-  // Step 6: Persist token and username.
+  // Step 8: Persist token and username.
   await chrome.storage.local.set({
     [STORAGE_KEY_TOKEN]: token,
     [STORAGE_KEY_USERNAME]: username,
   });
 
-  // Step 7: Return auth result.
+  // Step 9: Return auth result.
   return { token, username };
 }
 
@@ -292,7 +422,12 @@ async function getStoredAuth() {
  * @returns {Promise<void>}
  */
 async function clearAuth() {
-  await chrome.storage.local.remove([STORAGE_KEY_TOKEN, STORAGE_KEY_USERNAME]);
+  await chrome.storage.local.remove([
+    STORAGE_KEY_TOKEN,
+    STORAGE_KEY_USERNAME,
+    STORAGE_KEY_CLIENT_ID,
+    STORAGE_KEY_CLIENT_SECRET,
+  ]);
 }
 
 /**
