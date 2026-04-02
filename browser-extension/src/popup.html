@@ -36,7 +36,23 @@
             Connecting to server...
           </p>
           <div id="offline-queue" class="offline-queue" style="display: none;">
-            <p class="queue-label">⚠ <span id="queue-count">0</span> pending operations</p>
+            <p class="queue-label">&#9888; <span id="queue-count">0</span> pending operations</p>
+          </div>
+          <!-- Auth section: shown for remote connections -->
+          <div id="auth-section" class="auth-section" style="display: none;">
+            <!-- Shown when remote + unauthenticated -->
+            <button id="signin-btn" class="btn btn-signin" style="display: none;">
+              Sign in with GitHub
+            </button>
+            <!-- Shown when authenticated -->
+            <div id="auth-user" class="auth-user" style="display: none;">
+              <span id="auth-username" class="auth-username"></span>
+              <button id="signout-btn" class="btn btn-signout">Sign out</button>
+            </div>
+          </div>
+          <!-- Local author display: shown for local connections -->
+          <div id="local-author" class="local-author" style="display: none;">
+            <span id="local-author-label" class="local-author-label"></span>
           </div>
         </div>
       </div>

@@ -160,6 +160,71 @@ body {
   margin: 0;
 }
 
+/* Auth section */
+.auth-section {
+  margin-top: 8px;
+}
+
+.btn {
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 7px 14px;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.btn-signin {
+  background-color: #1a1a1a;
+  color: #ffffff;
+  width: 100%;
+}
+
+.btn-signin:hover {
+  background-color: #333;
+}
+
+.auth-user {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.auth-username {
+  font-size: 12px;
+  color: #444;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.btn-signout {
+  background-color: transparent;
+  border: 1px solid #ccc;
+  color: #666;
+  font-size: 12px;
+  padding: 4px 10px;
+  flex-shrink: 0;
+}
+
+.btn-signout:hover {
+  background-color: #f0f0f0;
+  color: #1a1a1a;
+}
+
+/* Local author display */
+.local-author {
+  margin-top: 8px;
+}
+
+.local-author-label {
+  font-size: 12px;
+  color: #666;
+}
+
 /* Placeholder sections */
 .bookmark-section,
 .watch-section {
@@ -269,5 +334,32 @@ body {
 
   .tab-content::-webkit-scrollbar-thumb:hover {
     background: #555;
+  }
+
+  .btn-signin {
+    background-color: #f5f5f5;
+    color: #1a1a1a;
+  }
+
+  .btn-signin:hover {
+    background-color: #e0e0e0;
+  }
+
+  .auth-username {
+    color: #aaa;
+  }
+
+  .btn-signout {
+    border-color: #444;
+    color: #aaa;
+  }
+
+  .btn-signout:hover {
+    background-color: #262626;
+    color: #f5f5f5;
+  }
+
+  .local-author-label {
+    color: #aaa;
   }
 }

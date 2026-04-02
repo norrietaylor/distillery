@@ -12,10 +12,11 @@
  * - Manage offline queue: enqueue failed operations, replay on reconnect.
  */
 
-/* global MCPClient, MCPNetworkError, OfflineQueue */
+/* global MCPClient, MCPNetworkError, OfflineQueue, startOAuthFlow, clearAuth, getStoredAuth */
 
 importScripts('mcp-client.js');
 importScripts('offline-queue.js');
+importScripts('auth.js');
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -390,6 +391,37 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       connect();
       sendResponse({ status: 'ok' });
       break;
+    }
+
+    case 'startOAuth': {
+      // Load options to get clientId and serverUrl, then run the OAuth flow.
+      loadOptions().then(async (options) => {
+        const clientId = options.githubClientId;
+        const serverUrl = options.remoteServerUrl;
+
+        try {
+          const { token, username } = await startOAuthFlow(clientId, serverUrl);
+          // Apply the token to the active MCP client.
+          mcpClient.setAuthToken(token);
+          // Update connection state with the new username and reconnect.
+          await connect();
+          sendResponse({ status: 'ok', username });
+        } catch (err) {
+          console.error('[background] OAuth flow failed:', err.message);
+          sendResponse({ status: 'error', error: err.message, errorType: err.name });
+        }
+      });
+      return true; // Keep message channel open for async response.
+    }
+
+    case 'signOut': {
+      // Clear stored auth credentials and reconnect (will be unauthenticated).
+      clearAuth().then(async () => {
+        mcpClient.setAuthToken(null);
+        await connect();
+        sendResponse({ status: 'ok' });
+      });
+      return true; // Keep message channel open for async response.
     }
 
     default:

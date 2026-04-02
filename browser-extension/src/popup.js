@@ -50,6 +50,71 @@ function updateConnectionStatus(connectionState) {
 
   // Update offline queue display if present
   updateOfflineQueueDisplay(connectionState);
+
+  // Update auth UI
+  updateAuthUI(connectionState);
+}
+
+/**
+ * Update the auth section based on connection state.
+ *
+ * Rules:
+ *   - local server: hide auth section, show local author name if available
+ *   - remote server, authenticated: show auth-user (username + sign-out button)
+ *   - remote server, unauthenticated: show sign-in button
+ *   - disconnected / unknown: hide auth section
+ *
+ * @param {Object} connectionState - State object from background worker
+ */
+function updateAuthUI(connectionState) {
+  const authSection = document.getElementById('auth-section');
+  const signinBtn = document.getElementById('signin-btn');
+  const authUser = document.getElementById('auth-user');
+  const authUsername = document.getElementById('auth-username');
+  const localAuthor = document.getElementById('local-author');
+  const localAuthorLabel = document.getElementById('local-author-label');
+
+  // Hide everything first.
+  authSection.style.display = 'none';
+  signinBtn.style.display = 'none';
+  authUser.style.display = 'none';
+  localAuthor.style.display = 'none';
+
+  if (!connectionState.connected) {
+    // Disconnected from a remote server — still show the sign-in button so
+    // the user can re-authenticate (e.g. after a 401 / token expiry).
+    if (connectionState.serverType === 'remote') {
+      authSection.style.display = 'block';
+      signinBtn.style.display = 'block';
+    }
+    return;
+  }
+
+  if (connectionState.serverType === 'local') {
+    // Local connection: show configured author name if present.
+    chrome.storage.local.get('defaultAuthor', (stored) => {
+      const author = stored.defaultAuthor || null;
+      if (author) {
+        localAuthorLabel.textContent = `Author: ${author}`;
+        localAuthor.style.display = 'block';
+      }
+    });
+    return;
+  }
+
+  // Remote connection: show auth UI.
+  authSection.style.display = 'block';
+
+  if (connectionState.username) {
+    // Authenticated.
+    authUsername.textContent = connectionState.username;
+    authUser.style.display = 'flex';
+    signinBtn.style.display = 'none';
+  } else {
+    // Unauthenticated.
+    signinBtn.style.display = 'block';
+    authUser.style.display = 'none';
+  }
 }
 
 /**
@@ -135,6 +200,54 @@ function setupSettingsButton() {
 }
 
 /**
+ * Set up GitHub OAuth sign-in button.
+ *
+ * Sends a startOAuth message to the background service worker.
+ * The worker calls startOAuthFlow from auth.js, then sends back
+ * a connectionStatusChanged broadcast when auth completes.
+ */
+function setupSignInButton() {
+  const signinBtn = document.getElementById('signin-btn');
+  signinBtn.addEventListener('click', async () => {
+    signinBtn.disabled = true;
+    signinBtn.textContent = 'Signing in...';
+    try {
+      const response = await chrome.runtime.sendMessage({ action: 'startOAuth' });
+      if (!response || response.status !== 'ok') {
+        const errorMsg = (response && response.error) ? response.error : 'Sign-in failed.';
+        console.error('[popup] OAuth failed:', errorMsg);
+        signinBtn.textContent = 'Sign in with GitHub';
+        signinBtn.disabled = false;
+      }
+      // On success the background broadcasts connectionStatusChanged,
+      // which triggers updateConnectionStatus and refreshes the UI.
+    } catch (err) {
+      console.error('[popup] startOAuth message failed:', err);
+      signinBtn.textContent = 'Sign in with GitHub';
+      signinBtn.disabled = false;
+    }
+  });
+}
+
+/**
+ * Set up sign-out button.
+ *
+ * Sends a signOut message to the background service worker.
+ * The worker calls clearAuth and re-connects.
+ */
+function setupSignOutButton() {
+  const signoutBtn = document.getElementById('signout-btn');
+  signoutBtn.addEventListener('click', async () => {
+    try {
+      await chrome.runtime.sendMessage({ action: 'signOut' });
+      // Background broadcasts connectionStatusChanged after clearing auth.
+    } catch (err) {
+      console.error('[popup] signOut message failed:', err);
+    }
+  });
+}
+
+/**
  * Set up auto-refresh of connection status
  * Refresh every 5 seconds to detect connection changes
  */
@@ -159,5 +272,7 @@ function setupAutoRefresh() {
 document.addEventListener('DOMContentLoaded', () => {
   setupTabNavigation();
   setupSettingsButton();
+  setupSignInButton();
+  setupSignOutButton();
   setupAutoRefresh();
 });
