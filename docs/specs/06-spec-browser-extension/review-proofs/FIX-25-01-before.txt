@@ -1,0 +1,14 @@
+Type: file-snapshot
+Description: manifest.json host_permissions BEFORE fix
+File: browser-extension/manifest.json
+Timestamp: 2026-04-02T00:05:00Z
+
+BEFORE FIX (lines 19-21):
+  "host_permissions": [
+    "http://localhost:*/",
+    "https://distillery-mcp.fly.dev/*"
+  ],
+
+ISSUE:
+1. "http://localhost:*/" is too narrow - only matches root path, not /mcp endpoint
+2. Missing "https://api.github.com/*" - auth.js calls fetch(GITHUB_USER_API) which needs this permission

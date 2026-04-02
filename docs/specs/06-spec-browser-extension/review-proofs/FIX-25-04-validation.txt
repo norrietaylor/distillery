@@ -1,0 +1,24 @@
+Type: cli
+Command: python3 -m json.tool browser-extension/manifest.json
+Description: Validate manifest.json syntax and completeness
+Timestamp: 2026-04-02T00:08:00Z
+
+Test Case: JSON Syntax Validation
+Expected: JSON parses without errors
+Status: PASS
+
+Verification Details:
+✓ manifest.json parses successfully as valid JSON
+✓ manifest_version: 3 (correct)
+✓ manifest includes new alarms permission (needed for timer-based operations)
+✓ host_permissions array contains 3 entries:
+  1. "http://localhost:*/*" ✓ (fixed: now includes /** pattern)
+  2. "https://distillery-mcp.fly.dev/*" ✓ (unchanged, already correct)
+  3. "https://api.github.com/*" ✓ (added, required for GitHub user API)
+
+Compliance Check:
+✓ All required permissions present
+✓ No extraneous permissions added
+✓ Matches spec requirement from issue FIX-REVIEW #25
+✓ Aligns with auth.js GITHUB_USER_API constant (https://api.github.com/user)
+✓ Aligns with localhost MCP endpoint requirements

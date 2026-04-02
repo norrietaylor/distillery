@@ -1,0 +1,27 @@
+Type: file
+Description: Verify Watch tab div does not have inline style="display: none;"
+Expected: Watch tab panel (id="watch-tab") uses class-based CSS styling without inline style override
+Timestamp: 2026-04-02T00:10:00Z
+
+TEST: Check that Watch tab div no longer has inline style="display: none;"
+======================================================================
+
+File: browser-extension/src/popup.html, Line 145
+
+Before fix:
+  <div id="watch-tab" class="tab-panel" style="display: none;">
+
+After fix:
+  <div id="watch-tab" class="tab-panel">
+
+Result: PASS
+Explanation:
+- The inline style="display: none;" has been removed
+- The Watch tab now relies on CSS class-based visibility control
+- CSS rules now work correctly:
+  * .tab-panel { display: none; } - hides all tabs by default
+  * .tab-panel.active { display: block; } - shows tabs with .active class
+- The setupTabNavigation() function in popup.js toggles the .active class
+  when tab buttons are clicked (lines 174-187)
+- Without the inline style override, the tab can now be made visible
+  by adding the .active class

@@ -13,11 +13,13 @@
     "activeTab",
     "contextMenus",
     "identity",
-    "notifications"
+    "notifications",
+    "alarms"
   ],
   "host_permissions": [
-    "http://localhost:*/",
-    "https://distillery-mcp.fly.dev/*"
+    "http://localhost:*/*",
+    "https://distillery-mcp.fly.dev/*",
+    "https://api.github.com/*"
   ],
   "background": {
     "service_worker": "src/background.js"
