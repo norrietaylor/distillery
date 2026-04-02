@@ -56,7 +56,8 @@ def call_api(
             [
                 "claude",
                 "--output-format",
-                "json",
+                "stream-json",
+                "--verbose",
                 "--model",
                 "claude-haiku-4-5-20251001",
                 "--mcp-config",
@@ -76,37 +77,39 @@ def call_api(
             env={**os.environ, "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"},
         )
 
-        # Parse JSON output (single JSON object with result, tool calls, usage)
+        # Parse stream-json output (one JSON object per line).
+        # Event types: "assistant" (text/tool_use blocks), "tool_result", "result".
         response_text = ""
         tool_calls: list[dict[str, object]] = []
         input_tokens = 0
         output_tokens = 0
 
-        try:
-            data = json.loads(result.stdout)
-        except json.JSONDecodeError:
-            data = {}
+        for line in result.stdout.strip().splitlines():
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
 
-        # --output-format json returns {result, messages, ...}
-        if isinstance(data, dict):
-            response_text = data.get("result", "")
+            event_type = event.get("type", "")
 
-            # Extract tool calls from the messages array
-            for msg in data.get("messages", []):
-                if msg.get("role") == "assistant":
-                    for block in msg.get("content", []):
-                        if block.get("type") == "tool_use":
-                            tool_calls.append(
-                                {
-                                    "name": block.get("name", ""),
-                                    "input": block.get("input", {}),
-                                }
-                            )
+            # Assistant messages contain tool_use blocks
+            if event_type == "assistant":
+                message = event.get("message", {})
+                for block in message.get("content", []):
+                    if block.get("type") == "tool_use":
+                        tool_calls.append(
+                            {"name": block.get("name", ""), "input": block.get("input", {})}
+                        )
+                    elif block.get("type") == "text":
+                        response_text = block.get("text", "")
 
-            # Token usage from top-level or nested
-            usage = data.get("usage", {})
-            input_tokens = usage.get("input_tokens", 0)
-            output_tokens = usage.get("output_tokens", 0)
+            # Result event has the final response and usage
+            if "result" in event:
+                response_text = event["result"]
+            if "usage" in event:
+                usage = event["usage"]
+                input_tokens += usage.get("input_tokens", 0)
+                output_tokens += usage.get("output_tokens", 0)
 
         if result.returncode != 0:
             error_msg = (
