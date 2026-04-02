@@ -6,6 +6,7 @@ allowed-tools:
   - "mcp__*__distillery_search"
   - "mcp__*__distillery_get"
   - "mcp__*__distillery_update"
+  - "mcp__*__distillery_list"
   - "mcp__*__distillery_status"
 disable-model-invocation: true
 effort: medium

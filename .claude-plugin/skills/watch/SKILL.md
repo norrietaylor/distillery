@@ -4,6 +4,10 @@ description: "Add, remove, or list monitored feed sources (RSS and GitHub)"
 allowed-tools:
   - "mcp__*__distillery_watch"
   - "mcp__*__distillery_status"
+  - "CronCreate"
+  - "CronList"
+  - "CronDelete"
+  - "RemoteTrigger"
 disable-model-invocation: true
 effort: medium
 ---

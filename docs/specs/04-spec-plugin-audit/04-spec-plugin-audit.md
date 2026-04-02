@@ -30,12 +30,12 @@ Harden the Distillery Claude Code plugin's skill definitions and plugin metadata
   | Skill | `allowed-tools` |
   |-------|-----------------|
   | `/recall` | `mcp__*__distillery_search`, `mcp__*__distillery_get`, `mcp__*__distillery_status` |
-  | `/distill` | `mcp__*__distillery_store`, `mcp__*__distillery_check_dedup`, `mcp__*__distillery_find_similar`, `mcp__*__distillery_status`, `Bash(git config *)` |
+  | `/distill` | `mcp__*__distillery_store`, `mcp__*__distillery_check_dedup`, `mcp__*__distillery_find_similar`, `mcp__*__distillery_update`, `mcp__*__distillery_status`, `Bash(git config *)` |
   | `/pour` | `mcp__*__distillery_search`, `mcp__*__distillery_get`, `mcp__*__distillery_store`, `mcp__*__distillery_status` |
-  | `/bookmark` | `mcp__*__distillery_store`, `mcp__*__distillery_check_dedup`, `mcp__*__distillery_status`, `WebFetch` |
-  | `/minutes` | `mcp__*__distillery_store`, `mcp__*__distillery_search`, `mcp__*__distillery_get`, `mcp__*__distillery_update`, `mcp__*__distillery_status` |
+  | `/bookmark` | `mcp__*__distillery_store`, `mcp__*__distillery_check_dedup`, `mcp__*__distillery_find_similar`, `mcp__*__distillery_status`, `WebFetch` |
+  | `/minutes` | `mcp__*__distillery_store`, `mcp__*__distillery_search`, `mcp__*__distillery_get`, `mcp__*__distillery_update`, `mcp__*__distillery_list`, `mcp__*__distillery_status` |
   | `/classify` | `mcp__*__distillery_classify`, `mcp__*__distillery_review_queue`, `mcp__*__distillery_resolve_review`, `mcp__*__distillery_get`, `mcp__*__distillery_list`, `mcp__*__distillery_status` |
-  | `/watch` | `mcp__*__distillery_watch`, `mcp__*__distillery_status` |
+  | `/watch` | `mcp__*__distillery_watch`, `mcp__*__distillery_status`, `CronCreate`, `CronList`, `CronDelete`, `RemoteTrigger` |
   | `/radar` | `mcp__*__distillery_search`, `mcp__*__distillery_list`, `mcp__*__distillery_store`, `mcp__*__distillery_interests`, `mcp__*__distillery_suggest_sources`, `mcp__*__distillery_status` |
   | `/tune` | `mcp__*__distillery_status`, `mcp__*__distillery_update` |
   | `/setup` | `mcp__*__distillery_status`, `CronCreate`, `RemoteTrigger` |

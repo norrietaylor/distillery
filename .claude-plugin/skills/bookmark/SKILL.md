@@ -4,6 +4,7 @@ description: "Save a URL with an auto-generated summary to the knowledge base"
 allowed-tools:
   - "mcp__*__distillery_store"
   - "mcp__*__distillery_check_dedup"
+  - "mcp__*__distillery_find_similar"
   - "mcp__*__distillery_status"
   - "WebFetch"
 disable-model-invocation: true
