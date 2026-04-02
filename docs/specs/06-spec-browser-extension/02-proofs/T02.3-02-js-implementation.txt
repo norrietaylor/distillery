@@ -1,0 +1,45 @@
+Type: file
+Command: node -e "verify popup.js and background.js implementation"
+Expected: All save flow functions present, background bookmark handler correct
+Timestamp: 2026-04-01T00:00:00Z
+
+--- popup.js save flow verification ---
+
+PASS: sends bookmark action to background
+PASS: handles ok response
+PASS: handles queued response (offline)
+PASS: buildBookmarkContent function
+PASS: truncate to 5000 chars
+PASS: selectedText preferred over articleText
+PASS: extractContent message type sent to content script
+PASS: fetches connection status for author (GitHub username)
+PASS: local author fallback (defaultAuthor from storage)
+PASS: bookmark tab re-init on switch
+
+--- background.js bookmark handler verification ---
+
+PASS: bookmark message handler (case 'bookmark':)
+PASS: distillery_store tool call
+PASS: entry_type: bookmark field
+PASS: source: browser-extension field
+PASS: queues on network error (offlineQueue.enqueue)
+PASS: handles auth error (MCPAuthError)
+PASS: handles network error (MCPNetworkError)
+
+--- Save flow summary ---
+
+1. Popup opens -> initializeBookmarkTab() called immediately
+2. Sends { type: 'extractContent' } to active tab content script
+3. Falls back to tab metadata (title/url) if content script unavailable
+4. Form pre-filled: title (editable), url (readonly), description (editable),
+   tags (from defaultTags option), project (from defaultProject option)
+5. User clicks Save -> handleBookmarkSave()
+6. Collects form values, builds markdown content (5000 char max)
+7. Gets author: GitHub username from connection state, else defaultAuthor
+8. Sends { action: 'bookmark', ... } to background service worker
+9. Background calls distillery_store via MCP client
+10. On network error: queued offline (status: 'queued')
+11. On success: shows success state, button text changes to 'Saved'
+12. On error: shows error message, re-enables Save button
+
+Status: PASS

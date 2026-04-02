@@ -424,6 +424,71 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       return true; // Keep message channel open for async response.
     }
 
+    case 'bookmark': {
+      // Save a bookmark to Distillery via the distillery_store MCP tool.
+      const {
+        title,
+        url,
+        content,
+        tags,
+        project,
+        author,
+        metadata: bookmarkMetadata,
+      } = request;
+
+      const args = {
+        content: content || '',
+        entry_type: 'bookmark',
+        source: 'browser-extension',
+        tags: Array.isArray(tags) ? tags : [],
+        metadata: {
+          url: url || '',
+          title: title || '',
+          ...(bookmarkMetadata || {}),
+        },
+      };
+
+      if (author) {
+        args.metadata.author = author;
+      }
+
+      if (project) {
+        args.project = project;
+      }
+
+      mcpClient
+        .callTool('distillery_store', args)
+        .then((result) => {
+          sendResponse({ status: 'ok', data: result });
+        })
+        .catch(async (err) => {
+          if (err.name === 'MCPAuthError') {
+            handleAuthError();
+            sendResponse({ status: 'error', error: err.message, errorType: err.name });
+            return;
+          }
+
+          if (err.name === 'MCPNetworkError') {
+            const { id, dropped } = await offlineQueue.enqueue({
+              toolName: 'distillery_store',
+              args,
+            });
+            await updateQueueBadge();
+            sendResponse({
+              status: 'queued',
+              queueId: id,
+              dropped,
+              error: err.message,
+              errorType: err.name,
+            });
+            return;
+          }
+
+          sendResponse({ status: 'error', error: err.message, errorType: err.name });
+        });
+      return true; // Keep message channel open for async response.
+    }
+
     default:
       sendResponse({ status: 'error', error: `Unknown action: ${request.action}` });
   }

@@ -185,6 +185,11 @@ function setupTabNavigation() {
       if (tabPanel) {
         tabPanel.classList.add('active');
       }
+
+      // Re-initialize bookmark tab when switching to it.
+      if (tabName === 'bookmark') {
+        initializeBookmarkTab();
+      }
     });
   });
 }
@@ -266,6 +271,288 @@ function setupAutoRefresh() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Bookmark Tab
+// ---------------------------------------------------------------------------
+
+/**
+ * Truncate text to a maximum number of characters.
+ *
+ * @param {string} text
+ * @param {number} maxLen
+ * @returns {string}
+ */
+function truncate(text, maxLen) {
+  if (!text || text.length <= maxLen) return text || '';
+  return text.slice(0, maxLen);
+}
+
+/**
+ * Build markdown-formatted content for the bookmark entry.
+ *
+ * Uses selectedText if present, otherwise falls back to articleText.
+ * Truncates to 5000 characters.
+ *
+ * @param {string} title
+ * @param {string} url
+ * @param {string} description
+ * @param {string|null} articleText
+ * @param {string} selectedText
+ * @returns {string}
+ */
+function buildBookmarkContent(title, url, description, articleText, selectedText) {
+  const body = selectedText || articleText || description || '';
+  const lines = [];
+
+  if (title) {
+    lines.push(`# ${title}`, '');
+  }
+  if (url) {
+    lines.push(`**URL:** ${url}`, '');
+  }
+  if (description) {
+    lines.push(`**Description:** ${description}`, '');
+  }
+  if (body) {
+    lines.push('---', '', body);
+  }
+
+  return truncate(lines.join('\n'), 5000);
+}
+
+/**
+ * Show the bookmark form in its loading state.
+ * Hides form and error; shows spinner.
+ */
+function showBookmarkLoading() {
+  const loading = document.getElementById('bookmark-loading');
+  const form = document.getElementById('bookmark-form');
+  const error = document.getElementById('bookmark-error');
+
+  loading.style.display = 'flex';
+  form.style.display = 'none';
+  error.style.display = 'none';
+}
+
+/**
+ * Show the bookmark form with pre-filled data.
+ *
+ * @param {Object} data - Extracted content from the content script.
+ * @param {string} defaultTags - Default tags from options.
+ * @param {string} defaultProject - Default project from options.
+ */
+function showBookmarkForm(data, defaultTags, defaultProject) {
+  const loading = document.getElementById('bookmark-loading');
+  const form = document.getElementById('bookmark-form');
+  const error = document.getElementById('bookmark-error');
+
+  loading.style.display = 'none';
+  error.style.display = 'none';
+  form.style.display = 'flex';
+
+  // Reset save feedback
+  document.getElementById('save-success').style.display = 'none';
+  document.getElementById('save-error').style.display = 'none';
+
+  // Pre-fill fields
+  document.getElementById('bookmark-title').value = data.title || '';
+  document.getElementById('bookmark-url').value = data.url || '';
+  document.getElementById('bookmark-description').value = data.description || '';
+  document.getElementById('bookmark-tags').value = defaultTags || '';
+  document.getElementById('bookmark-project').value = defaultProject || '';
+
+  // Re-enable save button in case it was disabled from a previous attempt.
+  const saveBtn = document.getElementById('bookmark-save-btn');
+  saveBtn.disabled = false;
+  saveBtn.textContent = 'Save';
+}
+
+/**
+ * Show an extraction error in the bookmark tab.
+ *
+ * @param {string} message
+ */
+function showBookmarkExtractError(message) {
+  const loading = document.getElementById('bookmark-loading');
+  const form = document.getElementById('bookmark-form');
+  const error = document.getElementById('bookmark-error');
+  const errorMsg = document.getElementById('bookmark-error-msg');
+
+  loading.style.display = 'none';
+  form.style.display = 'none';
+  error.style.display = 'block';
+  errorMsg.textContent = message || 'Failed to extract page content.';
+}
+
+/**
+ * Initialize the bookmark tab: query content script and populate form.
+ *
+ * Called when the Bookmark tab becomes active.
+ */
+async function initializeBookmarkTab() {
+  showBookmarkLoading();
+
+  // Load default tags and project from options storage.
+  let defaultTags = '';
+  let defaultProject = '';
+  try {
+    const stored = await chrome.storage.local.get(['defaultTags', 'defaultProject']);
+    defaultTags = stored.defaultTags || '';
+    defaultProject = stored.defaultProject || '';
+  } catch (_err) {
+    // Non-fatal — defaults remain empty.
+  }
+
+  // Get the active tab and send extractContent message to the content script.
+  try {
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+    if (!activeTab || !activeTab.id) {
+      showBookmarkExtractError('No active tab found.');
+      return;
+    }
+
+    let data;
+    try {
+      const response = await chrome.tabs.sendMessage(activeTab.id, { type: 'extractContent' });
+
+      if (!response || response.status !== 'ok') {
+        const errMsg = (response && response.error) ? response.error : 'Content extraction failed.';
+        throw new Error(errMsg);
+      }
+
+      data = response.data;
+    } catch (contentErr) {
+      // Content script may not be injected (e.g. chrome:// pages, extensions).
+      // Fall back to basic tab metadata.
+      console.warn('[popup] Content script unavailable, using tab metadata:', contentErr.message);
+      data = {
+        title: activeTab.title || '',
+        url: activeTab.url || '',
+        description: '',
+        articleText: null,
+        selectedText: '',
+      };
+    }
+
+    showBookmarkForm(data, defaultTags, defaultProject);
+
+    // Store extracted data for use by the save handler.
+    window._bookmarkExtractedData = data;
+  } catch (err) {
+    console.error('[popup] Failed to initialize bookmark tab:', err);
+    showBookmarkExtractError(err.message || 'Failed to extract page content.');
+  }
+}
+
+/**
+ * Handle the Save button click in the bookmark tab.
+ *
+ * Sends a "bookmark" message to the background service worker.
+ */
+async function handleBookmarkSave() {
+  const saveBtn = document.getElementById('bookmark-save-btn');
+  const saveSuccess = document.getElementById('save-success');
+  const saveError = document.getElementById('save-error');
+  const saveErrorMsg = document.getElementById('save-error-msg');
+
+  // Collect form values.
+  const title = document.getElementById('bookmark-title').value.trim();
+  const url = document.getElementById('bookmark-url').value.trim();
+  const description = document.getElementById('bookmark-description').value.trim();
+  const tagsRaw = document.getElementById('bookmark-tags').value.trim();
+  const project = document.getElementById('bookmark-project').value.trim();
+
+  const tags = tagsRaw
+    ? tagsRaw.split(',').map((t) => t.trim()).filter(Boolean)
+    : [];
+
+  // Get previously extracted data for article text and selection.
+  const extracted = window._bookmarkExtractedData || {};
+
+  // Build content (prefer selectedText from extraction).
+  const content = buildBookmarkContent(
+    title,
+    url,
+    description,
+    extracted.articleText || null,
+    extracted.selectedText || ''
+  );
+
+  // Determine author from connection state.
+  let author = '';
+  try {
+    const statusResp = await chrome.runtime.sendMessage({ action: 'getConnectionStatus' });
+    if (statusResp && statusResp.status === 'ok') {
+      const state = statusResp.data;
+      if (state.username) {
+        author = state.username;
+      }
+    }
+  } catch (_err) {
+    // Non-fatal.
+  }
+
+  // If no OAuth username, try local author setting.
+  if (!author) {
+    try {
+      const stored = await chrome.storage.local.get('defaultAuthor');
+      author = stored.defaultAuthor || '';
+    } catch (_err) {
+      // Non-fatal.
+    }
+  }
+
+  // Disable button and show saving state.
+  saveBtn.disabled = true;
+  saveBtn.textContent = 'Saving...';
+  saveSuccess.style.display = 'none';
+  saveError.style.display = 'none';
+
+  try {
+    const response = await chrome.runtime.sendMessage({
+      action: 'bookmark',
+      title,
+      url,
+      content,
+      tags,
+      project: project || null,
+      author: author || null,
+      metadata: { url, title },
+    });
+
+    if (response && response.status === 'ok') {
+      saveSuccess.style.display = 'block';
+      saveBtn.textContent = 'Saved';
+    } else if (response && response.status === 'queued') {
+      saveSuccess.style.display = 'block';
+      saveBtn.textContent = 'Queued';
+    } else {
+      const errMsg = (response && response.error) ? response.error : 'Save failed.';
+      saveErrorMsg.textContent = errMsg;
+      saveError.style.display = 'block';
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save';
+    }
+  } catch (err) {
+    console.error('[popup] Bookmark save failed:', err);
+    saveErrorMsg.textContent = err.message || 'Save failed.';
+    saveError.style.display = 'block';
+    saveBtn.disabled = false;
+    saveBtn.textContent = 'Save';
+  }
+}
+
+/**
+ * Set up the bookmark save button.
+ */
+function setupBookmarkSaveButton() {
+  const saveBtn = document.getElementById('bookmark-save-btn');
+  if (saveBtn) {
+    saveBtn.addEventListener('click', handleBookmarkSave);
+  }
+}
+
 /**
  * Main entry point
  */
@@ -274,5 +561,9 @@ document.addEventListener('DOMContentLoaded', () => {
   setupSettingsButton();
   setupSignInButton();
   setupSignOutButton();
+  setupBookmarkSaveButton();
   setupAutoRefresh();
+
+  // Initialize bookmark tab immediately since it is the default active tab.
+  initializeBookmarkTab();
 });
