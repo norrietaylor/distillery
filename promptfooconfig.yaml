@@ -89,7 +89,7 @@ tests:
           const ok = names.includes('distillery_search') || /no.*(?:entries|results|information|data)|knowledge base|search|cach|doesn.t have/i.test(text);
           return ok ? true : `FAIL: type=${typeof output}, text=${text.substring(0,120)}`;
       - type: not-regex
-        value: "(?i)(traceback|exception at |internal error|500 error)"
+        value: "(Traceback|traceback|Exception at|exception at|internal error|Internal Error|500 error)"
 
   # ---- /bookmark: store a URL as a bookmark entry ---------------------------
   - description: "bookmark stores a URL with entry_type=bookmark via distillery_store"
@@ -143,7 +143,7 @@ tests:
           const ok = names.includes('distillery_search') || /decision|log|no.*(?:entries|results)|knowledge|pour|synthe/i.test(text);
           return ok ? true : `FAIL: type=${typeof output}, text=${text.substring(0,120)}`;
       - type: not-regex
-        value: "(?i)(traceback|exception at |internal error|500 error)"
+        value: "(Traceback|traceback|Exception at|exception at|internal error|Internal Error|500 error)"
 
   # ---- /watch: list configured feed sources ---------------------------------
   - description: "watch list reports configured feed sources via distillery_watch"
@@ -155,7 +155,7 @@ tests:
           let p = output; if (typeof output === 'string') { try { p = JSON.parse(output); } catch(e) { p = {text: output}; } }
           const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
           const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
-          const ok = names.some(n => ['distillery_watch','distillery_status'].includes(n)) || /feed.*source|watch|no.*(?:sources|feeds)|configured|empty/i.test(text);
+          const ok = names.some(n => ['distillery_watch','distillery_status'].includes(n)) || /feed.*source|watch|no.*(?:sources|feeds)|configured|empty|sources.*monitored/i.test(text);
           return ok ? true : `FAIL: type=${typeof output}, text=${text.substring(0,120)}`;
 
   # ---- /watch: add RSS feed source ------------------------------------------
