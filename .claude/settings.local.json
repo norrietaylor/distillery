@@ -26,7 +26,12 @@
       "mcp__plugin_distillery_distillery__distillery_update",
       "mcp__plugin_distillery_distillery__distillery_watch",
       "Bash(wc:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "mcp__claude_ai_distillery__distillery_status",
+      "mcp__claude_ai_distillery__distillery_list",
+      "mcp__claude_ai_distillery__distillery_suggest_sources",
+      "mcp__claude_ai_distillery__distillery_store",
+      "mcp__claude_ai_distillery__distillery_search"
     ]
   }
 }
