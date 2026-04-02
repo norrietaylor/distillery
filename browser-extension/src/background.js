@@ -115,22 +115,19 @@ async function probeLocal(port) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), LOCAL_PROBE_TIMEOUT_MS);
 
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (url, init = {}) =>
+    originalFetch(url, { ...init, signal: controller.signal });
+
   try {
-    // Monkey-patch fetch for this probe to honour the AbortSignal.
-    // MCPClient uses the global fetch; we temporarily replace it.
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (url, init = {}) =>
-      originalFetch(url, { ...init, signal: controller.signal });
-
     await probe.initialize(localUrl);
-
-    globalThis.fetch = originalFetch;
-    clearTimeout(timeoutId);
     return true;
   } catch (_err) {
-    clearTimeout(timeoutId);
-    // Restore fetch in case we swapped it before the error.
     return false;
+  } finally {
+    // Always restore the original fetch, whether the probe succeeded or failed.
+    globalThis.fetch = originalFetch;
+    clearTimeout(timeoutId);
   }
 }
 
