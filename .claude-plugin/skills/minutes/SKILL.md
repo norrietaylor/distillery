@@ -142,7 +142,12 @@ distillery_store(
 
 ### Step 8a: Confirm
 
-Display: entry ID, meeting ID, version (1), project, and first 200 chars of notes.
+```
+[minutes] Stored: <entry-id>
+Project: <project> | Author: <author>
+Summary: <first 200 chars of notes>...
+Tags: tag1, tag2, tag3
+```
 
 ---
 
@@ -180,7 +185,12 @@ Set `new_version = current_version + 1`. Call `distillery_update` with the full 
 
 ### Step 7b: Confirm
 
-Display: entry ID, meeting ID, new version, and first 200 chars of the update section.
+```
+[minutes] Stored: <entry-id>
+Project: <project> | Author: <author>
+Summary: <first 200 chars of update section>...
+Tags: tag1, tag2, tag3
+```
 
 ---
 

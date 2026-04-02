@@ -111,7 +111,16 @@ On MCP errors, see CONVENTIONS.md error handling — display and stop.
 
 ### Step 8: Confirm
 
-Display the digest, then `Digest stored: <entry_id>`. Omit the stored line if `--store` was not specified.
+Display the digest. If `--store` was specified, append:
+
+```
+[digest] Stored: <entry_id>
+Project: <project> | Author: <author>
+Summary: <first 200 chars of digest>...
+Tags: digest, radar, ambient
+```
+
+Omit the stored block if `--store` was not specified.
 
 ## Output Format
 
@@ -143,7 +152,10 @@ To add a source: /watch add <url> [--type rss|github]
 
 ---
 
-Digest stored: <entry_id>
+[digest] Stored: <entry_id>
+Project: <project> | Author: <author>
+Summary: <first 200 chars>...
+Tags: digest, radar, ambient
 ```
 
 ## Rules
