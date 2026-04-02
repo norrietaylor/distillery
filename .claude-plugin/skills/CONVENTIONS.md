@@ -103,6 +103,166 @@ Stop immediately if MCP is unavailable.
 
 **Authentication errors** (HTTP transport with OAuth): If `distillery_status` returns an authentication error rather than a connection failure, direct the user to run `/setup` or complete the OAuth flow via the MCP server menu.
 
+## Canonical Dedup Flow
+
+All write skills (`/distill`, `/bookmark`, `/minutes`, `/radar`) must check for duplicates before storing a new entry. The canonical deduplication flow follows a uniform 4-outcome pattern via the `distillery_check_dedup` MCP tool.
+
+**When to Check:** Before calling `distillery_store`, invoke `distillery_check_dedup(content="<content to store>")`.
+
+**The 4 Outcomes:**
+
+1. **`"create"`** — No similar entries found. Proceed to store the entry normally.
+
+2. **`"skip"`** — Near-exact duplicate (similarity >= skip threshold, default 0.95). Show the user:
+   ```
+   Similar entry found (99% match):
+   
+   | Entry ID | Type | Author | Created | Preview |
+   |----------|------|--------|---------|---------|
+   | <id> | <type> | <author> | <date> | <preview> |
+   
+   Options:
+   1. Store anyway (create a separate entry)
+   2. Skip (don't store)
+   ```
+   
+   On "skip": Confirm "Skipped. No new entry was stored." and stop.
+
+3. **`"merge"`** — Very similar entry exists (similarity >= merge threshold, default 0.80). Show the user:
+   ```
+   Very similar entry exists (88% match):
+   
+   | Entry ID | Type | Author | Created | Preview |
+   |----------|------|--------|---------|---------|
+   | <id> | <type> | <author> | <date> | <preview> |
+   
+   Options:
+   1. Store anyway (create a separate entry)
+   2. Merge with existing (append new content to this entry)
+   3. Skip (don't store)
+   ```
+   
+   On "merge": Call `distillery_update(<entry_id>, merged_content)`, confirm success, and stop.
+   
+   On "store anyway" or "skip": Handle as directed.
+
+4. **`"link"`** — Related but distinct entry exists (similarity >= link threshold, default 0.60). Show the user:
+   ```
+   Related entry found (72% match):
+   
+   | Entry ID | Type | Author | Created | Preview |
+   |----------|------|--------|---------|---------|
+   | <id> | <type> | <author> | <date> | <preview> |
+   
+   New entry will be linked to this related entry.
+   
+   Options:
+   1. Store with link
+   2. Skip
+   ```
+   
+   On "store with link": Include `"related_entries": ["<id>", ...]` in the metadata passed to `distillery_store`, then proceed normally.
+   
+   On "skip": Confirm "Skipped. No new entry was stored." and stop.
+
+**Implementation Pattern:**
+
+```python
+# Step 1: Check for duplicates
+response = await distillery_check_dedup(content="<content>")
+action = response["action"]  # One of: create, skip, merge, link
+
+# Step 2: Handle by action
+if action == "create":
+    # Proceed to store
+    await distillery_store(...)
+
+elif action == "skip":
+    # Show similar entries, ask user
+    # If user chooses "skip": stop
+    # If user chooses "store anyway": await distillery_store(...)
+
+elif action == "merge":
+    # Show similar entries, ask user
+    # If user chooses "merge": await distillery_update(entry_id, merged_content)
+    # If user chooses "store anyway": await distillery_store(...)
+    # If user chooses "skip": stop
+
+elif action == "link":
+    # Show related entry, ask user
+    # If user chooses "store with link": 
+    #   - Add related_entries to metadata
+    #   - await distillery_store(metadata={"related_entries": [...]}, ...)
+    # If user chooses "skip": stop
+```
+
+## Confirmation Format
+
+All write skills (`/distill`, `/bookmark`, `/minutes`, `/radar`) must follow a unified confirmation template when storing entries. This ensures consistent user experience and predictable output parsing.
+
+**Standard Confirmation Template:**
+
+```
+[<entry_type>] Stored: <entry-id>
+Project: <project> | Author: <author>
+Summary: <first 200 chars>...
+Tags: tag1, tag2, tag3
+```
+
+**Field Definitions:**
+
+- **`<entry_type>`** — The entry type in uppercase badge (e.g., `[SESSION]`, `[BOOKMARK]`, `[MINUTES]`). Use the canonical name from the Entry Types table below.
+- **`<entry-id>`** — The UUID returned by `distillery_store` or `distillery_update`.
+- **`<project>`** — The project name or "None" if not specified.
+- **`<author>`** — The author determined per the Author & Project Resolution section.
+- **Summary** — First 200 characters of the content, with `...` if truncated. If content is shorter, show the whole content.
+- **Tags** — Comma-separated list of tags assigned to the entry (lowercase, hyphen-separated, hierarchical). If no tags, show "none".
+
+**Example confirmations:**
+
+```
+[SESSION] Stored: a1b2c3d4-e5f6-47g8-9h0i-j1k2l3m4n5o6
+Project: distillery | Author: Alice
+Summary: This session covered the dedup flow refactor, which consolidates four outcomes (create, skip, merge, link) into a...
+Tags: session, architecture, dedup
+
+[BOOKMARK] Stored: f7e8d9c0-b1a2-93c4-5d6e-7f8g9h0i1j2k
+Project: None | Author: Bob
+Summary: Excellent reference on embeddings and vector search in databases.
+Tags: database, embeddings, vector-search
+
+[MINUTES] Stored: 2e3f4g5h-6i7j-k8l9-m0n1-o2p3q4r5s6t7
+Project: distillery-team | Author: Carol
+Summary: Discussed progress on skill UX improvements, dedup standardization, and entry type documentation. Decisions: proceed with confirmation format...
+Tags: meeting, distillery, planning, decisions
+```
+
+## Entry Types
+
+The following table lists all valid `entry_type` values, their producing skills, required metadata fields, and use cases.
+
+| Type | Producing Skill | Required Metadata | Optional Metadata | Use Case |
+|------|---|---|---|---|
+| `session` | `/distill` | — | — | Captured work session, context snapshot, or conversation excerpt |
+| `bookmark` | `/bookmark` | — | `url`, `title` | Saved URLs, external references, articles |
+| `minutes` | `/minutes` | `meeting_id` | `attendees`, `version` | Meeting notes, discussion records, standup summaries |
+| `meeting` | — (future) | — | — | Structured meeting agenda and outcomes (reserved for future use) |
+| `reference` | — (manual) | — | — | Reference documents, snippets, facts (typically imported or manual) |
+| `idea` | — (manual) | — | — | Ideas, hypotheses, open questions (typically manual entries) |
+| `inbox` | `/classify` (internal state) | — | — | Unsorted entries awaiting classification or review |
+| `person` | — (manual) | `expertise` (list) | `github_username`, `team`, `role`, `email` | Team member profiles, contributor records, contact cards |
+| `project` | — (manual) | `repo` | `status`, `language`, `description` | Project records, repository metadata, initiative tracking |
+| `digest` | `/radar` | `period_start`, `period_end` | `sources`, `summary` | Periodic summaries of feed activity and signals |
+| `github` | `/watch` (poll) | `repo`, `ref_type`, `ref_number` | `title`, `url`, `state` | GitHub issues, PRs, discussions, releases (ref_type constrained to: issue, pr, discussion, release) |
+| `feed` | `/watch` (poll) | `source_url`, `source_type` | `title`, `item_url`, `published_at`, `relevance_score` | Entries from monitored RSS or GitHub feeds (source_type: rss or github) |
+
+**Notes:**
+
+- Types marked "—" under Producing Skill are not typically generated by skills (they are manual, imported, or reserved for future use).
+- Required metadata fields must be present when storing an entry of that type, or validation will fail.
+- Optional metadata fields may be included but are not required.
+- The `metadata.meeting_id` for `minutes` entries follows the format `<slugified-title>-<YYYY-MM-DD>`.
+
 ## Error Handling
 
 If any MCP tool returns an error, display it and stop (no retry loops):
