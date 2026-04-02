@@ -13,17 +13,15 @@ BLUE='\033[34m'
 CYAN='\033[36m'
 BRIGHT_WHITE='\033[97m'
 
-# Simulate typing with random delays
+# Simulate typing with a fixed per-character delay for reproducibility
 type_text() {
     local text="$1"
-    local min_delay="${2:-0.03}"
-    local max_delay="${3:-0.08}"
-    for (( i=0; i<${#text}; i++ )); do
+    local delay="${2:-0.045}"
+    local i=0
+    while [ "$i" -lt "${#text}" ]; do
         printf '%s' "${text:$i:1}"
-        # Random delay using $RANDOM
-        local delay
-        delay=$(python3 -c "import random; print(f'{random.uniform($min_delay, $max_delay):.3f}')")
         sleep "$delay"
+        i=$((i + 1))
     done
 }
 
