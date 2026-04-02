@@ -37,7 +37,10 @@ def call_api(
             "distillery": {
                 "command": "distillery-mcp",
                 "args": [],
-                "env": {"DISTILLERY_CONFIG": "distillery-dev.yaml"},
+                "env": {
+                    "DISTILLERY_CONFIG": "distillery-dev.yaml",
+                    "JINA_API_KEY": os.environ.get("JINA_API_KEY", ""),
+                },
             }
         }
     }

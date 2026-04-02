@@ -57,4 +57,5 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
         run: npx promptfoo@latest eval --config promptfooconfig.yaml
