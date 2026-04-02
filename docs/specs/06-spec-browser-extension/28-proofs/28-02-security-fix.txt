@@ -1,0 +1,27 @@
+CSS Selector Injection Fix Verification
+=========================================
+
+Type: code-review
+Command: grep -n "CSS.escape" browser-extension/src/content.js
+Expected: Both getMetaByName() and getOgMeta() use CSS.escape()
+Timestamp: 2026-04-01T00:00:00Z
+
+BEFORE (Vulnerable):
+  Line 26: const el = document.querySelector(`meta[name="${name}"]`);
+  Line 37: const el = document.querySelector(`meta[property="${property}"]`);
+
+AFTER (Fixed):
+  Line 26: const el = document.querySelector(`meta[name="${CSS.escape(name)}"]`);
+  Line 37: const el = document.querySelector(`meta[property="${CSS.escape(property)}"]`);
+
+IMPACT:
+- CSS.escape() is a standard Web API that escapes special characters in CSS selectors
+- Prevents CSS selector injection attacks when user-controlled input is used in querySelector()
+- Both getMetaByName() and getOgMeta() are patched
+- All callers of these functions (lines 83-86) use hardcoded strings, so no functional change
+
+VERIFICATION:
+  grep "CSS.escape" browser-extension/src/content.js | wc -l
+  Expected: 2 occurrences
+
+Status: PASS

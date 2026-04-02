@@ -23,7 +23,7 @@
  * @returns {string} The content value, or empty string if not found.
  */
 function getMetaByName(name) {
-  const el = document.querySelector(`meta[name="${name}"]`);
+  const el = document.querySelector(`meta[name="${CSS.escape(name)}"]`);
   return el ? (el.getAttribute('content') || '') : '';
 }
 
@@ -34,7 +34,7 @@ function getMetaByName(name) {
  * @returns {string} The content value, or empty string if not found.
  */
 function getOgMeta(property) {
-  const el = document.querySelector(`meta[property="${property}"]`);
+  const el = document.querySelector(`meta[property="${CSS.escape(property)}"]`);
   return el ? (el.getAttribute('content') || '') : '';
 }
 

@@ -1,0 +1,22 @@
+diff --git a/browser-extension/src/content.js b/browser-extension/src/content.js
+index 395dd29..8df256e 100644
+--- a/browser-extension/src/content.js
++++ b/browser-extension/src/content.js
+@@ -23,7 +23,7 @@
+  * @returns {string} The content value, or empty string if not found.
+  */
+ function getMetaByName(name) {
+-  const el = document.querySelector(`meta[name="${name}"]`);
++  const el = document.querySelector(`meta[name="${CSS.escape(name)}"]`);
+   return el ? (el.getAttribute('content') || '') : '';
+ }
+ 
+@@ -34,7 +34,7 @@ function getMetaByName(name) {
+  * @returns {string} The content value, or empty string if not found.
+  */
+ function getOgMeta(property) {
+-  const el = document.querySelector(`meta[property="${property}"]`);
++  const el = document.querySelector(`meta[property="${CSS.escape(property)}"]`);
+   return el ? (el.getAttribute('content') || '') : '';
+ }
+ 
