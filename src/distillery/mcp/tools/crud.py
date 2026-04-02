@@ -27,6 +27,7 @@ from distillery.mcp.tools._common import (
     validate_required,
     validate_type,
 )
+from distillery.mcp.tools._errors import validate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -648,15 +649,10 @@ async def _handle_list(
     Returns:
         MCP content list with a JSON payload of ``entries`` and ``count``.
     """
-    limit_raw = arguments.get("limit", 20)
-    err_limit = validate_type(arguments, "limit", int, "integer")
-    if err_limit:
-        return error_response("VALIDATION_ERROR", err_limit)
-    limit = int(limit_raw) if limit_raw is not None else 20
-    if limit < 1:
-        return error_response("VALIDATION_ERROR", "Field 'limit' must be >= 1")
-    if limit > 500:
-        return error_response("VALIDATION_ERROR", "Field 'limit' must be <= 500")
+    limit_result = validate_limit(arguments.get("limit", 20), min_val=1, max_val=500, default=20)
+    if isinstance(limit_result, tuple):
+        return error_response(*limit_result)
+    limit = limit_result
 
     offset_raw = arguments.get("offset", 0)
     err_offset = validate_type(arguments, "offset", int, "integer")

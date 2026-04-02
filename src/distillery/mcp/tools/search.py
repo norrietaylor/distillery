@@ -20,6 +20,7 @@ from distillery.mcp.tools._common import (
     validate_required,
     validate_type,
 )
+from distillery.mcp.tools._errors import validate_limit
 from distillery.mcp.tools.crud import _build_filters_from_arguments
 
 logger = logging.getLogger(__name__)
@@ -62,15 +63,10 @@ async def _handle_search(
 
     query: str = arguments["query"]
 
-    limit_raw = arguments.get("limit", 10)
-    err_limit = validate_type(arguments, "limit", int, "integer")
-    if err_limit:
-        return error_response("VALIDATION_ERROR", err_limit)
-    limit = int(limit_raw) if limit_raw is not None else 10
-    if limit < 1:
-        return error_response("VALIDATION_ERROR", "Field 'limit' must be >= 1")
-    if limit > 200:
-        return error_response("VALIDATION_ERROR", "Field 'limit' must be <= 200")
+    limit_result = validate_limit(arguments.get("limit", 10), min_val=1, max_val=200, default=10)
+    if isinstance(limit_result, tuple):
+        return error_response(*limit_result)
+    limit = limit_result
 
     # --- embedding budget check (1 embed call per search) -------------------
     if cfg is not None:
@@ -144,15 +140,10 @@ async def _handle_find_similar(
     if not (0.0 <= threshold <= 1.0):
         return error_response("VALIDATION_ERROR", "Field 'threshold' must be in [0.0, 1.0]")
 
-    limit_raw = arguments.get("limit", 10)
-    err_limit = validate_type(arguments, "limit", int, "integer")
-    if err_limit:
-        return error_response("VALIDATION_ERROR", err_limit)
-    limit = int(limit_raw) if limit_raw is not None else 10
-    if limit < 1:
-        return error_response("VALIDATION_ERROR", "Field 'limit' must be >= 1")
-    if limit > 200:
-        return error_response("VALIDATION_ERROR", "Field 'limit' must be <= 200")
+    limit_result = validate_limit(arguments.get("limit", 10), min_val=1, max_val=200, default=10)
+    if isinstance(limit_result, tuple):
+        return error_response(*limit_result)
+    limit = limit_result
 
     # --- embedding budget check (1 embed call) ----------------------------
     if cfg is not None:
@@ -214,14 +205,10 @@ async def _handle_aggregate(
             f"Field 'group_by' must be one of: {', '.join(sorted(_AGGREGATE_GROUP_BY_MAP))}",
         )
 
-    limit_raw = arguments.get("limit", 50)
-    if not isinstance(limit_raw, int):
-        return error_response("VALIDATION_ERROR", "Field 'limit' must be an integer")
-    limit = int(limit_raw)
-    if limit < 1:
-        return error_response("VALIDATION_ERROR", "Field 'limit' must be >= 1")
-    if limit > 500:
-        return error_response("VALIDATION_ERROR", "Field 'limit' must be <= 500")
+    limit_result = validate_limit(arguments.get("limit", 50), min_val=1, max_val=500, default=50)
+    if isinstance(limit_result, tuple):
+        return error_response(*limit_result)
+    limit = limit_result
 
     filters = _build_filters_from_arguments(arguments)
 

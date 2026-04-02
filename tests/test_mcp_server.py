@@ -616,7 +616,7 @@ class TestListTool:
         response = await _handle_list(store, {"limit": -1})
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "VALIDATION_ERROR"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_list_invalid_offset_returns_error(self, store: DuckDBStore) -> None:
         response = await _handle_list(store, {"offset": -5})
