@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Scripted demo recording for asciinema
 # Simulates a Claude Code session showing /distill → /pour flow
+export LC_ALL=C.UTF-8
 set -e
 
 # ANSI color codes (only those used in the script)
@@ -41,7 +42,7 @@ spin() {
     printf '\r%*s\r' 60 ''
 }
 
-clear
+clear 2>/dev/null || printf '\033c'
 
 # ── Claude Code header ──────────────────────────────────────────────────────
 echo ""
