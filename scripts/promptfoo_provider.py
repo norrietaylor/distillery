@@ -97,8 +97,11 @@ def call_api(
                 message = event.get("message", {})
                 for block in message.get("content", []):
                     if block.get("type") == "tool_use":
+                        # Strip MCP prefix: mcp__distillery__distillery_store -> distillery_store
+                        raw_name = block.get("name", "")
+                        name = raw_name.split("mcp__distillery__")[-1] if "mcp__distillery__" in raw_name else raw_name
                         tool_calls.append(
-                            {"name": block.get("name", ""), "input": block.get("input", {})}
+                            {"name": name, "input": block.get("input", {})}
                         )
                     elif block.get("type") == "text":
                         response_text = block.get("text", "")
