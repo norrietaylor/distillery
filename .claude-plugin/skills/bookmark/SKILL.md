@@ -4,7 +4,6 @@ description: "Save a URL with an auto-generated summary to the knowledge base"
 allowed-tools:
   - "mcp__*__distillery_store"
   - "mcp__*__distillery_check_dedup"
-  - "mcp__*__distillery_find_similar"
   - "mcp__*__distillery_status"
   - "WebFetch"
 disable-model-invocation: true
@@ -74,11 +73,13 @@ If the user edits, accept their revision. If they skip, confirm "Skipped. No ent
 
 ### Step 5: Check for Duplicates
 
-Call `distillery_find_similar(content="<url> <summary>", threshold=0.8)`.
+Call `distillery_check_dedup(content="<url> <summary>")`. Handle by `action` field:
 
-If no matches, proceed to Step 6.
+**`"create"`:** No similar entries. Proceed to Step 6.
 
-If matches found, show a comparison and prompt:
+**`"skip"`:** Near-exact duplicate. Show similarity table and offer: (1) Store anyway, (2) Skip.
+
+**`"merge"` or `"link"`:** Related entry exists. Show similarity table and offer: (1) Store anyway, (2) Skip.
 
 ```
 Similar entries found:
