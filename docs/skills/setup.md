@@ -1,6 +1,6 @@
 # /setup — Onboarding Wizard
 
-Walks through first-time Distillery configuration: verifying MCP connectivity, detecting transport mode, registering the MCP connector for remote polling, and configuring scheduled tasks.
+Walks through first-time Distillery configuration: verifying MCP connectivity, detecting transport mode, and configuring scheduled tasks.
 
 ## Usage
 
@@ -14,12 +14,12 @@ Walks through first-time Distillery configuration: verifying MCP connectivity, d
 
 - After installing the Distillery plugin for the first time
 - When switching between local and hosted transport
-- When enabling remote auto-polling
+- When you want to configure scheduled tasks for feed polling, rescoring, and maintenance
 - When `/watch add` reports the poll schedule is unavailable
 
 ## What It Does
 
-The wizard runs through up to 6 steps, showing a summary at the end regardless of how far it gets.
+The wizard runs through up to 5 steps, showing a summary at the end regardless of how far it gets.
 
 ### Step 1: Check MCP Availability
 
@@ -47,13 +47,7 @@ Reads your MCP settings to determine how you're connected:
 
 Lists any configured feed sources from `/watch`.
 
-### Step 4: MCP Connector Registration (hosted/team only)
-
-For remote transports, checks for an existing MCP connector at [`https://claude.ai/settings/connectors`](https://claude.ai/settings/connectors). If none exists, prompts you to register one for remote auto-polling.
-
-Skipped for local transport.
-
-### Step 5: Scheduled Tasks
+### Step 4: Scheduled Tasks
 
 Configures up to three tiers of recurring jobs:
 
@@ -63,12 +57,14 @@ Configures up to three tiers of recurring jobs:
 | **Daily** | Feed rescoring | Re-score entries against updated interest profile |
 | **Weekly** | KB maintenance | Collect metrics, quality, stale entries, interests, suggestions |
 
-- **Local transport** — creates cron jobs via `CronCreate` (a Claude Code platform primitive for scheduling recurring tasks)
-- **Hosted/team transport** — creates remote triggers via `RemoteTrigger` (a Claude Code platform primitive for server-side scheduling), falling back to cron if triggers fail
+Scheduling depends on your transport:
+
+- **Local transport** — creates cron jobs via `CronCreate` (a Claude Code platform primitive)
+- **Hosted/team transport** — scheduling is managed by the GitHub Actions workflow at `.github/workflows/scheduler.yml`, which calls the webhook endpoints (`/api/poll`, `/api/rescore`, `/api/maintenance`). No local cron configuration needed.
 - Checks for existing jobs before creating (no duplicates)
 - If no feed sources exist, poll/rescore are skipped but weekly maintenance is still offered
 
-### Step 6: Summary
+### Step 5: Summary
 
 Always displayed, even if the wizard exits early:
 
@@ -81,9 +77,9 @@ Always displayed, even if the wizard exits early:
 | Transport | Hosted (distillery-mcp.fly.dev) |
 | Entries | 42 |
 | Feed Sources | 3 |
-| Hourly Poll | Active (remote trigger) |
-| Daily Rescore | Active (cron) |
-| Weekly Maintenance | Active (cron) |
+| Hourly Poll | Managed by GitHub Actions |
+| Daily Rescore | Managed by GitHub Actions |
+| Weekly Maintenance | Managed by GitHub Actions |
 
 ### Available Skills
 /distill, /recall, /pour, /bookmark, /minutes,
@@ -96,3 +92,4 @@ Always displayed, even if the wizard exits early:
 - Scheduled tasks use off-peak cron minutes (not `:00` or `:30`) to spread load
 - Weekly maintenance stores a digest entry for longitudinal KB health tracking
 - You're asked once about enabling scheduled tasks, and the answer applies to all three tiers
+- For hosted deployments, the webhook endpoints provide audit records in DuckDB (see `webhook_audit:*` metadata keys)

@@ -48,6 +48,10 @@ docs = [
     "mkdocs-material>=9.5",
 ]
 eval = []
+ragas = [
+    "ragas>=0.2.0",
+    "datasets>=2.14.0",
+]
 
 [project.scripts]
 distillery = "distillery.cli:main"
@@ -83,9 +87,16 @@ module = "distillery.mcp.server"
 disable_error_code = ["untyped-decorator"]
 
 [[tool.mypy.overrides]]
-# The eval module has optional dependencies (anthropic) that are not installed
-# in the base dev environment. Suppress import-not-found for the eval sub-package.
-module = "distillery.eval.*"
+# The eval module has optional dependencies (anthropic, ragas, datasets) that
+# are not installed in the base dev environment. Suppress import-not-found for
+# the eval sub-package and its optional third-party dependencies.
+module = [
+    "distillery.eval.*",
+    "ragas",
+    "ragas.*",
+    "datasets",
+    "datasets.*",
+]
 ignore_missing_imports = true
 
 [tool.ruff]

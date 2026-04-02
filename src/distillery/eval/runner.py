@@ -366,6 +366,7 @@ class ClaudeEvalRunner:
             env["DISTILLERY_CONFIG"] = str(config_path)
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
+                stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
@@ -385,6 +386,21 @@ class ClaudeEvalRunner:
             # 6. Parse stream-json output.
             lines = stdout_text.splitlines()
             tool_calls, final_response, performance = _parse_stream_events(lines)
+
+            # Detect empty responses — likely CLI auth or startup failure.
+            if (
+                not final_response
+                and not tool_calls
+                and performance.input_tokens == 0
+            ):
+                hint = stderr_text[:300] if stderr_text else "(no stderr)"
+                logger.error(
+                    "Scenario %r produced empty response with 0 tokens. "
+                    "CLI may have failed to authenticate or connect. "
+                    "stderr: %s",
+                    scenario.name,
+                    hint,
+                )
 
             # 7. Reopen DuckDB to count entries stored since seeding.
             from distillery.mcp._stub_embedding import HashEmbeddingProvider
