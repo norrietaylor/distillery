@@ -765,6 +765,8 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
         title,
         url,
         content,
+        entry_type,
+        source,
         tags,
         project,
         author,
@@ -773,8 +775,8 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 
       const args = {
         content: content || '',
-        entry_type: 'bookmark',
-        source: 'browser-extension',
+        entry_type: entry_type || 'bookmark',
+        source: source || 'browser-extension',
         tags: Array.isArray(tags) ? tags : [],
         metadata: {
           url: url || '',

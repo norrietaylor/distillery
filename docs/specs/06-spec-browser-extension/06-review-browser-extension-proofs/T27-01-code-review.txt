@@ -1,0 +1,27 @@
+Type: code-review
+Task: T27 - missing entry_type and source in bookmark store call
+Timestamp: 2026-04-01T00:00:00Z
+
+Command: grep -n "entry_type\|source.*browser-extension" browser-extension/src/popup.js
+
+Expected: Both entry_type: 'bookmark' and source: 'browser-extension' present in sendMessage call
+
+Output:
+520:      entry_type: 'bookmark',
+521:      source: 'browser-extension',
+
+Status: PASS - Both fields now present in popup.js sendMessage call at lines 520-521.
+
+Additional verification - popup.js message object (lines 515-526):
+    const response = await chrome.runtime.sendMessage({
+      action: 'bookmark',
+      title,
+      url,
+      content,
+      entry_type: 'bookmark',
+      source: 'browser-extension',
+      tags,
+      project: project || null,
+      author: author || null,
+      metadata: { url, title },
+    });

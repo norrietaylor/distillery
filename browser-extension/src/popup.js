@@ -517,6 +517,8 @@ async function handleBookmarkSave() {
       title,
       url,
       content,
+      entry_type: 'bookmark',
+      source: 'browser-extension',
       tags,
       project: project || null,
       author: author || null,
