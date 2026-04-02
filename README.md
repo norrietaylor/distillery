@@ -41,7 +41,7 @@ Distillery captures the highest-value transformation — from noise to signal �
 ## Demo
 
 <p align="center">
-  <img src="docs/assets/distillery-demo.gif" alt="Distillery demo — /radar ambient intelligence digest" width="600">
+  <img src="docs/assets/distillery-demo.gif" alt="Distillery demo — /distill captures a decision, /pour synthesizes it" width="600">
 </p>
 
 ## Skills
