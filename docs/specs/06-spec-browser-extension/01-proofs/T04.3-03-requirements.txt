@@ -1,0 +1,32 @@
+Type: file
+Description: Map task requirements to feature scenarios from feed-detection-watch-flow-and-offline-queue.feature
+Expected: All offline queue scenarios covered
+Timestamp: 2026-04-01T12:00:00Z
+Status: PASS
+
+Scenario coverage:
+  [PASS] "Bookmark operation queued when offline"
+         -> callTool handler catches MCPNetworkError, calls enqueue, returns status:'queued'
+         -> popup reads connectionState.queuedOperations for badge display
+
+  [PASS] "Multiple operations queue and display count"
+         -> enqueue appends to array in chrome.storage.local
+         -> updateQueueBadge reads count and broadcasts via connectionState
+
+  [PASS] "Queued operations sync when connectivity is restored"
+         -> self.addEventListener('online') fires connect() then replayQueue()
+         -> connect() also fires replayQueue() on success when queue non-empty
+         -> replayQueue iterates FIFO, removes successful items
+
+  [PASS] "Failed replay keeps operation in queue with incremented retry count"
+         -> replayQueue catch block calls incrementRetry(item.id)
+         -> Item stays in queue for next replay attempt
+
+  [PASS] "Offline queue caps at 100 items"
+         -> QUEUE_MAX_SIZE = 100
+         -> enqueue shifts oldest when at capacity, logs warning, sets dropped=true
+
+  [PASS] "Only network errors are queued, not auth or validation errors"
+         -> callTool handler checks err.name === 'MCPNetworkError' before enqueue
+         -> MCPAuthError triggers handleAuthError() instead
+         -> MCPRateLimitError / MCPProtocolError return error response without queueing

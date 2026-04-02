@@ -9,11 +9,13 @@
  * - Expose message handlers for popup/content script communication.
  * - Track connection state and broadcast changes to all extension views.
  * - Handle chrome.runtime.onInstalled to open options page on first install.
+ * - Manage offline queue: enqueue failed operations, replay on reconnect.
  */
 
-/* global MCPClient, MCPNetworkError */
+/* global MCPClient, MCPNetworkError, OfflineQueue */
 
 importScripts('mcp-client.js');
+importScripts('offline-queue.js');
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -41,6 +43,12 @@ const DEFAULTS = {
 
 /** Shared MCP client instance. */
 let mcpClient = new MCPClient();
+
+/** Shared offline queue instance. */
+const offlineQueue = new OfflineQueue();
+
+/** Flag to prevent concurrent replay operations. */
+let replayInProgress = false;
 
 /**
  * Current connection state broadcast to popup/content scripts.
@@ -159,13 +167,21 @@ async function connect() {
   try {
     await mcpClient.initialize(targetUrl);
 
+    const queueCount = await offlineQueue.getCount();
+
     connectionState = {
       connected: true,
       serverType: targetType,
       serverUrl: targetUrl,
       username: targetType === 'remote' ? (authData.authUsername || null) : null,
-      queuedOperations: connectionState.queuedOperations,
+      queuedOperations: queueCount,
     };
+
+    // Replay any queued operations now that we are connected.
+    if (queueCount > 0) {
+      // Fire-and-forget; replayQueue manages its own state.
+      replayQueue();
+    }
   } catch (err) {
     console.warn(`[background] Failed to connect to ${targetType} server (${targetUrl}):`, err);
 
@@ -213,6 +229,86 @@ function startPeriodicProbe() {
 }
 
 // ---------------------------------------------------------------------------
+// Offline queue: replay and badge management
+// ---------------------------------------------------------------------------
+
+/**
+ * Replay queued operations in FIFO order.
+ *
+ * Iterates through the queue, attempting each operation via mcpClient.callTool.
+ * Successfully replayed items are removed; failures increment their retryCount.
+ * The badge is updated after each attempt.
+ *
+ * @returns {Promise<void>}
+ */
+async function replayQueue() {
+  if (replayInProgress) return;
+  if (!mcpClient.isConnected()) return;
+
+  replayInProgress = true;
+
+  try {
+    const items = await offlineQueue.getQueue();
+
+    for (const item of items) {
+      try {
+        await mcpClient.callTool(item.payload.toolName, item.payload.args || {});
+        await offlineQueue.removeItem(item.id);
+      } catch (err) {
+        if (err.name === 'MCPNetworkError') {
+          // Connection lost again — stop replaying.
+          await offlineQueue.incrementRetry(item.id);
+          break;
+        }
+        // For auth/rate/protocol errors during replay, increment retry and continue.
+        await offlineQueue.incrementRetry(item.id);
+      }
+    }
+  } finally {
+    replayInProgress = false;
+    await updateQueueBadge();
+  }
+}
+
+/**
+ * Update the extension badge to reflect the current queue count.
+ *
+ * Shows the count with an orange background when the queue is non-empty;
+ * clears the badge when the queue is empty.
+ *
+ * Also updates connectionState.queuedOperations and broadcasts the change.
+ *
+ * @returns {Promise<void>}
+ */
+async function updateQueueBadge() {
+  const count = await offlineQueue.getCount();
+
+  connectionState.queuedOperations = count;
+
+  if (count > 0) {
+    chrome.action.setBadgeText({ text: String(count) });
+    chrome.action.setBadgeBackgroundColor({ color: '#F59E0B' }); // Orange/amber
+  } else {
+    chrome.action.setBadgeText({ text: '' });
+  }
+
+  broadcastConnectionState();
+}
+
+// ---------------------------------------------------------------------------
+// Online event handling (service worker scope)
+// ---------------------------------------------------------------------------
+
+self.addEventListener('online', () => {
+  // When connectivity is restored, attempt to reconnect and replay.
+  connect().then(() => {
+    if (connectionState.connected) {
+      replayQueue();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Message handlers
 // ---------------------------------------------------------------------------
 
@@ -221,7 +317,8 @@ function startPeriodicProbe() {
  *
  * Supported actions:
  *   getConnectionStatus  — return current connectionState
- *   callTool            — proxy a tool call through mcpClient
+ *   callTool            — proxy a tool call through mcpClient (queues on network error)
+ *   getQueueCount       — return offline queue length
  *   reconnect           — force immediate reconnect attempt
  */
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
@@ -243,14 +340,39 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
         .then((result) => {
           sendResponse({ status: 'ok', data: result });
         })
-        .catch((err) => {
+        .catch(async (err) => {
           // If we get a 401, clear auth token and notify popup.
           if (err.name === 'MCPAuthError') {
             handleAuthError();
+            sendResponse({ status: 'error', error: err.message, errorType: err.name });
+            return;
           }
+
+          // Only queue on network errors — not auth (401), rate limit (429),
+          // or validation/protocol errors.
+          if (err.name === 'MCPNetworkError') {
+            const { id, dropped } = await offlineQueue.enqueue({ toolName, args: args || {} });
+            await updateQueueBadge();
+            sendResponse({
+              status: 'queued',
+              queueId: id,
+              dropped,
+              error: err.message,
+              errorType: err.name,
+            });
+            return;
+          }
+
           sendResponse({ status: 'error', error: err.message, errorType: err.name });
         });
       return true; // Keep message channel open for async response.
+    }
+
+    case 'getQueueCount': {
+      offlineQueue.getCount().then((count) => {
+        sendResponse({ status: 'ok', data: { count } });
+      });
+      return true;
     }
 
     case 'OPTIONS_UPDATED':
@@ -349,4 +471,6 @@ chrome.runtime.onStartup.addListener(() => {
 // Service workers can be activated without firing onStartup (e.g. when the
 // popup opens and the worker was idle). Connect immediately so the first
 // getConnectionStatus message has something to return.
+// Also initialise the badge to reflect any pending queue items.
+updateQueueBadge();
 connect();

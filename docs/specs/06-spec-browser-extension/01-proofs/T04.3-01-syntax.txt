@@ -1,0 +1,8 @@
+Type: cli
+Command: node --check browser-extension/src/offline-queue.js && node --check browser-extension/src/background.js
+Expected: No syntax errors
+Timestamp: 2026-04-01T12:00:00Z
+Status: PASS
+
+Output:
+Both files pass Node.js syntax validation with no errors.
