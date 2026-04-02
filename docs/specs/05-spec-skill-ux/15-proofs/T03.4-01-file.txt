@@ -1,0 +1,17 @@
+Type: file
+Command: grep 'distillery_configure' .claude-plugin/skills/tune/SKILL.md
+Expected: match
+Timestamp: 2026-04-02T00:00:00Z
+
+--- OUTPUT ---
+  - "mcp__*__distillery_configure"
+Apply each change via `distillery_configure`:
+- For alert: `distillery_configure(section="feeds.thresholds", key="alert", value="<new_value>")`
+- For digest: `distillery_configure(section="feeds.thresholds", key="digest", value="<new_value>")`
+If `distillery_configure` returns an error, display the error message and stop. Do not proceed with remaining changes if an earlier one fails.
+**After changes or reset:** Same table with Previous/New columns sourced from `distillery_configure` response (`previous_value` and `new_value` fields). Include a confirmation line:
+- Use `distillery_configure` to apply changes at runtime — no manual YAML editing required
+- When both alert and digest change, call `distillery_configure` for digest first
+
+--- STATUS: PASS ---
+distillery_configure appears in allowed-tools and in Steps 4 and 5 of the skill body.
