@@ -35,8 +35,6 @@ Distillery is a team knowledge base accessed through Claude Code skills. It refi
 
 Distillery captures the highest-value transformation — from noise to signal — and makes it a tool the whole team can use.
 
-> **Full documentation:** [norrietaylor.github.io/distillery](https://norrietaylor.github.io/distillery/)
-
 ## Demo
 
 <p align="center">
