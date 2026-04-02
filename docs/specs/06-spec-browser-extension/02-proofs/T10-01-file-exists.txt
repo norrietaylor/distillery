@@ -1,0 +1,12 @@
+Type: file
+Description: Readability.js file exists in vendor/ directory
+Expected: File exists at browser-extension/vendor/readability.js with ~89KB size
+Timestamp: 2026-04-01T23:30:00Z
+
+Command: ls -lh /home/norrie.guest/code/distillery/.worktrees/feature-browser-extension/browser-extension/vendor/readability.js
+
+Output:
+-rw-rw-r-- 1 norrie norrie 89K Apr  1 23:26 /home/norrie.guest/code/distillery/.worktrees/feature-browser-extension/browser-extension/vendor/readability.js
+
+Status: PASS
+Notes: File is present with correct size (89K = ~89000 bytes)

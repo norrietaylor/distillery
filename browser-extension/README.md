@@ -103,7 +103,7 @@ browser-extension/
 │   ├── icon-48.png        # Toolbar icon (48×48)
 │   └── icon-128.png       # Toolbar icon (128×128)
 ├── vendor/
-│   └── readability.js     # Mozilla's Readability library (MIT license)
+│   └── readability.js     # Mozilla's Readability library (Apache 2.0 license)
 ├── safari/                # Safari Xcode project (generated)
 └── README.md              # This file
 ```
