@@ -337,12 +337,17 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
 
     @server.tool
     async def distillery_review_queue(
-        ctx: Context, entry_type: str | None = None, limit: int = 20,
+        ctx: Context, entry_type: str | None = None, project: str | None = None, limit: int = 20,
     ) -> list[types.TextContent]:
-        """List entries awaiting human review after classification. limit 1–500."""
+        """List entries awaiting human review after classification. limit 1–500.
+
+        project filters results to a specific project slug.
+        """
         c = _lc(ctx)
-        return await _handle_review_queue(store=c["store"],
-                                          arguments=dict(limit=limit, **_omit_none(entry_type=entry_type)))
+        return await _handle_review_queue(
+            store=c["store"],
+            arguments=dict(limit=limit, **_omit_none(entry_type=entry_type, project=project)),
+        )
 
     @server.tool
     async def distillery_resolve_review(  # noqa: PLR0913

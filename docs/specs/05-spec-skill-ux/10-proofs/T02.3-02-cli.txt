@@ -1,0 +1,8 @@
+Type: cli
+Command: grep -n 'project' src/distillery/mcp/server.py | grep -E "340|349"
+Expected: project parameter present in distillery_review_queue signature and arguments dict
+Timestamp: 2026-04-02T00:00:00Z
+Status: PASS
+
+340:        ctx: Context, entry_type: str | None = None, project: str | None = None, limit: int = 20,
+349:            arguments=dict(limit=limit, **_omit_none(entry_type=entry_type, project=project)),
