@@ -31,7 +31,13 @@
       "mcp__claude_ai_distillery__distillery_list",
       "mcp__claude_ai_distillery__distillery_suggest_sources",
       "mcp__claude_ai_distillery__distillery_store",
-      "mcp__claude_ai_distillery__distillery_search"
+      "mcp__claude_ai_distillery__distillery_search",
+      "Bash(git checkout:*)",
+      "Bash(git fetch:*)",
+      "Bash(git merge:*)",
+      "Bash(git commit -m ':*)",
+      "Bash(chmod +x:*)",
+      "Bash(asciinema rec:*)"
     ]
   }
 }

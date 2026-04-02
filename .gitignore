@@ -68,3 +68,9 @@ distillery.yaml.local
 docs/specs/**/*-proofs/
 docs/specs/**/*-validation-*.md
 site/
+
+# Working demo files (committed versions live in docs/assets/)
+*.cast
+*.gif
+!docs/assets/*.cast
+!docs/assets/*.gif

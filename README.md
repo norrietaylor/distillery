@@ -24,16 +24,11 @@
 
 <p align="center">
   <a href="https://pypi.org/project/distillery/"><img src="https://img.shields.io/pypi/v/distillery" alt="PyPI version"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/norrietaylor/distillery" alt="License"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="License"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python version"></a>
 </p>
 
 ---
-
-<p align="center">
-  <img src="docs/assets/distillery-demo.gif" alt="Distillery demo — /radar ambient intelligence digest" width="600">
-</p>
-
 ## What is Distillery?
 
 Distillery is a team knowledge base accessed through Claude Code skills. It refines raw information from working sessions, meetings, bookmarks, and conversations into concentrated, searchable knowledge — stored as vector embeddings in DuckDB and retrieved through natural language. Runs locally over stdio or as a hosted HTTP service with GitHub OAuth for team access.
@@ -42,10 +37,8 @@ Distillery captures the highest-value transformation — from noise to signal �
 
 > **Full documentation:** [norrietaylor.github.io/distillery](https://norrietaylor.github.io/distillery/)
 
-## Demo
-
 <p align="center">
-  <img src="docs/assets/distillery-demo.gif" alt="Distillery demo — /radar ambient intelligence digest" width="600">
+  <img src="docs/assets/distillery-demo.gif" alt="Distillery demo — /distill captures a decision, /pour synthesizes it" width="600">
 </p>
 
 ## Skills
