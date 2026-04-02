@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Distillery</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div id="popup-container">
+    <!-- Header with connection status -->
+    <header class="popup-header">
+      <div class="connection-status">
+        <span id="status-indicator" class="status-dot disconnected"></span>
+        <div class="status-text">
+          <span id="status-label" class="status-label">Disconnected</span>
+          <span id="server-type" class="server-type"></span>
+        </div>
+      </div>
+      <button id="settings-btn" class="settings-btn" title="Settings">⚙</button>
+    </header>
+
+    <!-- Tab bar placeholder -->
+    <nav class="tab-bar">
+      <button class="tab-btn active" data-tab="status">Status</button>
+      <button class="tab-btn" data-tab="bookmark">Bookmark</button>
+      <button class="tab-btn" data-tab="watch">Watch</button>
+    </nav>
+
+    <!-- Tab content -->
+    <div class="tab-content">
+      <!-- Status Tab (initial/fallback) -->
+      <div id="status-tab" class="tab-panel active">
+        <div class="status-section">
+          <p id="status-message" class="status-message">
+            Connecting to server...
+          </p>
+          <div id="offline-queue" class="offline-queue" style="display: none;">
+            <p class="queue-label">⚠ <span id="queue-count">0</span> pending operations</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bookmark Tab -->
+      <div id="bookmark-tab" class="tab-panel" style="display: none;">
+        <div class="bookmark-section">
+          <p>Bookmark tab content will be added in T02</p>
+        </div>
+      </div>
+
+      <!-- Watch Tab -->
+      <div id="watch-tab" class="tab-panel" style="display: none;">
+        <div class="watch-section">
+          <p>Watch tab content will be added in T04</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
