@@ -38,12 +38,13 @@ See CONVENTIONS.md — skip if already confirmed this conversation.
 |------|-------------|
 | `--days N` | Look back N days for recent feed entries (default: 7) |
 | `--limit N` | Maximum number of feed entries to include (default: 20) |
+| `--project <name>` | Scope feed entries to a specific project |
 | `--suggest` | Include source suggestions at end of digest |
 | `--store` | Store digest as a knowledge entry (default: display-only) |
 
 ### Step 3: Retrieve Recent Feed Entries
 
-Call `distillery_list(entry_type="feed", limit=<limit>, output_mode="summary")`. If `--days N` was specified, also pass `date_from` as ISO 8601 date N days before today.
+Call `distillery_list(entry_type="feed", limit=<limit>, output_mode="summary")`. If `--days N` was specified, also pass `date_from` as ISO 8601 date N days before today. If `--project` was specified, also pass `project=<name>`.
 
 If no feed entries are found, display:
 

@@ -39,6 +39,12 @@ See CONVENTIONS.md — skip if already confirmed this conversation.
 | `/classify --review` | Review queue triage |
 | `/classify` (no args) | Show help |
 
+**Optional flags (all modes):**
+
+| Flag | Parameter | Description |
+|------|-----------|-------------|
+| `--project` | `<name>` | Filter by project name |
+
 ---
 
 ## Mode A: Classify by ID
@@ -65,7 +71,7 @@ Show entry ID, type, confidence (as `<n%> (<level>)`), status, reasoning, and su
 
 ### Step B1: List Inbox Entries
 
-Call `distillery_list(entry_type="inbox", limit=50, output_mode="full", content_max_length=300)`. If empty, tell the user and stop.
+Call `distillery_list(entry_type="inbox", limit=50, output_mode="full", content_max_length=300)`. If `--project` was specified, also pass `project=<name>`. If empty, tell the user and stop.
 
 ### Step B2: Classify Each Entry
 
@@ -91,7 +97,7 @@ If any sent to review, suggest `/classify --review`.
 
 ### Step C1: Fetch the Review Queue
 
-Call `distillery_review_queue(limit=20)`. If empty, tell the user and stop.
+Call `distillery_review_queue(limit=20)`. If `--project` was specified, also pass `project=<name>`. If empty, tell the user and stop.
 
 ### Step C2: Determine Reviewer
 

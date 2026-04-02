@@ -37,6 +37,12 @@ See CONVENTIONS.md — skip if already confirmed this conversation.
 - `--update <meeting_id>` → **Update Mode**
 - `--list` → **List Mode**
 
+**Optional flags (all modes):**
+
+| Flag | Parameter | Description |
+|------|-----------|-------------|
+| `--project` | `<name>` | Filter by project name (used in List Mode to scope results) |
+
 ---
 
 ## New Meeting Mode (default)
@@ -201,6 +207,8 @@ Tags: tag1, tag2, tag3
 ```python
 distillery_list(entry_type="minutes", limit=10)
 ```
+
+If `--project` was specified, also pass `project=<name>` to scope results to that project.
 
 If none found: "No meeting entries found. Use /minutes to capture your first meeting."
 
