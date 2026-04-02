@@ -55,6 +55,19 @@ Describe what the user will see after the skill completes:
 - Provide examples and expected output
 - Keep step descriptions concise but complete
 
+## Progressive Disclosure
+
+Skills that exceed 150 lines should move detailed or mode-specific content into a `references/` subdirectory alongside the main `SKILL.md`.
+
+**Pattern:**
+- `SKILL.md` describes purpose, flags, and dispatch logic — it stays concise
+- Mode-specific detail, help text, and reference tables live in `references/<file>.md`
+- The main skill reads the reference file on demand: `Read references/<file>.md for details`
+
+**Canonical example:** `/setup` uses `references/transport-detection.md` and `references/cron-payloads.md` to keep its main SKILL.md focused on the wizard flow.
+
+**When to split:** If adding a new mode or section would push `SKILL.md` past 150 lines, extract it to `references/`. Update the relevant step or mode in `SKILL.md` with a single `Read references/<file>.md` instruction.
+
 ## API Key Configuration
 
 API keys required by Distillery (embedding provider, GitHub OAuth) are declared in `plugin.json` under `userConfig`. Keys marked `sensitive: true` are stored in the OS keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service) via Claude Code's secure config system.
