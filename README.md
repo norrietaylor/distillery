@@ -30,6 +30,10 @@
 
 ---
 
+<p align="center">
+  <img src="docs/assets/distillery-demo.gif" alt="Distillery demo — /radar ambient intelligence digest" width="600">
+</p>
+
 ## What is Distillery?
 
 Distillery is a team knowledge base accessed through Claude Code skills. It refines raw information from working sessions, meetings, bookmarks, and conversations into concentrated, searchable knowledge — stored as vector embeddings in DuckDB and retrieved through natural language. Runs locally over stdio or as a hosted HTTP service with GitHub OAuth for team access.

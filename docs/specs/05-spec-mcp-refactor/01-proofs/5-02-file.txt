@@ -1,0 +1,26 @@
+Type: file
+Description: Verify tools/ package structure and exports
+Expected: __init__.py and _common.py exist with correct functions exported
+Timestamp: 2026-04-01T16:12:00Z
+
+File Structure:
+✓ src/distillery/mcp/tools/__init__.py exists
+✓ src/distillery/mcp/tools/_common.py exists
+
+Exported Functions (verified via import):
+✓ error_response - Builds structured error responses as MCP content
+✓ success_response - Builds structured success responses as MCP content
+✓ validate_required - Validates required fields in arguments dict
+✓ validate_type - Validates field types in arguments dict
+✓ _get_authenticated_user - Returns authenticated GitHub username
+
+Function Signatures (mypy --strict verified):
+- error_response(code: str, message: str, details: dict[str, Any] | None = None) -> list[types.TextContent]
+- success_response(data: dict[str, Any]) -> list[types.TextContent]
+- validate_required(arguments: dict[str, Any], *fields: str) -> str | None
+- validate_type(arguments: dict[str, Any], field: str, expected_type: type | tuple[type, ...], label: str) -> str | None
+- _get_authenticated_user() -> str
+
+Status: PASS
+
+All required exports are present and correctly type-annotated for mypy --strict.

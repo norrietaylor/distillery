@@ -1,0 +1,75 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.7, pytest-9.0.2, pluggy-1.6.0
+rootdir: /home/norrie.guest/code/distillery/.worktrees/feature-mcp-refactor
+configfile: pyproject.toml
+testpaths: tests
+plugins: asyncio-1.3.0, anyio-4.13.0, cov-7.1.0, typeguard-4.4.2
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 1278 items
+
+tests/test_budget.py ...................                                 [  1%]
+tests/test_classification_engine.py ................................     [  3%]
+tests/test_cli.py .............................                          [  6%]
+tests/test_cloud_storage.py ..........................................   [  9%]
+tests/test_config.py ................................................... [ 13%]
+......................................                                   [ 16%]
+tests/test_conflict.py ..........................                        [ 18%]
+tests/test_dedup.py .........................                            [ 20%]
+tests/test_duckdb_store.py ............................................. [ 24%]
+...............................                                          [ 26%]
+tests/test_e2e_mcp.py ............                                       [ 27%]
+tests/test_embedding.py ................................................ [ 31%]
+                                                                         [ 31%]
+tests/test_entry.py .................................................... [ 35%]
+...............                                                          [ 36%]
+tests/test_eval_claude.py ssssssssssssssssssssssssssssssssssssssssssssss [ 39%]
+ssssssssss..s.ssss                                                       [ 41%]
+tests/test_eval_unit.py ................................................ [ 45%]
+................................................                         [ 48%]
+tests/test_feedback.py ................                                  [ 50%]
+tests/test_feeds.py .................................................... [ 54%]
+......                                                                   [ 54%]
+tests/test_interests.py ...........................................      [ 58%]
+tests/test_list_output_modes.py ..................                       [ 59%]
+tests/test_mcp_auth.py ...........                                       [ 60%]
+tests/test_mcp_classify.py ...........................                   [ 62%]
+tests/test_mcp_dedup.py .........                                        [ 63%]
+tests/test_mcp_errors.py ........................                        [ 65%]
+tests/test_mcp_http_transport.py ........                                [ 65%]
+tests/test_mcp_org_membership.py ....................................... [ 68%]
+..                                                                       [ 68%]
+tests/test_mcp_server.py ............................................... [ 72%]
+...                                                                      [ 72%]
+tests/test_metrics.py ..........................                         [ 74%]
+tests/test_middleware.py ...................................             [ 77%]
+tests/test_plugin.py ................................................... [ 81%]
+..                                                                       [ 81%]
+tests/test_poller.py ............................                        [ 83%]
+tests/test_security.py ...........                                       [ 84%]
+tests/test_stale.py .........................                            [ 86%]
+tests/test_store_integration.py .........................                [ 88%]
+tests/test_store_protocol.py ..........                                  [ 89%]
+tests/test_store_security.py ......                                      [ 89%]
+tests/test_tags.py .............................                         [ 92%]
+tests/test_type_schemas.py ............................................. [ 95%]
+                                                                         [ 95%]
+tests/test_watch.py ...........................................          [ 99%]
+tests/test_webhooks.py ............                                      [100%]
+
+=============================== warnings summary ===============================
+tests/test_mcp_http_transport.py::TestHttpServerStarts::test_http_server_starts
+  /home/norrie.guest/.local/lib/python3.13/site-packages/websockets/legacy/__init__.py:6: DeprecationWarning: websockets.legacy is deprecated; see https://websockets.readthedocs.io/en/stable/howto/upgrade.html for upgrade instructions
+    warnings.warn(  # deprecated in 14.0 - 2024-11-09
+
+tests/test_mcp_http_transport.py::TestHttpServerStarts::test_http_server_starts
+  /home/norrie.guest/.local/lib/python3.13/site-packages/uvicorn/protocols/websockets/websockets_impl.py:17: DeprecationWarning: websockets.server.WebSocketServerProtocol is deprecated
+    from websockets.server import WebSocketServerProtocol
+
+tests/test_stale.py::TestEmptyDatabase::test_empty_db_returns_empty_list
+  /usr/lib/python3.13/typing.py:2371: RuntimeWarning: coroutine '_cmd_poll.<locals>._run' was never awaited
+    def cast(typ, val):
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================ 1217 passed, 61 skipped, 3 warnings in 14.14s =================

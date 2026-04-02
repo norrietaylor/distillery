@@ -1,0 +1,16 @@
+Type: test
+Command: python3 -m pytest tests/test_middleware.py -v
+Expected: All 35 middleware tests pass
+Timestamp: 2026-04-01T16:30:00Z
+
+Result:
+35 passed in 0.06s
+
+Test breakdown:
+- TestRateLimitMiddleware: 7 tests (per-minute limit, per-hour limit, sliding window expiry, per-IP tracking, non-HTTP passthrough, idle eviction)
+- TestBodySizeLimitMiddleware: 7 tests (within limit, oversized Content-Length, oversized streaming, boundary, non-HTTP passthrough, invalid Content-Length, streaming check)
+- TestOrgMembershipMiddleware: 11 tests (valid member, non-member 403, missing auth, non-bearer, OAuth bypass, disabled checker, non-HTTP, opaque token fail-closed, no login claim, sub claim, caching)
+- TestClientIp: 5 tests (scope client, X-Forwarded-For, trust_proxy, unknown, multiple forwarded)
+- TestApplyHttpMiddleware: 5 tests (basic composition, with org checker, disabled checker, rate limit composition, body size composition)
+
+Status: PASS

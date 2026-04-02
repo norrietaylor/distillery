@@ -1,0 +1,11 @@
+PROOF ARTIFACT: test
+Task: T01.4 - Extract classify handlers to tools/classify.py
+Command: pytest -m unit --tb=short -q
+Expected: all existing unit tests still pass
+Timestamp: 2026-04-01T00:00:00Z
+---
+895 passed, 2 skipped, 381 deselected, 1 warning in 2.73s
+
+All pre-existing unit tests pass after extraction. No regressions.
+
+Status: PASS

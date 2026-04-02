@@ -1,0 +1,9 @@
+Type: cli
+Command: mypy --strict src/distillery/config.py
+Expected: No errors
+Timestamp: 2026-04-01T00:00:00Z
+
+=== PROOF CAPTURE ===
+Success: no issues found in 1 source file
+
+Status: PASS

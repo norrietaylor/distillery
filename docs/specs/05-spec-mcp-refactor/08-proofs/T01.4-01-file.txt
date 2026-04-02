@@ -1,0 +1,29 @@
+PROOF ARTIFACT: file
+Task: T01.4 - Extract classify handlers to tools/classify.py
+Path: src/distillery/mcp/tools/classify.py
+Contains: _handle_classify, _handle_review_queue, _handle_resolve_review
+Timestamp: 2026-04-01T00:00:00Z
+---
+File exists: YES
+
+Verified contents:
+- Module docstring declares distillery_classify, distillery_review_queue, distillery_resolve_review
+- _handle_classify function defined (line 37)
+- _handle_review_queue function defined (line 144)
+- _handle_resolve_review function defined (line 195)
+- _VALID_REVIEW_ACTIONS constant defined (line 30)
+- __all__ export list includes all 3 handlers (line 276)
+
+Imports in classify.py:
+- from distillery.mcp.tools._common import error_response, success_response, validate_required, validate_type
+- from distillery.mcp.tools.crud import _VALID_ENTRY_TYPES
+- from distillery.config import DistilleryConfig
+
+server.py imports updated:
+- from distillery.mcp.tools.classify import _handle_classify, _handle_resolve_review, _handle_review_queue
+- Inline handler definitions removed from server.py
+
+tools/__init__.py updated:
+- Added classify handler imports and __all__ exports
+
+Status: PASS

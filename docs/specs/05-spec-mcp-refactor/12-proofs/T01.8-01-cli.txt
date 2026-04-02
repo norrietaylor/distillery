@@ -1,0 +1,10 @@
+Type: cli
+Command: wc -l src/distillery/mcp/server.py
+Expected: <=500 lines
+Timestamp: 2026-04-01T17:00:00Z
+Status: PASS
+
+Output:
+489 src/distillery/mcp/server.py
+
+Result: 489 lines — satisfies <=500 requirement.

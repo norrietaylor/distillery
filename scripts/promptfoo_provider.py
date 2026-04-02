@@ -66,7 +66,7 @@ def call_api(
                 "mcp__distillery__*",
                 "--dangerously-skip-permissions",
                 "--max-turns",
-                "5",
+                "10",
                 "-p",
                 prompt,
             ],
