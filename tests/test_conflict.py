@@ -590,19 +590,19 @@ class TestMCPCheckConflictsSecondPass:
         store: DuckDBStore,
     ) -> None:
         """
-        Verify that calling _handle_check_conflicts without a "content" field produces an INVALID_INPUT error in the response.
+        Verify that calling _handle_check_conflicts without a "content" field produces an INVALID_PARAMS error in the response.
         """
         config = _make_config()
         response = await _handle_check_conflicts(store, config, {})
         data = parse_mcp_response(response)
         assert data.get("error") is True
-        assert data.get("code") == "INVALID_INPUT"
+        assert data.get("code") == "INVALID_PARAMS"
 
     async def test_invalid_llm_responses_type_returns_error(
         self,
         store: DuckDBStore,
     ) -> None:
-        """Passing llm_responses as a non-dict returns an INVALID_INPUT error."""
+        """Passing llm_responses as a non-dict returns an INVALID_PARAMS error."""
         config = _make_config()
         response = await _handle_check_conflicts(
             store,
@@ -611,4 +611,4 @@ class TestMCPCheckConflictsSecondPass:
         )
         data = parse_mcp_response(response)
         assert data.get("error") is True
-        assert data.get("code") == "INVALID_INPUT"
+        assert data.get("code") == "INVALID_PARAMS"

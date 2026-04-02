@@ -130,7 +130,7 @@ class TestCheckDedupValidation:
         response = await _handle_check_dedup(store, config, {})
         data = parse_mcp_response(response)
         assert data.get("error") is True
-        assert data.get("code") == "INVALID_INPUT"
+        assert data.get("code") == "INVALID_PARAMS"
 
 
 # ---------------------------------------------------------------------------

@@ -59,7 +59,7 @@ async def _handle_search(
 
     err = validate_required(arguments, "query")
     if err:
-        return error_response("VALIDATION_ERROR", err)
+        return error_response("INVALID_PARAMS", err)
 
     query: str = arguments["query"]
 
@@ -128,17 +128,17 @@ async def _handle_find_similar(
 
     err = validate_required(arguments, "content")
     if err:
-        return error_response("VALIDATION_ERROR", err)
+        return error_response("INVALID_PARAMS", err)
 
     content: str = arguments["content"]
 
     threshold_raw = arguments.get("threshold", 0.8)
     err_threshold = validate_type(arguments, "threshold", (int, float), "number")
     if err_threshold:
-        return error_response("VALIDATION_ERROR", err_threshold)
+        return error_response("INVALID_PARAMS", err_threshold)
     threshold = float(threshold_raw) if threshold_raw is not None else 0.8
     if not (0.0 <= threshold <= 1.0):
-        return error_response("VALIDATION_ERROR", "Field 'threshold' must be in [0.0, 1.0]")
+        return error_response("INVALID_PARAMS", "Field 'threshold' must be in [0.0, 1.0]")
 
     limit_result = validate_limit(arguments.get("limit", 10), min_val=1, max_val=200, default=10)
     if isinstance(limit_result, tuple):
@@ -196,12 +196,12 @@ async def _handle_aggregate(
     group_by = arguments.get("group_by", "")
     err_group_by = validate_type(arguments, "group_by", str, "string")
     if err_group_by:
-        return error_response("VALIDATION_ERROR", err_group_by)
+        return error_response("INVALID_PARAMS", err_group_by)
     if not group_by:
-        return error_response("VALIDATION_ERROR", "Missing required field: group_by")
+        return error_response("INVALID_PARAMS", "Missing required field: group_by")
     if group_by not in _AGGREGATE_GROUP_BY_MAP:
         return error_response(
-            "VALIDATION_ERROR",
+            "INVALID_PARAMS",
             f"Field 'group_by' must be one of: {', '.join(sorted(_AGGREGATE_GROUP_BY_MAP))}",
         )
 

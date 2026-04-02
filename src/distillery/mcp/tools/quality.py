@@ -54,7 +54,7 @@ async def _handle_check_dedup(
     # --- validate input -----------------------------------------------------
     err = validate_required(arguments, "content")
     if err:
-        return error_response("INVALID_INPUT", err)
+        return error_response("INVALID_PARAMS", err)
 
     content = str(arguments["content"])
 
@@ -148,13 +148,13 @@ async def _handle_check_conflicts(
     # --- validate input -----------------------------------------------------
     err = validate_required(arguments, "content")
     if err:
-        return error_response("INVALID_INPUT", err)
+        return error_response("INVALID_PARAMS", err)
 
     content = str(arguments["content"])
 
     llm_responses_raw: dict[str, Any] | None = arguments.get("llm_responses")
     if llm_responses_raw is not None and not isinstance(llm_responses_raw, dict):
-        return error_response("INVALID_INPUT", "Field 'llm_responses' must be an object")
+        return error_response("INVALID_PARAMS", "Field 'llm_responses' must be an object")
 
     # --- build checker -------------------------------------------------------
     threshold = config.classification.conflict_threshold
@@ -223,13 +223,13 @@ async def _handle_check_conflicts(
     for entry_id, response_obj in llm_responses_raw.items():
         if not isinstance(response_obj, dict):
             return error_response(
-                "INVALID_INPUT",
+                "INVALID_PARAMS",
                 f"llm_responses[{entry_id!r}] must be an object with 'is_conflict' and 'reasoning'.",
             )
         is_conflict_raw = response_obj.get("is_conflict")
         if is_conflict_raw is None:
             return error_response(
-                "INVALID_INPUT",
+                "INVALID_PARAMS",
                 f"llm_responses[{entry_id!r}] is missing required field 'is_conflict'.",
             )
         reasoning = str(response_obj.get("reasoning", ""))

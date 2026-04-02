@@ -215,7 +215,7 @@ class TestClassifyTool:
         response = await _handle_classify(store, config, {"entry_id": "abc"})
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "INVALID_INPUT"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_classify_validates_invalid_entry_type(
         self, store: DuckDBStore, config: DistilleryConfig
@@ -230,7 +230,7 @@ class TestClassifyTool:
         )
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "INVALID_INPUT"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_classify_validates_confidence_out_of_range(
         self, store: DuckDBStore, config: DistilleryConfig
@@ -245,7 +245,7 @@ class TestClassifyTool:
         )
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "INVALID_INPUT"
+        assert data["code"] == "INVALID_PARAMS"
 
 
 # ---------------------------------------------------------------------------
@@ -331,13 +331,13 @@ class TestReviewQueueTool:
         response = await _handle_review_queue(store, {"limit": 0})
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "VALIDATION_ERROR"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_review_queue_validates_invalid_entry_type(self, store: DuckDBStore) -> None:
         response = await _handle_review_queue(store, {"entry_type": "not_a_type"})
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "INVALID_INPUT"
+        assert data["code"] == "INVALID_PARAMS"
 
 
 # ---------------------------------------------------------------------------
@@ -398,7 +398,7 @@ class TestResolveReviewTool:
         )
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "INVALID_INPUT"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_resolve_reclassify_validates_new_entry_type(self, store: DuckDBStore) -> None:
         entry = make_entry(status=EntryStatus.PENDING_REVIEW)
@@ -414,7 +414,7 @@ class TestResolveReviewTool:
         )
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "INVALID_INPUT"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_resolve_returns_not_found_for_missing_entry(self, store: DuckDBStore) -> None:
         response = await _handle_resolve_review(
@@ -432,7 +432,7 @@ class TestResolveReviewTool:
         response = await _handle_resolve_review(store, {"entry_id": "abc"})
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "INVALID_INPUT"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_resolve_validates_invalid_action(self, store: DuckDBStore) -> None:
         entry = make_entry(status=EntryStatus.PENDING_REVIEW)
@@ -441,7 +441,7 @@ class TestResolveReviewTool:
         response = await _handle_resolve_review(store, {"entry_id": entry_id, "action": "reject"})
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "INVALID_INPUT"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_resolve_approve_without_reviewer(self, store: DuckDBStore) -> None:
         """Reviewer field is optional."""

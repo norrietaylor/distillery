@@ -515,13 +515,13 @@ class TestValidation:
         response = await _handle_stale(store, config, {"days": "not-an-int"})
         data = parse_mcp_response(response)
         assert data.get("error") is True
-        assert "VALIDATION_ERROR" in data["code"]
+        assert "INVALID_PARAMS" in data["code"]
 
     async def test_invalid_limit_type(self, store: DuckDBStore, config: DistilleryConfig) -> None:
         response = await _handle_stale(store, config, {"limit": "not-an-int"})
         data = parse_mcp_response(response)
         assert data.get("error") is True
-        assert "VALIDATION_ERROR" in data["code"]
+        assert "INVALID_PARAMS" in data["code"]
 
     async def test_days_below_one_is_invalid(
         self, store: DuckDBStore, config: DistilleryConfig

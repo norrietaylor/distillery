@@ -207,10 +207,10 @@ async def _handle_metrics(
     period_days_raw = arguments.get("period_days", 30)
     err_period = validate_type(arguments, "period_days", int, "integer")
     if err_period:
-        return error_response("VALIDATION_ERROR", err_period)
+        return error_response("INVALID_PARAMS", err_period)
     period_days = int(period_days_raw) if period_days_raw is not None else 30
     if period_days < 1:
-        return error_response("VALIDATION_ERROR", "Field 'period_days' must be >= 1")
+        return error_response("INVALID_PARAMS", "Field 'period_days' must be >= 1")
 
     try:
         metrics = await asyncio.to_thread(
@@ -652,25 +652,25 @@ async def _handle_stale(
     # --- validate days -------------------------------------------------------
     err_days = validate_type(arguments, "days", int, "integer")
     if err_days:
-        return error_response("VALIDATION_ERROR", err_days)
+        return error_response("INVALID_PARAMS", err_days)
     days_raw = arguments.get("days")
     days: int = int(days_raw) if days_raw is not None else config.classification.stale_days
     if days < 1:
-        return error_response("VALIDATION_ERROR", "Field 'days' must be >= 1")
+        return error_response("INVALID_PARAMS", "Field 'days' must be >= 1")
 
     # --- validate limit -------------------------------------------------------
     err_limit = validate_type(arguments, "limit", int, "integer")
     if err_limit:
-        return error_response("VALIDATION_ERROR", err_limit)
+        return error_response("INVALID_PARAMS", err_limit)
     limit_raw = arguments.get("limit")
     limit: int = int(limit_raw) if limit_raw is not None else 20
     if limit < 1:
-        return error_response("VALIDATION_ERROR", "Field 'limit' must be >= 1")
+        return error_response("INVALID_PARAMS", "Field 'limit' must be >= 1")
 
     # --- validate entry_type -------------------------------------------------
     entry_type_filter: str | None = arguments.get("entry_type")
     if entry_type_filter is not None and not isinstance(entry_type_filter, str):
-        return error_response("VALIDATION_ERROR", "Field 'entry_type' must be a string")
+        return error_response("INVALID_PARAMS", "Field 'entry_type' must be a string")
 
     try:
         stale_entries = await asyncio.to_thread(

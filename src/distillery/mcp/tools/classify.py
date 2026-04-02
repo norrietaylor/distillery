@@ -59,7 +59,7 @@ async def _handle_classify(
     # --- input validation ---------------------------------------------------
     err = validate_required(arguments, "entry_id", "entry_type", "confidence")
     if err:
-        return error_response("INVALID_INPUT", err)
+        return error_response("INVALID_PARAMS", err)
 
     entry_id: str = arguments["entry_id"]
     entry_type_str: str = arguments["entry_type"]
@@ -67,20 +67,20 @@ async def _handle_classify(
 
     if entry_type_str not in _VALID_ENTRY_TYPES:
         return error_response(
-            "INVALID_INPUT",
+            "INVALID_PARAMS",
             f"Invalid entry_type {entry_type_str!r}. "
             f"Must be one of: {', '.join(sorted(_VALID_ENTRY_TYPES))}.",
         )
 
     if not isinstance(confidence_raw, (int, float)):
-        return error_response("INVALID_INPUT", "Field 'confidence' must be a number")
+        return error_response("INVALID_PARAMS", "Field 'confidence' must be a number")
     confidence = float(confidence_raw)
     if not (0.0 <= confidence <= 1.0):
-        return error_response("INVALID_INPUT", "Field 'confidence' must be in [0.0, 1.0]")
+        return error_response("INVALID_PARAMS", "Field 'confidence' must be in [0.0, 1.0]")
 
     tags_err = validate_type(arguments, "suggested_tags", list, "list of strings")
     if tags_err:
-        return error_response("INVALID_INPUT", tags_err)
+        return error_response("INVALID_PARAMS", tags_err)
 
     # --- retrieve existing entry --------------------------------------------
     try:
@@ -179,19 +179,19 @@ async def _handle_review_queue(
     limit_raw = arguments.get("limit", 20)
     err_limit = validate_type(arguments, "limit", int, "integer")
     if err_limit:
-        return error_response("VALIDATION_ERROR", err_limit)
+        return error_response("INVALID_PARAMS", err_limit)
     limit = int(limit_raw) if limit_raw is not None else 20
     if limit < 1:
-        return error_response("VALIDATION_ERROR", "Field 'limit' must be >= 1")
+        return error_response("INVALID_PARAMS", "Field 'limit' must be >= 1")
     if limit > 500:
-        return error_response("VALIDATION_ERROR", "Field 'limit' must be <= 500")
+        return error_response("INVALID_PARAMS", "Field 'limit' must be <= 500")
 
     filters: dict[str, Any] = {"status": "pending_review"}
     if "entry_type" in arguments and arguments["entry_type"] is not None:
         entry_type_str = arguments["entry_type"]
         if entry_type_str not in _VALID_ENTRY_TYPES:
             return error_response(
-                "INVALID_INPUT",
+                "INVALID_PARAMS",
                 f"Invalid entry_type {entry_type_str!r}. "
                 f"Must be one of: {', '.join(sorted(_VALID_ENTRY_TYPES))}.",
             )
@@ -254,14 +254,14 @@ async def _handle_resolve_review(
     # --- input validation ---------------------------------------------------
     err = validate_required(arguments, "entry_id", "action")
     if err:
-        return error_response("INVALID_INPUT", err)
+        return error_response("INVALID_PARAMS", err)
 
     entry_id: str = arguments["entry_id"]
     action: str = arguments["action"]
 
     if action not in _VALID_REVIEW_ACTIONS:
         return error_response(
-            "INVALID_INPUT",
+            "INVALID_PARAMS",
             f"Invalid action {action!r}. Must be one of: {', '.join(sorted(_VALID_REVIEW_ACTIONS))}.",
         )
 
@@ -297,12 +297,12 @@ async def _handle_resolve_review(
         new_type_str: str | None = arguments.get("new_entry_type")
         if not new_type_str:
             return error_response(
-                "INVALID_INPUT",
+                "INVALID_PARAMS",
                 "Field 'new_entry_type' is required when action='reclassify'.",
             )
         if new_type_str not in _VALID_ENTRY_TYPES:
             return error_response(
-                "INVALID_INPUT",
+                "INVALID_PARAMS",
                 f"Invalid new_entry_type {new_type_str!r}. "
                 f"Must be one of: {', '.join(sorted(_VALID_ENTRY_TYPES))}.",
             )

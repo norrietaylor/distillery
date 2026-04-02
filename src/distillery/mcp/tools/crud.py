@@ -240,31 +240,31 @@ async def _handle_store(
     # --- input validation ---------------------------------------------------
     err = validate_required(arguments, "content", "entry_type", "author")
     if err:
-        return error_response("INVALID_INPUT", err)
+        return error_response("INVALID_PARAMS", err)
 
     entry_type_str = arguments["entry_type"]
     if entry_type_str not in _VALID_ENTRY_TYPES:
         return error_response(
-            "INVALID_INPUT",
+            "INVALID_PARAMS",
             f"Invalid entry_type {entry_type_str!r}. "
             f"Must be one of: {', '.join(sorted(_VALID_ENTRY_TYPES))}.",
         )
 
     tags_err = validate_type(arguments, "tags", list, "list of strings")
     if tags_err:
-        return error_response("INVALID_INPUT", tags_err)
+        return error_response("INVALID_PARAMS", tags_err)
 
     metadata_err = validate_type(arguments, "metadata", dict, "object")
     if metadata_err:
-        return error_response("INVALID_INPUT", metadata_err)
+        return error_response("INVALID_PARAMS", metadata_err)
 
     dedup_threshold = arguments.get("dedup_threshold", _DEFAULT_DEDUP_THRESHOLD)
     dedup_limit = arguments.get("dedup_limit", _DEFAULT_DEDUP_LIMIT)
 
     if not isinstance(dedup_threshold, (int, float)):
-        return error_response("INVALID_INPUT", "Field 'dedup_threshold' must be a number")
+        return error_response("INVALID_PARAMS", "Field 'dedup_threshold' must be a number")
     if not isinstance(dedup_limit, int):
-        return error_response("INVALID_INPUT", "Field 'dedup_limit' must be an integer")
+        return error_response("INVALID_PARAMS", "Field 'dedup_limit' must be an integer")
 
     # --- reserved prefix enforcement ----------------------------------------
     # Sources that are permitted to use tags under reserved top-level prefixes.
@@ -275,7 +275,7 @@ async def _handle_store(
         for tag in tags_raw:
             if not isinstance(tag, str):
                 return error_response(
-                    "INVALID_INPUT", f"Each tag must be a string, got: {type(tag).__name__}"
+                    "INVALID_PARAMS", f"Each tag must be a string, got: {type(tag).__name__}"
                 )
         tags_to_check: list[str] = tags_raw
         if entry_source_str not in _reserved_allowed_sources:
@@ -330,7 +330,7 @@ async def _handle_store(
             created_by=created_by,
         )
     except Exception as exc:  # noqa: BLE001
-        return error_response("INVALID_INPUT", f"Failed to construct entry: {exc}")
+        return error_response("INVALID_PARAMS", f"Failed to construct entry: {exc}")
 
     # --- persist ------------------------------------------------------------
     try:
@@ -451,11 +451,11 @@ async def _handle_get(
 
     Returns:
         list[types.TextContent]: MCP content list containing the serialized entry on
-        success, or an error response (e.g., `NOT_FOUND`, `INVALID_INPUT`, `STORE_ERROR`).
+        success, or an error response (e.g., `NOT_FOUND`, `INVALID_PARAMS`, `STORE_ERROR`).
     """
     err = validate_required(arguments, "entry_id")
     if err:
-        return error_response("INVALID_INPUT", err)
+        return error_response("INVALID_PARAMS", err)
 
     entry_id: str = arguments["entry_id"]
 
@@ -530,7 +530,7 @@ async def _handle_update(
 
     err = validate_required(arguments, "entry_id")
     if err:
-        return error_response("INVALID_INPUT", err)
+        return error_response("INVALID_PARAMS", err)
 
     entry_id: str = arguments["entry_id"]
 
@@ -545,13 +545,13 @@ async def _handle_update(
     bad_keys = _IMMUTABLE_FIELDS & (set(arguments.keys()) - {"entry_id"})
     if bad_keys:
         return error_response(
-            "INVALID_INPUT",
+            "INVALID_PARAMS",
             f"Cannot update immutable field(s): {', '.join(sorted(bad_keys))}.",
         )
 
     if not updates:
         return error_response(
-            "INVALID_INPUT",
+            "INVALID_PARAMS",
             "No updatable fields provided. Supply at least one of: "
             + ", ".join(sorted(updatable_keys))
             + ".",
@@ -567,7 +567,7 @@ async def _handle_update(
         et_str = updates["entry_type"]
         if et_str not in _VALID_ENTRY_TYPES:
             return error_response(
-                "INVALID_INPUT",
+                "INVALID_PARAMS",
                 f"Invalid entry_type {et_str!r}. "
                 f"Must be one of: {', '.join(sorted(_VALID_ENTRY_TYPES))}.",
             )
@@ -577,18 +577,18 @@ async def _handle_update(
         st_str = updates["status"]
         if st_str not in _VALID_STATUSES:
             return error_response(
-                "INVALID_INPUT",
+                "INVALID_PARAMS",
                 f"Invalid status {st_str!r}. Must be one of: {', '.join(sorted(_VALID_STATUSES))}.",
             )
         updates["status"] = EntryStatus(st_str)
 
     tags_err = validate_type(updates, "tags", list, "list of strings")
     if tags_err:
-        return error_response("INVALID_INPUT", tags_err)
+        return error_response("INVALID_PARAMS", tags_err)
 
     metadata_err = validate_type(updates, "metadata", dict, "object")
     if metadata_err:
-        return error_response("INVALID_INPUT", metadata_err)
+        return error_response("INVALID_PARAMS", metadata_err)
 
     # --- persist ------------------------------------------------------------
     try:
@@ -600,7 +600,7 @@ async def _handle_update(
             details={"entry_id": entry_id},
         )
     except ValueError as exc:
-        return error_response("INVALID_INPUT", str(exc))
+        return error_response("INVALID_PARAMS", str(exc))
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error updating entry id=%s", entry_id)
         return error_response("STORE_ERROR", f"Failed to update entry: {exc}")
@@ -657,18 +657,18 @@ async def _handle_list(
     offset_raw = arguments.get("offset", 0)
     err_offset = validate_type(arguments, "offset", int, "integer")
     if err_offset:
-        return error_response("VALIDATION_ERROR", err_offset)
+        return error_response("INVALID_PARAMS", err_offset)
     offset = int(offset_raw) if offset_raw is not None else 0
     if offset < 0:
-        return error_response("VALIDATION_ERROR", "Field 'offset' must be >= 0")
+        return error_response("INVALID_PARAMS", "Field 'offset' must be >= 0")
 
     output_mode = arguments.get("output_mode", "full")
     err_output_mode = validate_type(arguments, "output_mode", str, "string")
     if err_output_mode:
-        return error_response("VALIDATION_ERROR", err_output_mode)
+        return error_response("INVALID_PARAMS", err_output_mode)
     if output_mode not in _VALID_OUTPUT_MODES:
         return error_response(
-            "VALIDATION_ERROR",
+            "INVALID_PARAMS",
             f"Field 'output_mode' must be one of: {', '.join(sorted(_VALID_OUTPUT_MODES))}",
         )
 
@@ -676,9 +676,9 @@ async def _handle_list(
     content_max_length: int | None = None
     if content_max_length_raw is not None:
         if not isinstance(content_max_length_raw, int):
-            return error_response("VALIDATION_ERROR", "Field 'content_max_length' must be an integer")
+            return error_response("INVALID_PARAMS", "Field 'content_max_length' must be an integer")
         if content_max_length_raw < 1:
-            return error_response("VALIDATION_ERROR", "Field 'content_max_length' must be >= 1")
+            return error_response("INVALID_PARAMS", "Field 'content_max_length' must be >= 1")
         content_max_length = content_max_length_raw
 
     filters = _build_filters_from_arguments(arguments)

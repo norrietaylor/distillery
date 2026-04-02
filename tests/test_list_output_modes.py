@@ -109,7 +109,7 @@ class TestListOutputModes:
         )
         data = parse_mcp_response(result)
         assert data["error"] is True
-        assert data["code"] == "VALIDATION_ERROR"
+        assert data["code"] == "INVALID_PARAMS"
         assert "output_mode" in data["message"]
 
     async def test_content_max_length_truncates(self, populated_store) -> None:
@@ -160,7 +160,7 @@ class TestListOutputModes:
         )
         data = parse_mcp_response(result)
         assert data["error"] is True
-        assert data["code"] == "VALIDATION_ERROR"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_content_max_length_zero_returns_error(self, store) -> None:
         result = await _handle_list(
@@ -169,7 +169,7 @@ class TestListOutputModes:
         )
         data = parse_mcp_response(result)
         assert data["error"] is True
-        assert data["code"] == "VALIDATION_ERROR"
+        assert data["code"] == "INVALID_PARAMS"
 
 
 # ---------------------------------------------------------------------------
@@ -228,7 +228,7 @@ class TestAggregate:
         )
         data = parse_mcp_response(result)
         assert data["error"] is True
-        assert data["code"] == "VALIDATION_ERROR"
+        assert data["code"] == "INVALID_PARAMS"
         assert "group_by" in data["message"]
 
     async def test_aggregate_missing_group_by_returns_error(self, populated_store) -> None:
@@ -238,7 +238,7 @@ class TestAggregate:
         )
         data = parse_mcp_response(result)
         assert data["error"] is True
-        assert data["code"] == "VALIDATION_ERROR"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_aggregate_sorted_by_count_desc(self, populated_store) -> None:
         result = await _handle_aggregate(
