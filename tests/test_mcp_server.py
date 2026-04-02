@@ -272,7 +272,7 @@ class TestStoreTool:
         )
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "INVALID_INPUT"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_store_missing_author_returns_error(self, store: DuckDBStore) -> None:
         response = await _handle_store(
@@ -281,7 +281,7 @@ class TestStoreTool:
         )
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "INVALID_INPUT"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_store_invalid_entry_type_returns_error(self, store: DuckDBStore) -> None:
         response = await _handle_store(
@@ -290,7 +290,7 @@ class TestStoreTool:
         )
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "INVALID_INPUT"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_store_all_valid_entry_types(self, store: DuckDBStore) -> None:
         """Each valid entry type should be accepted."""
@@ -315,7 +315,7 @@ class TestStoreTool:
         )
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "INVALID_INPUT"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_store_dedup_warning_on_duplicate(
         self,
@@ -372,7 +372,7 @@ class TestGetTool:
         response = await _handle_get(store, {})
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "INVALID_INPUT"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_get_returns_all_fields(self, store: DuckDBStore) -> None:
         entry = make_entry(
@@ -435,7 +435,7 @@ class TestUpdateTool:
         )
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "INVALID_INPUT"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_update_nonexistent_entry_returns_not_found(self, store: DuckDBStore) -> None:
         response = await _handle_update(store, {"entry_id": "nonexistent-id", "content": "Updated"})
@@ -447,7 +447,7 @@ class TestUpdateTool:
         response = await _handle_update(store, {"content": "No entry_id"})
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "INVALID_INPUT"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_update_no_fields_returns_error(self, store: DuckDBStore) -> None:
         entry = make_entry(content="No updates provided")
@@ -455,7 +455,7 @@ class TestUpdateTool:
         response = await _handle_update(store, {"entry_id": entry.id})
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "INVALID_INPUT"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_update_immutable_field_returns_error(self, store: DuckDBStore) -> None:
         entry = make_entry(content="Immutable test")
@@ -463,7 +463,7 @@ class TestUpdateTool:
         response = await _handle_update(store, {"entry_id": entry.id, "id": "new-id"})
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "INVALID_INPUT"
+        assert data["code"] == "INVALID_PARAMS"
 
 
 # ---------------------------------------------------------------------------
@@ -495,7 +495,7 @@ class TestSearchTool:
         response = await _handle_search(store, {})
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "VALIDATION_ERROR"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_search_respects_limit(self, store: DuckDBStore) -> None:
         for i in range(10):
@@ -539,7 +539,7 @@ class TestFindSimilarTool:
         response = await _handle_find_similar(store, {})
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "VALIDATION_ERROR"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_find_similar_threshold_out_of_range_returns_error(
         self, store: DuckDBStore
@@ -547,7 +547,7 @@ class TestFindSimilarTool:
         response = await _handle_find_similar(store, {"content": "test", "threshold": 1.5})
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "VALIDATION_ERROR"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_find_similar_default_threshold_returned_in_response(
         self, store: DuckDBStore
@@ -616,13 +616,13 @@ class TestListTool:
         response = await _handle_list(store, {"limit": -1})
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "VALIDATION_ERROR"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_list_invalid_offset_returns_error(self, store: DuckDBStore) -> None:
         response = await _handle_list(store, {"offset": -5})
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "VALIDATION_ERROR"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_list_includes_limit_and_offset_in_response(self, store: DuckDBStore) -> None:
         response = await _handle_list(store, {"limit": 5, "offset": 2})

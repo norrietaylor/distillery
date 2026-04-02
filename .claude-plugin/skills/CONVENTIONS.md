@@ -55,6 +55,14 @@ Describe what the user will see after the skill completes:
 - Provide examples and expected output
 - Keep step descriptions concise but complete
 
+## API Key Configuration
+
+API keys required by Distillery (embedding provider, GitHub OAuth) are declared in `plugin.json` under `userConfig`. Keys marked `sensitive: true` are stored in the OS keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service) via Claude Code's secure config system.
+
+**Preferred method:** `userConfig` in `plugin.json` — keys are prompted on first use and stored securely.
+
+**Fallback:** Environment variables (`JINA_API_KEY`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`) for CI or environments without keychain access.
+
 ## Author & Project Resolution
 
 Determine author and project once per conversation, then cache for subsequent skills.

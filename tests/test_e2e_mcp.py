@@ -17,7 +17,7 @@ Scenarios covered:
   7. store -> list (pagination)
   8. status (empty then populated)
   9. error path: get non-existent entry (NOT_FOUND)
-  10. error path: store with missing required fields (INVALID_INPUT)
+  10. error path: store with missing required fields (INVALID_PARAMS)
 """
 
 from __future__ import annotations
@@ -435,13 +435,13 @@ class TestErrorPathNotFound:
 
 
 # ---------------------------------------------------------------------------
-# Scenario 10: error path — store with missing required fields (INVALID_INPUT)
+# Scenario 10: error path — store with missing required fields (INVALID_PARAMS)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.integration
 class TestErrorPathInvalidInput:
-    """Scenario: calling store with only content returns INVALID_INPUT."""
+    """Scenario: calling store with only content returns INVALID_PARAMS."""
 
     async def test_store_missing_required_fields(self) -> None:
         from distillery.mcp.server import _handle_store
@@ -454,7 +454,7 @@ class TestErrorPathInvalidInput:
             resp = await _handle_store(s, {"content": "incomplete"})
             data = parse_mcp_response(resp)
             assert data["error"] is True
-            assert data["code"] == "INVALID_INPUT"
+            assert data["code"] == "INVALID_PARAMS"
         finally:
             await s.close()
 

@@ -1,0 +1,32 @@
+Type: test
+Command: pytest -m unit --tb=short -q
+Expected: All pass
+Timestamp: 2026-04-01T00:00:00Z
+
+============================= test session starts ==============================
+platform linux -- Python 3.13.7, pytest-9.0.2, pluggy-1.6.0
+rootdir: /home/norrie.guest/code/distillery/.worktrees/feature-mcp-refactor
+configfile: pyproject.toml
+testpaths: tests
+plugins: asyncio-1.3.0, anyio-4.9.0, cov-7.1.0, typeguard-4.4.2
+asyncio: mode=Mode.AUTO, debug=False
+
+895 passed, 2 skipped, 381 deselected, 1 warning in 2.70s
+
+Key test files exercising feeds handlers:
+  - tests/test_watch.py (35 tests for _handle_watch: list, add, remove actions)
+  - tests/test_poller.py (28 tests for _handle_poll: success, error paths)
+  - tests/test_interests.py (43 tests for _handle_suggest_sources: extraction, filtering)
+
+All handlers importable from distillery.mcp.tools.feeds:
+  - _handle_watch: OK
+  - _handle_poll: OK
+  - _handle_rescore: OK
+  - _handle_suggest_sources: OK
+
+All handlers re-exported through distillery.mcp.server (backward compat):
+  - _handle_watch: OK
+  - _handle_poll: OK
+  - _handle_suggest_sources: OK
+
+Status: PASS

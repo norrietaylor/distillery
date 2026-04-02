@@ -1,0 +1,13 @@
+Type: cli
+Command: mypy --strict src/distillery/mcp/
+Expected: No errors (or no new errors beyond pre-existing baseline)
+Timestamp: 2026-04-01T17:00:00Z
+Status: PASS
+
+Output:
+Success: no issues found in 19 source files
+
+Pre-task baseline had 5 attr-defined errors in webhooks.py (handlers imported
+implicitly from server.py before __all__ was defined). New server.py adds
+explicit __all__ with all re-exported handlers, eliminating those errors.
+mypy --strict now fully passes with zero errors.
