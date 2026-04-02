@@ -32,7 +32,7 @@ jobs:
         run: npm install -g @anthropic-ai/claude-code
 
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev,ragas]"
 
       - name: Run eval suite
         env:

@@ -130,6 +130,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default="claude-haiku-4-5-20251001",
         help="Claude model to use for eval runs (default: claude-haiku-4-5-20251001)",
     )
+    eval_parser.add_argument(
+        "--compare-cost",
+        action="store_true",
+        default=False,
+        help="Compare current run cost against baseline (requires --baseline)",
+    )
 
     return parser
 
@@ -446,6 +452,187 @@ def _cmd_poll(config_path: str | None, fmt: str, source_url: str | None) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Retrieval metrics helpers
+# ---------------------------------------------------------------------------
+
+#: MRR threshold — scenarios below this value are marked failed.
+_MRR_THRESHOLD: float = 0.7
+#: Precision@5 threshold — scenarios below this value are marked failed.
+_PRECISION_THRESHOLD: float = 0.6
+#: Number of top results to consider for precision/recall.
+_RETRIEVAL_K: int = 5
+
+
+def _load_golden_retrieval_labels(
+    golden_dir: Path,
+) -> dict[str, list[dict[str, Any]]]:
+    """Load golden retrieval labels from *golden_dir*/retrieval.yaml.
+
+    Returns a mapping of scenario name → list of golden label dicts with
+    ``"entry_id"`` (a content fingerprint) and ``"relevant"`` (bool).
+
+    The content fingerprint is the first 100 characters of each seed entry's
+    content, used to match against tool call response content fields since
+    actual UUIDs are not predictable at golden-data authoring time.
+
+    Returns an empty dict when the golden file is not found or cannot be parsed.
+    """
+    golden_path = golden_dir / "retrieval.yaml"
+    if not golden_path.exists():
+        return {}
+
+    try:
+        import yaml
+    except ImportError:
+        return {}
+
+    try:
+        raw: Any = yaml.safe_load(golden_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+    if not isinstance(raw, dict) or "scenarios" not in raw:
+        return {}
+
+    labels_by_name: dict[str, list[dict[str, Any]]] = {}
+    for scenario_data in raw.get("scenarios", []):
+        if not isinstance(scenario_data, dict):
+            continue
+        name: str = scenario_data.get("name", "")
+        if not name:
+            continue
+        seed_entries: list[Any] = scenario_data.get("seed_entries", [])
+        judgments: list[Any] = scenario_data.get("relevance_judgments", [])
+
+        golden_labels: list[dict[str, Any]] = []
+        for judgment in judgments:
+            if not isinstance(judgment, dict):
+                continue
+            idx = judgment.get("entry_index")
+            relevant = judgment.get("relevant", False)
+            if not isinstance(idx, int) or idx >= len(seed_entries):
+                continue
+            entry = seed_entries[idx]
+            if not isinstance(entry, dict):
+                continue
+            content: str = str(entry.get("content", ""))
+            # Use a 100-char content fingerprint as the entry_id for matching.
+            fingerprint = content[:100]
+            golden_labels.append({"entry_id": fingerprint, "relevant": relevant})
+
+        labels_by_name[name] = golden_labels
+
+    return labels_by_name
+
+
+def _build_retrieval_tool_calls(
+    result: Any,
+) -> list[Any]:
+    """Return ToolCallRecord copies with ``id`` replaced by a content fingerprint.
+
+    The ``distillery_search`` response contains a ``results`` list where each
+    item has both an ``id`` (UUID) and a ``content`` field.  This function
+    rebuilds the response so ``id = content[:100]``, enabling comparison
+    against content-fingerprint golden labels produced by
+    :func:`_load_golden_retrieval_labels`.
+    """
+    from distillery.eval.models import ToolCallRecord
+
+    translated: list[ToolCallRecord] = []
+    for tc in result.tool_calls:
+        if tc.tool_name != "distillery_search":
+            translated.append(tc)
+            continue
+
+        raw_results: Any = tc.response.get("results", [])
+        new_results: list[dict[str, Any]] = []
+        if isinstance(raw_results, list):
+            for item in raw_results:
+                if isinstance(item, dict):
+                    content_fp = str(item.get("content", ""))[:100]
+                    new_item = dict(item)
+                    new_item["id"] = content_fp
+                    new_results.append(new_item)
+
+        new_response = dict(tc.response)
+        new_response["results"] = new_results
+        translated.append(
+            ToolCallRecord(
+                tool_name=tc.tool_name,
+                arguments=tc.arguments,
+                response=new_response,
+                latency_ms=tc.latency_ms,
+                error=tc.error,
+            )
+        )
+    return translated
+
+
+def _apply_retrieval_scoring(
+    results: list[Any],
+    golden_labels_by_name: dict[str, list[dict[str, Any]]],
+) -> None:
+    """Compute retrieval metrics for results that have golden labels.
+
+    Mutates each :class:`~distillery.eval.models.ScenarioResult` in *results*:
+
+    - Sets ``retrieval_metrics`` to a :class:`~distillery.eval.retrieval_scorer.RetrievalMetrics`
+      instance when golden labels are available for the scenario.
+    - Appends to ``effectiveness.failure_reasons`` and sets ``passed = False``
+      when MRR < :data:`_MRR_THRESHOLD` or precision@5 < :data:`_PRECISION_THRESHOLD`.
+    """
+    try:
+        from distillery.eval.retrieval_scorer import score_retrieval
+    except ImportError:
+        return
+
+    for result in results:
+        golden_labels = golden_labels_by_name.get(result.scenario_name)
+        if not golden_labels:
+            continue
+
+        translated_calls = _build_retrieval_tool_calls(result)
+        metrics = score_retrieval(
+            results=translated_calls,
+            golden_labels=golden_labels,
+            k=_RETRIEVAL_K,
+        )
+        result.retrieval_metrics = metrics
+
+        # Enforce thresholds — only when the metric could actually be computed.
+        if metrics.mrr is not None and metrics.mrr < _MRR_THRESHOLD:
+            result.effectiveness.failure_reasons.append(
+                f"MRR {metrics.mrr:.3f} below threshold {_MRR_THRESHOLD}"
+            )
+            result.passed = False
+
+        if metrics.precision is not None and metrics.precision < _PRECISION_THRESHOLD:
+            result.effectiveness.failure_reasons.append(
+                f"precision@{_RETRIEVAL_K} {metrics.precision:.3f} below threshold {_PRECISION_THRESHOLD}"
+            )
+            result.passed = False
+
+
+def _format_retrieval_metrics_text(result: Any) -> str | None:
+    """Return a retrieval metrics line for text output, or ``None`` if unavailable."""
+    m = result.retrieval_metrics
+    if m is None:
+        return None
+    parts: list[str] = []
+    if m.mrr is not None:
+        parts.append(f"MRR={m.mrr:.3f}")
+    if m.precision is not None:
+        parts.append(f"P@{_RETRIEVAL_K}={m.precision:.3f}")
+    if m.recall is not None:
+        parts.append(f"R@{_RETRIEVAL_K}={m.recall:.3f}")
+    if m.faithfulness is not None:
+        parts.append(f"faith={m.faithfulness:.3f}")
+    if not parts:
+        return None
+    return "  retrieval: " + "  ".join(parts)
+
+
+# ---------------------------------------------------------------------------
 # Eval subcommand
 # ---------------------------------------------------------------------------
 
@@ -457,6 +644,7 @@ def _cmd_eval(
     baseline: str | None,
     model: str,
     fmt: str,
+    compare_cost: bool = False,
 ) -> int:
     """Implement the ``eval`` subcommand.
 
@@ -514,54 +702,113 @@ def _cmd_eval(
 
     results = asyncio.run(_run_all())
 
+    # Load golden retrieval labels and apply retrieval scoring/thresholds.
+    golden_dir = Path(__file__).parents[2] / "tests" / "eval" / "golden"
+    golden_labels_by_name = _load_golden_retrieval_labels(golden_dir)
+    _apply_retrieval_scoring(results, golden_labels_by_name)
+
     passed = sum(1 for r in results if r.passed)
     total = len(results)
     pass_rate = passed / total if total > 0 else 0.0
 
+    def _retrieval_metrics_dict(result: Any) -> dict[str, Any] | None:
+        m = result.retrieval_metrics
+        if m is None:
+            return None
+        return {
+            "mrr": round(m.mrr, 4) if m.mrr is not None else None,
+            "precision_at_k": round(m.precision, 4) if m.precision is not None else None,
+            "recall_at_k": round(m.recall, 4) if m.recall is not None else None,
+            "faithfulness": round(m.faithfulness, 4) if m.faithfulness is not None else None,
+            "k": _RETRIEVAL_K,
+        }
+
+    json_output: list[dict[str, Any]] = []
+    for r in results:
+        entry: dict[str, Any] = {
+            "name": r.scenario_name,
+            "skill": r.skill,
+            "passed": r.passed,
+            "latency_ms": round(r.performance.total_latency_ms, 1),
+            "input_tokens": r.performance.input_tokens,
+            "output_tokens": r.performance.output_tokens,
+            "tool_call_count": r.performance.tool_call_count,
+            "tools_called": r.effectiveness.tools_called,
+            "failure_reasons": r.effectiveness.failure_reasons,
+        }
+        rm = _retrieval_metrics_dict(r)
+        if rm is not None:
+            entry["retrieval_metrics"] = rm
+        json_output.append(entry)
+
+    summary: dict[str, Any] = {
+        "results": json_output,
+        "passed": passed,
+        "total": total,
+        "pass_rate": pass_rate,
+    }
+
     if fmt == "json":
-        output = []
-        for r in results:
-            output.append(
-                {
-                    "name": r.scenario_name,
-                    "skill": r.skill,
-                    "passed": r.passed,
-                    "latency_ms": round(r.performance.total_latency_ms, 1),
-                    "input_tokens": r.performance.input_tokens,
-                    "output_tokens": r.performance.output_tokens,
-                    "tool_call_count": r.performance.tool_call_count,
-                    "tools_called": r.effectiveness.tools_called,
-                    "failure_reasons": r.effectiveness.failure_reasons,
-                }
-            )
-        summary = {"results": output, "passed": passed, "total": total, "pass_rate": pass_rate}
-        print(json.dumps(summary, indent=2))
+        # Defer printing when compare_cost is active so we can append cost_comparison.
+        if not compare_cost:
+            print(json.dumps(summary, indent=2))
     else:
         for r in results:
             print(r.summary())
+            retrieval_line = _format_retrieval_metrics_text(r)
+            if retrieval_line is not None:
+                print(retrieval_line)
         print(f"\n{'=' * 60}")
         print(f"Results: {passed}/{total} passed ({pass_rate:.0%})")
 
     # Save baseline if requested.
     if save_baseline:
-        baseline_data = [
+        baseline_scenarios = [
             {
                 "name": r.scenario_name,
                 "skill": r.skill,
                 "passed": r.passed,
                 "latency_ms": r.performance.total_latency_ms,
                 "total_tokens": r.performance.total_tokens,
+                "input_tokens": r.performance.input_tokens,
+                "output_tokens": r.performance.output_tokens,
+                "total_cost_usd": r.performance.total_cost_usd,
                 "tool_call_count": r.performance.tool_call_count,
             }
             for r in results
         ]
-        Path(save_baseline).write_text(json.dumps(baseline_data, indent=2), encoding="utf-8")
+        per_skill: dict[str, dict[str, float | int]] = {}
+        for r in results:
+            skill_key = r.skill
+            if skill_key not in per_skill:
+                per_skill[skill_key] = {"cost_usd": 0.0, "tokens": 0, "scenario_count": 0}
+            per_skill[skill_key]["cost_usd"] = (
+                float(per_skill[skill_key]["cost_usd"]) + r.performance.total_cost_usd
+            )
+            per_skill[skill_key]["tokens"] = (
+                int(per_skill[skill_key]["tokens"]) + r.performance.total_tokens
+            )
+            per_skill[skill_key]["scenario_count"] = (
+                int(per_skill[skill_key]["scenario_count"]) + 1
+            )
+        cost_summary = {
+            "total_cost_usd": sum(r.performance.total_cost_usd for r in results),
+            "total_tokens": sum(r.performance.total_tokens for r in results),
+            "per_skill": per_skill,
+        }
+        baseline_output = {"scenarios": baseline_scenarios, "cost_summary": cost_summary}
+        Path(save_baseline).write_text(json.dumps(baseline_output, indent=2), encoding="utf-8")
         print(f"Baseline saved to {save_baseline}")
 
     # Regression check if baseline provided.
     if baseline and Path(baseline).exists():
         baseline_data_loaded = json.loads(Path(baseline).read_text(encoding="utf-8"))
-        baseline_by_name = {e["name"]: e for e in baseline_data_loaded}
+        # Support both old format (flat list) and new format (dict with "scenarios" key).
+        if isinstance(baseline_data_loaded, list):
+            loaded_scenarios = baseline_data_loaded
+        else:
+            loaded_scenarios = baseline_data_loaded.get("scenarios", [])
+        baseline_by_name = {e["name"]: e for e in loaded_scenarios}
         regressions = []
         for r in results:
             prev = baseline_by_name.get(r.scenario_name)
@@ -571,6 +818,89 @@ def _cmd_eval(
             print("\nRegressions detected:")
             print("\n".join(regressions))
             return 1
+
+        # Cost comparison if requested.
+        if compare_cost:
+            baseline_cost_summary = (
+                baseline_data_loaded.get("cost_summary")
+                if isinstance(baseline_data_loaded, dict)
+                else None
+            )
+            current_total_cost = sum(r.performance.total_cost_usd for r in results)
+            current_per_skill: dict[str, float] = {}
+            for r in results:
+                current_per_skill[r.skill] = (
+                    current_per_skill.get(r.skill, 0.0) + r.performance.total_cost_usd
+                )
+
+            if baseline_cost_summary is None:
+                if fmt == "json":
+                    summary["cost_comparison"] = {"note": "no cost baseline available"}
+                    print(json.dumps(summary, indent=2))
+                else:
+                    print("\nCost comparison: no cost baseline available")
+            else:
+                baseline_total = float(baseline_cost_summary.get("total_cost_usd", 0.0))
+                total_delta = current_total_cost - baseline_total
+                total_pct = (total_delta / baseline_total * 100) if baseline_total > 0 else 0.0
+
+                baseline_per_skill: dict[str, Any] = baseline_cost_summary.get("per_skill", {})
+                per_skill_deltas: dict[str, dict[str, float]] = {}
+                cost_warnings: list[str] = []
+                for skill, current_skill_cost in current_per_skill.items():
+                    prev_skill_data = baseline_per_skill.get(skill)
+                    prev_skill_cost = (
+                        float(prev_skill_data.get("cost_usd", 0.0))
+                        if isinstance(prev_skill_data, dict)
+                        else 0.0
+                    )
+                    skill_delta = current_skill_cost - prev_skill_cost
+                    skill_pct = (
+                        (skill_delta / prev_skill_cost * 100) if prev_skill_cost > 0 else 0.0
+                    )
+                    per_skill_deltas[skill] = {
+                        "current_usd": round(current_skill_cost, 6),
+                        "baseline_usd": round(prev_skill_cost, 6),
+                        "delta_usd": round(skill_delta, 6),
+                        "delta_pct": round(skill_pct, 1),
+                    }
+                    if skill_pct > 20.0:
+                        cost_warnings.append(
+                            f"  WARNING: {skill} cost increased by {skill_pct:.1f}%"
+                            f" (${prev_skill_cost:.6f} -> ${current_skill_cost:.6f})"
+                        )
+
+                if fmt == "json":
+                    summary["cost_comparison"] = {
+                        "current_total_usd": round(current_total_cost, 6),
+                        "baseline_total_usd": round(baseline_total, 6),
+                        "total_delta_usd": round(total_delta, 6),
+                        "total_delta_pct": round(total_pct, 1),
+                        "per_skill": per_skill_deltas,
+                        "warnings": cost_warnings,
+                    }
+                    print(json.dumps(summary, indent=2))
+                else:
+                    print(f"\n{'=' * 60}")
+                    print("Cost Comparison:")
+                    print(
+                        f"  Total: ${current_total_cost:.6f}"
+                        f" (baseline: ${baseline_total:.6f},"
+                        f" delta: {total_delta:+.6f} / {total_pct:+.1f}%)"
+                    )
+                    for skill, deltas in per_skill_deltas.items():
+                        print(
+                            f"  {skill}: ${deltas['current_usd']:.6f}"
+                            f" (delta: {deltas['delta_usd']:+.6f} / {deltas['delta_pct']:+.1f}%)"
+                        )
+                    if cost_warnings:
+                        print("\nCost warnings:")
+                        print("\n".join(cost_warnings))
+
+    # Ensure deferred JSON output is always printed when compare_cost was active.
+    if fmt == "json" and compare_cost and "cost_comparison" not in summary:
+        summary["cost_comparison"] = {"note": "no baseline provided for cost comparison"}
+        print(json.dumps(summary, indent=2))
 
     return 0 if passed == total else 1
 
@@ -617,6 +947,7 @@ def main(argv: list[str] | None = None) -> None:
                 baseline=getattr(args, "baseline", None),
                 model=getattr(args, "model", "claude-haiku-4-5-20251001"),
                 fmt=fmt,
+                compare_cost=getattr(args, "compare_cost", False),
             )
         )
     else:  # pragma: no cover – argparse rejects unknown subcommands

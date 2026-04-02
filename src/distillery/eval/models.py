@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from distillery.eval.retrieval_scorer import RetrievalMetrics
 
 
 @dataclass
@@ -173,6 +176,10 @@ class ScenarioResult:
         tool_calls: Ordered list of all MCP tool call records.
         final_response: The last text response from Claude.
         error: If the runner itself raised an exception, the message.
+        retrieval_metrics: Optional retrieval quality metrics (precision, recall,
+            MRR, faithfulness) computed by :mod:`distillery.eval.retrieval_scorer`.
+            ``None`` when the scenario is not a retrieval scenario or metrics have
+            not yet been computed.
     """
 
     scenario_name: str
@@ -183,6 +190,7 @@ class ScenarioResult:
     tool_calls: list[ToolCallRecord]
     final_response: str
     error: str | None = None
+    retrieval_metrics: RetrievalMetrics | None = None
 
     def summary(self) -> str:
         """Return a compact human-readable summary line."""
