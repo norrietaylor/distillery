@@ -1,0 +1,21 @@
+Type: test
+Command: python3 validate_manifest.py
+Expected: Manifest V3 with all required fields (manifest_version, name, permissions, host_permissions, background, content_scripts, action, options_page, icons)
+Timestamp: 2026-04-01T23:16:00Z
+
+Output:
+PASS: Manifest is valid Manifest V3 with all required fields and permissions
+
+Status: PASS
+
+Details:
+- manifest_version: 3 (correct)
+- name: "Distillery" (present)
+- description: Present
+- permissions: [storage, activeTab, contextMenus, identity] (all required present)
+- host_permissions: [http://localhost:*/, https://distillery-mcp.fly.dev/*] (localhost and remote)
+- background.service_worker: src/background.js (present)
+- content_scripts: [readability.js, content.js] (present)
+- action.default_popup: src/popup.html (present)
+- options_page: src/options.html (present)
+- icons: [16, 48, 128] (all sizes present)
