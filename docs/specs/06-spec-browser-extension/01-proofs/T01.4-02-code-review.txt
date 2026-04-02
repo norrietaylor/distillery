@@ -1,0 +1,30 @@
+Type: file
+Command: grep -n "chrome\." browser-extension/src/background.js
+Expected: Chrome Extension APIs used for storage, runtime, alarms
+Timestamp: 2026-04-01T00:00:00Z
+
+--- OUTPUT ---
+Chrome API usage count: 17 references
+
+Key API usages verified:
+  - chrome.storage.local.get           (loadOptions, connection lifecycle)
+  - chrome.storage.local.set           (persist auth token)
+  - chrome.storage.local.remove        (clear auth on 401)
+  - chrome.runtime.onMessage.addListener  (message handler for popup/content)
+  - chrome.runtime.sendMessage         (broadcast connectionStatusChanged)
+  - chrome.runtime.lastError           (suppress popup-closed errors)
+  - chrome.runtime.openOptionsPage     (first-install redirect)
+  - chrome.runtime.onInstalled         (install/update lifecycle)
+  - chrome.runtime.onStartup           (browser startup lifecycle)
+  - chrome.alarms.create               (5-minute periodic probe)
+  - chrome.alarms.onAlarm              (alarm listener)
+  - chrome.storage.onChanged           (react to options edits)
+
+Message actions handled:
+  - getConnectionStatus   -> returns current connectionState
+  - reconnect             -> async reconnect, returns new state
+  - callTool              -> proxies MCPClient.callTool
+  - OPTIONS_UPDATED       -> triggers reconnect
+  - setAuthToken          -> stores token, reconnects
+
+Status: PASS
