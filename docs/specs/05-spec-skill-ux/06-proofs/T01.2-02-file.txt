@@ -1,0 +1,11 @@
+Type: file
+Command: grep 'distillery_check_dedup' .claude-plugin/skills/minutes/SKILL.md | head -1
+Expected: in allowed-tools
+Timestamp: 2026-04-02T00:00:00Z
+
+--- OUTPUT ---
+  - "mcp__*__distillery_check_dedup"
+
+--- RESULT ---
+Status: PASS
+Note: First occurrence is in the allowed-tools frontmatter section

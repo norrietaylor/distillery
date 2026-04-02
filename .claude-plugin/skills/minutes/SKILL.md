@@ -3,6 +3,7 @@ name: minutes
 description: "Capture meeting notes or append updates to an existing meeting record"
 allowed-tools:
   - "mcp__*__distillery_store"
+  - "mcp__*__distillery_check_dedup"
   - "mcp__*__distillery_search"
   - "mcp__*__distillery_get"
   - "mcp__*__distillery_update"
@@ -79,6 +80,46 @@ Show preview and ask: `Ready to store? (yes / edit / skip)`. If skip: "Skipped. 
 ### Step 6a: Author, Project, Tags
 
 Determine author & project per CONVENTIONS.md. Auto-extract 2-5 lowercase, hyphen-separated tags from the content.
+
+### Step 6.5: Check for Duplicates
+
+First, check for an existing meeting with the same `meeting_id`:
+
+```python
+distillery_search(query="<meeting_id>", entry_type="minutes", limit=5)
+```
+
+If any result has `metadata.meeting_id == <meeting_id>`, treat this as a duplicate meeting record. Display:
+
+```
+A meeting entry with ID "<meeting_id>" already exists (entry <entry-id>).
+Use /minutes --update <meeting_id> to append new content instead.
+Proceed anyway? (yes / skip)
+```
+
+If user chooses skip: "Skipped. No new entry was stored." and stop.
+
+If no `meeting_id` match found, call `distillery_check_dedup(content="<meeting notes summary>")`. Handle by `action` field:
+
+**`"create"`:** No similar entries. Proceed to Step 7a.
+
+**`"skip"`:** Near-exact duplicate. Show similarity table and offer: (1) Store anyway, (2) Skip.
+
+**`"merge"`:** Very similar entry exists. Show similarity table and offer: (1) Store anyway, (2) Merge with existing, (3) Skip.
+
+For merge: combine new notes with the most similar entry's content, call `distillery_update` with the entry ID and merged content, confirm and stop.
+
+**`"link"`:** Related but distinct. Show similarity table, note new entry will be linked. Ask to proceed or skip. If proceeding, include `"related_entries": ["<id1>", ...]` in metadata at Step 7a.
+
+```
+Similar entries found:
+
+| Entry ID | Similarity | Preview |
+|----------|-----------|---------|
+| <id>     | <score%>  | <content_preview> |
+```
+
+On skip in any case: "Skipped. No new entry was stored." and stop.
 
 ### Step 7a: Store Entry
 
