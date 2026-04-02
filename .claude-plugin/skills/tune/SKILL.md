@@ -40,7 +40,7 @@ No flags = read-only mode (display current thresholds).
 **Validation rules:**
 
 - Both `--alert` and `--digest` must be floats in [0.0, 1.0]
-- `--alert` must be greater than `--digest`
+- `--alert` must be greater than or equal to `--digest`
 - `--max` must be a positive integer
 - `--reset` takes precedence over `--alert`/`--digest` if all provided
 - If validation fails, display error and stop
@@ -93,7 +93,7 @@ To adjust: /tune --alert <value> --digest <value>
 
 **After changes or reset:** Same table with Previous/New columns sourced from `distillery_configure` response (`previous_value` and `new_value` fields). Include a confirmation line:
 
-```
+```text
 Changes applied at runtime and persisted to distillery.yaml.
 ```
 
@@ -113,7 +113,7 @@ Tuning Guide:
 
 - Always call `distillery_status` first to verify MCP availability
 - In read-only mode, display thresholds without confirmation
-- Validate `--alert` > `--digest` before applying; reject invalid combinations
+- Validate `--alert` >= `--digest` before applying; reject invalid combinations
 - Always ask for confirmation before applying changes
 - Use `distillery_configure` to apply changes at runtime — no manual YAML editing required
 - When both alert and digest change, call `distillery_configure` for digest first
