@@ -385,16 +385,8 @@ async function handleContextMenuClick(info, tab) {
 
   // Determine author: prefer logged-in username over local author setting.
   let finalAuthor = author || '';
-  try {
-    const statusResp = await chrome.runtime.sendMessage({ action: 'getConnectionStatus' });
-    if (statusResp && statusResp.status === 'ok') {
-      const state = statusResp.data;
-      if (state.username) {
-        finalAuthor = state.username;
-      }
-    }
-  } catch (_err) {
-    // Non-fatal.
+  if (connectionState.username) {
+    finalAuthor = connectionState.username;
   }
 
   // Build the distillery_store args.
