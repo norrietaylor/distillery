@@ -1,0 +1,14 @@
+Type: cli
+Command: node --check browser-extension/src/content.js && node --check browser-extension/src/background.js
+Expected: Both files pass syntax check (exit code 0)
+Timestamp: 2026-04-01T00:00:00Z
+
+--- content.js ---
+$ node --check browser-extension/src/content.js
+(no output — syntax OK)
+
+--- background.js ---
+$ node --check browser-extension/src/background.js
+(no output — syntax OK)
+
+Status: PASS

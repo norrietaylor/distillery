@@ -73,6 +73,14 @@ let connectionState = {
 /** Timer handle for periodic re-probe. */
 let probeIntervalId = null;
 
+/**
+ * Most recently detected feeds from the active tab.
+ * Updated whenever a content script sends a "feedsDetected" message.
+ *
+ * @type {Array<{ url: string, title: string, source_type: 'rss'|'atom'|'github' }>}
+ */
+let detectedFeeds = [];
+
 // ---------------------------------------------------------------------------
 // Options helpers
 // ---------------------------------------------------------------------------
@@ -548,13 +556,39 @@ self.addEventListener('online', () => {
 /**
  * Handle messages from popup and content scripts.
  *
- * Supported actions:
+ * Supported request.type (from content scripts):
+ *   feedsDetected       — update detectedFeeds and set badge (feed count)
+ *
+ * Supported actions (request.action from popup/background):
  *   getConnectionStatus  — return current connectionState
+ *   getDetectedFeeds    — return current detectedFeeds array
  *   callTool            — proxy a tool call through mcpClient (queues on network error)
  *   getQueueCount       — return offline queue length
  *   reconnect           — force immediate reconnect attempt
  */
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
+  // Handle messages from content scripts that use request.type (not request.action).
+  if (request.type === 'feedsDetected') {
+    const feeds = Array.isArray(request.feeds) ? request.feeds : [];
+    detectedFeeds = feeds;
+
+    // Update badge to indicate how many feeds were detected.
+    if (feeds.length > 0) {
+      chrome.action.setBadgeText({ text: String(feeds.length) });
+      chrome.action.setBadgeBackgroundColor({ color: '#6366F1' }); // Indigo — feed indicator
+    } else {
+      // Preserve any existing queue badge; only clear if queue is empty too.
+      offlineQueue.getCount().then((count) => {
+        if (count === 0) {
+          chrome.action.setBadgeText({ text: '' });
+        }
+      });
+    }
+
+    sendResponse({ status: 'ok' });
+    return false;
+  }
+
   switch (request.action) {
     case 'getConnectionStatus':
       sendResponse({ status: 'ok', data: connectionState });
@@ -612,6 +646,11 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       // Options changed — reconnect immediately to pick up new settings.
       connect();
       sendResponse({ status: 'ok' });
+      break;
+
+    case 'getDetectedFeeds':
+      // Return the most recently detected feeds for this tab.
+      sendResponse({ status: 'ok', data: detectedFeeds });
       break;
 
     case 'setAuthToken': {
@@ -752,6 +791,32 @@ async function handleAuthError() {
 // ---------------------------------------------------------------------------
 
 chrome.contextMenus.onClicked.addListener(handleContextMenuClick);
+
+// ---------------------------------------------------------------------------
+// Tab navigation listener (reset detected feeds on page change)
+// ---------------------------------------------------------------------------
+
+/**
+ * Clear detected feeds when the active tab navigates to a new URL.
+ *
+ * The content script will re-run on the new page and send a fresh
+ * "feedsDetected" message, which will repopulate detectedFeeds and
+ * update the badge accordingly.
+ */
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status === 'loading' && tab.active) {
+    detectedFeeds = [];
+    // Clear feed badge — queue badge will be restored by updateQueueBadge if needed.
+    offlineQueue.getCount().then((count) => {
+      if (count > 0) {
+        chrome.action.setBadgeText({ text: String(count) });
+        chrome.action.setBadgeBackgroundColor({ color: '#F59E0B' });
+      } else {
+        chrome.action.setBadgeText({ text: '' });
+      }
+    });
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Alarm listener (periodic probe)

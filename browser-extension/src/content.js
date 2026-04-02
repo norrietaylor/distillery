@@ -106,16 +106,96 @@ function extractContent() {
 }
 
 // ---------------------------------------------------------------------------
+// Feed detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Detect RSS/Atom feed links and GitHub repository URLs on the current page.
+ *
+ * Queries <link rel="alternate" type="application/rss+xml|application/atom+xml">
+ * elements and checks if the current URL matches a GitHub repo pattern.
+ *
+ * @returns {Array<{ url: string, title: string, source_type: 'rss'|'atom'|'github' }>}
+ */
+function detectFeeds() {
+  const feeds = [];
+
+  // Query all <link rel="alternate"> elements with RSS or Atom types.
+  const linkEls = document.querySelectorAll(
+    'link[rel="alternate"][type*="rss"], link[rel="alternate"][type*="atom"]'
+  );
+
+  linkEls.forEach((el) => {
+    const href = el.getAttribute('href');
+    if (!href) return;
+
+    const type = (el.getAttribute('type') || '').toLowerCase();
+    const title = el.getAttribute('title') || document.title || '';
+    const source_type = type.includes('atom') ? 'atom' : 'rss';
+
+    // Resolve relative URLs against the page origin.
+    let url = href;
+    try {
+      url = new URL(href, window.location.href).href;
+    } catch (_err) {
+      // href was not a valid URL; skip.
+      return;
+    }
+
+    feeds.push({ url, title, source_type });
+  });
+
+  // Check if the current page is a GitHub repository.
+  const githubRepoPattern = /^https?:\/\/github\.com\/([^/]+)\/([^/?#]+)\/?([^/?#]*)$/;
+  const match = window.location.href.match(githubRepoPattern);
+  if (match) {
+    const owner = match[1];
+    const repo = match[2];
+    // Exclude known non-repo paths like github.com/owner/repo/issues etc.
+    // Only include if it looks like a root repo page or a common sub-path.
+    feeds.push({
+      url: `https://github.com/${owner}/${repo}`,
+      title: `${owner}/${repo}`,
+      source_type: 'github',
+    });
+  }
+
+  return feeds;
+}
+
+/**
+ * Run feed detection and notify the background service worker.
+ *
+ * Sends a "feedsDetected" message with the array of detected feeds.
+ * Called on DOMContentLoaded (or immediately if DOM is already ready).
+ */
+function notifyFeedsDetected() {
+  const feeds = detectFeeds();
+  chrome.runtime.sendMessage({ type: 'feedsDetected', feeds });
+}
+
+// Run detection when the DOM is fully parsed.
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', notifyFeedsDetected);
+} else {
+  // document_end injection: DOM is already ready.
+  notifyFeedsDetected();
+}
+
+// ---------------------------------------------------------------------------
 // Message listener
 // ---------------------------------------------------------------------------
 
 /**
- * Listen for "extractContent" messages from the background service worker
- * or popup and respond with extracted page metadata.
+ * Listen for "extractContent" and "detectFeeds" messages from the background
+ * service worker or popup.
  *
- * The caller receives:
+ * "extractContent" response:
  *   { status: 'ok', data: { title, url, description, ogTitle, ogDescription,
  *                            ogImage, articleText, selectedText } }
+ *
+ * "detectFeeds" response:
+ *   { status: 'ok', data: Array<{ url, title, source_type }> }
  */
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   if (request.type === 'extractContent') {
@@ -126,6 +206,16 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       sendResponse({ status: 'error', error: err.message });
     }
     // Return false — response is sent synchronously.
+    return false;
+  }
+
+  if (request.type === 'detectFeeds') {
+    try {
+      const data = detectFeeds();
+      sendResponse({ status: 'ok', data });
+    } catch (err) {
+      sendResponse({ status: 'error', error: err.message });
+    }
     return false;
   }
 });
