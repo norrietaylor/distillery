@@ -151,13 +151,19 @@ function detectFeeds() {
   if (match) {
     const owner = match[1];
     const repo = match[2];
-    // Exclude known non-repo paths like github.com/owner/repo/issues etc.
-    // Only include if it looks like a root repo page or a common sub-path.
-    feeds.push({
-      url: `https://github.com/${owner}/${repo}`,
-      title: `${owner}/${repo}`,
-      source_type: 'github',
-    });
+    // Exclude known non-repo top-level paths.
+    const GITHUB_NON_REPO = new Set([
+      'settings', 'features', 'explore', 'orgs', 'marketplace', 'notifications',
+      'login', 'signup', 'about', 'pricing', 'sponsors', 'topics', 'trending',
+      'collections', 'events', 'codespaces', 'discussions',
+    ]);
+    if (!GITHUB_NON_REPO.has(owner)) {
+      feeds.push({
+        url: `https://github.com/${owner}/${repo}`,
+        title: `${owner}/${repo}`,
+        source_type: 'github',
+      });
+    }
   }
 
   return feeds;

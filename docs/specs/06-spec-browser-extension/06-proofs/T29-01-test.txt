@@ -1,0 +1,25 @@
+[PASS] Valid repo: https://github.com/norrietaylor/distillery
+[PASS] Valid repo (torvalds/linux): https://github.com/torvalds/linux
+[PASS] Non-repo: settings: https://github.com/settings/profile
+[PASS] Non-repo: features: https://github.com/features/actions
+[PASS] Non-repo: explore: https://github.com/explore/trending
+[PASS] Non-repo: orgs: https://github.com/orgs/myorg
+[PASS] Non-repo: marketplace: https://github.com/marketplace
+[PASS] Non-repo: notifications: https://github.com/notifications
+[PASS] Non-repo: login: https://github.com/login
+[PASS] Non-repo: signup: https://github.com/signup
+[PASS] Non-repo: about: https://github.com/about
+[PASS] Non-repo: pricing: https://github.com/pricing
+[PASS] Non-repo: sponsors: https://github.com/sponsors
+[PASS] Non-repo: topics: https://github.com/topics
+[PASS] Non-repo: trending: https://github.com/trending
+[PASS] Non-repo: collections: https://github.com/collections
+[PASS] Non-repo: events: https://github.com/events
+[PASS] Non-repo: codespaces: https://github.com/codespaces
+[PASS] Non-repo: discussions: https://github.com/discussions
+[PASS] Repo with sub-path (issues): https://github.com/norrietaylor/distillery/issues
+[PASS] Repo with trailing slash: https://github.com/norrietaylor/distillery/
+
+========================================
+Results: 21 passed, 0 failed
+========================================
