@@ -1,0 +1,38 @@
+Type: file-artifact
+Description: Context menu click handler implementation
+Expected: Async function that extracts content, builds bookmark, saves to Distillery with error handling
+Timestamp: 2026-04-01T00:00:00Z
+Status: PASS
+
+File: browser-extension/src/background.js
+Lines: 316-438
+
+Handler Flow:
+1. Verify menuItemId is 'save-to-distillery'
+2. Extract content from active tab using chrome.tabs.sendMessage('extractContent')
+3. Fallback to basic tab metadata if content script unavailable
+4. Load default tags, project, author from chrome.storage.local
+5. Determine final author (prefer logged-in username over local author)
+6. Build markdown-formatted bookmark content using buildBookmarkContent()
+7. Call mcpClient.callTool('distillery_store', args)
+8. On success: showContextMenuSuccess() - badge "✓" green for 2s
+9. On MCPNetworkError: queue operation, show success (queued)
+10. On other errors: showContextMenuError() - badge "!" red
+
+Key Features:
+- Async/await pattern for clean error handling
+- Content extraction with fallback for restricted pages
+- Respects existing settings (tags, project, author)
+- Integrates with offline queue for network failures
+- Shows user feedback via badge and desktop notifications
+
+Error Handling:
+- MCPAuthError: not queued, shows error
+- MCPNetworkError: queued for replay, shows success
+- Other errors: shows error badge
+
+Validation:
+- Syntax check passed
+- Follows popup.js bookmark save pattern
+- Handles all required error cases
+- Uses proper async/await patterns

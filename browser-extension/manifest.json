@@ -12,7 +12,8 @@
     "storage",
     "activeTab",
     "contextMenus",
-    "identity"
+    "identity",
+    "notifications"
   ],
   "host_permissions": [
     "http://localhost:*/",

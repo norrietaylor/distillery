@@ -297,6 +297,238 @@ async function updateQueueBadge() {
 }
 
 // ---------------------------------------------------------------------------
+// Context menu integration
+// ---------------------------------------------------------------------------
+
+/**
+ * Register the context menu item on installation.
+ *
+ * Creates a "Save to Distillery" context menu that appears on any page.
+ */
+function registerContextMenu() {
+  chrome.contextMenus.create({
+    id: 'save-to-distillery',
+    title: 'Save to Distillery',
+    contexts: ['page'],
+  });
+}
+
+/**
+ * Handle context menu click: extract content and save to Distillery.
+ *
+ * Flow:
+ * 1. Get the active tab and send extractContent message to its content script.
+ * 2. Build bookmark content using the extracted data.
+ * 3. Call distillery_store via the MCP client.
+ * 4. Show success (checkmark badge for 2s) or error (red badge with "!") notification.
+ */
+async function handleContextMenuClick(info, tab) {
+  if (info.menuItemId !== 'save-to-distillery') {
+    return;
+  }
+
+  // Extract content from the active tab's content script.
+  let extractedData;
+  try {
+    const response = await chrome.tabs.sendMessage(tab.id, { type: 'extractContent' });
+
+    if (!response || response.status !== 'ok') {
+      const errMsg = (response && response.error) ? response.error : 'Content extraction failed.';
+      throw new Error(errMsg);
+    }
+
+    extractedData = response.data;
+  } catch (err) {
+    // Content script may not be injected (e.g. chrome:// pages, extensions).
+    // Fall back to basic tab metadata.
+    console.warn('[background] Content script unavailable, using tab metadata:', err.message);
+    extractedData = {
+      title: tab.title || '',
+      url: tab.url || '',
+      description: '',
+      articleText: null,
+      selectedText: '',
+    };
+  }
+
+  // Build bookmark content using helper function (from popup.js pattern).
+  const content = buildBookmarkContent(
+    extractedData.title,
+    extractedData.url,
+    extractedData.description,
+    extractedData.articleText,
+    extractedData.selectedText
+  );
+
+  // Load default tags and project from options.
+  let defaultTags = '';
+  let defaultProject = '';
+  let author = '';
+  try {
+    const stored = await chrome.storage.local.get(['defaultTags', 'defaultProject', 'defaultAuthor']);
+    defaultTags = stored.defaultTags || '';
+    defaultProject = stored.defaultProject || '';
+    author = stored.defaultAuthor || '';
+  } catch (_err) {
+    // Non-fatal.
+  }
+
+  // Parse tags.
+  const tags = defaultTags
+    ? defaultTags.split(',').map((t) => t.trim()).filter(Boolean)
+    : [];
+
+  // Determine author: prefer logged-in username over local author setting.
+  let finalAuthor = author || '';
+  try {
+    const statusResp = await chrome.runtime.sendMessage({ action: 'getConnectionStatus' });
+    if (statusResp && statusResp.status === 'ok') {
+      const state = statusResp.data;
+      if (state.username) {
+        finalAuthor = state.username;
+      }
+    }
+  } catch (_err) {
+    // Non-fatal.
+  }
+
+  // Build the distillery_store args.
+  const args = {
+    content,
+    entry_type: 'bookmark',
+    source: 'browser-extension',
+    tags,
+    metadata: {
+      url: extractedData.url || '',
+      title: extractedData.title || '',
+    },
+  };
+
+  if (finalAuthor) {
+    args.metadata.author = finalAuthor;
+  }
+
+  if (defaultProject) {
+    args.project = defaultProject;
+  }
+
+  // Call distillery_store and handle response.
+  try {
+    await mcpClient.callTool('distillery_store', args);
+    showContextMenuSuccess();
+  } catch (err) {
+    if (err.name === 'MCPNetworkError') {
+      // Queue the operation for later replay.
+      try {
+        await offlineQueue.enqueue({
+          toolName: 'distillery_store',
+          args,
+        });
+        await updateQueueBadge();
+        showContextMenuSuccess(); // Show success since it's queued.
+      } catch (queueErr) {
+        console.error('[background] Failed to queue context menu save:', queueErr.message);
+        showContextMenuError();
+      }
+    } else {
+      console.error('[background] Context menu save failed:', err.message);
+      showContextMenuError();
+    }
+  }
+}
+
+/**
+ * Show a success notification for context menu save.
+ *
+ * Sets badge to checkmark "✓" with green background for 2 seconds, then clears.
+ * Optionally shows a desktop notification.
+ *
+ * @returns {Promise<void>}
+ */
+async function showContextMenuSuccess() {
+  chrome.action.setBadgeText({ text: '✓' });
+  chrome.action.setBadgeBackgroundColor({ color: '#10B981' }); // Green
+
+  // Optionally show a desktop notification.
+  try {
+    chrome.notifications.create({
+      type: 'basic',
+      iconUrl: 'icons/icon-128.png',
+      title: 'Saved to Distillery',
+      message: 'Page has been saved to your Distillery knowledge base.',
+    });
+  } catch (_err) {
+    // Notifications API may not be available; non-fatal.
+  }
+
+  // Clear badge after 2 seconds.
+  setTimeout(() => {
+    chrome.action.setBadgeText({ text: '' });
+  }, 2000);
+}
+
+/**
+ * Show an error notification for context menu save.
+ *
+ * Sets badge to "!" with red background.
+ *
+ * @returns {Promise<void>}
+ */
+async function showContextMenuError() {
+  chrome.action.setBadgeText({ text: '!' });
+  chrome.action.setBadgeBackgroundColor({ color: '#EF4444' }); // Red
+
+  // Optionally show a desktop notification.
+  try {
+    chrome.notifications.create({
+      type: 'basic',
+      iconUrl: 'icons/icon-128.png',
+      title: 'Failed to Save',
+      message: 'Could not save page to Distillery. Check your connection and try again.',
+    });
+  } catch (_err) {
+    // Notifications API may not be available; non-fatal.
+  }
+}
+
+/**
+ * Build markdown-formatted content for the bookmark entry.
+ *
+ * Uses selectedText if present, otherwise falls back to articleText.
+ * Truncates to 5000 characters.
+ *
+ * @param {string} title
+ * @param {string} url
+ * @param {string} description
+ * @param {string|null} articleText
+ * @param {string} selectedText
+ * @returns {string}
+ */
+function buildBookmarkContent(title, url, description, articleText, selectedText) {
+  const body = selectedText || articleText || description || '';
+  const lines = [];
+
+  if (title) {
+    lines.push(`# ${title}`, '');
+  }
+  if (url) {
+    lines.push(`**URL:** ${url}`, '');
+  }
+  if (description) {
+    lines.push(`**Description:** ${description}`, '');
+  }
+  if (body) {
+    lines.push('---', '', body);
+  }
+
+  const content = lines.join('\n');
+  if (content.length <= 5000) {
+    return content;
+  }
+  return content.slice(0, 5000);
+}
+
+// ---------------------------------------------------------------------------
 // Online event handling (service worker scope)
 // ---------------------------------------------------------------------------
 
@@ -516,6 +748,12 @@ async function handleAuthError() {
 }
 
 // ---------------------------------------------------------------------------
+// Context menu click listener
+// ---------------------------------------------------------------------------
+
+chrome.contextMenus.onClicked.addListener(handleContextMenuClick);
+
+// ---------------------------------------------------------------------------
 // Alarm listener (periodic probe)
 // ---------------------------------------------------------------------------
 
@@ -548,6 +786,9 @@ chrome.runtime.onInstalled.addListener((details) => {
     // Open options page on first install so user can configure the remote URL.
     chrome.runtime.openOptionsPage();
   }
+
+  // Register context menu on install/update.
+  registerContextMenu();
 
   // Start the periodic probe alarm.
   startPeriodicProbe();
