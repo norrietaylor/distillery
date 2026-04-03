@@ -27,9 +27,9 @@ Address 8 skill UX gaps (issue #98, high + medium priority) that affect consiste
 **Purpose:** Ensure all skills that create entries use `distillery_find_similar(dedup_action=true)` with the canonical 4-outcome flow, closing the data integrity gap where `/minutes` and `/radar` can create duplicates unchecked.
 
 **Functional Requirements:**
-- `/minutes` SKILL.md shall call `distillery_find_similar(dedup_action=true)(content="<meeting notes summary>")` before storing a new meeting record (not on `--update` mode, which modifies an existing entry).
+- `/minutes` SKILL.md shall call `distillery_find_similar(content="<meeting notes summary>", dedup_action=true)` before storing a new meeting record (not on `--update` mode, which modifies an existing entry).
 - `/minutes` dedup shall match on content similarity, with an additional check: if `metadata.meeting_id` matches an existing entry, treat as `"skip"` and suggest `--update` instead.
-- `/radar` SKILL.md shall call `distillery_find_similar(dedup_action=true)(content="<digest summary>")` before storing a digest (when `--store` is specified — see Unit 3).
+- `/radar` SKILL.md shall call `distillery_find_similar(content="<digest summary>", dedup_action=true)` before storing a digest (when `--store` is specified — see Unit 3).
 - Both skills shall handle all 4 outcomes (create/skip/merge/link) identically to `/distill` and `/bookmark`.
 - CONVENTIONS.md shall include a `## Canonical Dedup Flow` section documenting the standard dedup pattern that all write skills must follow, referencing `distillery_find_similar(dedup_action=true)` and the 4 outcomes with user-facing prompts.
 
