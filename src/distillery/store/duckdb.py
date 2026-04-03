@@ -16,6 +16,7 @@ are implemented below (T02.4).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -417,7 +418,20 @@ class DuckDBStore:
                 # 3. Validate or record embedding model metadata.
                 self._validate_or_record_meta(conn)
 
-                # 4. Record DuckDB / VSS version info in _meta.
+                # 4. Ensure HNSW index exists.  Migration 6 may have been
+                #    applied when VSS was unavailable; this backfills the
+                #    index on a subsequent startup where VSS is present.
+                if self._vss_available:
+                    with contextlib.suppress(
+                        duckdb.CatalogException, duckdb.BinderException
+                    ):
+                        conn.execute(
+                            "CREATE INDEX IF NOT EXISTS idx_entries_embedding "
+                            "ON entries USING HNSW (embedding) "
+                            "WITH (metric = 'cosine');"
+                        )
+
+                # 5. Record DuckDB / VSS version info in _meta.
                 self._track_version_info(conn)
 
                 logger.info(

@@ -78,6 +78,14 @@ async def test_meta_version_tracking() -> None:
             f"expected={duckdb.__version__!r}"
         )
 
+        # vss_version: present when VSS is available, absent or empty otherwise.
+        # We don't assert a specific value since VSS availability varies by
+        # environment, but the key should exist if VSS loaded successfully.
+        if "vss_version" in rows:
+            assert isinstance(rows["vss_version"], str), (
+                f"vss_version should be a string, got {type(rows['vss_version'])}"
+            )
+
     finally:
         await store.close()
 

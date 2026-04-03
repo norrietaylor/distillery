@@ -284,7 +284,20 @@ def run_pending_migrations(
         try:
             conn.execute("BEGIN TRANSACTION")
             migration(conn, **kwargs)
+            # Advance schema_version inside the same transaction so it stays
+            # in sync even if a later migration fails.
+            conn.execute(
+                "INSERT INTO _meta (key, value) VALUES ('schema_version', ?) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                [str(version)],
+            )
             conn.execute("COMMIT")
+        except (duckdb.TransactionException, duckdb.ConstraintException):
+            # Re-raise retriable DuckDB exceptions so the caller's retry
+            # loop in _sync_initialize can handle them.
+            with contextlib.suppress(Exception):
+                conn.execute("ROLLBACK")
+            raise
         except Exception as exc:
             with contextlib.suppress(Exception):
                 conn.execute("ROLLBACK")
@@ -293,13 +306,5 @@ def run_pending_migrations(
             ) from exc
 
     new_version = pending[-1]
-
-    # Upsert the schema version in _meta.  The _meta table is guaranteed to
-    # exist after migration 1 has run.
-    conn.execute(
-        "INSERT INTO _meta (key, value) VALUES ('schema_version', ?) "
-        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
-        [str(new_version)],
-    )
     logger.info("Schema migrated from version %d to %d", current, new_version)
     return new_version

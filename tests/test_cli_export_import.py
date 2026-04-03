@@ -34,7 +34,7 @@ import pytest
 from distillery.cli import _cmd_export, _cmd_import
 from distillery.store.duckdb import DuckDBStore
 
-pytestmark = pytest.mark.integration
+# Individual tests use @pytest.mark.unit; no module-level marker to avoid dual-marking.
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -545,7 +545,8 @@ def test_import_replace_requires_confirmation(tmp_path: Path) -> None:
     with mock.patch("builtins.input", side_effect=EOFError):
         rc = _cmd_import(str(cfg_path), "text", str(input_file), "replace", False)
 
-    # On EOF (non-interactive), the import is cancelled (returns 0 — "Import cancelled").
-    assert rc == 0, (
-        f"Replace-mode cancellation should return 0 (not error), got {rc}"
+    # On EOF (non-interactive), the import is cancelled — should return non-zero
+    # so automation can distinguish a no-op from a successful restore.
+    assert rc == 1, (
+        f"Replace-mode cancellation should return 1 (cancelled), got {rc}"
     )

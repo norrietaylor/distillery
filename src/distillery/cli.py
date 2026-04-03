@@ -688,8 +688,8 @@ def _cmd_import(
         except EOFError:
             answer = ""
         if answer.strip().lower() not in ("y", "yes"):
-            print("Import cancelled.")
-            return 0
+            print("Import cancelled.", file=sys.stderr)
+            return 1
 
     # --- 3. Load config ---
     try:
@@ -701,6 +701,7 @@ def _cmd_import(
     async def _run() -> tuple[int, int, int, int]:
         """Return (imported, skipped, reembedded, sources_imported)."""
         import contextlib
+        import datetime
 
         from distillery.mcp.server import _create_embedding_provider, _normalize_db_path
         from distillery.models import Entry, EntrySource, EntryStatus, EntryType
@@ -720,16 +721,11 @@ def _cmd_import(
         conn = store._conn
         assert conn is not None
 
-        # --- 4. Replace mode: delete all existing entries ---
-        if mode == "replace":
-            conn.execute("DELETE FROM entries")
-
-        # --- 5. Import entries in batches ---
+        # --- 4. Collect entries for insertion (pre-embedding) ---
         imported = 0
         skipped = 0
         reembedded = 0
 
-        # Collect entries that need insertion (skipping existing IDs in merge mode).
         to_insert: list[dict[str, Any]] = []
         for raw in entries_data:
             entry_id: str = raw.get("id", "")
@@ -742,7 +738,18 @@ def _cmd_import(
                     continue
             to_insert.append(raw)
 
-        # Batch-embed and insert.
+        # --- 5. Pre-compute all embeddings before any destructive changes ---
+        def _parse_dt(val: Any) -> datetime.datetime:
+            if isinstance(val, datetime.datetime):
+                if val.tzinfo is None:
+                    return val.replace(tzinfo=datetime.UTC)
+                return val
+            parsed = datetime.datetime.fromisoformat(str(val))
+            if parsed.tzinfo is None:
+                return parsed.replace(tzinfo=datetime.UTC)
+            return parsed
+
+        staged_rows: list[tuple[Entry, list[float]]] = []
         for batch_start in range(0, len(to_insert), _IMPORT_BATCH_SIZE):
             batch = to_insert[batch_start : batch_start + _IMPORT_BATCH_SIZE]
             contents = [b.get("content", "") for b in batch]
@@ -750,19 +757,6 @@ def _cmd_import(
             reembedded += len(batch)
 
             for raw, embedding in zip(batch, embeddings, strict=True):
-                # Parse the entry from the exported dict; preserve original ID and timestamps.
-                from datetime import UTC, datetime
-
-                def _parse_dt(val: Any) -> datetime:
-                    if isinstance(val, datetime):
-                        if val.tzinfo is None:
-                            return val.replace(tzinfo=UTC)
-                        return val
-                    dt = datetime.fromisoformat(str(val))
-                    if dt.tzinfo is None:
-                        return dt.replace(tzinfo=UTC)
-                    return dt
-
                 entry = Entry(
                     id=raw.get("id", ""),
                     content=raw.get("content", ""),
@@ -774,13 +768,32 @@ def _cmd_import(
                     status=EntryStatus(raw.get("status", "active")),
                     metadata=dict(raw.get("metadata") or {}),
                     version=int(raw.get("version", 1)),
-                    created_at=_parse_dt(raw.get("created_at", datetime.now(UTC).isoformat())),
-                    updated_at=_parse_dt(raw.get("updated_at", datetime.now(UTC).isoformat())),
+                    created_at=_parse_dt(
+                        raw.get("created_at", datetime.datetime.now(datetime.UTC).isoformat())
+                    ),
+                    updated_at=_parse_dt(
+                        raw.get("updated_at", datetime.datetime.now(datetime.UTC).isoformat())
+                    ),
                     created_by=raw.get("created_by", ""),
                     last_modified_by=raw.get("last_modified_by", ""),
                 )
+                staged_rows.append((entry, embedding))
 
-                # Insert directly with pre-computed embedding.
+            print(
+                f"  Progress: {min(batch_start + _IMPORT_BATCH_SIZE, len(to_insert))}"
+                f"/{len(to_insert)} entries embedded...",
+                file=sys.stderr,
+            )
+
+        # --- 6. Atomic replace: delete + insert inside a transaction ---
+        try:
+            conn.execute("BEGIN TRANSACTION")
+
+            if mode == "replace":
+                conn.execute("DELETE FROM entries")
+                conn.execute("DELETE FROM feed_sources")
+
+            for entry, embedding in staged_rows:
                 conn.execute(
                     "INSERT INTO entries "
                     "(id, content, entry_type, source, author, project, tags, status, "
@@ -807,13 +820,13 @@ def _cmd_import(
                 )
                 imported += 1
 
-            print(
-                f"  Progress: {min(batch_start + _IMPORT_BATCH_SIZE, len(to_insert))}"
-                f"/{len(to_insert)} entries processed...",
-                file=sys.stderr,
-            )
+            conn.execute("COMMIT")
+        except Exception:
+            with contextlib.suppress(Exception):
+                conn.execute("ROLLBACK")
+            raise
 
-        # --- 6. Import feed sources ---
+        # --- 7. Import feed sources ---
         sources_imported = 0
         for fsrc in feed_sources_data:
             with contextlib.suppress(ValueError):
