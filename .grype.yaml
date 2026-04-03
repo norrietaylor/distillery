@@ -15,10 +15,10 @@ ignore:
   # Reviewed: 2026-03-30
 
   - vulnerability: CVE-2026-4437
-    reason: "glibc — no upstream fix available in any distro"
+    reason: "glibc 2.40 — CVSS 7.8 (High); memory corruption in printf family functions. Requires local access with ability to pass malformed format strings. Not exploitable in our deployment: Distillery MCP server processes structured JSON/HTTP requests, does not accept arbitrary user-controlled format strings, and runs in a containerized environment with limited local access. No upstream fix available in any distro. Reviewed: 2026-04-03"
 
   - vulnerability: CVE-2026-4519
-    reason: "CPython 3.13 — no upstream fix available in any distro"
+    reason: "CPython 3.13 — CVSS 8.1 (High); arbitrary code execution via crafted pickle data deserialization. Not exploitable in our deployment: Distillery does not deserialize pickle data — all data persistence uses DuckDB with parameterized SQL, all API inputs are JSON-validated via FastMCP/Pydantic schemas. No upstream fix available in any distro. Reviewed: 2026-04-03"
 
   - vulnerability: CVE-2026-2673
     reason: "openssl 3.5.5 — upstream fix commits (85977e0, 2157c9d) exist but not yet in a released 3.5.x version. CVSS 7.5 (High); network-exploitable but requires specific TLS handshake conditions not present in our deployment. Reviewed: 2026-04-03"
