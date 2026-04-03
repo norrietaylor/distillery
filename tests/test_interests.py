@@ -449,7 +449,7 @@ class TestHandleInterests:
 
 class TestHandleSuggestSources:
     async def test_returns_suggestions_field(self) -> None:
-        from distillery.mcp.server import _handle_suggest_sources
+        from distillery.mcp.server import _handle_interests
 
         store = _make_store(
             [
@@ -460,7 +460,7 @@ class TestHandleSuggestSources:
             ]
         )
         cfg = DistilleryConfig()
-        result = await _handle_suggest_sources(store=store, config=cfg, arguments={})
+        result = await _handle_interests(store=store, config=cfg, arguments={"suggest_sources": True})
         data = json.loads(result[0].text)
         assert "suggestions" in data
         assert "suggestion_context" in data
@@ -468,7 +468,7 @@ class TestHandleSuggestSources:
         assert "entry_count" in data
 
     async def test_suggestions_have_expected_fields(self) -> None:
-        from distillery.mcp.server import _handle_suggest_sources
+        from distillery.mcp.server import _handle_interests
 
         store = _make_store(
             [
@@ -479,7 +479,7 @@ class TestHandleSuggestSources:
             ]
         )
         cfg = DistilleryConfig()
-        result = await _handle_suggest_sources(store=store, config=cfg, arguments={})
+        result = await _handle_interests(store=store, config=cfg, arguments={"suggest_sources": True})
         data = json.loads(result[0].text)
         for suggestion in data["suggestions"]:
             assert "url" in suggestion
@@ -488,30 +488,32 @@ class TestHandleSuggestSources:
             assert "rationale" in suggestion
 
     async def test_invalid_max_suggestions_returns_error(self) -> None:
-        from distillery.mcp.server import _handle_suggest_sources
+        from distillery.mcp.server import _handle_interests
 
         cfg = DistilleryConfig()
-        result = await _handle_suggest_sources(
-            store=AsyncMock(), config=cfg, arguments={"max_suggestions": 0}
+        result = await _handle_interests(
+            store=AsyncMock(), config=cfg, arguments={"suggest_sources": True, "max_suggestions": 0}
         )
         data = json.loads(result[0].text)
         assert data.get("error") is True
 
     async def test_invalid_source_type_filter_returns_error(self) -> None:
-        from distillery.mcp.server import _handle_suggest_sources
+        # source_types filter was removed from _handle_interests;
+        # test that invalid suggest_sources type returns an error instead.
+        from distillery.mcp.server import _handle_interests
 
         cfg = DistilleryConfig()
-        result = await _handle_suggest_sources(
+        result = await _handle_interests(
             store=AsyncMock(),
             config=cfg,
-            arguments={"source_types": ["slack"]},
+            arguments={"suggest_sources": "not-a-bool"},
         )
         data = json.loads(result[0].text)
         assert data.get("error") is True
-        assert data["code"] == "INVALID_SOURCE_TYPE"
+        assert data["code"] == "INVALID_FIELD"
 
     async def test_watched_sources_excluded_from_suggestions(self) -> None:
-        from distillery.mcp.server import _handle_suggest_sources
+        from distillery.mcp.server import _handle_interests
 
         store = _make_store(
             [
@@ -524,13 +526,14 @@ class TestHandleSuggestSources:
                            "label": "", "poll_interval_minutes": 60, "trust_weight": 1.0}],
         )
         cfg = DistilleryConfig()
-        result = await _handle_suggest_sources(store=store, config=cfg, arguments={})
+        result = await _handle_interests(store=store, config=cfg, arguments={"suggest_sources": True})
         data = json.loads(result[0].text)
         suggestion_urls = [s["url"] for s in data["suggestions"]]
         assert "tiangolo/fastapi" not in suggestion_urls
 
     async def test_github_filter_only_returns_github_suggestions(self) -> None:
-        from distillery.mcp.server import _handle_suggest_sources
+        # source_types filter removed; test that github-only entries produce github suggestions.
+        from distillery.mcp.server import _handle_interests
 
         store = _make_store(
             [
@@ -538,22 +541,18 @@ class TestHandleSuggestSources:
                     entry_type="github",
                     metadata={"repo": "owner/repo", "ref_type": "issue", "ref_number": 1},
                 ),
-                _make_entry(
-                    entry_type="bookmark",
-                    metadata={"url": "https://blog.example.com/post"},
-                ),
             ]
         )
         cfg = DistilleryConfig()
-        result = await _handle_suggest_sources(
-            store=store, config=cfg, arguments={"source_types": ["github"]}
+        result = await _handle_interests(
+            store=store, config=cfg, arguments={"suggest_sources": True}
         )
         data = json.loads(result[0].text)
-        for suggestion in data["suggestions"]:
-            assert suggestion["source_type"] == "github"
+        github_suggestions = [s for s in data["suggestions"] if s["source_type"] == "github"]
+        assert len(github_suggestions) >= 1
 
     async def test_max_suggestions_limits_results(self) -> None:
-        from distillery.mcp.server import _handle_suggest_sources
+        from distillery.mcp.server import _handle_interests
 
         # Create many github entries to generate many potential suggestions
         store = _make_store(
@@ -566,8 +565,8 @@ class TestHandleSuggestSources:
             ]
         )
         cfg = DistilleryConfig()
-        result = await _handle_suggest_sources(
-            store=store, config=cfg, arguments={"max_suggestions": 3}
+        result = await _handle_interests(
+            store=store, config=cfg, arguments={"suggest_sources": True, "max_suggestions": 3}
         )
         data = json.loads(result[0].text)
         assert len(data["suggestions"]) <= 3

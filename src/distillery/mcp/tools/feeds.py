@@ -4,7 +4,10 @@ Implements the following tools:
   - distillery_watch: Manage feed sources (list, add, remove).
   - distillery_poll: Poll configured feed sources for new content.
   - distillery_rescore: Re-score existing feed entries against current knowledge.
-  - distillery_suggest_sources: Suggest new feed sources based on interest profile.
+
+Helper functions ``_normalise_watched_set`` and ``_derive_suggestions`` are used
+by :mod:`distillery.mcp.tools.analytics` when ``distillery_interests`` is called
+with ``suggest_sources=True``.
 """
 
 from __future__ import annotations
@@ -28,7 +31,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _VALID_SOURCE_TYPES = {"rss", "github"}
-_VALID_SUGGEST_SOURCE_TYPES = {"rss", "github"}
 
 
 # ---------------------------------------------------------------------------
@@ -393,116 +395,3 @@ def _derive_suggestions(
     return candidates[:max_suggestions]
 
 
-# ---------------------------------------------------------------------------
-# distillery_suggest_sources handler
-# ---------------------------------------------------------------------------
-
-
-async def _handle_suggest_sources(
-    store: Any,
-    config: DistilleryConfig,
-    arguments: dict[str, Any],
-) -> list[types.TextContent]:
-    """Handle the ``distillery_suggest_sources`` tool.
-
-    Extracts an interest profile from the store and derives heuristic source
-    suggestions from tracked repos and bookmark domains.  The ``suggestion_context``
-    field in the response can be forwarded to an LLM for richer recommendations.
-
-    Args:
-        store: An initialised storage backend.
-        config: The current :class:`~distillery.config.DistilleryConfig`.
-        arguments: Parsed tool arguments dict (``max_suggestions``,
-            ``source_types``, ``recency_days``, ``top_n``).
-
-    Returns:
-        A structured MCP success or error response.
-    """
-    from distillery.feeds.interests import InterestExtractor
-
-    max_suggestions_raw = arguments.get("max_suggestions", 5)
-    try:
-        max_suggestions = int(max_suggestions_raw)
-    except (TypeError, ValueError):
-        return error_response(
-            "INVALID_FIELD",
-            f"max_suggestions must be an integer, got: {max_suggestions_raw!r}",
-        )
-    if max_suggestions <= 0:
-        return error_response(
-            "INVALID_FIELD",
-            f"max_suggestions must be a positive integer, got: {max_suggestions}",
-        )
-
-    source_types_raw = arguments.get("source_types")
-    source_type_filter: set[str] | None = None
-    if source_types_raw is not None:
-        if not isinstance(source_types_raw, list):
-            return error_response(
-                "INVALID_FIELD",
-                f"source_types must be a list, got: {type(source_types_raw).__name__}",
-            )
-        invalid = [t for t in source_types_raw if t not in _VALID_SUGGEST_SOURCE_TYPES]
-        if invalid:
-            return error_response(
-                "INVALID_SOURCE_TYPE",
-                f"Invalid source_types: {invalid}. "
-                f"Must be one of {sorted(_VALID_SUGGEST_SOURCE_TYPES)}.",
-            )
-        source_type_filter = set(source_types_raw)
-
-    recency_days_raw = arguments.get("recency_days", 90)
-    try:
-        recency_days = int(recency_days_raw)
-    except (TypeError, ValueError):
-        return error_response(
-            "INVALID_FIELD",
-            f"recency_days must be an integer, got: {recency_days_raw!r}",
-        )
-    if recency_days <= 0:
-        return error_response(
-            "INVALID_FIELD",
-            f"recency_days must be a positive integer, got: {recency_days}",
-        )
-
-    top_n_raw = arguments.get("top_n", 20)
-    try:
-        top_n = int(top_n_raw)
-    except (TypeError, ValueError):
-        return error_response(
-            "INVALID_FIELD",
-            f"top_n must be an integer, got: {top_n_raw!r}",
-        )
-    if top_n <= 0:
-        return error_response(
-            "INVALID_FIELD",
-            f"top_n must be a positive integer, got: {top_n}",
-        )
-
-    extractor = InterestExtractor(
-        store=store,
-        recency_days=recency_days,
-        top_n=top_n,
-    )
-    try:
-        profile = await extractor.extract()
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("distillery_suggest_sources: extraction failed")
-        return error_response("EXTRACTION_ERROR", f"Interest extraction failed: {exc}")
-
-    watched_set = _normalise_watched_set(profile.watched_sources)
-    suggestions = _derive_suggestions(
-        profile=profile,
-        watched_set=watched_set,
-        source_type_filter=source_type_filter,
-        max_suggestions=max_suggestions,
-    )
-
-    return success_response(
-        {
-            "suggestions": suggestions,
-            "suggestion_context": profile.suggestion_context,
-            "watched_sources": profile.watched_sources,
-            "entry_count": profile.entry_count,
-        }
-    )

@@ -3,10 +3,9 @@ name: distill
 description: "Capture decisions, insights, and action items from the current session into the knowledge base"
 allowed-tools:
   - "mcp__*__distillery_store"
-  - "mcp__*__distillery_check_dedup"
   - "mcp__*__distillery_find_similar"
   - "mcp__*__distillery_update"
-  - "mcp__*__distillery_status"
+  - "mcp__*__distillery_metrics"
   - "Bash(git config *)"
 disable-model-invocation: true
 effort: medium
@@ -70,7 +69,7 @@ Accept revisions if the user wants to edit.
 
 ### Step 5: Check for Duplicates
 
-Call `distillery_check_dedup(content="<distilled summary>")`. Handle by `action` field:
+Call `distillery_find_similar(content="<distilled summary>", dedup_action=true)`. Handle by `action` field:
 
 **`"create"`:** No similar entries. Proceed to Step 6.
 
@@ -158,7 +157,7 @@ Tags: tag1, tag2, tag3
 
 - Never store raw session dumps — always distill to decisions, rationale, and insights
 - Always show the summary to the user before storing for review/edit
-- Always check for duplicates before storing using `distillery_check_dedup`
+- Always check for duplicates before storing using `distillery_find_similar(dedup_action=true)`
 - Always respect the user's choice on duplicate handling (store / merge / skip)
 - If session context is unclear, ask what to capture rather than guessing
 - On MCP errors, see CONVENTIONS.md error handling — display and stop

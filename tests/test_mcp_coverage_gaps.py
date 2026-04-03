@@ -27,21 +27,19 @@ from distillery.config import (
 )
 from distillery.mcp._stub_embedding import HashEmbeddingProvider, StubEmbeddingProvider
 from distillery.mcp.tools.analytics import (
+    _handle_interests,
     _handle_metrics,
-    _handle_quality,
     _handle_stale,
     _handle_tag_tree,
 )
 from distillery.mcp.tools.classify import (
     _handle_classify,
     _handle_resolve_review,
-    _handle_review_queue,
 )
 from distillery.mcp.tools.crud import (
     _build_filters_from_arguments,
     _handle_get,
     _handle_list,
-    _handle_status,
     _handle_store,
     _handle_update,
     _is_remote_db_path,
@@ -51,7 +49,6 @@ from distillery.mcp.tools.feeds import (
     _derive_suggestions,
     _handle_poll,
     _handle_rescore,
-    _handle_suggest_sources,
     _handle_watch,
     _normalise_watched_set,
 )
@@ -225,19 +222,19 @@ class TestAggregateGaps:
 
 
 class TestStatusGaps:
-    """Cover error paths and edge cases in _handle_status."""
+    """Cover error paths and edge cases in metrics (summary scope)."""
 
     async def test_status_error(self, store: DuckDBStore) -> None:
-        """Status returns STATUS_ERROR when gathering stats fails."""
+        """metrics(scope=summary) returns METRICS_ERROR when gathering stats fails."""
         with patch(
-            "distillery.mcp.tools.crud._sync_gather_stats",
+            "distillery.mcp.tools.analytics._sync_gather_summary",
             side_effect=RuntimeError("stat fail"),
         ):
             cfg = DistilleryConfig(storage=StorageConfig(database_path=":memory:"))
-            response = await _handle_status(store, store, cfg)
+            response = await _handle_metrics(store, cfg, None, {"scope": "summary"})
             data = parse_mcp_response(response)
             assert data["error"] is True
-            assert data["code"] == "STATUS_ERROR"
+            assert data["code"] == "METRICS_ERROR"
 
     async def test_status_remote_db_path(self) -> None:
         """Remote db paths (md:, s3://) are not expanded."""
@@ -847,32 +844,33 @@ class TestClassifyGaps:
 
 
 class TestReviewQueueGaps:
-    """Cover edge cases in _handle_review_queue."""
+    """Cover edge cases in _handle_list with output_mode=review."""
 
     async def test_review_queue_invalid_limit_type(self, store: DuckDBStore) -> None:
-        response = await _handle_review_queue(store, {"limit": "bad"})
+        response = await _handle_list(store, {"output_mode": "review", "limit": "bad"})
         data = parse_mcp_response(response)
         assert data["error"] is True
 
     async def test_review_queue_limit_too_low(self, store: DuckDBStore) -> None:
-        response = await _handle_review_queue(store, {"limit": 0})
+        response = await _handle_list(store, {"output_mode": "review", "limit": 0})
         data = parse_mcp_response(response)
         assert data["error"] is True
 
     async def test_review_queue_limit_too_high(self, store: DuckDBStore) -> None:
-        response = await _handle_review_queue(store, {"limit": 501})
+        response = await _handle_list(store, {"output_mode": "review", "limit": 501})
         data = parse_mcp_response(response)
         assert data["error"] is True
 
-    async def test_review_queue_invalid_entry_type(self, store: DuckDBStore) -> None:
-        response = await _handle_review_queue(store, {"entry_type": "nonexistent"})
+    async def test_review_queue_unknown_entry_type_returns_empty(self, store: DuckDBStore) -> None:
+        response = await _handle_list(store, {"output_mode": "review", "entry_type": "nonexistent"})
         data = parse_mcp_response(response)
-        assert data["error"] is True
-        assert data["code"] == "INVALID_PARAMS"
+        # _handle_list passes entry_type as a filter without validation; returns empty
+        assert "entries" in data
+        assert data["count"] == 0
 
     async def test_review_queue_store_error(self, store: DuckDBStore) -> None:
         with patch.object(store, "list_entries", side_effect=RuntimeError("boom")):
-            response = await _handle_review_queue(store, {})
+            response = await _handle_list(store, {"output_mode": "review"})
             data = parse_mcp_response(response)
             assert data["error"] is True
             assert data["code"] == "LIST_ERROR"
@@ -1007,17 +1005,18 @@ class TestMetricsGaps:
 
 
 class TestQualityGaps:
-    """Cover error path in _handle_quality."""
+    """Cover error path in _handle_metrics with scope=search_quality."""
 
     async def test_quality_gather_error(self, store: DuckDBStore) -> None:
         with patch(
             "distillery.mcp.tools.analytics._sync_gather_quality",
             side_effect=RuntimeError("quality fail"),
         ):
-            response = await _handle_quality(store, {})
+            cfg = DistilleryConfig(storage=StorageConfig(database_path=":memory:"))
+            response = await _handle_metrics(store, cfg, None, {"scope": "search_quality"})
             data = parse_mcp_response(response)
             assert data["error"] is True
-            assert data["code"] == "QUALITY_ERROR"
+            assert data["code"] == "METRICS_ERROR"
 
 
 class TestStaleGaps:
@@ -1213,12 +1212,14 @@ class TestRescoreGaps:
 
 
 class TestSuggestSourcesGaps:
-    """Cover validation paths in _handle_suggest_sources."""
+    """Cover validation paths in _handle_interests (suggest_sources=True)."""
 
     async def test_suggest_invalid_max_suggestions(
         self, store: DuckDBStore, config: DistilleryConfig
     ) -> None:
-        response = await _handle_suggest_sources(store, config, {"max_suggestions": "bad"})
+        response = await _handle_interests(
+            store, config, {"suggest_sources": True, "max_suggestions": "bad"}
+        )
         data = parse_mcp_response(response)
         assert data["error"] is True
         assert data["code"] == "INVALID_FIELD"
@@ -1226,49 +1227,41 @@ class TestSuggestSourcesGaps:
     async def test_suggest_zero_max_suggestions(
         self, store: DuckDBStore, config: DistilleryConfig
     ) -> None:
-        response = await _handle_suggest_sources(store, config, {"max_suggestions": 0})
+        response = await _handle_interests(
+            store, config, {"suggest_sources": True, "max_suggestions": 0}
+        )
         data = parse_mcp_response(response)
         assert data["error"] is True
-
-    async def test_suggest_source_types_not_list(
-        self, store: DuckDBStore, config: DistilleryConfig
-    ) -> None:
-        response = await _handle_suggest_sources(store, config, {"source_types": "rss"})
-        data = parse_mcp_response(response)
-        assert data["error"] is True
-        assert data["code"] == "INVALID_FIELD"
-
-    async def test_suggest_invalid_source_type(
-        self, store: DuckDBStore, config: DistilleryConfig
-    ) -> None:
-        response = await _handle_suggest_sources(store, config, {"source_types": ["invalid"]})
-        data = parse_mcp_response(response)
-        assert data["error"] is True
-        assert data["code"] == "INVALID_SOURCE_TYPE"
 
     async def test_suggest_invalid_recency_days(
         self, store: DuckDBStore, config: DistilleryConfig
     ) -> None:
-        response = await _handle_suggest_sources(store, config, {"recency_days": "bad"})
+        response = await _handle_interests(
+            store, config, {"suggest_sources": True, "recency_days": "bad"}
+        )
         data = parse_mcp_response(response)
         assert data["error"] is True
 
     async def test_suggest_zero_recency_days(
         self, store: DuckDBStore, config: DistilleryConfig
     ) -> None:
-        response = await _handle_suggest_sources(store, config, {"recency_days": 0})
+        response = await _handle_interests(
+            store, config, {"suggest_sources": True, "recency_days": 0}
+        )
         data = parse_mcp_response(response)
         assert data["error"] is True
 
     async def test_suggest_invalid_top_n(
         self, store: DuckDBStore, config: DistilleryConfig
     ) -> None:
-        response = await _handle_suggest_sources(store, config, {"top_n": "bad"})
+        response = await _handle_interests(
+            store, config, {"suggest_sources": True, "top_n": "bad"}
+        )
         data = parse_mcp_response(response)
         assert data["error"] is True
 
     async def test_suggest_zero_top_n(self, store: DuckDBStore, config: DistilleryConfig) -> None:
-        response = await _handle_suggest_sources(store, config, {"top_n": 0})
+        response = await _handle_interests(store, config, {"suggest_sources": True, "top_n": 0})
         data = parse_mcp_response(response)
         assert data["error"] is True
 
@@ -1277,7 +1270,7 @@ class TestSuggestSourcesGaps:
     ) -> None:
         with patch("distillery.feeds.interests.InterestExtractor") as mock_cls:
             mock_cls.return_value.extract = AsyncMock(side_effect=RuntimeError("boom"))
-            response = await _handle_suggest_sources(store, config, {})
+            response = await _handle_interests(store, config, {"suggest_sources": True})
             data = parse_mcp_response(response)
             assert data["error"] is True
             assert data["code"] == "EXTRACTION_ERROR"
@@ -1555,33 +1548,32 @@ class TestHashEmbeddingProvider:
 
 
 class TestCheckDedupGaps:
-    """Cover budget-exceeded and checker-error paths in _handle_check_dedup."""
+    """Cover budget-exceeded path in _handle_find_similar (dedup_action=True)."""
 
     async def test_check_dedup_budget_exceeded(
         self, store: DuckDBStore, budget_config: DistilleryConfig
     ) -> None:
         from distillery.mcp.budget import record_and_check
-        from distillery.mcp.tools.quality import _handle_check_dedup
+        from distillery.mcp.tools.search import _handle_find_similar
 
         record_and_check(store.connection, budget_config.rate_limit.embedding_budget_daily)
-        response = await _handle_check_dedup(store, budget_config, {"content": "test content"})
+        response = await _handle_find_similar(
+            store, {"content": "test content", "dedup_action": True}, cfg=budget_config
+        )
         data = parse_mcp_response(response)
         assert data["error"] is True
         assert data["code"] == "BUDGET_EXCEEDED"
 
-    async def test_check_dedup_checker_error(
+    async def test_check_dedup_checker_raises_on_store_error(
         self, store: DuckDBStore, config: DistilleryConfig
     ) -> None:
-        from distillery.mcp.tools.quality import _handle_check_dedup
+        from distillery.mcp.tools.quality import run_dedup_check
 
         with patch(
             "distillery.classification.dedup.DeduplicationChecker.check",
             side_effect=RuntimeError("dedup boom"),
-        ):
-            response = await _handle_check_dedup(store, config, {"content": "test content"})
-            data = parse_mcp_response(response)
-            assert data["error"] is True
-            assert data["code"] == "DEDUP_ERROR"
+        ), pytest.raises(RuntimeError, match="dedup boom"):
+            await run_dedup_check(store, config.classification, "test content")
 
 
 # ===========================================================================
@@ -1590,13 +1582,13 @@ class TestCheckDedupGaps:
 
 
 class TestSyncGatherStatsWarnings:
-    """Cover warning paths in _sync_gather_stats."""
+    """Cover warning paths in _sync_gather_summary."""
 
     def test_status_with_db_size_warning(self, embedding_provider) -> None:  # type: ignore[no-untyped-def]
-        """Status handler emits a size warning when DB nears limit."""
+        """Summary handler emits a size warning when DB nears limit."""
         import tempfile
 
-        from distillery.mcp.tools.crud import _sync_gather_stats
+        from distillery.mcp.tools.analytics import _sync_gather_summary
 
         # Create a temp file and write some data to make it have a measurable size
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
@@ -1615,7 +1607,7 @@ class TestSyncGatherStatsWarnings:
             mock_conn.execute.return_value.fetchall.return_value = []
             mock_store.connection = mock_conn
 
-            result = _sync_gather_stats(mock_store, embedding_provider, cfg)
+            result = _sync_gather_summary(mock_store, cfg, embedding_provider)
             # 1MB file with 2MB limit at 50% warn threshold = should warn
             assert "warnings" in result
             assert any("at" in w and "%" in w for w in result["warnings"])
@@ -1625,10 +1617,10 @@ class TestSyncGatherStatsWarnings:
             os.unlink(db_file)
 
     def test_status_with_db_at_limit(self, embedding_provider) -> None:  # type: ignore[no-untyped-def]
-        """Status handler emits a limit warning when DB exceeds max."""
+        """Summary handler emits a limit warning when DB exceeds max."""
         import tempfile
 
-        from distillery.mcp.tools.crud import _sync_gather_stats
+        from distillery.mcp.tools.analytics import _sync_gather_summary
 
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             f.write(b"x" * (2 * 1024 * 1024))  # 2MB
@@ -1645,7 +1637,7 @@ class TestSyncGatherStatsWarnings:
             mock_conn.execute.return_value.fetchall.return_value = []
             mock_store.connection = mock_conn
 
-            result = _sync_gather_stats(mock_store, embedding_provider, cfg)
+            result = _sync_gather_summary(mock_store, cfg, embedding_provider)
             assert "warnings" in result
             assert any("reached the limit" in w for w in result["warnings"])
         finally:
@@ -1654,8 +1646,8 @@ class TestSyncGatherStatsWarnings:
             os.unlink(db_file)
 
     def test_status_with_budget_warning(self, embedding_provider) -> None:  # type: ignore[no-untyped-def]
-        """Status handler warns when embedding budget is exhausted."""
-        from distillery.mcp.tools.crud import _sync_gather_stats
+        """Summary handler warns when embedding budget is exhausted."""
+        from distillery.mcp.tools.analytics import _sync_gather_summary
 
         cfg = DistilleryConfig(
             storage=StorageConfig(database_path=":memory:"),
@@ -1668,7 +1660,7 @@ class TestSyncGatherStatsWarnings:
         mock_store.connection = mock_conn
 
         with patch("distillery.mcp.budget.get_daily_usage", return_value=5):
-            result = _sync_gather_stats(mock_store, embedding_provider, cfg)
+            result = _sync_gather_summary(mock_store, cfg, embedding_provider)
             assert "warnings" in result
             assert any("budget exhausted" in w for w in result["warnings"])
 

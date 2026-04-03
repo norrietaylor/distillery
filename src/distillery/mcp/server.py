@@ -1,4 +1,4 @@
-"""MCP server for Distillery — 24 tools over stdio or HTTP.
+"""MCP server for Distillery — 18 tools over stdio or HTTP.
 
 Handlers live in ``src/distillery/mcp/tools/`` (crud, search, classify, quality,
 analytics, feeds, configure, meta). This module owns: FastMCP app creation,
@@ -28,7 +28,6 @@ from distillery.mcp.tools._common import (
 from distillery.mcp.tools.analytics import (
     _handle_interests,
     _handle_metrics,
-    _handle_quality,
     _handle_stale,
     _handle_tag_tree,
     _handle_type_schemas,
@@ -36,13 +35,11 @@ from distillery.mcp.tools.analytics import (
 from distillery.mcp.tools.classify import (
     _handle_classify,
     _handle_resolve_review,
-    _handle_review_queue,
 )
 from distillery.mcp.tools.configure import _handle_configure
 from distillery.mcp.tools.crud import (
     _handle_get,
     _handle_list,
-    _handle_status,
     _handle_store,
     _handle_update,
     _normalize_db_path,  # re-exported for webhooks.py backward compat
@@ -50,12 +47,12 @@ from distillery.mcp.tools.crud import (
 from distillery.mcp.tools.feeds import (
     _handle_poll,
     _handle_rescore,
-    _handle_suggest_sources,
     _handle_watch,
 )
 from distillery.mcp.tools.quality import (
-    _handle_check_conflicts,
-    _handle_check_dedup,
+    run_conflict_discovery,
+    run_conflict_evaluation,
+    run_dedup_check,
 )
 from distillery.mcp.tools.search import (
     _handle_aggregate,
@@ -70,13 +67,13 @@ __all__ = [
     "create_server", "error_response", "success_response",
     "_get_authenticated_user", "_normalize_db_path", "_create_embedding_provider",
     "_handle_configure",
-    "_handle_status", "_handle_store", "_handle_get", "_handle_update", "_handle_list",
+    "_handle_store", "_handle_get", "_handle_update", "_handle_list",
     "_handle_search", "_handle_find_similar", "_handle_aggregate",
-    "_handle_classify", "_handle_review_queue", "_handle_resolve_review",
-    "_handle_check_dedup", "_handle_check_conflicts",
-    "_handle_metrics", "_handle_quality", "_handle_stale",
+    "_handle_classify", "_handle_resolve_review",
+    "run_dedup_check", "run_conflict_discovery", "run_conflict_evaluation",
+    "_handle_metrics", "_handle_stale",
     "_handle_tag_tree", "_handle_interests", "_handle_type_schemas",
-    "_handle_watch", "_handle_poll", "_handle_rescore", "_handle_suggest_sources",
+    "_handle_watch", "_handle_poll", "_handle_rescore",
 ]
 
 
@@ -200,12 +197,6 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             logger.debug("audit_log write failed for %s (ignored)", op, exc_info=True)
 
     @server.tool
-    async def distillery_status(ctx: Context) -> list[types.TextContent]:
-        """Return database and embedding model statistics for the Distillery store."""
-        c = _lc(ctx)
-        return await _handle_status(store=c["store"], embedding_provider=c["embedding_provider"], config=c["config"])
-
-    @server.tool
     async def distillery_store(  # noqa: PLR0913
         ctx: Context, content: str, entry_type: str, author: str,
         project: str | None = None, tags: list[str] | None = None,
@@ -270,7 +261,8 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
     ) -> list[types.TextContent]:
         """List knowledge entries with optional filters and pagination (newest first).
 
-        date_from/date_to accept ISO 8601. output_mode: "full" (default), "summary", "ids".
+        date_from/date_to accept ISO 8601. output_mode: "full" (default), "summary", "ids",
+        or "review" (filters to pending_review and enriches with confidence/classification_reasoning).
         """
         c = _lc(ctx)
         args: dict[str, Any] = dict(limit=limit, offset=offset, output_mode=output_mode,
@@ -313,13 +305,25 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         return await _handle_search(store=c["store"], arguments=args, cfg=c["config"])
 
     @server.tool
-    async def distillery_find_similar(
+    async def distillery_find_similar(  # noqa: PLR0913
         ctx: Context, content: str, threshold: float = 0.8, limit: int = 10,
+        dedup_action: bool = False, conflict_check: bool = False,
+        llm_responses: list[dict[str, Any]] | None = None,
     ) -> list[types.TextContent]:
-        """Find stored entries similar to the given text. threshold: cosine cutoff (0–1). limit 1–200."""
+        """Find stored entries similar to the given text. threshold: cosine cutoff (0-1). limit 1-200.
+
+        Optional modes (progressive disclosure):
+          dedup_action: when true, includes dedup check with action (create/skip/merge/link).
+          conflict_check: when true, includes conflict candidates with LLM prompts.
+          llm_responses: with conflict_check=true, evaluates [{entry_id, is_conflict, reasoning}].
+        """
         c = _lc(ctx)
-        return await _handle_find_similar(store=c["store"], cfg=c["config"],
-                                          arguments={"content": content, "threshold": threshold, "limit": limit})
+        args: dict[str, Any] = dict(
+            content=content, threshold=threshold, limit=limit,
+            dedup_action=dedup_action, conflict_check=conflict_check,
+            **_omit_none(llm_responses=llm_responses),
+        )
+        return await _handle_find_similar(store=c["store"], cfg=c["config"], arguments=args)
 
     @server.tool
     async def distillery_classify(  # noqa: PLR0913
@@ -337,20 +341,6 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                                     **_omit_none(reasoning=reasoning, suggested_tags=suggested_tags,
                                                  suggested_project=suggested_project))
         return await _handle_classify(store=c["store"], config=c["config"], arguments=args)
-
-    @server.tool
-    async def distillery_review_queue(
-        ctx: Context, entry_type: str | None = None, project: str | None = None, limit: int = 20,
-    ) -> list[types.TextContent]:
-        """List entries awaiting human review after classification. limit 1–500.
-
-        project filters results to a specific project slug.
-        """
-        c = _lc(ctx)
-        return await _handle_review_queue(
-            store=c["store"],
-            arguments=dict(limit=limit, **_omit_none(entry_type=entry_type, project=project)),
-        )
 
     @server.tool
     async def distillery_resolve_review(  # noqa: PLR0913
@@ -376,37 +366,26 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         return result
 
     @server.tool
-    async def distillery_check_dedup(ctx: Context, content: str) -> list[types.TextContent]:
-        """Check content for duplicates; returns recommended action + similar entries."""
-        c = _lc(ctx)
-        return await _handle_check_dedup(store=c["store"], config=c["config"], arguments={"content": content})
-
-    @server.tool
-    async def distillery_check_conflicts(
-        ctx: Context, content: str, llm_responses: dict[str, Any] | None = None,
+    async def distillery_metrics(
+        ctx: Context,
+        scope: str = "full",
+        period_days: int = 30,
+        entry_type: str | None = None,
     ) -> list[types.TextContent]:
-        """Check for conflicts between content and existing entries (two-pass workflow).
+        """Return usage metrics and statistics for the knowledge store.
 
-        First pass: returns conflict_candidates with prompts for LLM evaluation.
-        Second pass (with llm_responses {entry_id: {is_conflict, reasoning}}): returns has_conflicts.
+        scope controls the payload returned:
+          "full" (default): complete metrics — entries, activity, search, quality, staleness, storage.
+          "summary": entry counts by type/status, database size, embedding model info.
+          "search_quality": search totals, feedback rates, quality breakdown (entry_type optional).
+        period_days >= 1 (used for "full" scope only).
         """
         c = _lc(ctx)
-        return await _handle_check_conflicts(store=c["store"], config=c["config"],
-                                             arguments=dict(content=content, **_omit_none(llm_responses=llm_responses)))
-
-    @server.tool
-    async def distillery_metrics(ctx: Context, period_days: int = 30) -> list[types.TextContent]:
-        """Return usage metrics and statistics for the knowledge store. period_days >= 1."""
-        c = _lc(ctx)
+        args: dict[str, Any] = dict(scope=scope, period_days=period_days,
+                                    **_omit_none(entry_type=entry_type))
         return await _handle_metrics(store=c["store"], config=c["config"],
                                      embedding_provider=c["embedding_provider"],
-                                     arguments={"period_days": period_days})
-
-    @server.tool
-    async def distillery_quality(ctx: Context, entry_type: str | None = None) -> list[types.TextContent]:
-        """Return aggregated search-quality metrics (search counts, feedback rates)."""
-        c = _lc(ctx)
-        return await _handle_quality(store=c["store"], arguments=_omit_none(entry_type=entry_type))
+                                     arguments=args)
 
     @server.tool
     async def distillery_stale(
@@ -444,29 +423,20 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             poll_interval_minutes=poll_interval_minutes, trust_weight=trust_weight)))
 
     @server.tool
-    async def distillery_interests(
+    async def distillery_interests(  # noqa: PLR0913
         ctx: Context, recency_days: int = 90, top_n: int = 20,
+        suggest_sources: bool = False, max_suggestions: int = 5,
     ) -> list[types.TextContent]:
-        """Extract an interest profile (top tags, bookmark domains, tracked repos) from the knowledge base."""
-        c = _lc(ctx)
-        return await _handle_interests(store=c["store"], config=c["config"],
-                                       arguments={"recency_days": recency_days, "top_n": top_n})
+        """Extract an interest profile (top tags, bookmark domains, tracked repos) from the knowledge base.
 
-    @server.tool
-    async def distillery_suggest_sources(  # noqa: PLR0913
-        ctx: Context, max_suggestions: int = 5, source_types: list[str] | None = None,
-        recency_days: int = 90, top_n: int = 20,
-    ) -> list[types.TextContent]:
-        """Suggest new feed sources to monitor based on the user's interest profile.
-
-        Returns suggestions with rationales and a suggestion_context for LLM prompting.
-        source_types filters by adapter type: rss or github.
+        When suggest_sources=True, also returns heuristic feed source suggestions
+        derived from tracked repos and bookmark domains (up to max_suggestions).
         """
         c = _lc(ctx)
-        return await _handle_suggest_sources(store=c["store"], config=c["config"],
-                                             arguments=dict(max_suggestions=max_suggestions,
-                                                            recency_days=recency_days, top_n=top_n,
-                                                            **_omit_none(source_types=source_types)))
+        return await _handle_interests(store=c["store"], config=c["config"],
+                                       arguments={"recency_days": recency_days, "top_n": top_n,
+                                                  "suggest_sources": suggest_sources,
+                                                  "max_suggestions": max_suggestions})
 
     @server.tool
     async def distillery_poll(ctx: Context, source_url: str | None = None) -> list[types.TextContent]:

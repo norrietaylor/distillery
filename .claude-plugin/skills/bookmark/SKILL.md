@@ -3,8 +3,8 @@ name: bookmark
 description: "Save a URL with an auto-generated summary to the knowledge base"
 allowed-tools:
   - "mcp__*__distillery_store"
-  - "mcp__*__distillery_check_dedup"
-  - "mcp__*__distillery_status"
+  - "mcp__*__distillery_find_similar"
+  - "mcp__*__distillery_metrics"
   - "WebFetch"
 disable-model-invocation: true
 effort: medium
@@ -73,7 +73,7 @@ If the user edits, accept their revision. If they skip, confirm "Skipped. No ent
 
 ### Step 5: Check for Duplicates
 
-Call `distillery_check_dedup(content="<url> <summary>")`. Handle by `action` field:
+Call `distillery_find_similar(content="<url> <summary>", dedup_action=true)`. Handle by `action` field:
 
 **`"create"`:** No similar entries. Proceed to Step 6.
 

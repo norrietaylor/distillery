@@ -1,26 +1,20 @@
-"""Tests for the distillery_check_conflicts MCP tool (T04.4).
+"""Tests for conflict detection logic (previously distillery_check_conflicts MCP tool, T04.4).
 
-Tests cover the _handle_check_conflicts handler's two-pass workflow:
+Tests cover the run_conflict_discovery and run_conflict_evaluation helpers:
 
-  First pass (no llm_responses):
+  First pass (run_conflict_discovery):
     - Returns conflict_candidates with LLM prompts when similar entries exist
     - Returns empty conflict_candidates when no similar entries found
     - Each candidate includes entry_id, conflict_prompt, content_preview, similarity_score
 
-  Second pass (llm_responses provided):
+  Second pass (run_conflict_evaluation):
     - Returns has_conflicts=True and conflict list when LLM indicates conflict
     - Returns has_conflicts=False and empty list when LLM indicates no conflict
     - Handles multiple candidates where only some are conflicts
     - Conflict entries include entry_id, content_preview, similarity_score, conflict_reasoning
 
-  Validation:
-    - Missing 'content' field returns INVALID_PARAMS error
-    - Non-dict llm_responses returns INVALID_PARAMS error
-    - llm_response item that is not a dict returns INVALID_PARAMS error
-    - llm_response item missing 'is_conflict' field returns INVALID_PARAMS error
-
   Edge cases:
-    - Error during conflict discovery is caught and returns CONFLICT_ERROR
+    - Error during conflict discovery is caught
     - Empty store returns empty conflict_candidates
     - Orthogonal vectors (similarity = 0) below threshold returns empty candidates
 """
@@ -28,7 +22,6 @@ Tests cover the _handle_check_conflicts handler's two-pass workflow:
 from __future__ import annotations
 
 import math
-from unittest.mock import AsyncMock
 
 import pytest
 
@@ -38,9 +31,9 @@ from distillery.config import (
     EmbeddingConfig,
     StorageConfig,
 )
-from distillery.mcp.tools.quality import _handle_check_conflicts
+from distillery.mcp.tools.quality import run_conflict_discovery, run_conflict_evaluation
 from distillery.store.duckdb import DuckDBStore
-from tests.conftest import ControlledEmbeddingProvider, make_entry, parse_mcp_response
+from tests.conftest import ControlledEmbeddingProvider, make_entry
 
 pytestmark = pytest.mark.unit
 
@@ -57,6 +50,16 @@ def _interpolated_vector(a: list[float], b: list[float], t: float) -> list[float
     vec = [a[i] * (1.0 - t) + b[i] * t for i in range(len(a))]
     magnitude = math.sqrt(sum(x * x for x in vec))
     return [x / magnitude for x in vec]
+
+
+def _parse_llm_responses(
+    raw: dict[str, dict[str, object]],
+) -> dict[str, tuple[bool, str]]:
+    """Convert test-style llm_responses to run_conflict_evaluation format."""
+    return {
+        entry_id: (bool(item["is_conflict"]), str(item.get("reasoning", "")))
+        for entry_id, item in raw.items()
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -120,8 +123,7 @@ class TestCheckConflictsFirstPassWithSimilarEntries:
         await store.store(make_entry(content=existing_text))
 
         config = _make_config(conflict_threshold=0.60)
-        response = await _handle_check_conflicts(store, config, {"content": query_text})
-        data = parse_mcp_response(response)
+        data = await run_conflict_discovery(store, config.classification.conflict_threshold, query_text)
 
         assert "conflict_candidates" in data
 
@@ -139,8 +141,7 @@ class TestCheckConflictsFirstPassWithSimilarEntries:
         await store.store(make_entry(content=existing_text))
 
         config = _make_config(conflict_threshold=0.60)
-        response = await _handle_check_conflicts(store, config, {"content": query_text})
-        data = parse_mcp_response(response)
+        data = await run_conflict_discovery(store, config.classification.conflict_threshold, query_text)
 
         assert len(data["conflict_candidates"]) >= 1
 
@@ -158,8 +159,7 @@ class TestCheckConflictsFirstPassWithSimilarEntries:
         await store.store(make_entry(content=existing_text))
 
         config = _make_config(conflict_threshold=0.60)
-        response = await _handle_check_conflicts(store, config, {"content": query_text})
-        data = parse_mcp_response(response)
+        data = await run_conflict_discovery(store, config.classification.conflict_threshold, query_text)
 
         candidate = data["conflict_candidates"][0]
         assert "entry_id" in candidate
@@ -178,8 +178,7 @@ class TestCheckConflictsFirstPassWithSimilarEntries:
         await store.store(make_entry(content=existing_text))
 
         config = _make_config(conflict_threshold=0.60)
-        response = await _handle_check_conflicts(store, config, {"content": query_text})
-        data = parse_mcp_response(response)
+        data = await run_conflict_discovery(store, config.classification.conflict_threshold, query_text)
 
         candidate = data["conflict_candidates"][0]
         assert "conflict_prompt" in candidate
@@ -200,8 +199,7 @@ class TestCheckConflictsFirstPassWithSimilarEntries:
         await store.store(make_entry(content=existing_text))
 
         config = _make_config(conflict_threshold=0.60)
-        response = await _handle_check_conflicts(store, config, {"content": query_text})
-        data = parse_mcp_response(response)
+        data = await run_conflict_discovery(store, config.classification.conflict_threshold, query_text)
 
         candidate = data["conflict_candidates"][0]
         assert "content_preview" in candidate
@@ -221,8 +219,7 @@ class TestCheckConflictsFirstPassWithSimilarEntries:
         await store.store(make_entry(content=existing_text))
 
         config = _make_config(conflict_threshold=0.60)
-        response = await _handle_check_conflicts(store, config, {"content": query_text})
-        data = parse_mcp_response(response)
+        data = await run_conflict_discovery(store, config.classification.conflict_threshold, query_text)
 
         candidate = data["conflict_candidates"][0]
         assert "similarity_score" in candidate
@@ -242,8 +239,7 @@ class TestCheckConflictsFirstPassWithSimilarEntries:
         await store.store(make_entry(content=existing_text))
 
         config = _make_config(conflict_threshold=0.60)
-        response = await _handle_check_conflicts(store, config, {"content": query_text})
-        data = parse_mcp_response(response)
+        data = await run_conflict_discovery(store, config.classification.conflict_threshold, query_text)
 
         candidate = data["conflict_candidates"][0]
         prompt = candidate["conflict_prompt"]
@@ -264,8 +260,7 @@ class TestCheckConflictsFirstPassWithSimilarEntries:
         await store.store(make_entry(content=existing_text))
 
         config = _make_config(conflict_threshold=0.60)
-        response = await _handle_check_conflicts(store, config, {"content": query_text})
-        data = parse_mcp_response(response)
+        data = await run_conflict_discovery(store, config.classification.conflict_threshold, query_text)
 
         assert data.get("has_conflicts") is False
 
@@ -283,8 +278,7 @@ class TestCheckConflictsFirstPassWithSimilarEntries:
         await store.store(make_entry(content=existing_text))
 
         config = _make_config(conflict_threshold=0.60)
-        response = await _handle_check_conflicts(store, config, {"content": query_text})
-        data = parse_mcp_response(response)
+        data = await run_conflict_discovery(store, config.classification.conflict_threshold, query_text)
 
         assert "message" in data
         assert "llm_responses" in data["message"]
@@ -310,8 +304,7 @@ class TestCheckConflictsFirstPassWithSimilarEntries:
             await store.store(make_entry(content=text))
 
         config = _make_config(conflict_threshold=0.60)
-        response = await _handle_check_conflicts(store, config, {"content": query_text})
-        data = parse_mcp_response(response)
+        data = await run_conflict_discovery(store, config.classification.conflict_threshold, query_text)
 
         assert len(data["conflict_candidates"]) >= 1
 
@@ -334,8 +327,7 @@ class TestCheckConflictsFirstPassNoSimilarEntries:
         embedding_provider.register(query_text, _UNIT_A)
 
         config = _make_config(conflict_threshold=0.60)
-        response = await _handle_check_conflicts(store, config, {"content": query_text})
-        data = parse_mcp_response(response)
+        data = await run_conflict_discovery(store, config.classification.conflict_threshold, query_text)
 
         assert data.get("conflict_candidates", []) == []
         assert data.get("has_conflicts") is False
@@ -354,8 +346,7 @@ class TestCheckConflictsFirstPassNoSimilarEntries:
         await store.store(make_entry(content=existing_text))
 
         config = _make_config(conflict_threshold=0.60)
-        response = await _handle_check_conflicts(store, config, {"content": query_text})
-        data = parse_mcp_response(response)
+        data = await run_conflict_discovery(store, config.classification.conflict_threshold, query_text)
 
         assert data.get("conflict_candidates", []) == []
         assert data.get("has_conflicts") is False
@@ -370,8 +361,7 @@ class TestCheckConflictsFirstPassNoSimilarEntries:
         embedding_provider.register(query_text, _UNIT_A)
 
         config = _make_config(conflict_threshold=0.60)
-        response = await _handle_check_conflicts(store, config, {"content": query_text})
-        data = parse_mcp_response(response)
+        data = await run_conflict_discovery(store, config.classification.conflict_threshold, query_text)
 
         assert "message" in data
         assert data["conflicts"] == []
@@ -400,13 +390,12 @@ class TestCheckConflictsSecondPassWithConflict:
         entry_id = await store.store(entry)
 
         config = _make_config(conflict_threshold=0.60)
-        llm_responses = {
+        llm_responses = _parse_llm_responses({
             entry_id: {"is_conflict": True, "reasoning": "Direct contradiction on blood pressure"}
-        }
-        response = await _handle_check_conflicts(
-            store, config, {"content": query_text, "llm_responses": llm_responses}
+        })
+        data = await run_conflict_evaluation(
+            store, config.classification.conflict_threshold, query_text, llm_responses
         )
-        data = parse_mcp_response(response)
 
         assert data.get("has_conflicts") is True
 
@@ -425,13 +414,12 @@ class TestCheckConflictsSecondPassWithConflict:
         entry_id = await store.store(entry)
 
         config = _make_config(conflict_threshold=0.60)
-        llm_responses = {
+        llm_responses = _parse_llm_responses({
             entry_id: {"is_conflict": True, "reasoning": "Different star count claims"}
-        }
-        response = await _handle_check_conflicts(
-            store, config, {"content": query_text, "llm_responses": llm_responses}
+        })
+        data = await run_conflict_evaluation(
+            store, config.classification.conflict_threshold, query_text, llm_responses
         )
-        data = parse_mcp_response(response)
 
         assert len(data.get("conflicts", [])) == 1
 
@@ -450,11 +438,10 @@ class TestCheckConflictsSecondPassWithConflict:
         entry_id = await store.store(entry)
 
         config = _make_config(conflict_threshold=0.60)
-        llm_responses = {entry_id: {"is_conflict": True, "reasoning": "Brain usage myth"}}
-        response = await _handle_check_conflicts(
-            store, config, {"content": query_text, "llm_responses": llm_responses}
+        llm_responses = _parse_llm_responses({entry_id: {"is_conflict": True, "reasoning": "Brain usage myth"}})
+        data = await run_conflict_evaluation(
+            store, config.classification.conflict_threshold, query_text, llm_responses
         )
-        data = parse_mcp_response(response)
 
         conflict = data["conflicts"][0]
         assert conflict["entry_id"] == entry_id
@@ -475,11 +462,10 @@ class TestCheckConflictsSecondPassWithConflict:
 
         config = _make_config(conflict_threshold=0.60)
         expected_reasoning = "Antibiotics vs viruses contradiction"
-        llm_responses = {entry_id: {"is_conflict": True, "reasoning": expected_reasoning}}
-        response = await _handle_check_conflicts(
-            store, config, {"content": query_text, "llm_responses": llm_responses}
+        llm_responses = _parse_llm_responses({entry_id: {"is_conflict": True, "reasoning": expected_reasoning}})
+        data = await run_conflict_evaluation(
+            store, config.classification.conflict_threshold, query_text, llm_responses
         )
-        data = parse_mcp_response(response)
 
         conflict = data["conflicts"][0]
         assert "conflict_reasoning" in conflict
@@ -500,11 +486,10 @@ class TestCheckConflictsSecondPassWithConflict:
         entry_id = await store.store(entry)
 
         config = _make_config(conflict_threshold=0.60)
-        llm_responses = {entry_id: {"is_conflict": True, "reasoning": "Hyperactivity myth"}}
-        response = await _handle_check_conflicts(
-            store, config, {"content": query_text, "llm_responses": llm_responses}
+        llm_responses = _parse_llm_responses({entry_id: {"is_conflict": True, "reasoning": "Hyperactivity myth"}})
+        data = await run_conflict_evaluation(
+            store, config.classification.conflict_threshold, query_text, llm_responses
         )
-        data = parse_mcp_response(response)
 
         conflict = data["conflicts"][0]
         assert "similarity_score" in conflict
@@ -525,11 +510,10 @@ class TestCheckConflictsSecondPassWithConflict:
         entry_id = await store.store(entry)
 
         config = _make_config(conflict_threshold=0.60)
-        llm_responses = {entry_id: {"is_conflict": True, "reasoning": "Speed comparison"}}
-        response = await _handle_check_conflicts(
-            store, config, {"content": query_text, "llm_responses": llm_responses}
+        llm_responses = _parse_llm_responses({entry_id: {"is_conflict": True, "reasoning": "Speed comparison"}})
+        data = await run_conflict_evaluation(
+            store, config.classification.conflict_threshold, query_text, llm_responses
         )
-        data = parse_mcp_response(response)
 
         conflict = data["conflicts"][0]
         assert "content_preview" in conflict
@@ -554,16 +538,15 @@ class TestCheckConflictsSecondPassNoConflict:
         entry_id = await store.store(entry)
 
         config = _make_config(conflict_threshold=0.60)
-        llm_responses = {
+        llm_responses = _parse_llm_responses({
             entry_id: {
                 "is_conflict": False,
                 "reasoning": "Both are true — Python supports multiple paradigms",
             }
-        }
-        response = await _handle_check_conflicts(
-            store, config, {"content": query_text, "llm_responses": llm_responses}
+        })
+        data = await run_conflict_evaluation(
+            store, config.classification.conflict_threshold, query_text, llm_responses
         )
-        data = parse_mcp_response(response)
 
         assert data.get("has_conflicts") is False
 
@@ -582,13 +565,12 @@ class TestCheckConflictsSecondPassNoConflict:
         entry_id = await store.store(entry)
 
         config = _make_config(conflict_threshold=0.60)
-        llm_responses = {
+        llm_responses = _parse_llm_responses({
             entry_id: {"is_conflict": False, "reasoning": "Complementary statements"}
-        }
-        response = await _handle_check_conflicts(
-            store, config, {"content": query_text, "llm_responses": llm_responses}
+        })
+        data = await run_conflict_evaluation(
+            store, config.classification.conflict_threshold, query_text, llm_responses
         )
-        data = parse_mcp_response(response)
 
         assert data.get("conflicts", []) == []
 
@@ -618,14 +600,13 @@ class TestCheckConflictsSecondPassMultipleCandidates:
 
         config = _make_config(conflict_threshold=0.60)
         is_conflict_list = list(texts.values())
-        llm_responses = {
+        llm_responses = _parse_llm_responses({
             entry_ids[0]: {"is_conflict": is_conflict_list[0], "reasoning": "Conflict found"},
             entry_ids[1]: {"is_conflict": is_conflict_list[1], "reasoning": "Not a conflict"},
-        }
-        response = await _handle_check_conflicts(
-            store, config, {"content": query_text, "llm_responses": llm_responses}
+        })
+        data = await run_conflict_evaluation(
+            store, config.classification.conflict_threshold, query_text, llm_responses
         )
-        data = parse_mcp_response(response)
 
         conflict_ids = {c["entry_id"] for c in data.get("conflicts", [])}
         assert entry_ids[0] in conflict_ids
@@ -652,164 +633,25 @@ class TestCheckConflictsSecondPassMultipleCandidates:
         embedding_provider.register(query_text, _UNIT_A)
 
         config = _make_config(conflict_threshold=0.60)
-        llm_responses = {
+        llm_responses = _parse_llm_responses({
             entry_ids[0]: {"is_conflict": True, "reasoning": "First conflict"},
             entry_ids[1]: {"is_conflict": True, "reasoning": "Second conflict"},
-        }
-        response = await _handle_check_conflicts(
-            store, config, {"content": query_text, "llm_responses": llm_responses}
+        })
+        data = await run_conflict_evaluation(
+            store, config.classification.conflict_threshold, query_text, llm_responses
         )
-        data = parse_mcp_response(response)
 
         assert data.get("has_conflicts") is True
         assert len(data.get("conflicts", [])) >= 2
 
 
 # ---------------------------------------------------------------------------
-# Validation error tests
-# ---------------------------------------------------------------------------
-
-
-class TestCheckConflictsValidation:
-    """Handler validates inputs and returns INVALID_PARAMS on failures."""
-
-    async def test_missing_content_returns_invalid_params(
-        self,
-        store: DuckDBStore,
-    ) -> None:
-        """Missing 'content' field in arguments returns INVALID_PARAMS error."""
-        config = _make_config()
-        response = await _handle_check_conflicts(store, config, {})
-        data = parse_mcp_response(response)
-
-        assert data.get("error") is True
-        assert data.get("code") == "INVALID_PARAMS"
-
-    async def test_missing_content_with_other_fields_returns_invalid_params(
-        self,
-        store: DuckDBStore,
-    ) -> None:
-        """Missing 'content' field even with other fields present returns error."""
-        config = _make_config()
-        response = await _handle_check_conflicts(
-            store, config, {"llm_responses": {"id": {"is_conflict": False, "reasoning": ""}}}
-        )
-        data = parse_mcp_response(response)
-
-        assert data.get("error") is True
-        assert data.get("code") == "INVALID_PARAMS"
-
-    async def test_non_dict_llm_responses_returns_invalid_params(
-        self,
-        store: DuckDBStore,
-    ) -> None:
-        """Passing a non-dict value for llm_responses returns INVALID_PARAMS error."""
-        config = _make_config()
-        response = await _handle_check_conflicts(
-            store, config, {"content": "some content", "llm_responses": "not a dict"}
-        )
-        data = parse_mcp_response(response)
-
-        assert data.get("error") is True
-        assert data.get("code") == "INVALID_PARAMS"
-
-    async def test_list_llm_responses_returns_invalid_params(
-        self,
-        store: DuckDBStore,
-    ) -> None:
-        """Passing a list as llm_responses returns INVALID_PARAMS error."""
-        config = _make_config()
-        response = await _handle_check_conflicts(
-            store, config, {"content": "some content", "llm_responses": [True, False]}
-        )
-        data = parse_mcp_response(response)
-
-        assert data.get("error") is True
-        assert data.get("code") == "INVALID_PARAMS"
-
-    async def test_llm_response_item_not_dict_returns_invalid_params(
-        self,
-        store: DuckDBStore,
-    ) -> None:
-        """llm_responses value that is not a dict returns INVALID_PARAMS error."""
-        config = _make_config()
-        response = await _handle_check_conflicts(
-            store,
-            config,
-            {"content": "some content", "llm_responses": {"entry-id": "not a dict"}},
-        )
-        data = parse_mcp_response(response)
-
-        assert data.get("error") is True
-        assert data.get("code") == "INVALID_PARAMS"
-
-    async def test_llm_response_item_missing_is_conflict_returns_invalid_params(
-        self,
-        store: DuckDBStore,
-    ) -> None:
-        """llm_responses value missing 'is_conflict' field returns INVALID_PARAMS error."""
-        config = _make_config()
-        response = await _handle_check_conflicts(
-            store,
-            config,
-            {
-                "content": "some content",
-                "llm_responses": {"entry-id": {"reasoning": "no is_conflict key"}},
-            },
-        )
-        data = parse_mcp_response(response)
-
-        assert data.get("error") is True
-        assert data.get("code") == "INVALID_PARAMS"
-
-
-# ---------------------------------------------------------------------------
-# Error handling tests
-# ---------------------------------------------------------------------------
-
-
-class TestCheckConflictsErrorHandling:
-    """Handler catches exceptions and returns CONFLICT_ERROR responses."""
-
-    async def test_store_find_similar_raises_returns_conflict_error(self) -> None:
-        """When store.find_similar raises an exception, CONFLICT_ERROR is returned."""
-        mock_store = AsyncMock()
-        mock_store.find_similar.side_effect = RuntimeError("Store failure")
-
-        config = _make_config()
-        response = await _handle_check_conflicts(
-            mock_store, config, {"content": "some content that will fail"}
-        )
-        data = parse_mcp_response(response)
-
-        assert data.get("error") is True
-        assert data.get("code") == "CONFLICT_ERROR"
-
-    async def test_second_pass_store_raises_returns_conflict_error(self) -> None:
-        """When store.find_similar raises on second pass, CONFLICT_ERROR is returned."""
-        mock_store = AsyncMock()
-        mock_store.find_similar.side_effect = RuntimeError("Store failure during second pass")
-
-        config = _make_config()
-        llm_responses = {"some-id": {"is_conflict": True, "reasoning": "contradiction"}}
-        response = await _handle_check_conflicts(
-            mock_store,
-            config,
-            {"content": "some content", "llm_responses": llm_responses},
-        )
-        data = parse_mcp_response(response)
-
-        assert data.get("error") is True
-        assert data.get("code") == "CONFLICT_ERROR"
-
-
-# ---------------------------------------------------------------------------
-# Conflict threshold tests
+# Threshold tests
 # ---------------------------------------------------------------------------
 
 
 class TestCheckConflictsThreshold:
-    """Handler respects the conflict_threshold from config."""
+    """Helpers respect the conflict_threshold from config."""
 
     async def test_high_threshold_excludes_moderate_similarity(
         self,
@@ -824,14 +666,12 @@ class TestCheckConflictsThreshold:
         interp = _interpolated_vector(_UNIT_A, _UNIT_B, 0.9)
         embedding_provider.register(existing_text, _UNIT_A)
         embedding_provider.register(query_text, interp)
-        # The cosine similarity between UNIT_A and interp is low (< 0.5 normalized)
 
         await store.store(make_entry(content=existing_text))
 
         # Set very high threshold — entry should not appear as candidate
         config = _make_config(conflict_threshold=0.99)
-        response = await _handle_check_conflicts(store, config, {"content": query_text})
-        data = parse_mcp_response(response)
+        data = await run_conflict_discovery(store, config.classification.conflict_threshold, query_text)
 
         assert data.get("conflict_candidates", []) == []
 
@@ -850,8 +690,7 @@ class TestCheckConflictsThreshold:
 
         # Low threshold — identical vector should appear as candidate
         config = _make_config(conflict_threshold=0.50)
-        response = await _handle_check_conflicts(store, config, {"content": query_text})
-        data = parse_mcp_response(response)
+        data = await run_conflict_discovery(store, config.classification.conflict_threshold, query_text)
 
         assert len(data.get("conflict_candidates", [])) >= 1
 
@@ -878,8 +717,7 @@ class TestCheckConflictsContentPreview:
         await store.store(make_entry(content=long_existing))
 
         config = _make_config(conflict_threshold=0.60)
-        response = await _handle_check_conflicts(store, config, {"content": query_text})
-        data = parse_mcp_response(response)
+        data = await run_conflict_discovery(store, config.classification.conflict_threshold, query_text)
 
         assert len(data["conflict_candidates"]) >= 1
         candidate = data["conflict_candidates"][0]
@@ -900,11 +738,10 @@ class TestCheckConflictsContentPreview:
         entry_id = await store.store(entry)
 
         config = _make_config(conflict_threshold=0.60)
-        llm_responses = {entry_id: {"is_conflict": True, "reasoning": "conflict confirmed"}}
-        response = await _handle_check_conflicts(
-            store, config, {"content": query_text, "llm_responses": llm_responses}
+        llm_responses = _parse_llm_responses({entry_id: {"is_conflict": True, "reasoning": "conflict confirmed"}})
+        data = await run_conflict_evaluation(
+            store, config.classification.conflict_threshold, query_text, llm_responses
         )
-        data = parse_mcp_response(response)
 
         assert len(data.get("conflicts", [])) >= 1
         conflict = data["conflicts"][0]

@@ -11,7 +11,7 @@
   prompt: '/distill ""'
   seed_entries: []
   expected_tools:
-    - distillery_status
+    - distillery_metrics
   response_must_contain:
     - nothing to store
   response_must_not_contain:
@@ -63,7 +63,7 @@
     rhoncus, sem quam semper libero, sit amet adipiscing sem neque sed ipsum."
   seed_entries: []
   expected_tools:
-    - distillery_status
+    - distillery_metrics
     - distillery_store
   response_must_contain:
     - stored
@@ -86,7 +86,7 @@
       author: alice
       tags: [architecture, storage]
   expected_tools:
-    - distillery_status
+    - distillery_metrics
     - distillery_search
   response_must_contain:
     - DuckDB
@@ -108,7 +108,7 @@
   prompt: "what caching strategies have we discussed?"
   seed_entries: []
   expected_tools:
-    - distillery_status
+    - distillery_metrics
     - distillery_search
   response_must_contain:
     - no results
@@ -128,7 +128,7 @@
   prompt: "/pour what patterns exist in our authentication decisions?"
   seed_entries: []
   expected_tools:
-    - distillery_status
+    - distillery_metrics
     - distillery_search
   response_must_contain:
     - insufficient
@@ -154,8 +154,8 @@
       author: alice
       tags: [python, requirements]
   expected_tools:
-    - distillery_status
-    - distillery_check_dedup
+    - distillery_metrics
+    - distillery_find_similar
   response_must_contain:
     - similar
   response_must_not_contain:
@@ -177,8 +177,8 @@
       author: alice
       tags: [architecture, duckdb]
   expected_tools:
-    - distillery_status
-    - distillery_check_dedup
+    - distillery_metrics
+    - distillery_find_similar
   response_must_contain:
     - duplicate
   response_must_not_contain:
@@ -200,8 +200,8 @@
       author: alice
       tags: [architecture, duckdb]
   expected_tools:
-    - distillery_status
-    - distillery_check_dedup
+    - distillery_metrics
+    - distillery_find_similar
   response_must_contain:
     - already
   response_must_not_contain:
@@ -223,7 +223,7 @@
     Then immediately: /recall "payments module test coverage"
   seed_entries: []
   expected_tools:
-    - distillery_status
+    - distillery_metrics
     - distillery_store
     - distillery_search
   response_must_contain:
@@ -247,7 +247,7 @@
     /distill "Decision: use S3 for blob storage."
   seed_entries: []
   expected_tools:
-    - distillery_status
+    - distillery_metrics
     - distillery_store
   response_must_contain:
     - stored
@@ -269,7 +269,7 @@
   prompt: "/recall architecture decisions"
   seed_entries: []
   expected_tools:
-    - distillery_status
+    - distillery_metrics
   response_must_contain:
     - unable
   response_must_not_contain:
@@ -289,7 +289,7 @@
   prompt: "/recall what were the performance benchmarks we ran last sprint?"
   seed_entries: []
   expected_tools:
-    - distillery_status
+    - distillery_metrics
   response_must_contain:
     - try again
   response_must_not_contain:

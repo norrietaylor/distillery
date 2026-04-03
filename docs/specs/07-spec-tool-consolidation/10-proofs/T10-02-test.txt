@@ -1,0 +1,74 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.7, pytest-9.0.2, pluggy-1.6.0
+rootdir: /home/norrie.guest/code/distillery/.claude/worktrees/agent-a22e02b1
+configfile: pyproject.toml
+testpaths: tests
+plugins: asyncio-1.3.0, anyio-4.13.0, cov-7.1.0, typeguard-4.4.2
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 1615 items
+
+tests/eval/test_cost_tracking.py ....................                    [  1%]
+tests/eval/test_retrieval_scorer.py .................................... [  3%]
+.....                                                                    [  3%]
+tests/test_budget.py ...................                                 [  4%]
+tests/test_classification_engine.py ................................     [  6%]
+tests/test_cli.py .............................                          [  8%]
+tests/test_cloud_storage.py ..........................................   [ 11%]
+tests/test_config.py ................................................... [ 14%]
+......................................                                   [ 16%]
+tests/test_conflict.py ..........................                        [ 18%]
+tests/test_dedup.py .........................                            [ 20%]
+tests/test_duckdb_store.py ............................................. [ 22%]
+...............................                                          [ 24%]
+tests/test_e2e_mcp.py ............                                       [ 25%]
+tests/test_embedding.py ................................................ [ 28%]
+                                                                         [ 28%]
+tests/test_entry.py .................................................... [ 31%]
+...............                                                          [ 32%]
+tests/test_eval_claude.py ssssssssssssssssssssssssssssssssssssssssssssss [ 35%]
+ssssssssssssssssssssss..s.ssss                                           [ 37%]
+tests/test_eval_unit.py ................................................ [ 40%]
+................................................                         [ 43%]
+tests/test_feedback.py ................                                  [ 44%]
+tests/test_feeds.py .................................................... [ 47%]
+......                                                                   [ 47%]
+tests/test_interests.py ...........................................      [ 50%]
+tests/test_list_output_modes.py ..................                       [ 51%]
+tests/test_mcp_analytics.py .......................................      [ 53%]
+tests/test_mcp_auth.py ...........                                       [ 54%]
+tests/test_mcp_classify.py ..........................                    [ 56%]
+tests/test_mcp_conflicts.py ...................................          [ 58%]
+tests/test_mcp_coverage_gaps.py ........................................ [ 60%]
+........................................................................ [ 65%]
+..............................................                           [ 68%]
+tests/test_mcp_dedup.py .........                                        [ 68%]
+tests/test_mcp_errors.py ........................                        [ 70%]
+tests/test_mcp_feeds.py .........................................        [ 72%]
+tests/test_mcp_org_membership.py ....................................... [ 75%]
+..                                                                       [ 75%]
+tests/test_mcp_server.py ............................................... [ 78%]
+...                                                                      [ 78%]
+tests/test_metrics.py ..........................                         [ 80%]
+tests/test_middleware.py ...................................             [ 82%]
+tests/test_plugin.py ................................................... [ 85%]
+..                                                                       [ 85%]
+tests/test_poller.py ............................                        [ 87%]
+tests/test_security.py ...........                                       [ 87%]
+tests/test_stale.py .........................                            [ 89%]
+tests/test_store_integration.py .........................                [ 91%]
+tests/test_store_protocol.py ..........                                  [ 91%]
+tests/test_store_security.py ......                                      [ 92%]
+tests/test_tags.py .............................                         [ 93%]
+tests/test_type_schemas.py ............................................. [ 96%]
+                                                                         [ 96%]
+tests/test_watch.py ...........................................          [ 99%]
+tests/test_webhooks.py ............                                      [100%]
+
+=============================== warnings summary ===============================
+tests/test_poller.py::TestCLIPollSubcommand::test_poll_source_flag
+  <frozen os>:717: RuntimeWarning: coroutine '_cmd_poll.<locals>._run' was never awaited
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================= 1542 passed, 73 skipped, 1 warning in 20.82s =================

@@ -1,12 +1,11 @@
 """Tests for the Distillery MCP analytics tool handlers (T04.2).
 
-Tests cover all 6 analytics handlers via direct handler calls with a mock
+Tests cover analytics handlers via direct handler calls with a mock
 store, deterministic embedding provider, and minimal config:
 
   - _handle_tag_tree
   - _handle_type_schemas
-  - _handle_metrics
-  - _handle_quality
+  - _handle_metrics (including scope=summary and scope=search_quality)
   - _handle_stale
   - _handle_interests
 
@@ -26,7 +25,6 @@ from distillery.config import DefaultsConfig, DistilleryConfig, StorageConfig
 from distillery.mcp.tools.analytics import (
     _handle_interests,
     _handle_metrics,
-    _handle_quality,
     _handle_stale,
     _handle_tag_tree,
     _handle_type_schemas,
@@ -268,13 +266,15 @@ class TestMetrics:
 
 
 # ---------------------------------------------------------------------------
-# _handle_quality tests
+# _handle_metrics(scope="search_quality") tests — replaces _handle_quality
 # ---------------------------------------------------------------------------
 
 
 class TestQuality:
-    async def test_quality_empty_store(self, store: DuckDBStore) -> None:
-        response = await _handle_quality(store, {})
+    async def test_quality_empty_store(
+        self, store: DuckDBStore, config: DistilleryConfig, embedding_provider: DeterministicEmbeddingProvider
+    ) -> None:
+        response = await _handle_metrics(store, config, embedding_provider, {"scope": "search_quality"})
         data = parse_mcp_response(response)
         assert data["total_searches"] == 0
         assert data["total_feedback"] == 0
@@ -282,16 +282,22 @@ class TestQuality:
         assert data["avg_result_count"] == 0.0
         assert data["per_type_breakdown"] == {}
 
-    async def test_quality_with_entry_type_filter(self, store: DuckDBStore) -> None:
-        response = await _handle_quality(store, {"entry_type": "idea"})
+    async def test_quality_with_entry_type_filter(
+        self, store: DuckDBStore, config: DistilleryConfig, embedding_provider: DeterministicEmbeddingProvider
+    ) -> None:
+        response = await _handle_metrics(
+            store, config, embedding_provider, {"scope": "search_quality", "entry_type": "idea"}
+        )
         data = parse_mcp_response(response)
         # Should still succeed with empty tables
         assert "total_searches" in data
         assert "per_type_breakdown" in data
 
-    async def test_quality_no_error_on_missing_tables(self, store: DuckDBStore) -> None:
+    async def test_quality_no_error_on_missing_tables(
+        self, store: DuckDBStore, config: DistilleryConfig, embedding_provider: DeterministicEmbeddingProvider
+    ) -> None:
         """Quality should return zeroes when search_log/feedback_log don't exist."""
-        response = await _handle_quality(store, {})
+        response = await _handle_metrics(store, config, embedding_provider, {"scope": "search_quality"})
         data = parse_mcp_response(response)
         assert "error" not in data
         assert data["total_searches"] == 0

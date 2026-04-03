@@ -2,7 +2,7 @@
 
 Tests verify:
 - HTTP server starts and responds to MCP initialize
-- All 24 tools are accessible over HTTP transport
+- All 18 tools are accessible over HTTP transport
 - Stateless HTTP singleton: two requests share same store instance
 - stdio mode (no flags) backward compatibility
 """
@@ -32,31 +32,25 @@ MCP_HEADERS = {
     "Accept": "application/json, text/event-stream",
 }
 
-# All 24 tools that the Distillery MCP server exposes.
+# All 18 tools that the Distillery MCP server exposes.
 EXPECTED_TOOLS = {
-    "distillery_status",
     "distillery_store",
     "distillery_get",
     "distillery_update",
     "distillery_search",
     "distillery_find_similar",
     "distillery_list",
+    "distillery_aggregate",
     "distillery_classify",
-    "distillery_review_queue",
     "distillery_resolve_review",
-    "distillery_check_conflicts",
-    "distillery_check_dedup",
     "distillery_metrics",
-    "distillery_quality",
     "distillery_stale",
     "distillery_tag_tree",
     "distillery_type_schemas",
+    "distillery_interests",
     "distillery_watch",
     "distillery_poll",
     "distillery_rescore",
-    "distillery_interests",
-    "distillery_suggest_sources",
-    "distillery_aggregate",
     "distillery_configure",
 }
 
@@ -153,7 +147,7 @@ class TestHttpServerStarts:
 
 class TestAllToolsAccessibleOverHttp:
     async def test_all_tools_accessible_over_http(self) -> None:
-        """All 24 tools appear in tools/list response over HTTP."""
+        """All 18 tools appear in tools/list response over HTTP."""
         port = _free_port()
         config = _make_server_config()
         uv_server, task = await _start_http_server(port, config)
@@ -170,7 +164,7 @@ class TestAllToolsAccessibleOverHttp:
             assert "result" in data, f"Expected result in: {data}"
             tools = data["result"]["tools"]
             tool_names = {t["name"] for t in tools}
-            assert len(tool_names) == 24, f"Expected 24 tools, got {len(tool_names)}: {tool_names}"
+            assert len(tool_names) == 18, f"Expected 18 tools, got {len(tool_names)}: {tool_names}"
             assert tool_names == EXPECTED_TOOLS, (
                 f"Tool mismatch.\nExpected: {EXPECTED_TOOLS}\nGot: {tool_names}"
             )
@@ -189,7 +183,7 @@ class TestStatelessHttpSingleton:
         try:
             base_url = f"http://127.0.0.1:{port}/mcp"
             async with httpx.AsyncClient(timeout=5.0) as client:
-                # First request: call distillery_status to confirm server is live.
+                # First request: call distillery_metrics(scope=summary) to confirm server is live.
                 r1 = await client.post(
                     base_url,
                     headers=MCP_HEADERS,
@@ -197,10 +191,10 @@ class TestStatelessHttpSingleton:
                         "jsonrpc": "2.0",
                         "id": 1,
                         "method": "tools/call",
-                        "params": {"name": "distillery_status", "arguments": {}},
+                        "params": {"name": "distillery_metrics", "arguments": {"scope": "summary"}},
                     },
                 )
-                # Second request: call distillery_status again to confirm store is shared.
+                # Second request: call distillery_metrics again to confirm store is shared.
                 r2 = await client.post(
                     base_url,
                     headers=MCP_HEADERS,
@@ -208,7 +202,7 @@ class TestStatelessHttpSingleton:
                         "jsonrpc": "2.0",
                         "id": 2,
                         "method": "tools/call",
-                        "params": {"name": "distillery_status", "arguments": {}},
+                        "params": {"name": "distillery_metrics", "arguments": {"scope": "summary"}},
                     },
                 )
             assert r1.status_code == 200, f"First request failed: {r1.text[:200]}"

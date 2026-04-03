@@ -36,7 +36,7 @@
         source_type: "rss"
         relevance_score: 0.60
   expected_tools:
-    - distillery_status
+    - distillery_metrics
     - distillery_list
   response_must_contain:
     - Digest
@@ -50,7 +50,7 @@
   prompt: "/radar"
   seed_entries: []
   expected_tools:
-    - distillery_status
+    - distillery_metrics
     - distillery_list
   response_must_contain:
     - No feed entries
@@ -59,7 +59,7 @@
 
 - name: radar-suggest-flag
   skill: radar
-  description: "With --suggest flag, Claude should call distillery_suggest_sources and include suggestions section"
+  description: "With --suggest flag, Claude should call distillery_interests and include suggestions section"
   prompt: "/radar --suggest"
   seed_entries:
     - content: "FastAPI 0.111 released. New dependency injection improvements and better OpenAPI schema generation."
@@ -78,9 +78,9 @@
       tags: [duckdb, release, feed]
       metadata: {source_url: "https://duckdb.org/news", source_name: "DuckDB News", source_type: "rss", relevance_score: 0.75}
   expected_tools:
-    - distillery_status
+    - distillery_metrics
     - distillery_list
-    - distillery_suggest_sources
+    - distillery_interests
   response_must_contain:
     - Suggest
   max_latency_ms: 60000
@@ -107,7 +107,7 @@
       tags: [go, release, feed]
       metadata: {source_url: "https://go.dev/blog", source_name: "Go Blog", source_type: "rss", relevance_score: 0.6}
   expected_tools:
-    - distillery_status
+    - distillery_metrics
     - distillery_list
   response_must_not_contain:
     - "Digest stored:"
@@ -135,7 +135,7 @@
       tags: [terraform, release, feed]
       metadata: {source_url: "https://www.hashicorp.com/blog", source_name: "HashiCorp Blog", source_type: "rss", relevance_score: 0.6}
   expected_tools:
-    - distillery_status
+    - distillery_metrics
     - distillery_list
   max_latency_ms: 60000
   max_total_tokens: 10000

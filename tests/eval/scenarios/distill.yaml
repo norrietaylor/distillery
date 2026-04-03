@@ -7,7 +7,7 @@
   prompt: '/distill "We decided to use pytest-asyncio in auto mode so async tests are detected automatically without needing @pytest.mark.asyncio on each function."'
   seed_entries: []
   expected_tools:
-    - distillery_status
+    - distillery_metrics
     - distillery_store
   min_entries_stored: 1
   max_latency_ms: 90000
@@ -15,7 +15,7 @@
 
 - name: distill-checks-dedup-first
   skill: distill
-  description: "Claude should call distillery_check_dedup before storing"
+  description: "Claude should call distillery_find_similar before storing"
   prompt: '/distill "Decided to use DuckDB for local storage because it has no server process."'
   seed_entries:
     - content: "Decided to use DuckDB for local storage because it requires no separate server process."
@@ -23,8 +23,8 @@
       author: alice
       tags: [architecture, duckdb]
   expected_tools:
-    - distillery_status
-    - distillery_check_dedup
+    - distillery_metrics
+    - distillery_find_similar
   max_latency_ms: 90000
   max_total_tokens: 10000
 
@@ -34,7 +34,7 @@
   prompt: '/distill --project api-redesign "We decided to move from REST to GraphQL for the public API to reduce over-fetching."'
   seed_entries: []
   expected_tools:
-    - distillery_status
+    - distillery_metrics
     - distillery_store
   min_entries_stored: 1
   max_latency_ms: 90000
@@ -64,10 +64,10 @@
 
 - name: distill-mcp-unavailable-message
   skill: distill
-  description: "Claude should call distillery_status even for lowercase distill prompts without the / prefix"
+  description: "Claude should call distillery_metrics even for lowercase distill prompts without the / prefix"
   prompt: "distill this insight: we should add circuit breakers to the embedding provider"
   seed_entries: []
   expected_tools:
-    - distillery_status
+    - distillery_metrics
   max_latency_ms: 60000
   max_total_tokens: 8000

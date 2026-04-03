@@ -6,7 +6,7 @@
   prompt: "/watch list"
   seed_entries: []
   expected_tools:
-    - distillery_status
+    - distillery_metrics
     - distillery_watch
   max_latency_ms: 30000
   max_total_tokens: 5000
@@ -17,7 +17,7 @@
   prompt: "/watch add https://news.ycombinator.com/rss --type rss --label 'Hacker News'"
   seed_entries: []
   expected_tools:
-    - distillery_status
+    - distillery_metrics
     - distillery_watch
   max_latency_ms: 30000
   max_total_tokens: 5000
@@ -38,7 +38,7 @@
   prompt: "/watch remove https://news.ycombinator.com/rss"
   seed_entries: []
   expected_tools:
-    - distillery_status
+    - distillery_metrics
     - distillery_watch
   max_latency_ms: 30000
   max_total_tokens: 5000
@@ -59,7 +59,7 @@
   prompt: "/watch add https://www.reddit.com/r/ClaudeCode/ --label 'r/ClaudeCode'"
   seed_entries: []
   expected_tools:
-    - distillery_status
+    - distillery_metrics
     - distillery_watch
   response_must_contain:
     - reddit
@@ -73,7 +73,7 @@
   prompt: "/watch add https://blog.anthropic.com/rss.xml --label 'Anthropic Blog'"
   seed_entries: []
   expected_tools:
-    - distillery_status
+    - distillery_metrics
     - distillery_watch
   response_must_contain:
     - poll
@@ -86,7 +86,7 @@
   prompt: "/watch remove https://nonexistent.example.com/feed"
   seed_entries: []
   expected_tools:
-    - distillery_status
+    - distillery_metrics
     - distillery_watch
   response_must_contain:
     - not found

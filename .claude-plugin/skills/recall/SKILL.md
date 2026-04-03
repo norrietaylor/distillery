@@ -4,7 +4,7 @@ description: "Search the knowledge base using natural language and return matchi
 allowed-tools:
   - "mcp__*__distillery_search"
   - "mcp__*__distillery_get"
-  - "mcp__*__distillery_status"
+  - "mcp__*__distillery_metrics"
 effort: low
 ---
 

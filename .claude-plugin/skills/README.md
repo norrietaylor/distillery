@@ -73,7 +73,7 @@ To create a new skill:
 
 The Distillery MCP server provides these tools:
 
-- `distillery_status` — Check server health and database stats
+- `distillery_metrics` — Server health, usage stats, and search quality (use `scope="summary"` for health check)
 - `distillery_store` — Store a new knowledge entry
 - `distillery_search` — Semantic search for entries
 - `distillery_find_similar` — Find duplicate entries
@@ -88,7 +88,7 @@ See `/docs/mcp-setup.md` for full tool documentation.
 If a skill doesn't work:
 
 1. **Verify MCP server is configured:** Check your Claude Code settings file (`.claude/settings.json`)
-2. **Verify MCP server is running:** Try calling `distillery_status` directly
+2. **Verify MCP server is running:** Try calling `distillery_metrics(scope="summary")` directly
 3. **Check skill format:** Ensure the SKILL.md has valid YAML frontmatter and proper structure
 4. **Check error messages:** MCP errors appear in the skill output
 
