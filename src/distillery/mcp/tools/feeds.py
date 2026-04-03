@@ -393,5 +393,3 @@ def _derive_suggestions(
                 )
 
     return candidates[:max_suggestions]
-
-

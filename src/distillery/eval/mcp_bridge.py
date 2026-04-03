@@ -208,7 +208,10 @@ DISTILLERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "content": {"type": "string"},
-                "threshold": {"type": "number", "description": "Similarity threshold (default 0.8)."},
+                "threshold": {
+                    "type": "number",
+                    "description": "Similarity threshold (default 0.8).",
+                },
                 "dedup_action": {
                     "type": "boolean",
                     "description": "If true, add dedup action recommendation (create/skip/merge/link).",
@@ -347,7 +350,10 @@ DISTILLERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "source_url": {"type": "string", "description": "URL of source to poll; omit for all."},
+                "source_url": {
+                    "type": "string",
+                    "description": "URL of source to poll; omit for all.",
+                },
             },
             "required": [],
         },
@@ -358,7 +364,10 @@ DISTILLERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "limit": {"type": "integer", "description": "Max entries to rescore (default 100)."},
+                "limit": {
+                    "type": "integer",
+                    "description": "Max entries to rescore (default 100).",
+                },
             },
             "required": [],
         },
@@ -516,7 +525,9 @@ class MCPBridge:
         return [
             mcp_types.TextContent(
                 type="text",
-                text=json.dumps({"error": True, "code": "UNKNOWN_TOOL", "message": f"No handler for {name}"}),
+                text=json.dumps(
+                    {"error": True, "code": "UNKNOWN_TOOL", "message": f"No handler for {name}"}
+                ),
             )
         ]
 

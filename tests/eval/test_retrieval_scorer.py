@@ -35,7 +35,9 @@ def _make_search_record(
     latency_ms: float = 50.0,
 ) -> ToolCallRecord:
     """Create a ToolCallRecord whose response contains a ``results`` list."""
-    results: list[dict[str, Any]] = [{"id": eid, "content": f"Content for {eid}"} for eid in entry_ids]
+    results: list[dict[str, Any]] = [
+        {"id": eid, "content": f"Content for {eid}"} for eid in entry_ids
+    ]
     return ToolCallRecord(
         tool_name=tool_name,
         arguments={"query": "test query"},
@@ -367,9 +369,7 @@ class TestScoreRetrieval:
         """recall@k when only some relevant items fit in top-k."""
         # 4 relevant items, only 2 appear in top-3
         records = [_make_search_record(["a", "b", "x", "c", "d"])]
-        golden = _make_golden(
-            ["a", "b", "x", "c", "d"], relevant_ids={"a", "b", "c", "d"}
-        )
+        golden = _make_golden(["a", "b", "x", "c", "d"], relevant_ids={"a", "b", "c", "d"})
         metrics = score_retrieval(records, golden, k=3)
 
         # top-3: a, b, x — 2 of 4 relevant = recall 0.5

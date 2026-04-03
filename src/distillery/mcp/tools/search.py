@@ -167,9 +167,7 @@ async def _handle_find_similar(
 
     # Validate llm_responses type if provided
     if llm_responses_raw is not None and not isinstance(llm_responses_raw, list):
-        return error_response(
-            "INVALID_PARAMS", "Field 'llm_responses' must be a list of objects"
-        )
+        return error_response("INVALID_PARAMS", "Field 'llm_responses' must be a list of objects")
 
     # llm_responses without conflict_check is invalid
     if llm_responses_raw is not None and not conflict_check:
@@ -257,17 +255,13 @@ async def _handle_find_similar(
                 payload["conflict_evaluation"] = eval_result
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Error running conflict evaluation in find_similar")
-                return error_response(
-                    "CONFLICT_ERROR", f"Conflict evaluation failed: {exc}"
-                )
+                return error_response("CONFLICT_ERROR", f"Conflict evaluation failed: {exc}")
         else:
             # --- first pass: discover conflict candidates ---
             try:
                 from distillery.mcp.tools.quality import run_conflict_discovery
 
-                discovery_result = await run_conflict_discovery(
-                    store, conflict_threshold, content
-                )
+                discovery_result = await run_conflict_discovery(store, conflict_threshold, content)
                 # Attach conflict_prompt to matching entries in results
                 prompt_map: dict[str, str] = {}
                 for candidate in discovery_result.get("conflict_candidates", []):
@@ -278,18 +272,12 @@ async def _handle_find_similar(
                     if entry_id in prompt_map:
                         result_item["conflict_prompt"] = prompt_map[entry_id]
 
-                payload["conflict_candidates"] = discovery_result.get(
-                    "conflict_candidates", []
-                )
-                payload["conflict_candidates_count"] = len(
-                    payload["conflict_candidates"]
-                )
+                payload["conflict_candidates"] = discovery_result.get("conflict_candidates", [])
+                payload["conflict_candidates_count"] = len(payload["conflict_candidates"])
                 payload["conflict_message"] = discovery_result.get("message", "")
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Error running conflict discovery in find_similar")
-                return error_response(
-                    "CONFLICT_ERROR", f"Conflict check failed: {exc}"
-                )
+                return error_response("CONFLICT_ERROR", f"Conflict check failed: {exc}")
 
     return success_response(payload)
 

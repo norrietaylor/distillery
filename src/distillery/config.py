@@ -407,7 +407,9 @@ def _parse_defaults(raw: dict[str, Any]) -> DefaultsConfig:
     try:
         dedup_limit = int(dedup_limit_raw)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"defaults.dedup_limit must be an integer, got: {dedup_limit_raw!r}") from exc
+        raise ValueError(
+            f"defaults.dedup_limit must be an integer, got: {dedup_limit_raw!r}"
+        ) from exc
 
     stale_days_raw = raw.get("stale_days", 30)
     stale_days = _parse_strict_int(stale_days_raw, "defaults.stale_days")

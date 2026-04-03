@@ -6,6 +6,7 @@ allowed-tools:
   - "mcp__*__distillery_get"
   - "mcp__*__distillery_metrics"
 effort: low
+model: haiku
 ---
 
 <!-- Trigger phrases: recall, search knowledge, what do we know about, find in knowledge base, /recall <query> -->
