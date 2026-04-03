@@ -39,6 +39,8 @@ from distillery.mcp.server import (
     _handle_interests,
     _handle_list,
     _handle_metrics,
+    _handle_poll,
+    _handle_rescore,
     _handle_resolve_review,
     _handle_search,
     _handle_stale,
@@ -47,8 +49,6 @@ from distillery.mcp.server import (
     _handle_type_schemas,
     _handle_update,
     _handle_watch,
-    _handle_poll,
-    _handle_rescore,
 )
 from distillery.store.duckdb import DuckDBStore
 

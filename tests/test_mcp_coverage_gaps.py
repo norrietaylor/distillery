@@ -1572,9 +1572,8 @@ class TestCheckDedupGaps:
         with patch(
             "distillery.classification.dedup.DeduplicationChecker.check",
             side_effect=RuntimeError("dedup boom"),
-        ):
-            with pytest.raises(RuntimeError, match="dedup boom"):
-                await run_dedup_check(store, config.classification, "test content")
+        ), pytest.raises(RuntimeError, match="dedup boom"):
+            await run_dedup_check(store, config.classification, "test content")
 
 
 # ===========================================================================

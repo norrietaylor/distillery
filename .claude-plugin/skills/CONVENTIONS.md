@@ -105,9 +105,9 @@ Stop immediately if MCP is unavailable.
 
 ## Canonical Dedup Flow
 
-All write skills (`/distill`, `/bookmark`, `/minutes`, `/radar`) must check for duplicates before storing a new entry. The canonical deduplication flow follows a uniform 4-outcome pattern via the `distillery_check_dedup` MCP tool.
+All write skills (`/distill`, `/bookmark`, `/minutes`, `/radar`) must check for duplicates before storing a new entry. The canonical deduplication flow follows a uniform 4-outcome pattern via the `distillery_find_similar(dedup_action=true)` MCP tool.
 
-**When to Check:** Before calling `distillery_store`, invoke `distillery_check_dedup(content="<content to store>")`.
+**When to Check:** Before calling `distillery_store`, invoke `distillery_find_similar(dedup_action=true)(content="<content to store>")`.
 
 **The 4 Outcomes:**
 
@@ -169,7 +169,7 @@ All write skills (`/distill`, `/bookmark`, `/minutes`, `/radar`) must check for 
 
 ```python
 # Step 1: Check for duplicates
-response = await distillery_check_dedup(content="<content>")
+response = await distillery_find_similar(dedup_action=true)(content="<content>")
 action = response["action"]  # One of: create, skip, merge, link
 
 # Step 2: Handle by action

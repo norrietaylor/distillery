@@ -278,8 +278,11 @@ async def _handle_find_similar(
                     if entry_id in prompt_map:
                         result_item["conflict_prompt"] = prompt_map[entry_id]
 
+                payload["conflict_candidates"] = discovery_result.get(
+                    "conflict_candidates", []
+                )
                 payload["conflict_candidates_count"] = len(
-                    discovery_result.get("conflict_candidates", [])
+                    payload["conflict_candidates"]
                 )
                 payload["conflict_message"] = discovery_result.get("message", "")
             except Exception as exc:  # noqa: BLE001

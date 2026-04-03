@@ -6,7 +6,7 @@ Address 8 skill UX gaps (issue #98, high + medium priority) that affect consiste
 
 ## Goals
 
-1. All write skills use `distillery_check_dedup` with the same 4-outcome flow (create/skip/merge/link)
+1. All write skills use `distillery_find_similar(dedup_action=true)` with the same 4-outcome flow (create/skip/merge/link)
 2. All list/search/batch operations support `--project` filtering
 3. Store confirmations follow a single format template defined in CONVENTIONS.md
 4. `/radar` defaults to display-only (no auto-store), requiring `--store` for persistence
@@ -24,18 +24,18 @@ Address 8 skill UX gaps (issue #98, high + medium priority) that affect consiste
 
 ### Unit 1: Dedup Standardization Across Write Skills
 
-**Purpose:** Ensure all skills that create entries use `distillery_check_dedup` with the canonical 4-outcome flow, closing the data integrity gap where `/minutes` and `/radar` can create duplicates unchecked.
+**Purpose:** Ensure all skills that create entries use `distillery_find_similar(dedup_action=true)` with the canonical 4-outcome flow, closing the data integrity gap where `/minutes` and `/radar` can create duplicates unchecked.
 
 **Functional Requirements:**
-- `/minutes` SKILL.md shall call `distillery_check_dedup(content="<meeting notes summary>")` before storing a new meeting record (not on `--update` mode, which modifies an existing entry).
+- `/minutes` SKILL.md shall call `distillery_find_similar(dedup_action=true)(content="<meeting notes summary>")` before storing a new meeting record (not on `--update` mode, which modifies an existing entry).
 - `/minutes` dedup shall match on content similarity, with an additional check: if `metadata.meeting_id` matches an existing entry, treat as `"skip"` and suggest `--update` instead.
-- `/radar` SKILL.md shall call `distillery_check_dedup(content="<digest summary>")` before storing a digest (when `--store` is specified — see Unit 3).
+- `/radar` SKILL.md shall call `distillery_find_similar(dedup_action=true)(content="<digest summary>")` before storing a digest (when `--store` is specified — see Unit 3).
 - Both skills shall handle all 4 outcomes (create/skip/merge/link) identically to `/distill` and `/bookmark`.
-- CONVENTIONS.md shall include a `## Canonical Dedup Flow` section documenting the standard dedup pattern that all write skills must follow, referencing `distillery_check_dedup` and the 4 outcomes with user-facing prompts.
+- CONVENTIONS.md shall include a `## Canonical Dedup Flow` section documenting the standard dedup pattern that all write skills must follow, referencing `distillery_find_similar(dedup_action=true)` and the 4 outcomes with user-facing prompts.
 
 **Proof Artifacts:**
-- File: `.claude-plugin/skills/minutes/SKILL.md` contains `distillery_check_dedup` call
-- File: `.claude-plugin/skills/radar/SKILL.md` contains `distillery_check_dedup` call
+- File: `.claude-plugin/skills/minutes/SKILL.md` contains `distillery_find_similar(dedup_action=true)` call
+- File: `.claude-plugin/skills/radar/SKILL.md` contains `distillery_find_similar(dedup_action=true)` call
 - File: `.claude-plugin/skills/CONVENTIONS.md` contains `## Canonical Dedup Flow` section
 
 ### Unit 2: `--project` Filtering and Output Format Standardization
@@ -47,7 +47,7 @@ Address 8 skill UX gaps (issue #98, high + medium priority) that affect consiste
   - `/classify --inbox` and `/classify --review` — filter pending/review entries by project
   - `/minutes --list` — filter meeting records by project
   - `/radar` — scope digest generation to entries from a specific project
-- Each skill's SKILL.md shall document the `--project` flag in its flags table and pass `project=<name>` to the relevant MCP tool calls (`distillery_list`, `distillery_search`, `distillery_review_queue`).
+- Each skill's SKILL.md shall document the `--project` flag in its flags table and pass `project=<name>` to the relevant MCP tool calls (`distillery_list`, `distillery_search`, `distillery_list(output_mode="review")`).
 - CONVENTIONS.md shall include a `## Confirmation Format` section defining the standard output template for all store operations:
   ```
   [<entry_type>] Stored: <entry-id>
@@ -139,7 +139,7 @@ No specific design requirements identified. All changes are to SKILL.md files, C
 
 - **`distillery_configure`**: Must write to `distillery.yaml` atomically (write to temp file, rename). Must reload the in-memory config object after writing. Must handle concurrent access safely (lock or serialize writes).
 - **Dedup in `/minutes`**: The `meeting_id` match should take precedence over content similarity — if the same `meeting_id` exists, always suggest `--update` rather than creating a new entry.
-- **`--project` on `distillery_review_queue`**: The MCP tool must already support a `project` parameter, or the filter must be applied client-side in the skill. Check the tool schema before implementing.
+- **`--project` on `distillery_list(output_mode="review")`**: The MCP tool must already support a `project` parameter, or the filter must be applied client-side in the skill. Check the tool schema before implementing.
 - **Token counting**: Use `wc -l` as a proxy for token budget. The 150-line target for SKILL.md bodies corresponds to roughly 2,000 tokens.
 
 ## Security Considerations
@@ -160,5 +160,5 @@ No specific design requirements identified. All changes are to SKILL.md files, C
 
 ## Open Questions
 
-1. **`distillery_review_queue` project filter**: Does the MCP tool's current schema accept a `project` parameter? If not, the tool needs a schema update alongside the skill change.
+1. **`distillery_list(output_mode="review")` project filter**: Does the MCP tool's current schema accept a `project` parameter? If not, the tool needs a schema update alongside the skill change.
 2. **Config hot-reload**: When `distillery_configure` writes to YAML, does the in-memory config need a full reload, or can individual values be patched? A full reload is safer but may have side effects if other config sections are being used concurrently.
