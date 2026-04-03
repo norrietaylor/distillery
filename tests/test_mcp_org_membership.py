@@ -30,9 +30,11 @@ class TestTryDecodeJwtClaims:
         import json
 
         header = base64.urlsafe_b64encode(b'{"alg":"HS256"}').rstrip(b"=").decode()
-        payload = base64.urlsafe_b64encode(
-            json.dumps({"login": "alice", "sub": "12345"}).encode()
-        ).rstrip(b"=").decode()
+        payload = (
+            base64.urlsafe_b64encode(json.dumps({"login": "alice", "sub": "12345"}).encode())
+            .rstrip(b"=")
+            .decode()
+        )
         token = f"{header}.{payload}.fakesig"
 
         result = _try_decode_jwt_claims(token)
@@ -179,6 +181,7 @@ class TestOrgMembershipApiPrivateOrg:
         user_orgs_resp = _mock_response(200, [{"login": "private-corp"}])
 
         with patch("httpx.AsyncClient") as mock_client_cls:
+
             async def fake_get(url: str, **kwargs: object) -> MagicMock:
                 if "members" in url:
                     return members_resp
@@ -198,6 +201,7 @@ class TestOrgMembershipApiPrivateOrg:
         user_orgs_resp = _mock_response(200, [{"login": "other-org"}])
 
         with patch("httpx.AsyncClient") as mock_client_cls:
+
             async def fake_get(url: str, **kwargs: object) -> MagicMock:
                 if "members" in url:
                     return members_resp
@@ -236,6 +240,7 @@ class TestOrgMembershipApiErrorHandling:
         captured_headers: dict[str, str] = {}
 
         with patch("httpx.AsyncClient") as mock_client_cls:
+
             async def fake_get(url: str, headers: dict[str, str], **kw: object) -> MagicMock:
                 captured_headers.update(headers)
                 return _mock_response(204)
@@ -261,6 +266,7 @@ class TestMultiOrgShortCircuit:
         call_count = 0
 
         with patch("httpx.AsyncClient") as mock_client_cls:
+
             async def fake_get(url: str, **kwargs: object) -> MagicMock:
                 nonlocal call_count
                 call_count += 1
@@ -295,6 +301,7 @@ class TestOrgMembershipCaching:
         api_call_count = 0
 
         with patch("httpx.AsyncClient") as mock_client_cls:
+
             async def fake_get(url: str, **kwargs: object) -> MagicMock:
                 nonlocal api_call_count
                 api_call_count += 1
@@ -350,6 +357,7 @@ class TestOrgMembershipCaching:
         api_call_count = 0
 
         with patch("httpx.AsyncClient") as mock_client_cls:
+
             async def fake_get(url: str, **kwargs: object) -> MagicMock:
                 nonlocal api_call_count
                 api_call_count += 1

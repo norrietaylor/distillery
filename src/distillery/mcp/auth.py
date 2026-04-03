@@ -59,9 +59,7 @@ class OrgRestrictedGitHubProvider(GitHubProvider):
         )
         self._org_checker = org_checker
 
-    async def _extract_upstream_claims(
-        self, idp_tokens: dict[str, Any]
-    ) -> dict[str, Any] | None:
+    async def _extract_upstream_claims(self, idp_tokens: dict[str, Any]) -> dict[str, Any] | None:
         """Extract GitHub user identity and store the token for org checks."""
         access_token = idp_tokens.get("access_token")
         if not access_token or not isinstance(access_token, str):
@@ -98,6 +96,7 @@ class OrgRestrictedGitHubProvider(GitHubProvider):
             logger.warning("Error extracting upstream claims", exc_info=True)
             return None
 
+
 _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 
@@ -118,9 +117,7 @@ def _patch_cimd_localhost_redirect() -> None:
     except ImportError:
         return  # FastMCP version without CIMD support
 
-    def _validate_redirect_uri(
-        self: CIMDFetcher, doc: CIMDDocument, redirect_uri: str
-    ) -> bool:
+    def _validate_redirect_uri(self: CIMDFetcher, doc: CIMDDocument, redirect_uri: str) -> bool:
         if not doc.redirect_uris:
             return False
 

@@ -161,7 +161,6 @@ class TestYAMLLoading:
         assert cfg.classification.dedup_link_threshold == pytest.approx(0.55)
         assert cfg.classification.dedup_limit == 10
 
-
     def test_loads_defaults(self, tmp_path: Path) -> None:
         p = write_yaml(tmp_path, self.FULL_YAML)
         cfg = load_config(str(p))
@@ -843,9 +842,7 @@ class TestServerAuthConfigParsing:
         assert cfg.server.auth.client_id_env == "MY_GH_CLIENT_ID"
         assert cfg.server.auth.client_secret_env == "MY_GH_CLIENT_SECRET"
 
-    def test_server_auth_defaults(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_server_auth_defaults(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """When no server section is present, defaults are applied."""
         monkeypatch.chdir(tmp_path)
         monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
@@ -898,9 +895,7 @@ class TestServerAuthInvalidProvider:
 class TestServerMalformedValues:
     """Malformed server/auth values must raise, not silently coerce to defaults."""
 
-    def test_server_as_list_raises(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_server_as_list_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.chdir(tmp_path)
         monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
         yaml_content = """\
@@ -975,9 +970,7 @@ class TestWebhookConfigParsing:
         assert cfg.server.webhooks.enabled is True
         assert cfg.server.webhooks.secret_env == "DISTILLERY_WEBHOOK_SECRET"
 
-    def test_webhooks_enabled_true(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_webhooks_enabled_true(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Webhooks can be explicitly enabled."""
         monkeypatch.chdir(tmp_path)
         monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
@@ -990,9 +983,7 @@ class TestWebhookConfigParsing:
         cfg = load_config(str(p))
         assert cfg.server.webhooks.enabled is True
 
-    def test_webhooks_enabled_false(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_webhooks_enabled_false(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Webhooks can be disabled."""
         monkeypatch.chdir(tmp_path)
         monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
@@ -1020,9 +1011,7 @@ class TestWebhookConfigParsing:
         cfg = load_config(str(p))
         assert cfg.server.webhooks.secret_env == "MY_CUSTOM_WEBHOOK_SECRET"
 
-    def test_webhooks_all_fields(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_webhooks_all_fields(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """All webhook fields can be configured together."""
         monkeypatch.chdir(tmp_path)
         monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)

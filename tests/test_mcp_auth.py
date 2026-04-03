@@ -49,9 +49,7 @@ def _make_config(
 
 
 class TestBuildGithubAuthReadsEnv:
-    def test_build_github_auth_reads_env(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_build_github_auth_reads_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """build_github_auth() reads correct env vars from config."""
         monkeypatch.setenv("GITHUB_CLIENT_ID", "test-client-id")
         monkeypatch.setenv("GITHUB_CLIENT_SECRET", "test-client-secret")
@@ -65,9 +63,7 @@ class TestBuildGithubAuthReadsEnv:
 
         assert isinstance(provider, GitHubProvider)
 
-    def test_build_github_auth_custom_env_names(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_build_github_auth_custom_env_names(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """build_github_auth() respects custom env var names from config."""
         monkeypatch.setenv("MY_CLIENT_ID", "custom-id")
         monkeypatch.setenv("MY_CLIENT_SECRET", "custom-secret")
@@ -85,9 +81,7 @@ class TestBuildGithubAuthReadsEnv:
 
 
 class TestBuildGithubAuthMissingClientId:
-    def test_build_github_auth_missing_client_id(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_build_github_auth_missing_client_id(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Raises ValueError with clear message when client ID env is missing."""
         monkeypatch.delenv("GITHUB_CLIENT_ID", raising=False)
         monkeypatch.setenv("GITHUB_CLIENT_SECRET", "test-secret")
@@ -99,9 +93,7 @@ class TestBuildGithubAuthMissingClientId:
 
 
 class TestBuildGithubAuthMissingClientSecret:
-    def test_build_github_auth_missing_client_secret(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_build_github_auth_missing_client_secret(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Raises ValueError with clear message when client secret env is missing."""
         monkeypatch.setenv("GITHUB_CLIENT_ID", "test-id")
         monkeypatch.delenv("GITHUB_CLIENT_SECRET", raising=False)
@@ -142,13 +134,9 @@ class TestNoSecretsInLogs:
             build_github_auth(config)
 
         log_output = caplog.text
-        assert client_secret not in log_output, (
-            f"Client secret found in logs: {log_output}"
-        )
+        assert client_secret not in log_output, f"Client secret found in logs: {log_output}"
         # The client ID value itself should also not be logged (only the env var name).
-        assert client_id not in log_output, (
-            f"Client ID value found in logs: {log_output}"
-        )
+        assert client_id not in log_output, f"Client ID value found in logs: {log_output}"
 
 
 class TestBuildGithubAuthWithOrgChecker:
@@ -168,9 +156,7 @@ class TestBuildGithubAuthWithOrgChecker:
 
         assert isinstance(provider, OrgRestrictedGitHubProvider)
 
-    def test_returns_plain_provider_when_no_checker(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_returns_plain_provider_when_no_checker(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """build_github_auth() returns plain GitHubProvider when org_checker is None."""
         monkeypatch.setenv("GITHUB_CLIENT_ID", "test-id")
         monkeypatch.setenv("GITHUB_CLIENT_SECRET", "test-secret")
@@ -185,17 +171,13 @@ class TestBuildGithubAuthWithOrgChecker:
 
 
 class TestBuildOrgCheckerIntegration:
-    def test_returns_none_when_no_orgs_configured(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_returns_none_when_no_orgs_configured(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """build_org_checker() returns None when allowed_orgs is empty."""
         monkeypatch.delenv("DISTILLERY_ALLOWED_ORGS", raising=False)
         config = _make_config()
         assert build_org_checker(config) is None
 
-    def test_returns_checker_when_orgs_configured(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_returns_checker_when_orgs_configured(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """build_org_checker() returns OrgMembershipChecker when orgs are set."""
         monkeypatch.delenv("DISTILLERY_ALLOWED_ORGS", raising=False)
         from distillery.mcp.org_membership import OrgMembershipChecker
@@ -205,9 +187,7 @@ class TestBuildOrgCheckerIntegration:
         assert isinstance(checker, OrgMembershipChecker)
         assert checker.enabled
 
-    def test_env_var_alone_produces_checker(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_env_var_alone_produces_checker(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """DISTILLERY_ALLOWED_ORGS env var alone is sufficient to produce a checker."""
         monkeypatch.setenv("DISTILLERY_ALLOWED_ORGS", "env-company")
         from distillery.mcp.org_membership import OrgMembershipChecker

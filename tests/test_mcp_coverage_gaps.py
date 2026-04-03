@@ -1254,9 +1254,7 @@ class TestSuggestSourcesGaps:
     async def test_suggest_invalid_top_n(
         self, store: DuckDBStore, config: DistilleryConfig
     ) -> None:
-        response = await _handle_interests(
-            store, config, {"suggest_sources": True, "top_n": "bad"}
-        )
+        response = await _handle_interests(store, config, {"suggest_sources": True, "top_n": "bad"})
         data = parse_mcp_response(response)
         assert data["error"] is True
 
@@ -1569,10 +1567,13 @@ class TestCheckDedupGaps:
     ) -> None:
         from distillery.mcp.tools.quality import run_dedup_check
 
-        with patch(
-            "distillery.classification.dedup.DeduplicationChecker.check",
-            side_effect=RuntimeError("dedup boom"),
-        ), pytest.raises(RuntimeError, match="dedup boom"):
+        with (
+            patch(
+                "distillery.classification.dedup.DeduplicationChecker.check",
+                side_effect=RuntimeError("dedup boom"),
+            ),
+            pytest.raises(RuntimeError, match="dedup boom"),
+        ):
             await run_dedup_check(store, config.classification, "test content")
 
 

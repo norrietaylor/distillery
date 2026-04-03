@@ -207,9 +207,7 @@ class TestSetupHttpfs:
         }
         with patch.dict("os.environ", env, clear=True):
             store._setup_httpfs(conn)
-        conn.execute.assert_any_call(
-            "SET s3_access_key_id = 'AKIAIOSFODNN7EXAMPLE';"
-        )
+        conn.execute.assert_any_call("SET s3_access_key_id = 'AKIAIOSFODNN7EXAMPLE';")
         conn.execute.assert_any_call(
             "SET s3_secret_access_key = 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY';"
         )
@@ -439,9 +437,7 @@ class TestStorageConfigParsing:
 
 
 class TestBackendValidation:
-    def test_duckdb_backend_accepted(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_duckdb_backend_accepted(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.chdir(tmp_path)
         write_yaml(tmp_path, "storage:\n  backend: duckdb\n")
         cfg = load_config()

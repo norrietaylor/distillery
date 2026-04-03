@@ -39,9 +39,7 @@ _REDDIT_SUBREDDIT_RE = re.compile(
 )
 
 # User-Agent that Reddit will accept (requires a descriptive bot string).
-_REDDIT_USER_AGENT = (
-    "Distillery/0.1 (RSS feed reader; https://github.com/norrietaylor/distillery)"
-)
+_REDDIT_USER_AGENT = "Distillery/0.1 (RSS feed reader; https://github.com/norrietaylor/distillery)"
 
 
 def _normalise_feed_url(url: str) -> tuple[str, dict[str, str]]:

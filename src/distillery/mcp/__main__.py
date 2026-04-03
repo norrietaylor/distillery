@@ -100,6 +100,7 @@ def main(argv: list[str] | None = None) -> int:
     Returns:
         Exit code: ``0`` on successful exit or interruption, ``1`` on error.
     """
+
     # Convert SIGTERM into KeyboardInterrupt so atexit handlers run.
     # Fly.io sends SIGTERM on scale-to-zero; without this, the DuckDB
     # atexit CHECKPOINT never fires and the WAL is left dirty on disk.
@@ -121,9 +122,7 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.transport == "http":
             host = (
-                args.host
-                if args.host is not None
-                else os.environ.get("DISTILLERY_HOST", "0.0.0.0")
+                args.host if args.host is not None else os.environ.get("DISTILLERY_HOST", "0.0.0.0")
             )
             port_env = os.environ.get("DISTILLERY_PORT")
             port = args.port if args.port is not None else (int(port_env) if port_env else 8000)
@@ -143,8 +142,7 @@ def main(argv: list[str] | None = None) -> int:
                 auth = build_github_auth(config, org_checker=org_checker)
             elif provider_name == "none":
                 logger.warning(
-                    "HTTP server running without authentication "
-                    "(server.auth.provider is 'none')",
+                    "HTTP server running without authentication (server.auth.provider is 'none')",
                 )
             else:
                 raise ValueError(
@@ -175,19 +173,16 @@ def main(argv: list[str] | None = None) -> int:
             from starlette.types import ASGIApp, Receive, Scope, Send
 
             final_app: ASGIApp = wrapped_app
-            if config.server.webhooks.enabled and os.environ.get(
-                config.server.webhooks.secret_env
-            ):
+            if config.server.webhooks.enabled and os.environ.get(config.server.webhooks.secret_env):
                 from distillery.mcp.middleware import BodySizeLimitMiddleware
                 from distillery.mcp.webhooks import create_webhook_app
 
                 webhook_app: ASGIApp = create_webhook_app(
-                    server._distillery_shared, config  # type: ignore[attr-defined]
+                    server._distillery_shared,  # type: ignore[attr-defined]
+                    config,
                 )
                 # Apply the same body-size guard as the MCP endpoint.
-                webhook_app = BodySizeLimitMiddleware(
-                    webhook_app, max_bytes=rl.max_body_bytes
-                )
+                webhook_app = BodySizeLimitMiddleware(webhook_app, max_bytes=rl.max_body_bytes)
 
                 # Route /api/* to webhooks, everything else to MCP.
                 # Uses a thin ASGI dispatcher instead of Starlette Mount so
@@ -195,12 +190,8 @@ def main(argv: list[str] | None = None) -> int:
                 # (which contains the FastMCP lifespan via middleware chain).
                 _mcp_app = wrapped_app
 
-                async def _combined_app(
-                    scope: Scope, receive: Receive, send: Send
-                ) -> None:
-                    if scope["type"] == "http" and scope.get("path", "").startswith(
-                        "/api/"
-                    ):
+                async def _combined_app(scope: Scope, receive: Receive, send: Send) -> None:
+                    if scope["type"] == "http" and scope.get("path", "").startswith("/api/"):
                         # Strip /api prefix for the webhook app's routes.
                         scope = dict(scope)
                         scope["path"] = scope["path"][4:]  # /api/poll -> /poll

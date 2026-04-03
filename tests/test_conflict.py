@@ -486,7 +486,9 @@ class TestMCPCheckConflictsFirstPass:
         await store.store(existing_entry)
 
         config = _make_config(conflict_threshold=0.60)
-        data = await run_conflict_discovery(store, config.classification.conflict_threshold, query_text)
+        data = await run_conflict_discovery(
+            store, config.classification.conflict_threshold, query_text
+        )
 
         assert "conflict_candidates" in data
         assert len(data["conflict_candidates"]) >= 1
@@ -512,7 +514,9 @@ class TestMCPCheckConflictsFirstPass:
         await store.store(existing_entry)
 
         config = _make_config(conflict_threshold=0.60)
-        data = await run_conflict_discovery(store, config.classification.conflict_threshold, query_text)
+        data = await run_conflict_discovery(
+            store, config.classification.conflict_threshold, query_text
+        )
 
         assert data.get("conflict_candidates", []) == []
         assert data.get("has_conflicts") is False

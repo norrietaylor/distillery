@@ -119,10 +119,7 @@ def _run_cmd_eval(
     # Write a minimal scenario YAML so the directory is not empty.
     scenario_yaml = scenarios_dir / "mock.yaml"
     scenario_yaml.write_text(
-        "scenarios:\n"
-        "  - name: mock-scenario\n"
-        "    skill: recall\n"
-        "    prompt: 'test'\n",
+        "scenarios:\n  - name: mock-scenario\n    skill: recall\n    prompt: 'test'\n",
         encoding="utf-8",
     )
 
@@ -131,8 +128,7 @@ def _run_cmd_eval(
     from distillery.eval.models import EvalScenario
 
     mock_scenarios = [
-        EvalScenario(name=r.scenario_name, skill=r.skill, prompt="test")
-        for r in results
+        EvalScenario(name=r.scenario_name, skill=r.skill, prompt="test") for r in results
     ]
 
     import io
@@ -176,9 +172,7 @@ def _run_cmd_eval(
 class TestBaselineSaveFormat:
     """Verify that --save-baseline writes the correct JSON structure."""
 
-    def test_baseline_has_scenarios_and_cost_summary_keys(
-        self, tmp_path: Path
-    ) -> None:
+    def test_baseline_has_scenarios_and_cost_summary_keys(self, tmp_path: Path) -> None:
         baseline_path = tmp_path / "baseline.json"
         results = [
             _make_result("s1", "recall", total_cost_usd=0.001),
@@ -239,9 +233,7 @@ class TestBaselineSaveFormat:
         assert data["scenarios"][0]["name"] == "my-scenario"
         assert data["scenarios"][0]["skill"] == "distill"
 
-    def test_cost_summary_total_cost_is_sum_of_scenarios(
-        self, tmp_path: Path
-    ) -> None:
+    def test_cost_summary_total_cost_is_sum_of_scenarios(self, tmp_path: Path) -> None:
         baseline_path = tmp_path / "baseline.json"
         results = [
             _make_result("s1", "recall", total_cost_usd=0.001),
@@ -264,9 +256,7 @@ class TestBaselineSaveFormat:
 class TestPerSkillAggregation:
     """Verify that cost_summary.per_skill groups and sums correctly."""
 
-    def test_per_skill_keys_match_skills_in_results(
-        self, tmp_path: Path
-    ) -> None:
+    def test_per_skill_keys_match_skills_in_results(self, tmp_path: Path) -> None:
         baseline_path = tmp_path / "baseline.json"
         results = [
             _make_result("s1", "recall", total_cost_usd=0.001),
@@ -310,12 +300,8 @@ class TestPerSkillAggregation:
     def test_per_skill_token_sum(self, tmp_path: Path) -> None:
         baseline_path = tmp_path / "baseline.json"
         results = [
-            _make_result(
-                "s1", "recall", input_tokens=10, output_tokens=5, total_cost_usd=0.001
-            ),
-            _make_result(
-                "s2", "recall", input_tokens=20, output_tokens=10, total_cost_usd=0.001
-            ),
+            _make_result("s1", "recall", input_tokens=10, output_tokens=5, total_cost_usd=0.001),
+            _make_result("s2", "recall", input_tokens=20, output_tokens=10, total_cost_usd=0.001),
         ]
 
         _run_cmd_eval(tmp_path, results, save_baseline=str(baseline_path))
@@ -347,9 +333,7 @@ class TestCostComparison:
         )
         return baseline_path
 
-    def test_compare_cost_delta_is_current_minus_baseline(
-        self, tmp_path: Path
-    ) -> None:
+    def test_compare_cost_delta_is_current_minus_baseline(self, tmp_path: Path) -> None:
         baseline = self._write_baseline(
             tmp_path,
             scenarios=[
@@ -472,9 +456,7 @@ class TestCostComparison:
 class TestCostWarning:
     """Verify that warnings are emitted when per-skill cost increases by >20%."""
 
-    def _baseline_with_skill_cost(
-        self, tmp_path: Path, skill: str, cost_usd: float
-    ) -> Path:
+    def _baseline_with_skill_cost(self, tmp_path: Path, skill: str, cost_usd: float) -> Path:
         baseline_path = tmp_path / "baseline.json"
         baseline_path.write_text(
             json.dumps(
@@ -509,9 +491,7 @@ class TestCostWarning:
         )
         return baseline_path
 
-    def test_warning_emitted_when_cost_increases_more_than_20_pct(
-        self, tmp_path: Path
-    ) -> None:
+    def test_warning_emitted_when_cost_increases_more_than_20_pct(self, tmp_path: Path) -> None:
         baseline = self._baseline_with_skill_cost(tmp_path, "recall", 0.010)
         # 0.013 / 0.010 = +30% → warning expected
         results = [_make_result("s1", "recall", total_cost_usd=0.013)]
@@ -530,9 +510,7 @@ class TestCostWarning:
         assert "recall" in warnings[0]
         assert "30.0%" in warnings[0]
 
-    def test_no_warning_when_cost_increase_is_below_20_pct(
-        self, tmp_path: Path
-    ) -> None:
+    def test_no_warning_when_cost_increase_is_below_20_pct(self, tmp_path: Path) -> None:
         baseline = self._baseline_with_skill_cost(tmp_path, "recall", 0.010)
         # 0.011 / 0.010 = +10% → no warning
         results = [_make_result("s1", "recall", total_cost_usd=0.011)]
@@ -566,9 +544,7 @@ class TestCostWarning:
         warnings = data["cost_comparison"]["warnings"]
         assert warnings == []
 
-    def test_warning_boundary_exactly_20_pct_no_warning(
-        self, tmp_path: Path
-    ) -> None:
+    def test_warning_boundary_exactly_20_pct_no_warning(self, tmp_path: Path) -> None:
         baseline = self._baseline_with_skill_cost(tmp_path, "recall", 0.010)
         # 0.012 / 0.010 = +20.0% (not > 20) → no warning
         results = [_make_result("s1", "recall", total_cost_usd=0.012)]
@@ -625,9 +601,7 @@ class TestBackwardCompatibility:
         # Must not raise, exit code depends only on pass/fail
         assert exit_code == 0
 
-    def test_old_format_reports_no_cost_baseline_available(
-        self, tmp_path: Path
-    ) -> None:
+    def test_old_format_reports_no_cost_baseline_available(self, tmp_path: Path) -> None:
         baseline_path = tmp_path / "baseline.json"
         baseline_path.write_text(
             json.dumps(
@@ -668,9 +642,7 @@ class TestBackwardCompatibility:
 class TestMissingCostSummary:
     """New-format baseline dict that lacks cost_summary → graceful message."""
 
-    def test_missing_cost_summary_reports_no_cost_baseline(
-        self, tmp_path: Path
-    ) -> None:
+    def test_missing_cost_summary_reports_no_cost_baseline(self, tmp_path: Path) -> None:
         baseline_path = tmp_path / "baseline.json"
         baseline_path.write_text(
             json.dumps(

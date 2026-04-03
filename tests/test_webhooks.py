@@ -32,7 +32,9 @@ _SECRET = "test-webhook-secret-xyz"
 _AUTH_HEADER = {"Authorization": f"Bearer {_SECRET}"}
 
 
-def _make_config(*, enabled: bool = True, secret_env: str = "DISTILLERY_WEBHOOK_SECRET") -> DistilleryConfig:
+def _make_config(
+    *, enabled: bool = True, secret_env: str = "DISTILLERY_WEBHOOK_SECRET"
+) -> DistilleryConfig:
     """Return a DistilleryConfig with WebhookConfig overrides."""
     return DistilleryConfig(
         server=ServerConfig(
@@ -309,7 +311,9 @@ async def test_poll_handler(store: DuckDBStore, monkeypatch: pytest.MonkeyPatch)
     shared = _make_shared_state(store)
 
     # Build a deterministic summary with one source, no errors.
-    result = PollResult(source_url="https://example.com/feed", source_type="rss", items_fetched=10, items_stored=7)
+    result = PollResult(
+        source_url="https://example.com/feed", source_type="rss", items_fetched=10, items_stored=7
+    )
     summary = PollerSummary(results=[result], total_fetched=10, total_stored=7, sources_polled=1)
 
     mock_poller = MagicMock()
@@ -392,10 +396,12 @@ async def test_maintenance_handler(store: DuckDBStore, monkeypatch: pytest.Monke
     )
     stale_mock = AsyncMock(return_value=_text({"stale_count": 3, "entries": []}))
     interests_mock = AsyncMock(
-        return_value=_text({
-            "top_tags": [["python", 10], ["ai", 7]],
-            "suggestions": [{"url": "https://news.example.com"}],
-        })
+        return_value=_text(
+            {
+                "top_tags": [["python", 10], ["ai", 7]],
+                "suggestions": [{"url": "https://news.example.com"}],
+            }
+        )
     )
 
     # The server handlers are imported lazily in _handle_maintenance; patch at source.
@@ -431,7 +437,9 @@ async def test_maintenance_handler(store: DuckDBStore, monkeypatch: pytest.Monke
 
 
 @pytest.mark.unit
-async def test_maintenance_stores_digest(store: DuckDBStore, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_maintenance_stores_digest(
+    store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """POST /maintenance stores a digest Entry with the expected type, author, tags,
     and period_start/period_end metadata keys."""
     import json as _json
@@ -454,7 +462,10 @@ async def test_maintenance_stores_digest(store: DuckDBStore, monkeypatch: pytest
             "distillery.mcp.server._handle_metrics",
             AsyncMock(side_effect=[_text({"entries": {"total": 0}}), _text({})]),
         ),
-        patch("distillery.mcp.server._handle_stale", AsyncMock(return_value=_text({"stale_count": 0, "entries": []}))),
+        patch(
+            "distillery.mcp.server._handle_stale",
+            AsyncMock(return_value=_text({"stale_count": 0, "entries": []})),
+        ),
         patch(
             "distillery.mcp.server._handle_interests",
             AsyncMock(return_value=_text({"top_tags": [], "suggestions": []})),
@@ -480,7 +491,9 @@ async def test_maintenance_stores_digest(store: DuckDBStore, monkeypatch: pytest
 
 
 @pytest.mark.unit
-async def test_handler_error_returns_500(store: DuckDBStore, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_handler_error_returns_500(
+    store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """When FeedPoller.poll() raises an exception the endpoint returns
     {ok: false, error: '<message>'} with HTTP status 500."""
     from unittest.mock import AsyncMock, MagicMock, patch
