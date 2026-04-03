@@ -11,6 +11,11 @@ Each skill is located in its own subdirectory:
 - **`pour/`** — `/pour` — Multi-entry synthesis and deep dives
 - **`bookmark/`** — `/bookmark` — Store and summarize URLs
 - **`minutes/`** — `/minutes` — Create and update meeting notes
+- **`classify/`** — `/classify` — Classify entries and manage the review queue
+- **`watch/`** — `/watch` — Add, remove, or list monitored feed sources
+- **`radar/`** — `/radar` — Generate ambient intelligence digests
+- **`tune/`** — `/tune` — Adjust feed relevance thresholds at runtime
+- **`setup/`** — `/setup` — Onboarding wizard for MCP connectivity
 
 ## Getting Started
 
@@ -71,17 +76,16 @@ To create a new skill:
 
 ## MCP Tools Available
 
-The Distillery MCP server provides these tools:
+The Distillery MCP server provides 18 tools:
 
-- `distillery_metrics` — Server health, usage stats, and search quality (use `scope="summary"` for health check)
-- `distillery_store` — Store a new knowledge entry
-- `distillery_search` — Semantic search for entries
-- `distillery_find_similar` — Find duplicate entries
-- `distillery_get` — Retrieve an entry by ID
-- `distillery_update` — Partially update an entry
-- `distillery_list` — List entries with filtering
+**CRUD:** `distillery_store`, `distillery_get`, `distillery_update`, `distillery_list`
+**Discovery:** `distillery_search`, `distillery_find_similar`, `distillery_aggregate`, `distillery_stale`, `distillery_tag_tree`
+**Classification:** `distillery_classify`, `distillery_resolve_review`
+**Observability:** `distillery_metrics` (scopes: `"summary"`, `"full"`, `"search_quality"`)
+**Feeds:** `distillery_watch`, `distillery_poll`, `distillery_rescore`, `distillery_interests`
+**Configuration:** `distillery_configure`, `distillery_type_schemas`
 
-See `/docs/mcp-setup.md` for full tool documentation.
+See `/docs/getting-started/mcp-setup.md` for full tool documentation.
 
 ## Debugging
 

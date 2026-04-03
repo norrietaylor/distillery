@@ -1,8 +1,0 @@
-Type: file
-Command: grep -rn "distillery_status|_handle_quality|_handle_suggest_sources|distillery_quality|distillery_suggest_sources" .claude-plugin/skills/ src/distillery/mcp/webhooks.py
-Expected: no matches (all old references removed)
-Timestamp: 2026-04-02T00:00:00Z
-
-RESULT: No matches found in .claude-plugin/skills/ SKILL.md files or src/distillery/mcp/webhooks.py
-
-Status: PASS

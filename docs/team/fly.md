@@ -143,7 +143,7 @@ The flow (handled by FastMCP's `GitHubProvider`):
 |-------|---------|---------|
 | `embedding_budget_daily` | 500 | Max Jina API calls/day (0 = unlimited) |
 | `max_db_size_mb` | 900 | Reject writes above this DB size |
-| `warn_db_size_pct` | 80 | Warn in `distillery_status` at this % |
+| `warn_db_size_pct` | 80 | Warn in `distillery_metrics` at this % |
 
 Budget counters are stored in DuckDB's `_meta` table and survive scale-to-zero restarts.
 
