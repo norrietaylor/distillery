@@ -4,8 +4,7 @@
 # testing and development. It uses a local DuckDB file for storage (no cloud dependencies)
 # and no authentication (open access for convenience).
 #
-# For production deployment, see deploy/prefect/distillery.yaml (Horizon/MotherDuck)
-# or deploy/fly/distillery-fly.yaml (Fly.io/local DuckDB).
+# For production deployment configs, see https://github.com/norrietaylor/distill_ops
 #
 storage:
   backend: duckdb

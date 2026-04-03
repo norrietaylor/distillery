@@ -23,7 +23,7 @@ After installation, restart Claude Code and run the onboarding wizard:
 This verifies MCP connectivity, detects your transport, and configures auto-poll for ambient intelligence.
 
 !!! warning "Demo Server"
-    The plugin defaults to the hosted instance at `distillery-mcp.fly.dev`, which is a **demo server** for evaluation only. Do not store sensitive or confidential data. For production use, [deploy your own instance](../team/fly.md) or use [local setup](local-setup.md).
+    The plugin defaults to the hosted instance at `distillery-mcp.fly.dev`, which is a **demo server** for evaluation only. Do not store sensitive or confidential data. For production use, [deploy your own instance](../team/deployment.md) or use [local setup](local-setup.md).
 
 !!! note "Claude Desktop"
     The Claude desktop app does not support Claude Code skills or the plugin install system. Desktop users can connect the MCP server directly (all 18 tools are available) but slash commands like `/distill` and `/recall` are CLI-only features.
@@ -102,7 +102,7 @@ See [Local Setup](local-setup.md) for full local configuration and [MCP Server R
 
 ### Alternative — Self-hosted HTTP
 
-Deploy your own Distillery server with GitHub OAuth. See [Operator Deployment](../team/deployment.md) for setup and [Fly.io](../team/fly.md) or [Prefect Horizon](../team/prefect.md) for platform-specific guides.
+Deploy your own Distillery server with GitHub OAuth. See [Operator Deployment](../team/deployment.md) for setup and the [distill_ops](https://github.com/norrietaylor/distill_ops) repo for platform-specific guides (Fly.io, Prefect Horizon).
 
 ## Remote Auto-Poll Setup
 

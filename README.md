@@ -75,7 +75,7 @@ Then run the onboarding wizard in Claude Code:
 
 This verifies MCP connectivity, detects your transport, and configures auto-poll for ambient intelligence.
 
-> **Demo Server:** The plugin defaults to `distillery-mcp.fly.dev`, which is a demo server for evaluation only. Do not store sensitive or confidential data. For production use, [deploy your own instance](https://norrietaylor.github.io/distillery/team/fly/) or run locally.
+> **Demo Server:** The plugin defaults to `distillery-mcp.fly.dev`, which is a demo server for evaluation only. Do not store sensitive or confidential data. For production use, [deploy your own instance](https://norrietaylor.github.io/distillery/team/deployment/) or run locally.
 
 ### Local Setup
 
