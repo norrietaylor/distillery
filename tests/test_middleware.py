@@ -11,6 +11,7 @@ Covers:
     missing/no-bearer auth passthrough, OAuth path bypass, GitHub API error
     handling, caching behaviour, disabled checker passthrough, non-HTTP scope
     passthrough, opaque token fail-closed
+  - RequestIDMiddleware: echoes/generates X-Request-ID on responses
   - apply_http_middleware: composition of all middleware layers
   - _client_ip: extraction from scope client, X-Forwarded-For, trust_proxy
 """
@@ -29,6 +30,7 @@ from distillery.mcp.middleware import (
     BodySizeLimitMiddleware,
     OrgMembershipMiddleware,
     RateLimitMiddleware,
+    RequestIDMiddleware,
     _client_ip,
     apply_http_middleware,
 )
@@ -622,3 +624,76 @@ class TestApplyHttpMiddleware:
         scope = _make_scope(headers=[(b"content-length", b"200")])
         await app(scope, _noop_receive, cap)
         assert cap.status == 413
+
+    async def test_request_id_present_in_composition(self) -> None:
+        """X-Request-ID header is echoed on responses from the composed stack."""
+        app = apply_http_middleware(_dummy_app, requests_per_minute=1000)
+        cap = _ResponseCapture()
+        scope = _make_scope(headers=[(b"x-request-id", b"trace-abc123")])
+        await app(scope, _noop_receive, cap)
+        assert cap.status == 200
+        assert cap.headers.get("x-request-id") == "trace-abc123"
+
+
+# ===================================================================
+# TestRequestIDMiddleware
+# ===================================================================
+
+
+class TestRequestIDMiddleware:
+    """Tests for RequestIDMiddleware."""
+
+    async def test_echoes_provided_request_id(self) -> None:
+        """X-Request-ID from request is echoed in the response."""
+        mw = RequestIDMiddleware(_dummy_app)
+        cap = _ResponseCapture()
+        scope = _make_scope(headers=[(b"x-request-id", b"my-trace-id")])
+        await mw(scope, _noop_receive, cap)
+        assert cap.status == 200
+        assert cap.headers.get("x-request-id") == "my-trace-id"
+
+    async def test_generates_id_when_absent(self) -> None:
+        """A UUID4 is generated when X-Request-ID is not present."""
+        import uuid
+
+        mw = RequestIDMiddleware(_dummy_app)
+        cap = _ResponseCapture()
+        await mw(_make_scope(), _noop_receive, cap)
+        assert cap.status == 200
+        rid = cap.headers.get("x-request-id", "")
+        parsed = uuid.UUID(rid)
+        assert parsed.version == 4, f"Expected UUID4, got version {parsed.version}"
+
+    async def test_non_http_scope_passthrough(self) -> None:
+        """Non-HTTP scopes are passed through without modification."""
+        called: list[str] = []
+
+        async def _inner(scope: Any, receive: Any, send: Any) -> None:
+            called.append(scope["type"])
+
+        mw = RequestIDMiddleware(_inner)
+        ws_scope = _make_scope(scope_type="websocket")
+        await mw(ws_scope, _noop_receive, _ResponseCapture())
+        assert called == ["websocket"]
+
+    async def test_request_id_present_on_429(self) -> None:
+        """X-Request-ID is included on rate-limited 429 responses."""
+        import uuid
+
+        app = apply_http_middleware(
+            _dummy_app,
+            requests_per_minute=1,
+            requests_per_hour=100,
+        )
+        # First request succeeds and consumes the quota.
+        cap = _ResponseCapture()
+        await app(_make_scope(), _noop_receive, cap)
+        assert cap.status == 200
+
+        # Second request is rate-limited — should still carry X-Request-ID.
+        cap = _ResponseCapture()
+        await app(_make_scope(), _noop_receive, cap)
+        assert cap.status == 429
+        rid = cap.headers.get("x-request-id", "")
+        parsed = uuid.UUID(rid)
+        assert parsed.version == 4, f"Expected UUID4 on 429 response, got {rid!r}"

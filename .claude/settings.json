@@ -1,5 +1,27 @@
 {
   "env": {
     "CLAUDE_CODE_TASK_LIST_ID": "distillery"
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .claude-plugin/hooks/session-start.py 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo \"[Distillery] If this session produced decisions or insights, run /distill to capture them in the knowledge base.\""
+          }
+        ]
+      }
+    ]
   }
 }
