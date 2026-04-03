@@ -300,7 +300,7 @@ Format: `ID: <uuid> | Author: <name> | Project: <project> | <date>`
 
 ## Skills Registry
 
-The following skills are available in `.claude-plugin/skills/`:
+The following skills are available in `skills/`:
 
 | Skill | Directory | Primary MCP Tools | Purpose |
 |-------|-----------|-------------------|---------|

@@ -34,23 +34,23 @@ Copy the skills directory into any project that should have access:
 
 ```bash
 mkdir -p ~/.claude/skills
-cp -r /path/to/distillery/.claude-plugin/skills/* ~/.claude/skills/
+cp -r /path/to/distillery/skills/* ~/.claude/skills/
 ```
 
 Or clone and symlink:
 
 ```bash
 git clone https://github.com/norrietaylor/distillery.git ~/.claude/distillery
-ln -s ~/.claude/distillery/.claude-plugin/skills/distill   ~/.claude/skills/distill
-ln -s ~/.claude/distillery/.claude-plugin/skills/recall    ~/.claude/skills/recall
-ln -s ~/.claude/distillery/.claude-plugin/skills/pour      ~/.claude/skills/pour
-ln -s ~/.claude/distillery/.claude-plugin/skills/bookmark  ~/.claude/skills/bookmark
-ln -s ~/.claude/distillery/.claude-plugin/skills/minutes   ~/.claude/skills/minutes
-ln -s ~/.claude/distillery/.claude-plugin/skills/classify  ~/.claude/skills/classify
-ln -s ~/.claude/distillery/.claude-plugin/skills/watch     ~/.claude/skills/watch
-ln -s ~/.claude/distillery/.claude-plugin/skills/radar     ~/.claude/skills/radar
-ln -s ~/.claude/distillery/.claude-plugin/skills/tune      ~/.claude/skills/tune
-ln -s ~/.claude/distillery/.claude-plugin/skills/setup     ~/.claude/skills/setup
+ln -s ~/.claude/distillery/skills/distill   ~/.claude/skills/distill
+ln -s ~/.claude/distillery/skills/recall    ~/.claude/skills/recall
+ln -s ~/.claude/distillery/skills/pour      ~/.claude/skills/pour
+ln -s ~/.claude/distillery/skills/bookmark  ~/.claude/skills/bookmark
+ln -s ~/.claude/distillery/skills/minutes   ~/.claude/skills/minutes
+ln -s ~/.claude/distillery/skills/classify  ~/.claude/skills/classify
+ln -s ~/.claude/distillery/skills/watch     ~/.claude/skills/watch
+ln -s ~/.claude/distillery/skills/radar     ~/.claude/skills/radar
+ln -s ~/.claude/distillery/skills/tune      ~/.claude/skills/tune
+ln -s ~/.claude/distillery/skills/setup     ~/.claude/skills/setup
 ```
 
 ## MCP Configuration
