@@ -569,6 +569,10 @@ def _cmd_export(config_path: str | None, fmt: str, output_path: str) -> int:
             for col, val in zip(entry_cols, row, strict=True):
                 if hasattr(val, "isoformat"):
                     entry[col] = val.isoformat()
+                elif col == "metadata" and isinstance(val, str):
+                    # DuckDB returns JSON columns as strings; parse back to dict
+                    # so the export file contains a JSON object, not a JSON string.
+                    entry[col] = json.loads(val) if val else {}
                 else:
                     entry[col] = val
             entries.append(entry)
