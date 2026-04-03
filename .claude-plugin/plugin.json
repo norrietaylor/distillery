@@ -33,5 +33,28 @@
       "type": "http",
       "url": "https://distillery-mcp.fly.dev/mcp"
     }
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Call distillery_metrics with scope 'summary'. If there are pending_review entries, print a one-line reminder: '[Distillery] N entries pending review — run /classify to process them.' If there are no pending entries or the call fails, say nothing.",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '[Distillery] If this session produced decisions or insights, run /distill to capture them in the knowledge base.'"
+          }
+        ]
+      }
+    ]
   }
 }
