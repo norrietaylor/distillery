@@ -1,0 +1,21 @@
+Type: test (coverage)
+Command: python3 -m pytest tests/test_mcp_configure.py --cov=distillery.mcp.tools.configure --cov-report=term-missing
+Expected: 91%+ coverage on configure.py, all 22 tests pass
+Timestamp: 2026-04-02T10:00:00Z
+
+Name                                    Stmts   Miss  Cover   Missing
+---------------------------------------------------------------------
+src/distillery/mcp/tools/configure.py     103      9    91%   111, 123-127, 206-207, 225-226
+---------------------------------------------------------------------
+TOTAL                                     103      9    91%
+Required test coverage of 80.0% reached. Total coverage: 91.26%
+22 passed in 0.31s
+
+Coverage notes:
+- Line 111: _resolve_config_path wrapper — delegates to _find_config_path (tested via monkeypatching)
+- Lines 123-127: BaseException cleanup in _write_config_atomic — defensive error path
+- Lines 206-207: AttributeError on _get_nested — defensive against broken config objects
+- Lines 225-226: AttributeError on _set_nested — defensive against frozen config objects
+All meaningful functional paths are covered.
+
+Status: PASS

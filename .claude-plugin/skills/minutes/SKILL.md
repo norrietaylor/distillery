@@ -3,6 +3,7 @@ name: minutes
 description: "Capture meeting notes or append updates to an existing meeting record"
 allowed-tools:
   - "mcp__*__distillery_store"
+  - "mcp__*__distillery_check_dedup"
   - "mcp__*__distillery_search"
   - "mcp__*__distillery_get"
   - "mcp__*__distillery_update"
@@ -35,6 +36,12 @@ See CONVENTIONS.md — skip if already confirmed this conversation.
 - **No flags** → **New Meeting Mode** (default)
 - `--update <meeting_id>` → **Update Mode**
 - `--list` → **List Mode**
+
+**Optional flags (all modes):**
+
+| Flag | Parameter | Description |
+|------|-----------|-------------|
+| `--project` | `<name>` | Filter by project name (used in List Mode to scope results) |
 
 ---
 
@@ -80,6 +87,46 @@ Show preview and ask: `Ready to store? (yes / edit / skip)`. If skip: "Skipped. 
 
 Determine author & project per CONVENTIONS.md. Auto-extract 2-5 lowercase, hyphen-separated tags from the content.
 
+### Step 6.5: Check for Duplicates
+
+First, check for an existing meeting with the same `meeting_id`:
+
+```python
+distillery_search(query="<meeting_id>", entry_type="minutes", limit=5)
+```
+
+If any result has `metadata.meeting_id == <meeting_id>`, treat this as a duplicate meeting record. Display:
+
+```
+A meeting entry with ID "<meeting_id>" already exists (entry <entry-id>).
+Use /minutes --update <meeting_id> to append new content instead.
+Proceed anyway? (yes / skip)
+```
+
+If user chooses skip: "Skipped. No new entry was stored." and stop.
+
+If no `meeting_id` match found, call `distillery_check_dedup(content="<meeting notes summary>")`. Handle by `action` field:
+
+**`"create"`:** No similar entries. Proceed to Step 7a.
+
+**`"skip"`:** Near-exact duplicate. Show similarity table and offer: (1) Store anyway, (2) Skip.
+
+**`"merge"`:** Very similar entry exists. Show similarity table and offer: (1) Store anyway, (2) Merge with existing, (3) Skip.
+
+For merge: combine new notes with the most similar entry's content, call `distillery_update` with the entry ID and merged content, confirm and stop.
+
+**`"link"`:** Related but distinct. Show similarity table, note new entry will be linked. Ask to proceed or skip. If proceeding, include `"related_entries": ["<id1>", ...]` in metadata at Step 7a.
+
+```
+Similar entries found:
+
+| Entry ID | Similarity | Preview |
+|----------|-----------|---------|
+| <id>     | <score%>  | <content_preview> |
+```
+
+On skip in any case: "Skipped. No new entry was stored." and stop.
+
 ### Step 7a: Store Entry
 
 ```python
@@ -101,7 +148,12 @@ distillery_store(
 
 ### Step 8a: Confirm
 
-Display: entry ID, meeting ID, version (1), project, and first 200 chars of notes.
+```
+[minutes] Stored: <entry-id>
+Project: <project> | Author: <author>
+Summary: <first 200 chars of notes>...
+Tags: tag1, tag2, tag3
+```
 
 ---
 
@@ -139,7 +191,12 @@ Set `new_version = current_version + 1`. Call `distillery_update` with the full 
 
 ### Step 7b: Confirm
 
-Display: entry ID, meeting ID, new version, and first 200 chars of the update section.
+```
+[minutes] Stored: <entry-id>
+Project: <project> | Author: <author>
+Summary: <first 200 chars of update section>...
+Tags: tag1, tag2, tag3
+```
 
 ---
 
@@ -150,6 +207,8 @@ Display: entry ID, meeting ID, new version, and first 200 chars of the update se
 ```python
 distillery_list(entry_type="minutes", limit=10)
 ```
+
+If `--project` was specified, also pass `project=<name>` to scope results to that project.
 
 If none found: "No meeting entries found. Use /minutes to capture your first meeting."
 

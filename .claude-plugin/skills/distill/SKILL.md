@@ -124,11 +124,9 @@ The `session_id` must be unique per invocation (timestamp + short random suffix)
 ### Step 8: Confirm
 
 ```
-Stored as entry <entry-id> in project <project>
-
-Summary:
-<first 200 chars of summary>...
-
+[session] Stored: <entry-id>
+Project: <project> | Author: <author>
+Summary: <first 200 chars>...
 Tags: tag1, tag2, tag3
 ```
 
@@ -143,7 +141,8 @@ Ready to store? (yes / edit / skip)
 
 **Confirmation** (after storing):
 ```
-Stored as entry <entry-id> in project <project>
+[session] Stored: <entry-id>
+Project: <project> | Author: <author>
 Summary: <first 200 chars>...
 Tags: tag1, tag2, tag3
 ```

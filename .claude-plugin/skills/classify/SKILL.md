@@ -39,6 +39,12 @@ See CONVENTIONS.md — skip if already confirmed this conversation.
 | `/classify --review` | Review queue triage |
 | `/classify` (no args) | Show help |
 
+**Optional flags (all modes):**
+
+| Flag | Parameter | Description |
+|------|-----------|-------------|
+| `--project` | `<name>` | Filter by project name |
+
 ---
 
 ## Mode A: Classify by ID
@@ -65,7 +71,7 @@ Show entry ID, type, confidence (as `<n%> (<level>)`), status, reasoning, and su
 
 ### Step B1: List Inbox Entries
 
-Call `distillery_list(entry_type="inbox", limit=50, output_mode="full", content_max_length=300)`. If empty, tell the user and stop.
+Call `distillery_list(entry_type="inbox", limit=50, output_mode="full", content_max_length=300)`. If `--project` was specified, also pass `project=<name>`. If empty, tell the user and stop.
 
 ### Step B2: Classify Each Entry
 
@@ -91,7 +97,7 @@ If any sent to review, suggest `/classify --review`.
 
 ### Step C1: Fetch the Review Queue
 
-Call `distillery_review_queue(limit=20)`. If empty, tell the user and stop.
+Call `distillery_review_queue(limit=20)`. If `--project` was specified, also pass `project=<name>`. If empty, tell the user and stop.
 
 ### Step C2: Determine Reviewer
 
@@ -123,40 +129,7 @@ Entries reviewed: <total>
 
 ## Mode D: Show Help (No Arguments)
 
-Display:
-
-```
-## /classify — Classification & Review Queue
-
-Usage:
-  /classify <entry_id>    Classify a specific entry by its ID
-  /classify --inbox       Classify all unclassified inbox entries in batch
-  /classify --review      Triage the manual review queue
-
-Examples:
-  /classify 550e8400-e29b-41d4-a716-446655440000
-  /classify --inbox
-  /classify --review
-
-Confidence Levels:
-  high    >= 80%   Entry is classified automatically as active
-  medium  50–79%   Entry may require review depending on threshold settings
-  low     < 50%    Entry is sent to the review queue for manual triage
-```
-
----
-
-## Confidence Levels
-
-| Score Range | Display | Level |
-|-------------|---------|-------|
-| 0.80–1.00 | e.g. `85%` | `high` |
-| 0.50–0.79 | e.g. `65%` | `medium` |
-| 0.00–0.49 | e.g. `45%` | `low` |
-
-Format: `<n%> (<level>)`.
-
-Valid entry types: `session`, `bookmark`, `minutes`, `meeting`, `reference`, `idea`, `inbox`.
+Read `references/modes.md` for the help text to display.
 
 ---
 
@@ -165,7 +138,7 @@ Valid entry types: `session`, `bookmark`, `minutes`, `meeting`, `reference`, `id
 - Always check MCP availability first — stop if unavailable
 - Show help when invoked with no arguments
 - Retrieve the entry with `distillery_get` before classifying by ID
-- Display confidence as percentage with level label in all output
+- Display confidence as percentage with level label in all output (see `references/modes.md` for level thresholds)
 - For reclassifications, show old and new classification together
 - Batch mode: max 50 entries per invocation
 - Review mode: one entry at a time, accept `s` to skip

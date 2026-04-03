@@ -171,7 +171,8 @@ async def _handle_review_queue(
 
     Args:
         store: Initialised ``DuckDBStore``.
-        arguments: Tool argument dict (all fields optional).
+        arguments: Tool argument dict (all fields optional). Supports
+            ``limit`` (int, 1–500), ``entry_type`` (str), ``project`` (str).
 
     Returns:
         MCP content list with a JSON payload of ``entries`` and ``count``.
@@ -196,6 +197,8 @@ async def _handle_review_queue(
                 f"Must be one of: {', '.join(sorted(_VALID_ENTRY_TYPES))}.",
             )
         filters["entry_type"] = entry_type_str
+    if "project" in arguments and arguments["project"] is not None:
+        filters["project"] = arguments["project"]
 
     try:
         entries = await store.list_entries(filters=filters, limit=limit, offset=0)

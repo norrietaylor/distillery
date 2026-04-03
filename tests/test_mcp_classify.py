@@ -339,6 +339,32 @@ class TestReviewQueueTool:
         assert data["error"] is True
         assert data["code"] == "INVALID_PARAMS"
 
+    async def test_review_queue_filters_by_project(self, store: DuckDBStore) -> None:
+        """project parameter filters results to matching project only."""
+        alpha = make_entry(
+            content="Entry for project alpha",
+            status=EntryStatus.PENDING_REVIEW,
+            project="alpha",
+        )
+        beta = make_entry(
+            content="Entry for project beta",
+            status=EntryStatus.PENDING_REVIEW,
+            project="beta",
+        )
+        no_project = make_entry(
+            content="Entry with no project",
+            status=EntryStatus.PENDING_REVIEW,
+        )
+        await store.store(alpha)
+        await store.store(beta)
+        await store.store(no_project)
+
+        response = await _handle_review_queue(store, {"project": "alpha"})
+        data = parse_mcp_response(response)
+        assert "error" not in data
+        assert data["count"] == 1
+        assert data["entries"][0]["id"] == alpha.id
+
 
 # ---------------------------------------------------------------------------
 # distillery_resolve_review tests

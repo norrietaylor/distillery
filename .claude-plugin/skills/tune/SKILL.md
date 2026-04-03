@@ -4,6 +4,7 @@ description: "Display and adjust feed relevance thresholds for alerts and digest
 allowed-tools:
   - "mcp__*__distillery_status"
   - "mcp__*__distillery_update"
+  - "mcp__*__distillery_configure"
 effort: low
 ---
 
@@ -39,7 +40,7 @@ No flags = read-only mode (display current thresholds).
 **Validation rules:**
 
 - Both `--alert` and `--digest` must be floats in [0.0, 1.0]
-- `--alert` must be greater than `--digest`
+- `--alert` must be greater than or equal to `--digest`
 - `--max` must be a positive integer
 - `--reset` takes precedence over `--alert`/`--digest` if all provided
 - If validation fails, display error and stop
@@ -65,17 +66,19 @@ Apply these changes? (yes/no)
 
 If declined, display "No changes made." and stop.
 
-Since thresholds live in `distillery.yaml`, provide the exact YAML snippet to update:
+Apply each change via `distillery_configure`:
 
-```
-feeds:
-  thresholds:
-    alert: <new_alert_value>
-    digest: <new_digest_value>
-  max_items_per_poll: <new_max_value>   # if --max provided
-```
+- For alert: `distillery_configure(section="feeds.thresholds", key="alert", value="<new_value>")`
+- For digest: `distillery_configure(section="feeds.thresholds", key="digest", value="<new_value>")`
 
-Include the full path to `distillery.yaml` if determinable. The MCP server must be restarted for changes to take effect.
+**Important:** When both thresholds change, determine the correct order to satisfy the `alert >= digest` constraint:
+- If both new values are **higher** than current: set `alert` first (raises the ceiling before the floor)
+- If both new values are **lower** than current: set `digest` first (lowers the floor before the ceiling)
+- If only one changes: apply that change directly
+
+If the user passes `--max`, inform them that `max_items_per_poll` is not yet configurable at runtime and skip that change.
+
+If `distillery_configure` returns an error, display the error message and stop. Do not proceed with remaining changes if an earlier one fails.
 
 ### Step 5: Display Results
 
@@ -93,7 +96,13 @@ Items below the digest threshold (< 0.60) are discarded.
 To adjust: /tune --alert <value> --digest <value>
 ```
 
-**After changes or reset:** Same table with Previous/New columns. Include "Update distillery.yaml to persist these thresholds across restarts."
+**After changes or reset:** Same table with Previous/New columns sourced from `distillery_configure` response (`previous_value` and `new_value` fields). Include a confirmation line:
+
+```text
+Changes applied at runtime and persisted to distillery.yaml.
+```
+
+If `disk_written` is false in the response, instead show: "Changes applied in memory only — no config file found to persist to disk."
 
 **Tuning guide** (always include):
 
@@ -109,8 +118,9 @@ Tuning Guide:
 
 - Always call `distillery_status` first to verify MCP availability
 - In read-only mode, display thresholds without confirmation
-- Validate `--alert` > `--digest` before applying; reject invalid combinations
+- Validate `--alert` >= `--digest` before applying; reject invalid combinations
 - Always ask for confirmation before applying changes
-- Changes to `distillery.yaml` are the user's responsibility; provide exact YAML
+- Use `distillery_configure` to apply changes at runtime — no manual YAML editing required
+- When both alert and digest change, order calls to avoid constraint violations (alert first when raising, digest first when lowering)
 - On MCP errors, see CONVENTIONS.md error handling -- display and stop
 - Always include the tuning guide after displaying thresholds

@@ -123,14 +123,9 @@ distillery_store(
 ### Step 9: Confirm
 
 ```
-Bookmarked: <entry-id>
-
-URL: <url>
-Project: <project>
-
-Summary:
-<first 200 chars>...
-
+[bookmark] Stored: <entry-id>
+Project: <project> | Author: <author>
+Summary: <first 200 chars>...
 Tags: tag1, tag2, tag3
 ```
 
@@ -138,8 +133,8 @@ Tags: tag1, tag2, tag3
 
 **Stored:**
 ```
-Bookmarked: <entry-id>
-URL: <url> | Project: <project>
+[bookmark] Stored: <entry-id>
+Project: <project> | Author: <author>
 Summary: <first 200 chars>...
 Tags: tag1, tag2, tag3
 ```
