@@ -57,29 +57,7 @@ MCP server connected.
 
 Proceed to Step 2.
 
-**State: Needs Authentication** — Server entry found but `distillery_status` unavailable or returns auth error. See `references/transport-detection.md` for display instructions. Skip to Step 5 with `MCP Server: needs authentication`.
-
-**State: Needs Authentication** — A Distillery MCP server entry exists (in `plugin.json`, `.mcp.json`, or `settings.json`) but `distillery_metrics(scope="summary")` is unavailable or returns an auth error. This typically means the server is configured with HTTP transport and GitHub OAuth, but the user has not completed the OAuth flow yet.
-
-Display:
-
-```text
-Distillery MCP Server — Authentication Required
-
-The MCP server is configured but needs authentication.
-  Server: <URL from config>
-
-To authenticate:
-1. Press Ctrl+. (or Cmd+.) to open the MCP server menu
-2. Select the Distillery server (it will show "needs authentication")
-3. Press Enter — your browser will open for GitHub OAuth
-4. Authorize the app in your browser
-5. Return here and run /distillery:setup again
-
-Alternatively, you can type: ! claude mcp authenticate distillery
-```
-
-Then skip to Step 5 (Summary) with `MCP Server: needs authentication`.
+**State: Needs Authentication** — Server entry found but `distillery_metrics(scope="summary")` is unavailable or fails (including auth-related failures). See `references/transport-detection.md` for display instructions. Skip to Step 5 with `MCP Server: needs authentication`.
 
 ---
 
