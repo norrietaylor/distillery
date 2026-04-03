@@ -1,9 +1,0 @@
-Type: file
-Command: grep -c '\[.*\] Stored:' .claude-plugin/skills/bookmark/SKILL.md
-Expected: >=1
-Timestamp: 2026-04-02T00:00:00Z
-
-Output:
-2
-
-Status: PASS

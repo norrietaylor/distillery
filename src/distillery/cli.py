@@ -6,6 +6,8 @@ Provides the ``distillery`` entry point with the following subcommands:
   and status, database path, and configured embedding model).
 - ``health``: Verify database connectivity and exit with code 0 on success
   or code 1 on failure.
+- ``export``: Export all entries and feed sources to a JSON file.
+- ``import``: Import entries and feed sources from a JSON export file.
 - ``eval``: Run skill evaluation scenarios against Claude (requires
   ``ANTHROPIC_API_KEY`` and ``pip install 'distillery[eval]'``).
 
@@ -95,6 +97,42 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Poll only the source with this URL (polls all sources when omitted)",
     )
 
+    export_parser = subparsers.add_parser(
+        "export",
+        help="Export all entries and feed sources to a JSON file",
+        parents=[shared],
+    )
+    export_parser.add_argument(
+        "--output",
+        metavar="PATH",
+        required=True,
+        help="Path to write the exported JSON file",
+    )
+
+    import_parser = subparsers.add_parser(
+        "import",
+        help="Import entries and feed sources from a JSON export file",
+        parents=[shared],
+    )
+    import_parser.add_argument(
+        "--input",
+        metavar="PATH",
+        required=True,
+        help="Path to the JSON export file to import",
+    )
+    import_parser.add_argument(
+        "--mode",
+        choices=["merge", "replace"],
+        default="merge",
+        help="Import mode: merge (skip existing IDs) or replace (delete all before import)",
+    )
+    import_parser.add_argument(
+        "--yes",
+        action="store_true",
+        default=False,
+        help="Skip confirmation prompt for replace mode",
+    )
+
     eval_parser = subparsers.add_parser(
         "eval",
         help="Run skill evaluation scenarios against Claude",
@@ -160,6 +198,8 @@ def _query_status(db_path: str) -> dict[str, Any]:
     - ``total_entries`` (int)
     - ``entries_by_type`` (dict[str, int])
     - ``entries_by_status`` (dict[str, int])
+    - ``schema_version`` (str | None) — value from _meta, or None if unavailable
+    - ``duckdb_version`` (str | None) — value from _meta, or None if unavailable
 
     Raises:
         RuntimeError: If the database cannot be opened or queried.
@@ -185,6 +225,8 @@ def _query_status(db_path: str) -> dict[str, Any]:
                 "total_entries": 0,
                 "entries_by_type": {},
                 "entries_by_status": {},
+                "schema_version": None,
+                "duckdb_version": None,
             }
 
         total_row = conn.execute("SELECT COUNT(*) FROM entries").fetchone()
@@ -200,10 +242,24 @@ def _query_status(db_path: str) -> dict[str, Any]:
         ).fetchall()
         entries_by_status = {str(row[0]): int(row[1]) for row in status_rows}
 
+        # Read version info from _meta if the table exists.
+        schema_version: str | None = None
+        duckdb_version: str | None = None
+        meta_check = conn.execute(
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '_meta'"
+        ).fetchone()
+        if meta_check is not None and meta_check[0] > 0:
+            sv_row = conn.execute("SELECT value FROM _meta WHERE key = 'schema_version'").fetchone()
+            schema_version = sv_row[0] if sv_row is not None else None
+            dv_row = conn.execute("SELECT value FROM _meta WHERE key = 'duckdb_version'").fetchone()
+            duckdb_version = dv_row[0] if dv_row is not None else None
+
         return {
             "total_entries": total,
             "entries_by_type": entries_by_type,
             "entries_by_status": entries_by_status,
+            "schema_version": schema_version,
+            "duckdb_version": duckdb_version,
         }
     finally:
         conn.close()
@@ -267,6 +323,8 @@ def _cmd_status(config_path: str | None, fmt: str) -> int:
         "total_entries": stats["total_entries"],
         "entries_by_type": stats["entries_by_type"],
         "entries_by_status": stats["entries_by_status"],
+        "schema_version": stats["schema_version"],
+        "duckdb_version": stats["duckdb_version"],
     }
 
     if fmt == "json":
@@ -274,6 +332,10 @@ def _cmd_status(config_path: str | None, fmt: str) -> int:
     else:
         print(f"database_path:    {data['database_path']}")
         print(f"embedding_model:  {data['embedding_model']}")
+        if data["schema_version"] is not None:
+            print(f"schema_version:   {data['schema_version']}")
+        if data["duckdb_version"] is not None:
+            print(f"duckdb_version:   {data['duckdb_version']}")
         print(f"total_entries:    {data['total_entries']}")
         print("entries_by_type:")
         if data["entries_by_type"]:
@@ -446,6 +508,367 @@ def _cmd_poll(config_path: str | None, fmt: str, source_url: str | None) -> int:
                 print(f"    error: {err}", file=sys.stderr)
 
     return 0 if summary.sources_errored == 0 else 1
+
+
+# ---------------------------------------------------------------------------
+# Export subcommand
+# ---------------------------------------------------------------------------
+
+
+def _cmd_export(config_path: str | None, fmt: str, output_path: str) -> int:
+    """Implement the ``export`` subcommand.
+
+    Queries all entries, feed sources, and _meta from the database and writes
+    a portable JSON snapshot to *output_path*.  Embeddings are omitted so the
+    file can be safely imported on any instance.
+
+    Returns:
+        Exit code (0 on success, 1 on error).
+    """
+    import datetime
+
+    try:
+        cfg = load_config(config_path)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Error loading configuration: {exc}", file=sys.stderr)
+        return 1
+
+    def _run_export() -> Any:
+        import duckdb as _duckdb
+
+        from distillery.mcp.server import _normalize_db_path
+
+        db_path = _normalize_db_path(cfg.storage.database_path)
+
+        # Open read-only to avoid running migrations or modifying _meta.
+        if db_path == ":memory:":
+            raise RuntimeError("Cannot export from an in-memory database")
+        resolved = Path(db_path).expanduser()
+        if not resolved.exists():
+            raise RuntimeError(f"Database file not found: {db_path}")
+
+        conn = _duckdb.connect(str(resolved), read_only=True)
+        try:
+            # Verify the entries table exists.
+            table_check = conn.execute(
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_name = 'entries'"
+            ).fetchone()
+            if table_check is None or table_check[0] == 0:
+                return [], [], {}
+
+            # Query entries (no embedding column).
+            entry_rows = conn.execute(
+                "SELECT id, content, entry_type, source, status, tags, metadata, "
+                "version, project, author, created_at, updated_at, created_by, "
+                "last_modified_by FROM entries"
+            ).fetchall()
+            entry_cols = [
+                "id", "content", "entry_type", "source", "status", "tags",
+                "metadata", "version", "project", "author", "created_at",
+                "updated_at", "created_by", "last_modified_by",
+            ]
+            entries: list[dict[str, Any]] = []
+            for row in entry_rows:
+                entry: dict[str, Any] = {}
+                for col, val in zip(entry_cols, row, strict=True):
+                    if hasattr(val, "isoformat"):
+                        entry[col] = val.isoformat()
+                    elif col == "metadata" and isinstance(val, str):
+                        entry[col] = json.loads(val) if val else {}
+                    else:
+                        entry[col] = val
+                entries.append(entry)
+
+            # Query feed_sources.
+            feed_rows = conn.execute("SELECT * FROM feed_sources").fetchall()
+            feed_cols = [desc[0] for desc in conn.description]
+            feed_sources: list[dict[str, Any]] = []
+            for row in feed_rows:
+                fsrc: dict[str, Any] = {}
+                for col, val in zip(feed_cols, row, strict=True):
+                    if hasattr(val, "isoformat"):
+                        fsrc[col] = val.isoformat()
+                    else:
+                        fsrc[col] = val
+                feed_sources.append(fsrc)
+
+            # Query _meta.
+            meta_rows = conn.execute("SELECT key, value FROM _meta").fetchall()
+            meta: dict[str, str] = {str(row[0]): str(row[1]) for row in meta_rows}
+
+            return entries, feed_sources, meta
+        finally:
+            conn.close()
+
+    try:
+        entries, feed_sources, meta = _run_export()
+    except Exception as exc:
+        print(f"Error during export: {exc}", file=sys.stderr)
+        return 1
+
+    exported_at = datetime.datetime.now(datetime.UTC).isoformat()
+    payload: dict[str, Any] = {
+        "version": 1,
+        "exported_at": exported_at,
+        "meta": meta,
+        "entries": entries,
+        "feed_sources": feed_sources,
+    }
+
+    try:
+        out = Path(output_path)
+        out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    except OSError as exc:
+        print(f"Error writing export file: {exc}", file=sys.stderr)
+        return 1
+
+    n_entries = len(entries)
+    n_sources = len(feed_sources)
+    print(f"Exported {n_entries} entries and {n_sources} feed sources to {output_path}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Import subcommand
+# ---------------------------------------------------------------------------
+
+_IMPORT_BATCH_SIZE = 50
+
+
+def _cmd_import(
+    config_path: str | None,
+    fmt: str,
+    input_path: str,
+    mode: str,
+    yes: bool,
+) -> int:
+    """Implement the ``import`` subcommand.
+
+    Reads a JSON export file produced by ``distillery export`` and inserts the
+    entries and feed sources into the database.  In *merge* mode existing IDs
+    are skipped; in *replace* mode all existing entries are deleted first.
+
+    Returns:
+        Exit code (0 on success, 1 on error).
+    """
+    # --- 1. Load and validate JSON structure ---
+    try:
+        raw_text = Path(input_path).read_text(encoding="utf-8")
+    except OSError as exc:
+        print(f"Error reading import file: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        payload = json.loads(raw_text)
+    except json.JSONDecodeError as exc:
+        print(f"Error parsing import file (invalid JSON): {exc}", file=sys.stderr)
+        return 1
+
+    if not isinstance(payload, dict):
+        print("Error: import file must be a JSON object", file=sys.stderr)
+        return 1
+
+    missing = [k for k in ("version", "entries", "feed_sources") if k not in payload]
+    if missing:
+        print(
+            f"Error: import file is missing required keys: {', '.join(missing)}",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Validate export format version.
+    supported_versions = {1}
+    export_version = payload.get("version")
+    if export_version not in supported_versions:
+        print(
+            f"Error: unsupported export format version {export_version!r} "
+            f"(supported: {sorted(supported_versions)})",
+            file=sys.stderr,
+        )
+        return 1
+
+    entries_data = payload["entries"]
+    feed_sources_data = payload["feed_sources"]
+    if not isinstance(entries_data, list) or not isinstance(feed_sources_data, list):
+        print(
+            "Error: 'entries' and 'feed_sources' must be JSON arrays",
+            file=sys.stderr,
+        )
+        return 1
+
+    # --- 2. Replace-mode confirmation ---
+    if mode == "replace" and not yes:
+        try:
+            answer = input("This will delete all existing entries. Continue? [y/N] ")
+        except EOFError:
+            answer = ""
+        if answer.strip().lower() not in ("y", "yes"):
+            print("Import cancelled.", file=sys.stderr)
+            return 1
+
+    # --- 3. Load config ---
+    try:
+        cfg = load_config(config_path)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Error loading configuration: {exc}", file=sys.stderr)
+        return 1
+
+    async def _run() -> tuple[int, int, int, int]:
+        """Return (imported, skipped, reembedded, sources_imported)."""
+        import contextlib
+        import datetime
+
+        from distillery.mcp.server import _create_embedding_provider, _normalize_db_path
+        from distillery.models import Entry, EntrySource, EntryStatus, EntryType
+        from distillery.store.duckdb import DuckDBStore
+
+        embedding_provider = _create_embedding_provider(cfg)
+        db_path = _normalize_db_path(cfg.storage.database_path)
+
+        store = DuckDBStore(
+            db_path=db_path,
+            embedding_provider=embedding_provider,
+            s3_region=cfg.storage.s3_region,
+            s3_endpoint=cfg.storage.s3_endpoint,
+        )
+        await store.initialize()
+
+        conn = store._conn
+        assert conn is not None
+
+        # --- 4. Collect entries for insertion (pre-embedding) ---
+        imported = 0
+        skipped = 0
+        reembedded = 0
+
+        to_insert: list[dict[str, Any]] = []
+        for raw in entries_data:
+            entry_id: str = raw.get("id", "")
+            if mode == "merge" and entry_id:
+                existing_row = conn.execute(
+                    "SELECT id FROM entries WHERE id = ?", [entry_id]
+                ).fetchone()
+                if existing_row is not None:
+                    skipped += 1
+                    continue
+            to_insert.append(raw)
+
+        # --- 5. Pre-compute all embeddings before any destructive changes ---
+        def _parse_dt(val: Any) -> datetime.datetime:
+            if isinstance(val, datetime.datetime):
+                if val.tzinfo is None:
+                    return val.replace(tzinfo=datetime.UTC)
+                return val
+            parsed = datetime.datetime.fromisoformat(str(val))
+            if parsed.tzinfo is None:
+                return parsed.replace(tzinfo=datetime.UTC)
+            return parsed
+
+        staged_rows: list[tuple[Entry, list[float]]] = []
+        for batch_start in range(0, len(to_insert), _IMPORT_BATCH_SIZE):
+            batch = to_insert[batch_start : batch_start + _IMPORT_BATCH_SIZE]
+            contents = [b.get("content", "") for b in batch]
+            embeddings = await asyncio.to_thread(embedding_provider.embed_batch, contents)
+            reembedded += len(batch)
+
+            for raw, embedding in zip(batch, embeddings, strict=True):
+                entry = Entry(
+                    id=raw.get("id", ""),
+                    content=raw.get("content", ""),
+                    entry_type=EntryType(raw.get("entry_type", "inbox")),
+                    source=EntrySource(raw.get("source", "import")),
+                    author=raw.get("author", ""),
+                    project=raw.get("project"),
+                    tags=list(raw.get("tags") or []),
+                    status=EntryStatus(raw.get("status", "active")),
+                    metadata=dict(raw.get("metadata") or {}),
+                    version=int(raw.get("version", 1)),
+                    created_at=_parse_dt(
+                        raw.get("created_at", datetime.datetime.now(datetime.UTC).isoformat())
+                    ),
+                    updated_at=_parse_dt(
+                        raw.get("updated_at", datetime.datetime.now(datetime.UTC).isoformat())
+                    ),
+                    created_by=raw.get("created_by", ""),
+                    last_modified_by=raw.get("last_modified_by", ""),
+                )
+                staged_rows.append((entry, embedding))
+
+            print(
+                f"  Progress: {min(batch_start + _IMPORT_BATCH_SIZE, len(to_insert))}"
+                f"/{len(to_insert)} entries embedded...",
+                file=sys.stderr,
+            )
+
+        # --- 6. Atomic replace: delete + insert inside a transaction ---
+        try:
+            conn.execute("BEGIN TRANSACTION")
+
+            if mode == "replace":
+                conn.execute("DELETE FROM entries")
+                conn.execute("DELETE FROM feed_sources")
+
+            for entry, embedding in staged_rows:
+                conn.execute(
+                    "INSERT INTO entries "
+                    "(id, content, entry_type, source, author, project, tags, status, "
+                    " metadata, created_at, updated_at, version, embedding, "
+                    " created_by, last_modified_by) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [
+                        entry.id,
+                        entry.content,
+                        entry.entry_type.value,
+                        entry.source.value,
+                        entry.author,
+                        entry.project,
+                        list(entry.tags),
+                        entry.status.value,
+                        json.dumps(entry.metadata),
+                        entry.created_at,
+                        entry.updated_at,
+                        entry.version,
+                        embedding,
+                        entry.created_by,
+                        entry.last_modified_by,
+                    ],
+                )
+                imported += 1
+
+            conn.execute("COMMIT")
+        except Exception:
+            with contextlib.suppress(Exception):
+                conn.execute("ROLLBACK")
+            raise
+
+        # --- 7. Import feed sources ---
+        sources_imported = 0
+        for fsrc in feed_sources_data:
+            with contextlib.suppress(ValueError):
+                await store.add_feed_source(
+                    url=fsrc.get("url", ""),
+                    source_type=fsrc.get("source_type", "rss"),
+                    label=fsrc.get("label", ""),
+                    poll_interval_minutes=int(fsrc.get("poll_interval_minutes", 60)),
+                    trust_weight=float(fsrc.get("trust_weight", 1.0)),
+                )
+                sources_imported += 1
+
+        await store.close()
+        return imported, skipped, reembedded, sources_imported
+
+    try:
+        imported, skipped, reembedded, sources_imported = asyncio.run(_run())
+    except Exception as exc:
+        print(f"Error during import: {exc}", file=sys.stderr)
+        return 1
+
+    print(
+        f"Imported {imported} entries ({skipped} skipped, {reembedded} re-embedded)"
+        f" and {sources_imported} feed sources"
+    )
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -931,6 +1354,24 @@ def main(argv: list[str] | None = None) -> None:
                 config_path=config_path,
                 fmt=fmt,
                 source_url=getattr(args, "source", None),
+            )
+        )
+    elif command == "export":
+        sys.exit(
+            _cmd_export(
+                config_path=config_path,
+                fmt=fmt,
+                output_path=args.output,
+            )
+        )
+    elif command == "import":
+        sys.exit(
+            _cmd_import(
+                config_path=config_path,
+                fmt=fmt,
+                input_path=args.input,
+                mode=args.mode,
+                yes=args.yes,
             )
         )
     elif command == "eval":

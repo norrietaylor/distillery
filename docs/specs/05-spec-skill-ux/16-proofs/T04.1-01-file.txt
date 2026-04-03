@@ -1,9 +1,0 @@
-Type: file
-Command: test -f .claude-plugin/skills/setup/references/cron-payloads.md && echo exists
-Expected: exists
-Timestamp: 2026-04-02T00:00:00Z
-
-Output:
-exists
-
-Status: PASS

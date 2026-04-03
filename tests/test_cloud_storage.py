@@ -256,15 +256,15 @@ class TestSyncInitializeHttpfs:
             patch.object(store, "_open_connection", return_value=mock_conn),
             patch.object(store, "_setup_httpfs") as mock_httpfs,
             patch.object(store, "_setup_vss"),
-            patch.object(store, "_create_schema"),
-            patch.object(store, "_add_accessed_at_column"),
-            patch.object(store, "_create_log_tables"),
-            patch.object(store, "_create_meta_table"),
-            patch.object(store, "_validate_or_record_meta"),
-            patch.object(store, "_create_index"),
+            patch("distillery.store.duckdb.run_pending_migrations", return_value=6) as mock_mig,
+            patch.object(store, "_validate_or_record_meta") as mock_meta,
+            patch.object(store, "_track_version_info") as mock_track,
         ):
             store._sync_initialize()
             mock_httpfs.assert_called_once_with(mock_conn)
+            mock_mig.assert_called_once()
+            mock_meta.assert_called_once_with(mock_conn)
+            mock_track.assert_called_once_with(mock_conn)
 
     def test_httpfs_not_called_for_local_path(self, tmp_path: Path) -> None:
         db_path = str(tmp_path / "db.duckdb")
@@ -274,15 +274,15 @@ class TestSyncInitializeHttpfs:
             patch.object(store, "_open_connection", return_value=mock_conn),
             patch.object(store, "_setup_httpfs") as mock_httpfs,
             patch.object(store, "_setup_vss"),
-            patch.object(store, "_create_schema"),
-            patch.object(store, "_add_accessed_at_column"),
-            patch.object(store, "_create_log_tables"),
-            patch.object(store, "_create_meta_table"),
-            patch.object(store, "_validate_or_record_meta"),
-            patch.object(store, "_create_index"),
+            patch("distillery.store.duckdb.run_pending_migrations", return_value=6) as mock_mig,
+            patch.object(store, "_validate_or_record_meta") as mock_meta,
+            patch.object(store, "_track_version_info") as mock_track,
         ):
             store._sync_initialize()
             mock_httpfs.assert_not_called()
+            mock_mig.assert_called_once()
+            mock_meta.assert_called_once_with(mock_conn)
+            mock_track.assert_called_once_with(mock_conn)
 
     def test_httpfs_not_called_for_memory(self) -> None:
         store = make_store(db_path=":memory:")
@@ -291,15 +291,15 @@ class TestSyncInitializeHttpfs:
             patch.object(store, "_open_connection", return_value=mock_conn),
             patch.object(store, "_setup_httpfs") as mock_httpfs,
             patch.object(store, "_setup_vss"),
-            patch.object(store, "_create_schema"),
-            patch.object(store, "_add_accessed_at_column"),
-            patch.object(store, "_create_log_tables"),
-            patch.object(store, "_create_meta_table"),
-            patch.object(store, "_validate_or_record_meta"),
-            patch.object(store, "_create_index"),
+            patch("distillery.store.duckdb.run_pending_migrations", return_value=6) as mock_mig,
+            patch.object(store, "_validate_or_record_meta") as mock_meta,
+            patch.object(store, "_track_version_info") as mock_track,
         ):
             store._sync_initialize()
             mock_httpfs.assert_not_called()
+            mock_mig.assert_called_once()
+            mock_meta.assert_called_once_with(mock_conn)
+            mock_track.assert_called_once_with(mock_conn)
 
     def test_httpfs_not_called_for_motherduck(self) -> None:
         store = make_store(db_path="md:distillery")
@@ -308,15 +308,15 @@ class TestSyncInitializeHttpfs:
             patch.object(store, "_open_connection", return_value=mock_conn),
             patch.object(store, "_setup_httpfs") as mock_httpfs,
             patch.object(store, "_setup_vss"),
-            patch.object(store, "_create_schema"),
-            patch.object(store, "_add_accessed_at_column"),
-            patch.object(store, "_create_log_tables"),
-            patch.object(store, "_create_meta_table"),
-            patch.object(store, "_validate_or_record_meta"),
-            patch.object(store, "_create_index"),
+            patch("distillery.store.duckdb.run_pending_migrations", return_value=6) as mock_mig,
+            patch.object(store, "_validate_or_record_meta") as mock_meta,
+            patch.object(store, "_track_version_info") as mock_track,
         ):
             store._sync_initialize()
             mock_httpfs.assert_not_called()
+            mock_mig.assert_called_once()
+            mock_meta.assert_called_once_with(mock_conn)
+            mock_track.assert_called_once_with(mock_conn)
 
     def test_httpfs_called_before_vss_for_s3(self) -> None:
         """httpfs must be loaded before vss when using S3."""
@@ -334,12 +334,9 @@ class TestSyncInitializeHttpfs:
             patch.object(store, "_open_connection", return_value=mock_conn),
             patch.object(store, "_setup_httpfs", side_effect=fake_httpfs),
             patch.object(store, "_setup_vss", side_effect=fake_vss),
-            patch.object(store, "_create_schema"),
-            patch.object(store, "_add_accessed_at_column"),
-            patch.object(store, "_create_log_tables"),
-            patch.object(store, "_create_meta_table"),
+            patch("distillery.store.duckdb.run_pending_migrations", return_value=6),
             patch.object(store, "_validate_or_record_meta"),
-            patch.object(store, "_create_index"),
+            patch.object(store, "_track_version_info"),
         ):
             store._sync_initialize()
 
