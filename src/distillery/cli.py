@@ -533,71 +533,76 @@ def _cmd_export(config_path: str | None, fmt: str, output_path: str) -> int:
         print(f"Error loading configuration: {exc}", file=sys.stderr)
         return 1
 
-    async def _run() -> Any:
-        from distillery.mcp.server import _create_embedding_provider, _normalize_db_path
-        from distillery.store.duckdb import DuckDBStore
+    def _run_export() -> Any:
+        import duckdb as _duckdb
 
-        embedding_provider = _create_embedding_provider(cfg)
+        from distillery.mcp.server import _normalize_db_path
+
         db_path = _normalize_db_path(cfg.storage.database_path)
 
-        store = DuckDBStore(
-            db_path=db_path,
-            embedding_provider=embedding_provider,
-            s3_region=cfg.storage.s3_region,
-            s3_endpoint=cfg.storage.s3_endpoint,
-        )
-        await store.initialize()
+        # Open read-only to avoid running migrations or modifying _meta.
+        if db_path == ":memory:":
+            raise RuntimeError("Cannot export from an in-memory database")
+        resolved = Path(db_path).expanduser()
+        if not resolved.exists():
+            raise RuntimeError(f"Database file not found: {db_path}")
 
-        conn = store._conn
-        assert conn is not None
+        conn = _duckdb.connect(str(resolved), read_only=True)
+        try:
+            # Verify the entries table exists.
+            table_check = conn.execute(
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_name = 'entries'"
+            ).fetchone()
+            if table_check is None or table_check[0] == 0:
+                return [], [], {}
 
-        # Query entries (no embedding column).
-        entry_rows = conn.execute(
-            "SELECT id, content, entry_type, source, status, tags, metadata, version, "
-            "project, author, created_at, updated_at, created_by, last_modified_by FROM entries"
-        ).fetchall()
-        entry_cols = [
-            "id", "content", "entry_type", "source", "status", "tags",
-            "metadata", "version", "project", "author", "created_at", "updated_at",
-            "created_by", "last_modified_by",
-        ]
-        entries: list[dict[str, Any]] = []
-        for row in entry_rows:
-            entry: dict[str, Any] = {}
-            for col, val in zip(entry_cols, row, strict=True):
-                if hasattr(val, "isoformat"):
-                    entry[col] = val.isoformat()
-                elif col == "metadata" and isinstance(val, str):
-                    # DuckDB returns JSON columns as strings; parse back to dict
-                    # so the export file contains a JSON object, not a JSON string.
-                    entry[col] = json.loads(val) if val else {}
-                else:
-                    entry[col] = val
-            entries.append(entry)
+            # Query entries (no embedding column).
+            entry_rows = conn.execute(
+                "SELECT id, content, entry_type, source, status, tags, metadata, "
+                "version, project, author, created_at, updated_at, created_by, "
+                "last_modified_by FROM entries"
+            ).fetchall()
+            entry_cols = [
+                "id", "content", "entry_type", "source", "status", "tags",
+                "metadata", "version", "project", "author", "created_at",
+                "updated_at", "created_by", "last_modified_by",
+            ]
+            entries: list[dict[str, Any]] = []
+            for row in entry_rows:
+                entry: dict[str, Any] = {}
+                for col, val in zip(entry_cols, row, strict=True):
+                    if hasattr(val, "isoformat"):
+                        entry[col] = val.isoformat()
+                    elif col == "metadata" and isinstance(val, str):
+                        entry[col] = json.loads(val) if val else {}
+                    else:
+                        entry[col] = val
+                entries.append(entry)
 
-        # Query feed_sources.
-        feed_rows = conn.execute("SELECT * FROM feed_sources").fetchall()
-        feed_cols = [desc[0] for desc in conn.description]
-        feed_sources: list[dict[str, Any]] = []
-        for row in feed_rows:
-            fsrc: dict[str, Any] = {}
-            for col, val in zip(feed_cols, row, strict=True):
-                if hasattr(val, "isoformat"):
-                    fsrc[col] = val.isoformat()
-                else:
-                    fsrc[col] = val
-            feed_sources.append(fsrc)
+            # Query feed_sources.
+            feed_rows = conn.execute("SELECT * FROM feed_sources").fetchall()
+            feed_cols = [desc[0] for desc in conn.description]
+            feed_sources: list[dict[str, Any]] = []
+            for row in feed_rows:
+                fsrc: dict[str, Any] = {}
+                for col, val in zip(feed_cols, row, strict=True):
+                    if hasattr(val, "isoformat"):
+                        fsrc[col] = val.isoformat()
+                    else:
+                        fsrc[col] = val
+                feed_sources.append(fsrc)
 
-        # Query _meta.
-        meta_rows = conn.execute("SELECT key, value FROM _meta").fetchall()
-        meta: dict[str, str] = {str(row[0]): str(row[1]) for row in meta_rows}
+            # Query _meta.
+            meta_rows = conn.execute("SELECT key, value FROM _meta").fetchall()
+            meta: dict[str, str] = {str(row[0]): str(row[1]) for row in meta_rows}
 
-        await store.close()
-
-        return entries, feed_sources, meta
+            return entries, feed_sources, meta
+        finally:
+            conn.close()
 
     try:
-        entries, feed_sources, meta = asyncio.run(_run())
+        entries, feed_sources, meta = _run_export()
     except Exception as exc:
         print(f"Error during export: {exc}", file=sys.stderr)
         return 1
@@ -668,6 +673,17 @@ def _cmd_import(
     if missing:
         print(
             f"Error: import file is missing required keys: {', '.join(missing)}",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Validate export format version.
+    supported_versions = {1}
+    export_version = payload.get("version")
+    if export_version not in supported_versions:
+        print(
+            f"Error: unsupported export format version {export_version!r} "
+            f"(supported: {sorted(supported_versions)})",
             file=sys.stderr,
         )
         return 1

@@ -429,6 +429,35 @@ class TestCmdHealthUnit:
 # ---------------------------------------------------------------------------
 
 
+class _DummyProvider:
+    """Minimal embedding provider for test DB initialization."""
+
+    @property
+    def dimensions(self) -> int:
+        return 4
+
+    @property
+    def model_name(self) -> str:
+        return "test-4d"
+
+    def embed(self, text: str) -> list[float]:
+        return [0.25, 0.25, 0.25, 0.25]
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        return [self.embed(t) for t in texts]
+
+
+def _init_test_db(db_path: str) -> None:
+    """Create and initialize a test database so export can open it read-only."""
+    import asyncio
+
+    from distillery.store.duckdb import DuckDBStore
+
+    store = DuckDBStore(db_path=db_path, embedding_provider=_DummyProvider())
+    asyncio.run(store.initialize())
+    asyncio.run(store.close())
+
+
 class TestExportCommand:
     def test_export_creates_json_file(
         self,
@@ -436,6 +465,7 @@ class TestExportCommand:
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         db_path = str(tmp_path / "test.db")
+        _init_test_db(db_path)
         cfg_path = write_config(tmp_path, db_path)
         out_path = str(tmp_path / "export.json")
         with pytest.raises(SystemExit) as exc:
@@ -449,6 +479,7 @@ class TestExportCommand:
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         db_path = str(tmp_path / "test.db")
+        _init_test_db(db_path)
         cfg_path = write_config(tmp_path, db_path)
         out_path = str(tmp_path / "export.json")
         with pytest.raises(SystemExit):
@@ -466,6 +497,7 @@ class TestExportCommand:
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         db_path = str(tmp_path / "test.db")
+        _init_test_db(db_path)
         cfg_path = write_config(tmp_path, db_path)
         out_path = str(tmp_path / "export.json")
         with pytest.raises(SystemExit):
@@ -480,6 +512,7 @@ class TestExportCommand:
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         db_path = str(tmp_path / "test.db")
+        _init_test_db(db_path)
         cfg_path = write_config(tmp_path, db_path)
         out_path = str(tmp_path / "export.json")
         with pytest.raises(SystemExit):
@@ -514,6 +547,7 @@ class TestExportCommand:
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         db_path = str(tmp_path / "test.db")
+        _init_test_db(db_path)
         cfg_path = write_config(tmp_path, db_path)
         out_path = str(tmp_path / "export.json")
         rc = _cmd_export(str(cfg_path), "text", out_path)
