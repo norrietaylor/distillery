@@ -21,10 +21,10 @@ ignore:
     reason: "CPython 3.13 — no upstream fix available in any distro"
 
   - vulnerability: CVE-2026-2673
-    reason: "openssl 3.5.5 — no upstream fix available in any distro"
+    reason: "openssl 3.5.5 — upstream fix commits (85977e0, 2157c9d) exist but not yet in a released 3.5.x version. CVSS 7.5 (High); network-exploitable but requires specific TLS handshake conditions not present in our deployment. Reviewed: 2026-04-03"
 
   - vulnerability: CVE-2025-69720
-    reason: "ncurses 6.5 — no upstream fix available in any distro"
+    reason: "ncurses 6.5 — CVSS 3.3 (Low); local attack vector only, not exploitable in our non-interactive container deployment. Action plan: upgrade to ncurses 6.6 when available in Wolfi/Alpine. Reviewed: 2026-04-03"
 
   - vulnerability: CVE-2026-4046
     reason: "glibc 2.43 (Wolfi) — no upstream fix available"
