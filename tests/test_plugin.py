@@ -159,7 +159,6 @@ class TestPluginManifestMetadata:
             "homepage",
             "repository",
             "keywords",
-            "skills",
             "mcpServers",
         }
         for key in required_keys:
@@ -171,52 +170,32 @@ class TestPluginManifestMetadata:
 # ---------------------------------------------------------------------------
 
 
+SKILLS_DIR = REPO_ROOT / "skills"
+
+
 class TestPluginSkills:
-    def test_skills_is_a_directory_path(self) -> None:
-        """skills field must be a relative directory path string."""
-        manifest = load_plugin_manifest()
-        assert isinstance(manifest["skills"], str)
-        assert not manifest["skills"].startswith("/"), "skills path must be relative"
-
-    def test_skills_directory_value(self) -> None:
-        """skills must point to '../skills/' (relative to .claude-plugin/)."""
-        manifest = load_plugin_manifest()
-        assert manifest["skills"] == "../skills/"
-
     def test_skills_directory_exists(self) -> None:
-        """The skills directory referenced in the manifest must exist."""
-        manifest = load_plugin_manifest()
-        skills_path = manifest["skills"].removeprefix("./")
-        skills_dir = PLUGIN_DIR / skills_path
-        assert skills_dir.exists(), f"Skills directory not found at {skills_dir}"
-        assert skills_dir.is_dir(), f"{skills_dir} is not a directory"
+        """The skills/ directory must exist at the repo root."""
+        assert SKILLS_DIR.exists(), f"Skills directory not found at {SKILLS_DIR}"
+        assert SKILLS_DIR.is_dir(), f"{SKILLS_DIR} is not a directory"
 
     def test_all_expected_skill_subdirectories_exist(self) -> None:
         """Each expected skill must have a subdirectory with a SKILL.md file."""
-        manifest = load_plugin_manifest()
-        skills_path = manifest["skills"].removeprefix("./")
-        skills_dir = PLUGIN_DIR / skills_path
         for skill_name in EXPECTED_SKILL_NAMES:
-            skill_file = skills_dir / skill_name / "SKILL.md"
+            skill_file = SKILLS_DIR / skill_name / "SKILL.md"
             assert skill_file.exists(), f"Skill file missing: {skill_file}"
 
     def test_skill_files_have_yaml_frontmatter(self) -> None:
         """Each SKILL.md must start with YAML frontmatter."""
-        manifest = load_plugin_manifest()
-        skills_path = manifest["skills"].removeprefix("./")
-        skills_dir = PLUGIN_DIR / skills_path
         for skill_name in EXPECTED_SKILL_NAMES:
-            skill_file = skills_dir / skill_name / "SKILL.md"
+            skill_file = SKILLS_DIR / skill_name / "SKILL.md"
             assert skill_file.read_text(encoding="utf-8").lstrip().startswith("---"), (
                 f"Skill file missing YAML frontmatter: {skill_file}"
             )
 
     def test_exactly_ten_skill_subdirectories(self) -> None:
         """The skills directory must contain exactly ten skill subdirectories with SKILL.md files."""
-        manifest = load_plugin_manifest()
-        skills_path = manifest["skills"].removeprefix("./")
-        skills_dir = PLUGIN_DIR / skills_path
-        found = {d.name for d in skills_dir.iterdir() if d.is_dir() and (d / "SKILL.md").exists()}
+        found = {d.name for d in SKILLS_DIR.iterdir() if d.is_dir() and (d / "SKILL.md").exists()}
         assert found == EXPECTED_SKILL_NAMES
 
 
