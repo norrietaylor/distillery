@@ -139,7 +139,7 @@ Distillery is built as a 4-layer system where skills (SKILL.md files) drive all 
 
 | Layer | What it does | Key files |
 |-------|-------------|-----------|
-| **Skills** | 10 SKILL.md files — portable, version-controlled slash commands. Not Python code. | `.claude-plugin/skills/*/SKILL.md` |
+| **Skills** | 10 SKILL.md files — portable, version-controlled slash commands. Not Python code. | `skills/*/SKILL.md` |
 | **MCP Server** | 22 tools exposed over stdio (local) or streamable-HTTP (team). Built on FastMCP 2.x/3.x with `@server.tool` decorators. | `src/distillery/mcp/server.py` |
 | **Webhook API** | REST endpoints (`/api/poll`, `/api/rescore`, `/api/maintenance`) for automated scheduling. Bearer token auth, per-endpoint cooldowns persisted to DuckDB. Mounted alongside MCP in HTTP mode. | `src/distillery/mcp/webhooks.py` |
 | **Auth** | MCP: GitHub OAuth with org-restricted access. Webhooks: bearer token via `DISTILLERY_WEBHOOK_SECRET`. Middleware handles logging, rate limiting, security headers, budget tracking. | `src/distillery/mcp/auth.py`, `middleware.py`, `budget.py` |
@@ -191,7 +191,7 @@ The `Entry` dataclass (`src/distillery/models.py`) is the fundamental unit of kn
 
 ```text
 distillery/
-├── .claude-plugin/skills/   # Claude Code skill definitions (loaded via plugin)
+├── skills/                  # Claude Code skill definitions (loaded via plugin)
 │   ├── distill/SKILL.md
 │   ├── recall/SKILL.md
 │   ├── pour/SKILL.md

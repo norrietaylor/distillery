@@ -49,7 +49,7 @@ distillery-mcp --transport http --port 8000
 Four-layer design:
 
 ```text
-Skills (.claude-plugin/skills/<name>/SKILL.md)  →  slash commands users invoke
+Skills (skills/<name>/SKILL.md)  →  slash commands users invoke
     ↓
 MCP Server (src/distillery/mcp/server.py)  →  16 tools over stdio or HTTP (FastMCP 2.x/3.x)
 Webhook API (src/distillery/mcp/webhooks.py) →  /api/poll, /api/rescore, /api/maintenance (bearer auth)
@@ -100,7 +100,7 @@ Always create a pull request for changes — never push directly to `main`. Crea
 
 ## Skills
 
-10 skills live in `.claude-plugin/skills/<name>/SKILL.md` with YAML frontmatter. Shared conventions are in `.claude-plugin/skills/CONVENTIONS.md`. All skills follow the same pattern: check MCP availability, determine author (git config > env > ask), determine project (git repo name > flag > ask), execute, confirm.
+10 skills live in `skills/<name>/SKILL.md` with YAML frontmatter. Shared conventions are in `skills/CONVENTIONS.md`. All skills follow the same pattern: check MCP availability, determine author (git config > env > ask), determine project (git repo name > flag > ask), execute, confirm.
 
 - **Knowledge capture**: `/distill`, `/bookmark`, `/minutes`
 - **Knowledge retrieval**: `/recall`, `/pour`, `/classify`
@@ -122,4 +122,4 @@ make docs-serve          # or: mkdocs serve
 pip install .[docs]
 ```
 
-The docs site is deployed to GitHub Pages via `.github/workflows/pages.yml` on push to `main`. The `docs/` directory contains only MkDocs source files — legacy docs and specs have been removed. SKILL.md files in `.claude-plugin/skills/` are Claude-facing instructions; the `docs/skills/` pages are human-readable rewrites.
+The docs site is deployed to GitHub Pages via `.github/workflows/pages.yml` on push to `main`. The `docs/` directory contains only MkDocs source files — legacy docs and specs have been removed. SKILL.md files in `skills/` are Claude-facing instructions; the `docs/skills/` pages are human-readable rewrites.
