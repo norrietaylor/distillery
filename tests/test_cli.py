@@ -323,6 +323,14 @@ class TestQueryStatus:
         assert "total_entries" in result
         assert "entries_by_type" in result
         assert "entries_by_status" in result
+        assert "schema_version" in result
+        assert "duckdb_version" in result
+
+    def test_version_keys_none_on_uninitialised_db(self) -> None:
+        """schema_version and duckdb_version are None when _meta table is absent."""
+        result = _query_status(":memory:")
+        assert result["schema_version"] is None
+        assert result["duckdb_version"] is None
 
     def test_bad_path_raises_runtime_error(self, tmp_path: Path) -> None:
         bad = str(tmp_path / "no_dir" / "x.db")
@@ -347,6 +355,56 @@ class TestCmdStatusUnit:
         missing = str(tmp_path / "missing.yaml")
         rc = _cmd_status(missing, "text")
         assert rc == 1
+
+    def test_cmd_status_json_includes_version_keys(
+        self, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        """JSON output always includes schema_version and duckdb_version keys."""
+        cfg_path = write_config(tmp_path, ":memory:")
+        rc = _cmd_status(str(cfg_path), "json")
+        assert rc == 0
+        data = json.loads(capsys.readouterr().out)
+        assert "schema_version" in data
+        assert "duckdb_version" in data
+
+    def test_cmd_status_text_shows_version_when_available(
+        self, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        """Text output includes schema_version/duckdb_version lines when the values are set."""
+        import duckdb
+
+        from distillery.store.duckdb import DuckDBStore
+
+        class _FakeProvider:
+            @property
+            def dimensions(self) -> int:
+                return 4
+
+            @property
+            def model_name(self) -> str:
+                return "test-4d"
+
+            def embed(self, text: str) -> list[float]:
+                return [0.25, 0.25, 0.25, 0.25]
+
+            def embed_batch(self, texts: list[str]) -> list[list[float]]:
+                return [self.embed(t) for t in texts]
+
+        import asyncio
+
+        db_path = str(tmp_path / "version_test.db")
+        provider = _FakeProvider()
+        store = DuckDBStore(db_path=db_path, embedding_provider=provider)
+        asyncio.run(store.initialize())
+        asyncio.run(store.close())
+
+        cfg_path = write_config(tmp_path, db_path)
+        rc = _cmd_status(str(cfg_path), "text")
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "schema_version:" in out
+        assert "duckdb_version:" in out
+        assert duckdb.__version__ in out
 
 
 class TestCmdHealthUnit:

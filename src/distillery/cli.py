@@ -198,6 +198,8 @@ def _query_status(db_path: str) -> dict[str, Any]:
     - ``total_entries`` (int)
     - ``entries_by_type`` (dict[str, int])
     - ``entries_by_status`` (dict[str, int])
+    - ``schema_version`` (str | None) — value from _meta, or None if unavailable
+    - ``duckdb_version`` (str | None) — value from _meta, or None if unavailable
 
     Raises:
         RuntimeError: If the database cannot be opened or queried.
@@ -223,6 +225,8 @@ def _query_status(db_path: str) -> dict[str, Any]:
                 "total_entries": 0,
                 "entries_by_type": {},
                 "entries_by_status": {},
+                "schema_version": None,
+                "duckdb_version": None,
             }
 
         total_row = conn.execute("SELECT COUNT(*) FROM entries").fetchone()
@@ -238,10 +242,24 @@ def _query_status(db_path: str) -> dict[str, Any]:
         ).fetchall()
         entries_by_status = {str(row[0]): int(row[1]) for row in status_rows}
 
+        # Read version info from _meta if the table exists.
+        schema_version: str | None = None
+        duckdb_version: str | None = None
+        meta_check = conn.execute(
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '_meta'"
+        ).fetchone()
+        if meta_check is not None and meta_check[0] > 0:
+            sv_row = conn.execute("SELECT value FROM _meta WHERE key = 'schema_version'").fetchone()
+            schema_version = sv_row[0] if sv_row is not None else None
+            dv_row = conn.execute("SELECT value FROM _meta WHERE key = 'duckdb_version'").fetchone()
+            duckdb_version = dv_row[0] if dv_row is not None else None
+
         return {
             "total_entries": total,
             "entries_by_type": entries_by_type,
             "entries_by_status": entries_by_status,
+            "schema_version": schema_version,
+            "duckdb_version": duckdb_version,
         }
     finally:
         conn.close()
@@ -305,6 +323,8 @@ def _cmd_status(config_path: str | None, fmt: str) -> int:
         "total_entries": stats["total_entries"],
         "entries_by_type": stats["entries_by_type"],
         "entries_by_status": stats["entries_by_status"],
+        "schema_version": stats["schema_version"],
+        "duckdb_version": stats["duckdb_version"],
     }
 
     if fmt == "json":
@@ -312,6 +332,10 @@ def _cmd_status(config_path: str | None, fmt: str) -> int:
     else:
         print(f"database_path:    {data['database_path']}")
         print(f"embedding_model:  {data['embedding_model']}")
+        if data["schema_version"] is not None:
+            print(f"schema_version:   {data['schema_version']}")
+        if data["duckdb_version"] is not None:
+            print(f"duckdb_version:   {data['duckdb_version']}")
         print(f"total_entries:    {data['total_entries']}")
         print("entries_by_type:")
         if data["entries_by_type"]:
