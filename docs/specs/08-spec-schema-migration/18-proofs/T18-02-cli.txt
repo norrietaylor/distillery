@@ -1,0 +1,19 @@
+Type: cli
+Command: grep -n "created_by\|last_modified_by" src/distillery/cli.py
+Expected: created_by and last_modified_by present in SELECT query (line ~560) and entry_cols list (line ~565)
+Timestamp: 2026-04-03T00:00:00Z
+
+560:            "project, author, created_at, updated_at, created_by, last_modified_by FROM entries"
+565:            "created_by", "last_modified_by",
+782:                    created_by=raw.get("created_by", ""),
+783:                    last_modified_by=raw.get("last_modified_by", ""),
+791:                    " created_by, last_modified_by) "
+807:                        entry.created_by,
+808:                        entry.last_modified_by,
+
+Both columns now appear in:
+1. The SELECT query at line 560 (was missing before fix)
+2. The entry_cols list at line 565 (was missing before fix)
+3. The import side already had them at lines 782-808 (pre-existing)
+
+Status: PASS

@@ -557,11 +557,12 @@ def _cmd_export(config_path: str | None, fmt: str, output_path: str) -> int:
         # Query entries (no embedding column).
         entry_rows = conn.execute(
             "SELECT id, content, entry_type, source, status, tags, metadata, version, "
-            "project, author, created_at, updated_at FROM entries"
+            "project, author, created_at, updated_at, created_by, last_modified_by FROM entries"
         ).fetchall()
         entry_cols = [
             "id", "content", "entry_type", "source", "status", "tags",
             "metadata", "version", "project", "author", "created_at", "updated_at",
+            "created_by", "last_modified_by",
         ]
         entries: list[dict[str, Any]] = []
         for row in entry_rows:
@@ -776,8 +777,8 @@ def _cmd_import(
                     status=EntryStatus(raw.get("status", "active")),
                     metadata=dict(raw.get("metadata") or {}),
                     version=int(raw.get("version", 1)),
-                    created_at=_parse_dt(raw["created_at"]),
-                    updated_at=_parse_dt(raw["updated_at"]),
+                    created_at=_parse_dt(raw.get("created_at", datetime.now(UTC).isoformat())),
+                    updated_at=_parse_dt(raw.get("updated_at", datetime.now(UTC).isoformat())),
                     created_by=raw.get("created_by", ""),
                     last_modified_by=raw.get("last_modified_by", ""),
                 )
