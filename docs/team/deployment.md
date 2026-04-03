@@ -153,10 +153,69 @@ S3 credentials are resolved from `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` o
 
 ## Platform-Specific Guides
 
-- [Fly.io](fly.md) — persistent DuckDB on volume, scale-to-zero (~$3-5/month)
-- [Prefect Horizon](prefect.md) — managed hosting with MotherDuck
+Platform-specific deployment configs live in the [distill_ops](https://github.com/norrietaylor/distill_ops) repo:
 
-For other platforms (Docker, Kubernetes, AWS/GCP/Azure), use `deploy/fly/Dockerfile` as a starting point.
+- [Fly.io](https://github.com/norrietaylor/distill_ops/tree/main/fly) — persistent DuckDB on volume, scale-to-zero (~$3-5/month)
+- [Prefect Horizon](https://github.com/norrietaylor/distill_ops/tree/main/prefect) — managed hosting with MotherDuck
+
+For other platforms (Docker, Kubernetes, AWS/GCP/Azure), use the root `Dockerfile` in the distillery repo as a starting point:
+
+```bash
+docker build -t distillery .
+docker run -p 8000:8000 -e JINA_API_KEY=... distillery
+```
+
+## Database Migrations
+
+Distillery uses a forward-only schema migration system. Migrations run automatically on startup — no manual steps are needed for additive changes (new columns, new tables).
+
+### How It Works
+
+1. On startup, Distillery reads `schema_version` from the `_meta` table
+2. Any pending migrations (numbered higher than the current version) run in order
+3. Each migration runs in a transaction — if it fails, the database is unchanged
+4. After all migrations complete, `schema_version`, `duckdb_version`, and `vss_version` are updated in `_meta`
+
+Check the current schema version:
+
+```bash
+distillery status
+# Shows: Schema version: 6, DuckDB: 1.5.x
+```
+
+### Backup Before Upgrading
+
+Before deploying a new version with schema changes, back up the knowledge base:
+
+```bash
+distillery export --output backup-$(date +%Y%m%d).json
+```
+
+This exports all entries and feed sources to a portable JSON file (embeddings are excluded — they're recomputed on import).
+
+### Restoring from Backup
+
+```bash
+# Merge import — adds missing entries, skips duplicates
+distillery import --input backup.json
+
+# Full replace — drops all entries and reimports (re-embeds content)
+distillery import --input backup.json --mode replace
+```
+
+### Breaking Changes (Rare)
+
+If a release requires incompatible schema changes (e.g., embedding dimension change):
+
+1. `distillery export --output backup.json`
+2. Deploy the new version (creates fresh schema)
+3. `distillery import --input backup.json --mode replace`
+
+Content is re-embedded using the new model during import.
+
+### DuckDB Version Compatibility
+
+DuckDB's on-disk format is not guaranteed stable across minor versions. Distillery pins DuckDB to a compatible release range (`~=1.5.0`) and logs a warning if the stored `duckdb_version` in `_meta` differs from the running version.
 
 ## Scaling
 

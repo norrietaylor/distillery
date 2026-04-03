@@ -51,7 +51,7 @@ Distillery is built as a 4-layer system where skills (SKILL.md files) drive all 
   <!-- Layer 2: MCP Server -->
   <rect class="d-amber-bg" x="30" y="104" width="700" height="52" rx="10"/>
   <text class="d-white" x="380" y="128" text-anchor="middle">MCP Server</text>
-  <text class="d-white-sub" x="380" y="144" text-anchor="middle">FastMCP 2.x/3.x  ·  stdio + streamable-HTTP  ·  22 tools  ·  REST webhooks (/api/*)</text>
+  <text class="d-white-sub" x="380" y="144" text-anchor="middle">FastMCP 2.x/3.x  ·  stdio + streamable-HTTP  ·  18 tools  ·  REST webhooks (/api/*)</text>
 
   <!-- Connector: MCP to Auth + Protocols -->
   <line class="d-line" x1="380" y1="156" x2="380" y2="168"/>
@@ -139,7 +139,7 @@ Distillery is built as a 4-layer system where skills (SKILL.md files) drive all 
 
 | Layer | What it does | Key files |
 |-------|-------------|-----------|
-| **Skills** | 10 SKILL.md files — portable, version-controlled slash commands. Not Python code. | `.claude-plugin/skills/*/SKILL.md` |
+| **Skills** | 10 SKILL.md files — portable, version-controlled slash commands. Not Python code. | `skills/*/SKILL.md` |
 | **MCP Server** | 22 tools exposed over stdio (local) or streamable-HTTP (team). Built on FastMCP 2.x/3.x with `@server.tool` decorators. | `src/distillery/mcp/server.py` |
 | **Webhook API** | REST endpoints (`/api/poll`, `/api/rescore`, `/api/maintenance`) for automated scheduling. Bearer token auth, per-endpoint cooldowns persisted to DuckDB. Mounted alongside MCP in HTTP mode. | `src/distillery/mcp/webhooks.py` |
 | **Auth** | MCP: GitHub OAuth with org-restricted access. Webhooks: bearer token via `DISTILLERY_WEBHOOK_SECRET`. Middleware handles logging, rate limiting, security headers, budget tracking. | `src/distillery/mcp/auth.py`, `middleware.py`, `budget.py` |
@@ -191,7 +191,7 @@ The `Entry` dataclass (`src/distillery/models.py`) is the fundamental unit of kn
 
 ```text
 distillery/
-├── .claude-plugin/skills/   # Claude Code skill definitions (loaded via plugin)
+├── skills/                  # Claude Code skill definitions (loaded via plugin)
 │   ├── distill/SKILL.md
 │   ├── recall/SKILL.md
 │   ├── pour/SKILL.md
@@ -219,7 +219,7 @@ distillery/
 │   │   ├── engine.py        # ClassificationEngine
 │   │   └── dedup.py         # DeduplicationChecker
 │   ├── mcp/
-│   │   ├── server.py        # MCP server (22 tools, FastMCP 2.x)
+│   │   ├── server.py        # MCP server (18 tools, FastMCP 2.x)
 │   │   ├── webhooks.py      # REST webhook endpoints (/api/poll, /api/rescore, /api/maintenance)
 │   │   ├── auth.py          # GitHub OAuth via FastMCP GitHubProvider
 │   │   ├── middleware.py     # Request logging, rate limiting, security headers
@@ -231,7 +231,7 @@ distillery/
 │       ├── scorer.py        # Embedding-based relevance scorer
 │       ├── poller.py        # Background feed poller
 │       └── interests.py     # Interest extractor for source suggestions
-├── tests/                   # 1100+ tests (unit + integration)
+├── tests/                   # 1600+ tests (unit + integration)
 ├── deploy/
 │   ├── fly/                 # Fly.io deployment (persistent DuckDB)
 │   └── prefect/             # Prefect Horizon deployment (MotherDuck)

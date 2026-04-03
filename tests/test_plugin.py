@@ -176,12 +176,12 @@ class TestPluginSkills:
         """skills field must be a relative directory path string."""
         manifest = load_plugin_manifest()
         assert isinstance(manifest["skills"], str)
-        assert manifest["skills"].startswith("./")
+        assert not manifest["skills"].startswith("/"), "skills path must be relative"
 
     def test_skills_directory_value(self) -> None:
-        """skills must point to './skills/'."""
+        """skills must point to '../skills/' (relative to .claude-plugin/)."""
         manifest = load_plugin_manifest()
-        assert manifest["skills"] == "./skills/"
+        assert manifest["skills"] == "../skills/"
 
     def test_skills_directory_exists(self) -> None:
         """The skills directory referenced in the manifest must exist."""

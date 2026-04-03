@@ -8,7 +8,7 @@
 - [x] DuckDB backend with VSS extension and HNSW index (cosine similarity)
 - [x] Configurable embedding providers (Jina v3 default, OpenAI adapter)
 - [x] Embedding model lock via `_meta` table — prevents mixed-model corruption
-- [x] MCP server with 22 tools over stdio and streamable-HTTP
+- [x] MCP server with 18 tools over stdio and streamable-HTTP
 - [x] `distillery.yaml` config system with validation
 
 ### Core Skills
@@ -25,9 +25,9 @@
 - [x] `/classify` skill — classify by ID, batch inbox, review queue triage
 
 ### Quality & Observability
-- [x] Implicit retrieval feedback + `distillery_quality` tool
+- [x] Implicit retrieval feedback + quality metrics (now via `distillery_metrics(scope="search_quality")`)
 - [x] Stale entry detection — `distillery_stale` tool
-- [x] Conflict detection — `distillery_check_conflicts` tool
+- [x] Conflict detection (now via `distillery_find_similar(conflict_check=true)`)
 - [x] Usage metrics dashboard — `distillery_metrics` tool
 
 ### Infrastructure

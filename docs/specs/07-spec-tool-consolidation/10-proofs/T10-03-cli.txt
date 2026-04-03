@@ -1,3 +1,0 @@
-_VALID_OUTPUT_MODES: ['full', 'ids', 'review', 'summary']
-PASS: review output mode registered in _VALID_OUTPUT_MODES
-PASS: _handle_review_queue removed from classify.py

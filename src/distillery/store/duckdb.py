@@ -16,6 +16,7 @@ are implemented below (T02.4).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -28,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 import duckdb
 
 from distillery.models import Entry, EntryStatus, validate_metadata
+from distillery.store.migrations import _CREATE_META_TABLE, run_pending_migrations
 
 if TYPE_CHECKING:
     from distillery.embedding.protocol import EmbeddingProvider
@@ -43,97 +45,6 @@ def _sql_escape(value: str) -> str:
     inside a SQL single-quoted string (e.g. ``SET s3_region = 'us-east-1'``).
     """
     return value.replace("'", "''")
-
-
-# SQL for the entries table.  The ``embedding`` column uses a fixed-size
-# FLOAT array whose length is set at runtime based on the configured
-# embedding dimensions.
-_CREATE_ENTRIES_TABLE = """
-CREATE TABLE IF NOT EXISTS entries (
-    id              VARCHAR PRIMARY KEY,
-    content         VARCHAR NOT NULL,
-    entry_type      VARCHAR NOT NULL,
-    source          VARCHAR NOT NULL,
-    author          VARCHAR NOT NULL,
-    project         VARCHAR,
-    tags            VARCHAR[] DEFAULT [],
-    status          VARCHAR NOT NULL DEFAULT 'active',
-    metadata        JSON,
-    created_at      TIMESTAMP NOT NULL DEFAULT current_timestamp,
-    updated_at      TIMESTAMP NOT NULL DEFAULT current_timestamp,
-    version         INTEGER NOT NULL DEFAULT 1,
-    embedding       FLOAT[{dimensions}],
-    created_by      VARCHAR DEFAULT '',
-    last_modified_by VARCHAR DEFAULT ''
-);
-"""
-
-_CREATE_HNSW_INDEX = """
-CREATE INDEX IF NOT EXISTS idx_entries_embedding
-ON entries
-USING HNSW (embedding)
-WITH (metric = 'cosine');
-"""
-
-_CREATE_META_TABLE = """
-CREATE TABLE IF NOT EXISTS _meta (
-    key   VARCHAR PRIMARY KEY,
-    value VARCHAR NOT NULL
-);
-"""
-
-_ADD_ACCESSED_AT_COLUMN = """
-ALTER TABLE entries ADD COLUMN IF NOT EXISTS accessed_at TIMESTAMP;
-"""
-
-_ADD_OWNERSHIP_COLUMNS = """
-ALTER TABLE entries ADD COLUMN IF NOT EXISTS created_by VARCHAR DEFAULT '';
-ALTER TABLE entries ADD COLUMN IF NOT EXISTS last_modified_by VARCHAR DEFAULT '';
-"""
-
-_CREATE_SEARCH_LOG_TABLE = """
-CREATE TABLE IF NOT EXISTS search_log (
-    id                 VARCHAR PRIMARY KEY,
-    query              VARCHAR NOT NULL,
-    result_entry_ids   VARCHAR[],
-    result_scores      FLOAT[],
-    timestamp          TIMESTAMP NOT NULL DEFAULT current_timestamp,
-    session_id         VARCHAR
-);
-"""
-
-_CREATE_FEEDBACK_LOG_TABLE = """
-CREATE TABLE IF NOT EXISTS feedback_log (
-    id          VARCHAR PRIMARY KEY,
-    search_id   VARCHAR NOT NULL REFERENCES search_log(id),
-    entry_id    VARCHAR NOT NULL,
-    signal      VARCHAR NOT NULL,
-    timestamp   TIMESTAMP NOT NULL DEFAULT current_timestamp
-);
-"""
-
-_CREATE_AUDIT_LOG_TABLE = """
-CREATE TABLE IF NOT EXISTS audit_log (
-    id         VARCHAR PRIMARY KEY,
-    timestamp  TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
-    user_id    VARCHAR NOT NULL DEFAULT '',
-    tool       VARCHAR NOT NULL,
-    entry_id   VARCHAR NOT NULL DEFAULT '',
-    action     VARCHAR NOT NULL,
-    outcome    VARCHAR NOT NULL
-);
-"""
-
-_CREATE_FEED_SOURCES_TABLE = """
-CREATE TABLE IF NOT EXISTS feed_sources (
-    url                    VARCHAR PRIMARY KEY,
-    source_type            VARCHAR NOT NULL,
-    label                  VARCHAR NOT NULL DEFAULT '',
-    poll_interval_minutes  INTEGER NOT NULL DEFAULT 60,
-    trust_weight           FLOAT NOT NULL DEFAULT 1.0,
-    created_at             TIMESTAMP NOT NULL DEFAULT current_timestamp
-);
-"""
 
 
 _AGGREGATE_EXPR_MAP: dict[str, str] = {
@@ -351,52 +262,65 @@ class DuckDBStore:
             bool(access_key),
         )
 
-    def _create_schema(self, conn: duckdb.DuckDBPyConnection) -> None:
-        """Create the ``entries`` table and HNSW index if they don't exist."""
-        dimensions = self._embedding_provider.dimensions
-        ddl = _CREATE_ENTRIES_TABLE.format(dimensions=dimensions)
-        conn.execute(ddl)
-        logger.info(
-            "Entries table ready (embedding dimensions=%d)",
-            dimensions,
-        )
+    def _track_version_info(self, conn: duckdb.DuckDBPyConnection) -> None:
+        """Persist DuckDB and VSS version info in ``_meta``.
 
-    def _create_index(self, conn: duckdb.DuckDBPyConnection) -> None:
-        """Create the HNSW index on the embedding column.
+        Compares the stored ``duckdb_version`` against the running library
+        version and warns on major/minor mismatch.  Then upserts
+        ``duckdb_version`` and (when available) ``vss_version``.
 
-        Skipped when the VSS extension is not available — vector search
-        degrades to brute-force cosine distance which is still correct.
+        Schema version tracking is handled by
+        :func:`~distillery.store.migrations.run_pending_migrations`.
         """
-        if not self._vss_available:
-            logger.info("Skipping HNSW index creation (VSS extension not available)")
-            return
-        try:
-            conn.execute(_CREATE_HNSW_INDEX)
-            logger.info("HNSW index on entries.embedding ready")
-        except duckdb.CatalogException:
-            # Index already exists -- safe to ignore.
-            logger.debug("HNSW index already exists, skipping creation")
-        except duckdb.BinderException:
-            logger.warning("HNSW index type not recognized — skipping index creation")
+        current_duckdb_version: str = duckdb.__version__
 
-    def _create_meta_table(self, conn: duckdb.DuckDBPyConnection) -> None:
-        """Create the ``_meta`` table if it does not exist."""
-        conn.execute(_CREATE_META_TABLE)
-
-    def _create_log_tables(self, conn: duckdb.DuckDBPyConnection) -> None:
-        """Create the ``search_log``, ``feedback_log``, and ``audit_log`` tables."""
-        conn.execute(_CREATE_SEARCH_LOG_TABLE)
-        conn.execute(_CREATE_FEEDBACK_LOG_TABLE)
-        conn.execute(_CREATE_AUDIT_LOG_TABLE)
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_search_log_timestamp ON search_log (timestamp)"
+        # Compare stored duckdb_version; warn on major/minor mismatch
+        stored_result = conn.execute(
+            "SELECT value FROM _meta WHERE key = 'duckdb_version'"
         )
-        logger.info("search_log, feedback_log, and audit_log tables ready")
+        stored_row = stored_result.fetchone()
+        if stored_row is not None:
+            stored_version: str = stored_row[0]
+            stored_parts = stored_version.split(".")
+            current_parts = current_duckdb_version.split(".")
+            if (
+                len(stored_parts) >= 2
+                and len(current_parts) >= 2
+                and (stored_parts[0] != current_parts[0] or stored_parts[1] != current_parts[1])
+            ):
+                logger.warning(
+                    "DuckDB version changed: stored=%s, current=%s — "
+                    "consider running distillery export/import if schema differs",
+                    stored_version,
+                    current_duckdb_version,
+                )
 
-    def _create_feed_sources_table(self, conn: duckdb.DuckDBPyConnection) -> None:
-        """Create the ``feed_sources`` table if it doesn't exist."""
-        conn.execute(_CREATE_FEED_SOURCES_TABLE)
-        logger.info("feed_sources table ready")
+        # Upsert duckdb_version
+        conn.execute(
+            "INSERT INTO _meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+            ["duckdb_version", current_duckdb_version],
+        )
+
+        # Get VSS extension version if available; upsert into _meta
+        vss_version: str = ""
+        try:
+            vss_result = conn.execute(
+                "SELECT extension_version FROM duckdb_extensions() "
+                "WHERE extension_name = 'vss'"
+            )
+            vss_row = vss_result.fetchone()
+            if vss_row is not None:
+                vss_version = vss_row[0] or ""
+        except Exception:  # noqa: BLE001
+            pass  # VSS extension metadata not available — silently skip
+
+        if vss_version:
+            conn.execute(
+                "INSERT INTO _meta (key, value) VALUES (?, ?) "
+                "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+                ["vss_version", vss_version],
+            )
 
     def _validate_or_record_meta(self, conn: duckdb.DuckDBPyConnection) -> None:
         """Validate or record the embedding model metadata.
@@ -452,35 +376,13 @@ class DuckDBStore:
                 f"incompatible embeddings."
             )
 
-    def _add_accessed_at_column(self, conn: duckdb.DuckDBPyConnection) -> None:
-        """
-        Ensure the `entries` table has an `accessed_at` TIMESTAMP column.
-
-        If the column already exists this is a no-op; otherwise the table
-        schema is altered to add ``accessed_at``.
-        """
-        conn.execute(_ADD_ACCESSED_AT_COLUMN)
-        logger.debug("accessed_at column ready on entries table")
-
-    def _add_ownership_columns(self, conn: duckdb.DuckDBPyConnection) -> None:
-        """Ensure ``created_by`` and ``last_modified_by`` columns exist.
-
-        Idempotent — uses ``ADD COLUMN IF NOT EXISTS``.
-        """
-        for stmt in _ADD_OWNERSHIP_COLUMNS.strip().split(";"):
-            stmt = stmt.strip()
-            if stmt:
-                conn.execute(stmt)
-        logger.debug("ownership columns ready on entries table")
-
     def _sync_initialize(self) -> None:
-        """
-        Initialize the DuckDB connection and ensure the database is ready for use.
+        """Initialize the DuckDB connection and run pending schema migrations.
 
         Opens or creates the DuckDB database, loads and configures the VSS
-        extension, creates or migrates the schema (entries, logs, and metadata),
-        validates or records embedding model metadata, and ensures the HNSW
-        index and ``accessed_at`` column exist.
+        extension, runs forward-only migrations via
+        :func:`~distillery.store.migrations.run_pending_migrations`, validates
+        embedding metadata, and records DuckDB/VSS version info.
 
         Write-write conflicts (common when multiple stateless HTTP sessions
         start concurrently) are retried automatically by wrapping the entire
@@ -497,20 +399,47 @@ class DuckDBStore:
         self._setup_vss(conn)
 
         # Wrap the entire initialization write path in a retry loop to handle
-        # write-write conflicts during concurrent initialization. All the wrapped
-        # operations use CREATE IF NOT EXISTS or transactional upsert patterns,
-        # making retries safe.
+        # write-write conflicts during concurrent initialization.  All the
+        # wrapped operations use CREATE IF NOT EXISTS / transactional upsert
+        # patterns, making retries safe.
         for attempt in range(3):
             try:
-                self._create_schema(conn)
-                self._add_accessed_at_column(conn)
-                self._add_ownership_columns(conn)
-                self._create_log_tables(conn)
-                self._create_feed_sources_table(conn)
-                self._create_meta_table(conn)
+                # 1. Bootstrap the _meta table so get_current_schema_version
+                #    can read schema_version even on a brand-new database.
+                conn.execute(_CREATE_META_TABLE)
+
+                # 2. Run all pending forward-only migrations.
+                schema_version = run_pending_migrations(
+                    conn,
+                    dimensions=self._embedding_provider.dimensions,
+                    vss_available=self._vss_available,
+                )
+
+                # 3. Validate or record embedding model metadata.
                 self._validate_or_record_meta(conn)
-                self._create_index(conn)
-                break  # Success - exit retry loop
+
+                # 4. Ensure HNSW index exists.  Migration 6 may have been
+                #    applied when VSS was unavailable; this backfills the
+                #    index on a subsequent startup where VSS is present.
+                if self._vss_available:
+                    with contextlib.suppress(
+                        duckdb.CatalogException, duckdb.BinderException
+                    ):
+                        conn.execute(
+                            "CREATE INDEX IF NOT EXISTS idx_entries_embedding "
+                            "ON entries USING HNSW (embedding) "
+                            "WITH (metric = 'cosine');"
+                        )
+
+                # 5. Record DuckDB / VSS version info in _meta.
+                self._track_version_info(conn)
+
+                logger.info(
+                    "Schema at version %d, DuckDB %s",
+                    schema_version,
+                    duckdb.__version__,
+                )
+                break  # Success — exit retry loop
             except (duckdb.TransactionException, duckdb.ConstraintException):
                 if attempt < 2:
                     logger.warning(

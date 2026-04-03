@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is Distillery
 
-Distillery is a knowledge-base system for Claude Code. It stores, searches, and classifies knowledge entries using DuckDB with vector similarity search (VSS/HNSW). It includes ambient intelligence features that poll external feeds (GitHub, RSS) and score relevance using embeddings. It exposes functionality via an MCP server (stdio or streamable-HTTP transport) with 16 tools, orchestrated by 10 Claude Code skills (`/distill`, `/recall`, `/pour`, `/bookmark`, `/minutes`, `/classify`, `/watch`, `/radar`, `/tune`, `/setup`). HTTP transport supports GitHub OAuth for team access. REST webhook endpoints (`/api/poll`, `/api/rescore`, `/api/maintenance`) run alongside the MCP server for automated scheduling via GitHub Actions cron.
+Distillery is a knowledge-base system for Claude Code. It stores, searches, and classifies knowledge entries using DuckDB with vector similarity search (VSS/HNSW). It includes ambient intelligence features that poll external feeds (GitHub, RSS) and score relevance using embeddings. It exposes functionality via an MCP server (stdio or streamable-HTTP transport) with 18 tools, orchestrated by 10 Claude Code skills (`/distill`, `/recall`, `/pour`, `/bookmark`, `/minutes`, `/classify`, `/watch`, `/radar`, `/tune`, `/setup`). HTTP transport supports GitHub OAuth for team access. REST webhook endpoints (`/api/poll`, `/api/rescore`, `/api/maintenance`) run alongside the MCP server for automated scheduling via GitHub Actions cron.
 
 ## Commands
 
@@ -49,9 +49,9 @@ distillery-mcp --transport http --port 8000
 Four-layer design:
 
 ```text
-Skills (.claude-plugin/skills/<name>/SKILL.md)  →  slash commands users invoke
+Skills (skills/<name>/SKILL.md)  →  slash commands users invoke
     ↓
-MCP Server (src/distillery/mcp/server.py)  →  16 tools over stdio or HTTP (FastMCP 2.x/3.x)
+MCP Server (src/distillery/mcp/server.py)  →  18 tools over stdio or HTTP (FastMCP 2.x/3.x)
 Webhook API (src/distillery/mcp/webhooks.py) →  /api/poll, /api/rescore, /api/maintenance (bearer auth)
     ↓
 Core Protocols (store/protocol.py, embedding/protocol.py)  →  typed Protocol interfaces
@@ -70,12 +70,9 @@ Uses Python `Protocol` (structural subtyping), not ABCs. All storage operations 
 
 ## Deployment
 
-Production deployment configs live under `deploy/` with one subdirectory per provider:
+A generic `Dockerfile` at the repo root builds the Distillery MCP server image, published to `ghcr.io/norrietaylor/distillery`. Platform-specific deployment configs (Fly.io, Prefect Horizon) live in the [distill_ops](https://github.com/norrietaylor/distill_ops) repo.
 
-- `deploy/prefect/` — Prefect Horizon (MotherDuck + GitHub OAuth)
-- `deploy/fly/` — Fly.io (local DuckDB on persistent volume + GitHub OAuth)
-
-Local development uses `distillery-dev.yaml` at the repo root. The `DISTILLERY_CONFIG` env var points each deployment to its config file. See each provider's README for quickstart instructions.
+Local development uses `distillery-dev.yaml` at the repo root. The `DISTILLERY_CONFIG` env var points each deployment to its config file.
 
 ## Git Workflow
 
@@ -100,7 +97,7 @@ Always create a pull request for changes — never push directly to `main`. Crea
 
 ## Skills
 
-10 skills live in `.claude-plugin/skills/<name>/SKILL.md` with YAML frontmatter. Shared conventions are in `.claude-plugin/skills/CONVENTIONS.md`. All skills follow the same pattern: check MCP availability, determine author (git config > env > ask), determine project (git repo name > flag > ask), execute, confirm.
+10 skills live in `skills/<name>/SKILL.md` with YAML frontmatter. Shared conventions are in `skills/CONVENTIONS.md`. All skills follow the same pattern: check MCP availability, determine author (git config > env > ask), determine project (git repo name > flag > ask), execute, confirm.
 
 - **Knowledge capture**: `/distill`, `/bookmark`, `/minutes`
 - **Knowledge retrieval**: `/recall`, `/pour`, `/classify`
@@ -122,4 +119,4 @@ make docs-serve          # or: mkdocs serve
 pip install .[docs]
 ```
 
-The docs site is deployed to GitHub Pages via `.github/workflows/pages.yml` on push to `main`. The `docs/` directory contains only MkDocs source files — legacy docs and specs have been removed. SKILL.md files in `.claude-plugin/skills/` are Claude-facing instructions; the `docs/skills/` pages are human-readable rewrites.
+The docs site is deployed to GitHub Pages via `.github/workflows/pages.yml` on push to `main`. The `docs/` directory contains only MkDocs source files — legacy docs and specs have been removed. SKILL.md files in `skills/` are Claude-facing instructions; the `docs/skills/` pages are human-readable rewrites.

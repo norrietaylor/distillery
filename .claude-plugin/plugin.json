@@ -9,7 +9,7 @@
   "homepage": "https://github.com/norrietaylor/distillery",
   "repository": "https://github.com/norrietaylor/distillery",
   "keywords": ["knowledge-base", "second-brain", "mcp", "embeddings", "distillery"],
-  "skills": "./skills/",
+  "skills": "../skills/",
   "userConfig": {
     "jina_api_key": {
       "description": "Jina AI embedding API key. Obtain from https://jina.ai/api-key/",

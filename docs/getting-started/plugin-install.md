@@ -23,10 +23,10 @@ After installation, restart Claude Code and run the onboarding wizard:
 This verifies MCP connectivity, detects your transport, and configures auto-poll for ambient intelligence.
 
 !!! warning "Demo Server"
-    The plugin defaults to the hosted instance at `distillery-mcp.fly.dev`, which is a **demo server** for evaluation only. Do not store sensitive or confidential data. For production use, [deploy your own instance](../team/fly.md) or use [local setup](local-setup.md).
+    The plugin defaults to the hosted instance at `distillery-mcp.fly.dev`, which is a **demo server** for evaluation only. Do not store sensitive or confidential data. For production use, [deploy your own instance](../team/deployment.md) or use [local setup](local-setup.md).
 
 !!! note "Claude Desktop"
-    The Claude desktop app does not support Claude Code skills or the plugin install system. Desktop users can connect the MCP server directly (all 22 tools are available) but slash commands like `/distill` and `/recall` are CLI-only features.
+    The Claude desktop app does not support Claude Code skills or the plugin install system. Desktop users can connect the MCP server directly (all 18 tools are available) but slash commands like `/distill` and `/recall` are CLI-only features.
 
 ## Manual Install (Copy Skills)
 
@@ -34,23 +34,23 @@ Copy the skills directory into any project that should have access:
 
 ```bash
 mkdir -p ~/.claude/skills
-cp -r /path/to/distillery/.claude-plugin/skills/* ~/.claude/skills/
+cp -r /path/to/distillery/skills/* ~/.claude/skills/
 ```
 
 Or clone and symlink:
 
 ```bash
 git clone https://github.com/norrietaylor/distillery.git ~/.claude/distillery
-ln -s ~/.claude/distillery/.claude-plugin/skills/distill   ~/.claude/skills/distill
-ln -s ~/.claude/distillery/.claude-plugin/skills/recall    ~/.claude/skills/recall
-ln -s ~/.claude/distillery/.claude-plugin/skills/pour      ~/.claude/skills/pour
-ln -s ~/.claude/distillery/.claude-plugin/skills/bookmark  ~/.claude/skills/bookmark
-ln -s ~/.claude/distillery/.claude-plugin/skills/minutes   ~/.claude/skills/minutes
-ln -s ~/.claude/distillery/.claude-plugin/skills/classify  ~/.claude/skills/classify
-ln -s ~/.claude/distillery/.claude-plugin/skills/watch     ~/.claude/skills/watch
-ln -s ~/.claude/distillery/.claude-plugin/skills/radar     ~/.claude/skills/radar
-ln -s ~/.claude/distillery/.claude-plugin/skills/tune      ~/.claude/skills/tune
-ln -s ~/.claude/distillery/.claude-plugin/skills/setup     ~/.claude/skills/setup
+ln -s ~/.claude/distillery/skills/distill   ~/.claude/skills/distill
+ln -s ~/.claude/distillery/skills/recall    ~/.claude/skills/recall
+ln -s ~/.claude/distillery/skills/pour      ~/.claude/skills/pour
+ln -s ~/.claude/distillery/skills/bookmark  ~/.claude/skills/bookmark
+ln -s ~/.claude/distillery/skills/minutes   ~/.claude/skills/minutes
+ln -s ~/.claude/distillery/skills/classify  ~/.claude/skills/classify
+ln -s ~/.claude/distillery/skills/watch     ~/.claude/skills/watch
+ln -s ~/.claude/distillery/skills/radar     ~/.claude/skills/radar
+ln -s ~/.claude/distillery/skills/tune      ~/.claude/skills/tune
+ln -s ~/.claude/distillery/skills/setup     ~/.claude/skills/setup
 ```
 
 ## MCP Configuration
@@ -102,7 +102,7 @@ See [Local Setup](local-setup.md) for full local configuration and [MCP Server R
 
 ### Alternative — Self-hosted HTTP
 
-Deploy your own Distillery server with GitHub OAuth. See [Operator Deployment](../team/deployment.md) for setup and [Fly.io](../team/fly.md) or [Prefect Horizon](../team/prefect.md) for platform-specific guides.
+Deploy your own Distillery server with GitHub OAuth. See [Operator Deployment](../team/deployment.md) for setup and the [distill_ops](https://github.com/norrietaylor/distill_ops) repo for platform-specific guides (Fly.io, Prefect Horizon).
 
 ## Remote Auto-Poll Setup
 
@@ -134,10 +134,10 @@ You should see your feed sources and a note about the active remote trigger.
 
 ## Verifying the Setup
 
-After saving the settings file, restart Claude Code or reload MCP servers, then check connectivity by calling the `distillery_status` MCP tool:
+After saving the settings file, restart Claude Code or reload MCP servers, then check connectivity by calling the `distillery_metrics` MCP tool:
 
 ```text
-distillery_status
+distillery_metrics(scope="summary")
 ```
 
 You should see a JSON response with `"status": "ok"`.

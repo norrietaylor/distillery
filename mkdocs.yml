@@ -80,8 +80,6 @@ nav:
   - Team Access:
     - Team Member Guide: team/team-setup.md
     - Operator Deployment: team/deployment.md
-    - Fly.io: team/fly.md
-    - Prefect Horizon: team/prefect.md
   - Architecture: architecture.md
   - Contributing: contributing.md
   - Roadmap: roadmap.md

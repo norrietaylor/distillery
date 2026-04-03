@@ -1,9 +1,0 @@
-Type: cli
-Command: tail -n +$(grep -n '^---$' .claude-plugin/skills/setup/SKILL.md | tail -1 | cut -d: -f1) .claude-plugin/skills/setup/SKILL.md | wc -l
-Expected: <=150
-Timestamp: 2026-04-02T00:00:00Z
-
-Output:
-125
-
-Status: PASS (125 <= 150)

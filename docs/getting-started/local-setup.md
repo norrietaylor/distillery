@@ -88,7 +88,7 @@ Or use the installed entry point:
 Restart Claude Code and verify:
 
 ```text
-distillery_status
+distillery_metrics(scope="summary")
 ```
 
 ## Embedding Providers
