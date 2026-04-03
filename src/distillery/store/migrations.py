@@ -12,6 +12,7 @@ their corresponding migration callable.  The migration runner in
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import Any, Protocol
 
@@ -209,3 +210,96 @@ MIGRATIONS: dict[int, MigrationFunc] = {
 The migration runner executes entries with version > current schema version,
 in ascending order.  Each function must be idempotent.
 """
+
+
+# ---------------------------------------------------------------------------
+# Migration runner
+# ---------------------------------------------------------------------------
+
+
+def get_current_schema_version(conn: duckdb.DuckDBPyConnection) -> int:
+    """Read the current schema version from the ``_meta`` table.
+
+    Returns ``0`` if the ``_meta`` table does not exist or the
+    ``schema_version`` key has not been set.
+    """
+    try:
+        result = conn.execute(
+            "SELECT value FROM _meta WHERE key = 'schema_version'"
+        )
+        row = result.fetchone()
+        if row is not None:
+            return int(row[0])
+    except duckdb.CatalogException:
+        # _meta table does not exist yet.
+        pass
+    return 0
+
+
+def run_pending_migrations(
+    conn: duckdb.DuckDBPyConnection,
+    *,
+    dimensions: int,
+    vss_available: bool,
+) -> int:
+    """Execute pending migrations and return the resulting schema version.
+
+    Migrations with version numbers greater than the current schema version
+    are executed in ascending order.  Each migration runs inside its own
+    transaction; on failure the transaction is rolled back and a
+    ``RuntimeError`` is raised.
+
+    After all pending migrations succeed the ``schema_version`` key in
+    ``_meta`` is updated to the highest applied version.
+
+    Parameters
+    ----------
+    conn:
+        An open DuckDB connection.
+    dimensions:
+        Embedding vector width (required by migration 1).
+    vss_available:
+        Whether the VSS extension is loaded (required by migration 6).
+
+    Returns
+    -------
+    int
+        The schema version after all pending migrations have been applied.
+    """
+    current = get_current_schema_version(conn)
+    pending = sorted(v for v in MIGRATIONS if v > current)
+
+    if not pending:
+        logger.debug("Schema is up-to-date at version %d", current)
+        return current
+
+    kwargs: dict[str, Any] = {
+        "dimensions": dimensions,
+        "vss_available": vss_available,
+    }
+
+    for version in pending:
+        migration = MIGRATIONS[version]
+        logger.info("Running migration %d …", version)
+        try:
+            conn.execute("BEGIN TRANSACTION")
+            migration(conn, **kwargs)
+            conn.execute("COMMIT")
+        except Exception as exc:
+            with contextlib.suppress(Exception):
+                conn.execute("ROLLBACK")
+            raise RuntimeError(
+                f"Migration {version} failed: {exc}"
+            ) from exc
+
+    new_version = pending[-1]
+
+    # Upsert the schema version in _meta.  The _meta table is guaranteed to
+    # exist after migration 1 has run.
+    conn.execute(
+        "INSERT INTO _meta (key, value) VALUES ('schema_version', ?) "
+        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+        [str(new_version)],
+    )
+    logger.info("Schema migrated from version %d to %d", current, new_version)
+    return new_version

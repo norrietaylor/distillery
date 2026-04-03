@@ -1,0 +1,14 @@
+Type: test
+Command: python3 inline smoke tests
+Expected: All assertions pass
+Timestamp: 2026-04-03T00:00:00Z
+============================================================
+[PASS] get_current_schema_version returns 0 on fresh db
+[PASS] run_pending_migrations returns 6 from fresh db
+[PASS] get_current_schema_version returns 6 after migrations
+[PASS] re-running migrations is idempotent (returns 6)
+[PASS] partial migration from version 3 to 6
+[PASS] failed migration raises RuntimeError
+============================================================
+Results: 6 passed, 0 failed
+Status: PASS
