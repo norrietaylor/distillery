@@ -64,7 +64,7 @@ Digest stored: m3n4o5p6
 2. Groups entries by source tag or topic
 3. Synthesizes 2-4 sentence summaries per group with bullet points
 4. Generates a cross-group overall summary
-5. If `--suggest` is enabled, calls `distillery_suggest_sources` for recommendations
+5. If `--suggest` is enabled, calls `distillery_interests` (with `suggest_sources=true`) for recommendations
 6. Stores the digest as an entry (type `digest`) unless `--no-store` is specified
 
 ## Tips

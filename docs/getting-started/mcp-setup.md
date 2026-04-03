@@ -1,6 +1,6 @@
 # MCP Server Reference
 
-Complete reference for the Distillery MCP server — all 22 tools, configuration options, and troubleshooting.
+Complete reference for the Distillery MCP server — all 18 tools, configuration options, and troubleshooting.
 
 ## Starting the Server
 
@@ -42,35 +42,37 @@ See [`distillery.yaml.example`](https://github.com/norrietaylor/distillery/blob/
 
 | Tool | Description |
 |------|-------------|
-| `distillery_status` | Database stats: total entries, breakdown by type/status, embedding model |
-| `distillery_store` | Store a new knowledge entry with duplicate and conflict checks |
+| **CRUD** | |
+| `distillery_store` | Store a new knowledge entry with content, tags, and metadata |
 | `distillery_get` | Retrieve a single entry by UUID |
-| `distillery_update` | Partially update an existing entry (with metadata re-validation) |
+| `distillery_update` | Partially update an existing entry (tags, status, metadata) |
+| `distillery_list` | List entries with filtering, pagination, and optional review-queue enrichment (`output_mode="review"`) |
+| **Discovery** | |
 | `distillery_search` | Semantic search using cosine similarity; returns ranked results |
-| `distillery_find_similar` | Find entries similar to given text (for deduplication) |
-| `distillery_list` | List entries with optional filtering and pagination |
-| `distillery_classify` | Classify an entry by type with LLM-based confidence scoring |
-| `distillery_review_queue` | List entries pending manual review |
-| `distillery_resolve_review` | Resolve a pending review entry (accept/reject/reclassify) |
-| `distillery_check_dedup` | Check content for duplicates against existing entries |
-| `distillery_check_conflicts` | Detect semantic contradictions with existing entries |
-| `distillery_metrics` | Usage dashboard: entries, activity, search, quality, staleness |
-| `distillery_quality` | Aggregate retrieval quality metrics from implicit feedback |
+| `distillery_find_similar` | Find similar entries — supports dedup mode (`dedup_action=true`) and conflict detection (`conflict_check=true`) |
+| `distillery_aggregate` | Group entry counts by field (type, status, project, author) |
 | `distillery_stale` | Surface entries not accessed within a configurable time window |
 | `distillery_tag_tree` | Nested tree of all tags in use with entry counts |
-| `distillery_type_schemas` | Metadata schema registry for all entry types |
-| `distillery_watch` | List, add, or remove monitored feed sources |
+| **Classification** | |
+| `distillery_classify` | Classify an entry by type with LLM-based confidence scoring |
+| `distillery_resolve_review` | Resolve a pending review entry (accept/reject/reclassify) |
+| **Observability** | |
+| `distillery_metrics` | Usage dashboard with configurable scope: `"summary"` (health check), `"full"` (all metrics), or `"search_quality"` (retrieval stats) |
+| **Feeds** | |
+| `distillery_watch` | List, add, or remove monitored feed sources (RSS, GitHub) |
 | `distillery_poll` | Trigger a feed poll cycle (fetch, score, store) |
-| `distillery_interests` | Return user's interest profile (top tags, domains, repos) |
-| `distillery_suggest_sources` | Interest profile with suggestion context for source discovery |
 | `distillery_rescore` | Re-score feed entries against current interest profile |
+| `distillery_interests` | User's interest profile (top tags/domains); optionally includes source suggestions (`suggest_sources=true`) |
+| **Configuration** | |
+| `distillery_configure` | Update runtime configuration (thresholds, settings) and persist to `distillery.yaml` |
+| `distillery_type_schemas` | Metadata schema registry for all entry types |
 
 ## Verifying the Server
 
-Call the `distillery_status` MCP tool from within Claude Code:
+Call the `distillery_metrics` MCP tool from within Claude Code:
 
 ```text
-distillery_status
+distillery_metrics(scope="summary")
 ```
 
 Expected response:
