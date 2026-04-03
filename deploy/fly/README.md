@@ -203,7 +203,7 @@ If a new Distillery version requires breaking schema changes, the migration syst
    ```bash
    fly ssh console --app <app-name>
    # Inside the SSH console:
-   distillery import /data/backup-before-breaking.json --mode merge
+   distillery import --input /data/backup-before-breaking.json --mode merge
    exit
    ```
 
@@ -239,7 +239,7 @@ exit
 fly machines restart <machine-id> --app <app-name>
 
 # Wait for restart, then import the backup
-fly ssh console -C "distillery import /data/backup-YYYYMMDD.json --mode replace" --app <app-name>
+fly ssh console -C "distillery import --input /data/backup-YYYYMMDD.json --mode replace" --app <app-name>
 
 # Verify
 fly logs --app <app-name>
