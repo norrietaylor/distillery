@@ -7,6 +7,7 @@ Provides the ``distillery`` entry point with the following subcommands:
 - ``health``: Verify database connectivity and exit with code 0 on success
   or code 1 on failure.
 - ``export``: Export all entries and feed sources to a JSON file.
+- ``import``: Import entries and feed sources from a JSON export file.
 - ``eval``: Run skill evaluation scenarios against Claude (requires
   ``ANTHROPIC_API_KEY`` and ``pip install 'distillery[eval]'``).
 
@@ -106,6 +107,30 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         required=True,
         help="Path to write the exported JSON file",
+    )
+
+    import_parser = subparsers.add_parser(
+        "import",
+        help="Import entries and feed sources from a JSON export file",
+        parents=[shared],
+    )
+    import_parser.add_argument(
+        "--input",
+        metavar="PATH",
+        required=True,
+        help="Path to the JSON export file to import",
+    )
+    import_parser.add_argument(
+        "--mode",
+        choices=["merge", "replace"],
+        default="merge",
+        help="Import mode: merge (skip existing IDs) or replace (delete all before import)",
+    )
+    import_parser.add_argument(
+        "--yes",
+        action="store_true",
+        default=False,
+        help="Skip confirmation prompt for replace mode",
     )
 
     eval_parser = subparsers.add_parser(
@@ -570,6 +595,224 @@ def _cmd_export(config_path: str | None, fmt: str, output_path: str) -> int:
     n_entries = len(entries)
     n_sources = len(feed_sources)
     print(f"Exported {n_entries} entries and {n_sources} feed sources to {output_path}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Import subcommand
+# ---------------------------------------------------------------------------
+
+_IMPORT_BATCH_SIZE = 50
+
+
+def _cmd_import(
+    config_path: str | None,
+    fmt: str,
+    input_path: str,
+    mode: str,
+    yes: bool,
+) -> int:
+    """Implement the ``import`` subcommand.
+
+    Reads a JSON export file produced by ``distillery export`` and inserts the
+    entries and feed sources into the database.  In *merge* mode existing IDs
+    are skipped; in *replace* mode all existing entries are deleted first.
+
+    Returns:
+        Exit code (0 on success, 1 on error).
+    """
+    # --- 1. Load and validate JSON structure ---
+    try:
+        raw_text = Path(input_path).read_text(encoding="utf-8")
+    except OSError as exc:
+        print(f"Error reading import file: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        payload = json.loads(raw_text)
+    except json.JSONDecodeError as exc:
+        print(f"Error parsing import file (invalid JSON): {exc}", file=sys.stderr)
+        return 1
+
+    if not isinstance(payload, dict):
+        print("Error: import file must be a JSON object", file=sys.stderr)
+        return 1
+
+    missing = [k for k in ("version", "entries", "feed_sources") if k not in payload]
+    if missing:
+        print(
+            f"Error: import file is missing required keys: {', '.join(missing)}",
+            file=sys.stderr,
+        )
+        return 1
+
+    entries_data = payload["entries"]
+    feed_sources_data = payload["feed_sources"]
+    if not isinstance(entries_data, list) or not isinstance(feed_sources_data, list):
+        print(
+            "Error: 'entries' and 'feed_sources' must be JSON arrays",
+            file=sys.stderr,
+        )
+        return 1
+
+    # --- 2. Replace-mode confirmation ---
+    if mode == "replace" and not yes:
+        try:
+            answer = input("This will delete all existing entries. Continue? [y/N] ")
+        except EOFError:
+            answer = ""
+        if answer.strip().lower() not in ("y", "yes"):
+            print("Import cancelled.")
+            return 0
+
+    # --- 3. Load config ---
+    try:
+        cfg = load_config(config_path)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Error loading configuration: {exc}", file=sys.stderr)
+        return 1
+
+    async def _run() -> tuple[int, int, int, int]:
+        """Return (imported, skipped, reembedded, sources_imported)."""
+        import contextlib
+
+        from distillery.mcp.server import _create_embedding_provider, _normalize_db_path
+        from distillery.models import Entry, EntrySource, EntryStatus, EntryType
+        from distillery.store.duckdb import DuckDBStore
+
+        embedding_provider = _create_embedding_provider(cfg)
+        db_path = _normalize_db_path(cfg.storage.database_path)
+
+        store = DuckDBStore(
+            db_path=db_path,
+            embedding_provider=embedding_provider,
+            s3_region=cfg.storage.s3_region,
+            s3_endpoint=cfg.storage.s3_endpoint,
+        )
+        await store.initialize()
+
+        conn = store._conn
+        assert conn is not None
+
+        # --- 4. Replace mode: delete all existing entries ---
+        if mode == "replace":
+            conn.execute("DELETE FROM entries")
+
+        # --- 5. Import entries in batches ---
+        imported = 0
+        skipped = 0
+        reembedded = 0
+
+        # Collect entries that need insertion (skipping existing IDs in merge mode).
+        to_insert: list[dict[str, Any]] = []
+        for raw in entries_data:
+            entry_id: str = raw.get("id", "")
+            if mode == "merge" and entry_id:
+                existing_row = conn.execute(
+                    "SELECT id FROM entries WHERE id = ?", [entry_id]
+                ).fetchone()
+                if existing_row is not None:
+                    skipped += 1
+                    continue
+            to_insert.append(raw)
+
+        # Batch-embed and insert.
+        for batch_start in range(0, len(to_insert), _IMPORT_BATCH_SIZE):
+            batch = to_insert[batch_start : batch_start + _IMPORT_BATCH_SIZE]
+            contents = [b.get("content", "") for b in batch]
+            embeddings = await asyncio.to_thread(embedding_provider.embed_batch, contents)
+            reembedded += len(batch)
+
+            for raw, embedding in zip(batch, embeddings, strict=True):
+                # Parse the entry from the exported dict; preserve original ID and timestamps.
+                from datetime import UTC, datetime
+
+                def _parse_dt(val: Any) -> datetime:
+                    if isinstance(val, datetime):
+                        if val.tzinfo is None:
+                            return val.replace(tzinfo=UTC)
+                        return val
+                    dt = datetime.fromisoformat(str(val))
+                    if dt.tzinfo is None:
+                        return dt.replace(tzinfo=UTC)
+                    return dt
+
+                entry = Entry(
+                    id=raw.get("id", ""),
+                    content=raw.get("content", ""),
+                    entry_type=EntryType(raw.get("entry_type", "inbox")),
+                    source=EntrySource(raw.get("source", "import")),
+                    author=raw.get("author", ""),
+                    project=raw.get("project"),
+                    tags=list(raw.get("tags") or []),
+                    status=EntryStatus(raw.get("status", "active")),
+                    metadata=dict(raw.get("metadata") or {}),
+                    version=int(raw.get("version", 1)),
+                    created_at=_parse_dt(raw["created_at"]),
+                    updated_at=_parse_dt(raw["updated_at"]),
+                    created_by=raw.get("created_by", ""),
+                    last_modified_by=raw.get("last_modified_by", ""),
+                )
+
+                # Insert directly with pre-computed embedding.
+                conn.execute(
+                    "INSERT INTO entries "
+                    "(id, content, entry_type, source, author, project, tags, status, "
+                    " metadata, created_at, updated_at, version, embedding, "
+                    " created_by, last_modified_by) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [
+                        entry.id,
+                        entry.content,
+                        entry.entry_type.value,
+                        entry.source.value,
+                        entry.author,
+                        entry.project,
+                        list(entry.tags),
+                        entry.status.value,
+                        json.dumps(entry.metadata),
+                        entry.created_at,
+                        entry.updated_at,
+                        entry.version,
+                        embedding,
+                        entry.created_by,
+                        entry.last_modified_by,
+                    ],
+                )
+                imported += 1
+
+            print(
+                f"  Progress: {min(batch_start + _IMPORT_BATCH_SIZE, len(to_insert))}"
+                f"/{len(to_insert)} entries processed...",
+                file=sys.stderr,
+            )
+
+        # --- 6. Import feed sources ---
+        sources_imported = 0
+        for fsrc in feed_sources_data:
+            with contextlib.suppress(ValueError):
+                await store.add_feed_source(
+                    url=fsrc.get("url", ""),
+                    source_type=fsrc.get("source_type", "rss"),
+                    label=fsrc.get("label", ""),
+                    poll_interval_minutes=int(fsrc.get("poll_interval_minutes", 60)),
+                    trust_weight=float(fsrc.get("trust_weight", 1.0)),
+                )
+                sources_imported += 1
+
+        await store.close()
+        return imported, skipped, reembedded, sources_imported
+
+    try:
+        imported, skipped, reembedded, sources_imported = asyncio.run(_run())
+    except Exception as exc:
+        print(f"Error during import: {exc}", file=sys.stderr)
+        return 1
+
+    print(
+        f"Imported {imported} entries ({skipped} skipped, {reembedded} re-embedded)"
+        f" and {sources_imported} feed sources"
+    )
     return 0
 
 
@@ -1066,6 +1309,16 @@ def main(argv: list[str] | None = None) -> None:
                 config_path=config_path,
                 fmt=fmt,
                 output_path=args.output,
+            )
+        )
+    elif command == "import":
+        sys.exit(
+            _cmd_import(
+                config_path=config_path,
+                fmt=fmt,
+                input_path=args.input,
+                mode=args.mode,
+                yes=args.yes,
             )
         )
     elif command == "eval":

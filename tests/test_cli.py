@@ -1,4 +1,4 @@
-"""Tests for distillery.cli: main(), status, health, export subcommands."""
+"""Tests for distillery.cli: main(), status, health, export, import subcommands."""
 
 from __future__ import annotations
 
@@ -9,7 +9,15 @@ from pathlib import Path
 import pytest
 
 from distillery import __version__
-from distillery.cli import _check_health, _cmd_export, _cmd_health, _cmd_status, _query_status, main
+from distillery.cli import (
+    _check_health,
+    _cmd_export,
+    _cmd_health,
+    _cmd_import,
+    _cmd_status,
+    _query_status,
+    main,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -461,3 +469,172 @@ class TestExportCommand:
         out_path = str(tmp_path / "export.json")
         rc = _cmd_export(missing, "text", out_path)
         assert rc == 1
+
+
+# ---------------------------------------------------------------------------
+# import subcommand
+# ---------------------------------------------------------------------------
+
+_VALID_PAYLOAD: dict = {
+    "version": 1,
+    "exported_at": "2026-01-01T00:00:00+00:00",
+    "meta": {},
+    "entries": [],
+    "feed_sources": [],
+}
+
+
+class TestImportCommand:
+    def test_import_input_required(self, tmp_path: Path) -> None:
+        cfg_path = write_config(tmp_path, ":memory:")
+        with pytest.raises(SystemExit) as exc:
+            main(["import", "--config", str(cfg_path)])
+        assert exc.value.code != 0
+
+    def test_import_missing_file_returns_one(self, tmp_path: Path) -> None:
+        cfg_path = write_config(tmp_path, ":memory:")
+        missing = str(tmp_path / "no_such.json")
+        rc = _cmd_import(str(cfg_path), "text", missing, "merge", True)
+        assert rc == 1
+
+    def test_import_invalid_json_returns_one(self, tmp_path: Path) -> None:
+        cfg_path = write_config(tmp_path, ":memory:")
+        bad_file = tmp_path / "bad.json"
+        bad_file.write_text("not json", encoding="utf-8")
+        rc = _cmd_import(str(cfg_path), "text", str(bad_file), "merge", True)
+        assert rc == 1
+
+    def test_import_missing_keys_returns_one(self, tmp_path: Path) -> None:
+        cfg_path = write_config(tmp_path, ":memory:")
+        bad_file = tmp_path / "bad.json"
+        bad_file.write_text(json.dumps({"version": 1}), encoding="utf-8")
+        rc = _cmd_import(str(cfg_path), "text", str(bad_file), "merge", True)
+        assert rc == 1
+
+    def test_import_empty_payload_succeeds(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        db_path = str(tmp_path / "test.db")
+        cfg_path = write_config(tmp_path, db_path)
+        input_file = tmp_path / "export.json"
+        input_file.write_text(json.dumps(_VALID_PAYLOAD), encoding="utf-8")
+        rc = _cmd_import(str(cfg_path), "text", str(input_file), "merge", True)
+        assert rc == 0
+        captured = capsys.readouterr()
+        assert "Imported" in captured.out
+        assert "entries" in captured.out
+        assert "feed sources" in captured.out
+
+    def test_import_bad_config_returns_one(self, tmp_path: Path) -> None:
+        missing_cfg = str(tmp_path / "missing.yaml")
+        input_file = tmp_path / "export.json"
+        input_file.write_text(json.dumps(_VALID_PAYLOAD), encoding="utf-8")
+        rc = _cmd_import(missing_cfg, "text", str(input_file), "merge", True)
+        assert rc == 1
+
+    def test_import_merge_skips_existing(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Import same payload twice in merge mode — second run skips all entries."""
+        db_path = str(tmp_path / "test.db")
+        cfg_path = write_config(tmp_path, db_path)
+        payload = dict(_VALID_PAYLOAD)
+        payload["entries"] = [
+            {
+                "id": "aaaaaaaa-0000-0000-0000-000000000001",
+                "content": "test entry content",
+                "entry_type": "inbox",
+                "source": "import",
+                "author": "tester",
+                "project": None,
+                "tags": [],
+                "status": "active",
+                "metadata": {},
+                "version": 1,
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+                "created_by": "",
+                "last_modified_by": "",
+            }
+        ]
+        input_file = tmp_path / "export.json"
+        input_file.write_text(json.dumps(payload), encoding="utf-8")
+
+        # First import.
+        rc1 = _cmd_import(str(cfg_path), "text", str(input_file), "merge", True)
+        assert rc1 == 0
+        out1 = capsys.readouterr().out
+        assert "Imported 1 entries" in out1
+
+        # Second import (merge — should skip).
+        rc2 = _cmd_import(str(cfg_path), "text", str(input_file), "merge", True)
+        assert rc2 == 0
+        out2 = capsys.readouterr().out
+        assert "Imported 0 entries" in out2
+        assert "1 skipped" in out2
+
+    def test_import_replace_mode_deletes_existing(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Replace mode imports fresh — no skips even if ID already present."""
+        db_path = str(tmp_path / "test.db")
+        cfg_path = write_config(tmp_path, db_path)
+        entry = {
+            "id": "aaaaaaaa-0000-0000-0000-000000000002",
+            "content": "another test entry",
+            "entry_type": "inbox",
+            "source": "import",
+            "author": "tester",
+            "project": None,
+            "tags": [],
+            "status": "active",
+            "metadata": {},
+            "version": 1,
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "created_by": "",
+            "last_modified_by": "",
+        }
+        payload = dict(_VALID_PAYLOAD)
+        payload["entries"] = [entry]
+        input_file = tmp_path / "export.json"
+        input_file.write_text(json.dumps(payload), encoding="utf-8")
+
+        # First import.
+        rc1 = _cmd_import(str(cfg_path), "text", str(input_file), "merge", True)
+        assert rc1 == 0
+
+        # Replace import — --yes bypasses prompt.
+        rc2 = _cmd_import(str(cfg_path), "text", str(input_file), "replace", True)
+        assert rc2 == 0
+        out = capsys.readouterr().out
+        assert "Imported 1 entries" in out
+        assert "0 skipped" in out
+
+    def test_import_via_main_dispatches(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        db_path = str(tmp_path / "test.db")
+        cfg_path = write_config(tmp_path, db_path)
+        input_file = tmp_path / "export.json"
+        input_file.write_text(json.dumps(_VALID_PAYLOAD), encoding="utf-8")
+        with pytest.raises(SystemExit) as exc:
+            main(
+                [
+                    "import",
+                    "--config",
+                    str(cfg_path),
+                    "--input",
+                    str(input_file),
+                    "--yes",
+                ]
+            )
+        assert exc.value.code == 0
