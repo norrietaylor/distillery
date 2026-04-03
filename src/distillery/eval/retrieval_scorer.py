@@ -98,11 +98,7 @@ def _build_relevance_set(golden_labels: Sequence[dict[str, Any]]) -> set[str]:
     Each label dict is expected to have ``"entry_id"`` (str) and ``"relevant"``
     (bool) keys.
     """
-    return {
-        str(label["entry_id"])
-        for label in golden_labels
-        if label.get("relevant", False)
-    }
+    return {str(label["entry_id"]) for label in golden_labels if label.get("relevant", False)}
 
 
 def _precision_at_k(retrieved: Sequence[str], relevant: set[str], k: int) -> float:

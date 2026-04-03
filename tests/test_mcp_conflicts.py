@@ -123,7 +123,9 @@ class TestCheckConflictsFirstPassWithSimilarEntries:
         await store.store(make_entry(content=existing_text))
 
         config = _make_config(conflict_threshold=0.60)
-        data = await run_conflict_discovery(store, config.classification.conflict_threshold, query_text)
+        data = await run_conflict_discovery(
+            store, config.classification.conflict_threshold, query_text
+        )
 
         assert "conflict_candidates" in data
 
@@ -141,7 +143,9 @@ class TestCheckConflictsFirstPassWithSimilarEntries:
         await store.store(make_entry(content=existing_text))
 
         config = _make_config(conflict_threshold=0.60)
-        data = await run_conflict_discovery(store, config.classification.conflict_threshold, query_text)
+        data = await run_conflict_discovery(
+            store, config.classification.conflict_threshold, query_text
+        )
 
         assert len(data["conflict_candidates"]) >= 1
 
@@ -159,7 +163,9 @@ class TestCheckConflictsFirstPassWithSimilarEntries:
         await store.store(make_entry(content=existing_text))
 
         config = _make_config(conflict_threshold=0.60)
-        data = await run_conflict_discovery(store, config.classification.conflict_threshold, query_text)
+        data = await run_conflict_discovery(
+            store, config.classification.conflict_threshold, query_text
+        )
 
         candidate = data["conflict_candidates"][0]
         assert "entry_id" in candidate
@@ -178,7 +184,9 @@ class TestCheckConflictsFirstPassWithSimilarEntries:
         await store.store(make_entry(content=existing_text))
 
         config = _make_config(conflict_threshold=0.60)
-        data = await run_conflict_discovery(store, config.classification.conflict_threshold, query_text)
+        data = await run_conflict_discovery(
+            store, config.classification.conflict_threshold, query_text
+        )
 
         candidate = data["conflict_candidates"][0]
         assert "conflict_prompt" in candidate
@@ -199,7 +207,9 @@ class TestCheckConflictsFirstPassWithSimilarEntries:
         await store.store(make_entry(content=existing_text))
 
         config = _make_config(conflict_threshold=0.60)
-        data = await run_conflict_discovery(store, config.classification.conflict_threshold, query_text)
+        data = await run_conflict_discovery(
+            store, config.classification.conflict_threshold, query_text
+        )
 
         candidate = data["conflict_candidates"][0]
         assert "content_preview" in candidate
@@ -219,7 +229,9 @@ class TestCheckConflictsFirstPassWithSimilarEntries:
         await store.store(make_entry(content=existing_text))
 
         config = _make_config(conflict_threshold=0.60)
-        data = await run_conflict_discovery(store, config.classification.conflict_threshold, query_text)
+        data = await run_conflict_discovery(
+            store, config.classification.conflict_threshold, query_text
+        )
 
         candidate = data["conflict_candidates"][0]
         assert "similarity_score" in candidate
@@ -239,7 +251,9 @@ class TestCheckConflictsFirstPassWithSimilarEntries:
         await store.store(make_entry(content=existing_text))
 
         config = _make_config(conflict_threshold=0.60)
-        data = await run_conflict_discovery(store, config.classification.conflict_threshold, query_text)
+        data = await run_conflict_discovery(
+            store, config.classification.conflict_threshold, query_text
+        )
 
         candidate = data["conflict_candidates"][0]
         prompt = candidate["conflict_prompt"]
@@ -260,7 +274,9 @@ class TestCheckConflictsFirstPassWithSimilarEntries:
         await store.store(make_entry(content=existing_text))
 
         config = _make_config(conflict_threshold=0.60)
-        data = await run_conflict_discovery(store, config.classification.conflict_threshold, query_text)
+        data = await run_conflict_discovery(
+            store, config.classification.conflict_threshold, query_text
+        )
 
         assert data.get("has_conflicts") is False
 
@@ -278,7 +294,9 @@ class TestCheckConflictsFirstPassWithSimilarEntries:
         await store.store(make_entry(content=existing_text))
 
         config = _make_config(conflict_threshold=0.60)
-        data = await run_conflict_discovery(store, config.classification.conflict_threshold, query_text)
+        data = await run_conflict_discovery(
+            store, config.classification.conflict_threshold, query_text
+        )
 
         assert "message" in data
         assert "llm_responses" in data["message"]
@@ -304,7 +322,9 @@ class TestCheckConflictsFirstPassWithSimilarEntries:
             await store.store(make_entry(content=text))
 
         config = _make_config(conflict_threshold=0.60)
-        data = await run_conflict_discovery(store, config.classification.conflict_threshold, query_text)
+        data = await run_conflict_discovery(
+            store, config.classification.conflict_threshold, query_text
+        )
 
         assert len(data["conflict_candidates"]) >= 1
 
@@ -327,7 +347,9 @@ class TestCheckConflictsFirstPassNoSimilarEntries:
         embedding_provider.register(query_text, _UNIT_A)
 
         config = _make_config(conflict_threshold=0.60)
-        data = await run_conflict_discovery(store, config.classification.conflict_threshold, query_text)
+        data = await run_conflict_discovery(
+            store, config.classification.conflict_threshold, query_text
+        )
 
         assert data.get("conflict_candidates", []) == []
         assert data.get("has_conflicts") is False
@@ -346,7 +368,9 @@ class TestCheckConflictsFirstPassNoSimilarEntries:
         await store.store(make_entry(content=existing_text))
 
         config = _make_config(conflict_threshold=0.60)
-        data = await run_conflict_discovery(store, config.classification.conflict_threshold, query_text)
+        data = await run_conflict_discovery(
+            store, config.classification.conflict_threshold, query_text
+        )
 
         assert data.get("conflict_candidates", []) == []
         assert data.get("has_conflicts") is False
@@ -361,7 +385,9 @@ class TestCheckConflictsFirstPassNoSimilarEntries:
         embedding_provider.register(query_text, _UNIT_A)
 
         config = _make_config(conflict_threshold=0.60)
-        data = await run_conflict_discovery(store, config.classification.conflict_threshold, query_text)
+        data = await run_conflict_discovery(
+            store, config.classification.conflict_threshold, query_text
+        )
 
         assert "message" in data
         assert data["conflicts"] == []
@@ -390,9 +416,9 @@ class TestCheckConflictsSecondPassWithConflict:
         entry_id = await store.store(entry)
 
         config = _make_config(conflict_threshold=0.60)
-        llm_responses = _parse_llm_responses({
-            entry_id: {"is_conflict": True, "reasoning": "Direct contradiction on blood pressure"}
-        })
+        llm_responses = _parse_llm_responses(
+            {entry_id: {"is_conflict": True, "reasoning": "Direct contradiction on blood pressure"}}
+        )
         data = await run_conflict_evaluation(
             store, config.classification.conflict_threshold, query_text, llm_responses
         )
@@ -414,9 +440,9 @@ class TestCheckConflictsSecondPassWithConflict:
         entry_id = await store.store(entry)
 
         config = _make_config(conflict_threshold=0.60)
-        llm_responses = _parse_llm_responses({
-            entry_id: {"is_conflict": True, "reasoning": "Different star count claims"}
-        })
+        llm_responses = _parse_llm_responses(
+            {entry_id: {"is_conflict": True, "reasoning": "Different star count claims"}}
+        )
         data = await run_conflict_evaluation(
             store, config.classification.conflict_threshold, query_text, llm_responses
         )
@@ -438,7 +464,9 @@ class TestCheckConflictsSecondPassWithConflict:
         entry_id = await store.store(entry)
 
         config = _make_config(conflict_threshold=0.60)
-        llm_responses = _parse_llm_responses({entry_id: {"is_conflict": True, "reasoning": "Brain usage myth"}})
+        llm_responses = _parse_llm_responses(
+            {entry_id: {"is_conflict": True, "reasoning": "Brain usage myth"}}
+        )
         data = await run_conflict_evaluation(
             store, config.classification.conflict_threshold, query_text, llm_responses
         )
@@ -462,7 +490,9 @@ class TestCheckConflictsSecondPassWithConflict:
 
         config = _make_config(conflict_threshold=0.60)
         expected_reasoning = "Antibiotics vs viruses contradiction"
-        llm_responses = _parse_llm_responses({entry_id: {"is_conflict": True, "reasoning": expected_reasoning}})
+        llm_responses = _parse_llm_responses(
+            {entry_id: {"is_conflict": True, "reasoning": expected_reasoning}}
+        )
         data = await run_conflict_evaluation(
             store, config.classification.conflict_threshold, query_text, llm_responses
         )
@@ -486,7 +516,9 @@ class TestCheckConflictsSecondPassWithConflict:
         entry_id = await store.store(entry)
 
         config = _make_config(conflict_threshold=0.60)
-        llm_responses = _parse_llm_responses({entry_id: {"is_conflict": True, "reasoning": "Hyperactivity myth"}})
+        llm_responses = _parse_llm_responses(
+            {entry_id: {"is_conflict": True, "reasoning": "Hyperactivity myth"}}
+        )
         data = await run_conflict_evaluation(
             store, config.classification.conflict_threshold, query_text, llm_responses
         )
@@ -510,7 +542,9 @@ class TestCheckConflictsSecondPassWithConflict:
         entry_id = await store.store(entry)
 
         config = _make_config(conflict_threshold=0.60)
-        llm_responses = _parse_llm_responses({entry_id: {"is_conflict": True, "reasoning": "Speed comparison"}})
+        llm_responses = _parse_llm_responses(
+            {entry_id: {"is_conflict": True, "reasoning": "Speed comparison"}}
+        )
         data = await run_conflict_evaluation(
             store, config.classification.conflict_threshold, query_text, llm_responses
         )
@@ -538,12 +572,14 @@ class TestCheckConflictsSecondPassNoConflict:
         entry_id = await store.store(entry)
 
         config = _make_config(conflict_threshold=0.60)
-        llm_responses = _parse_llm_responses({
-            entry_id: {
-                "is_conflict": False,
-                "reasoning": "Both are true — Python supports multiple paradigms",
+        llm_responses = _parse_llm_responses(
+            {
+                entry_id: {
+                    "is_conflict": False,
+                    "reasoning": "Both are true — Python supports multiple paradigms",
+                }
             }
-        })
+        )
         data = await run_conflict_evaluation(
             store, config.classification.conflict_threshold, query_text, llm_responses
         )
@@ -565,9 +601,9 @@ class TestCheckConflictsSecondPassNoConflict:
         entry_id = await store.store(entry)
 
         config = _make_config(conflict_threshold=0.60)
-        llm_responses = _parse_llm_responses({
-            entry_id: {"is_conflict": False, "reasoning": "Complementary statements"}
-        })
+        llm_responses = _parse_llm_responses(
+            {entry_id: {"is_conflict": False, "reasoning": "Complementary statements"}}
+        )
         data = await run_conflict_evaluation(
             store, config.classification.conflict_threshold, query_text, llm_responses
         )
@@ -600,10 +636,12 @@ class TestCheckConflictsSecondPassMultipleCandidates:
 
         config = _make_config(conflict_threshold=0.60)
         is_conflict_list = list(texts.values())
-        llm_responses = _parse_llm_responses({
-            entry_ids[0]: {"is_conflict": is_conflict_list[0], "reasoning": "Conflict found"},
-            entry_ids[1]: {"is_conflict": is_conflict_list[1], "reasoning": "Not a conflict"},
-        })
+        llm_responses = _parse_llm_responses(
+            {
+                entry_ids[0]: {"is_conflict": is_conflict_list[0], "reasoning": "Conflict found"},
+                entry_ids[1]: {"is_conflict": is_conflict_list[1], "reasoning": "Not a conflict"},
+            }
+        )
         data = await run_conflict_evaluation(
             store, config.classification.conflict_threshold, query_text, llm_responses
         )
@@ -633,10 +671,12 @@ class TestCheckConflictsSecondPassMultipleCandidates:
         embedding_provider.register(query_text, _UNIT_A)
 
         config = _make_config(conflict_threshold=0.60)
-        llm_responses = _parse_llm_responses({
-            entry_ids[0]: {"is_conflict": True, "reasoning": "First conflict"},
-            entry_ids[1]: {"is_conflict": True, "reasoning": "Second conflict"},
-        })
+        llm_responses = _parse_llm_responses(
+            {
+                entry_ids[0]: {"is_conflict": True, "reasoning": "First conflict"},
+                entry_ids[1]: {"is_conflict": True, "reasoning": "Second conflict"},
+            }
+        )
         data = await run_conflict_evaluation(
             store, config.classification.conflict_threshold, query_text, llm_responses
         )
@@ -671,7 +711,9 @@ class TestCheckConflictsThreshold:
 
         # Set very high threshold — entry should not appear as candidate
         config = _make_config(conflict_threshold=0.99)
-        data = await run_conflict_discovery(store, config.classification.conflict_threshold, query_text)
+        data = await run_conflict_discovery(
+            store, config.classification.conflict_threshold, query_text
+        )
 
         assert data.get("conflict_candidates", []) == []
 
@@ -690,7 +732,9 @@ class TestCheckConflictsThreshold:
 
         # Low threshold — identical vector should appear as candidate
         config = _make_config(conflict_threshold=0.50)
-        data = await run_conflict_discovery(store, config.classification.conflict_threshold, query_text)
+        data = await run_conflict_discovery(
+            store, config.classification.conflict_threshold, query_text
+        )
 
         assert len(data.get("conflict_candidates", [])) >= 1
 
@@ -717,7 +761,9 @@ class TestCheckConflictsContentPreview:
         await store.store(make_entry(content=long_existing))
 
         config = _make_config(conflict_threshold=0.60)
-        data = await run_conflict_discovery(store, config.classification.conflict_threshold, query_text)
+        data = await run_conflict_discovery(
+            store, config.classification.conflict_threshold, query_text
+        )
 
         assert len(data["conflict_candidates"]) >= 1
         candidate = data["conflict_candidates"][0]
@@ -738,7 +784,9 @@ class TestCheckConflictsContentPreview:
         entry_id = await store.store(entry)
 
         config = _make_config(conflict_threshold=0.60)
-        llm_responses = _parse_llm_responses({entry_id: {"is_conflict": True, "reasoning": "conflict confirmed"}})
+        llm_responses = _parse_llm_responses(
+            {entry_id: {"is_conflict": True, "reasoning": "conflict confirmed"}}
+        )
         data = await run_conflict_evaluation(
             store, config.classification.conflict_threshold, query_text, llm_responses
         )

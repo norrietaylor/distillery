@@ -494,8 +494,14 @@ class DuckDBStore:
     # vector where dynamic column names are interpolated into the UPDATE clause.
     _ALLOWED_UPDATE_COLUMNS = frozenset(
         {
-            "content", "entry_type", "author", "project", "tags",
-            "status", "metadata", "last_modified_by",
+            "content",
+            "entry_type",
+            "author",
+            "project",
+            "tags",
+            "status",
+            "metadata",
+            "last_modified_by",
         }
     )
 
@@ -619,9 +625,7 @@ class DuckDBStore:
         # SQL injection via dynamic SET clause construction).
         unknown_keys = updates.keys() - self._ALLOWED_UPDATE_COLUMNS
         if unknown_keys:
-            raise ValueError(
-                f"Cannot update unknown column(s): {', '.join(sorted(unknown_keys))}"
-            )
+            raise ValueError(f"Cannot update unknown column(s): {', '.join(sorted(unknown_keys))}")
 
         conn = self.connection
 
@@ -1261,8 +1265,7 @@ class DuckDBStore:
         """Return IDs of search_log rows that include entry_id and are newer than since."""
         conn = self.connection
         sql = (
-            "SELECT id FROM search_log "
-            "WHERE timestamp >= ? AND list_contains(result_entry_ids, ?)"
+            "SELECT id FROM search_log WHERE timestamp >= ? AND list_contains(result_entry_ids, ?)"
         )
         rows = conn.execute(sql, [since, entry_id]).fetchall()
         return [row[0] for row in rows]

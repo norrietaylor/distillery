@@ -12,13 +12,17 @@ when ``--transport http`` is selected.
 from __future__ import annotations
 
 import json
+import logging
 import time
+import uuid
 from collections import deque
 from collections.abc import MutableMapping
 from typing import TYPE_CHECKING, Any
 
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from distillery.mcp.org_membership import OrgMembershipChecker
@@ -278,6 +282,49 @@ class _BodyTooLargeError(Exception):
 
 
 # ---------------------------------------------------------------------------
+# RequestIDMiddleware
+# ---------------------------------------------------------------------------
+
+
+class RequestIDMiddleware:
+    """ASGI middleware that propagates ``X-Request-ID`` for request tracing.
+
+    Reads the ``X-Request-ID`` header from the incoming request.  If absent,
+    generates a new UUID4.  The resolved ID is then echoed back in the
+    ``X-Request-ID`` response header and logged at DEBUG level, enabling
+    correlation of multi-step MCP workflows across log lines.
+
+    Args:
+        app: The wrapped ASGI application.
+    """
+
+    HEADER = b"x-request-id"
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        headers = Headers(scope=scope)
+        request_id = headers.get("x-request-id") or str(uuid.uuid4())
+        logger.debug("request_id=%s path=%s", request_id, scope.get("path", ""))
+
+        request_id_bytes = request_id.encode()
+
+        async def _send_with_id(message: _State) -> None:
+            if message["type"] == "http.response.start":
+                existing = list(message.get("headers", []))
+                existing.append((self.HEADER, request_id_bytes))
+                message = dict(message, headers=existing)
+            await send(message)
+
+        await self.app(scope, receive, _send_with_id)
+
+
+# ---------------------------------------------------------------------------
 # OrgMembershipMiddleware
 # ---------------------------------------------------------------------------
 
@@ -356,9 +403,7 @@ class OrgMembershipMiddleware:
 
         # Cannot identify the user (opaque token or JWT without
         # login/sub claim) — fail closed.
-        await self._send_403(
-            send, "<unknown>", list(self.checker.allowed_orgs)
-        )
+        await self._send_403(send, "<unknown>", list(self.checker.allowed_orgs))
 
     @staticmethod
     async def _send_403(send: Send, username: str, orgs: list[str]) -> None:
@@ -398,14 +443,16 @@ def apply_http_middleware(
     trust_proxy: bool = False,
     org_checker: OrgMembershipChecker | None = None,
 ) -> ASGIApp:
-    """Wrap *app* with rate-limit, body-size, and (optionally) org-membership middleware.
+    """Wrap *app* with rate-limit, body-size, request-ID, and org-membership middleware.
 
     Middleware is applied in outermost-to-innermost order:
-    1. :class:`RateLimitMiddleware` (outermost — counts every request so denied
-       requests still consume quota)
-    2. :class:`OrgMembershipMiddleware` (when *org_checker* is provided and
+    1. :class:`RequestIDMiddleware` (outermost — echoes ``X-Request-ID`` on
+       *all* responses, including 429/403/413 rejections)
+    2. :class:`RateLimitMiddleware` (counts every request so denied requests
+       still consume quota)
+    3. :class:`OrgMembershipMiddleware` (when *org_checker* is provided and
        enabled — blocks non-members before body is read)
-    3. :class:`BodySizeLimitMiddleware` (innermost — rejects oversized bodies)
+    4. :class:`BodySizeLimitMiddleware` (innermost — rejects oversized bodies)
 
     Args:
         app: The ASGI application to wrap.
@@ -429,4 +476,5 @@ def apply_http_middleware(
         requests_per_hour=requests_per_hour,
         trust_proxy=trust_proxy,
     )
+    app = RequestIDMiddleware(app)
     return app

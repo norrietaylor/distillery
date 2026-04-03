@@ -41,9 +41,7 @@ def get_daily_usage(conn: Any) -> int:
         The number of embedding calls made today.
     """
     key = _today_key()
-    row = conn.execute(
-        "SELECT value FROM _meta WHERE key = ?", [key]
-    ).fetchone()
+    row = conn.execute("SELECT value FROM _meta WHERE key = ?", [key]).fetchone()
     return int(row[0]) if row else 0
 
 

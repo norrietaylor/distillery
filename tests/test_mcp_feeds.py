@@ -576,9 +576,7 @@ class TestHandleSuggestSources:
         mock_extractor = MagicMock()
         mock_extractor.extract = AsyncMock(return_value=profile)
 
-        with patch(
-            "distillery.feeds.interests.InterestExtractor", return_value=mock_extractor
-        ):
+        with patch("distillery.feeds.interests.InterestExtractor", return_value=mock_extractor):
             result = await _handle_interests(
                 store=store, config=config, arguments={"suggest_sources": True}
             )
@@ -600,9 +598,7 @@ class TestHandleSuggestSources:
         mock_extractor = MagicMock()
         mock_extractor.extract = AsyncMock(return_value=profile)
 
-        with patch(
-            "distillery.feeds.interests.InterestExtractor", return_value=mock_extractor
-        ):
+        with patch("distillery.feeds.interests.InterestExtractor", return_value=mock_extractor):
             result = await _handle_interests(
                 store=store, config=config, arguments={"suggest_sources": True}
             )
@@ -620,9 +616,7 @@ class TestHandleSuggestSources:
         mock_extractor = MagicMock()
         mock_extractor.extract = AsyncMock(return_value=profile)
 
-        with patch(
-            "distillery.feeds.interests.InterestExtractor", return_value=mock_extractor
-        ):
+        with patch("distillery.feeds.interests.InterestExtractor", return_value=mock_extractor):
             result = await _handle_interests(
                 store=store, config=config, arguments={"suggest_sources": True}
             )
@@ -644,9 +638,7 @@ class TestHandleSuggestSources:
         mock_extractor = MagicMock()
         mock_extractor.extract = AsyncMock(return_value=profile)
 
-        with patch(
-            "distillery.feeds.interests.InterestExtractor", return_value=mock_extractor
-        ):
+        with patch("distillery.feeds.interests.InterestExtractor", return_value=mock_extractor):
             result = await _handle_interests(
                 store=store, config=config, arguments={"suggest_sources": True}
             )
@@ -666,9 +658,7 @@ class TestHandleSuggestSources:
         mock_extractor = MagicMock()
         mock_extractor.extract = AsyncMock(return_value=profile)
 
-        with patch(
-            "distillery.feeds.interests.InterestExtractor", return_value=mock_extractor
-        ):
+        with patch("distillery.feeds.interests.InterestExtractor", return_value=mock_extractor):
             result = await _handle_interests(
                 store=store,
                 config=config,
@@ -709,9 +699,7 @@ class TestHandleSuggestSources:
         mock_extractor = MagicMock()
         mock_extractor.extract = AsyncMock(side_effect=RuntimeError("store unavailable"))
 
-        with patch(
-            "distillery.feeds.interests.InterestExtractor", return_value=mock_extractor
-        ):
+        with patch("distillery.feeds.interests.InterestExtractor", return_value=mock_extractor):
             result = await _handle_interests(
                 store=store, config=config, arguments={"suggest_sources": True}
             )
@@ -729,9 +717,7 @@ class TestHandleSuggestSources:
         mock_extractor = MagicMock()
         mock_extractor.extract = AsyncMock(return_value=profile)
 
-        with patch(
-            "distillery.feeds.interests.InterestExtractor", return_value=mock_extractor
-        ):
+        with patch("distillery.feeds.interests.InterestExtractor", return_value=mock_extractor):
             result = await _handle_interests(
                 store=store, config=config, arguments={"suggest_sources": True}
             )

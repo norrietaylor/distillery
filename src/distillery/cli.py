@@ -456,7 +456,7 @@ def _cmd_poll(config_path: str | None, fmt: str, source_url: str | None) -> int:
         return 0
 
     if isinstance(result, str) and result.startswith("not-found:"):
-        not_found_url = result[len("not-found:"):]
+        not_found_url = result[len("not-found:") :]
         msg = f"No configured source found with url {not_found_url!r}."
         print(f"Error: {msg}", file=sys.stderr)
         return 1
@@ -503,10 +503,7 @@ def _cmd_poll(config_path: str | None, fmt: str, source_url: str | None) -> int:
         print(f"  total_below_threshold: {summary.total_below_threshold}")
         for r in summary.results:
             status = "ERROR" if r.errors else "OK"
-            print(
-                f"  [{status}] {r.source_url}: "
-                f"fetched={r.items_fetched} stored={r.items_stored}"
-            )
+            print(f"  [{status}] {r.source_url}: fetched={r.items_fetched} stored={r.items_stored}")
             for err in r.errors:
                 print(f"    error: {err}", file=sys.stderr)
 
@@ -1182,9 +1179,7 @@ def _cmd_eval(
             per_skill[skill_key]["tokens"] = (
                 int(per_skill[skill_key]["tokens"]) + r.performance.total_tokens
             )
-            per_skill[skill_key]["scenario_count"] = (
-                int(per_skill[skill_key]["scenario_count"]) + 1
-            )
+            per_skill[skill_key]["scenario_count"] = int(per_skill[skill_key]["scenario_count"]) + 1
         cost_summary = {
             "total_cost_usd": sum(r.performance.total_cost_usd for r in results),
             "total_tokens": sum(r.performance.total_tokens for r in results),

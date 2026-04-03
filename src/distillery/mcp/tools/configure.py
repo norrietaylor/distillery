@@ -213,14 +213,16 @@ async def _handle_configure(
         )
 
     if coerced == previous:
-        return success_response({
-            "changed": False,
-            "section": section,
-            "key": key,
-            "previous_value": previous,
-            "new_value": coerced,
-            "message": "Value unchanged.",
-        })
+        return success_response(
+            {
+                "changed": False,
+                "section": section,
+                "key": key,
+                "previous_value": previous,
+                "new_value": coerced,
+                "message": "Value unchanged.",
+            }
+        )
 
     # --- Apply to in-memory config ---
     try:
@@ -243,13 +245,18 @@ async def _handle_configure(
             disk_written = True
             logger.info(
                 "Configuration updated: %s.%s = %r (was %r), written to %s",
-                section, key, coerced, previous, config_path,
+                section,
+                key,
+                coerced,
+                previous,
+                config_path,
             )
         except Exception:
             # Revert in-memory change on disk-write failure.
             _set_nested(config, section, key, previous)
             logger.exception(
-                "Failed to write config to %s — in-memory change reverted", config_path,
+                "Failed to write config to %s — in-memory change reverted",
+                config_path,
             )
             return error_response(
                 "INTERNAL",
@@ -260,18 +267,23 @@ async def _handle_configure(
         logger.info(
             "Configuration updated in-memory: %s.%s = %r (was %r). "
             "No config file found on disk to persist.",
-            section, key, coerced, previous,
+            section,
+            key,
+            coerced,
+            previous,
         )
 
-    return success_response({
-        "changed": True,
-        "section": section,
-        "key": key,
-        "previous_value": previous,
-        "new_value": coerced,
-        "disk_written": disk_written,
-        "message": (
-            f"Updated {section}.{key}: {previous} -> {coerced}"
-            + (f" (written to {config_path})" if disk_written else " (in-memory only)")
-        ),
-    })
+    return success_response(
+        {
+            "changed": True,
+            "section": section,
+            "key": key,
+            "previous_value": previous,
+            "new_value": coerced,
+            "disk_written": disk_written,
+            "message": (
+                f"Updated {section}.{key}: {previous} -> {coerced}"
+                + (f" (written to {config_path})" if disk_written else " (in-memory only)")
+            ),
+        }
+    )
