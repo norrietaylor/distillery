@@ -51,7 +51,7 @@ Four-layer design:
 ```text
 Skills (.claude-plugin/skills/<name>/SKILL.md)  →  slash commands users invoke
     ↓
-MCP Server (src/distillery/mcp/server.py)  →  22 tools over stdio or HTTP (FastMCP 2.x/3.x)
+MCP Server (src/distillery/mcp/server.py)  →  18 tools over stdio or HTTP (FastMCP 2.x/3.x)
 Webhook API (src/distillery/mcp/webhooks.py) →  /api/poll, /api/rescore, /api/maintenance (bearer auth)
     ↓
 Core Protocols (store/protocol.py, embedding/protocol.py)  →  typed Protocol interfaces

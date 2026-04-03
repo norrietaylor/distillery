@@ -948,9 +948,7 @@ class TestLoadSkillPrompt:
 
         skill_dir = tmp_path / "myskill"
         skill_dir.mkdir()
-        (skill_dir / "SKILL.md").write_text(
-            "No frontmatter here.\nJust content.", encoding="utf-8"
-        )
+        (skill_dir / "SKILL.md").write_text("No frontmatter here.\nJust content.", encoding="utf-8")
 
         monkeypatch.setattr(runner, "_SKILLS_DIR", tmp_path)
         prompt = runner._load_skill_prompt("myskill")
@@ -1025,19 +1023,23 @@ class TestParseStreamEvents:
         from distillery.eval.runner import _parse_stream_events
 
         lines = [
-            json.dumps({
-                "type": "assistant",
-                "message": {
-                    "content": [{"type": "text", "text": "Hello, world!"}],
-                },
-            }),
-            json.dumps({
-                "type": "result",
-                "duration_ms": 1500,
-                "usage": {"input_tokens": 50, "output_tokens": 25},
-                "num_turns": 1,
-                "total_cost_usd": 0.001,
-            }),
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [{"type": "text", "text": "Hello, world!"}],
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "result",
+                    "duration_ms": 1500,
+                    "usage": {"input_tokens": 50, "output_tokens": 25},
+                    "num_turns": 1,
+                    "total_cost_usd": 0.001,
+                }
+            ),
         ]
         tool_calls, final_response, perf = _parse_stream_events(lines)
         assert tool_calls == []
@@ -1055,40 +1057,52 @@ class TestParseStreamEvents:
 
         lines = [
             # Assistant message with tool_use block
-            json.dumps({
-                "type": "assistant",
-                "message": {
-                    "content": [
-                        {
-                            "type": "tool_use",
-                            "id": "tu_001",
-                            "name": "distillery_store",
-                            "input": {"content": "test entry", "entry_type": "session", "author": "eval"},
-                        }
-                    ],
-                },
-            }),
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "tu_001",
+                                "name": "distillery_store",
+                                "input": {
+                                    "content": "test entry",
+                                    "entry_type": "session",
+                                    "author": "eval",
+                                },
+                            }
+                        ],
+                    },
+                }
+            ),
             # Tool result
-            json.dumps({
-                "type": "tool_result",
-                "tool_use_id": "tu_001",
-                "content": json.dumps({"id": "abc-123", "status": "created"}),
-            }),
+            json.dumps(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "tu_001",
+                    "content": json.dumps({"id": "abc-123", "status": "created"}),
+                }
+            ),
             # Final assistant text
-            json.dumps({
-                "type": "assistant",
-                "message": {
-                    "content": [{"type": "text", "text": "Entry stored successfully."}],
-                },
-            }),
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [{"type": "text", "text": "Entry stored successfully."}],
+                    },
+                }
+            ),
             # Result event
-            json.dumps({
-                "type": "result",
-                "duration_ms": 3200,
-                "usage": {"input_tokens": 200, "output_tokens": 80},
-                "num_turns": 2,
-                "total_cost_usd": 0.005,
-            }),
+            json.dumps(
+                {
+                    "type": "result",
+                    "duration_ms": 3200,
+                    "usage": {"input_tokens": 200, "output_tokens": 80},
+                    "num_turns": 2,
+                    "total_cost_usd": 0.005,
+                }
+            ),
         ]
         tool_calls, final_response, perf = _parse_stream_events(lines)
         assert len(tool_calls) == 1
@@ -1109,47 +1123,57 @@ class TestParseStreamEvents:
         from distillery.eval.runner import _parse_stream_events
 
         lines = [
-            json.dumps({
-                "type": "assistant",
-                "message": {
-                    "content": [
-                        {
-                            "type": "tool_use",
-                            "id": "tu_001",
-                            "name": "distillery_status",
-                            "input": {},
-                        },
-                        {
-                            "type": "tool_use",
-                            "id": "tu_002",
-                            "name": "distillery_search",
-                            "input": {"query": "python testing"},
-                        },
-                    ],
-                },
-            }),
-            json.dumps({
-                "type": "tool_result",
-                "tool_use_id": "tu_001",
-                "content": json.dumps({"status": "ok", "entries": 42}),
-            }),
-            json.dumps({
-                "type": "tool_result",
-                "tool_use_id": "tu_002",
-                "content": json.dumps({"count": 3, "entries": []}),
-            }),
-            json.dumps({
-                "type": "assistant",
-                "message": {
-                    "content": [{"type": "text", "text": "Found 3 results."}],
-                },
-            }),
-            json.dumps({
-                "type": "result",
-                "duration_ms": 5000,
-                "usage": {"input_tokens": 500, "output_tokens": 150},
-                "num_turns": 2,
-            }),
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "tu_001",
+                                "name": "distillery_status",
+                                "input": {},
+                            },
+                            {
+                                "type": "tool_use",
+                                "id": "tu_002",
+                                "name": "distillery_search",
+                                "input": {"query": "python testing"},
+                            },
+                        ],
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "tu_001",
+                    "content": json.dumps({"status": "ok", "entries": 42}),
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "tu_002",
+                    "content": json.dumps({"count": 3, "entries": []}),
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [{"type": "text", "text": "Found 3 results."}],
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "result",
+                    "duration_ms": 5000,
+                    "usage": {"input_tokens": 500, "output_tokens": 150},
+                    "num_turns": 2,
+                }
+            ),
         ]
         tool_calls, final_response, perf = _parse_stream_events(lines)
         assert len(tool_calls) == 2
@@ -1165,30 +1189,36 @@ class TestParseStreamEvents:
         from distillery.eval.runner import _parse_stream_events
 
         lines = [
-            json.dumps({
-                "type": "assistant",
-                "message": {
-                    "content": [
-                        {
-                            "type": "tool_use",
-                            "id": "tu_err",
-                            "name": "distillery_get",
-                            "input": {"entry_id": "bad-id"},
-                        }
-                    ],
-                },
-            }),
-            json.dumps({
-                "type": "tool_result",
-                "tool_use_id": "tu_err",
-                "content": json.dumps({"error": True, "message": "Entry not found"}),
-            }),
-            json.dumps({
-                "type": "result",
-                "duration_ms": 800,
-                "usage": {"input_tokens": 100, "output_tokens": 30},
-                "num_turns": 1,
-            }),
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "tu_err",
+                                "name": "distillery_get",
+                                "input": {"entry_id": "bad-id"},
+                            }
+                        ],
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "tu_err",
+                    "content": json.dumps({"error": True, "message": "Entry not found"}),
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "result",
+                    "duration_ms": 800,
+                    "usage": {"input_tokens": 100, "output_tokens": 30},
+                    "num_turns": 1,
+                }
+            ),
         ]
         tool_calls, final_response, perf = _parse_stream_events(lines)
         assert len(tool_calls) == 1
@@ -1202,12 +1232,14 @@ class TestParseStreamEvents:
         lines = [
             "not valid json",
             "",
-            json.dumps({
-                "type": "result",
-                "duration_ms": 100,
-                "usage": {"input_tokens": 10, "output_tokens": 5},
-                "num_turns": 1,
-            }),
+            json.dumps(
+                {
+                    "type": "result",
+                    "duration_ms": 100,
+                    "usage": {"input_tokens": 10, "output_tokens": 5},
+                    "num_turns": 1,
+                }
+            ),
         ]
         tool_calls, final_response, perf = _parse_stream_events(lines)
         assert tool_calls == []
@@ -1220,12 +1252,14 @@ class TestParseStreamEvents:
         from distillery.eval.runner import _parse_stream_events
 
         lines = [
-            json.dumps({
-                "type": "assistant",
-                "message": {
-                    "content": [{"type": "text", "text": "Partial output"}],
-                },
-            }),
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [{"type": "text", "text": "Partial output"}],
+                    },
+                }
+            ),
         ]
         tool_calls, final_response, perf = _parse_stream_events(lines)
         assert final_response == "Partial output"
@@ -1239,12 +1273,14 @@ class TestParseStreamEvents:
         from distillery.eval.runner import _parse_stream_events
 
         lines = [
-            json.dumps({
-                "type": "result",
-                "duration_ms": 500,
-                "usage": {"input_tokens": 20, "output_tokens": 10},
-                "num_turns": 1,
-            }),
+            json.dumps(
+                {
+                    "type": "result",
+                    "duration_ms": 500,
+                    "usage": {"input_tokens": 20, "output_tokens": 10},
+                    "num_turns": 1,
+                }
+            ),
         ]
         _, _, perf = _parse_stream_events(lines)
         assert perf.total_cost_usd == 0.0

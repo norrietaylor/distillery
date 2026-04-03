@@ -202,9 +202,7 @@ class TestMetrics:
         embedding_provider: DeterministicEmbeddingProvider,
     ) -> None:
         await store.store(make_entry(content="Period test"))
-        response = await _handle_metrics(
-            store, config, embedding_provider, {"period_days": 7}
-        )
+        response = await _handle_metrics(store, config, embedding_provider, {"period_days": 7})
         data = parse_mcp_response(response)
         # Custom period key should appear in activity
         assert "created_7d" in data["activity"]
@@ -229,9 +227,7 @@ class TestMetrics:
         config: DistilleryConfig,
         embedding_provider: DeterministicEmbeddingProvider,
     ) -> None:
-        response = await _handle_metrics(
-            store, config, embedding_provider, {"period_days": 0}
-        )
+        response = await _handle_metrics(store, config, embedding_provider, {"period_days": 0})
         data = parse_mcp_response(response)
         assert data["error"] is True
         assert data["code"] == "INVALID_PARAMS"
@@ -272,9 +268,14 @@ class TestMetrics:
 
 class TestQuality:
     async def test_quality_empty_store(
-        self, store: DuckDBStore, config: DistilleryConfig, embedding_provider: DeterministicEmbeddingProvider
+        self,
+        store: DuckDBStore,
+        config: DistilleryConfig,
+        embedding_provider: DeterministicEmbeddingProvider,
     ) -> None:
-        response = await _handle_metrics(store, config, embedding_provider, {"scope": "search_quality"})
+        response = await _handle_metrics(
+            store, config, embedding_provider, {"scope": "search_quality"}
+        )
         data = parse_mcp_response(response)
         assert data["total_searches"] == 0
         assert data["total_feedback"] == 0
@@ -283,7 +284,10 @@ class TestQuality:
         assert data["per_type_breakdown"] == {}
 
     async def test_quality_with_entry_type_filter(
-        self, store: DuckDBStore, config: DistilleryConfig, embedding_provider: DeterministicEmbeddingProvider
+        self,
+        store: DuckDBStore,
+        config: DistilleryConfig,
+        embedding_provider: DeterministicEmbeddingProvider,
     ) -> None:
         response = await _handle_metrics(
             store, config, embedding_provider, {"scope": "search_quality", "entry_type": "idea"}
@@ -294,10 +298,15 @@ class TestQuality:
         assert "per_type_breakdown" in data
 
     async def test_quality_no_error_on_missing_tables(
-        self, store: DuckDBStore, config: DistilleryConfig, embedding_provider: DeterministicEmbeddingProvider
+        self,
+        store: DuckDBStore,
+        config: DistilleryConfig,
+        embedding_provider: DeterministicEmbeddingProvider,
     ) -> None:
         """Quality should return zeroes when search_log/feedback_log don't exist."""
-        response = await _handle_metrics(store, config, embedding_provider, {"scope": "search_quality"})
+        response = await _handle_metrics(
+            store, config, embedding_provider, {"scope": "search_quality"}
+        )
         data = parse_mcp_response(response)
         assert "error" not in data
         assert data["total_searches"] == 0
@@ -309,18 +318,14 @@ class TestQuality:
 
 
 class TestStale:
-    async def test_stale_empty_store(
-        self, store: DuckDBStore, config: DistilleryConfig
-    ) -> None:
+    async def test_stale_empty_store(self, store: DuckDBStore, config: DistilleryConfig) -> None:
         response = await _handle_stale(store, config, {})
         data = parse_mcp_response(response)
         assert data["stale_count"] == 0
         assert data["entries"] == []
         assert data["days_threshold"] == 30  # default from config
 
-    async def test_stale_with_old_entry(
-        self, store: DuckDBStore, config: DistilleryConfig
-    ) -> None:
+    async def test_stale_with_old_entry(self, store: DuckDBStore, config: DistilleryConfig) -> None:
         """An entry updated long ago should appear in stale results."""
         entry = make_entry(content="Old stale entry")
         await store.store(entry)
@@ -345,9 +350,7 @@ class TestStale:
         data = parse_mcp_response(response)
         assert data["stale_count"] == 0
 
-    async def test_stale_custom_days(
-        self, store: DuckDBStore, config: DistilleryConfig
-    ) -> None:
+    async def test_stale_custom_days(self, store: DuckDBStore, config: DistilleryConfig) -> None:
         response = await _handle_stale(store, config, {"days": 7})
         data = parse_mcp_response(response)
         assert data["days_threshold"] == 7
@@ -360,9 +363,7 @@ class TestStale:
         assert data["error"] is True
         assert data["code"] == "INVALID_PARAMS"
 
-    async def test_stale_days_zero(
-        self, store: DuckDBStore, config: DistilleryConfig
-    ) -> None:
+    async def test_stale_days_zero(self, store: DuckDBStore, config: DistilleryConfig) -> None:
         response = await _handle_stale(store, config, {"days": 0})
         data = parse_mcp_response(response)
         assert data["error"] is True
@@ -376,17 +377,13 @@ class TestStale:
         assert data["error"] is True
         assert data["code"] == "INVALID_PARAMS"
 
-    async def test_stale_limit_zero(
-        self, store: DuckDBStore, config: DistilleryConfig
-    ) -> None:
+    async def test_stale_limit_zero(self, store: DuckDBStore, config: DistilleryConfig) -> None:
         response = await _handle_stale(store, config, {"limit": 0})
         data = parse_mcp_response(response)
         assert data["error"] is True
         assert data["code"] == "INVALID_PARAMS"
 
-    async def test_stale_respects_limit(
-        self, store: DuckDBStore, config: DistilleryConfig
-    ) -> None:
+    async def test_stale_respects_limit(self, store: DuckDBStore, config: DistilleryConfig) -> None:
         old_date = datetime.now(UTC) - timedelta(days=60)
         for i in range(5):
             entry = make_entry(content=f"Old entry {i}")
@@ -411,16 +408,12 @@ class TestStale:
             "UPDATE entries SET updated_at = ? WHERE id IN (?, ?)",
             [old_date, idea.id, inbox.id],
         )
-        response = await _handle_stale(
-            store, config, {"days": 30, "entry_type": "idea"}
-        )
+        response = await _handle_stale(store, config, {"days": 30, "entry_type": "idea"})
         data = parse_mcp_response(response)
         for e in data["entries"]:
             assert e["entry_type"] == "idea"
 
-    async def test_stale_entry_fields(
-        self, store: DuckDBStore, config: DistilleryConfig
-    ) -> None:
+    async def test_stale_entry_fields(self, store: DuckDBStore, config: DistilleryConfig) -> None:
         """Stale entries should have the expected summary fields."""
         entry = make_entry(
             content="Stale content preview test",
@@ -461,15 +454,11 @@ class TestStale:
 
 
 class TestInterests:
-    async def test_interests_success(
-        self, store: DuckDBStore, config: DistilleryConfig
-    ) -> None:
+    async def test_interests_success(self, store: DuckDBStore, config: DistilleryConfig) -> None:
         """Interests handler should return profile data on success."""
         mock_profile = self._make_mock_profile()
 
-        with patch(
-            "distillery.feeds.interests.InterestExtractor"
-        ) as mock_extractor_cls:
+        with patch("distillery.feeds.interests.InterestExtractor") as mock_extractor_cls:
             instance = mock_extractor_cls.return_value
             instance.extract = AsyncMock(return_value=mock_profile)
 
@@ -489,30 +478,22 @@ class TestInterests:
     ) -> None:
         mock_profile = self._make_mock_profile()
 
-        with patch(
-            "distillery.feeds.interests.InterestExtractor"
-        ) as mock_extractor_cls:
+        with patch("distillery.feeds.interests.InterestExtractor") as mock_extractor_cls:
             instance = mock_extractor_cls.return_value
             instance.extract = AsyncMock(return_value=mock_profile)
 
-            response = await _handle_interests(
-                store, config, {"recency_days": 14}
-            )
+            response = await _handle_interests(store, config, {"recency_days": 14})
             data = parse_mcp_response(response)
 
         assert "error" not in data
-        mock_extractor_cls.assert_called_once_with(
-            store=store, recency_days=14, top_n=20
-        )
+        mock_extractor_cls.assert_called_once_with(store=store, recency_days=14, top_n=20)
 
     async def test_interests_custom_top_n(
         self, store: DuckDBStore, config: DistilleryConfig
     ) -> None:
         mock_profile = self._make_mock_profile()
 
-        with patch(
-            "distillery.feeds.interests.InterestExtractor"
-        ) as mock_extractor_cls:
+        with patch("distillery.feeds.interests.InterestExtractor") as mock_extractor_cls:
             instance = mock_extractor_cls.return_value
             instance.extract = AsyncMock(return_value=mock_profile)
 
@@ -520,16 +501,12 @@ class TestInterests:
             data = parse_mcp_response(response)
 
         assert "error" not in data
-        mock_extractor_cls.assert_called_once_with(
-            store=store, recency_days=90, top_n=5
-        )
+        mock_extractor_cls.assert_called_once_with(store=store, recency_days=90, top_n=5)
 
     async def test_interests_invalid_recency_days(
         self, store: DuckDBStore, config: DistilleryConfig
     ) -> None:
-        response = await _handle_interests(
-            store, config, {"recency_days": "bad"}
-        )
+        response = await _handle_interests(store, config, {"recency_days": "bad"})
         data = parse_mcp_response(response)
         assert data["error"] is True
         assert data["code"] == "INVALID_FIELD"
@@ -537,9 +514,7 @@ class TestInterests:
     async def test_interests_negative_recency_days(
         self, store: DuckDBStore, config: DistilleryConfig
     ) -> None:
-        response = await _handle_interests(
-            store, config, {"recency_days": -1}
-        )
+        response = await _handle_interests(store, config, {"recency_days": -1})
         data = parse_mcp_response(response)
         assert data["error"] is True
         assert data["code"] == "INVALID_FIELD"
@@ -552,9 +527,7 @@ class TestInterests:
         assert data["error"] is True
         assert data["code"] == "INVALID_FIELD"
 
-    async def test_interests_zero_top_n(
-        self, store: DuckDBStore, config: DistilleryConfig
-    ) -> None:
+    async def test_interests_zero_top_n(self, store: DuckDBStore, config: DistilleryConfig) -> None:
         response = await _handle_interests(store, config, {"top_n": 0})
         data = parse_mcp_response(response)
         assert data["error"] is True
@@ -563,13 +536,9 @@ class TestInterests:
     async def test_interests_extraction_error(
         self, store: DuckDBStore, config: DistilleryConfig
     ) -> None:
-        with patch(
-            "distillery.feeds.interests.InterestExtractor"
-        ) as mock_extractor_cls:
+        with patch("distillery.feeds.interests.InterestExtractor") as mock_extractor_cls:
             instance = mock_extractor_cls.return_value
-            instance.extract = AsyncMock(
-                side_effect=RuntimeError("extraction boom")
-            )
+            instance.extract = AsyncMock(side_effect=RuntimeError("extraction boom"))
 
             response = await _handle_interests(store, config, {})
             data = parse_mcp_response(response)

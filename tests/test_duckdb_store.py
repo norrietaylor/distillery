@@ -634,9 +634,7 @@ class TestAccessedAt:
 class TestClose:
     """DuckDBStore.close() checkpoints the WAL and releases the connection."""
 
-    async def test_close_checkpoints_wal(
-        self, deterministic_embedding_provider: object
-    ) -> None:
+    async def test_close_checkpoints_wal(self, deterministic_embedding_provider: object) -> None:
         """After close(), tables created in-session are persisted to the DB file."""
         import tempfile
         from pathlib import Path
@@ -651,9 +649,7 @@ class TestClose:
             )
             await store.initialize()
             # feed_sources table should exist in the live connection.
-            assert store.connection.execute(
-                "SELECT count(*) FROM feed_sources"
-            ).fetchone() == (0,)
+            assert store.connection.execute("SELECT count(*) FROM feed_sources").fetchone() == (0,)
             await store.close()
 
             # Re-open read-only to verify the table was checkpointed to disk.

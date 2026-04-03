@@ -388,9 +388,7 @@ class TestFeedPollerMultipleSources:
         store = AsyncMock()
         store.store.return_value = "eid"
         store.list_entries.return_value = []  # no external_id matches
-        store.list_feed_sources = AsyncMock(
-            return_value=[_source_to_dict(s) for s in sources]
-        )
+        store.list_feed_sources = AsyncMock(return_value=[_source_to_dict(s) for s in sources])
 
         source_items_map = {
             "https://a.com/rss": items_a,
@@ -410,7 +408,9 @@ class TestFeedPollerMultipleSources:
 
         store.find_similar.side_effect = _find_similar
 
-        with patch("distillery.feeds.poller._build_adapter", side_effect=_build_adapter_side_effect):
+        with patch(
+            "distillery.feeds.poller._build_adapter", side_effect=_build_adapter_side_effect
+        ):
             poller = FeedPoller(store=store, config=cfg)
             summary = await poller.poll()
 
@@ -533,9 +533,7 @@ class TestCLIPollSubcommand:
             )
             mock_load.return_value = cfg
             mock_asyncio.run.return_value = "not-found:https://nonexistent.com/rss"
-            code = _cmd_poll(
-                config_path=None, fmt="text", source_url="https://nonexistent.com/rss"
-            )
+            code = _cmd_poll(config_path=None, fmt="text", source_url="https://nonexistent.com/rss")
             assert code == 1
 
     def test_poll_runs_and_exits_zero_on_no_errors(self) -> None:

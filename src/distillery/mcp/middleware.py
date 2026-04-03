@@ -403,9 +403,7 @@ class OrgMembershipMiddleware:
 
         # Cannot identify the user (opaque token or JWT without
         # login/sub claim) — fail closed.
-        await self._send_403(
-            send, "<unknown>", list(self.checker.allowed_orgs)
-        )
+        await self._send_403(send, "<unknown>", list(self.checker.allowed_orgs))
 
     @staticmethod
     async def _send_403(send: Send, username: str, orgs: list[str]) -> None:

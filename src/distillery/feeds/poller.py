@@ -315,9 +315,7 @@ class FeedPoller:
             return result
 
         result.items_fetched = len(items)
-        logger.debug(
-            "FeedPoller: fetched %d items from %s", result.items_fetched, source.url
-        )
+        logger.debug("FeedPoller: fetched %d items from %s", result.items_fetched, source.url)
 
         # Track entry IDs stored during this batch so we can exclude them
         # from semantic dedup — prevents same-batch items from blocking
@@ -344,9 +342,7 @@ class FeedPoller:
             try:
                 score = await scorer.score(text)
             except Exception as exc:  # noqa: BLE001
-                result.errors.append(
-                    f"Scoring failed for item {item.item_id!r}: {exc}"
-                )
+                result.errors.append(f"Scoring failed for item {item.item_id!r}: {exc}")
                 logger.warning(
                     "FeedPoller: scoring failed for item %r from %s: %s",
                     item.item_id,
@@ -430,9 +426,7 @@ class FeedPoller:
 
         # Build a source trust_weight lookup from DB.
         db_sources = await self._store.list_feed_sources()
-        trust_weights: dict[str, float] = {
-            s["url"]: s["trust_weight"] for s in db_sources
-        }
+        trust_weights: dict[str, float] = {s["url"]: s["trust_weight"] for s in db_sources}
 
         stats: dict[str, int] = {
             "rescored": 0,
@@ -487,9 +481,7 @@ class FeedPoller:
                     stats["archived"] += 1
 
             except Exception:  # noqa: BLE001
-                logger.warning(
-                    "FeedPoller: rescore failed for entry %s", entry.id, exc_info=True
-                )
+                logger.warning("FeedPoller: rescore failed for entry %s", entry.id, exc_info=True)
                 stats["errors"] += 1
 
         return stats
