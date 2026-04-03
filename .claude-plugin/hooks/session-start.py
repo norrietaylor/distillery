@@ -19,8 +19,9 @@ def main() -> None:
             ["distillery", "status", "--format", "json"],
             capture_output=True,
             text=True,
+            timeout=2.0,
         )
-    except FileNotFoundError:
+    except (FileNotFoundError, subprocess.TimeoutExpired):
         sys.exit(0)
     if result.returncode != 0:
         sys.exit(0)

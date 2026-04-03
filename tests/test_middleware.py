@@ -653,15 +653,16 @@ class TestRequestIDMiddleware:
         assert cap.headers.get("x-request-id") == "my-trace-id"
 
     async def test_generates_id_when_absent(self) -> None:
-        """A UUID is generated when X-Request-ID is not present."""
-        import re
+        """A UUID4 is generated when X-Request-ID is not present."""
+        import uuid
 
         mw = RequestIDMiddleware(_dummy_app)
         cap = _ResponseCapture()
         await mw(_make_scope(), _noop_receive, cap)
         assert cap.status == 200
         rid = cap.headers.get("x-request-id", "")
-        assert re.fullmatch(r"[0-9a-f-]{36}", rid), f"Expected UUID4, got {rid!r}"
+        parsed = uuid.UUID(rid)
+        assert parsed.version == 4, f"Expected UUID4, got version {parsed.version}"
 
     async def test_non_http_scope_passthrough(self) -> None:
         """Non-HTTP scopes are passed through without modification."""
@@ -674,3 +675,25 @@ class TestRequestIDMiddleware:
         ws_scope = _make_scope(scope_type="websocket")
         await mw(ws_scope, _noop_receive, _ResponseCapture())
         assert called == ["websocket"]
+
+    async def test_request_id_present_on_429(self) -> None:
+        """X-Request-ID is included on rate-limited 429 responses."""
+        import uuid
+
+        app = apply_http_middleware(
+            _dummy_app,
+            requests_per_minute=1,
+            requests_per_hour=100,
+        )
+        # First request succeeds and consumes the quota.
+        cap = _ResponseCapture()
+        await app(_make_scope(), _noop_receive, cap)
+        assert cap.status == 200
+
+        # Second request is rate-limited — should still carry X-Request-ID.
+        cap = _ResponseCapture()
+        await app(_make_scope(), _noop_receive, cap)
+        assert cap.status == 429
+        rid = cap.headers.get("x-request-id", "")
+        parsed = uuid.UUID(rid)
+        assert parsed.version == 4, f"Expected UUID4 on 429 response, got {rid!r}"
