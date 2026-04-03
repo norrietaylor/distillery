@@ -134,6 +134,152 @@ Resource protection is configured via the `rate_limit` section in `distillery-fl
 
 Budget counters are stored in DuckDB's `_meta` table and survive scale-to-zero restarts.
 
+## Database Migrations
+
+Distillery uses a **forward-only schema migration system** that automatically runs on startup. Schema migrations are additive only—they never modify or delete existing columns. This ensures:
+
+- **Automatic updates**: New deployments automatically migrate the database schema to the latest version
+- **Zero-downtime**: Additive migrations don't require data restructuring or downtime
+- **Safe rollbacks**: Pre-deploy backups allow reverting to a previous schema version if needed
+
+### How Automatic Migrations Work
+
+When the server starts, it:
+
+1. Checks the current `schema_version` in the `_meta` table
+2. Executes any pending migrations in order (migration 1, 2, 3, etc.)
+3. Updates `schema_version` after each migration
+4. Completes startup once all migrations are applied
+
+No manual intervention is required—migrations run automatically on deploy.
+
+### Pre-Deploy Backup
+
+Before deploying a new version with schema migrations, create a backup:
+
+```bash
+# SSH into the machine and export all data
+fly ssh console -C "distillery export --output /data/backup-$(date +%Y%m%d).json" --app <app-name>
+```
+
+This creates a portable JSON export containing all entries, feed sources, and metadata. Embeddings are omitted so the export is independent of embedding model changes.
+
+### Volume Snapshots
+
+Fly.io automatically takes daily volume snapshots (5-day retention). For manual snapshots before risky operations:
+
+```bash
+# Create a manual snapshot
+fly volumes snapshots create <volume-id> --app <app-name>
+
+# List all snapshots
+fly volumes snapshots list <volume-id> --app <app-name>
+
+# Restore from snapshot (creates a new volume; restore manually afterward)
+fly volumes snapshots restore <snapshot-id> --app <app-name>
+```
+
+### Breaking Migration Procedure
+
+If a new Distillery version requires breaking schema changes, the migration system is still forward-only—it never deletes data. However, to reset for incompatible versions:
+
+1. **Export current data**:
+   ```bash
+   fly ssh console -C "distillery export --output /data/backup-before-breaking.json" --app <app-name>
+   ```
+
+2. **Create a volume snapshot** (optional extra safety):
+   ```bash
+   fly volumes snapshots create <volume-id> --app <app-name>
+   ```
+
+3. **Deploy the new version**:
+   ```bash
+   fly deploy -c deploy/fly/fly.toml
+   ```
+   The new schema migrations will run on startup, creating fresh tables as needed.
+
+4. **Re-import previous data** (if compatible):
+   ```bash
+   fly ssh console --app <app-name>
+   # Inside the SSH console:
+   distillery import /data/backup-before-breaking.json --mode merge
+   exit
+   ```
+
+5. **Verify** the server is operational:
+   ```bash
+   fly logs --app <app-name>
+   # Look for successful startup and no errors
+   ```
+
+6. **Clean up**:
+   ```bash
+   fly ssh console -C "rm /data/backup-before-breaking.json" --app <app-name>
+   ```
+
+### Rollback from Backup
+
+If a deployment causes issues, restore from a pre-deploy backup:
+
+#### Option 1: Restore from JSON Export
+
+```bash
+# Export current (broken) database as a fallback
+fly ssh console -C "distillery export --output /data/broken-state.json" --app <app-name>
+
+# Clear and restore from backup
+fly ssh console --app <app-name>
+# Inside the SSH console:
+# First, delete the current database file to start fresh
+rm /data/distillery.db
+# Restart the machine to recreate the schema
+exit
+
+fly machines restart <machine-id> --app <app-name>
+
+# Wait for restart, then import the backup
+fly ssh console -C "distillery import /data/backup-YYYYMMDD.json --mode replace" --app <app-name>
+
+# Verify
+fly logs --app <app-name>
+```
+
+#### Option 2: Restore from Volume Snapshot
+
+```bash
+# List available snapshots
+fly volumes snapshots list <volume-id> --app <app-name>
+
+# Create a new volume from the snapshot
+fly volumes snapshots restore <snapshot-id> --app <app-name>
+
+# Detach the broken volume
+fly volumes detach <current-volume-id> --app <app-name>
+
+# Attach the restored volume
+fly machines update <machine-id> --mount-volume <restored-volume-id>:/data --app <app-name>
+
+# Restart
+fly machines restart <machine-id> --app <app-name>
+
+# Verify
+fly logs --app <app-name>
+```
+
+### Schema Version Tracking
+
+The current schema version is stored in the `_meta` table. View it:
+
+```bash
+# From local CLI
+distillery status
+# Output includes: schema_version: 6, duckdb_version: 1.5.x
+
+# From SSH console
+fly ssh console -C "distillery status" --app <app-name>
+```
+
 ## Backup
 
 Fly takes automatic daily volume snapshots (5-day retention). For additional safety:
