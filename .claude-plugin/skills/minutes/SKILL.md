@@ -3,7 +3,7 @@ name: minutes
 description: "Capture meeting notes or append updates to an existing meeting record"
 allowed-tools:
   - "mcp__*__distillery_store"
-  - "mcp__*__distillery_check_dedup"
+  - "mcp__*__distillery_find_similar"
   - "mcp__*__distillery_search"
   - "mcp__*__distillery_get"
   - "mcp__*__distillery_update"
@@ -105,7 +105,7 @@ Proceed anyway? (yes / skip)
 
 If user chooses skip: "Skipped. No new entry was stored." and stop.
 
-If no `meeting_id` match found, call `distillery_check_dedup(content="<meeting notes summary>")`. Handle by `action` field:
+If no `meeting_id` match found, call `distillery_find_similar(content="<meeting notes summary>", dedup_action=True)`. Handle by `action` field:
 
 **`"create"`:** No similar entries. Proceed to Step 7a.
 

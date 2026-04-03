@@ -9,6 +9,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Webhook Endpoints (PR #94)
+
+- REST webhook API (`/api/poll`, `/api/rescore`, `/api/maintenance`) with bearer token auth
+- Per-endpoint cooldowns persisted in DuckDB, rate limiting, audit logging
+- ASGI dispatcher routing `/api/*` to webhooks, all other paths to MCP
+- GitHub Actions webhook scheduler integration for `/setup` skill
+
+### Eval Supplement (PR #102)
+
+- promptfoo PR CI gate (`eval-pr.yml`) with 10 smoke-test scenarios
+- RAGAS retrieval quality metrics (`retrieval_scorer.py`) with golden dataset
+- 13 adversarial/edge-case eval scenarios (malformed input, empty store, boundaries)
+- Per-run cost tracking with `--compare-cost` flag and per-skill breakdown
+
+### Promotion Readiness (PR #103)
+
+- README badges (PyPI, License, Python), demo GIF, `.env.example`
+- `SECURITY.md` with GitHub Security Advisories disclosure policy
+
+### Plugin Audit (PR #105)
+
+- `allowed-tools` on all 10 skills, `disable-model-invocation` on write skills
+- Skill descriptions rewritten from trigger-phrase lists to purpose statements
+- `context: fork` on `/pour` and `/radar`, `effort` hints on all skills
+- `userConfig` in `plugin.json` with `sensitive: true` for API keys
+
+### MCP Server Refactor (PR #106)
+
+- Split `server.py` (4,041 lines) into 7 domain modules under `mcp/tools/`
+- Standardized error codes (`INVALID_PARAMS`, `NOT_FOUND`, `CONFLICT`, `INTERNAL`)
+- Extracted validation helpers (`validate_limit`, `validate_required`, `tool_error`)
+- Configurable defaults (`defaults.dedup_threshold`, `dedup_limit`, `stale_days`) in `distillery.yaml`
+- Full middleware test coverage (rate limiting, body size, org membership)
+- Tests for all 22 tool handlers; `mcp/` package at 95%+ coverage
+
+### Skill UX Improvements (PR #115)
+
+- Dedup standardization: `/minutes` and `/radar` now call `distillery_find_similar(dedup_action=true)`
+- `--project` filtering on `/classify --inbox`, `/minutes --list`, `/radar`
+- Confirmation format template and entry types table in CONVENTIONS.md
+- `/radar` defaults to display-only (requires `--store` to persist)
+- `distillery_configure` MCP tool for runtime threshold changes (`/tune` no longer requires manual YAML editing)
+- Progressive disclosure: `/setup` references extracted to `references/` subdirectory
+
+### Tool Consolidation (PR #118)
+
+- Consolidated 22 MCP tools down to 18 by merging overlapping tools:
+  - `distillery_metrics` absorbs `distillery_status` and `distillery_quality` (via `scope` parameter)
+  - `distillery_find_similar` absorbs `distillery_check_dedup` and `distillery_check_conflicts` (via `dedup_action` and `conflict_check` parameters)
+  - `distillery_list` absorbs `distillery_review_queue` (via `output_mode="review"`)
+  - `distillery_interests` absorbs `distillery_suggest_sources` (via `suggest_sources` parameter)
+- All skills, eval scenarios, and tests updated to use consolidated tool names
+- 18 MCP tools total, 1600+ tests
+
+### Remaining Audit (PRs #120, #121)
+
+- SessionStart hook for review queue notifications
+- `distillery-researcher` custom agent for `/pour` and `/radar` workflows
+- `X-Request-ID` middleware for HTTP request correlation
+- Model hints on `/recall` and `/tune` skills
+- Stale tool reference cleanup across skills and cron payloads
+
 ### Spec 05 — Developer Experience
 
 - Fixed `distillery` CLI entry point with `status` and `health` subcommands
@@ -27,7 +89,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `distillery_metrics` tool: comprehensive usage dashboard (entries, activity, search, quality, staleness, storage)
 - `ConflictChecker` class for LLM-based contradiction detection
 - Config extensions: `feedback_window_minutes`, `stale_days`, `conflict_threshold`
-- 15 MCP tools total
+- 15 MCP tools total (later consolidated to 18)
 
 ### Spec 07 — FastMCP Migration
 
@@ -47,7 +109,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `TagsConfig` in `distillery.yaml`: `enforce_namespaces`, `reserved_prefixes`
 - DuckDB concurrent initialization retry with `INSERT OR IGNORE` for meta bootstrap
 - Updated `/distill` and `/bookmark` skills with hierarchical tag suggestions
-- 17 MCP tools total, 600+ tests
+- 17 MCP tools total (later consolidated to 18), 600+ tests
 
 ### Spec 09 — CLI Eval Runner
 
@@ -71,7 +133,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `distillery poll` CLI command for cron-based scheduling
 - `FeedsConfig` in `distillery.yaml` with sources (each with per-source `trust_weight`) and thresholds
 - MotherDuck backend (`md:distillery`) for persistent storage across container restarts
-- 21 MCP tools total, 1000+ tests
+- 21 MCP tools total (later consolidated to 18), 1000+ tests
 
 ### Spec 10b — GitHub Team OAuth
 

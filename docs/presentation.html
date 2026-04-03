@@ -806,7 +806,7 @@
       </div>
     </div>
     <div class="demo-buttons">
-      <button class="demo-btn" id="demo-btn-status">distillery_status()</button>
+      <button class="demo-btn" id="demo-btn-status">distillery_metrics()</button>
       <button class="demo-btn" id="demo-btn-search">distillery_search("caching strategy")</button>
       <button class="demo-btn" id="demo-btn-recent">distillery_list(limit=5)</button>
     </div>
@@ -949,7 +949,7 @@ Options:
       </div>
       <div class="arch-mcp">
         <div class="arch-mcp-title">MCP Server</div>
-        <div class="arch-mcp-sub">FastMCP 2.x/3.x &middot; stdio + streamable-HTTP &middot; 22 tools &middot; REST webhooks</div>
+        <div class="arch-mcp-sub">FastMCP 2.x/3.x &middot; stdio + streamable-HTTP &middot; 18 tools &middot; REST webhooks</div>
       </div>
     </div>
     <div class="arch-connector">
@@ -1294,8 +1294,8 @@ $ distillery-mcp --transport http --port 8000
 
   /* Pre-recorded fallbacks shown when the hosted MCP is unreachable */
   var FALLBACK = {
-    distillery_status: [
-      ['prompt', '> distillery_status()'],
+    distillery_metrics: [
+      ['prompt', '> distillery_metrics()'],
       ['plain',  ''],
       ['label',  '● Distillery Knowledge Base'],
       ['plain',  ''],
@@ -1485,7 +1485,7 @@ $ distillery-mcp --transport http --port 8000
     panel.addEventListener('keydown', function (e) { e.stopPropagation(); });
 
     document.getElementById('demo-btn-status').addEventListener('click', function () {
-      runAction('distillery_status', {}, outputEl, null);
+      runAction('distillery_metrics', {}, outputEl, null);
     });
     document.getElementById('demo-btn-search').addEventListener('click', function () {
       runAction('distillery_search', { query: 'caching strategy', limit: 5 }, outputEl, 'caching strategy');

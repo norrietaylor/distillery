@@ -77,6 +77,7 @@ jobs:
           fail-build: true
           severity-cutoff: high
           output-format: json
+          config: .grype.yaml
 
       - name: Save Grype report and generate summary
         if: always()

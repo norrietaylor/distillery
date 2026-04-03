@@ -6,7 +6,7 @@ allowed-tools:
   - "mcp__*__distillery_list"
   - "mcp__*__distillery_store"
   - "mcp__*__distillery_update"
-  - "mcp__*__distillery_check_dedup"
+  - "mcp__*__distillery_find_similar"
   - "mcp__*__distillery_interests"
   - "mcp__*__distillery_metrics"
 context: fork
@@ -80,7 +80,7 @@ Call `distillery_interests(suggest_sources=true, max_suggestions=5)`. Include th
 
 If `--store` was specified, check for duplicate digests before storing.
 
-Call `distillery_check_dedup(content="<digest summary>")`. Handle by `action` field:
+Call `distillery_find_similar(content="<digest summary>", dedup_action=True)`. Handle by `action` field:
 
 **`"create"`:** No similar entries. Proceed to Step 7.
 

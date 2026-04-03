@@ -20,6 +20,15 @@ ignore:
   - vulnerability: CVE-2026-4519
     reason: "CPython 3.13 — no upstream fix available in any distro"
 
+  - vulnerability: CVE-2026-2673
+    reason: "openssl 3.5.5 — no upstream fix available in any distro"
+
+  - vulnerability: CVE-2025-69720
+    reason: "ncurses 6.5 — no upstream fix available in any distro"
+
+  - vulnerability: CVE-2026-4046
+    reason: "glibc 2.43 (Wolfi) — no upstream fix available"
+
 # Fail on critical and high severity vulnerabilities.
 # This is also enforced in the CI workflow via --severity-cutoff=high,
 # but defining it here ensures consistent behavior for local scans.
