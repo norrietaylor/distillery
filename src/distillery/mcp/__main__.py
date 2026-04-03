@@ -178,8 +178,8 @@ def main(argv: list[str] | None = None) -> int:
                 from distillery.mcp.webhooks import create_webhook_app
 
                 webhook_app: ASGIApp = create_webhook_app(
-                    server._distillery_shared,
-                    config,  # type: ignore[attr-defined]
+                    server._distillery_shared,  # type: ignore[attr-defined]
+                    config,
                 )
                 # Apply the same body-size guard as the MCP endpoint.
                 webhook_app = BodySizeLimitMiddleware(webhook_app, max_bytes=rl.max_body_bytes)
