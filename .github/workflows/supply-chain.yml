@@ -29,12 +29,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - target: fly
-            dockerfile: deploy/fly/Dockerfile
+          - target: distillery
+            dockerfile: Dockerfile
             context: .
-          # - target: prefect
-          #   dockerfile: deploy/prefect/Dockerfile
-          #   context: .
 
     steps:
       - name: Checkout repository
@@ -160,15 +157,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - target: fly
-            dockerfile: deploy/fly/Dockerfile
+          - target: distillery
+            dockerfile: Dockerfile
             context: .
 
-    # NOTE: With a matrix strategy, outputs capture only the last job's value.
-    # Currently only one matrix entry (fly) exists. When adding Prefect,
-    # switch to per-target output keys or use artifacts for digest passing.
     outputs:
-      digest-fly: ${{ steps.push.outputs.digest }}
+      digest: ${{ steps.push.outputs.digest }}
 
     steps:
       - name: Checkout repository

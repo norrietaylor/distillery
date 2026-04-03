@@ -153,10 +153,17 @@ S3 credentials are resolved from `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` o
 
 ## Platform-Specific Guides
 
-- [Fly.io](fly.md) — persistent DuckDB on volume, scale-to-zero (~$3-5/month)
-- [Prefect Horizon](prefect.md) — managed hosting with MotherDuck
+Platform-specific deployment configs live in the [distill_ops](https://github.com/norrietaylor/distill_ops) repo:
 
-For other platforms (Docker, Kubernetes, AWS/GCP/Azure), use `deploy/fly/Dockerfile` as a starting point.
+- [Fly.io](https://github.com/norrietaylor/distill_ops/tree/main/fly) — persistent DuckDB on volume, scale-to-zero (~$3-5/month)
+- [Prefect Horizon](https://github.com/norrietaylor/distill_ops/tree/main/prefect) — managed hosting with MotherDuck
+
+For other platforms (Docker, Kubernetes, AWS/GCP/Azure), use the root `Dockerfile` in the distillery repo as a starting point:
+
+```bash
+docker build -t distillery .
+docker run -p 8000:8000 -e JINA_API_KEY=... distillery
+```
 
 ## Scaling
 

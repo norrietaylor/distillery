@@ -70,12 +70,9 @@ Uses Python `Protocol` (structural subtyping), not ABCs. All storage operations 
 
 ## Deployment
 
-Production deployment configs live under `deploy/` with one subdirectory per provider:
+A generic `Dockerfile` at the repo root builds the Distillery MCP server image, published to `ghcr.io/norrietaylor/distillery`. Platform-specific deployment configs (Fly.io, Prefect Horizon) live in the [distill_ops](https://github.com/norrietaylor/distill_ops) repo.
 
-- `deploy/prefect/` — Prefect Horizon (MotherDuck + GitHub OAuth)
-- `deploy/fly/` — Fly.io (local DuckDB on persistent volume + GitHub OAuth)
-
-Local development uses `distillery-dev.yaml` at the repo root. The `DISTILLERY_CONFIG` env var points each deployment to its config file. See each provider's README for quickstart instructions.
+Local development uses `distillery-dev.yaml` at the repo root. The `DISTILLERY_CONFIG` env var points each deployment to its config file.
 
 ## Git Workflow
 
