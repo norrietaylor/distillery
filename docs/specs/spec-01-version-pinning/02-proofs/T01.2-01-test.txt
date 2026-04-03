@@ -1,0 +1,13 @@
+Type: test
+Command: python3 -m pytest tests/test_store_migration.py::test_meta_version_tracking -v
+Expected: test passes, _meta contains schema_version and duckdb_version
+Timestamp: 2026-04-03T00:00:00Z
+
+============================= test session starts ==============================
+collected 1 item
+
+tests/test_store_migration.py::test_meta_version_tracking PASSED         [100%]
+
+============================== 1 passed in 0.05s ==============================
+
+Status: PASS

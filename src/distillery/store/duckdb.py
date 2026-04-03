@@ -398,6 +398,79 @@ class DuckDBStore:
         conn.execute(_CREATE_FEED_SOURCES_TABLE)
         logger.info("feed_sources table ready")
 
+    def _track_version_info(self, conn: duckdb.DuckDBPyConnection) -> None:
+        """Read and persist schema/DuckDB/VSS version info in ``_meta``.
+
+        Steps:
+        1. Read ``schema_version`` from ``_meta`` (default ``"0"``).
+        2. Read the current DuckDB library version.
+        3. Compare the stored ``duckdb_version``; warn if major or minor differs.
+        4. Upsert ``duckdb_version`` and ``vss_version`` into ``_meta``.
+        5. Log ``"Schema at version {N}, DuckDB {version}"``.
+        """
+        # 1. Read schema_version (may not exist yet on a fresh database)
+        result = conn.execute(
+            "SELECT value FROM _meta WHERE key = 'schema_version'"
+        )
+        row = result.fetchone()
+        schema_version: str = row[0] if row else "0"
+
+        # 2. Current DuckDB library version
+        current_duckdb_version: str = duckdb.__version__
+
+        # 3. Compare stored duckdb_version; warn on major/minor mismatch
+        stored_result = conn.execute(
+            "SELECT value FROM _meta WHERE key = 'duckdb_version'"
+        )
+        stored_row = stored_result.fetchone()
+        if stored_row is not None:
+            stored_version: str = stored_row[0]
+            stored_parts = stored_version.split(".")
+            current_parts = current_duckdb_version.split(".")
+            if (
+                len(stored_parts) >= 2
+                and len(current_parts) >= 2
+                and (stored_parts[0] != current_parts[0] or stored_parts[1] != current_parts[1])
+            ):
+                logger.warning(
+                    "DuckDB version changed: stored=%s, current=%s — "
+                    "consider running distillery export/import if schema differs",
+                    stored_version,
+                    current_duckdb_version,
+                )
+
+        # 4. Upsert duckdb_version
+        conn.execute(
+            "INSERT INTO _meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+            ["duckdb_version", current_duckdb_version],
+        )
+
+        # 5. Get VSS extension version if available; upsert into _meta
+        vss_version: str = ""
+        try:
+            vss_result = conn.execute(
+                "SELECT extension_version FROM duckdb_extensions() WHERE extension_name = 'vss'"
+            )
+            vss_row = vss_result.fetchone()
+            if vss_row is not None:
+                vss_version = vss_row[0] or ""
+        except Exception:  # noqa: BLE001
+            pass  # VSS extension metadata not available — silently skip
+
+        if vss_version:
+            conn.execute(
+                "INSERT INTO _meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+                ["vss_version", vss_version],
+            )
+
+        # 6. Ensure schema_version key exists (default "0" on fresh db)
+        conn.execute(
+            "INSERT INTO _meta (key, value) VALUES (?, ?) ON CONFLICT DO NOTHING",
+            ["schema_version", schema_version],
+        )
+
+        logger.info("Schema at version %s, DuckDB %s", schema_version, current_duckdb_version)
+
     def _validate_or_record_meta(self, conn: duckdb.DuckDBPyConnection) -> None:
         """Validate or record the embedding model metadata.
 
@@ -508,6 +581,7 @@ class DuckDBStore:
                 self._create_log_tables(conn)
                 self._create_feed_sources_table(conn)
                 self._create_meta_table(conn)
+                self._track_version_info(conn)
                 self._validate_or_record_meta(conn)
                 self._create_index(conn)
                 break  # Success - exit retry loop
