@@ -3,7 +3,7 @@ name: watch
 description: "Add, remove, or list monitored feed sources (RSS and GitHub)"
 allowed-tools:
   - "mcp__*__distillery_watch"
-  - "mcp__*__distillery_status"
+  - "mcp__*__distillery_metrics"
   - "CronCreate"
   - "CronList"
   - "CronDelete"

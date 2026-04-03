@@ -2,7 +2,8 @@
 
 Implements the following tools:
   - distillery_search: Semantic search over stored entries by query
-  - distillery_find_similar: Find entries similar to a given content string
+  - distillery_find_similar: Find entries similar to a given content string,
+    with optional dedup_action and conflict_check modes
   - distillery_aggregate: Count entries grouped by a field
 """
 
@@ -116,6 +117,20 @@ async def _handle_find_similar(
     Embeds *content* and returns stored entries whose cosine similarity
     exceeds *threshold*, sorted by descending similarity.
 
+    Optional modes (progressive disclosure):
+
+    * **dedup_action** (bool, default ``False``): when ``True``, runs the
+      extracted dedup helper and adds a ``dedup`` field to the response
+      containing ``action`` and ``similar_entries``.
+
+    * **conflict_check** (bool, default ``False``): when ``True``, runs
+      conflict pass 1 and adds a ``conflict_prompt`` field alongside each
+      similar entry in the results.
+
+    * **llm_responses** (list[dict] | None): when provided together with
+      ``conflict_check=True``, runs conflict pass 2 and adds a
+      ``conflict_evaluation`` field to the response.
+
     Args:
         store: Initialised :class:`~distillery.store.duckdb.DuckDBStore`.
         arguments: Tool argument dict containing at minimum ``content``.
@@ -145,6 +160,24 @@ async def _handle_find_similar(
         return error_response(*limit_result)
     limit = limit_result
 
+    # --- optional mode flags ------------------------------------------------
+    dedup_action: bool = bool(arguments.get("dedup_action", False))
+    conflict_check: bool = bool(arguments.get("conflict_check", False))
+    llm_responses_raw: list[dict[str, Any]] | None = arguments.get("llm_responses")
+
+    # Validate llm_responses type if provided
+    if llm_responses_raw is not None and not isinstance(llm_responses_raw, list):
+        return error_response(
+            "INVALID_PARAMS", "Field 'llm_responses' must be a list of objects"
+        )
+
+    # llm_responses without conflict_check is invalid
+    if llm_responses_raw is not None and not conflict_check:
+        return error_response(
+            "INVALID_PARAMS",
+            "Field 'llm_responses' requires conflict_check=true",
+        )
+
     # --- embedding budget check (1 embed call) ----------------------------
     if cfg is not None:
         try:
@@ -159,7 +192,103 @@ async def _handle_find_similar(
         return error_response("FIND_SIMILAR_ERROR", f"find_similar failed: {exc}")
 
     results = [{"score": round(sr.score, 6), "entry": sr.entry.to_dict()} for sr in search_results]
-    return success_response({"results": results, "count": len(results), "threshold": threshold})
+    payload: dict[str, Any] = {
+        "results": results,
+        "count": len(results),
+        "threshold": threshold,
+    }
+
+    # --- dedup_action mode ---------------------------------------------------
+    if dedup_action:
+        if cfg is None:
+            return error_response(
+                "INVALID_PARAMS",
+                "dedup_action requires server configuration (classification settings)",
+            )
+        try:
+            from distillery.mcp.tools.quality import run_dedup_check
+
+            dedup_result = await run_dedup_check(store, cfg.classification, content)
+            payload["dedup"] = dedup_result
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Error running dedup check in find_similar")
+            return error_response("DEDUP_ERROR", f"Deduplication check failed: {exc}")
+
+    # --- conflict_check mode -------------------------------------------------
+    if conflict_check:
+        if cfg is None:
+            return error_response(
+                "INVALID_PARAMS",
+                "conflict_check requires server configuration (classification settings)",
+            )
+        conflict_threshold = cfg.classification.conflict_threshold
+
+        if llm_responses_raw is not None:
+            # --- second pass: evaluate LLM responses ---
+            parsed_responses: dict[str, tuple[bool, str]] = {}
+            for item in llm_responses_raw:
+                if not isinstance(item, dict):
+                    return error_response(
+                        "INVALID_PARAMS",
+                        "Each item in llm_responses must be an object with "
+                        "'entry_id', 'is_conflict', and 'reasoning'.",
+                    )
+                entry_id = item.get("entry_id")
+                if entry_id is None:
+                    return error_response(
+                        "INVALID_PARAMS",
+                        "Each llm_responses item must have an 'entry_id' field.",
+                    )
+                is_conflict_val = item.get("is_conflict")
+                if is_conflict_val is None:
+                    return error_response(
+                        "INVALID_PARAMS",
+                        f"llm_responses item for entry {entry_id!r} is missing 'is_conflict'.",
+                    )
+                reasoning = str(item.get("reasoning", ""))
+                parsed_responses[str(entry_id)] = (bool(is_conflict_val), reasoning)
+
+            try:
+                from distillery.mcp.tools.quality import run_conflict_evaluation
+
+                eval_result = await run_conflict_evaluation(
+                    store, conflict_threshold, content, parsed_responses
+                )
+                payload["conflict_evaluation"] = eval_result
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Error running conflict evaluation in find_similar")
+                return error_response(
+                    "CONFLICT_ERROR", f"Conflict evaluation failed: {exc}"
+                )
+        else:
+            # --- first pass: discover conflict candidates ---
+            try:
+                from distillery.mcp.tools.quality import run_conflict_discovery
+
+                discovery_result = await run_conflict_discovery(
+                    store, conflict_threshold, content
+                )
+                # Attach conflict_prompt to matching entries in results
+                prompt_map: dict[str, str] = {}
+                for candidate in discovery_result.get("conflict_candidates", []):
+                    prompt_map[candidate["entry_id"]] = candidate["conflict_prompt"]
+
+                for result_item in results:
+                    entry_id = result_item["entry"].get("id", "")
+                    if entry_id in prompt_map:
+                        result_item["conflict_prompt"] = prompt_map[entry_id]
+
+                payload["conflict_candidates_count"] = len(
+                    discovery_result.get("conflict_candidates", [])
+                )
+                payload["conflict_message"] = discovery_result.get("message", "")
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Error running conflict discovery in find_similar")
+                return error_response(
+                    "CONFLICT_ERROR", f"Conflict check failed: {exc}"
+                )
+
+    return success_response(payload)
 
 
 # ---------------------------------------------------------------------------

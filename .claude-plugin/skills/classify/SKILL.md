@@ -3,11 +3,10 @@ name: classify
 description: "Classify knowledge entries by type and manage the manual review queue"
 allowed-tools:
   - "mcp__*__distillery_classify"
-  - "mcp__*__distillery_review_queue"
   - "mcp__*__distillery_resolve_review"
   - "mcp__*__distillery_get"
   - "mcp__*__distillery_list"
-  - "mcp__*__distillery_status"
+  - "mcp__*__distillery_metrics"
 effort: medium
 ---
 
@@ -97,7 +96,7 @@ If any sent to review, suggest `/classify --review`.
 
 ### Step C1: Fetch the Review Queue
 
-Call `distillery_review_queue(limit=20)`. If `--project` was specified, also pass `project=<name>`. If empty, tell the user and stop.
+Call `distillery_list(status="pending_review", output_mode="review", limit=20)`. If `--project` was specified, also pass `project=<name>`. If empty, tell the user and stop.
 
 ### Step C2: Determine Reviewer
 

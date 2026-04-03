@@ -1,0 +1,55 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.7, pytest-9.0.2, pluggy-1.6.0 -- /usr/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/norrie.guest/code/distillery/.claude/worktrees/agent-a22e02b1
+configfile: pyproject.toml
+plugins: asyncio-1.3.0, anyio-4.13.0, cov-7.1.0, typeguard-4.4.2
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 44 items
+
+tests/test_mcp_classify.py::TestClassifyTool::test_classify_updates_entry_type_and_status_above_threshold PASSED [  2%]
+tests/test_mcp_classify.py::TestClassifyTool::test_classify_sets_pending_review_below_threshold PASSED [  4%]
+tests/test_mcp_classify.py::TestClassifyTool::test_classify_merges_suggested_tags PASSED [  6%]
+tests/test_mcp_classify.py::TestClassifyTool::test_classify_sets_suggested_project_when_entry_has_none PASSED [  9%]
+tests/test_mcp_classify.py::TestClassifyTool::test_classify_does_not_overwrite_existing_project PASSED [ 11%]
+tests/test_mcp_classify.py::TestClassifyTool::test_classify_records_reclassified_from_on_second_classify PASSED [ 13%]
+tests/test_mcp_classify.py::TestClassifyTool::test_classify_returns_not_found_for_missing_entry PASSED [ 15%]
+tests/test_mcp_classify.py::TestClassifyTool::test_classify_validates_missing_required_fields PASSED [ 18%]
+tests/test_mcp_classify.py::TestClassifyTool::test_classify_validates_invalid_entry_type PASSED [ 20%]
+tests/test_mcp_classify.py::TestClassifyTool::test_classify_validates_confidence_out_of_range PASSED [ 22%]
+tests/test_mcp_classify.py::TestReviewQueueTool::test_review_queue_returns_pending_entries PASSED [ 25%]
+tests/test_mcp_classify.py::TestReviewQueueTool::test_review_queue_entry_shape PASSED [ 27%]
+tests/test_mcp_classify.py::TestReviewQueueTool::test_review_queue_filters_by_entry_type PASSED [ 29%]
+tests/test_mcp_classify.py::TestReviewQueueTool::test_review_queue_respects_limit PASSED [ 31%]
+tests/test_mcp_classify.py::TestReviewQueueTool::test_review_queue_returns_empty_when_none_pending PASSED [ 34%]
+tests/test_mcp_classify.py::TestReviewQueueTool::test_review_queue_validates_bad_limit PASSED [ 36%]
+tests/test_mcp_classify.py::TestResolveReviewTool::test_resolve_approve_sets_status_active PASSED [ 38%]
+tests/test_mcp_classify.py::TestResolveReviewTool::test_resolve_archive_sets_status_archived PASSED [ 40%]
+tests/test_mcp_classify.py::TestResolveReviewTool::test_resolve_reclassify_updates_entry_type PASSED [ 43%]
+tests/test_mcp_classify.py::TestResolveReviewTool::test_resolve_reclassify_requires_new_entry_type PASSED [ 45%]
+tests/test_mcp_classify.py::TestResolveReviewTool::test_resolve_reclassify_validates_new_entry_type PASSED [ 47%]
+tests/test_mcp_classify.py::TestResolveReviewTool::test_resolve_returns_not_found_for_missing_entry PASSED [ 50%]
+tests/test_mcp_classify.py::TestResolveReviewTool::test_resolve_validates_missing_required_fields PASSED [ 52%]
+tests/test_mcp_classify.py::TestResolveReviewTool::test_resolve_validates_invalid_action PASSED [ 54%]
+tests/test_mcp_classify.py::TestResolveReviewTool::test_resolve_approve_without_reviewer PASSED [ 56%]
+tests/test_mcp_classify.py::TestClassificationEndToEnd::test_full_classify_review_resolve_flow PASSED [ 59%]
+tests/test_list_output_modes.py::TestListOutputModes::test_full_mode_includes_content PASSED [ 61%]
+tests/test_list_output_modes.py::TestListOutputModes::test_summary_mode_excludes_content PASSED [ 63%]
+tests/test_list_output_modes.py::TestListOutputModes::test_ids_mode_minimal_fields PASSED [ 65%]
+tests/test_list_output_modes.py::TestListOutputModes::test_invalid_output_mode_returns_error PASSED [ 68%]
+tests/test_list_output_modes.py::TestListOutputModes::test_content_max_length_truncates PASSED [ 70%]
+tests/test_list_output_modes.py::TestListOutputModes::test_content_max_length_no_truncation_when_short PASSED [ 72%]
+tests/test_list_output_modes.py::TestListOutputModes::test_content_max_length_ignored_in_summary_mode PASSED [ 75%]
+tests/test_list_output_modes.py::TestListOutputModes::test_default_mode_is_full PASSED [ 77%]
+tests/test_list_output_modes.py::TestListOutputModes::test_content_max_length_invalid_type_returns_error PASSED [ 79%]
+tests/test_list_output_modes.py::TestListOutputModes::test_content_max_length_zero_returns_error PASSED [ 81%]
+tests/test_list_output_modes.py::TestAggregate::test_aggregate_by_entry_type PASSED [ 84%]
+tests/test_list_output_modes.py::TestAggregate::test_aggregate_by_metadata_source_url PASSED [ 86%]
+tests/test_list_output_modes.py::TestAggregate::test_aggregate_with_entry_type_filter PASSED [ 88%]
+tests/test_list_output_modes.py::TestAggregate::test_aggregate_invalid_group_by_returns_error PASSED [ 90%]
+tests/test_list_output_modes.py::TestAggregate::test_aggregate_missing_group_by_returns_error PASSED [ 93%]
+tests/test_list_output_modes.py::TestAggregate::test_aggregate_sorted_by_count_desc PASSED [ 95%]
+tests/test_list_output_modes.py::TestAggregate::test_aggregate_limit_respected PASSED [ 97%]
+tests/test_list_output_modes.py::TestAggregate::test_aggregate_by_author PASSED [100%]
+
+============================== 44 passed in 2.29s ==============================

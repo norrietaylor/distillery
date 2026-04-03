@@ -16,7 +16,7 @@
       author: alice
       tags: [architecture, storage]
   expected_tools:
-    - distillery_status
+    - distillery_metrics
     - distillery_search
   response_must_contain:
     - DuckDB
@@ -30,7 +30,7 @@
   prompt: "what do we know about caching strategies?"
   seed_entries: []
   expected_tools:
-    - distillery_status
+    - distillery_metrics
     - distillery_search
   response_must_contain:
     - No results
@@ -54,7 +54,7 @@
       author: alice
       tags: [architecture, duckdb]
   expected_tools:
-    - distillery_status
+    - distillery_metrics
     - distillery_search
   min_entries_retrieved: 1
   max_latency_ms: 60000

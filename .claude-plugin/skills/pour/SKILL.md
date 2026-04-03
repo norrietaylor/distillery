@@ -5,7 +5,7 @@ allowed-tools:
   - "mcp__*__distillery_search"
   - "mcp__*__distillery_get"
   - "mcp__*__distillery_store"
-  - "mcp__*__distillery_status"
+  - "mcp__*__distillery_metrics"
 context: fork
 effort: high
 ---

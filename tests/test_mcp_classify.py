@@ -1,9 +1,9 @@
 """Tests for the MCP classification tools (T02).
 
-Tests cover all 3 classification tools via direct handler calls with a mock
+Tests cover classification tools via direct handler calls with a mock
 store and mocked classification engine:
 
-  distillery_classify -> distillery_review_queue -> distillery_resolve_review
+  distillery_classify -> distillery_list(output_mode="review") -> distillery_resolve_review
 
 The test harness exercises the server handlers directly without requiring a
 running stdio transport.  All handlers are async functions that accept a
@@ -23,8 +23,8 @@ from distillery.config import (
 from distillery.mcp.tools.classify import (
     _handle_classify,
     _handle_resolve_review,
-    _handle_review_queue,
 )
+from distillery.mcp.tools.crud import _handle_list
 from distillery.models import EntryStatus, EntryType
 from distillery.store.duckdb import DuckDBStore
 from tests.conftest import make_entry, parse_mcp_response
@@ -255,13 +255,13 @@ class TestClassifyTool:
 
 class TestReviewQueueTool:
     async def test_review_queue_returns_pending_entries(self, store: DuckDBStore) -> None:
-        """Returns only pending_review entries."""
+        """Returns only pending_review entries via distillery_list(output_mode='review')."""
         pending = make_entry(content="Needs review", status=EntryStatus.PENDING_REVIEW)
         active = make_entry(content="Already active", status=EntryStatus.ACTIVE)
         await store.store(pending)
         await store.store(active)
 
-        response = await _handle_review_queue(store, {})
+        response = await _handle_list(store, {"output_mode": "review"})
         data = parse_mcp_response(response)
         assert "error" not in data
         assert data["count"] == 1
@@ -276,7 +276,7 @@ class TestReviewQueueTool:
         )
         await store.store(entry)
 
-        response = await _handle_review_queue(store, {})
+        response = await _handle_list(store, {"output_mode": "review"})
         data = parse_mcp_response(response)
         item = data["entries"][0]
 
@@ -304,7 +304,7 @@ class TestReviewQueueTool:
         await store.store(session)
         await store.store(inbox)
 
-        response = await _handle_review_queue(store, {"entry_type": "session"})
+        response = await _handle_list(store, {"output_mode": "review", "entry_type": "session"})
         data = parse_mcp_response(response)
         assert data["count"] == 1
         assert data["entries"][0]["entry_type"] == "session"
@@ -314,7 +314,7 @@ class TestReviewQueueTool:
             e = make_entry(content=f"Entry {i}", status=EntryStatus.PENDING_REVIEW)
             await store.store(e)
 
-        response = await _handle_review_queue(store, {"limit": 3})
+        response = await _handle_list(store, {"output_mode": "review", "limit": 3})
         data = parse_mcp_response(response)
         assert data["count"] == 3
 
@@ -322,22 +322,23 @@ class TestReviewQueueTool:
         entry = make_entry(status=EntryStatus.ACTIVE)
         await store.store(entry)
 
-        response = await _handle_review_queue(store, {})
+        response = await _handle_list(store, {"output_mode": "review"})
         data = parse_mcp_response(response)
         assert data["count"] == 0
         assert data["entries"] == []
 
     async def test_review_queue_validates_bad_limit(self, store: DuckDBStore) -> None:
-        response = await _handle_review_queue(store, {"limit": 0})
+        response = await _handle_list(store, {"output_mode": "review", "limit": 0})
         data = parse_mcp_response(response)
         assert data["error"] is True
         assert data["code"] == "INVALID_PARAMS"
 
-    async def test_review_queue_validates_invalid_entry_type(self, store: DuckDBStore) -> None:
-        response = await _handle_review_queue(store, {"entry_type": "not_a_type"})
+    async def test_review_queue_invalid_entry_type_returns_empty(self, store: DuckDBStore) -> None:
+        """An unrecognised entry_type passes through as a filter, returning empty results."""
+        response = await _handle_list(store, {"output_mode": "review", "entry_type": "not_a_type"})
         data = parse_mcp_response(response)
-        assert data["error"] is True
-        assert data["code"] == "INVALID_PARAMS"
+        assert "error" not in data
+        assert data["count"] == 0
 
     async def test_review_queue_filters_by_project(self, store: DuckDBStore) -> None:
         """project parameter filters results to matching project only."""
@@ -359,7 +360,7 @@ class TestReviewQueueTool:
         await store.store(beta)
         await store.store(no_project)
 
-        response = await _handle_review_queue(store, {"project": "alpha"})
+        response = await _handle_list(store, {"output_mode": "review", "project": "alpha"})
         data = parse_mcp_response(response)
         assert "error" not in data
         assert data["count"] == 1
@@ -513,7 +514,7 @@ class TestClassificationEndToEnd:
         assert classify_data["entry_type"] == "minutes"
 
         # Step 3: Check it appears in the review queue
-        queue_response = await _handle_review_queue(store, {})
+        queue_response = await _handle_list(store, {"output_mode": "review"})
         queue_data = parse_mcp_response(queue_response)
         assert queue_data["count"] >= 1
         queue_ids = [e["id"] for e in queue_data["entries"]]
@@ -529,7 +530,7 @@ class TestClassificationEndToEnd:
         assert resolve_data["metadata"]["reviewed_by"] == "reviewer-alice"
 
         # Step 5: Verify it's no longer in the review queue
-        queue_response2 = await _handle_review_queue(store, {})
+        queue_response2 = await _handle_list(store, {"output_mode": "review"})
         queue_data2 = parse_mcp_response(queue_response2)
         queue_ids2 = [e["id"] for e in queue_data2["entries"]]
         assert entry_id not in queue_ids2

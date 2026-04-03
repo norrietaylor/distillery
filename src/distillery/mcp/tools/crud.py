@@ -1,7 +1,6 @@
 """CRUD tool handlers for the Distillery MCP server.
 
 Implements the following tools:
-  - distillery_status: DB statistics
   - distillery_store: Create and persist a new entry
   - distillery_get: Retrieve an entry by ID
   - distillery_update: Update an existing entry
@@ -10,8 +9,6 @@ Implements the following tools:
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import logging
 import os
 from datetime import UTC, datetime, timedelta
@@ -74,136 +71,6 @@ _VALID_STATUSES = {"active", "pending_review", "archived"}
 # Fields that callers may never overwrite via distillery_update.
 _IMMUTABLE_FIELDS = {"id", "created_at", "source"}
 
-
-
-# ---------------------------------------------------------------------------
-# _handle_status and its synchronous helper
-# ---------------------------------------------------------------------------
-
-
-async def _handle_status(
-    store: Any,
-    embedding_provider: Any,
-    config: DistilleryConfig,
-) -> list[types.TextContent]:
-    """Implement the ``distillery_status`` tool.
-
-    Queries the DuckDB store for aggregate statistics and returns them as a
-    JSON payload.
-
-    Args:
-        store: Initialised :class:`~distillery.store.duckdb.DuckDBStore`.
-        embedding_provider: The active embedding provider instance.
-        config: The loaded Distillery configuration.
-
-    Returns:
-        MCP content list with a single JSON ``TextContent`` block.
-    """
-    try:
-        stats = await asyncio.to_thread(_sync_gather_stats, store, embedding_provider, config)
-        return success_response(stats)
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Error gathering status stats")
-        return error_response("STATUS_ERROR", f"Failed to gather status: {exc}")
-
-
-def _sync_gather_stats(
-    store: Any,
-    embedding_provider: Any,
-    config: DistilleryConfig,
-) -> dict[str, Any]:
-    """Synchronous helper that queries DuckDB for status statistics.
-
-    Runs inside ``asyncio.to_thread`` so that blocking DuckDB calls do not
-    stall the event loop.
-
-    Args:
-        store: Initialised ``DuckDBStore`` whose ``connection`` property is
-            available.
-        embedding_provider: Active embedding provider (for model metadata).
-        config: Loaded ``DistilleryConfig``.
-
-    Returns:
-        A dict suitable for JSON serialisation.
-    """
-    conn = store.connection
-
-    # Total entry count (all statuses).
-    total_row = conn.execute("SELECT COUNT(*) FROM entries").fetchone()
-    total_entries: int = total_row[0] if total_row else 0
-
-    # Counts grouped by entry_type.
-    type_rows = conn.execute(
-        "SELECT entry_type, COUNT(*) AS cnt FROM entries GROUP BY entry_type ORDER BY cnt DESC"
-    ).fetchall()
-    entries_by_type = {row[0]: row[1] for row in type_rows}
-
-    # Counts grouped by status.
-    status_rows = conn.execute(
-        "SELECT status, COUNT(*) AS cnt FROM entries GROUP BY status ORDER BY cnt DESC"
-    ).fetchall()
-    entries_by_status = {row[0]: row[1] for row in status_rows}
-
-    # Database file size.
-    db_path = _normalize_db_path(config.storage.database_path)
-    database_size_bytes: int | None = None
-    if db_path != ":memory:" and not _is_remote_db_path(db_path):
-        try:
-            database_size_bytes = Path(db_path).stat().st_size
-        except OSError:
-            database_size_bytes = None
-
-    # Embedding model info.
-    model_name = getattr(embedding_provider, "model_name", "unknown")
-    embedding_dimensions = getattr(embedding_provider, "dimensions", None)
-
-    # Embedding budget usage.
-    from distillery.mcp.budget import get_daily_usage
-
-    embedding_usage_today = 0
-    embedding_budget_daily = config.rate_limit.embedding_budget_daily
-    with contextlib.suppress(Exception):
-        embedding_usage_today = get_daily_usage(conn)
-
-    # Storage warnings.
-    warnings: list[str] = []
-    rl = config.rate_limit
-    if database_size_bytes is not None and rl.max_db_size_mb > 0:
-        size_mb = database_size_bytes / (1024 * 1024)
-        warn_threshold_mb = rl.max_db_size_mb * rl.warn_db_size_pct / 100
-        if size_mb >= rl.max_db_size_mb:
-            warnings.append(
-                f"Database size ({size_mb:.1f} MB) has reached the limit "
-                f"({rl.max_db_size_mb} MB). New writes will be rejected."
-            )
-        elif size_mb >= warn_threshold_mb:
-            warnings.append(
-                f"Database size ({size_mb:.1f} MB) is at "
-                f"{size_mb / rl.max_db_size_mb * 100:.0f}% of the "
-                f"{rl.max_db_size_mb} MB limit."
-            )
-
-    if embedding_budget_daily > 0 and embedding_usage_today >= embedding_budget_daily:
-        warnings.append(
-            f"Daily embedding budget exhausted: {embedding_usage_today}/{embedding_budget_daily} "
-            "calls used."
-        )
-
-    result: dict[str, Any] = {
-        "status": "ok",
-        "total_entries": total_entries,
-        "entries_by_type": entries_by_type,
-        "entries_by_status": entries_by_status,
-        "database_size_bytes": database_size_bytes,
-        "embedding_model": model_name,
-        "embedding_dimensions": embedding_dimensions,
-        "database_path": db_path,
-        "embedding_usage_today": embedding_usage_today,
-        "embedding_budget_daily": embedding_budget_daily,
-    }
-    if warnings:
-        result["warnings"] = warnings
-    return result
 
 
 # ---------------------------------------------------------------------------
@@ -408,7 +275,7 @@ async def _handle_store(
                 response_data["conflict_message"] = (
                     f"Found {len(conflicts)} potential conflict "
                     f"{'candidate' if len(conflicts) == 1 else 'candidates'}. "
-                    "Use distillery_check_conflicts with LLM responses to confirm conflicts."
+                    "Use distillery_find_similar(conflict_check=true) with llm_responses to confirm conflicts."
                 )
                 return success_response(response_data)
     except Exception as exc:  # noqa: BLE001
@@ -612,7 +479,7 @@ async def _handle_update(
 # _handle_list and its helpers
 # ---------------------------------------------------------------------------
 
-_VALID_OUTPUT_MODES = frozenset({"full", "summary", "ids"})
+_VALID_OUTPUT_MODES = frozenset({"full", "summary", "ids", "review"})
 
 
 def _entry_to_summary_dict(entry: Any) -> dict[str, Any]:
@@ -683,6 +550,12 @@ async def _handle_list(
 
     filters = _build_filters_from_arguments(arguments)
 
+    # review mode implicitly filters to pending_review status.
+    if output_mode == "review":
+        if filters is None:
+            filters = {}
+        filters["status"] = "pending_review"
+
     try:
         entries = await store.list_entries(filters=filters, limit=limit, offset=offset)
     except Exception as exc:  # noqa: BLE001
@@ -693,6 +566,21 @@ async def _handle_list(
         serialised = [_entry_to_summary_dict(e) for e in entries]
     elif output_mode == "ids":
         serialised = [_entry_to_id_dict(e) for e in entries]
+    elif output_mode == "review":
+        items = []
+        for entry in entries:
+            items.append(
+                {
+                    "id": entry.id,
+                    "content_preview": entry.content[:200],
+                    "entry_type": entry.entry_type.value,
+                    "confidence": entry.metadata.get("confidence"),
+                    "author": entry.author,
+                    "created_at": entry.created_at.isoformat(),
+                    "classification_reasoning": entry.metadata.get("classification_reasoning"),
+                }
+            )
+        serialised = items
     else:
         if content_max_length is not None:
             result_dicts = []
@@ -751,7 +639,6 @@ def _build_filters_from_arguments(arguments: dict[str, Any]) -> dict[str, Any] |
 
 
 __all__ = [
-    "_handle_status",
     "_handle_store",
     "_handle_get",
     "_handle_update",

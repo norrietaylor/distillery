@@ -1,0 +1,23 @@
+Type: cli
+Command: grep -r 'distillery_status\|distillery_quality' src/distillery/mcp/ --include="*.py"
+Expected: No tool registration lines (no @server.tool decorated functions with these names)
+Timestamp: 2026-04-02T00:00:00Z
+
+=== RESULTS ===
+
+Output (only docstring references remain, no tool registrations):
+
+src/distillery/mcp/tools/analytics.py:              (equivalent to the former ``distillery_status`` output).
+src/distillery/mcp/tools/analytics.py:              (equivalent to the former ``distillery_quality`` output).
+src/distillery/mcp/tools/analytics.py:    Gather summary statistics from DuckDB -- equivalent to the former ``distillery_status`` output.
+src/distillery/mcp/tools/analytics.py:        A JSON-serializable dict with keys matching the former ``distillery_status`` response:
+
+Analysis:
+- All 4 lines are in docstrings only, describing the historical relationship
+- No @server.tool decorated function named distillery_status exists
+- No @server.tool decorated function named distillery_quality exists
+- The _handle_status function has been removed from crud.py
+- The _handle_quality function has been removed from analytics.py
+- The tool registrations in server.py have been removed
+
+Status: PASS

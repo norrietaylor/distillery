@@ -23,7 +23,7 @@
       author: carol
       tags: [meeting, architecture]
   expected_tools:
-    - distillery_status
+    - distillery_metrics
     - distillery_search
   min_entries_retrieved: 1
   max_latency_ms: 120000
@@ -77,7 +77,7 @@
   prompt: "/pour decision log"
   seed_entries: []
   expected_tools:
-    - distillery_status
+    - distillery_metrics
     - distillery_search
   max_latency_ms: 60000
   max_total_tokens: 8000

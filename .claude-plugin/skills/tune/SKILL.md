@@ -2,7 +2,7 @@
 name: tune
 description: "Display and adjust feed relevance thresholds for alerts and digests"
 allowed-tools:
-  - "mcp__*__distillery_status"
+  - "mcp__*__distillery_metrics"
   - "mcp__*__distillery_update"
   - "mcp__*__distillery_configure"
 effort: low
@@ -47,7 +47,7 @@ No flags = read-only mode (display current thresholds).
 
 ### Step 3: Retrieve Current Configuration
 
-Call `distillery_status` and extract `feeds.thresholds.alert` (default: 0.85) and `feeds.thresholds.digest` (default: 0.60). If feeds config is absent, show defaults and note live values could not be confirmed.
+Call `distillery_metrics(scope="summary")` and extract `feeds.thresholds.alert` (default: 0.85) and `feeds.thresholds.digest` (default: 0.60). If feeds config is absent, show defaults and note live values could not be confirmed.
 
 ### Step 4: Apply Changes (if flags provided)
 
@@ -116,7 +116,7 @@ Tuning Guide:
 
 ## Rules
 
-- Always call `distillery_status` first to verify MCP availability
+- Always call `distillery_metrics(scope="summary")` first to verify MCP availability
 - In read-only mode, display thresholds without confirmation
 - Validate `--alert` >= `--digest` before applying; reject invalid combinations
 - Always ask for confirmation before applying changes

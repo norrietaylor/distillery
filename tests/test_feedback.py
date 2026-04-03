@@ -25,7 +25,7 @@ from distillery.config import (
     EmbeddingConfig,
     StorageConfig,
 )
-from distillery.mcp.server import _handle_get, _handle_quality, _handle_search
+from distillery.mcp.server import _handle_get, _handle_metrics, _handle_search
 from distillery.models import EntryType
 from distillery.store.duckdb import DuckDBStore
 from tests.conftest import MockEmbeddingProvider, make_entry, parse_mcp_response
@@ -128,10 +128,10 @@ async def _quality(
             - per_type_breakdown (dict): Mapping from entry type (str) to a dict of metrics for that type
               (each sub-dict contains `total_feedback` (int), `positive_count` (int), and `positive_rate` (float)).
     """
-    args: dict = {}
+    args: dict = {"scope": "search_quality"}
     if entry_type is not None:
         args["entry_type"] = entry_type
-    response = await _handle_quality(store, args)
+    response = await _handle_metrics(store, None, None, args)
     return parse_mcp_response(response)
 
 

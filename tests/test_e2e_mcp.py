@@ -201,8 +201,8 @@ class TestClassifyReviewResolveRoundTrip:
         from distillery.config import ClassificationConfig
         from distillery.mcp.server import (
             _handle_classify,
+            _handle_list,
             _handle_resolve_review,
-            _handle_review_queue,
             _handle_store,
         )
 
@@ -236,8 +236,8 @@ class TestClassifyReviewResolveRoundTrip:
         assert "error" not in classify_data
         assert classify_data["status"] == "pending_review"
 
-        # Step 3: review_queue -- entry should appear
-        queue_resp = await _handle_review_queue(e2e_store, {})
+        # Step 3: list with output_mode=review -- entry should appear
+        queue_resp = await _handle_list(e2e_store, {"output_mode": "review"})
         queue_data = parse_mcp_response(queue_resp)
         assert "entries" in queue_data
         assert "count" in queue_data
@@ -268,7 +268,8 @@ class TestStoreCheckDedupRoundTrip:
     """Scenario: store an entry then check for duplicates."""
 
     async def test_store_then_check_dedup(self, e2e_store: DuckDBStore) -> None:
-        from distillery.mcp.server import _handle_check_dedup, _handle_store
+        from distillery.mcp.server import _handle_store
+        from distillery.mcp.tools.quality import run_dedup_check
 
         config = _make_config()
 
@@ -280,8 +281,7 @@ class TestStoreCheckDedupRoundTrip:
         store_data = parse_mcp_response(store_resp)
         assert "entry_id" in store_data
 
-        dedup_resp = await _handle_check_dedup(e2e_store, config, {"content": content})
-        dedup_data = parse_mcp_response(dedup_resp)
+        dedup_data = await run_dedup_check(e2e_store, config.classification, content)
 
         assert "action" in dedup_data
         assert "highest_score" in dedup_data
@@ -379,13 +379,13 @@ class TestStatusReflectsEntries:
     """Scenario: status on empty DB then after storing entries."""
 
     async def test_status_empty_then_populated(self, e2e_store: DuckDBStore) -> None:
-        from distillery.mcp.server import _handle_status, _handle_store
+        from distillery.mcp.server import _handle_metrics, _handle_store
 
         provider = StubEmbeddingProvider(dimensions=4)
         config = _make_config()
 
-        # Status on empty DB
-        empty_resp = await _handle_status(e2e_store, provider, config)
+        # Metrics (summary scope) on empty DB
+        empty_resp = await _handle_metrics(e2e_store, config, provider, {"scope": "summary"})
         empty_data = parse_mcp_response(empty_resp)
         assert "error" not in empty_data
         assert empty_data["total_entries"] == 0
@@ -402,8 +402,8 @@ class TestStatusReflectsEntries:
                 },
             )
 
-        # Status after storing
-        populated_resp = await _handle_status(e2e_store, provider, config)
+        # Metrics (summary scope) after storing
+        populated_resp = await _handle_metrics(e2e_store, config, provider, {"scope": "summary"})
         populated_data = parse_mcp_response(populated_resp)
         assert populated_data["total_entries"] == 3
         assert "entries_by_type" in populated_data
@@ -470,7 +470,7 @@ class TestCallToolDispatcher:
 
     async def test_call_tool_dispatches_store_and_status(self, e2e_store: DuckDBStore) -> None:
         """Verify that the CallToolRequest handler routes to correct tool handlers."""
-        from distillery.mcp.server import _handle_status, _handle_store
+        from distillery.mcp.server import _handle_metrics, _handle_store
 
         config = _make_config()
         provider = StubEmbeddingProvider(dimensions=4)
@@ -484,8 +484,8 @@ class TestCallToolDispatcher:
         assert "entry_id" in store_data
         assert "error" not in store_data
 
-        # Verify status reports it
-        status_resp = await _handle_status(e2e_store, provider, config)
+        # Verify metrics (summary scope) reports it
+        status_resp = await _handle_metrics(e2e_store, config, provider, {"scope": "summary"})
         status_data = parse_mcp_response(status_resp)
         assert status_data["status"] == "ok"
         assert status_data["total_entries"] >= 1
@@ -499,29 +499,23 @@ class TestCallToolDispatcher:
         tool_names = {t.name for t in tools}
 
         expected = {
-            "distillery_status",
             "distillery_store",
             "distillery_get",
             "distillery_update",
             "distillery_search",
             "distillery_find_similar",
             "distillery_list",
+            "distillery_aggregate",
             "distillery_classify",
-            "distillery_review_queue",
             "distillery_resolve_review",
-            "distillery_check_dedup",
             "distillery_metrics",
-            "distillery_check_conflicts",
-            "distillery_quality",
             "distillery_stale",
             "distillery_tag_tree",
             "distillery_type_schemas",
-            "distillery_watch",
             "distillery_interests",
-            "distillery_suggest_sources",
+            "distillery_watch",
             "distillery_poll",
             "distillery_rescore",
-            "distillery_aggregate",
             "distillery_configure",
         }
         assert expected == tool_names, f"Missing tools: {expected - tool_names}"

@@ -1,6 +1,6 @@
-"""Tests for the distillery_check_dedup MCP tool (T03).
+"""Tests for deduplication logic (previously distillery_check_dedup MCP tool, T03).
 
-Tests cover the _handle_check_dedup handler at various similarity levels:
+Tests cover the run_dedup_check helper at various similarity levels:
   - No similar entries -> action=create
   - Score at or above skip threshold -> action=skip
   - Score at or above merge threshold (below skip) -> action=merge
@@ -22,9 +22,9 @@ from distillery.config import (
     EmbeddingConfig,
     StorageConfig,
 )
-from distillery.mcp.server import _handle_check_dedup
+from distillery.mcp.tools.quality import run_dedup_check
 from distillery.store.duckdb import DuckDBStore
-from tests.conftest import ControlledEmbeddingProvider, make_entry, parse_mcp_response
+from tests.conftest import ControlledEmbeddingProvider, make_entry
 
 pytestmark = pytest.mark.integration
 
@@ -101,8 +101,7 @@ class TestCheckDedupNoEntries:
     ) -> None:
         embedding_provider.register("new content", _UNIT_A)
         config = _make_config()
-        response = await _handle_check_dedup(store, config, {"content": "new content"})
-        data = parse_mcp_response(response)
+        data = await run_dedup_check(store, config.classification, "new content")
         assert data["action"] == "create"
         assert data["similar_entries"] == []
         assert data["highest_score"] == pytest.approx(0.0)
@@ -112,25 +111,10 @@ class TestCheckDedupNoEntries:
     ) -> None:
         embedding_provider.register("unique text", _UNIT_A)
         config = _make_config()
-        response = await _handle_check_dedup(store, config, {"content": "unique text"})
-        data = parse_mcp_response(response)
+        data = await run_dedup_check(store, config.classification, "unique text")
         assert data["action"] == "create"
         assert isinstance(data["reasoning"], str)
         assert len(data["reasoning"]) > 0
-
-
-# ---------------------------------------------------------------------------
-# Test: missing required field -> error response
-# ---------------------------------------------------------------------------
-
-
-class TestCheckDedupValidation:
-    async def test_missing_content_returns_error(self, store: DuckDBStore) -> None:
-        config = _make_config()
-        response = await _handle_check_dedup(store, config, {})
-        data = parse_mcp_response(response)
-        assert data.get("error") is True
-        assert data.get("code") == "INVALID_PARAMS"
 
 
 # ---------------------------------------------------------------------------
@@ -154,8 +138,7 @@ class TestCheckDedupSkipAction:
         await store.store(entry)
 
         config = _make_config(skip=0.95, merge=0.80, link=0.60)
-        response = await _handle_check_dedup(store, config, {"content": new_text})
-        data = parse_mcp_response(response)
+        data = await run_dedup_check(store, config.classification, new_text)
 
         assert data["action"] == "skip"
         assert data["highest_score"] >= 0.95
@@ -174,8 +157,7 @@ class TestCheckDedupSkipAction:
         await store.store(entry)
 
         config = _make_config(skip=0.95, merge=0.80, link=0.60)
-        response = await _handle_check_dedup(store, config, {"content": new_text})
-        data = parse_mcp_response(response)
+        data = await run_dedup_check(store, config.classification, new_text)
 
         assert data["action"] == "skip"
         similar = data["similar_entries"]
@@ -220,8 +202,7 @@ class TestCheckDedupMergeAction:
 
         # Set thresholds so that norm_sim is between merge and skip
         config = _make_config(skip=norm_sim + 0.01, merge=norm_sim - 0.01, link=0.0)
-        response = await _handle_check_dedup(store, config, {"content": new_text})
-        data = parse_mcp_response(response)
+        data = await run_dedup_check(store, config.classification, new_text)
 
         assert data["action"] == "merge"
         assert data["highest_score"] >= config.classification.dedup_merge_threshold
@@ -255,8 +236,7 @@ class TestCheckDedupLinkAction:
 
         # Set thresholds so that norm_sim is between link and merge
         config = _make_config(skip=0.99, merge=norm_sim + 0.01, link=norm_sim - 0.01)
-        response = await _handle_check_dedup(store, config, {"content": new_text})
-        data = parse_mcp_response(response)
+        data = await run_dedup_check(store, config.classification, new_text)
 
         assert data["action"] == "link"
         assert data["highest_score"] >= config.classification.dedup_link_threshold
@@ -280,8 +260,7 @@ class TestCheckDedupConfigThresholds:
         await store.store(entry)
 
         config = _make_config(skip=0.5, merge=0.3, link=0.1)
-        response = await _handle_check_dedup(store, config, {"content": text})
-        data = parse_mcp_response(response)
+        data = await run_dedup_check(store, config.classification, text)
         assert data["action"] == "skip"
 
     async def test_dedup_limit_controls_similar_entries_returned(
@@ -300,8 +279,7 @@ class TestCheckDedupConfigThresholds:
 
         # Limit to 2
         config = _make_config(skip=0.95, merge=0.80, link=0.60, limit=2)
-        response = await _handle_check_dedup(store, config, {"content": query_text})
-        data = parse_mcp_response(response)
+        data = await run_dedup_check(store, config.classification, query_text)
 
         assert data["action"] == "skip"
         assert len(data["similar_entries"]) <= 2

@@ -8,8 +8,7 @@ allowed-tools:
   - "mcp__*__distillery_update"
   - "mcp__*__distillery_check_dedup"
   - "mcp__*__distillery_interests"
-  - "mcp__*__distillery_suggest_sources"
-  - "mcp__*__distillery_status"
+  - "mcp__*__distillery_metrics"
 context: fork
 effort: high
 ---
@@ -75,7 +74,7 @@ You (the executing Claude instance) produce the synthesis — do not dump raw en
 
 ### Step 5: Suggest Sources
 
-Call `distillery_suggest_sources(max_suggestions=5)`. Include suggestions when `--suggest` is specified or when entries were found. Omit silently if the call returns an error or empty results.
+Call `distillery_interests(suggest_sources=true, max_suggestions=5)`. Include the returned ``suggestions`` when `--suggest` is specified or when entries were found. Omit silently if the call returns an error or empty results.
 
 ### Step 6: Check for Duplicates (if --store specified)
 

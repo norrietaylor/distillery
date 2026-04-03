@@ -383,20 +383,27 @@ async def test_maintenance_handler(store: DuckDBStore, monkeypatch: pytest.Monke
     def _text(data: dict) -> list[mcp_types.TextContent]:
         return [mcp_types.TextContent(type="text", text=_json.dumps(data))]
 
-    metrics_mock = AsyncMock(return_value=_text({"entries": {"total": 42}}))
-    quality_mock = AsyncMock(return_value=_text({"score": 0.85}))
+    # _handle_metrics is called twice: once for full metrics, once for scope=search_quality.
+    metrics_mock = AsyncMock(
+        side_effect=[
+            _text({"entries": {"total": 42}}),
+            _text({"score": 0.85}),
+        ]
+    )
     stale_mock = AsyncMock(return_value=_text({"stale_count": 3, "entries": []}))
-    interests_mock = AsyncMock(return_value=_text({"top_tags": [["python", 10], ["ai", 7]]}))
-    suggestions_mock = AsyncMock(return_value=_text({"suggestions": [{"url": "https://news.example.com"}]}))
+    interests_mock = AsyncMock(
+        return_value=_text({
+            "top_tags": [["python", 10], ["ai", 7]],
+            "suggestions": [{"url": "https://news.example.com"}],
+        })
+    )
 
     # The server handlers are imported lazily in _handle_maintenance; patch at source.
     # Each test receives a fresh in-memory store (no pre-existing cooldowns).
     with (
         patch("distillery.mcp.server._handle_metrics", metrics_mock),
-        patch("distillery.mcp.server._handle_quality", quality_mock),
         patch("distillery.mcp.server._handle_stale", stale_mock),
         patch("distillery.mcp.server._handle_interests", interests_mock),
-        patch("distillery.mcp.server._handle_suggest_sources", suggestions_mock),
     ):
         app = create_webhook_app(shared, config)
         client = TestClient(app, raise_server_exceptions=False)
@@ -407,12 +414,10 @@ async def test_maintenance_handler(store: DuckDBStore, monkeypatch: pytest.Monke
     assert body["ok"] is True
     data = body["data"]
 
-    # All 5 operations ran.
-    metrics_mock.assert_awaited_once()
-    quality_mock.assert_awaited_once()
+    # All 3 handlers ran (metrics called twice, stale and interests once each).
+    assert metrics_mock.await_count == 2
     stale_mock.assert_awaited_once()
     interests_mock.assert_awaited_once()
-    suggestions_mock.assert_awaited_once()
 
     # Response shape.
     assert "metrics" in data
@@ -443,12 +448,17 @@ async def test_maintenance_stores_digest(store: DuckDBStore, monkeypatch: pytest
 
     # The server handlers are imported lazily in _handle_maintenance; patch at source.
     # Each test receives a fresh in-memory store (no pre-existing cooldowns).
+    # _handle_metrics is called twice: first for full metrics, then for scope=search_quality.
     with (
-        patch("distillery.mcp.server._handle_metrics", AsyncMock(return_value=_text({"entries": {"total": 0}}))),
-        patch("distillery.mcp.server._handle_quality", AsyncMock(return_value=_text({}))),
+        patch(
+            "distillery.mcp.server._handle_metrics",
+            AsyncMock(side_effect=[_text({"entries": {"total": 0}}), _text({})]),
+        ),
         patch("distillery.mcp.server._handle_stale", AsyncMock(return_value=_text({"stale_count": 0, "entries": []}))),
-        patch("distillery.mcp.server._handle_interests", AsyncMock(return_value=_text({"top_tags": []}))),
-        patch("distillery.mcp.server._handle_suggest_sources", AsyncMock(return_value=_text({"suggestions": []}))),
+        patch(
+            "distillery.mcp.server._handle_interests",
+            AsyncMock(return_value=_text({"top_tags": [], "suggestions": []})),
+        ),
     ):
         app = create_webhook_app(shared, config)
         client = TestClient(app, raise_server_exceptions=False)

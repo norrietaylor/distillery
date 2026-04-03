@@ -88,7 +88,7 @@ If already resolved earlier in the conversation, reuse the cached values without
 
 ## MCP Health Check
 
-Skills depend on the Distillery MCP server. Call `distillery_status` at the start of the first skill invoked in a conversation. **If `distillery_status` has already succeeded earlier in the same conversation, skip the check and proceed directly.**
+Skills depend on the Distillery MCP server. Call `distillery_metrics(scope="summary")` at the start of the first skill invoked in a conversation. **If `distillery_metrics(scope="summary")` has already succeeded earlier in the same conversation, skip the check and proceed directly.**
 
 If the check fails, display:
 
@@ -101,7 +101,7 @@ Setup: see docs/mcp-setup.md
 
 Stop immediately if MCP is unavailable.
 
-**Authentication errors** (HTTP transport with OAuth): If `distillery_status` returns an authentication error rather than a connection failure, direct the user to run `/setup` or complete the OAuth flow via the MCP server menu.
+**Authentication errors** (HTTP transport with OAuth): If `distillery_metrics(scope="summary")` returns an authentication error rather than a connection failure, direct the user to run `/setup` or complete the OAuth flow via the MCP server menu.
 
 ## Canonical Dedup Flow
 
@@ -309,10 +309,10 @@ The following skills are available in `.claude/skills/`:
 | `/pour` | `pour/` | distillery_search | Multi-entry synthesis with citations |
 | `/bookmark` | `bookmark/` | distillery_store, distillery_find_similar | Save and annotate URLs |
 | `/minutes` | `minutes/` | distillery_store, distillery_update, distillery_list | Record and update meeting notes |
-| `/classify` | `classify/` | distillery_classify, distillery_review_queue, distillery_resolve_review | Classify and review entries |
+| `/classify` | `classify/` | distillery_classify, distillery_list(output_mode=review), distillery_resolve_review | Classify and review entries |
 | `/watch` | `watch/` | distillery_watch | Manage monitored feed sources + auto-poll scheduling (CronCreate local; GitHub Actions for hosted) |
-| `/radar` | `radar/` | distillery_list, distillery_suggest_sources, distillery_store | Ambient feed digest and source suggestions |
-| `/tune` | `tune/` | distillery_status | Display and adjust feed relevance thresholds |
+| `/radar` | `radar/` | distillery_list, distillery_interests, distillery_store | Ambient feed digest and source suggestions |
+| `/tune` | `tune/` | distillery_metrics | Display and adjust feed relevance thresholds |
 
 ---
 

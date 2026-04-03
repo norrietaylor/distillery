@@ -6,7 +6,7 @@
   prompt: '/bookmark https://duckdb.org/docs/extensions/vss "DuckDB VSS extension docs — HNSW index creation and cosine similarity"'
   seed_entries: []
   expected_tools:
-    - distillery_status
+    - distillery_metrics
     - distillery_store
   min_entries_stored: 1
   max_latency_ms: 90000
@@ -35,8 +35,8 @@
       metadata:
         url: "https://duckdb.org/docs/extensions/vss"
   expected_tools:
-    - distillery_status
-    - distillery_check_dedup
+    - distillery_metrics
+    - distillery_find_similar
   max_latency_ms: 90000
   max_total_tokens: 10000
 

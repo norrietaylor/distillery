@@ -22,7 +22,7 @@ providers:
 # Prompt template
 # ---------------------------------------------------------------------------
 prompts:
-  - "You are a Distillery knowledge assistant. Use the available distillery MCP tools to fulfill the user's request. Always call distillery_status first to confirm connectivity.\n\n{{prompt}}"
+  - "You are a Distillery knowledge assistant. Use the available distillery MCP tools to fulfill the user's request. Always call distillery_metrics first to confirm connectivity.\n\n{{prompt}}"
 
 # ---------------------------------------------------------------------------
 # Default assertions
@@ -47,7 +47,7 @@ tests:
           let p = output; if (typeof output === 'string') { try { p = JSON.parse(output); } catch(e) { p = {text: output}; } }
           const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
           const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
-          const ok = names.some(n => ['distillery_status','distillery_store','distillery_check_dedup'].includes(n)) || /stored|saved|entry.*id|created/i.test(text);
+          const ok = names.some(n => ['distillery_metrics','distillery_store','distillery_find_similar'].includes(n)) || /stored|saved|entry.*id|created/i.test(text);
           return ok ? true : `FAIL: type=${typeof output}, text=${text.substring(0,120)}`;
 
   # ---- /distill: dedup check before store -----------------------------------
@@ -60,7 +60,7 @@ tests:
           let p = output; if (typeof output === 'string') { try { p = JSON.parse(output); } catch(e) { p = {text: output}; } }
           const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
           const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
-          const ok = names.some(n => ['distillery_status','distillery_check_dedup','distillery_store'].includes(n)) || /stored|saved|entry.*id|created|duplicate|dedup/i.test(text);
+          const ok = names.some(n => ['distillery_metrics','distillery_find_similar','distillery_store'].includes(n)) || /stored|saved|entry.*id|created|duplicate|dedup/i.test(text);
           return ok ? true : `FAIL: type=${typeof output}, text=${text.substring(0,120)}`;
 
   # ---- /recall: search for existing knowledge entries -----------------------
@@ -101,7 +101,7 @@ tests:
           let p = output; if (typeof output === 'string') { try { p = JSON.parse(output); } catch(e) { p = {text: output}; } }
           const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
           const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
-          const ok = names.some(n => ['distillery_status','distillery_store','distillery_check_dedup'].includes(n)) || /bookmark|stored|saved|entry.*id/i.test(text);
+          const ok = names.some(n => ['distillery_metrics','distillery_store','distillery_find_similar'].includes(n)) || /bookmark|stored|saved|entry.*id/i.test(text);
           return ok ? true : `FAIL: type=${typeof output}, text=${text.substring(0,120)}`;
 
   # ---- /bookmark: dedup check for known URL ---------------------------------
@@ -114,7 +114,7 @@ tests:
           let p = output; if (typeof output === 'string') { try { p = JSON.parse(output); } catch(e) { p = {text: output}; } }
           const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
           const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
-          const ok = names.some(n => ['distillery_check_dedup','distillery_store','distillery_status'].includes(n)) || /bookmark|stored|saved|duplicate|already|entry.*id/i.test(text);
+          const ok = names.some(n => ['distillery_find_similar','distillery_store','distillery_metrics'].includes(n)) || /bookmark|stored|saved|duplicate|already|entry.*id/i.test(text);
           return ok ? true : `FAIL: type=${typeof output}, text=${text.substring(0,120)}`;
 
   # ---- /pour: synthesize entries into a narrative ---------------------------
@@ -155,7 +155,7 @@ tests:
           let p = output; if (typeof output === 'string') { try { p = JSON.parse(output); } catch(e) { p = {text: output}; } }
           const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
           const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
-          const ok = names.some(n => ['distillery_watch','distillery_status'].includes(n)) || /feed.*source|watch|no.*(?:sources|feeds)|configured|empty|sources.*monitored/i.test(text);
+          const ok = names.some(n => ['distillery_watch','distillery_metrics'].includes(n)) || /feed.*source|watch|no.*(?:sources|feeds)|configured|empty|sources.*monitored/i.test(text);
           return ok ? true : `FAIL: type=${typeof output}, text=${text.substring(0,120)}`;
 
   # ---- /watch: add RSS feed source ------------------------------------------

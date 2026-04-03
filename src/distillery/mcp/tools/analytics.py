@@ -2,10 +2,10 @@
 
 Implements the following tools:
   - distillery_metrics: Aggregate usage and quality metrics from the DuckDB store.
-  - distillery_quality: Search and feedback quality summary.
   - distillery_stale: Entries not accessed within a staleness window.
   - distillery_tag_tree: Nested tag hierarchy from active entries.
-  - distillery_interests: Interest profile mined from stored entries.
+  - distillery_interests: Interest profile mined from stored entries (optionally
+    includes feed source suggestions when suggest_sources=True).
   - distillery_type_schemas: Full metadata schema registry for all entry types.
 """
 
@@ -180,6 +180,9 @@ async def _handle_type_schemas() -> list[types.TextContent]:
 # ---------------------------------------------------------------------------
 
 
+_VALID_METRICS_SCOPES = frozenset({"summary", "full", "search_quality"})
+
+
 async def _handle_metrics(
     store: Any,
     config: DistilleryConfig,
@@ -194,12 +197,52 @@ async def _handle_metrics(
         config: Loaded :class:`~distillery.config.DistilleryConfig`.
         embedding_provider: Active embedding provider (used to report model metadata).
         arguments: Tool arguments; supports optional ``period_days`` (int) specifying
-            the lookback window in days (must be >= 1).
+            the lookback window in days (must be >= 1), and optional ``scope``
+            (``"summary"`` | ``"full"`` | ``"search_quality"``, default ``"full"``):
+
+            - ``"summary"``: entry counts by type/status, database size, embedding model info
+              (equivalent to the former ``distillery_status`` output).
+            - ``"full"``: complete metrics payload — entries, activity, search, quality,
+              staleness, and storage sections (default behaviour).
+            - ``"search_quality"``: search totals, feedback rates, and quality breakdown
+              (equivalent to the former ``distillery_quality`` output).
 
     Returns:
-        MCP content list with aggregated metrics (entries, activity, search, quality,
-        staleness, and storage sections).
+        MCP content list with aggregated metrics shaped by the requested scope.
     """
+    # --- validate scope -----------------------------------------------------
+    scope_raw = arguments.get("scope", "full")
+    if not isinstance(scope_raw, str):
+        return error_response("INVALID_PARAMS", "Field 'scope' must be a string")
+    scope = scope_raw
+    if scope not in _VALID_METRICS_SCOPES:
+        return error_response(
+            "INVALID_PARAMS",
+            f"Field 'scope' must be one of: {', '.join(sorted(_VALID_METRICS_SCOPES))}",
+        )
+
+    # --- scope=search_quality delegates to _handle_quality ------------------
+    if scope == "search_quality":
+        entry_type_filter: str | None = arguments.get("entry_type")
+        try:
+            result = await asyncio.to_thread(_sync_gather_quality, store, entry_type_filter)
+            return success_response(result)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Error gathering quality metrics")
+            return error_response("METRICS_ERROR", f"Failed to gather quality metrics: {exc}")
+
+    # --- scope=summary delegates to _sync_gather_summary --------------------
+    if scope == "summary":
+        try:
+            result_summary = await asyncio.to_thread(
+                _sync_gather_summary, store, config, embedding_provider
+            )
+            return success_response(result_summary)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Error gathering summary metrics")
+            return error_response("METRICS_ERROR", f"Failed to gather summary: {exc}")
+
+    # --- scope=full (default) -----------------------------------------------
     # --- validate period_days -----------------------------------------------
     period_days_raw = arguments.get("period_days", 30)
     err_period = validate_type(arguments, "period_days", int, "integer")
@@ -217,6 +260,111 @@ async def _handle_metrics(
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error gathering metrics")
         return error_response("METRICS_ERROR", f"Failed to gather metrics: {exc}")
+
+
+def _sync_gather_summary(
+    store: Any,
+    config: DistilleryConfig,
+    embedding_provider: Any,
+) -> dict[str, Any]:
+    """
+    Gather summary statistics from DuckDB — equivalent to the former ``distillery_status`` output.
+
+    Returns entry counts by type and status, database size, and embedding model info.
+    Used when ``scope="summary"`` is passed to ``_handle_metrics``.
+
+    Parameters:
+        store: Initialized DuckDBStore exposing a live ``connection``.
+        config: Loaded DistilleryConfig (used for storage path resolution and rate limits).
+        embedding_provider: Active embedding provider (used to report model metadata).
+
+    Returns:
+        A JSON-serializable dict with keys matching the former ``distillery_status`` response:
+        ``status``, ``total_entries``, ``entries_by_type``, ``entries_by_status``,
+        ``database_size_bytes``, ``embedding_model``, ``embedding_dimensions``,
+        ``database_path``, ``embedding_usage_today``, ``embedding_budget_daily``,
+        and optionally ``warnings``.
+    """
+    import contextlib
+
+    conn = store.connection
+
+    # Total entry count (all statuses).
+    total_row = conn.execute("SELECT COUNT(*) FROM entries").fetchone()
+    total_entries: int = total_row[0] if total_row else 0
+
+    # Counts grouped by entry_type.
+    type_rows = conn.execute(
+        "SELECT entry_type, COUNT(*) AS cnt FROM entries GROUP BY entry_type ORDER BY cnt DESC"
+    ).fetchall()
+    entries_by_type = {row[0]: row[1] for row in type_rows}
+
+    # Counts grouped by status.
+    status_rows = conn.execute(
+        "SELECT status, COUNT(*) AS cnt FROM entries GROUP BY status ORDER BY cnt DESC"
+    ).fetchall()
+    entries_by_status = {row[0]: row[1] for row in status_rows}
+
+    # Database file size.
+    db_path = _normalize_db_path(config.storage.database_path)
+    database_size_bytes: int | None = None
+    if db_path != ":memory:" and not _is_remote_db_path(db_path):
+        try:
+            database_size_bytes = Path(db_path).stat().st_size
+        except OSError:
+            database_size_bytes = None
+
+    # Embedding model info.
+    model_name = getattr(embedding_provider, "model_name", "unknown")
+    embedding_dimensions = getattr(embedding_provider, "dimensions", None)
+
+    # Embedding budget usage.
+    from distillery.mcp.budget import get_daily_usage
+
+    embedding_usage_today = 0
+    embedding_budget_daily = config.rate_limit.embedding_budget_daily
+    with contextlib.suppress(Exception):
+        embedding_usage_today = get_daily_usage(conn)
+
+    # Storage warnings.
+    warnings: list[str] = []
+    rl = config.rate_limit
+    if database_size_bytes is not None and rl.max_db_size_mb > 0:
+        size_mb = database_size_bytes / (1024 * 1024)
+        warn_threshold_mb = rl.max_db_size_mb * rl.warn_db_size_pct / 100
+        if size_mb >= rl.max_db_size_mb:
+            warnings.append(
+                f"Database size ({size_mb:.1f} MB) has reached the limit "
+                f"({rl.max_db_size_mb} MB). New writes will be rejected."
+            )
+        elif size_mb >= warn_threshold_mb:
+            warnings.append(
+                f"Database size ({size_mb:.1f} MB) is at "
+                f"{size_mb / rl.max_db_size_mb * 100:.0f}% of the "
+                f"{rl.max_db_size_mb} MB limit."
+            )
+
+    if embedding_budget_daily > 0 and embedding_usage_today >= embedding_budget_daily:
+        warnings.append(
+            f"Daily embedding budget exhausted: {embedding_usage_today}/{embedding_budget_daily} "
+            "calls used."
+        )
+
+    result: dict[str, Any] = {
+        "status": "ok",
+        "total_entries": total_entries,
+        "entries_by_type": entries_by_type,
+        "entries_by_status": entries_by_status,
+        "database_size_bytes": database_size_bytes,
+        "embedding_model": model_name,
+        "embedding_dimensions": embedding_dimensions,
+        "database_path": db_path,
+        "embedding_usage_today": embedding_usage_today,
+        "embedding_budget_daily": embedding_budget_daily,
+    }
+    if warnings:
+        result["warnings"] = warnings
+    return result
 
 
 def _sync_gather_metrics(
@@ -475,41 +623,6 @@ def _sync_gather_metrics(
         "staleness": staleness_section,
         "storage": storage_section,
     }
-
-
-# ---------------------------------------------------------------------------
-# _handle_quality
-# ---------------------------------------------------------------------------
-
-
-async def _handle_quality(
-    store: Any,
-    arguments: dict[str, Any],
-) -> list[types.TextContent]:
-    """
-    Aggregate search and feedback metrics and produce a quality summary payload.
-
-    Reads the read-only ``search_log`` and ``feedback_log`` tables and computes
-    ``total_searches``, ``total_feedback``, ``positive_rate``, ``avg_result_count``,
-    and an optional ``per_type_breakdown``. If ``entry_type`` is provided in
-    ``arguments``, results are filtered to that entry type when possible.
-
-    Parameters:
-        store: Initialized DuckDBStore providing access to log tables.
-        arguments: Tool arguments; accepts optional ``entry_type`` (str) to filter results.
-
-    Returns:
-        MCP content list with a single JSON ``TextContent`` block containing the
-        computed quality metrics.
-    """
-    entry_type_filter: str | None = arguments.get("entry_type")
-
-    try:
-        result = await asyncio.to_thread(_sync_gather_quality, store, entry_type_filter)
-        return success_response(result)
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Error gathering quality metrics")
-        return error_response("QUALITY_ERROR", f"Failed to gather quality metrics: {exc}")
 
 
 def _sync_gather_quality(
@@ -786,10 +899,15 @@ async def _handle_interests(
     Builds an :class:`~distillery.feeds.interests.InterestProfile` by mining
     the active entries in *store* and returns it as a JSON payload.
 
+    When ``suggest_sources=True`` is passed, the response also includes
+    heuristic feed source suggestions derived from the interest profile
+    (absorbing the former ``distillery_suggest_sources`` tool behaviour).
+
     Args:
         store: An initialised storage backend.
         config: The current :class:`~distillery.config.DistilleryConfig`.
-        arguments: Parsed tool arguments dict (``recency_days``, ``top_n``).
+        arguments: Parsed tool arguments dict (``recency_days``, ``top_n``,
+            ``suggest_sources``, ``max_suggestions``).
 
     Returns:
         A structured MCP success or error response.
@@ -824,6 +942,28 @@ async def _handle_interests(
             f"top_n must be a positive integer, got: {top_n}",
         )
 
+    suggest_sources_raw = arguments.get("suggest_sources", False)
+    if not isinstance(suggest_sources_raw, bool):
+        return error_response(
+            "INVALID_FIELD",
+            f"suggest_sources must be a boolean, got: {suggest_sources_raw!r}",
+        )
+    suggest_sources: bool = suggest_sources_raw
+
+    max_suggestions_raw = arguments.get("max_suggestions", 5)
+    try:
+        max_suggestions = int(max_suggestions_raw)
+    except (TypeError, ValueError):
+        return error_response(
+            "INVALID_FIELD",
+            f"max_suggestions must be an integer, got: {max_suggestions_raw!r}",
+        )
+    if max_suggestions <= 0:
+        return error_response(
+            "INVALID_FIELD",
+            f"max_suggestions must be a positive integer, got: {max_suggestions}",
+        )
+
     extractor = InterestExtractor(
         store=store,
         recency_days=recency_days,
@@ -835,25 +975,39 @@ async def _handle_interests(
         logger.exception("distillery_interests: extraction failed")
         return error_response("EXTRACTION_ERROR", f"Interest extraction failed: {exc}")
 
-    return success_response(
-        {
-            "top_tags": [[tag, weight] for tag, weight in profile.top_tags],
-            "bookmark_domains": profile.bookmark_domains,
-            "tracked_repos": profile.tracked_repos,
-            "expertise_areas": profile.expertise_areas,
-            "watched_sources": profile.watched_sources,
-            "suggestion_context": profile.suggestion_context,
-            "entry_count": profile.entry_count,
-            "generated_at": profile.generated_at.isoformat(),
-        }
-    )
+    payload: dict[str, Any] = {
+        "top_tags": [[tag, weight] for tag, weight in profile.top_tags],
+        "bookmark_domains": profile.bookmark_domains,
+        "tracked_repos": profile.tracked_repos,
+        "expertise_areas": profile.expertise_areas,
+        "watched_sources": profile.watched_sources,
+        "suggestion_context": profile.suggestion_context,
+        "entry_count": profile.entry_count,
+        "generated_at": profile.generated_at.isoformat(),
+    }
+
+    if suggest_sources:
+        from distillery.mcp.tools.feeds import _derive_suggestions, _normalise_watched_set
+
+        watched_set = _normalise_watched_set(profile.watched_sources)
+        suggestions = _derive_suggestions(
+            profile=profile,
+            watched_set=watched_set,
+            source_type_filter=None,
+            max_suggestions=max_suggestions,
+        )
+        payload["suggestions"] = suggestions
+
+    return success_response(payload)
 
 
 __all__ = [
+    "_VALID_METRICS_SCOPES",
     "_handle_interests",
     "_handle_metrics",
-    "_handle_quality",
     "_handle_stale",
     "_handle_tag_tree",
     "_handle_type_schemas",
+    "_sync_gather_summary",
+    "_sync_gather_quality",
 ]

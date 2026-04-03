@@ -33,23 +33,22 @@ from distillery.eval.models import SeedEntry
 from distillery.mcp._stub_embedding import HashEmbeddingProvider
 from distillery.mcp.server import (
     _handle_aggregate,
-    _handle_check_conflicts,
-    _handle_check_dedup,
     _handle_classify,
     _handle_find_similar,
     _handle_get,
+    _handle_interests,
     _handle_list,
     _handle_metrics,
-    _handle_quality,
     _handle_resolve_review,
-    _handle_review_queue,
     _handle_search,
     _handle_stale,
-    _handle_status,
     _handle_store,
     _handle_tag_tree,
     _handle_type_schemas,
     _handle_update,
+    _handle_watch,
+    _handle_poll,
+    _handle_rescore,
 )
 from distillery.store.duckdb import DuckDBStore
 
@@ -60,14 +59,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 DISTILLERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
-    {
-        "name": "distillery_status",
-        "description": (
-            "Retrieve database and embedding model statistics. "
-            "Call this first to confirm the Distillery MCP server is running."
-        ),
-        "input_schema": {"type": "object", "properties": {}, "required": []},
-    },
     {
         "name": "distillery_store",
         "description": (
@@ -209,26 +200,27 @@ DISTILLERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
     {
         "name": "distillery_find_similar",
-        "description": "Find entries similar to the given content (for deduplication).",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "content": {"type": "string"},
-                "threshold": {"type": "number", "description": "Similarity threshold (default 0.8)."},
-            },
-            "required": ["content"],
-        },
-    },
-    {
-        "name": "distillery_check_dedup",
         "description": (
-            "Check whether content is a duplicate of existing entries. "
-            "Returns an action: create, skip, merge, or link."
+            "Find entries similar to the given content. Supports dedup_action=true "
+            "for deduplication recommendations and conflict_check=true for conflict detection."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "content": {"type": "string"},
+                "threshold": {"type": "number", "description": "Similarity threshold (default 0.8)."},
+                "dedup_action": {
+                    "type": "boolean",
+                    "description": "If true, add dedup action recommendation (create/skip/merge/link).",
+                },
+                "conflict_check": {
+                    "type": "boolean",
+                    "description": "If true, run conflict detection pass.",
+                },
+                "llm_responses": {
+                    "type": "array",
+                    "description": "LLM evaluations for conflict candidates (second pass).",
+                },
             },
             "required": ["content"],
         },
@@ -249,18 +241,6 @@ DISTILLERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
         },
     },
     {
-        "name": "distillery_review_queue",
-        "description": "List entries in pending_review status awaiting human review.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "entry_type": {"type": "string"},
-                "limit": {"type": "integer"},
-            },
-            "required": [],
-        },
-    },
-    {
         "name": "distillery_resolve_review",
         "description": "Approve, reclassify, or archive a pending-review entry.",
         "input_schema": {
@@ -275,35 +255,20 @@ DISTILLERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
         },
     },
     {
-        "name": "distillery_check_conflicts",
-        "description": "Check for conflicting information against existing entries.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "content": {"type": "string"},
-                "llm_responses": {"type": "object"},
-            },
-            "required": ["content"],
-        },
-    },
-    {
         "name": "distillery_metrics",
-        "description": "Retrieve aggregate usage and quality metrics.",
+        "description": (
+            "Retrieve aggregate metrics. scope='summary' gives entry counts and server info "
+            "(replaces distillery_status). scope='search_quality' gives search quality metrics. "
+            "scope='full' (default) gives complete metrics."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
+                "scope": {
+                    "type": "string",
+                    "description": "One of: 'summary', 'full', 'search_quality' (default: 'full').",
+                },
                 "period_days": {"type": "integer", "description": "Lookback window in days."},
-            },
-            "required": [],
-        },
-    },
-    {
-        "name": "distillery_quality",
-        "description": "Retrieve search quality and feedback metrics.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "entry_type": {"type": "string"},
             },
             "required": [],
         },
@@ -336,6 +301,67 @@ DISTILLERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "name": "distillery_type_schemas",
         "description": "Return metadata schemas for all structured entry types.",
         "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "distillery_interests",
+        "description": (
+            "Build an interest profile from active entries. "
+            "Set suggest_sources=true to also get feed source recommendations "
+            "(replaces the former distillery_suggest_sources tool)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "recency_days": {"type": "integer", "description": "Lookback window (default 90)."},
+                "top_n": {"type": "integer", "description": "Max topics returned (default 20)."},
+                "suggest_sources": {
+                    "type": "boolean",
+                    "description": "If true, include feed source suggestions.",
+                },
+                "max_suggestions": {
+                    "type": "integer",
+                    "description": "Max source suggestions (default 5).",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "distillery_watch",
+        "description": "Manage feed sources (add, remove, list).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "description": "One of: list, add, remove."},
+                "url": {"type": "string"},
+                "source_type": {"type": "string"},
+                "label": {"type": "string"},
+                "poll_interval_minutes": {"type": "integer"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "distillery_poll",
+        "description": "Trigger a feed poll for one or all registered sources.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "source_url": {"type": "string", "description": "URL of source to poll; omit for all."},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "distillery_rescore",
+        "description": "Rescore feed entries using the current interest profile.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "description": "Max entries to rescore (default 100)."},
+            },
+            "required": [],
+        },
     },
 ]
 
@@ -449,10 +475,6 @@ class MCPBridge:
         config = self._config
         ep = self._embedding_provider
 
-        if name == "distillery_status":
-            return await _handle_status(
-                store=store, embedding_provider=ep, config=config
-            )
         if name == "distillery_store":
             return await _handle_store(store=store, arguments=args, cfg=config)
         if name == "distillery_get":
@@ -466,29 +488,29 @@ class MCPBridge:
         if name == "distillery_search":
             return await _handle_search(store=store, arguments=args)
         if name == "distillery_find_similar":
-            return await _handle_find_similar(store=store, arguments=args)
-        if name == "distillery_check_dedup":
-            return await _handle_check_dedup(store=store, config=config, arguments=args)
+            return await _handle_find_similar(store=store, arguments=args, cfg=config)
         if name == "distillery_classify":
             return await _handle_classify(store=store, config=config, arguments=args)
-        if name == "distillery_review_queue":
-            return await _handle_review_queue(store=store, arguments=args)
         if name == "distillery_resolve_review":
             return await _handle_resolve_review(store=store, arguments=args)
-        if name == "distillery_check_conflicts":
-            return await _handle_check_conflicts(store=store, config=config, arguments=args)
         if name == "distillery_metrics":
             return await _handle_metrics(
                 store=store, config=config, embedding_provider=ep, arguments=args
             )
-        if name == "distillery_quality":
-            return await _handle_quality(store=store, arguments=args)
         if name == "distillery_stale":
             return await _handle_stale(store=store, config=config, arguments=args)
         if name == "distillery_tag_tree":
             return await _handle_tag_tree(store=store, arguments=args)
         if name == "distillery_type_schemas":
             return await _handle_type_schemas()
+        if name == "distillery_interests":
+            return await _handle_interests(store=store, config=config, arguments=args)
+        if name == "distillery_watch":
+            return await _handle_watch(store=store, arguments=args)
+        if name == "distillery_poll":
+            return await _handle_poll(store=store, config=config, arguments=args)
+        if name == "distillery_rescore":
+            return await _handle_rescore(store=store, config=config, arguments=args)
 
         logger.warning("Unknown tool requested: %s", name)
         return [

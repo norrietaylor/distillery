@@ -3,7 +3,7 @@
 Covers the three handlers extracted from server.py:
   - _handle_watch: list, add, remove actions, validation errors, edge cases
   - _handle_poll: successful poll, single source filter, source not found, poll error
-  - _handle_suggest_sources: successful suggestions, empty store, custom params
+  - _handle_interests (suggest_sources=True): successful suggestions, empty store, custom params
 
 All tests are @pytest.mark.unit and use the FakeSourceStore pattern from
 test_watch.py so they run without a live database.
@@ -26,9 +26,9 @@ from distillery.config import (
 )
 from distillery.feeds.interests import InterestProfile
 from distillery.feeds.poller import PollerSummary, PollResult
+from distillery.mcp.tools.analytics import _handle_interests
 from distillery.mcp.tools.feeds import (
     _handle_poll,
-    _handle_suggest_sources,
     _handle_watch,
 )
 
@@ -548,7 +548,7 @@ class TestHandlePoll:
 
 
 # ---------------------------------------------------------------------------
-# _handle_suggest_sources
+# _handle_interests (suggest_sources=True)
 # ---------------------------------------------------------------------------
 
 
@@ -579,8 +579,8 @@ class TestHandleSuggestSources:
         with patch(
             "distillery.feeds.interests.InterestExtractor", return_value=mock_extractor
         ):
-            result = await _handle_suggest_sources(
-                store=store, config=config, arguments={}
+            result = await _handle_interests(
+                store=store, config=config, arguments={"suggest_sources": True}
             )
 
         data = parse(result)
@@ -603,8 +603,8 @@ class TestHandleSuggestSources:
         with patch(
             "distillery.feeds.interests.InterestExtractor", return_value=mock_extractor
         ):
-            result = await _handle_suggest_sources(
-                store=store, config=config, arguments={}
+            result = await _handle_interests(
+                store=store, config=config, arguments={"suggest_sources": True}
             )
 
         data = parse(result)
@@ -623,8 +623,8 @@ class TestHandleSuggestSources:
         with patch(
             "distillery.feeds.interests.InterestExtractor", return_value=mock_extractor
         ):
-            result = await _handle_suggest_sources(
-                store=store, config=config, arguments={}
+            result = await _handle_interests(
+                store=store, config=config, arguments={"suggest_sources": True}
             )
 
         data = parse(result)
@@ -647,8 +647,8 @@ class TestHandleSuggestSources:
         with patch(
             "distillery.feeds.interests.InterestExtractor", return_value=mock_extractor
         ):
-            result = await _handle_suggest_sources(
-                store=store, config=config, arguments={}
+            result = await _handle_interests(
+                store=store, config=config, arguments={"suggest_sources": True}
             )
 
         data = parse(result)
@@ -669,61 +669,23 @@ class TestHandleSuggestSources:
         with patch(
             "distillery.feeds.interests.InterestExtractor", return_value=mock_extractor
         ):
-            result = await _handle_suggest_sources(
+            result = await _handle_interests(
                 store=store,
                 config=config,
-                arguments={"max_suggestions": 2},
+                arguments={"suggest_sources": True, "max_suggestions": 2},
             )
 
         data = parse(result)
         assert len(data["suggestions"]) <= 2
 
-    async def test_suggest_sources_source_types_filter_github_only(self) -> None:
-        store = FakeSourceStore()
-        config = make_config()
-        profile = _make_profile(
-            tracked_repos=["owner/repo"],
-            bookmark_domains=["example.com"],
-        )
-
-        mock_extractor = MagicMock()
-        mock_extractor.extract = AsyncMock(return_value=profile)
-
-        with patch(
-            "distillery.feeds.interests.InterestExtractor", return_value=mock_extractor
-        ):
-            result = await _handle_suggest_sources(
-                store=store,
-                config=config,
-                arguments={"source_types": ["github"]},
-            )
-
-        data = parse(result)
-        assert "error" not in data
-        for suggestion in data["suggestions"]:
-            assert suggestion["source_type"] == "github"
-
-    async def test_suggest_sources_invalid_source_type_returns_error(self) -> None:
-        store = FakeSourceStore()
-        config = make_config()
-
-        result = await _handle_suggest_sources(
-            store=store,
-            config=config,
-            arguments={"source_types": ["slack"]},
-        )
-        data = parse(result)
-        assert data["error"] is True
-        assert data["code"] == "INVALID_SOURCE_TYPE"
-
     async def test_suggest_sources_invalid_max_suggestions_zero_returns_error(self) -> None:
         store = FakeSourceStore()
         config = make_config()
 
-        result = await _handle_suggest_sources(
+        result = await _handle_interests(
             store=store,
             config=config,
-            arguments={"max_suggestions": 0},
+            arguments={"suggest_sources": True, "max_suggestions": 0},
         )
         data = parse(result)
         assert data["error"] is True
@@ -732,10 +694,10 @@ class TestHandleSuggestSources:
         store = FakeSourceStore()
         config = make_config()
 
-        result = await _handle_suggest_sources(
+        result = await _handle_interests(
             store=store,
             config=config,
-            arguments={"recency_days": -1},
+            arguments={"suggest_sources": True, "recency_days": -1},
         )
         data = parse(result)
         assert data["error"] is True
@@ -750,8 +712,8 @@ class TestHandleSuggestSources:
         with patch(
             "distillery.feeds.interests.InterestExtractor", return_value=mock_extractor
         ):
-            result = await _handle_suggest_sources(
-                store=store, config=config, arguments={}
+            result = await _handle_interests(
+                store=store, config=config, arguments={"suggest_sources": True}
             )
 
         data = parse(result)
@@ -770,8 +732,8 @@ class TestHandleSuggestSources:
         with patch(
             "distillery.feeds.interests.InterestExtractor", return_value=mock_extractor
         ):
-            result = await _handle_suggest_sources(
-                store=store, config=config, arguments={}
+            result = await _handle_interests(
+                store=store, config=config, arguments={"suggest_sources": True}
             )
 
         data = parse(result)

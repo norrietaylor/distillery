@@ -422,13 +422,13 @@ async def _handle_rescore(request: Request, state: dict[str, Any]) -> JSONRespon
 async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONResponse:
     """Handler for ``POST /maintenance``.
 
-    Sequentially executes five knowledge-base maintenance operations:
+    Sequentially executes four knowledge-base maintenance operations:
 
-    1. **metrics** -- 7-day usage metrics
-    2. **quality** -- search/feedback quality summary
+    1. **metrics** -- 7-day usage metrics (scope="summary")
+    2. **quality** -- search/feedback quality summary (scope="search_quality")
     3. **stale_detection** -- entries not accessed in 30 days (limit 10)
-    4. **interests** -- top 10 interests over the past 30 days
-    5. **source_suggestions** -- up to 3 new feed source suggestions
+    4. **interests** -- top 10 interests over the past 30 days, including up
+       to 3 feed source suggestions (via ``suggest_sources=True``)
 
     On success a one-paragraph digest entry is stored in the knowledge base
     with ``entry_type="session"``, ``author="distillery-maintenance"``, and
@@ -450,9 +450,7 @@ async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONRe
     from distillery.mcp.server import (
         _handle_interests,
         _handle_metrics,
-        _handle_quality,
         _handle_stale,
-        _handle_suggest_sources,
     )
     from distillery.models import Entry, EntrySource, EntryType
 
@@ -471,10 +469,12 @@ async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONRe
         )
         metrics_data = _parse_mcp_response(metrics_result)
 
-        # 2. Quality
-        quality_result = await _handle_quality(
+        # 2. Quality (via metrics with scope=search_quality)
+        quality_result = await _handle_metrics(
             store=store,
-            arguments={},
+            config=config,
+            embedding_provider=embedding_provider,
+            arguments={"scope": "search_quality"},
         )
         quality_data = _parse_mcp_response(quality_result)
 
@@ -487,23 +487,15 @@ async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONRe
         stale_data = _parse_mcp_response(stale_result)
         stale_count: int = stale_data.get("stale_count", 0)
 
-        # 4. Interests (30 days, top 10)
+        # 4. Interests (30 days, top 10) with source suggestions (max 3)
         interests_result = await _handle_interests(
             store=store,
             config=config,
-            arguments={"recency_days": 30, "top_n": 10},
+            arguments={"recency_days": 30, "top_n": 10, "suggest_sources": True, "max_suggestions": 3},
         )
         interests_data = _parse_mcp_response(interests_result)
         top_interests: list[Any] = interests_data.get("top_tags", [])
-
-        # 5. Source suggestions (max 3)
-        suggestions_result = await _handle_suggest_sources(
-            store=store,
-            config=config,
-            arguments={"max_suggestions": 3},
-        )
-        suggestions_data = _parse_mcp_response(suggestions_result)
-        suggested_sources: list[Any] = suggestions_data.get("suggestions", [])
+        suggested_sources: list[Any] = interests_data.get("suggestions", [])
 
         # Compose digest summary
         now = datetime.now(UTC)

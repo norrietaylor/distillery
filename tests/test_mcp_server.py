@@ -22,8 +22,8 @@ from distillery.mcp.server import (
     _handle_find_similar,
     _handle_get,
     _handle_list,
+    _handle_metrics,
     _handle_search,
-    _handle_status,
     _handle_store,
     _handle_update,
     create_server,
@@ -43,7 +43,7 @@ pytestmark = pytest.mark.integration
 
 @pytest.fixture
 def embedding_provider(deterministic_embedding_provider):
-    """Alias for deterministic_embedding_provider used by _handle_status tests."""
+    """Alias for deterministic_embedding_provider used by _handle_metrics tests."""
     return deterministic_embedding_provider
 
 
@@ -177,11 +177,13 @@ class TestEndToEndFlow:
         assert entry_id in ids
 
         # ------------------------------------------------------------------ #
-        # Step 7: distillery_status                                           #
+        # Step 7: distillery_metrics(scope="summary") — replaces status     #
         # ------------------------------------------------------------------ #
-        # Build a minimal config object for status
+        # Build a minimal config object for metrics
         config = DistilleryConfig(storage=StorageConfig(database_path=":memory:"))
-        status_response = await _handle_status(store, embedding_provider, config)
+        status_response = await _handle_metrics(
+            store, config, embedding_provider, {"scope": "summary"}
+        )
         status_data = parse_mcp_response(status_response)
         assert status_data.get("status") == "ok"
         assert "total_entries" in status_data
@@ -191,7 +193,7 @@ class TestEndToEndFlow:
 
 
 # ---------------------------------------------------------------------------
-# distillery_status tests
+# distillery_metrics (scope=summary) — replaces distillery_status
 # ---------------------------------------------------------------------------
 
 
@@ -200,7 +202,7 @@ class TestStatusTool:
         self, store: DuckDBStore, embedding_provider: DeterministicEmbeddingProvider
     ) -> None:
         config = DistilleryConfig(storage=StorageConfig(database_path=":memory:"))
-        response = await _handle_status(store, embedding_provider, config)
+        response = await _handle_metrics(store, config, embedding_provider, {"scope": "summary"})
         data = parse_mcp_response(response)
         assert data["status"] == "ok"
 
@@ -211,7 +213,7 @@ class TestStatusTool:
         entry = make_entry(content="status test", entry_type=EntryType.IDEA)
         await store.store(entry)
 
-        response = await _handle_status(store, embedding_provider, config)
+        response = await _handle_metrics(store, config, embedding_provider, {"scope": "summary"})
         data = parse_mcp_response(response)
         assert data["total_entries"] >= 1
         assert "entries_by_type" in data
@@ -221,7 +223,7 @@ class TestStatusTool:
         self, store: DuckDBStore, embedding_provider: DeterministicEmbeddingProvider
     ) -> None:
         config = DistilleryConfig(storage=StorageConfig(database_path=":memory:"))
-        response = await _handle_status(store, embedding_provider, config)
+        response = await _handle_metrics(store, config, embedding_provider, {"scope": "summary"})
         data = parse_mcp_response(response)
         assert data["embedding_model"] == "deterministic-4d"
         assert data["embedding_dimensions"] == 4
@@ -660,29 +662,23 @@ class TestCreateServer:
         tool_names = {t.name for t in tools}
 
         expected = {
-            "distillery_status",
             "distillery_store",
             "distillery_get",
             "distillery_update",
             "distillery_search",
             "distillery_find_similar",
             "distillery_list",
+            "distillery_aggregate",
             "distillery_classify",
-            "distillery_review_queue",
             "distillery_resolve_review",
-            "distillery_check_dedup",
             "distillery_metrics",
-            "distillery_check_conflicts",
-            "distillery_quality",
             "distillery_stale",
             "distillery_tag_tree",
             "distillery_type_schemas",
-            "distillery_watch",
             "distillery_interests",
-            "distillery_suggest_sources",
+            "distillery_watch",
             "distillery_poll",
             "distillery_rescore",
-            "distillery_aggregate",
             "distillery_configure",
         }
         assert expected == tool_names, f"Missing tools: {expected - tool_names}"

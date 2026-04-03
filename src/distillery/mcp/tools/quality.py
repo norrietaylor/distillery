@@ -1,11 +1,13 @@
-"""Quality tool handlers for the Distillery MCP server.
+"""Importable helpers for deduplication and conflict detection.
 
-Implements the following tools:
-  - distillery_check_dedup: Run deduplication check against the store and return
-    an action (create/skip/merge/link) with similar entries.
-  - distillery_check_conflicts: Two-pass conflict detection — first pass returns
-    conflict candidates with prompts; second pass processes LLM responses and
-    returns confirmed conflicts.
+Provides standalone async helper functions that can be imported by other
+modules (e.g. ``search.py``).  These helpers accept typed arguments and
+return typed dicts -- they do NOT depend on MCP handler signatures.
+
+The ``distillery_check_dedup`` and ``distillery_check_conflicts`` tools have
+been removed; their functionality is now available via
+``distillery_find_similar(dedup_action=True)`` and
+``distillery_find_similar(conflict_check=True)`` respectively.
 """
 
 from __future__ import annotations
@@ -13,76 +15,54 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from mcp import types
-
-from distillery.config import DistilleryConfig
-from distillery.mcp.budget import EmbeddingBudgetError, record_and_check
-from distillery.mcp.tools._common import (
-    error_response,
-    success_response,
-    validate_required,
-)
+from distillery.config import ClassificationConfig
 
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# _handle_check_dedup
+# Helper: dedup check
 # ---------------------------------------------------------------------------
 
 
-async def _handle_check_dedup(
+async def run_dedup_check(
     store: Any,
-    config: DistilleryConfig,
-    arguments: dict[str, Any],
-) -> list[types.TextContent]:
-    """Implement the ``distillery_check_dedup`` tool.
+    classification_config: ClassificationConfig,
+    content: str,
+) -> dict[str, Any]:
+    """Run a deduplication check and return the result as a plain dict.
 
-    Runs :class:`~distillery.classification.dedup.DeduplicationChecker` against
-    the store using thresholds from *config* and returns the deduplication
-    result as a JSON payload.
+    This is a standalone helper that does NOT depend on MCP handler signatures.
+    It can be imported and called directly from any module (e.g. ``search.py``).
 
     Args:
         store: Initialised store with a ``find_similar`` method.
-        config: Loaded :class:`~distillery.config.DistilleryConfig` (dedup
-            thresholds are read from ``config.classification``).
-        arguments: Tool argument dict. Must contain ``"content"`` (str).
+        classification_config: Classification configuration containing dedup
+            thresholds (``dedup_skip_threshold``, ``dedup_merge_threshold``,
+            ``dedup_link_threshold``, ``dedup_limit``).
+        content: The text content to check for duplicates.
 
     Returns:
-        MCP content list with a single JSON ``TextContent`` block.
+        A dict with keys ``action`` (str), ``highest_score`` (float),
+        ``reasoning`` (str), and ``similar_entries`` (list of dicts with
+        ``entry_id``, ``score``, ``content_preview``, ``entry_type``,
+        ``author``, ``project``, ``created_at``).
+
+    Raises:
+        Exception: Propagates any exception from the store or dedup checker.
     """
-    # --- validate input -----------------------------------------------------
-    err = validate_required(arguments, "content")
-    if err:
-        return error_response("INVALID_PARAMS", err)
-
-    content = str(arguments["content"])
-
-    # --- embedding budget check (1 embed call for find_similar) -------------
-    try:
-        record_and_check(store.connection, config.rate_limit.embedding_budget_daily)
-    except EmbeddingBudgetError as exc:
-        return error_response("BUDGET_EXCEEDED", str(exc))
-
-    # --- run dedup checker --------------------------------------------------
     from distillery.classification.dedup import DeduplicationChecker
 
-    cls_cfg = config.classification
     checker = DeduplicationChecker(
         store=store,
-        skip_threshold=cls_cfg.dedup_skip_threshold,
-        merge_threshold=cls_cfg.dedup_merge_threshold,
-        link_threshold=cls_cfg.dedup_link_threshold,
-        dedup_limit=cls_cfg.dedup_limit,
+        skip_threshold=classification_config.dedup_skip_threshold,
+        merge_threshold=classification_config.dedup_merge_threshold,
+        link_threshold=classification_config.dedup_link_threshold,
+        dedup_limit=classification_config.dedup_limit,
     )
 
-    try:
-        result = await checker.check(content)
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Error running dedup check")
-        return error_response("DEDUP_ERROR", f"Deduplication check failed: {exc}")
+    result = await checker.check(content)
 
-    # --- serialise result ---------------------------------------------------
     similar_entries_serialised = []
     for sr in result.similar_entries:
         similar_entries_serialised.append(
@@ -97,151 +77,131 @@ async def _handle_check_dedup(
             }
         )
 
-    return success_response(
-        {
-            "action": result.action.value,
-            "highest_score": result.highest_score,
-            "reasoning": result.reasoning,
-            "similar_entries": similar_entries_serialised,
-        }
-    )
+    return {
+        "action": result.action.value,
+        "highest_score": result.highest_score,
+        "reasoning": result.reasoning,
+        "similar_entries": similar_entries_serialised,
+    }
 
 
 # ---------------------------------------------------------------------------
-# _handle_check_conflicts
+# Standalone helper: conflict discovery (first pass)
 # ---------------------------------------------------------------------------
 
 
-async def _handle_check_conflicts(
+async def run_conflict_discovery(
     store: Any,
-    config: DistilleryConfig,
-    arguments: dict[str, Any],
-) -> list[types.TextContent]:
-    """Implement the ``distillery_check_conflicts`` tool.
+    threshold: float,
+    content: str,
+) -> dict[str, Any]:
+    """Discover conflict candidates and return prompts for LLM evaluation.
 
-    Supports a two-pass workflow:
-
-    **First pass** (``llm_responses`` absent or ``None``):
-    - Calls :class:`~distillery.classification.conflict.ConflictChecker` with
-      ``llm_responses=None`` to discover candidate entry IDs.
-    - Returns ``conflict_candidates`` with a prompt for each candidate pair so
-      the calling LLM can evaluate them.
-
-    **Second pass** (``llm_responses`` provided):
-    - Converts the supplied ``{entry_id: {is_conflict, reasoning}}`` dict to
-      the ``(bool, str)`` tuple format expected by
-      :meth:`~distillery.classification.conflict.ConflictChecker.check`.
-    - Returns the serialised :class:`~distillery.classification.conflict.ConflictResult`.
+    This is the first pass of the two-pass conflict workflow.  It finds
+    similar entries above *threshold* and builds an LLM prompt for each
+    candidate pair.
 
     Args:
         store: Initialised store with a ``find_similar`` method.
-        config: Loaded :class:`~distillery.config.DistilleryConfig` (conflict
-            threshold is read from ``config.classification.conflict_threshold``).
-        arguments: Tool argument dict.  Must contain ``"content"`` (str).
-            Optionally contains ``"llm_responses"`` (dict).
+        threshold: Minimum cosine similarity for a stored entry to be
+            considered a conflict candidate.
+        content: The text content to check for conflicts.
 
     Returns:
-        MCP content list with a single JSON ``TextContent`` block.
+        A dict with keys ``has_conflicts`` (always ``False`` in first pass),
+        ``conflicts`` (always ``[]``), ``conflict_candidates`` (list of dicts
+        with ``entry_id``, ``content_preview``, ``similarity_score``,
+        ``conflict_prompt``), and ``message`` (str).
+
+    Raises:
+        Exception: Propagates any exception from the store or conflict checker.
     """
-    from distillery.classification.conflict import ConflictChecker
+    from distillery.classification.conflict import _DEFAULT_CONFLICT_LIMIT, ConflictChecker
 
-    # --- validate input -----------------------------------------------------
-    err = validate_required(arguments, "content")
-    if err:
-        return error_response("INVALID_PARAMS", err)
-
-    content = str(arguments["content"])
-
-    llm_responses_raw: dict[str, Any] | None = arguments.get("llm_responses")
-    if llm_responses_raw is not None and not isinstance(llm_responses_raw, dict):
-        return error_response("INVALID_PARAMS", "Field 'llm_responses' must be an object")
-
-    # --- build checker -------------------------------------------------------
-    threshold = config.classification.conflict_threshold
     checker = ConflictChecker(store=store, threshold=threshold)
 
-    # --- first pass: discover candidates (no llm_responses) ------------------
-    if not llm_responses_raw:
-        try:
-            # Call check with no LLM responses to find similar entries.
-            await checker.check(content, llm_responses=None)
+    # Call check with no LLM responses to find similar entries.
+    await checker.check(content, llm_responses=None)
 
-            # Retrieve similar entries to build prompts for the caller.
-            from distillery.classification.conflict import _DEFAULT_CONFLICT_LIMIT
+    # Retrieve similar entries to build prompts for the caller.
+    similar = await store.find_similar(
+        content=content,
+        threshold=threshold,
+        limit=_DEFAULT_CONFLICT_LIMIT,
+    )
 
-            similar = await store.find_similar(
-                content=content,
-                threshold=threshold,
-                limit=_DEFAULT_CONFLICT_LIMIT,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Error during conflict discovery pass")
-            return error_response("CONFLICT_ERROR", f"Conflict check failed: {exc}")
+    if not similar:
+        return {
+            "has_conflicts": False,
+            "conflicts": [],
+            "conflict_candidates": [],
+            "message": "No similar entries found above the conflict threshold.",
+        }
 
-        if not similar:
-            return success_response(
-                {
-                    "has_conflicts": False,
-                    "conflicts": [],
-                    "conflict_candidates": [],
-                    "message": "No similar entries found above the conflict threshold.",
-                }
-            )
-
-        candidates = []
-        for result in similar:
-            lines = result.entry.content.splitlines()
-            preview = lines[0][:120] if lines else result.entry.content[:120]
-            prompt = checker.build_prompt(content, result.entry.content)
-            candidates.append(
-                {
-                    "entry_id": result.entry.id,
-                    "content_preview": preview,
-                    "similarity_score": round(result.score, 4),
-                    "conflict_prompt": prompt,
-                }
-            )
-
-        return success_response(
+    candidates = []
+    for result in similar:
+        lines = result.entry.content.splitlines()
+        preview = lines[0][:120] if lines else result.entry.content[:120]
+        prompt = checker.build_prompt(content, result.entry.content)
+        candidates.append(
             {
-                "has_conflicts": False,
-                "conflicts": [],
-                "conflict_candidates": candidates,
-                "message": (
-                    f"Found {len(candidates)} conflict "
-                    f"{'candidate' if len(candidates) == 1 else 'candidates'}. "
-                    "Evaluate each conflict_prompt with an LLM and call "
-                    "distillery_check_conflicts again with llm_responses."
-                ),
+                "entry_id": result.entry.id,
+                "content_preview": preview,
+                "similarity_score": round(result.score, 4),
+                "conflict_prompt": prompt,
             }
         )
 
-    # --- second pass: process LLM responses ----------------------------------
-    # Convert {entry_id: {is_conflict: bool, reasoning: str}} ->
-    #         {entry_id: (bool, str)}
-    llm_responses: dict[str, tuple[bool, str]] = {}
-    for entry_id, response_obj in llm_responses_raw.items():
-        if not isinstance(response_obj, dict):
-            return error_response(
-                "INVALID_PARAMS",
-                f"llm_responses[{entry_id!r}] must be an object with 'is_conflict' and 'reasoning'.",
-            )
-        is_conflict_raw = response_obj.get("is_conflict")
-        if is_conflict_raw is None:
-            return error_response(
-                "INVALID_PARAMS",
-                f"llm_responses[{entry_id!r}] is missing required field 'is_conflict'.",
-            )
-        reasoning = str(response_obj.get("reasoning", ""))
-        llm_responses[str(entry_id)] = (bool(is_conflict_raw), reasoning)
+    return {
+        "has_conflicts": False,
+        "conflicts": [],
+        "conflict_candidates": candidates,
+        "message": (
+            f"Found {len(candidates)} conflict "
+            f"{'candidate' if len(candidates) == 1 else 'candidates'}. "
+            "Evaluate each conflict_prompt with an LLM and call "
+            "distillery_find_similar(conflict_check=true, llm_responses=...) to confirm."
+        ),
+    }
 
-    try:
-        result = await checker.check(content, llm_responses=llm_responses)
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Error during conflict evaluation pass")
-        return error_response("CONFLICT_ERROR", f"Conflict check failed: {exc}")
 
-    # Serialise ConflictResult.
+# ---------------------------------------------------------------------------
+# Standalone helper: conflict evaluation (second pass)
+# ---------------------------------------------------------------------------
+
+
+async def run_conflict_evaluation(
+    store: Any,
+    threshold: float,
+    content: str,
+    llm_responses: dict[str, tuple[bool, str]],
+) -> dict[str, Any]:
+    """Evaluate conflict candidates using LLM responses and return results.
+
+    This is the second pass of the two-pass conflict workflow.  It takes
+    pre-parsed LLM responses and returns which entries are confirmed
+    conflicts.
+
+    Args:
+        store: Initialised store with a ``find_similar`` method.
+        threshold: Minimum cosine similarity used for conflict detection.
+        content: The text content that was checked for conflicts.
+        llm_responses: Mapping from entry ID to ``(is_conflict, reasoning)``
+            tuple as parsed from LLM output.
+
+    Returns:
+        A dict with keys ``has_conflicts`` (bool) and ``conflicts``
+        (list of dicts with ``entry_id``, ``content_preview``,
+        ``similarity_score``, ``conflict_reasoning``).
+
+    Raises:
+        Exception: Propagates any exception from the store or conflict checker.
+    """
+    from distillery.classification.conflict import ConflictChecker
+
+    checker = ConflictChecker(store=store, threshold=threshold)
+    result = await checker.check(content, llm_responses=llm_responses)
+
     conflicts_serialised = [
         {
             "entry_id": conflict.entry_id,
@@ -252,15 +212,14 @@ async def _handle_check_conflicts(
         for conflict in result.conflicts
     ]
 
-    return success_response(
-        {
-            "has_conflicts": result.has_conflicts,
-            "conflicts": conflicts_serialised,
-        }
-    )
+    return {
+        "has_conflicts": result.has_conflicts,
+        "conflicts": conflicts_serialised,
+    }
 
 
 __all__ = [
-    "_handle_check_dedup",
-    "_handle_check_conflicts",
+    "run_dedup_check",
+    "run_conflict_discovery",
+    "run_conflict_evaluation",
 ]

@@ -3,12 +3,12 @@
 
 - name: classify-shows-review-queue
   skill: classify
-  description: "Claude should call distillery_review_queue when asked to review pending entries"
+  description: "Claude should call distillery_list when asked to review pending entries"
   prompt: "/classify --review"
   seed_entries: []
   expected_tools:
-    - distillery_status
-    - distillery_review_queue
+    - distillery_metrics
+    - distillery_list
   max_latency_ms: 60000
   max_total_tokens: 8000
 
@@ -18,7 +18,7 @@
   prompt: "/classify --review"
   seed_entries: []
   expected_tools:
-    - distillery_review_queue
+    - distillery_list
   max_latency_ms: 60000
   max_total_tokens: 8000
 
@@ -36,7 +36,7 @@
       author: bob
       tags: [todo, idea]
   expected_tools:
-    - distillery_status
+    - distillery_metrics
     - distillery_list
   max_latency_ms: 90000
   max_total_tokens: 10000
@@ -47,7 +47,7 @@
   prompt: "/classify --review"
   seed_entries: []
   expected_tools:
-    - distillery_status
+    - distillery_metrics
     - distillery_type_schemas
   max_latency_ms: 60000
   max_total_tokens: 8000
@@ -58,6 +58,6 @@
   prompt: "/classify --review"
   seed_entries: []
   expected_tools:
-    - distillery_review_queue
+    - distillery_list
   max_latency_ms: 90000
   max_total_tokens: 10000

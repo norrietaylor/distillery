@@ -6,7 +6,7 @@
   prompt: "/setup"
   seed_entries: []
   expected_tools:
-    - distillery_status
+    - distillery_metrics
   response_must_contain:
     - connected
   max_latency_ms: 45000
@@ -18,7 +18,7 @@
   prompt: "/setup"
   seed_entries: []
   expected_tools:
-    - distillery_status
+    - distillery_metrics
   response_must_contain:
     - Transport
   max_latency_ms: 45000
@@ -34,7 +34,7 @@
       author: eval-seed
       tags: [test]
   expected_tools:
-    - distillery_status
+    - distillery_metrics
   response_must_contain:
     - Setup
     - Database
@@ -47,7 +47,7 @@
   prompt: "/setup"
   seed_entries: []
   expected_tools:
-    - distillery_status
+    - distillery_metrics
     - distillery_watch
   response_must_contain:
     - source
@@ -64,7 +64,7 @@
       author: eval-seed
       tags: [test, setup]
   expected_tools:
-    - distillery_status
+    - distillery_metrics
   response_must_not_contain:
     - Error
     - error

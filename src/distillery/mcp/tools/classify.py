@@ -2,8 +2,9 @@
 
 Implements the following tools:
   - distillery_classify: Store a pre-computed classification result onto an existing entry
-  - distillery_review_queue: Return entries pending human review
   - distillery_resolve_review: Approve, reclassify, or archive a pending-review entry
+
+Note: review queue listing is handled by distillery_list with output_mode="review".
 """
 
 from __future__ import annotations
@@ -156,75 +157,6 @@ async def _handle_classify(
 
 
 # ---------------------------------------------------------------------------
-# _handle_review_queue
-# ---------------------------------------------------------------------------
-
-
-async def _handle_review_queue(
-    store: Any,
-    arguments: dict[str, Any],
-) -> list[types.TextContent]:
-    """Implement the ``distillery_review_queue`` tool.
-
-    Returns ``pending_review`` entries sorted by ``created_at`` descending
-    with a content preview and classification metadata fields.
-
-    Args:
-        store: Initialised ``DuckDBStore``.
-        arguments: Tool argument dict (all fields optional). Supports
-            ``limit`` (int, 1–500), ``entry_type`` (str), ``project`` (str).
-
-    Returns:
-        MCP content list with a JSON payload of ``entries`` and ``count``.
-    """
-    limit_raw = arguments.get("limit", 20)
-    err_limit = validate_type(arguments, "limit", int, "integer")
-    if err_limit:
-        return error_response("INVALID_PARAMS", err_limit)
-    limit = int(limit_raw) if limit_raw is not None else 20
-    if limit < 1:
-        return error_response("INVALID_PARAMS", "Field 'limit' must be >= 1")
-    if limit > 500:
-        return error_response("INVALID_PARAMS", "Field 'limit' must be <= 500")
-
-    filters: dict[str, Any] = {"status": "pending_review"}
-    if "entry_type" in arguments and arguments["entry_type"] is not None:
-        entry_type_str = arguments["entry_type"]
-        if entry_type_str not in _VALID_ENTRY_TYPES:
-            return error_response(
-                "INVALID_PARAMS",
-                f"Invalid entry_type {entry_type_str!r}. "
-                f"Must be one of: {', '.join(sorted(_VALID_ENTRY_TYPES))}.",
-            )
-        filters["entry_type"] = entry_type_str
-    if "project" in arguments and arguments["project"] is not None:
-        filters["project"] = arguments["project"]
-
-    try:
-        entries = await store.list_entries(filters=filters, limit=limit, offset=0)
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Error in distillery_review_queue")
-        return error_response("LIST_ERROR", f"list_entries failed: {exc}")
-
-    # Project each entry to the review-queue summary shape.
-    items = []
-    for entry in entries:
-        items.append(
-            {
-                "id": entry.id,
-                "content_preview": entry.content[:200],
-                "entry_type": entry.entry_type.value,
-                "confidence": entry.metadata.get("confidence"),
-                "author": entry.author,
-                "created_at": entry.created_at.isoformat(),
-                "classification_reasoning": entry.metadata.get("classification_reasoning"),
-            }
-        )
-
-    return success_response({"entries": items, "count": len(items)})
-
-
-# ---------------------------------------------------------------------------
 # _handle_resolve_review
 # ---------------------------------------------------------------------------
 
@@ -341,7 +273,6 @@ async def _handle_resolve_review(
 
 __all__ = [
     "_handle_classify",
-    "_handle_review_queue",
     "_handle_resolve_review",
     "_VALID_REVIEW_ACTIONS",
 ]
