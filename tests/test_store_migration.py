@@ -114,8 +114,14 @@ async def test_meta_duckdb_version_updated_on_reopen() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_meta_schema_version_default_zero() -> None:
-    """schema_version defaults to '0' on a fresh database before any migrations."""
+async def test_meta_schema_version_after_init() -> None:
+    """schema_version reflects the latest migration after initialization.
+
+    A fresh database runs all pending migrations during ``initialize()``,
+    so the schema version should equal the highest migration number (6).
+    """
+    from distillery.store.migrations import MIGRATIONS
+
     provider = _MinimalProvider()
     store = DuckDBStore(db_path=":memory:", embedding_provider=provider)
     await store.initialize()
@@ -126,7 +132,10 @@ async def test_meta_schema_version_default_zero() -> None:
 
         row = conn.execute("SELECT value FROM _meta WHERE key = 'schema_version'").fetchone()
         assert row is not None, "_meta missing schema_version"
-        assert row[0] == "0", f"Fresh database schema_version should be '0', got {row[0]!r}"
+        expected = str(max(MIGRATIONS))
+        assert row[0] == expected, (
+            f"Fresh database schema_version should be {expected!r}, got {row[0]!r}"
+        )
 
     finally:
         await store.close()

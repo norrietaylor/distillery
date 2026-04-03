@@ -1,0 +1,15 @@
+Type: cli
+Command: grep -c "_create_schema\|_create_index\|_create_meta_table\|_create_log_tables\|_create_feed_sources_table\|_add_accessed_at_column\|_add_ownership_columns" src/distillery/store/duckdb.py
+Expected: 0 (all old helper methods removed)
+Timestamp: 2026-04-03T00:00:00Z
+
+0
+0
+
+Verify run_pending_migrations is called in _sync_initialize:
+31:from distillery.store.migrations import _CREATE_META_TABLE, run_pending_migrations
+272:        :func:`~distillery.store.migrations.run_pending_migrations`.
+383:        :func:`~distillery.store.migrations.run_pending_migrations`, validates
+411:                schema_version = run_pending_migrations(
+
+Status: PASS

@@ -258,12 +258,9 @@ class TestSyncInitializeHttpfs:
             patch.object(store, "_open_connection", return_value=mock_conn),
             patch.object(store, "_setup_httpfs") as mock_httpfs,
             patch.object(store, "_setup_vss"),
-            patch.object(store, "_create_schema"),
-            patch.object(store, "_add_accessed_at_column"),
-            patch.object(store, "_create_log_tables"),
-            patch.object(store, "_create_meta_table"),
+            patch("distillery.store.duckdb.run_pending_migrations", return_value=6),
             patch.object(store, "_validate_or_record_meta"),
-            patch.object(store, "_create_index"),
+            patch.object(store, "_track_version_info"),
         ):
             store._sync_initialize()
             mock_httpfs.assert_called_once_with(mock_conn)
@@ -276,12 +273,9 @@ class TestSyncInitializeHttpfs:
             patch.object(store, "_open_connection", return_value=mock_conn),
             patch.object(store, "_setup_httpfs") as mock_httpfs,
             patch.object(store, "_setup_vss"),
-            patch.object(store, "_create_schema"),
-            patch.object(store, "_add_accessed_at_column"),
-            patch.object(store, "_create_log_tables"),
-            patch.object(store, "_create_meta_table"),
+            patch("distillery.store.duckdb.run_pending_migrations", return_value=6),
             patch.object(store, "_validate_or_record_meta"),
-            patch.object(store, "_create_index"),
+            patch.object(store, "_track_version_info"),
         ):
             store._sync_initialize()
             mock_httpfs.assert_not_called()
@@ -293,12 +287,9 @@ class TestSyncInitializeHttpfs:
             patch.object(store, "_open_connection", return_value=mock_conn),
             patch.object(store, "_setup_httpfs") as mock_httpfs,
             patch.object(store, "_setup_vss"),
-            patch.object(store, "_create_schema"),
-            patch.object(store, "_add_accessed_at_column"),
-            patch.object(store, "_create_log_tables"),
-            patch.object(store, "_create_meta_table"),
+            patch("distillery.store.duckdb.run_pending_migrations", return_value=6),
             patch.object(store, "_validate_or_record_meta"),
-            patch.object(store, "_create_index"),
+            patch.object(store, "_track_version_info"),
         ):
             store._sync_initialize()
             mock_httpfs.assert_not_called()
@@ -310,12 +301,9 @@ class TestSyncInitializeHttpfs:
             patch.object(store, "_open_connection", return_value=mock_conn),
             patch.object(store, "_setup_httpfs") as mock_httpfs,
             patch.object(store, "_setup_vss"),
-            patch.object(store, "_create_schema"),
-            patch.object(store, "_add_accessed_at_column"),
-            patch.object(store, "_create_log_tables"),
-            patch.object(store, "_create_meta_table"),
+            patch("distillery.store.duckdb.run_pending_migrations", return_value=6),
             patch.object(store, "_validate_or_record_meta"),
-            patch.object(store, "_create_index"),
+            patch.object(store, "_track_version_info"),
         ):
             store._sync_initialize()
             mock_httpfs.assert_not_called()
@@ -336,12 +324,9 @@ class TestSyncInitializeHttpfs:
             patch.object(store, "_open_connection", return_value=mock_conn),
             patch.object(store, "_setup_httpfs", side_effect=fake_httpfs),
             patch.object(store, "_setup_vss", side_effect=fake_vss),
-            patch.object(store, "_create_schema"),
-            patch.object(store, "_add_accessed_at_column"),
-            patch.object(store, "_create_log_tables"),
-            patch.object(store, "_create_meta_table"),
+            patch("distillery.store.duckdb.run_pending_migrations", return_value=6),
             patch.object(store, "_validate_or_record_meta"),
-            patch.object(store, "_create_index"),
+            patch.object(store, "_track_version_info"),
         ):
             store._sync_initialize()
 
