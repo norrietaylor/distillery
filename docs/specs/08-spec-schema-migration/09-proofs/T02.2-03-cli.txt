@@ -1,8 +1,0 @@
-Type: cli
-Command: ruff check src/distillery/store/migrations.py
-Expected: All checks passed
-Timestamp: 2026-04-03T00:00:00Z
-============================================================
-All checks passed!
-============================================================
-Status: PASS

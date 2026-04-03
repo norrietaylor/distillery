@@ -1,7 +1,0 @@
-Type: cli
-Command: mypy --strict src/distillery/store/migrations.py
-Expected: Success: no issues found
-Timestamp: 2026-04-03T$(date -u +%H:%M:%S)Z
-Success: no issues found in 1 source file
----
-Status: PASS

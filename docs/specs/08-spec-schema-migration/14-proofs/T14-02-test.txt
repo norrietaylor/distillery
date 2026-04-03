@@ -1,8 +1,0 @@
-Type: test
-Command: pytest tests/ -q --no-header
-Expected: Full test suite passes (baseline 1626 + new tests)
-Timestamp: 2026-04-03T08:01:00Z
-
-1639 passed, 73 skipped, 3 warnings in 30.12s
-
-Status: PASS
