@@ -83,11 +83,11 @@ Check `CronList` for an existing maintenance job. If none exists, create one:
 CronCreate(
   cron="<random minute> 7 * * 1",
   prompt="""Run weekly Distillery maintenance:
-1. Call distillery_metrics(period_days=7) — note entry growth, search volume, storage usage.
-2. Call distillery_quality() — note positive feedback rate and avg result count.
+1. Call distillery_metrics(scope="summary", period_days=7) — note entry growth, search volume, storage usage.
+2. Call distillery_metrics(scope="search_quality") — note positive feedback rate and avg result count.
 3. Call distillery_stale(days=30, limit=10) — note count and oldest entries.
 4. Call distillery_interests(recency_days=30, top_n=10) — note top tags and domains.
-5. Call distillery_suggest_sources(max_suggestions=3) — note any new recommendations.
+5. Call distillery_interests(suggest_sources=True, max_suggestions=3) — note any new recommendations.
 6. Store a digest: distillery_store(content=<one-paragraph summary of findings>, entry_type="session", author="distillery-maintenance", tags=["digest", "weekly", "maintenance"], metadata={"period_start": "<7 days ago ISO>", "period_end": "<today ISO>"}).
 Report: entry counts, search quality trend, stale entry count, top interests, suggested sources.""",
   recurring=True,

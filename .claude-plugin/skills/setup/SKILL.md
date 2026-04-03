@@ -57,7 +57,7 @@ MCP server connected.
 
 Proceed to Step 2.
 
-**State: Needs Authentication** — Server entry found but `distillery_status` unavailable or returns auth error. See `references/transport-detection.md` for display instructions. Skip to Step 5 with `MCP Server: needs authentication`.
+**State: Needs Authentication** — Server entry found but `distillery_metrics(scope="summary")` unavailable or returns auth error. See `references/transport-detection.md` for display instructions. Skip to Step 5 with `MCP Server: needs authentication`.
 
 **State: Needs Authentication** — A Distillery MCP server entry exists (in `plugin.json`, `.mcp.json`, or `settings.json`) but `distillery_metrics(scope="summary")` is unavailable or returns an auth error. This typically means the server is configured with HTTP transport and GitHub OAuth, but the user has not completed the OAuth flow yet.
 
