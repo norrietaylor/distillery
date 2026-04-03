@@ -272,9 +272,7 @@ class TestHttpAuthIdentityVisibleToTools:
         debug_auth = DebugTokenVerifier(client_id="test-team-client")
         server = create_server(config=config, auth=debug_auth)
 
-        http_app = server.http_app(
-            path="/mcp", transport="streamable-http", stateless_http=True
-        )
+        http_app = server.http_app(path="/mcp", transport="streamable-http", stateless_http=True)
         uv_config = uvicorn.Config(
             app=http_app,
             host="127.0.0.1",

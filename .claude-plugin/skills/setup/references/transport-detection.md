@@ -14,7 +14,7 @@ Look for any Distillery MCP server entry in these config files to determine if a
 
 ## State: Needs Authentication
 
-A Distillery MCP server entry exists (in `plugin.json`, `.mcp.json`, or `settings.json`) but `distillery_metrics(scope="summary")` is unavailable or returns an auth error. This typically means the server is configured with HTTP transport and GitHub OAuth, but the user has not completed the OAuth flow yet.
+A Distillery MCP server entry exists (in `plugin.json`, `.mcp.json`, or `settings.json`) but `distillery_metrics(scope="summary")` is unavailable or fails (including auth-related failures). This typically means the server is configured with HTTP transport and GitHub OAuth, but the user has not completed the OAuth flow yet.
 
 Display:
 

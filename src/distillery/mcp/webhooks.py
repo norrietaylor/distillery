@@ -491,7 +491,12 @@ async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONRe
         interests_result = await _handle_interests(
             store=store,
             config=config,
-            arguments={"recency_days": 30, "top_n": 10, "suggest_sources": True, "max_suggestions": 3},
+            arguments={
+                "recency_days": 30,
+                "top_n": 10,
+                "suggest_sources": True,
+                "max_suggestions": 3,
+            },
         )
         interests_data = _parse_mcp_response(interests_result)
         top_interests: list[Any] = interests_data.get("top_tags", [])

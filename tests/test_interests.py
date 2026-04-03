@@ -51,7 +51,6 @@ def _make_entry(
     )
 
 
-
 def _make_store(
     entries: list[Entry],
     feed_sources: list[dict[str, object]] | None = None,
@@ -60,9 +59,7 @@ def _make_store(
     store = AsyncMock()
     _feed_sources: list[dict[str, object]] = feed_sources or []
 
-    async def _list_entries(
-        filters: dict | None, limit: int, offset: int
-    ) -> list[Entry]:
+    async def _list_entries(filters: dict | None, limit: int, offset: int) -> list[Entry]:
         batch = entries[offset : offset + limit]
         return batch
 
@@ -87,7 +84,9 @@ class TestInterestProfile:
         assert profile.tracked_repos == []
         assert profile.expertise_areas == []
         assert profile.watched_sources == []
-        assert profile.suggestion_context == ""  # populated by extract(), empty on direct construction
+        assert (
+            profile.suggestion_context == ""
+        )  # populated by extract(), empty on direct construction
 
     def test_entry_count_default_zero(self) -> None:
         profile = InterestProfile()
@@ -329,8 +328,15 @@ class TestInterestExtractorExtract:
     async def test_watched_sources_populated_from_store(self) -> None:
         store = _make_store(
             [],
-            feed_sources=[{"url": "https://example.com/rss", "source_type": "rss",
-                           "label": "", "poll_interval_minutes": 60, "trust_weight": 1.0}],
+            feed_sources=[
+                {
+                    "url": "https://example.com/rss",
+                    "source_type": "rss",
+                    "label": "",
+                    "poll_interval_minutes": 60,
+                    "trust_weight": 1.0,
+                }
+            ],
         )
         ext = InterestExtractor(store=store)
         profile = await ext.extract()
@@ -367,8 +373,15 @@ class TestInterestExtractorExtract:
     async def test_suggestion_context_mentions_exclusion(self) -> None:
         store = _make_store(
             [_make_entry(tags=["python"])],
-            feed_sources=[{"url": "https://myfeed.com/rss", "source_type": "rss",
-                           "label": "", "poll_interval_minutes": 60, "trust_weight": 1.0}],
+            feed_sources=[
+                {
+                    "url": "https://myfeed.com/rss",
+                    "source_type": "rss",
+                    "label": "",
+                    "poll_interval_minutes": 60,
+                    "trust_weight": 1.0,
+                }
+            ],
         )
         ext = InterestExtractor(store=store)
         profile = await ext.extract()
@@ -412,9 +425,7 @@ class TestHandleInterests:
         from distillery.mcp.server import _handle_interests
 
         cfg = DistilleryConfig()
-        result = await _handle_interests(
-            store=AsyncMock(), config=cfg, arguments={"top_n": -5}
-        )
+        result = await _handle_interests(store=AsyncMock(), config=cfg, arguments={"top_n": -5})
         data = json.loads(result[0].text)
         assert data.get("error") is True
 
@@ -435,9 +446,7 @@ class TestHandleInterests:
 
         store = _make_store([_make_entry(tags=["python"])])
         cfg = DistilleryConfig()
-        result = await _handle_interests(
-            store=store, config=cfg, arguments={"recency_days": 30}
-        )
+        result = await _handle_interests(store=store, config=cfg, arguments={"recency_days": 30})
         data = json.loads(result[0].text)
         assert "error" not in data or not data.get("error")
 
@@ -460,7 +469,9 @@ class TestHandleSuggestSources:
             ]
         )
         cfg = DistilleryConfig()
-        result = await _handle_interests(store=store, config=cfg, arguments={"suggest_sources": True})
+        result = await _handle_interests(
+            store=store, config=cfg, arguments={"suggest_sources": True}
+        )
         data = json.loads(result[0].text)
         assert "suggestions" in data
         assert "suggestion_context" in data
@@ -479,7 +490,9 @@ class TestHandleSuggestSources:
             ]
         )
         cfg = DistilleryConfig()
-        result = await _handle_interests(store=store, config=cfg, arguments={"suggest_sources": True})
+        result = await _handle_interests(
+            store=store, config=cfg, arguments={"suggest_sources": True}
+        )
         data = json.loads(result[0].text)
         for suggestion in data["suggestions"]:
             assert "url" in suggestion
@@ -522,11 +535,20 @@ class TestHandleSuggestSources:
                     metadata={"repo": "tiangolo/fastapi", "ref_type": "pr", "ref_number": 1},
                 )
             ],
-            feed_sources=[{"url": "tiangolo/fastapi", "source_type": "github",
-                           "label": "", "poll_interval_minutes": 60, "trust_weight": 1.0}],
+            feed_sources=[
+                {
+                    "url": "tiangolo/fastapi",
+                    "source_type": "github",
+                    "label": "",
+                    "poll_interval_minutes": 60,
+                    "trust_weight": 1.0,
+                }
+            ],
         )
         cfg = DistilleryConfig()
-        result = await _handle_interests(store=store, config=cfg, arguments={"suggest_sources": True})
+        result = await _handle_interests(
+            store=store, config=cfg, arguments={"suggest_sources": True}
+        )
         data = json.loads(result[0].text)
         suggestion_urls = [s["url"] for s in data["suggestions"]]
         assert "tiangolo/fastapi" not in suggestion_urls

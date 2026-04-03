@@ -82,9 +82,7 @@ class TestRequiredParams:
     @pytest.mark.asyncio
     async def test_missing_value(self) -> None:
         cfg = make_config()
-        result = await _handle_configure(
-            cfg, {"section": "feeds.thresholds", "key": "alert"}
-        )
+        result = await _handle_configure(cfg, {"section": "feeds.thresholds", "key": "alert"})
         data = parse(result)
         assert data["error"] is True
         assert data["code"] == "INVALID_PARAMS"
@@ -213,9 +211,7 @@ class TestInMemoryUpdate:
     @pytest.mark.asyncio
     async def test_update_alert_threshold(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Ensure no config file is found so we only test in-memory.
-        monkeypatch.setattr(
-            "distillery.mcp.tools.configure._resolve_config_path", lambda: None
-        )
+        monkeypatch.setattr("distillery.mcp.tools.configure._resolve_config_path", lambda: None)
         cfg = make_config(alert=0.8, digest=0.5)
         result = await _handle_configure(
             cfg, {"section": "feeds.thresholds", "key": "alert", "value": 0.7}
@@ -229,9 +225,7 @@ class TestInMemoryUpdate:
 
     @pytest.mark.asyncio
     async def test_update_digest_threshold(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(
-            "distillery.mcp.tools.configure._resolve_config_path", lambda: None
-        )
+        monkeypatch.setattr("distillery.mcp.tools.configure._resolve_config_path", lambda: None)
         cfg = make_config(alert=0.8, digest=0.5)
         result = await _handle_configure(
             cfg, {"section": "feeds.thresholds", "key": "digest", "value": 0.6}
@@ -244,9 +238,7 @@ class TestInMemoryUpdate:
 
     @pytest.mark.asyncio
     async def test_update_dedup_threshold(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(
-            "distillery.mcp.tools.configure._resolve_config_path", lambda: None
-        )
+        monkeypatch.setattr("distillery.mcp.tools.configure._resolve_config_path", lambda: None)
         cfg = make_config(dedup_threshold=0.92)
         result = await _handle_configure(
             cfg, {"section": "defaults", "key": "dedup_threshold", "value": 0.85}
@@ -259,9 +251,7 @@ class TestInMemoryUpdate:
 
     @pytest.mark.asyncio
     async def test_update_confidence_threshold(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(
-            "distillery.mcp.tools.configure._resolve_config_path", lambda: None
-        )
+        monkeypatch.setattr("distillery.mcp.tools.configure._resolve_config_path", lambda: None)
         cfg = make_config(confidence_threshold=0.6)
         result = await _handle_configure(
             cfg, {"section": "classification", "key": "confidence_threshold", "value": 0.8}
@@ -272,9 +262,7 @@ class TestInMemoryUpdate:
 
     @pytest.mark.asyncio
     async def test_noop_when_value_unchanged(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(
-            "distillery.mcp.tools.configure._resolve_config_path", lambda: None
-        )
+        monkeypatch.setattr("distillery.mcp.tools.configure._resolve_config_path", lambda: None)
         cfg = make_config(alert=0.85)
         result = await _handle_configure(
             cfg, {"section": "feeds.thresholds", "key": "alert", "value": 0.85}
@@ -299,11 +287,13 @@ class TestDiskPersistence:
     ) -> None:
         config_file = tmp_path / "distillery.yaml"
         config_file.write_text(
-            yaml.dump({
-                "feeds": {
-                    "thresholds": {"alert": 0.85, "digest": 0.60},
-                },
-            })
+            yaml.dump(
+                {
+                    "feeds": {
+                        "thresholds": {"alert": 0.85, "digest": 0.60},
+                    },
+                }
+            )
         )
         monkeypatch.setattr(
             "distillery.mcp.tools.configure._resolve_config_path",
@@ -363,9 +353,7 @@ class TestDiskPersistence:
         def _boom(path: Path, data: dict[str, Any]) -> None:
             raise OSError("disk full")
 
-        monkeypatch.setattr(
-            "distillery.mcp.tools.configure._write_config_atomic", _boom
-        )
+        monkeypatch.setattr("distillery.mcp.tools.configure._write_config_atomic", _boom)
 
         cfg = make_config(alert=0.85)
         result = await _handle_configure(
@@ -381,9 +369,7 @@ class TestDiskPersistence:
     async def test_no_config_file_returns_in_memory_only(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(
-            "distillery.mcp.tools.configure._resolve_config_path", lambda: None
-        )
+        monkeypatch.setattr("distillery.mcp.tools.configure._resolve_config_path", lambda: None)
         cfg = make_config(alert=0.85)
         result = await _handle_configure(
             cfg, {"section": "feeds.thresholds", "key": "alert", "value": 0.7}
@@ -404,9 +390,7 @@ class TestValueCoercion:
 
     @pytest.mark.asyncio
     async def test_string_to_float(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(
-            "distillery.mcp.tools.configure._resolve_config_path", lambda: None
-        )
+        monkeypatch.setattr("distillery.mcp.tools.configure._resolve_config_path", lambda: None)
         cfg = make_config(alert=0.85)
         result = await _handle_configure(
             cfg, {"section": "feeds.thresholds", "key": "alert", "value": "0.7"}
@@ -418,9 +402,7 @@ class TestValueCoercion:
 
     @pytest.mark.asyncio
     async def test_string_to_int(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(
-            "distillery.mcp.tools.configure._resolve_config_path", lambda: None
-        )
+        monkeypatch.setattr("distillery.mcp.tools.configure._resolve_config_path", lambda: None)
         cfg = make_config()
         result = await _handle_configure(
             cfg, {"section": "defaults", "key": "dedup_limit", "value": "5"}

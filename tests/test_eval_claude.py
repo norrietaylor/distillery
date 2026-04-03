@@ -96,8 +96,10 @@ async def test_eval_scenario(scenario: EvalScenario, eval_runner) -> None:
     print(f"\n{result.summary()}")
     if result.tool_calls:
         print(f"  Tool calls: {[tc.tool_name for tc in result.tool_calls]}")
-        print(f"  Performance: {result.performance.total_latency_ms:.0f}ms, "
-              f"{result.performance.total_tokens} tokens")
+        print(
+            f"  Performance: {result.performance.total_latency_ms:.0f}ms, "
+            f"{result.performance.total_tokens} tokens"
+        )
 
     assert result.passed, (
         f"Scenario '{scenario.name}' failed:\n"
@@ -115,8 +117,7 @@ async def test_eval_scenario(scenario: EvalScenario, eval_runner) -> None:
 def test_scenarios_discovered() -> None:
     """At least one scenario file must be loadable from the scenarios dir."""
     assert len(_ALL_SCENARIOS) > 0, (
-        f"No scenarios found in {_SCENARIOS_DIR}. "
-        "Add YAML files to tests/eval/scenarios/."
+        f"No scenarios found in {_SCENARIOS_DIR}. Add YAML files to tests/eval/scenarios/."
     )
 
 
@@ -256,14 +257,16 @@ async def test_eval_save_baseline(eval_runner, tmp_path) -> None:
     results = []
     for scenario in _ALL_SCENARIOS:
         result = await eval_runner.run(scenario)
-        results.append({
-            "name": result.scenario_name,
-            "skill": result.skill,
-            "passed": result.passed,
-            "latency_ms": result.performance.total_latency_ms,
-            "total_tokens": result.performance.total_tokens,
-            "tool_call_count": result.performance.tool_call_count,
-        })
+        results.append(
+            {
+                "name": result.scenario_name,
+                "skill": result.skill,
+                "passed": result.passed,
+                "latency_ms": result.performance.total_latency_ms,
+                "total_tokens": result.performance.total_tokens,
+                "tool_call_count": result.performance.tool_call_count,
+            }
+        )
 
     Path(baseline_path).write_text(json.dumps(results, indent=2), encoding="utf-8")
     print(f"\nBaseline saved to {baseline_path} ({len(results)} scenarios)")
@@ -308,7 +311,6 @@ async def test_eval_regression_check(eval_runner) -> None:
                     f"({latency_ratio:.1f}x)"
                 )
 
-    assert not regressions, (
-        f"Eval regressions detected ({len(regressions)}):\n"
-        + "\n".join(f"  - {r}" for r in regressions)
+    assert not regressions, f"Eval regressions detected ({len(regressions)}):\n" + "\n".join(
+        f"  - {r}" for r in regressions
     )

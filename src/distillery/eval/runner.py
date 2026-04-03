@@ -334,9 +334,7 @@ class ClaudeEvalRunner:
                     }
                 }
             }
-            mcp_config_path.write_text(
-                json.dumps(mcp_config, indent=2), encoding="utf-8"
-            )
+            mcp_config_path.write_text(json.dumps(mcp_config, indent=2), encoding="utf-8")
 
             # 4. Build CLI command.
             system_prompt = self._get_skill_prompt(scenario.skill)
@@ -388,11 +386,7 @@ class ClaudeEvalRunner:
             tool_calls, final_response, performance = _parse_stream_events(lines)
 
             # Detect empty responses — likely CLI auth or startup failure.
-            if (
-                not final_response
-                and not tool_calls
-                and performance.input_tokens == 0
-            ):
+            if not final_response and not tool_calls and performance.input_tokens == 0:
                 hint = stderr_text[:300] if stderr_text else "(no stderr)"
                 logger.error(
                     "Scenario %r produced empty response with 0 tokens. "

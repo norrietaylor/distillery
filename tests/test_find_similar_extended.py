@@ -88,9 +88,7 @@ class TestFindSimilarBaseline:
         cfg: DistilleryConfig,
     ) -> None:
         embedding_provider.register("default test", _UNIT_A)
-        response = await _handle_find_similar(
-            store, {"content": "default test"}, cfg=cfg
-        )
+        response = await _handle_find_similar(store, {"content": "default test"}, cfg=cfg)
         data = parse_mcp_response(response)
         assert "dedup" not in data
         assert "conflict_evaluation" not in data
@@ -517,9 +515,7 @@ class TestFindSimilarConflictCheckPass2:
                 {
                     "content": "eval err content",
                     "conflict_check": True,
-                    "llm_responses": [
-                        {"entry_id": "x", "is_conflict": True, "reasoning": "r"}
-                    ],
+                    "llm_responses": [{"entry_id": "x", "is_conflict": True, "reasoning": "r"}],
                 },
                 cfg=cfg,
             )
