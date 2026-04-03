@@ -68,7 +68,7 @@ All skills follow shared conventions for consistency. See `CONVENTIONS.md` for:
 
 To create a new skill:
 
-1. Create a subdirectory: `mkdir .claude-plugin/skills/<skill-name>/`
+1. Create a subdirectory: `mkdir skills/<skill-name>/`
 2. Create `SKILL.md` with frontmatter and instructions (follow the session-log pattern)
 3. Reference `CONVENTIONS.md` for shared patterns
 4. Test manually with the MCP server running
