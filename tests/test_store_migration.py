@@ -11,6 +11,11 @@ import duckdb
 import pytest
 
 from distillery.store.duckdb import DuckDBStore  # noqa: E402
+from distillery.store.migrations import (
+    MIGRATIONS,
+    get_current_schema_version,
+    run_pending_migrations,
+)
 
 # ---------------------------------------------------------------------------
 # Minimal in-memory embedding provider for migration tests
@@ -139,3 +144,128 @@ async def test_meta_schema_version_after_init() -> None:
 
     finally:
         await store.close()
+
+
+# ---------------------------------------------------------------------------
+# T02.4: Migration system tests (run_pending_migrations)
+# ---------------------------------------------------------------------------
+
+_EXPECTED_TABLES = {"entries", "_meta", "search_log", "feedback_log", "audit_log", "feed_sources"}
+_DIMENSIONS = 4
+
+
+def _table_names(conn: duckdb.DuckDBPyConnection) -> set[str]:
+    """Return the set of user-visible table names in the connection."""
+    rows = conn.execute(
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
+    ).fetchall()
+    return {row[0] for row in rows}
+
+
+@pytest.mark.unit
+def test_migration_from_zero() -> None:
+    """Fresh in-memory DB → run_pending_migrations → schema_version=6, all tables exist."""
+    conn = duckdb.connect(":memory:")
+    try:
+        version = run_pending_migrations(conn, dimensions=_DIMENSIONS, vss_available=False)
+
+        assert version == max(MIGRATIONS), f"Expected version {max(MIGRATIONS)}, got {version}"
+        assert get_current_schema_version(conn) == max(MIGRATIONS)
+
+        tables = _table_names(conn)
+        for expected_table in _EXPECTED_TABLES:
+            assert expected_table in tables, f"Table {expected_table!r} missing after migration"
+    finally:
+        conn.close()
+
+
+@pytest.mark.unit
+def test_migration_idempotent() -> None:
+    """Running migrations twice on the same DB produces the same result with no errors."""
+    conn = duckdb.connect(":memory:")
+    try:
+        first = run_pending_migrations(conn, dimensions=_DIMENSIONS, vss_available=False)
+        second = run_pending_migrations(conn, dimensions=_DIMENSIONS, vss_available=False)
+
+        assert first == second == max(MIGRATIONS)
+        assert get_current_schema_version(conn) == max(MIGRATIONS)
+        assert _table_names(conn) >= _EXPECTED_TABLES
+    finally:
+        conn.close()
+
+
+@pytest.mark.unit
+def test_migration_partial() -> None:
+    """Set schema_version=3 in _meta → run_pending_migrations → only 4,5,6 run → version=6."""
+    conn = duckdb.connect(":memory:")
+    try:
+        # Run migrations 1-3 manually so the base tables exist.
+        for v in [1, 2, 3]:
+            MIGRATIONS[v](conn, dimensions=_DIMENSIONS, vss_available=False)
+
+        # Set schema_version to 3 to simulate a partially-migrated database.
+        conn.execute(
+            "INSERT INTO _meta (key, value) VALUES ('schema_version', '3') "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+        )
+
+        assert get_current_schema_version(conn) == 3
+
+        version = run_pending_migrations(conn, dimensions=_DIMENSIONS, vss_available=False)
+
+        assert version == max(MIGRATIONS), f"Expected {max(MIGRATIONS)}, got {version}"
+        assert get_current_schema_version(conn) == max(MIGRATIONS)
+
+        # Tables created by migrations 4 and 5 must now exist.
+        tables = _table_names(conn)
+        for expected_table in {"search_log", "feedback_log", "audit_log", "feed_sources"}:
+            assert expected_table in tables, (
+                f"Table {expected_table!r} missing after partial migration"
+            )
+    finally:
+        conn.close()
+
+
+@pytest.mark.unit
+def test_migration_failure_rollback() -> None:
+    """Injecting a failing migration raises RuntimeError; schema_version unchanged."""
+    from unittest.mock import patch
+
+    def _bad_migration(conn: duckdb.DuckDBPyConnection, **kwargs: object) -> None:
+        raise ValueError("injected failure")
+
+    # Patch MIGRATIONS to add a failing migration at version 7.
+    patched: dict[int, object] = dict(MIGRATIONS)
+    patched[7] = _bad_migration
+
+    conn = duckdb.connect(":memory:")
+    try:
+        # Run all real migrations first so we reach a stable state at version 6.
+        run_pending_migrations(conn, dimensions=_DIMENSIONS, vss_available=False)
+        assert get_current_schema_version(conn) == max(MIGRATIONS)
+
+        with (
+            patch("distillery.store.migrations.MIGRATIONS", patched),
+            pytest.raises(RuntimeError, match="Migration 7 failed"),
+        ):
+            run_pending_migrations(conn, dimensions=_DIMENSIONS, vss_available=False)
+
+        # The schema_version must not have advanced beyond the last successful migration.
+        assert get_current_schema_version(conn) == max(MIGRATIONS)
+    finally:
+        conn.close()
+
+
+@pytest.mark.unit
+def test_get_current_schema_version() -> None:
+    """Returns 0 for a fresh DB (no _meta), and the correct version after migrations."""
+    conn = duckdb.connect(":memory:")
+    try:
+        # Fresh DB has no _meta table → version 0.
+        assert get_current_schema_version(conn) == 0
+
+        run_pending_migrations(conn, dimensions=_DIMENSIONS, vss_available=False)
+
+        assert get_current_schema_version(conn) == max(MIGRATIONS)
+    finally:
+        conn.close()
