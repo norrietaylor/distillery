@@ -6,6 +6,7 @@ allowed-tools:
   - "mcp__*__distillery_update"
   - "mcp__*__distillery_configure"
 effort: low
+model: haiku
 ---
 
 <!-- Trigger phrases: tune, /tune, adjust thresholds, change alert threshold, set digest threshold, tune my feed, show thresholds -->

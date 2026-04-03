@@ -300,7 +300,7 @@ Format: `ID: <uuid> | Author: <name> | Project: <project> | <date>`
 
 ## Skills Registry
 
-The following skills are available in `.claude/skills/`:
+The following skills are available in `.claude-plugin/skills/`:
 
 | Skill | Directory | Primary MCP Tools | Purpose |
 |-------|-----------|-------------------|---------|
@@ -313,8 +313,13 @@ The following skills are available in `.claude/skills/`:
 | `/watch` | `watch/` | distillery_watch | Manage monitored feed sources + auto-poll scheduling (CronCreate local; GitHub Actions for hosted) |
 | `/radar` | `radar/` | distillery_list, distillery_interests, distillery_store | Ambient feed digest and source suggestions |
 | `/tune` | `tune/` | distillery_metrics | Display and adjust feed relevance thresholds |
+| `/setup` | `setup/` | distillery_metrics | MCP connectivity wizard and transport configuration |
+
+## Custom Agents
+
+The `distillery-researcher` agent (`.claude/agents/distillery-researcher.md`) is pre-wired with all Distillery read tools and is invoked automatically for `/pour` and `/radar` workflows that require deep multi-pass retrieval or ambient digest synthesis.
 
 ---
 
-**Document Version:** 2.0
-**Last Updated:** 2026-03-29
+**Document Version:** 2.1
+**Last Updated:** 2026-04-03

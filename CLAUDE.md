@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is Distillery
 
-Distillery is a knowledge-base system for Claude Code. It stores, searches, and classifies knowledge entries using DuckDB with vector similarity search (VSS/HNSW). It includes ambient intelligence features that poll external feeds (GitHub, RSS) and score relevance using embeddings. It exposes functionality via an MCP server (stdio or streamable-HTTP transport) with 22 tools, orchestrated by 10 Claude Code skills (`/distill`, `/recall`, `/pour`, `/bookmark`, `/minutes`, `/classify`, `/watch`, `/radar`, `/tune`, `/setup`). HTTP transport supports GitHub OAuth for team access. REST webhook endpoints (`/api/poll`, `/api/rescore`, `/api/maintenance`) run alongside the MCP server for automated scheduling via GitHub Actions cron.
+Distillery is a knowledge-base system for Claude Code. It stores, searches, and classifies knowledge entries using DuckDB with vector similarity search (VSS/HNSW). It includes ambient intelligence features that poll external feeds (GitHub, RSS) and score relevance using embeddings. It exposes functionality via an MCP server (stdio or streamable-HTTP transport) with 18 tools, orchestrated by 10 Claude Code skills (`/distill`, `/recall`, `/pour`, `/bookmark`, `/minutes`, `/classify`, `/watch`, `/radar`, `/tune`, `/setup`). HTTP transport supports GitHub OAuth for team access. REST webhook endpoints (`/api/poll`, `/api/rescore`, `/api/maintenance`) run alongside the MCP server for automated scheduling via GitHub Actions cron.
 
 ## Commands
 
