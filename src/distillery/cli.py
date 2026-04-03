@@ -6,6 +6,7 @@ Provides the ``distillery`` entry point with the following subcommands:
   and status, database path, and configured embedding model).
 - ``health``: Verify database connectivity and exit with code 0 on success
   or code 1 on failure.
+- ``export``: Export all entries and feed sources to a JSON file.
 - ``eval``: Run skill evaluation scenarios against Claude (requires
   ``ANTHROPIC_API_KEY`` and ``pip install 'distillery[eval]'``).
 
@@ -93,6 +94,18 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="URL",
         default=None,
         help="Poll only the source with this URL (polls all sources when omitted)",
+    )
+
+    export_parser = subparsers.add_parser(
+        "export",
+        help="Export all entries and feed sources to a JSON file",
+        parents=[shared],
+    )
+    export_parser.add_argument(
+        "--output",
+        metavar="PATH",
+        required=True,
+        help="Path to write the exported JSON file",
     )
 
     eval_parser = subparsers.add_parser(
@@ -449,6 +462,115 @@ def _cmd_poll(config_path: str | None, fmt: str, source_url: str | None) -> int:
                 print(f"    error: {err}", file=sys.stderr)
 
     return 0 if summary.sources_errored == 0 else 1
+
+
+# ---------------------------------------------------------------------------
+# Export subcommand
+# ---------------------------------------------------------------------------
+
+
+def _cmd_export(config_path: str | None, fmt: str, output_path: str) -> int:
+    """Implement the ``export`` subcommand.
+
+    Queries all entries, feed sources, and _meta from the database and writes
+    a portable JSON snapshot to *output_path*.  Embeddings are omitted so the
+    file can be safely imported on any instance.
+
+    Returns:
+        Exit code (0 on success, 1 on error).
+    """
+    import datetime
+
+    try:
+        cfg = load_config(config_path)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Error loading configuration: {exc}", file=sys.stderr)
+        return 1
+
+    async def _run() -> Any:
+        from distillery.mcp.server import _create_embedding_provider, _normalize_db_path
+        from distillery.store.duckdb import DuckDBStore
+
+        embedding_provider = _create_embedding_provider(cfg)
+        db_path = _normalize_db_path(cfg.storage.database_path)
+
+        store = DuckDBStore(
+            db_path=db_path,
+            embedding_provider=embedding_provider,
+            s3_region=cfg.storage.s3_region,
+            s3_endpoint=cfg.storage.s3_endpoint,
+        )
+        await store.initialize()
+
+        conn = store._conn
+        assert conn is not None
+
+        # Query entries (no embedding column).
+        entry_rows = conn.execute(
+            "SELECT id, content, entry_type, source, status, tags, metadata, version, "
+            "project, author, created_at, updated_at FROM entries"
+        ).fetchall()
+        entry_cols = [
+            "id", "content", "entry_type", "source", "status", "tags",
+            "metadata", "version", "project", "author", "created_at", "updated_at",
+        ]
+        entries: list[dict[str, Any]] = []
+        for row in entry_rows:
+            entry: dict[str, Any] = {}
+            for col, val in zip(entry_cols, row, strict=True):
+                if hasattr(val, "isoformat"):
+                    entry[col] = val.isoformat()
+                else:
+                    entry[col] = val
+            entries.append(entry)
+
+        # Query feed_sources.
+        feed_rows = conn.execute("SELECT * FROM feed_sources").fetchall()
+        feed_cols = [desc[0] for desc in conn.description]
+        feed_sources: list[dict[str, Any]] = []
+        for row in feed_rows:
+            fsrc: dict[str, Any] = {}
+            for col, val in zip(feed_cols, row, strict=True):
+                if hasattr(val, "isoformat"):
+                    fsrc[col] = val.isoformat()
+                else:
+                    fsrc[col] = val
+            feed_sources.append(fsrc)
+
+        # Query _meta.
+        meta_rows = conn.execute("SELECT key, value FROM _meta").fetchall()
+        meta: dict[str, str] = {str(row[0]): str(row[1]) for row in meta_rows}
+
+        await store.close()
+
+        return entries, feed_sources, meta
+
+    try:
+        entries, feed_sources, meta = asyncio.run(_run())
+    except Exception as exc:
+        print(f"Error during export: {exc}", file=sys.stderr)
+        return 1
+
+    exported_at = datetime.datetime.now(datetime.UTC).isoformat()
+    payload: dict[str, Any] = {
+        "version": 1,
+        "exported_at": exported_at,
+        "meta": meta,
+        "entries": entries,
+        "feed_sources": feed_sources,
+    }
+
+    try:
+        out = Path(output_path)
+        out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    except OSError as exc:
+        print(f"Error writing export file: {exc}", file=sys.stderr)
+        return 1
+
+    n_entries = len(entries)
+    n_sources = len(feed_sources)
+    print(f"Exported {n_entries} entries and {n_sources} feed sources to {output_path}")
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -936,6 +1058,14 @@ def main(argv: list[str] | None = None) -> None:
                 config_path=config_path,
                 fmt=fmt,
                 source_url=getattr(args, "source", None),
+            )
+        )
+    elif command == "export":
+        sys.exit(
+            _cmd_export(
+                config_path=config_path,
+                fmt=fmt,
+                output_path=args.output,
             )
         )
     elif command == "eval":

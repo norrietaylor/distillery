@@ -1,4 +1,4 @@
-"""Tests for distillery.cli: main(), status, health subcommands."""
+"""Tests for distillery.cli: main(), status, health, export subcommands."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from distillery import __version__
-from distillery.cli import _check_health, _cmd_health, _cmd_status, _query_status, main
+from distillery.cli import _check_health, _cmd_export, _cmd_health, _cmd_status, _query_status, main
 
 pytestmark = pytest.mark.unit
 
@@ -355,4 +355,109 @@ class TestCmdHealthUnit:
         bad_path = str(tmp_path / "no_dir" / "sub" / "x.db")
         cfg_path = write_config(tmp_path, bad_path)
         rc = _cmd_health(str(cfg_path), "text")
+        assert rc == 1
+
+
+# ---------------------------------------------------------------------------
+# export subcommand
+# ---------------------------------------------------------------------------
+
+
+class TestExportCommand:
+    def test_export_creates_json_file(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        db_path = str(tmp_path / "test.db")
+        cfg_path = write_config(tmp_path, db_path)
+        out_path = str(tmp_path / "export.json")
+        with pytest.raises(SystemExit) as exc:
+            main(["export", "--config", str(cfg_path), "--output", out_path])
+        assert exc.value.code == 0
+        assert Path(out_path).exists()
+
+    def test_export_json_structure(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        db_path = str(tmp_path / "test.db")
+        cfg_path = write_config(tmp_path, db_path)
+        out_path = str(tmp_path / "export.json")
+        with pytest.raises(SystemExit):
+            main(["export", "--config", str(cfg_path), "--output", out_path])
+        data = json.loads(Path(out_path).read_text(encoding="utf-8"))
+        assert data["version"] == 1
+        assert "exported_at" in data
+        assert "meta" in data
+        assert "entries" in data
+        assert "feed_sources" in data
+
+    def test_export_no_embedding_in_entries(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        db_path = str(tmp_path / "test.db")
+        cfg_path = write_config(tmp_path, db_path)
+        out_path = str(tmp_path / "export.json")
+        with pytest.raises(SystemExit):
+            main(["export", "--config", str(cfg_path), "--output", out_path])
+        data = json.loads(Path(out_path).read_text(encoding="utf-8"))
+        for entry in data["entries"]:
+            assert "embedding" not in entry
+
+    def test_export_stdout_message(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        db_path = str(tmp_path / "test.db")
+        cfg_path = write_config(tmp_path, db_path)
+        out_path = str(tmp_path / "export.json")
+        with pytest.raises(SystemExit):
+            main(["export", "--config", str(cfg_path), "--output", out_path])
+        captured = capsys.readouterr()
+        assert "Exported" in captured.out
+        assert "entries" in captured.out
+        assert "feed sources" in captured.out
+
+    def test_export_missing_config_exits_one(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        missing = str(tmp_path / "no_such.yaml")
+        out_path = str(tmp_path / "export.json")
+        with pytest.raises(SystemExit) as exc:
+            main(["export", "--config", missing, "--output", out_path])
+        assert exc.value.code == 1
+
+    def test_export_output_required(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        cfg_path = write_config(tmp_path, ":memory:")
+        with pytest.raises(SystemExit) as exc:
+            main(["export", "--config", str(cfg_path)])
+        assert exc.value.code != 0
+
+    def test_cmd_export_returns_zero(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        db_path = str(tmp_path / "test.db")
+        cfg_path = write_config(tmp_path, db_path)
+        out_path = str(tmp_path / "export.json")
+        rc = _cmd_export(str(cfg_path), "text", out_path)
+        assert rc == 0
+
+    def test_cmd_export_bad_config_returns_one(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        missing = str(tmp_path / "missing.yaml")
+        out_path = str(tmp_path / "export.json")
+        rc = _cmd_export(missing, "text", out_path)
         assert rc == 1

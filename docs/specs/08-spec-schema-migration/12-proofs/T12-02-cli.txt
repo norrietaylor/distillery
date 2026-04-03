@@ -1,0 +1,31 @@
+Type: cli
+Command: distillery export --config <cfg> --output <path>
+Expected: JSON file with version, exported_at, meta, entries, feed_sources keys; no embedding in entries
+Timestamp: 2026-04-03T07:30:31Z
+
+=== CLI execution ===
+
+$ distillery export --config distillery.yaml --output export.json
+Exported 0 entries and 0 feed sources to export.json
+
+=== JSON output verification ===
+
+version: 1
+exported_at: 2026-04-03T07:30:31.908156+00:00
+entries: 0
+feed_sources: 0
+meta keys: ['embedding_model', 'embedding_dimensions']
+
+=== Checks ===
+
+[PASS] Exit code 0
+[PASS] JSON file created at output path
+[PASS] JSON has "version": 1
+[PASS] JSON has "exported_at" ISO timestamp
+[PASS] JSON has "meta" dict
+[PASS] JSON has "entries" list
+[PASS] JSON has "feed_sources" list
+[PASS] No "embedding" key in entries
+[PASS] stdout message: "Exported N entries and M feed sources to PATH"
+
+Status: PASS
