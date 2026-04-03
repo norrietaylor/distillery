@@ -665,13 +665,12 @@ class TestRequestIDMiddleware:
 
     async def test_non_http_scope_passthrough(self) -> None:
         """Non-HTTP scopes are passed through without modification."""
-        mw = RequestIDMiddleware(_dummy_app)
         called: list[str] = []
 
         async def _inner(scope: Any, receive: Any, send: Any) -> None:
             called.append(scope["type"])
 
-        mw2 = RequestIDMiddleware(_inner)
+        mw = RequestIDMiddleware(_inner)
         ws_scope = _make_scope(scope_type="websocket")
-        await mw2(ws_scope, _noop_receive, _ResponseCapture())
+        await mw(ws_scope, _noop_receive, _ResponseCapture())
         assert called == ["websocket"]

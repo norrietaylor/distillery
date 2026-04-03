@@ -12,6 +12,7 @@ when ``--transport http`` is selected.
 from __future__ import annotations
 
 import json
+import logging
 import time
 import uuid
 from collections import deque
@@ -20,6 +21,8 @@ from typing import TYPE_CHECKING, Any
 
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from distillery.mcp.org_membership import OrgMembershipChecker
