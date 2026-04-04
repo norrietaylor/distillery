@@ -4,7 +4,7 @@ Deploy the Distillery MCP server in HTTP mode with GitHub OAuth, enabling team m
 
 ## Prerequisites
 
-- Distillery installed: `pip install distillery`
+- Distillery installed: `pip install distillery-mcp`
 - A public domain or IP address for your server
 - A GitHub OAuth App registered (see below)
 

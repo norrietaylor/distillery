@@ -28,7 +28,7 @@ Currently, we support the following versions with security updates:
 | 0.1.x   | Yes       |
 | < 0.1.0 | No        |
 
-Security updates are released on the `main` branch and tagged with semver releases on [PyPI](https://pypi.org/project/distillery/).
+Security updates are released on the `main` branch and tagged with semver releases on [PyPI](https://pypi.org/project/distillery-mcp/).
 
 ---
 

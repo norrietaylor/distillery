@@ -391,7 +391,7 @@ class TestPluginDocumentationContent:
     def test_mentions_pip_install(self) -> None:
         """Plugin doc must include pip install instructions."""
         content = load_plugin_doc()
-        assert "pip install distillery" in content
+        assert "pip install distillery-mcp" in content
 
     def test_mentions_jina_api_key(self) -> None:
         """Plugin doc must mention the JINA_API_KEY environment variable."""

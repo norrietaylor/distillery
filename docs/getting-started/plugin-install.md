@@ -79,7 +79,7 @@ To configure manually, add to `~/.claude/settings.json`:
 For offline use or a private knowledge base, run the MCP server locally. Requires Python 3.11+ and a local Distillery installation.
 
 ```bash
-pip install distillery
+pip install distillery-mcp
 ```
 
 Add to `~/.claude/settings.json`:
