@@ -181,7 +181,8 @@ jobs:
       - name: Determine image tags
         id: tags
         run: |
-          TAGS="${{ env.IMAGE_NAME }}:sha-${GITHUB_SHA::7}"
+          SHORT_SHA="${GITHUB_SHA::7}"
+          TAGS="${{ env.IMAGE_NAME }}:sha-${SHORT_SHA}"
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             TAG="${GITHUB_REF#refs/tags/}"
             TAGS="${TAGS},${{ env.IMAGE_NAME }}:${TAG}"
@@ -189,6 +190,7 @@ jobs:
           if [[ "$GITHUB_REF" == refs/heads/main ]]; then
             TAGS="${TAGS},${{ env.IMAGE_NAME }}:latest"
           fi
+          echo "short_sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
 
       - name: Push image to GHCR
@@ -261,4 +263,4 @@ jobs:
           token: ${{ secrets.DISTILL_OPS_DEPLOY_TOKEN }}
           repository: norrietaylor/distill_ops
           event-type: container-published
-          client-payload: '{"image_tag": "sha-${{ github.sha }}", "digest": "${{ steps.push.outputs.digest }}"}'
+          client-payload: '{"image_tag": "sha-${{ steps.tags.outputs.short_sha }}", "digest": "${{ steps.push.outputs.digest }}"}'
