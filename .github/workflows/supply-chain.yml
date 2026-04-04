@@ -23,7 +23,7 @@ jobs:
     name: Scan (${{ matrix.target }})
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write  # read for PRs, write needed to attach SBOMs to releases on tag pushes
 
     strategy:
       fail-fast: false
