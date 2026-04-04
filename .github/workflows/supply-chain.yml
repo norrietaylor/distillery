@@ -254,3 +254,11 @@ jobs:
           files: |
             sbom-${{ matrix.target }}.cdx.json
             grype-report-${{ matrix.target }}.json
+
+      - name: Trigger deploy in distill_ops
+        uses: peter-evans/repository-dispatch@ff45666b9427631e3450c54a1bcbee4d9ff4d7c0 # v3
+        with:
+          token: ${{ secrets.DISTILL_OPS_DEPLOY_TOKEN }}
+          repository: norrietaylor/distill_ops
+          event-type: container-published
+          client-payload: '{"image_tag": "sha-${{ github.sha }}", "digest": "${{ steps.push.outputs.digest }}"}'
