@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Distillery E2E Article</title>
+
+    <meta name="description" content="A stable HTML page used by the Distillery browser extension E2E test harness." />
+
+    <!-- RSS feed link used by the extension's feed detection logic -->
+    <link
+      rel="alternate"
+      type="application/rss+xml"
+      title="Distillery E2E Feed"
+      href="__FEED_URL__"
+    />
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Distillery E2E Article</h1>
+        <p>
+          This is a deterministic test page for validating the Distillery browser extension.
+          It contains enough readable text for Readability.js to extract an article body.
+        </p>
+        <p>
+          The extension should detect the RSS link above and populate the Watch tab detected feeds.
+          When a bookmark is created, the extension should store the extracted article text.
+        </p>
+        <h2>Section</h2>
+        <p>
+          Additional paragraph content to help ensure Readability extraction succeeds in a headless browser.
+          E2E tests should not rely on external sites.
+        </p>
+      </article>
+    </main>
+  </body>
+</html>
+

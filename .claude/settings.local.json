@@ -37,7 +37,10 @@
       "Bash(git merge:*)",
       "Bash(git commit -m ':*)",
       "Bash(chmod +x:*)",
-      "Bash(asciinema rec:*)"
+      "Bash(asciinema rec:*)",
+      "Read(//Users/norrie/.claude/plugins/cache/**)",
+      "Read(//Users/norrie/.claude/plugins/**)",
+      "Bash(git push:*)"
     ]
   }
 }
