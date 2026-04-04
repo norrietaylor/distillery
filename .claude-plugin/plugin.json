@@ -39,9 +39,8 @@
       {
         "hooks": [
           {
-            "type": "prompt",
-            "prompt": "Call distillery_metrics with scope 'summary'. If there are pending_review entries, print a one-line reminder: '[Distillery] N entries pending review — run /classify to process them.' If there are no pending entries or the call fails, say nothing.",
-            "timeout": 10
+            "type": "command",
+            "command": "echo '[Distillery] Knowledge base available. Skills: /recall (search), /pour (synthesize), /distill (capture), /classify (review queue), /radar (feed digest).'"
           }
         ]
       }
@@ -51,7 +50,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "echo '[Distillery] If this session produced decisions or insights, run /distill to capture them in the knowledge base.'"
+            "command": "echo '[Distillery] If this response produced decisions or insights, run /distill to capture them. If it surfaced interesting URLs, use /watch to add as a feed source or /bookmark to save as an entry.'"
           }
         ]
       }

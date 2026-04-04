@@ -82,4 +82,6 @@ nav:
     - Operator Deployment: team/deployment.md
   - Architecture: architecture.md
   - Contributing: contributing.md
+  - Blog:
+    - Building a Second Brain for Claude Code: blog/building-a-second-brain-for-claude-code.md
   - Roadmap: roadmap.md
