@@ -9,17 +9,22 @@
   "homepage": "https://github.com/norrietaylor/distillery",
   "repository": "https://github.com/norrietaylor/distillery",
   "keywords": ["knowledge-base", "second-brain", "mcp", "embeddings", "distillery"],
-  "skills": "../skills/",
   "userConfig": {
     "jina_api_key": {
+      "title": "Jina API Key",
       "description": "Jina AI embedding API key. Obtain from https://jina.ai/api-key/",
+      "type": "string",
       "sensitive": true
     },
     "github_client_id": {
-      "description": "GitHub OAuth app client ID for team access. Create at Settings > Developer settings > OAuth Apps"
+      "title": "GitHub Client ID",
+      "description": "GitHub OAuth app client ID for team access. Create at Settings > Developer settings > OAuth Apps",
+      "type": "string"
     },
     "github_client_secret": {
+      "title": "GitHub Client Secret",
       "description": "GitHub OAuth app client secret for team access. Found alongside the client ID in your OAuth App settings",
+      "type": "string",
       "sensitive": true
     }
   },
@@ -28,5 +33,28 @@
       "type": "http",
       "url": "https://distillery-mcp.fly.dev/mcp"
     }
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Call distillery_metrics with scope 'summary'. If there are pending_review entries, print a one-line reminder: '[Distillery] N entries pending review — run /classify to process them.' If there are no pending entries or the call fails, say nothing.",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '[Distillery] If this session produced decisions or insights, run /distill to capture them in the knowledge base.'"
+          }
+        ]
+      }
+    ]
   }
 }
