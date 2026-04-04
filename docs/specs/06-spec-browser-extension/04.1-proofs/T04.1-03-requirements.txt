@@ -1,0 +1,46 @@
+Type: file
+Description: Requirements checklist for T04.1 — Feed detection in content script
+Timestamp: 2026-04-01T00:00:00Z
+
+=== Task Requirements ===
+
+Requirement 1: Query RSS/Atom feed links
+  File: browser-extension/src/content.js
+  Implementation: document.querySelectorAll('link[rel="alternate"][type*="rss"], link[rel="alternate"][type*="atom"]')
+  Status: PASS
+
+Requirement 2: Extract href and title attributes
+  File: browser-extension/src/content.js
+  Implementation: el.getAttribute('href'), el.getAttribute('title') || document.title
+  URL resolution: new URL(href, window.location.href).href (handles relative URLs)
+  Status: PASS
+
+Requirement 3: Match github.com/{owner}/{repo} pattern → source_type 'github'
+  File: browser-extension/src/content.js
+  Implementation: /^https?:\/\/github\.com\/([^/]+)\/([^/?#]+)\/?([^/?#]*)$/
+  Status: PASS
+
+Requirement 4: Send feedsDetected on DOMContentLoaded
+  File: browser-extension/src/content.js
+  Implementation:
+    - if (document.readyState === 'loading') → addEventListener('DOMContentLoaded', notifyFeedsDetected)
+    - else → notifyFeedsDetected() immediately (handles document_end injection)
+  Message format: { type: 'feedsDetected', feeds: Array<{ url, title, source_type }> }
+  Status: PASS
+
+Requirement 5: Background — set badge icon/text (feed count) on feedsDetected
+  File: browser-extension/src/background.js
+  Implementation:
+    - Handles request.type === 'feedsDetected' before switch(request.action)
+    - Sets chrome.action.setBadgeText({ text: String(feeds.length) }) when feeds.length > 0
+    - Sets badge background color '#6366F1' (indigo, distinct from queue orange)
+    - Clears badge when feeds.length === 0 and queue is empty
+  Status: PASS
+
+Requirement 6: getDetectedFeeds action for popup consumption
+  File: browser-extension/src/background.js
+  Implementation: case 'getDetectedFeeds' → sendResponse({ status: 'ok', data: detectedFeeds })
+  Note: Extra feature enabling Watch tab (T04.2) to read detected feeds
+  Status: PASS
+
+=== All Requirements: PASS ===

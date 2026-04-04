@@ -1,0 +1,344 @@
+/* Distillery Extension - Options Page Styles */
+
+:root {
+  --color-primary: #2563eb;
+  --color-primary-hover: #1d4ed8;
+  --color-secondary: #6b7280;
+  --color-secondary-hover: #4b5563;
+  --color-success: #10b981;
+  --color-error: #ef4444;
+  --color-warning: #f59e0b;
+  --color-border: #e5e7eb;
+  --color-background: #f9fafb;
+  --color-text: #1f2937;
+  --color-text-light: #6b7280;
+  --spacing-xs: 0.25rem;
+  --spacing-sm: 0.5rem;
+  --spacing-md: 1rem;
+  --spacing-lg: 1.5rem;
+  --spacing-xl: 2rem;
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  --font-size-sm: 0.875rem;
+  --font-size-base: 1rem;
+  --font-size-lg: 1.125rem;
+  --font-size-xl: 1.5rem;
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-family);
+  font-size: var(--font-size-base);
+  line-height: 1.5;
+  color: var(--color-text);
+  background-color: var(--color-background);
+  padding: var(--spacing-md);
+}
+
+.container {
+  max-width: 600px;
+  margin: 0 auto;
+  background-color: white;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+}
+
+.header {
+  padding: var(--spacing-xl);
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.header h1 {
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+  margin-bottom: var(--spacing-sm);
+}
+
+.header .subtitle {
+  font-size: var(--font-size-sm);
+  opacity: 0.9;
+  font-weight: 400;
+}
+
+.options-form {
+  padding: var(--spacing-xl);
+}
+
+.form-section {
+  margin-bottom: var(--spacing-xl);
+  padding-bottom: var(--spacing-xl);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.form-section:last-of-type {
+  border-bottom: none;
+}
+
+.form-section legend {
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: var(--spacing-md);
+  display: block;
+}
+
+.form-group {
+  margin-bottom: var(--spacing-lg);
+}
+
+.form-group.checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-md);
+}
+
+.form-group.checkbox input[type="checkbox"] {
+  margin-top: var(--spacing-sm);
+  cursor: pointer;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--color-primary);
+}
+
+.form-group.checkbox label {
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+}
+
+label {
+  display: block;
+  font-weight: 500;
+  margin-bottom: var(--spacing-sm);
+  color: var(--color-text);
+}
+
+input[type="text"],
+input[type="email"],
+input[type="url"],
+input[type="number"],
+input[type="password"],
+textarea {
+  width: 100%;
+  padding: var(--spacing-sm) var(--spacing-md);
+  font-family: var(--font-family);
+  font-size: var(--font-size-base);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  transition: border-color 0.2s, box-shadow 0.2s;
+  background-color: white;
+}
+
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="url"]:focus,
+input[type="number"]:focus,
+input[type="password"]:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+input[type="text"]:invalid,
+input[type="email"]:invalid,
+input[type="url"]:invalid,
+input[type="number"]:invalid {
+  border-color: var(--color-error);
+}
+
+.help-text {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-light);
+  margin-top: var(--spacing-xs);
+  line-height: 1.4;
+}
+
+.form-actions {
+  display: flex;
+  gap: var(--spacing-md);
+  margin-top: var(--spacing-xl);
+  padding-top: var(--spacing-xl);
+  border-top: 1px solid var(--color-border);
+}
+
+.btn {
+  flex: 1;
+  padding: var(--spacing-sm) var(--spacing-lg);
+  font-family: var(--font-family);
+  font-size: var(--font-size-base);
+  font-weight: 500;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: center;
+}
+
+.btn-primary {
+  background-color: var(--color-primary);
+  color: white;
+  box-shadow: var(--shadow-sm);
+}
+
+.btn-primary:hover {
+  background-color: var(--color-primary-hover);
+  box-shadow: var(--shadow-md);
+}
+
+.btn-primary:active {
+  transform: translateY(1px);
+}
+
+.btn-secondary {
+  background-color: white;
+  color: var(--color-secondary);
+  border: 1px solid var(--color-border);
+}
+
+.btn-secondary:hover {
+  background-color: var(--color-background);
+  border-color: var(--color-secondary);
+}
+
+.btn-secondary:active {
+  transform: translateY(1px);
+}
+
+.status {
+  margin-top: var(--spacing-lg);
+  padding: var(--spacing-md) var(--spacing-lg);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+}
+
+.status-success {
+  background-color: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #d1fae5;
+}
+
+.status-error {
+  background-color: #fef2f2;
+  color: #7f1d1d;
+  border: 1px solid #fee2e2;
+}
+
+.status-info {
+  background-color: #eff6ff;
+  color: #0c2f48;
+  border: 1px solid #bfdbfe;
+}
+
+/* Responsive Design */
+@media (max-width: 600px) {
+  body {
+    padding: var(--spacing-sm);
+  }
+
+  .container {
+    border-radius: 0;
+  }
+
+  .header {
+    padding: var(--spacing-lg);
+  }
+
+  .options-form {
+    padding: var(--spacing-lg);
+  }
+
+  .form-actions {
+    flex-direction: column;
+  }
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+  body {
+    background-color: #111827;
+    color: #f3f4f6;
+  }
+
+  .container {
+    background-color: #1f2937;
+  }
+
+  .form-section {
+    border-bottom-color: #374151;
+  }
+
+  input[type="text"],
+  input[type="email"],
+  input[type="url"],
+  input[type="number"],
+  input[type="password"],
+  textarea {
+    background-color: #111827;
+    border-color: #374151;
+    color: #f3f4f6;
+  }
+
+  input[type="text"]:focus,
+  input[type="email"]:focus,
+  input[type="url"]:focus,
+  input[type="number"]:focus,
+  input[type="password"]:focus,
+  textarea:focus {
+    border-color: var(--color-primary);
+  }
+
+  .btn-secondary {
+    background-color: #1f2937;
+    color: #d1d5db;
+    border-color: #374151;
+  }
+
+  .btn-secondary:hover {
+    background-color: #111827;
+    border-color: #4b5563;
+  }
+
+  .help-text {
+    color: #9ca3af;
+  }
+
+  .form-actions {
+    border-top-color: #374151;
+  }
+
+  .status-success {
+    background-color: #064e3b;
+    color: #d1fae5;
+    border-color: #047857;
+  }
+
+  .status-error {
+    background-color: #7f1d1d;
+    color: #fee2e2;
+    border-color: #dc2626;
+  }
+
+  .status-info {
+    background-color: #0c2f48;
+    color: #bfdbfe;
+    border-color: #1e40af;
+  }
+}

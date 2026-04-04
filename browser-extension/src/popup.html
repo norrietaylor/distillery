@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Distillery</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div id="popup-container">
+    <!-- Header with connection status -->
+    <header class="popup-header">
+      <div class="connection-status">
+        <span id="status-indicator" class="status-dot disconnected"></span>
+        <div class="status-text">
+          <span id="status-label" class="status-label">Disconnected</span>
+          <span id="server-type" class="server-type"></span>
+        </div>
+      </div>
+      <button id="settings-btn" class="settings-btn" title="Settings">⚙</button>
+    </header>
+
+    <!-- Tab bar -->
+    <nav class="tab-bar">
+      <button class="tab-btn active" data-tab="bookmark">Bookmark</button>
+      <button class="tab-btn" data-tab="watch">Watch</button>
+      <button class="tab-btn" data-tab="status">Status</button>
+    </nav>
+
+    <!-- Tab content -->
+    <div class="tab-content">
+      <!-- Status Tab -->
+      <div id="status-tab" class="tab-panel">
+        <div class="status-section">
+          <p id="status-message" class="status-message">
+            Connecting to server...
+          </p>
+          <div id="offline-queue" class="offline-queue" style="display: none;">
+            <p class="queue-label">&#9888; <span id="queue-count">0</span> pending operations</p>
+          </div>
+          <!-- Auth section: shown for remote connections -->
+          <div id="auth-section" class="auth-section" style="display: none;">
+            <!-- Shown when remote + unauthenticated -->
+            <button id="signin-btn" class="btn btn-signin" style="display: none;">
+              Sign in with GitHub
+            </button>
+            <!-- Shown when authenticated -->
+            <div id="auth-user" class="auth-user" style="display: none;">
+              <span id="auth-username" class="auth-username"></span>
+              <button id="signout-btn" class="btn btn-signout">Sign out</button>
+            </div>
+          </div>
+          <!-- Local author display: shown for local connections -->
+          <div id="local-author" class="local-author" style="display: none;">
+            <span id="local-author-label" class="local-author-label"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bookmark Tab (active by default) -->
+      <div id="bookmark-tab" class="tab-panel active">
+        <div class="bookmark-section">
+          <!-- Loading state -->
+          <div id="bookmark-loading" class="bookmark-loading">
+            <span class="loading-spinner"></span>
+            <span>Loading page content...</span>
+          </div>
+
+          <!-- Error state -->
+          <div id="bookmark-error" class="bookmark-error" style="display: none;">
+            <p id="bookmark-error-msg" class="bookmark-error-msg"></p>
+          </div>
+
+          <!-- Form -->
+          <form id="bookmark-form" class="bookmark-form" style="display: none;">
+            <div class="form-group">
+              <label class="form-label" for="bookmark-title">Title</label>
+              <input
+                type="text"
+                id="bookmark-title"
+                class="form-input"
+                placeholder="Page title"
+                autocomplete="off"
+              />
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="bookmark-url">URL</label>
+              <input
+                type="text"
+                id="bookmark-url"
+                class="form-input form-input-readonly"
+                readonly
+              />
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="bookmark-description">Description</label>
+              <textarea
+                id="bookmark-description"
+                class="form-textarea"
+                rows="3"
+                placeholder="Description or excerpt"
+              ></textarea>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="bookmark-tags">Tags</label>
+              <input
+                type="text"
+                id="bookmark-tags"
+                class="form-input"
+                placeholder="comma, separated, tags"
+                autocomplete="off"
+              />
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="bookmark-project">Project</label>
+              <input
+                type="text"
+                id="bookmark-project"
+                class="form-input"
+                placeholder="Project name (optional)"
+                autocomplete="off"
+              />
+            </div>
+
+            <!-- Save result feedback -->
+            <div id="save-success" class="save-success" style="display: none;">
+              Saved to Distillery
+            </div>
+            <div id="save-error" class="save-error" style="display: none;">
+              <span id="save-error-msg"></span>
+            </div>
+
+            <button type="button" id="bookmark-save-btn" class="btn btn-save">
+              Save
+            </button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Watch Tab -->
+      <div id="watch-tab" class="tab-panel">
+        <div class="watch-section">
+
+          <!-- Detected Feeds -->
+          <div class="watch-subsection">
+            <h3 class="watch-subsection-title">Detected Feeds</h3>
+            <div id="detected-feeds-loading" class="watch-loading">
+              <span class="loading-spinner"></span>
+              <span>Detecting feeds...</span>
+            </div>
+            <ul id="detected-feeds-list" class="watch-list" style="display: none;"></ul>
+            <p id="detected-feeds-empty" class="watch-empty" style="display: none;">
+              No feeds detected on this page.
+            </p>
+          </div>
+
+          <!-- Add Feed -->
+          <div class="watch-subsection">
+            <h3 class="watch-subsection-title">Add Feed</h3>
+            <div class="watch-add-form">
+              <input
+                type="url"
+                id="watch-url-input"
+                class="form-input"
+                placeholder="https://example.com/feed.xml"
+                autocomplete="off"
+              />
+              <div class="watch-add-row">
+                <select id="watch-type-select" class="form-select">
+                  <option value="rss">RSS</option>
+                  <option value="github">GitHub</option>
+                </select>
+                <button type="button" id="watch-add-btn" class="btn btn-watch">Watch</button>
+              </div>
+              <div id="watch-add-success" class="watch-feedback watch-feedback-success" style="display: none;">
+                Feed added to watch list.
+              </div>
+              <div id="watch-add-error" class="watch-feedback watch-feedback-error" style="display: none;">
+                <span id="watch-add-error-msg"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Watched Sources -->
+          <div class="watch-subsection">
+            <h3 class="watch-subsection-title">Watched Sources</h3>
+            <div id="watched-sources-loading" class="watch-loading" style="display: none;">
+              <span class="loading-spinner"></span>
+              <span>Loading watched sources...</span>
+            </div>
+            <ul id="watched-sources-list" class="watch-list" style="display: none;"></ul>
+            <p id="watched-sources-empty" class="watch-empty" style="display: none;">
+              No sources being watched yet.
+            </p>
+            <p id="watched-sources-error" class="watch-error" style="display: none;">
+              Could not load watched sources.
+            </p>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

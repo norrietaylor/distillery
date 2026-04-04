@@ -1,0 +1,43 @@
+Type: file
+Command: node -c browser-extension/src/auth.js && grep -E "^(async function|function)" browser-extension/src/auth.js
+Expected: auth.js exists with all required exports (startOAuthFlow, getStoredAuth, clearAuth, getUsername, isAuthenticated)
+Timestamp: 2026-04-02T06:28:26Z
+
+--- Syntax Check ---
+
+node -c browser-extension/src/auth.js
+(exit code 0 — syntax valid)
+
+--- Exported Functions ---
+
+async function startOAuthFlow(clientId, serverUrl)
+async function getStoredAuth()
+async function clearAuth()
+async function getUsername()
+async function isAuthenticated()
+
+--- globalThis Registration (lines 265-273) ---
+
+globalThis.startOAuthFlow = startOAuthFlow;
+globalThis.getStoredAuth = getStoredAuth;
+globalThis.clearAuth = clearAuth;
+globalThis.getUsername = getUsername;
+globalThis.isAuthenticated = isAuthenticated;
+globalThis.AuthError = AuthError;
+globalThis.AuthCancelledError = AuthCancelledError;
+
+--- File Size ---
+
+browser-extension/src/auth.js: ~290 lines
+
+--- Exports Verified ---
+
+[x] startOAuthFlow(clientId, serverUrl) — full OAuth flow via chrome.identity.launchWebAuthFlow
+[x] getStoredAuth() — returns {token, username} from chrome.storage.local
+[x] clearAuth() — removes authToken and authUsername from storage
+[x] getUsername() — returns stored GitHub username or null
+[x] isAuthenticated() — returns boolean based on presence of authToken
+[x] AuthError — custom error for auth failures
+[x] AuthCancelledError — custom error for user-cancelled flows
+
+Status: PASS

@@ -1,0 +1,16 @@
+CSS.escape() Grep Verification
+===============================
+
+Type: cli
+Command: grep -n "CSS.escape" browser-extension/src/content.js
+Expected: 2 matches (one in getMetaByName, one in getOgMeta)
+Timestamp: 2026-04-01T00:00:00Z
+
+Output:
+26:  const el = document.querySelector(`meta[name="${CSS.escape(name)}"]`);
+37:  const el = document.querySelector(`meta[property="${CSS.escape(property)}"]`);
+
+Total matches:
+2
+
+Status: PASS

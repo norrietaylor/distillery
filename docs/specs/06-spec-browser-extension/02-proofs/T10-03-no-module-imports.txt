@@ -1,0 +1,13 @@
+Type: file
+Description: Readability.js has no module imports or requires
+Expected: No require() or import statements in the code
+Timestamp: 2026-04-01T23:30:00Z
+
+Command: grep -E "^require\(|^import\s|^from\s" browser-extension/vendor/readability.js
+
+Output:
+(no output)
+
+Status: PASS
+Notes: File contains no module imports or Node.js requires at the top level.
+The file is a standalone bundle suitable for content script context.

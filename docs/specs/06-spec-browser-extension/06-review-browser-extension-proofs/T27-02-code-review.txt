@@ -1,0 +1,37 @@
+Type: code-review
+Task: T27 - background.js passes entry_type and source through to distillery_store
+Timestamp: 2026-04-01T00:00:00Z
+
+Command: grep -n "entry_type\|source" browser-extension/src/background.js (bookmark case)
+
+Expected: background.js destructures entry_type and source from request, passes them to args
+
+Output (bookmark case lines 762-786):
+    case 'bookmark': {
+      // Save a bookmark to Distillery via the distillery_store MCP tool.
+      const {
+        title,
+        url,
+        content,
+        entry_type,
+        source,
+        tags,
+        project,
+        author,
+        metadata: bookmarkMetadata,
+      } = request;
+
+      const args = {
+        content: content || '',
+        entry_type: entry_type || 'bookmark',
+        source: source || 'browser-extension',
+        tags: Array.isArray(tags) ? tags : [],
+        metadata: {
+          url: url || '',
+          title: title || '',
+          ...(bookmarkMetadata || {}),
+        },
+      };
+
+Status: PASS - background.js now destructures entry_type and source from request
+and passes them through to the distillery_store MCP call with fallback defaults.

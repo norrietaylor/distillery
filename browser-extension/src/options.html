@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Distillery Extension - Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <h1>Distillery Settings</h1>
+      <p class="subtitle">Configure your connection to the Distillery MCP server</p>
+    </header>
+
+    <form id="optionsForm" class="options-form">
+      <!-- Server Configuration Section -->
+      <fieldset class="form-section">
+        <legend>Server Configuration</legend>
+
+        <div class="form-group">
+          <label for="remoteServerUrl">Remote MCP Server URL</label>
+          <input
+            type="url"
+            id="remoteServerUrl"
+            name="remoteServerUrl"
+            placeholder="https://distillery-mcp.fly.dev/mcp"
+            required
+          />
+          <p class="help-text">URL of the remote Distillery MCP server. Default: https://distillery-mcp.fly.dev/mcp</p>
+        </div>
+
+        <div class="form-group">
+          <label for="localMcpPort">Local MCP Port</label>
+          <input
+            type="number"
+            id="localMcpPort"
+            name="localMcpPort"
+            min="1"
+            max="65535"
+            placeholder="8000"
+            required
+          />
+          <p class="help-text">Port for local Distillery MCP server. Default: 8000</p>
+        </div>
+
+        <div class="form-group checkbox">
+          <input
+            type="checkbox"
+            id="autoDetectLocal"
+            name="autoDetectLocal"
+          />
+          <label for="autoDetectLocal">Auto-detect local instance</label>
+          <p class="help-text">Automatically detect and connect to localhost when available. Falls back to remote server if not found.</p>
+        </div>
+      </fieldset>
+
+      <!-- Content Configuration Section -->
+      <fieldset class="form-section">
+        <legend>Content Configuration</legend>
+
+        <div class="form-group">
+          <label for="defaultProject">Default Project Name</label>
+          <input
+            type="text"
+            id="defaultProject"
+            name="defaultProject"
+            placeholder="My Project"
+          />
+          <p class="help-text">Pre-fill the project field in bookmarks. Leave blank to prompt on each save.</p>
+        </div>
+
+        <div class="form-group">
+          <label for="defaultTags">Default Tags</label>
+          <input
+            type="text"
+            id="defaultTags"
+            name="defaultTags"
+            placeholder="research, browser-saved"
+          />
+          <p class="help-text">Comma-separated tags to apply to bookmarks. Example: research, browser-saved</p>
+        </div>
+      </fieldset>
+
+      <!-- Authentication Section -->
+      <fieldset class="form-section">
+        <legend>Authentication</legend>
+
+        <div class="form-group">
+          <label for="githubClientId">GitHub OAuth Client ID</label>
+          <input
+            type="text"
+            id="githubClientId"
+            name="githubClientId"
+            placeholder="(Optional)"
+          />
+          <p class="help-text">For remote server authentication. Optional if using local server or public demo. Required for GitHub OAuth flow on custom remote instances.</p>
+        </div>
+      </fieldset>
+
+      <!-- Form Actions -->
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Save Settings</button>
+        <button type="reset" class="btn btn-secondary">Reset to Defaults</button>
+      </div>
+
+      <!-- Status Message -->
+      <div id="status" class="status" style="display: none;"></div>
+    </form>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>

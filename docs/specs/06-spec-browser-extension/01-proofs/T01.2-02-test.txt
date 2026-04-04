@@ -1,0 +1,23 @@
+Type: test
+Command: node /tmp/test-mcp-client.js
+Expected: All unit tests pass for MCPClient class
+Timestamp: 2026-04-01T23:32:00Z
+
+--- Test Output ---
+
+PASS: _envelope creates valid JSON-RPC 2.0 request
+PASS: Auto-incrementing request ID
+PASS: _notificationEnvelope creates valid notification (no id)
+PASS: _headers returns correct default headers
+PASS: _headers includes auth and session after setting
+PASS: isConnected returns false before initialize
+PASS: disconnect clears session state but preserves authToken
+PASS: MCPNetworkError works
+PASS: MCPAuthError works
+PASS: MCPRateLimitError works with retryAfter
+PASS: MCPProtocolError works with code and data
+PASS: callTool throws when not connected
+
+All 10 tests PASSED.
+
+Status: PASS

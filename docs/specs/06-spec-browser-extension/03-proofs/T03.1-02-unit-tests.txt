@@ -1,0 +1,45 @@
+Type: test
+Command: node /tmp/test-auth.js
+Expected: All unit tests pass for auth.js module
+Timestamp: 2026-04-02T06:28:26Z
+
+--- Test Output ---
+
+PASS: AuthError has correct name and message
+PASS: AuthCancelledError has correct name
+PASS: AuthCancelledError accepts custom message
+PASS: getStoredAuth returns nulls when nothing is stored
+PASS: getStoredAuth returns stored token and username
+PASS: clearAuth removes token and username from storage
+PASS: getUsername returns null when not stored
+PASS: getUsername returns stored username
+PASS: isAuthenticated returns false when no token
+PASS: isAuthenticated returns true when token is stored
+PASS: startOAuthFlow throws AuthError when clientId is empty
+PASS: startOAuthFlow throws AuthCancelledError when user cancels
+PASS: startOAuthFlow throws AuthError when redirect has no code
+PASS: startOAuthFlow stores token and username on success
+PASS: startOAuthFlow throws AuthError on token exchange failure
+
+All 15 tests PASSED.
+
+--- Test Coverage Summary ---
+
+Error classes:
+  - AuthError: name, message, instanceof Error
+  - AuthCancelledError: default message, custom message, instanceof Error
+
+Storage functions:
+  - getStoredAuth: empty storage → nulls, populated storage → values
+  - clearAuth: removes authToken and authUsername
+  - getUsername: missing → null, stored → value
+  - isAuthenticated: no token → false, with token → true
+
+startOAuthFlow:
+  - Missing clientId → AuthError (guards early)
+  - User cancels (callback with undefined) → AuthCancelledError
+  - Redirect has error param → AuthError with GitHub error message
+  - Happy path: code extracted → token exchanged → username fetched → stored → returned
+  - Token exchange HTTP failure → AuthError('Token exchange failed')
+
+Status: PASS

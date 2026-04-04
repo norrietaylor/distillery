@@ -1,0 +1,11 @@
+Type: cli
+Description: Verify content.js has valid JavaScript syntax
+Expected: node --check exits 0 with no errors
+Timestamp: 2026-04-01T00:00:00Z
+
+Command: node --check browser-extension/src/content.js
+
+Output:
+(no output — exit code 0)
+
+Status: PASS

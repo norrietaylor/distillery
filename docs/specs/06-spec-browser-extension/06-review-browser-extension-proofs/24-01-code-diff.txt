@@ -1,0 +1,39 @@
+Type: file
+Description: Code change for handleContextMenuClick to use in-scope connectionState
+Expected: Replace chrome.runtime.sendMessage with direct connectionState.username access
+Timestamp: 2026-04-01T00:00:00Z
+
+Location: browser-extension/src/background.js, lines 386-390
+
+BEFORE:
+  // Determine author: prefer logged-in username over local author setting.
+  let finalAuthor = author || '';
+  try {
+    const statusResp = await chrome.runtime.sendMessage({ action: 'getConnectionStatus' });
+    if (statusResp && statusResp.status === 'ok') {
+      const state = statusResp.data;
+      if (state.username) {
+        finalAuthor = state.username;
+      }
+    }
+  } catch (_err) {
+    // Non-fatal.
+  }
+
+AFTER:
+  // Determine author: prefer logged-in username over local author setting.
+  let finalAuthor = author || '';
+  if (connectionState.username) {
+    finalAuthor = connectionState.username;
+  }
+
+Explanation:
+The original code attempted to use chrome.runtime.sendMessage({action: 'getConnectionStatus'})
+from within the background service worker. This doesn't work because sendMessage from a
+service worker doesn't deliver to its own onMessage listener — the message is lost.
+
+The fix directly accesses the in-scope connectionState variable (defined at line 65),
+which is already maintained by the connect() and other lifecycle functions. This is
+simpler, more efficient, and actually works as intended.
+
+Status: PASS

@@ -1,0 +1,21 @@
+diff --git a/browser-extension/manifest.json b/browser-extension/manifest.json
+index 429e2a4..b4a5491 100644
+--- a/browser-extension/manifest.json
++++ b/browser-extension/manifest.json
+@@ -13,11 +13,13 @@
+     "activeTab",
+     "contextMenus",
+     "identity",
+-    "notifications"
++    "notifications",
++    "alarms"
+   ],
+   "host_permissions": [
+-    "http://localhost:*/",
+-    "https://distillery-mcp.fly.dev/*"
++    "http://localhost:*/*",
++    "https://distillery-mcp.fly.dev/*",
++    "https://api.github.com/*"
+   ],
+   "background": {
+     "service_worker": "src/background.js"

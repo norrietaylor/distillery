@@ -1,0 +1,57 @@
+Type: file
+Description: Watch tab HTML structure in popup.html
+Timestamp: 2026-04-01T00:00:00Z
+Status: PASS
+
+=== Watch tab HTML elements verified ===
+
+Detected Feeds section:
+  - id="detected-feeds-loading"    [PRESENT]
+  - id="detected-feeds-list"       [PRESENT]
+  - id="detected-feeds-empty"      [PRESENT]
+
+Add Feed section:
+  - id="watch-url-input"           [PRESENT]
+  - id="watch-type-select"         [PRESENT] (options: rss, github)
+  - id="watch-add-btn"             [PRESENT]
+  - id="watch-add-success"         [PRESENT]
+  - id="watch-add-error"           [PRESENT]
+  - id="watch-add-error-msg"       [PRESENT]
+
+Watched Sources section:
+  - id="watched-sources-loading"   [PRESENT]
+  - id="watched-sources-list"      [PRESENT]
+  - id="watched-sources-empty"     [PRESENT]
+  - id="watched-sources-error"     [PRESENT]
+
+Tab button with data-tab="watch":  [PRESENT]
+Watch tab panel id="watch-tab":    [PRESENT]
+
+=== Raw grep evidence ===
+
+$ grep -n "watch" browser-extension/src/popup.html
+
+26:      <button class="tab-btn" data-tab="watch">Watch</button>
+145:      <div id="watch-tab" class="tab-panel" style="display: none;">
+146:        <div class="watch-section">
+149:          <div class="watch-subsection">
+150:            <h3 class="watch-subsection-title">Detected Feeds</h3>
+151:            <div id="detected-feeds-loading" class="watch-loading">
+155:            <ul id="detected-feeds-list" class="watch-list" style="display: none;"></ul>
+156:            <p id="detected-feeds-empty" class="watch-empty" style="display: none;">
+162:          <div class="watch-subsection">
+163:            <h3 class="watch-subsection-title">Add Feed</h3>
+164:            <div class="watch-add-form">
+167:                id="watch-url-input"
+172:              <div class="watch-add-row">
+173:                <select id="watch-type-select" class="form-select">
+177:                <button type="button" id="watch-add-btn" class="btn btn-watch">Watch</button>
+179:              <div id="watch-add-success" class="watch-feedback watch-feedback-success" style="display: none;">
+182:              <div id="watch-add-error" class="watch-feedback watch-feedback-error" style="display: none;">
+183:                <span id="watch-add-error-msg"></span>
+189:          <div class="watch-subsection">
+190:            <h3 class="watch-subsection-title">Watched Sources</h3>
+191:            <div id="watched-sources-loading" class="watch-loading" style="display: none;">
+195:            <ul id="watched-sources-list" class="watch-list" style="display: none;"></ul>
+196:            <p id="watched-sources-empty" class="watch-empty" style="display: none;">
+199:            <p id="watched-sources-error" class="watch-error" style="display: none;">

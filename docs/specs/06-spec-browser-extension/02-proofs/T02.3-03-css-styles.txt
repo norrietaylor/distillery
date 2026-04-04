@@ -1,0 +1,38 @@
+Type: file
+Command: node -e "verify popup.css bookmark styles"
+Expected: All bookmark form CSS classes present including dark mode
+Timestamp: 2026-04-01T00:00:00Z
+
+--- CSS verification ---
+
+Checking browser-extension/src/popup.css for bookmark styles...
+
+PASS: .bookmark-loading (spinner + text during extraction)
+PASS: .loading-spinner (CSS animation spin)
+PASS: @keyframes spin (rotate animation)
+PASS: .bookmark-error (error state styling)
+PASS: .bookmark-error-msg
+PASS: .bookmark-form
+PASS: .form-group
+PASS: .form-label (uppercase, small, muted)
+PASS: .form-input (border, padding, focus state)
+PASS: .form-textarea (resizable, min-height)
+PASS: .form-input-readonly (muted background for URL field)
+PASS: .save-success (green accent banner)
+PASS: .save-error (red accent banner)
+PASS: .btn-save (full-width dark button)
+PASS: .btn-save:disabled (muted disabled state)
+
+Dark mode (@media prefers-color-scheme: dark):
+PASS: .bookmark-loading dark colors
+PASS: .loading-spinner dark colors
+PASS: .bookmark-error dark background
+PASS: .form-label dark color
+PASS: .form-input dark background and border
+PASS: .form-input-readonly dark muted
+PASS: .save-success dark green
+PASS: .save-error dark red
+PASS: .btn-save dark (inverted: light bg, dark text)
+PASS: .btn-save:disabled dark
+
+Status: PASS

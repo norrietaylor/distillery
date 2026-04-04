@@ -1,0 +1,49 @@
+Type: file
+Description: Code review — feed detection implementation in content.js and background.js
+Timestamp: 2026-04-01T00:00:00Z
+
+=== content.js: detectFeeds() ===
+
+Function: detectFeeds()
+  - Queries: document.querySelectorAll('link[rel="alternate"][type*="rss"], link[rel="alternate"][type*="atom"]')
+  - Extracts: href (resolved to absolute URL via new URL(href, window.location.href))
+  - Extracts: title from link element's title attribute, falls back to document.title
+  - Determines source_type: 'atom' if type contains 'atom', else 'rss'
+  - GitHub detection: matches /^https?:\/\/github\.com\/([^/]+)\/([^/?#]+)\/?([^/?#]*)$/
+  - GitHub entry: { url: 'https://github.com/{owner}/{repo}', title: '{owner}/{repo}', source_type: 'github' }
+  - Returns: Array<{ url, title, source_type }>
+
+Function: notifyFeedsDetected()
+  - Calls detectFeeds() and sends { type: 'feedsDetected', feeds } via chrome.runtime.sendMessage
+  - Called on DOMContentLoaded if document is still loading, otherwise immediately
+
+Message listener (request.type === 'detectFeeds'):
+  - Allows popup to request current feed detection results on demand
+  - Returns { status: 'ok', data: Array<{ url, title, source_type }> }
+
+=== background.js: feedsDetected handler ===
+
+State variable:
+  - let detectedFeeds = []  — stores latest detected feeds
+
+Message handler (request.type === 'feedsDetected'):
+  - Updates detectedFeeds array
+  - If feeds.length > 0: setBadgeText(feeds.length), setBadgeBackgroundColor('#6366F1' indigo)
+  - If feeds.length === 0: clears badge if queue is also empty
+
+Action handler (request.action === 'getDetectedFeeds'):
+  - Returns { status: 'ok', data: detectedFeeds } to popup
+
+Tab navigation listener (chrome.tabs.onUpdated):
+  - Clears detectedFeeds when active tab starts loading new URL
+  - Restores queue badge if queue is non-empty, otherwise clears badge
+
+=== Requirements coverage ===
+
+[x] Query link[rel="alternate"][type*="rss"] and link[rel="alternate"][type*="atom"]
+[x] Extract href and title attributes
+[x] Match github.com/{owner}/{repo} pattern → source_type 'github'
+[x] Send feedsDetected message on DOMContentLoaded
+[x] Background: set badge text (feed count) on feedsDetected
+
+Status: PASS

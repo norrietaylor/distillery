@@ -1,0 +1,11 @@
+VENDOR DEPENDENCIES AND LICENSES
+=================================
+
+readability.js
+--------------
+Source: https://github.com/mozilla/readability
+License: Apache License 2.0
+Copyright (c) 2010 Arc90 Inc
+
+This file includes the full Apache 2.0 license header at the top of readability.js.
+The library is used for extracting article content from web pages in the browser extension.

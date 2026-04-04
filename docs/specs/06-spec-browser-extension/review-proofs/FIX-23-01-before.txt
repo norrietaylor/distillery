@@ -1,0 +1,31 @@
+Type: file
+Description: Before - buggy probeLocal() with fetch not restored on failure
+Timestamp: 2026-04-01T00:00:00Z
+
+BEFORE (lines 118-134 of background.js):
+
+  try {
+    // Monkey-patch fetch for this probe to honour the AbortSignal.
+    // MCPClient uses the global fetch; we temporarily replace it.
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (url, init = {}) =>
+      originalFetch(url, { ...init, signal: controller.signal });
+
+    await probe.initialize(localUrl);
+
+    globalThis.fetch = originalFetch;   // <-- only restored on SUCCESS path
+    clearTimeout(timeoutId);
+    return true;
+  } catch (_err) {
+    clearTimeout(timeoutId);
+    // Restore fetch in case we swapped it before the error.
+    return false;                        // <-- globalThis.fetch NEVER restored on failure
+  }
+
+BUG: originalFetch is declared inside the try block, so the catch block cannot
+access it. The comment says "restore fetch in case we swapped it before the error"
+but the actual restore line is missing. After any failed probe, globalThis.fetch
+remains pointing to the patched closure that carries a stale AbortController signal,
+causing all subsequent fetch() calls in the service worker to use that signal.
+
+Status: FAIL (bug confirmed)

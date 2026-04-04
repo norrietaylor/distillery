@@ -1,0 +1,30 @@
+Type: file
+Description: Verify offline-queue.js exports and background.js integration
+Expected: All required exports and integration points present
+Timestamp: 2026-04-01T12:00:00Z
+Status: PASS
+
+offline-queue.js exports verified:
+  [PASS] enqueue(payload) - adds {id, payload, timestamp, retryCount:0}, enforces 100-item cap
+  [PASS] dequeue() - removes and returns oldest item
+  [PASS] getQueue() - returns full queue array
+  [PASS] getCount() - returns queue length
+  [PASS] removeItem(id) - removes specific item by id
+  [PASS] incrementRetry(id) - increments retryCount for replay failures
+  [PASS] QUEUE_MAX_SIZE = 100, drops oldest with console.warn on overflow
+  [PASS] Uses chrome.storage.local with key 'offlineQueue'
+  [PASS] Exported via globalThis.OfflineQueue
+
+background.js integration verified:
+  [PASS] importScripts('offline-queue.js') added
+  [PASS] OfflineQueue instance created as module state
+  [PASS] callTool handler catches MCPNetworkError and calls enqueue
+  [PASS] callTool handler does NOT queue auth (401), rate limit (429), or validation errors
+  [PASS] self.addEventListener('online') triggers connect() then replayQueue()
+  [PASS] replayQueue() iterates FIFO, removes on success, incrementRetry on failure
+  [PASS] replayQueue() stops on MCPNetworkError (connection lost again)
+  [PASS] replayInProgress flag prevents concurrent replays
+  [PASS] updateQueueBadge() sets orange badge with count, clears when empty
+  [PASS] connect() triggers replayQueue() when queue non-empty after successful connection
+  [PASS] getQueueCount message handler added for popup queries
+  [PASS] connectionState.queuedOperations updated and broadcast

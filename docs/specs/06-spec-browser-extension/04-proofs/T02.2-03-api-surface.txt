@@ -1,0 +1,40 @@
+Type: file
+Description: Verify content.js implements all required API elements
+Expected: All required elements present (message listener, Readability integration, metadata extraction)
+Timestamp: 2026-04-01T00:00:00Z
+
+Checks performed:
+
+1. chrome.runtime.onMessage listener with type "extractContent"
+   Line 120: chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
+   Line 121:   if (request.type === 'extractContent') {
+   Result: PASS
+
+2. Readability.js integration (new Readability(document.cloneNode(true)).parse())
+   Line 50:   if (typeof Readability === 'undefined') {
+   Line 55:   const docClone = document.cloneNode(true);
+   Line 56:   const reader = new Readability(docClone);
+   Line 57:   return reader.parse();
+   Result: PASS
+
+3. Metadata extraction: title, url, meta description
+   Line 81:   const title = document.title || '';
+   Line 82:   const url = window.location.href;
+   Line 83:   const metaDescription = getMetaByName('description');
+   Result: PASS
+
+4. Open Graph extraction: og:title, og:description, og:image
+   Line 84:   const ogTitle = getOgMeta('og:title');
+   Line 85:   const ogDescription = getOgMeta('og:description');
+   Line 86:   const ogImage = getOgMeta('og:image');
+   Result: PASS
+
+5. Selected text capture: window.getSelection().toString()
+   Line 87:   const selectedText = window.getSelection().toString();
+   Result: PASS
+
+6. Return object includes all required fields
+   Lines 96-105: title, url, description, ogTitle, ogDescription, ogImage, articleText, selectedText
+   Result: PASS
+
+Status: PASS

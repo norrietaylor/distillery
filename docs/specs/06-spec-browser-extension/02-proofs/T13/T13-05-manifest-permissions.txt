@@ -1,0 +1,43 @@
+Type: file-artifact
+Description: manifest.json permissions update for notifications support
+Expected: "notifications" permission added to support desktop notifications
+Timestamp: 2026-04-01T00:00:00Z
+Status: PASS
+
+File: browser-extension/manifest.json
+Lines: 11-16
+
+Before:
+  "permissions": [
+    "storage",
+    "activeTab",
+    "contextMenus",
+    "identity"
+  ],
+
+After:
+  "permissions": [
+    "storage",
+    "activeTab",
+    "contextMenus",
+    "identity",
+    "notifications"
+  ],
+
+Changes Made:
+- Added "notifications" permission to manifest.json
+- Enables chrome.notifications.create() API calls
+- Required for desktop notifications on save success/error
+
+Permissions Rationale:
+- storage: existing, for options and auth data
+- activeTab: existing, to access current tab URL/title
+- contextMenus: existing, to register context menu items
+- identity: existing, for GitHub OAuth flow
+- notifications: NEW, to show success/error desktop notifications
+
+Validation:
+- manifest.json validated with python3 -m json.tool
+- Proper JSON formatting confirmed
+- Permission string matches Chrome extension API requirements
+- No syntax errors detected

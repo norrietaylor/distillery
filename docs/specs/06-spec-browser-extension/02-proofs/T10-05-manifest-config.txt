@@ -1,0 +1,19 @@
+Type: file
+Description: manifest.json correctly includes vendor/readability.js in content_scripts
+Expected: content_scripts array has vendor/readability.js before src/content.js
+Timestamp: 2026-04-01T23:30:00Z
+
+Command: grep -A 10 '"content_scripts"' browser-extension/manifest.json
+
+Output:
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["vendor/readability.js", "src/content.js"],
+      "run_at": "document_end"
+    }
+  ],
+
+Status: PASS
+Notes: Manifest correctly lists vendor/readability.js as the first script in content_scripts.
+This ensures Readability class is available before content.js loads.
