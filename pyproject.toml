@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "distillery"
+name = "distillery-mcp"
 version = "0.1.0"
 description = "A configurable embedding system with DuckDB storage and MCP server integration"
 readme = "README.md"
