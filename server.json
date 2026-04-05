@@ -1,5 +1,5 @@
 {
-  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-11-25/server.schema.json",
   "name": "io.github.norrietaylor/distillery-mcp",
   "title": "Distillery",
   "description": "A configurable embedding system with DuckDB storage and MCP server integration",
