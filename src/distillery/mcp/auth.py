@@ -21,7 +21,6 @@ from __future__ import annotations
 import fnmatch
 import logging
 import os
-from collections.abc import Awaitable, Callable
 from typing import Any
 from urllib.parse import urlparse
 
@@ -30,11 +29,9 @@ from fastmcp.server.auth.providers.github import GitHubProvider
 
 from distillery.config import DistilleryConfig, parse_env_allowed_orgs
 from distillery.mcp.org_membership import OrgMembershipChecker
+from distillery.mcp.types import AuditCallback
 
 logger = logging.getLogger(__name__)
-
-# Callback signature: (user_id, operation, entry_id, action, outcome) -> awaitable
-AuditCallback = Callable[[str, str, str, str, str], Awaitable[None]]
 
 
 class OrgRestrictedGitHubProvider(GitHubProvider):
@@ -111,7 +108,27 @@ class OrgRestrictedGitHubProvider(GitHubProvider):
             return None
 
     async def _audit(self, user: str, operation: str, outcome: str) -> None:
-        """Fire audit callback (best-effort, never raises)."""
+        """Fire the audit callback for an authentication event.
+
+        Emits a best-effort audit log entry for login success or failure.
+        Exceptions from the callback are caught and logged at DEBUG level
+        so that audit infrastructure issues never block the auth flow.
+
+        Args:
+            user: GitHub login of the authenticating user, or ``"unknown"``
+                when identity cannot be determined.
+            operation: Audit operation name (e.g. ``"auth_login"``,
+                ``"auth_login_failed"``).
+            outcome: Free-text outcome descriptor (e.g. ``"success"``,
+                ``"github_api_status_401"``).
+
+        Note:
+            Token refresh (``auth_refresh``) is handled entirely within
+            FastMCP's ``OAuthProxy`` layer, which does not expose a hook
+            for subclasses.  GitHub OAuth tokens are long-lived and do not
+            use refresh tokens, so this event is not emitted here.
+            See issue #139 for background.
+        """
         if self._audit_callback is None:
             return
         try:

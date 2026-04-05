@@ -16,19 +16,18 @@ import logging
 import time
 import uuid
 from collections import deque
-from collections.abc import Awaitable, Callable, MutableMapping
+from collections.abc import MutableMapping
 from typing import TYPE_CHECKING, Any
 
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from distillery.mcp.types import AuditCallback
+
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from distillery.mcp.org_membership import OrgMembershipChecker
-
-# Callback signature: (user_id, operation, entry_id, action, outcome) -> awaitable
-AuditCallback = Callable[[str, str, str, str, str], Awaitable[None]]
 
 # ---------------------------------------------------------------------------
 # Type aliases
@@ -413,7 +412,16 @@ class OrgMembershipMiddleware:
         await self._send_403(send, "<unknown>", list(self.checker.allowed_orgs))
 
     async def _audit_org_denied(self, username: str) -> None:
-        """Fire audit callback for org membership denial (best-effort)."""
+        """Fire the audit callback when a user is denied by org membership check.
+
+        Emits a best-effort audit log entry with operation ``auth_org_denied``.
+        Exceptions from the callback are caught and logged at DEBUG level so
+        that audit infrastructure issues never block the 403 response.
+
+        Args:
+            username: GitHub login of the denied user, or ``"<unknown>"``
+                when the JWT does not contain an identifiable claim.
+        """
         if self._audit_callback is None:
             return
         try:
