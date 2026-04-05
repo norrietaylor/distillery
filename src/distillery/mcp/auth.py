@@ -21,6 +21,7 @@ from __future__ import annotations
 import fnmatch
 import logging
 import os
+from collections.abc import Awaitable, Callable
 from typing import Any
 from urllib.parse import urlparse
 
@@ -31,6 +32,9 @@ from distillery.config import DistilleryConfig, parse_env_allowed_orgs
 from distillery.mcp.org_membership import OrgMembershipChecker
 
 logger = logging.getLogger(__name__)
+
+# Callback signature: (user_id, operation, entry_id, action, outcome) -> awaitable
+AuditCallback = Callable[[str, str, str, str, str], Awaitable[None]]
 
 
 class OrgRestrictedGitHubProvider(GitHubProvider):
@@ -51,6 +55,7 @@ class OrgRestrictedGitHubProvider(GitHubProvider):
         client_id: str,
         client_secret: str,
         base_url: str,
+        audit_callback: AuditCallback | None = None,
     ) -> None:
         super().__init__(
             client_id=client_id,
@@ -58,11 +63,13 @@ class OrgRestrictedGitHubProvider(GitHubProvider):
             base_url=base_url,
         )
         self._org_checker = org_checker
+        self._audit_callback = audit_callback
 
     async def _extract_upstream_claims(self, idp_tokens: dict[str, Any]) -> dict[str, Any] | None:
         """Extract GitHub user identity and store the token for org checks."""
         access_token = idp_tokens.get("access_token")
         if not access_token or not isinstance(access_token, str):
+            await self._audit("unknown", "auth_login_failed", "missing_or_invalid_access_token")
             return None
 
         try:
@@ -79,6 +86,11 @@ class OrgRestrictedGitHubProvider(GitHubProvider):
                         "Failed to fetch GitHub user info during OAuth exchange: %d",
                         resp.status_code,
                     )
+                    await self._audit(
+                        "unknown",
+                        "auth_login_failed",
+                        f"github_api_status_{resp.status_code}",
+                    )
                     return None
 
                 user_data = resp.json()
@@ -87,6 +99,7 @@ class OrgRestrictedGitHubProvider(GitHubProvider):
                     self._org_checker.store_user_token(login, access_token)
                     logger.debug("Stored user token for %s", login)
 
+                await self._audit(login or "unknown", "auth_login", "success")
                 return {
                     "login": login,
                     "name": user_data.get("name"),
@@ -94,7 +107,17 @@ class OrgRestrictedGitHubProvider(GitHubProvider):
                 }
         except Exception:
             logger.warning("Error extracting upstream claims", exc_info=True)
+            await self._audit("unknown", "auth_login_failed", "exception_during_claims_extraction")
             return None
+
+    async def _audit(self, user: str, operation: str, outcome: str) -> None:
+        """Fire audit callback (best-effort, never raises)."""
+        if self._audit_callback is None:
+            return
+        try:
+            await self._audit_callback(user, operation, "", operation, outcome)
+        except Exception:  # noqa: BLE001
+            logger.debug("auth audit_log write failed (ignored)", exc_info=True)
 
 
 _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
@@ -185,6 +208,7 @@ def _patch_cimd_localhost_redirect() -> None:
 def build_github_auth(
     config: DistilleryConfig,
     org_checker: OrgMembershipChecker | None = None,
+    audit_callback: AuditCallback | None = None,
 ) -> GitHubProvider:
     """Build a :class:`~fastmcp.server.auth.providers.github.GitHubProvider`.
 
@@ -249,6 +273,7 @@ def build_github_auth(
             client_id=client_id,
             client_secret=client_secret,
             base_url=base_url,
+            audit_callback=audit_callback,
         )
 
     return GitHubProvider(

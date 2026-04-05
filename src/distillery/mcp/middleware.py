@@ -16,7 +16,7 @@ import logging
 import time
 import uuid
 from collections import deque
-from collections.abc import MutableMapping
+from collections.abc import Awaitable, Callable, MutableMapping
 from typing import TYPE_CHECKING, Any
 
 from starlette.datastructures import Headers
@@ -26,6 +26,9 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from distillery.mcp.org_membership import OrgMembershipChecker
+
+# Callback signature: (user_id, operation, entry_id, action, outcome) -> awaitable
+AuditCallback = Callable[[str, str, str, str, str], Awaitable[None]]
 
 # ---------------------------------------------------------------------------
 # Type aliases
@@ -363,9 +366,11 @@ class OrgMembershipMiddleware:
         self,
         app: ASGIApp,
         checker: OrgMembershipChecker,
+        audit_callback: AuditCallback | None = None,
     ) -> None:
         self.app = app
         self.checker = checker
+        self._audit_callback = audit_callback
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or not self.checker.enabled:
@@ -396,6 +401,7 @@ class OrgMembershipMiddleware:
             username = raw.strip() if isinstance(raw, str) else ""
             if username:
                 if not await self.checker.is_allowed(username):
+                    await self._audit_org_denied(username)
                     await self._send_403(send, username, list(self.checker.allowed_orgs))
                     return
                 await self.app(scope, receive, send)
@@ -403,7 +409,19 @@ class OrgMembershipMiddleware:
 
         # Cannot identify the user (opaque token or JWT without
         # login/sub claim) — fail closed.
+        await self._audit_org_denied("<unknown>")
         await self._send_403(send, "<unknown>", list(self.checker.allowed_orgs))
+
+    async def _audit_org_denied(self, username: str) -> None:
+        """Fire audit callback for org membership denial (best-effort)."""
+        if self._audit_callback is None:
+            return
+        try:
+            await self._audit_callback(
+                username, "auth_org_denied", "", "auth_org_denied", "denied"
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("org-denied audit_log write failed (ignored)", exc_info=True)
 
     @staticmethod
     async def _send_403(send: Send, username: str, orgs: list[str]) -> None:
@@ -442,6 +460,7 @@ def apply_http_middleware(
     max_body_bytes: int = 1_048_576,
     trust_proxy: bool = False,
     org_checker: OrgMembershipChecker | None = None,
+    audit_callback: AuditCallback | None = None,
 ) -> ASGIApp:
     """Wrap *app* with rate-limit, body-size, request-ID, and org-membership middleware.
 
@@ -463,13 +482,16 @@ def apply_http_middleware(
         org_checker: Optional org membership checker.  When provided and
             :attr:`~distillery.mcp.org_membership.OrgMembershipChecker.enabled`
             is ``True``, :class:`OrgMembershipMiddleware` is added.
+        audit_callback: Optional async callback for writing audit log entries
+            when org membership checks deny access.  Signature:
+            ``(user_id, operation, entry_id, action, outcome) -> Awaitable[None]``.
 
     Returns:
         A new ASGI app with all requested middleware layers applied.
     """
     app = BodySizeLimitMiddleware(app, max_bytes=max_body_bytes)
     if org_checker is not None and org_checker.enabled:
-        app = OrgMembershipMiddleware(app, org_checker)
+        app = OrgMembershipMiddleware(app, org_checker, audit_callback=audit_callback)
     app = RateLimitMiddleware(
         app,
         requests_per_minute=requests_per_minute,

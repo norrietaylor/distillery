@@ -151,6 +151,29 @@ def main(argv: list[str] | None = None) -> int:
                 )
 
             server = create_server(config=config, auth=auth)
+
+            # Wire up audit logging for auth events.  The callback lazily
+            # reads the store from the server's shared state so it works
+            # even though the store is only initialised at first request.
+            _shared_ref = server._distillery_shared  # type: ignore[attr-defined]
+
+            async def _auth_audit_cb(
+                user_id: str,
+                operation: str,
+                entry_id: str,
+                action: str,
+                outcome: str,
+            ) -> None:
+                store = _shared_ref.get("store")
+                if store is None:
+                    return
+                await store.write_audit_log(user_id, operation, entry_id, action, outcome)
+
+            # Attach callback to auth provider (if org-restricted).
+            from distillery.mcp.auth import OrgRestrictedGitHubProvider
+
+            if isinstance(auth, OrgRestrictedGitHubProvider):
+                auth._audit_callback = _auth_audit_cb
             http_app = server.http_app(
                 path="/mcp",
                 transport="streamable-http",
@@ -168,6 +191,7 @@ def main(argv: list[str] | None = None) -> int:
                 max_body_bytes=rl.max_body_bytes,
                 trust_proxy=rl.trust_proxy,
                 org_checker=org_checker,
+                audit_callback=_auth_audit_cb,
             )
 
             from starlette.types import ASGIApp, Receive, Scope, Send

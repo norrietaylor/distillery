@@ -515,6 +515,63 @@ class TestOrgMembershipMiddleware:
         # the OrgMembershipChecker itself handles caching internally.
         assert checker.is_allowed.await_count == 3
 
+    async def test_org_denied_fires_audit_callback(self) -> None:
+        """Org membership denial fires the audit callback."""
+        checker = self._make_checker(allowed_orgs=["myorg"], is_allowed_return=False)
+        audit_cb = AsyncMock()
+        mw = OrgMembershipMiddleware(_dummy_app, checker, audit_callback=audit_cb)
+
+        token = _make_jwt({"login": "baduser"})
+        scope = _make_scope(headers=[(b"authorization", f"Bearer {token}".encode())])
+        cap = _ResponseCapture()
+        await mw(scope, _noop_receive, cap)
+        assert cap.status == 403
+
+        audit_cb.assert_awaited_once_with(
+            "baduser", "auth_org_denied", "", "auth_org_denied", "denied"
+        )
+
+    async def test_org_denied_unknown_user_fires_audit(self) -> None:
+        """Opaque token (unknown user) denial fires audit callback."""
+        checker = self._make_checker(allowed_orgs=["myorg"], is_allowed_return=True)
+        audit_cb = AsyncMock()
+        mw = OrgMembershipMiddleware(_dummy_app, checker, audit_callback=audit_cb)
+
+        scope = _make_scope(headers=[(b"authorization", b"Bearer opaque-token-no-dots")])
+        cap = _ResponseCapture()
+        await mw(scope, _noop_receive, cap)
+        assert cap.status == 403
+
+        audit_cb.assert_awaited_once_with(
+            "<unknown>", "auth_org_denied", "", "auth_org_denied", "denied"
+        )
+
+    async def test_audit_callback_failure_does_not_break_403(self) -> None:
+        """A failing audit callback must not prevent the 403 response."""
+        checker = self._make_checker(allowed_orgs=["myorg"], is_allowed_return=False)
+        audit_cb = AsyncMock(side_effect=RuntimeError("db down"))
+        mw = OrgMembershipMiddleware(_dummy_app, checker, audit_callback=audit_cb)
+
+        token = _make_jwt({"login": "baduser"})
+        scope = _make_scope(headers=[(b"authorization", f"Bearer {token}".encode())])
+        cap = _ResponseCapture()
+        await mw(scope, _noop_receive, cap)
+        # 403 is still sent despite audit failure.
+        assert cap.status == 403
+
+    async def test_no_audit_callback_on_allowed_user(self) -> None:
+        """Audit callback is NOT fired when user is allowed."""
+        checker = self._make_checker(allowed_orgs=["myorg"], is_allowed_return=True)
+        audit_cb = AsyncMock()
+        mw = OrgMembershipMiddleware(_dummy_app, checker, audit_callback=audit_cb)
+
+        token = _make_jwt({"login": "gooduser"})
+        scope = _make_scope(headers=[(b"authorization", f"Bearer {token}".encode())])
+        cap = _ResponseCapture()
+        await mw(scope, _noop_receive, cap)
+        assert cap.status == 200
+        audit_cb.assert_not_awaited()
+
 
 # ===================================================================
 # _client_ip helper
