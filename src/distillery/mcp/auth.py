@@ -29,6 +29,7 @@ from fastmcp.server.auth.providers.github import GitHubProvider
 
 from distillery.config import DistilleryConfig, parse_env_allowed_orgs
 from distillery.mcp.org_membership import OrgMembershipChecker
+from distillery.mcp.types import AuditCallback
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,7 @@ class OrgRestrictedGitHubProvider(GitHubProvider):
         client_id: str,
         client_secret: str,
         base_url: str,
+        audit_callback: AuditCallback | None = None,
     ) -> None:
         super().__init__(
             client_id=client_id,
@@ -58,11 +60,13 @@ class OrgRestrictedGitHubProvider(GitHubProvider):
             base_url=base_url,
         )
         self._org_checker = org_checker
+        self._audit_callback = audit_callback
 
     async def _extract_upstream_claims(self, idp_tokens: dict[str, Any]) -> dict[str, Any] | None:
         """Extract GitHub user identity and store the token for org checks."""
         access_token = idp_tokens.get("access_token")
         if not access_token or not isinstance(access_token, str):
+            await self._audit("unknown", "auth_login_failed", "missing_or_invalid_access_token")
             return None
 
         try:
@@ -79,6 +83,11 @@ class OrgRestrictedGitHubProvider(GitHubProvider):
                         "Failed to fetch GitHub user info during OAuth exchange: %d",
                         resp.status_code,
                     )
+                    await self._audit(
+                        "unknown",
+                        "auth_login_failed",
+                        f"github_api_status_{resp.status_code}",
+                    )
                     return None
 
                 user_data = resp.json()
@@ -87,6 +96,7 @@ class OrgRestrictedGitHubProvider(GitHubProvider):
                     self._org_checker.store_user_token(login, access_token)
                     logger.debug("Stored user token for %s", login)
 
+                await self._audit(login or "unknown", "auth_login", "success")
                 return {
                     "login": login,
                     "name": user_data.get("name"),
@@ -94,7 +104,37 @@ class OrgRestrictedGitHubProvider(GitHubProvider):
                 }
         except Exception:
             logger.warning("Error extracting upstream claims", exc_info=True)
+            await self._audit("unknown", "auth_login_failed", "exception_during_claims_extraction")
             return None
+
+    async def _audit(self, user: str, operation: str, outcome: str) -> None:
+        """Fire the audit callback for an authentication event.
+
+        Emits a best-effort audit log entry for login success or failure.
+        Exceptions from the callback are caught and logged at DEBUG level
+        so that audit infrastructure issues never block the auth flow.
+
+        Args:
+            user: GitHub login of the authenticating user, or ``"unknown"``
+                when identity cannot be determined.
+            operation: Audit operation name (e.g. ``"auth_login"``,
+                ``"auth_login_failed"``).
+            outcome: Free-text outcome descriptor (e.g. ``"success"``,
+                ``"github_api_status_401"``).
+
+        Note:
+            Token refresh (``auth_refresh``) is handled entirely within
+            FastMCP's ``OAuthProxy`` layer, which does not expose a hook
+            for subclasses.  GitHub OAuth tokens are long-lived and do not
+            use refresh tokens, so this event is not emitted here.
+            See issue #139 for background.
+        """
+        if self._audit_callback is None:
+            return
+        try:
+            await self._audit_callback(user, operation, "", operation, outcome)
+        except Exception:  # noqa: BLE001
+            logger.debug("auth audit_log write failed (ignored)", exc_info=True)
 
 
 _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
@@ -185,6 +225,7 @@ def _patch_cimd_localhost_redirect() -> None:
 def build_github_auth(
     config: DistilleryConfig,
     org_checker: OrgMembershipChecker | None = None,
+    audit_callback: AuditCallback | None = None,
 ) -> GitHubProvider:
     """Build a :class:`~fastmcp.server.auth.providers.github.GitHubProvider`.
 
@@ -249,6 +290,7 @@ def build_github_auth(
             client_id=client_id,
             client_secret=client_secret,
             base_url=base_url,
+            audit_callback=audit_callback,
         )
 
     return GitHubProvider(

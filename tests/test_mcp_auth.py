@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -196,3 +197,157 @@ class TestBuildOrgCheckerIntegration:
         checker = build_org_checker(config)
         assert isinstance(checker, OrgMembershipChecker)
         assert "env-company" in checker._allowed_orgs
+
+
+# ---------------------------------------------------------------------------
+# Tests: Audit events on OrgRestrictedGitHubProvider
+# ---------------------------------------------------------------------------
+
+
+class TestAuthAuditEvents:
+    """Verify audit callbacks are fired for login success/failure."""
+
+    def _make_provider(
+        self, audit_cb: AsyncMock | None = None
+    ) -> OrgRestrictedGitHubProvider:
+        from distillery.mcp.org_membership import OrgMembershipChecker
+
+        checker = OrgMembershipChecker(allowed_orgs=["acme"])
+        return OrgRestrictedGitHubProvider(
+            org_checker=checker,
+            client_id="fake-id",
+            client_secret="fake-secret",
+            base_url="https://example.com",
+            audit_callback=audit_cb,
+        )
+
+    async def test_audit_login_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Successful login fires audit callback with auth_login operation."""
+        from unittest.mock import MagicMock
+
+        cb = AsyncMock()
+        provider = self._make_provider(audit_cb=cb)
+
+        # Mock httpx to return a successful user response.
+        import httpx
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "login": "testuser",
+            "name": "Test User",
+            "email": "test@example.com",
+        }
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.get = AsyncMock(return_value=mock_resp)
+
+        monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: mock_client)
+
+        result = await provider._extract_upstream_claims({"access_token": "tok123"})
+        assert result is not None
+        assert result["login"] == "testuser"
+
+        cb.assert_awaited_once_with("testuser", "auth_login", "", "auth_login", "success")
+
+    async def test_audit_login_failed_bad_token(self) -> None:
+        """Missing access token fires audit with auth_login_failed."""
+        cb = AsyncMock()
+        provider = self._make_provider(audit_cb=cb)
+
+        result = await provider._extract_upstream_claims({})
+        assert result is None
+
+        cb.assert_awaited_once()
+        args = cb.call_args[0]
+        assert args[0] == "unknown"
+        assert args[1] == "auth_login_failed"
+
+    async def test_audit_login_failed_github_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Non-200 GitHub API response fires audit with auth_login_failed."""
+        from unittest.mock import MagicMock
+
+        cb = AsyncMock()
+        provider = self._make_provider(audit_cb=cb)
+
+        import httpx
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 401
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.get = AsyncMock(return_value=mock_resp)
+
+        monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: mock_client)
+
+        result = await provider._extract_upstream_claims({"access_token": "bad"})
+        assert result is None
+
+        cb.assert_awaited_once()
+        args = cb.call_args[0]
+        assert args[0] == "unknown"
+        assert args[1] == "auth_login_failed"
+        assert "401" in args[4]
+
+    async def test_audit_login_failed_exception(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Exception during claims extraction fires audit with auth_login_failed."""
+        cb = AsyncMock()
+        provider = self._make_provider(audit_cb=cb)
+
+        import httpx
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.get = AsyncMock(side_effect=httpx.ConnectError("network down"))
+
+        monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: mock_client)
+
+        result = await provider._extract_upstream_claims({"access_token": "tok"})
+        assert result is None
+
+        cb.assert_awaited_once()
+        args = cb.call_args[0]
+        assert args[1] == "auth_login_failed"
+        assert "exception" in args[4]
+
+    async def test_audit_callback_failure_does_not_break_auth(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A failing audit callback must not prevent a successful login."""
+        from unittest.mock import MagicMock
+
+        cb = AsyncMock(side_effect=RuntimeError("audit db down"))
+        provider = self._make_provider(audit_cb=cb)
+
+        import httpx
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"login": "user1", "name": "U", "email": "u@e.com"}
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.get = AsyncMock(return_value=mock_resp)
+
+        monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: mock_client)
+
+        result = await provider._extract_upstream_claims({"access_token": "tok"})
+        # Auth succeeds despite audit failure.
+        assert result is not None
+        assert result["login"] == "user1"
+
+    async def test_no_audit_callback_is_safe(self) -> None:
+        """Provider with no audit callback does not error."""
+        provider = self._make_provider(audit_cb=None)
+        result = await provider._extract_upstream_claims({})
+        assert result is None  # no crash
