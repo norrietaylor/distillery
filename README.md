@@ -24,6 +24,7 @@
 
 <p align="center">
   <a href="https://pypi.org/project/distillery-mcp/"><img src="https://img.shields.io/pypi/v/distillery-mcp" alt="PyPI version"></a>
+  <a href="https://pypi.org/project/distillery-mcp/"><img src="https://img.shields.io/pypi/dm/distillery-mcp" alt="PyPI downloads"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="License"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python version"></a>
 </p>
