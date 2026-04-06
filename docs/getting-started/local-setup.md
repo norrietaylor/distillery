@@ -9,20 +9,27 @@ Run Distillery locally with your own DuckDB database and embedding provider. Thi
 
 ## Install
 
+### Run with uvx (recommended)
+
+`uvx` runs the package ephemerally — no persistent install, no virtualenv to manage:
+
 ```bash
-# Recommended (no clone needed)
 uvx distillery-mcp
+```
+
+### Install persistently (pip / source)
+
+A persistent install registers CLI entry points (`distillery`, `distillery-mcp`) on your PATH:
+
+```bash
+# From PyPI
+pip install distillery-mcp
 
 # Or install from source
 git clone https://github.com/norrietaylor/distillery.git
 cd distillery
 pip install -e .
 ```
-
-This registers two CLI entry points:
-
-- `distillery` — the CLI tool (health check, status)
-- `distillery-mcp` — the MCP server
 
 ## Configure
 
@@ -83,7 +90,8 @@ Or use `uvx` (recommended):
       "command": "uvx",
       "args": ["distillery-mcp"],
       "env": {
-        "JINA_API_KEY": "your-jina-api-key"
+        "JINA_API_KEY": "your-jina-api-key",
+        "DISTILLERY_CONFIG": "/path/to/distillery.yaml"
       }
     }
   }

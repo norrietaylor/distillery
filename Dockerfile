@@ -9,7 +9,7 @@ ENV DISTILLERY_BUILD_SHA=${BUILD_SHA}
 RUN apk add --no-cache python-3.13
 
 # Install uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.11.3 /uv /usr/local/bin/uv
 
 # Create non-root user
 RUN adduser --disabled-password --uid 10001 appuser
