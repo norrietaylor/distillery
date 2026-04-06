@@ -80,8 +80,11 @@ This verifies MCP connectivity, detects your transport, and configures auto-poll
 ### Local Setup
 
 ```bash
-# Recommended
+# Run directly (no install needed)
 uvx distillery-mcp
+
+# Or install from PyPI
+pip install distillery-mcp
 
 # Or install from source
 git clone https://github.com/norrietaylor/distillery.git
