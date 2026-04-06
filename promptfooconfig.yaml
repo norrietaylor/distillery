@@ -1,18 +1,16 @@
 # promptfooconfig.yaml — Distillery PR CI Gate
 #
-# Fast smoke-test suite (5-10 scenarios) covering critical skill paths.
+# Fast smoke-test suite (10 scenarios) covering critical skill paths.
 # Runs on every PR via .github/workflows/eval-pr.yml.
 #
 # Provider: Claude CLI (OAuth) with Distillery MCP server (stdio)
-# Run: npx promptfoo@latest eval --config promptfooconfig.yaml
-#
-# Each scenario asserts tool calls were made OR the response indicates
-# the skill executed successfully (resilient to LLM non-determinism).
+# Assertions: Python grading functions in scripts/promptfoo_grader.py
+# Run: npx promptfoo@0.118.0 eval --config promptfooconfig.yaml
 
 description: "Distillery MCP smoke-test suite for PR CI gate"
 
 # ---------------------------------------------------------------------------
-# Provider: Claude CLI with Distillery MCP server (uses CLAUDE_CODE_OAUTH_TOKEN)
+# Provider: Claude CLI with Distillery MCP server
 # ---------------------------------------------------------------------------
 providers:
   - id: "python:scripts/promptfoo_provider.py"
@@ -33,8 +31,7 @@ defaultTest:
       threshold: 120000
 
 # ---------------------------------------------------------------------------
-# Helper: all javascript assertions use this parse pattern to handle output
-# being either an object {text, tool_calls} or a JSON string.
+# Test scenarios
 # ---------------------------------------------------------------------------
 tests:
   # ---- /distill: store a new knowledge entry --------------------------------
@@ -42,52 +39,32 @@ tests:
     vars:
       prompt: '/distill "We decided to use pytest-asyncio in auto mode so async tests are detected automatically without needing @pytest.mark.asyncio on each function."'
     assert:
-      - type: javascript
-        value: |
-          let p = output; if (typeof output === 'string') { try { p = JSON.parse(output); } catch(e) { p = {text: output}; } }
-          const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
-          const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
-          const ok = names.some(n => ['distillery_metrics','distillery_store','distillery_find_similar'].includes(n)) || /stored|saved|entry.*id|created/i.test(text);
-          return ok ? {pass: true} : {pass: false, reason: `type=${typeof output}, text=${text.substring(0,120)}`};
+      - type: python
+        value: "file://scripts/promptfoo_grader.py:get_assert_distill_store"
 
   # ---- /distill: dedup check before store -----------------------------------
   - description: "distill checks for duplicates before storing similar content"
     vars:
       prompt: '/distill "Decided to use DuckDB for local storage because it has no server process."'
     assert:
-      - type: javascript
-        value: |
-          let p = output; if (typeof output === 'string') { try { p = JSON.parse(output); } catch(e) { p = {text: output}; } }
-          const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
-          const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
-          const ok = names.some(n => ['distillery_metrics','distillery_find_similar','distillery_store'].includes(n)) || /stored|saved|entry.*id|created|duplicate|dedup/i.test(text);
-          return ok ? {pass: true} : {pass: false, reason: `type=${typeof output}, text=${text.substring(0,120)}`};
+      - type: python
+        value: "file://scripts/promptfoo_grader.py:get_assert_distill_dedup"
 
   # ---- /recall: search for existing knowledge entries -----------------------
   - description: "recall searches knowledge base and returns relevant entries"
     vars:
       prompt: "what storage engine do we use and why did we choose it?"
     assert:
-      - type: javascript
-        value: |
-          let p = output; if (typeof output === 'string') { try { p = JSON.parse(output); } catch(e) { p = {text: output}; } }
-          const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
-          const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
-          const ok = names.includes('distillery_search') || /duckdb|storage|database/i.test(text);
-          return ok ? {pass: true} : {pass: false, reason: `type=${typeof output}, text=${text.substring(0,120)}`};
+      - type: python
+        value: "file://scripts/promptfoo_grader.py:get_assert_recall_search"
 
   # ---- /recall: graceful empty store response -------------------------------
   - description: "recall handles empty knowledge base gracefully"
     vars:
       prompt: "what do we know about caching strategies?"
     assert:
-      - type: javascript
-        value: |
-          let p = output; if (typeof output === 'string') { try { p = JSON.parse(output); } catch(e) { p = {text: output}; } }
-          const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
-          const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
-          const ok = names.includes('distillery_search') || /no.*(?:entries|results|information|data)|knowledge base|search|cach|doesn.t have/i.test(text);
-          return ok ? {pass: true} : {pass: false, reason: `type=${typeof output}, text=${text.substring(0,120)}`};
+      - type: python
+        value: "file://scripts/promptfoo_grader.py:get_assert_recall_empty"
       - type: not-regex
         value: "(Traceback|traceback|Exception at|exception at|internal error|Internal Error|500 error)"
 
@@ -96,52 +73,32 @@ tests:
     vars:
       prompt: '/bookmark https://duckdb.org/docs/extensions/vss "DuckDB VSS extension docs — HNSW index creation and cosine similarity"'
     assert:
-      - type: javascript
-        value: |
-          let p = output; if (typeof output === 'string') { try { p = JSON.parse(output); } catch(e) { p = {text: output}; } }
-          const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
-          const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
-          const ok = names.some(n => ['distillery_metrics','distillery_store','distillery_find_similar'].includes(n)) || /bookmark|stored|saved|entry.*id/i.test(text);
-          return ok ? {pass: true} : {pass: false, reason: `type=${typeof output}, text=${text.substring(0,120)}`};
+      - type: python
+        value: "file://scripts/promptfoo_grader.py:get_assert_bookmark_store"
 
   # ---- /bookmark: dedup check for known URL ---------------------------------
   - description: "bookmark checks dedup before storing a known URL"
     vars:
       prompt: '/bookmark https://duckdb.org/docs/extensions/vss "DuckDB vector similarity search extension"'
     assert:
-      - type: javascript
-        value: |
-          let p = output; if (typeof output === 'string') { try { p = JSON.parse(output); } catch(e) { p = {text: output}; } }
-          const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
-          const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
-          const ok = names.some(n => ['distillery_find_similar','distillery_store','distillery_metrics'].includes(n)) || /bookmark|stored|saved|duplicate|already|entry.*id/i.test(text);
-          return ok ? {pass: true} : {pass: false, reason: `type=${typeof output}, text=${text.substring(0,120)}`};
+      - type: python
+        value: "file://scripts/promptfoo_grader.py:get_assert_bookmark_dedup"
 
   # ---- /pour: synthesize entries into a narrative ---------------------------
   - description: "pour searches and synthesizes knowledge into a coherent narrative"
     vars:
       prompt: "/pour what's the full picture on the storage architecture decisions?"
     assert:
-      - type: javascript
-        value: |
-          let p = output; if (typeof output === 'string') { try { p = JSON.parse(output); } catch(e) { p = {text: output}; } }
-          const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
-          const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
-          const ok = names.includes('distillery_search') || /storage|architecture|duckdb|decision/i.test(text);
-          return ok ? {pass: true} : {pass: false, reason: `type=${typeof output}, text=${text.substring(0,120)}`};
+      - type: python
+        value: "file://scripts/promptfoo_grader.py:get_assert_pour_synthesis"
 
   # ---- /pour: graceful with sparse data -------------------------------------
   - description: "pour handles sparse knowledge base without crashing"
     vars:
       prompt: "/pour decision log"
     assert:
-      - type: javascript
-        value: |
-          let p = output; if (typeof output === 'string') { try { p = JSON.parse(output); } catch(e) { p = {text: output}; } }
-          const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
-          const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
-          const ok = names.includes('distillery_search') || /decision|log|no.*(?:entries|results)|knowledge|pour|synthe/i.test(text);
-          return ok ? {pass: true} : {pass: false, reason: `type=${typeof output}, text=${text.substring(0,120)}`};
+      - type: python
+        value: "file://scripts/promptfoo_grader.py:get_assert_pour_sparse"
       - type: not-regex
         value: "(Traceback|traceback|Exception at|exception at|internal error|Internal Error|500 error)"
 
@@ -150,26 +107,16 @@ tests:
     vars:
       prompt: "/watch list"
     assert:
-      - type: javascript
-        value: |
-          let p = output; if (typeof output === 'string') { try { p = JSON.parse(output); } catch(e) { p = {text: output}; } }
-          const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
-          const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
-          const ok = names.some(n => ['distillery_watch','distillery_metrics'].includes(n)) || /feed.*source|watch|no.*(?:sources|feeds)|configured|empty|sources.*monitored/i.test(text);
-          return ok ? {pass: true} : {pass: false, reason: `type=${typeof output}, text=${text.substring(0,120)}`};
+      - type: python
+        value: "file://scripts/promptfoo_grader.py:get_assert_watch_list"
 
   # ---- /watch: add RSS feed source ------------------------------------------
   - description: "watch add registers a new RSS source via distillery_watch"
     vars:
       prompt: "/watch add https://news.ycombinator.com/rss --type rss --label 'Hacker News'"
     assert:
-      - type: javascript
-        value: |
-          let p = output; if (typeof output === 'string') { try { p = JSON.parse(output); } catch(e) { p = {text: output}; } }
-          const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
-          const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
-          const ok = names.includes('distillery_watch') || /added|registered|hacker news|rss|feed.*source/i.test(text);
-          return ok ? {pass: true} : {pass: false, reason: `type=${typeof output}, text=${text.substring(0,120)}`};
+      - type: python
+        value: "file://scripts/promptfoo_grader.py:get_assert_watch_add"
 
 # ---------------------------------------------------------------------------
 # Output settings
