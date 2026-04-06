@@ -28,7 +28,9 @@ class MigrationFunc(Protocol):
     for runtime configuration (e.g. ``dimensions``, ``vss_available``).
     """
 
-    def __call__(self, conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None: ...
+    def __call__(
+        self, conn: duckdb.DuckDBPyConnection, **kwargs: Any
+    ) -> None: ...
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +162,9 @@ def create_log_tables(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
     conn.execute(_CREATE_SEARCH_LOG_TABLE)
     conn.execute(_CREATE_FEEDBACK_LOG_TABLE)
     conn.execute(_CREATE_AUDIT_LOG_TABLE)
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_search_log_timestamp ON search_log (timestamp)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_search_log_timestamp ON search_log (timestamp)"
+    )
     logger.info("Migration 4: search_log, feedback_log, audit_log tables created")
 
 
@@ -220,7 +224,9 @@ def get_current_schema_version(conn: duckdb.DuckDBPyConnection) -> int:
     ``schema_version`` key has not been set.
     """
     try:
-        result = conn.execute("SELECT value FROM _meta WHERE key = 'schema_version'")
+        result = conn.execute(
+            "SELECT value FROM _meta WHERE key = 'schema_version'"
+        )
         row = result.fetchone()
         if row is not None:
             return int(row[0])
@@ -295,7 +301,9 @@ def run_pending_migrations(
         except Exception as exc:
             with contextlib.suppress(Exception):
                 conn.execute("ROLLBACK")
-            raise RuntimeError(f"Migration {version} failed: {exc}") from exc
+            raise RuntimeError(
+                f"Migration {version} failed: {exc}"
+            ) from exc
 
     new_version = pending[-1]
     logger.info("Schema migrated from version %d to %d", current, new_version)

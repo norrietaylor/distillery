@@ -24,9 +24,7 @@ def _parse_output(output: Any) -> tuple[str, list[str]]:
 
     if isinstance(output, dict):
         text = output.get("text", "")
-        tool_calls = output.get("tool_calls")
-        if not isinstance(tool_calls, list):
-            tool_calls = []
+        tool_calls = output.get("tool_calls", [])
         names = [t.get("name", "") for t in tool_calls if isinstance(t, dict)]
         return str(text), names
 

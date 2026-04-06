@@ -425,7 +425,9 @@ class OrgMembershipMiddleware:
         if self._audit_callback is None:
             return
         try:
-            await self._audit_callback(username, "auth_org_denied", "", "auth_org_denied", "denied")
+            await self._audit_callback(
+                username, "auth_org_denied", "", "auth_org_denied", "denied"
+            )
         except Exception:  # noqa: BLE001
             logger.debug("org-denied audit_log write failed (ignored)", exc_info=True)
 
