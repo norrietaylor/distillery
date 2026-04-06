@@ -207,9 +207,7 @@ class TestBuildOrgCheckerIntegration:
 class TestAuthAuditEvents:
     """Verify audit callbacks are fired for login success/failure."""
 
-    def _make_provider(
-        self, audit_cb: AsyncMock | None = None
-    ) -> OrgRestrictedGitHubProvider:
+    def _make_provider(self, audit_cb: AsyncMock | None = None) -> OrgRestrictedGitHubProvider:
         from distillery.mcp.org_membership import OrgMembershipChecker
 
         checker = OrgMembershipChecker(allowed_orgs=["acme"])
@@ -265,9 +263,7 @@ class TestAuthAuditEvents:
         assert args[0] == "unknown"
         assert args[1] == "auth_login_failed"
 
-    async def test_audit_login_failed_github_error(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_audit_login_failed_github_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Non-200 GitHub API response fires audit with auth_login_failed."""
         from unittest.mock import MagicMock
 
@@ -295,9 +291,7 @@ class TestAuthAuditEvents:
         assert args[1] == "auth_login_failed"
         assert "401" in args[4]
 
-    async def test_audit_login_failed_exception(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_audit_login_failed_exception(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Exception during claims extraction fires audit with auth_login_failed."""
         cb = AsyncMock()
         provider = self._make_provider(audit_cb=cb)

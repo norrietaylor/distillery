@@ -123,6 +123,7 @@ async def _async_seed_store(db_path: str, entries: list[dict[str, Any]]) -> None
     assert conn is not None
 
     for raw in entries:
+
         def _parse_dt(val: Any) -> datetime:
             if isinstance(val, datetime):
                 return val if val.tzinfo is not None else val.replace(tzinfo=UTC)
@@ -226,8 +227,14 @@ def test_export_creates_valid_json(tmp_path: Path) -> None:
 
     # Verify required fields present in each entry row.
     required_fields = {
-        "id", "content", "entry_type", "source", "status",
-        "tags", "metadata", "version",
+        "id",
+        "content",
+        "entry_type",
+        "source",
+        "status",
+        "tags",
+        "metadata",
+        "version",
     }
     for entry in data["entries"]:
         for field in required_fields:
@@ -256,9 +263,7 @@ def test_export_excludes_embeddings(tmp_path: Path) -> None:
 
     data = json.loads(Path(out_path).read_text(encoding="utf-8"))
     for entry in data["entries"]:
-        assert "embedding" not in entry, (
-            f"Entry {entry.get('id')} must not expose 'embedding' key"
-        )
+        assert "embedding" not in entry, f"Entry {entry.get('id')} must not expose 'embedding' key"
 
 
 # ---------------------------------------------------------------------------
@@ -328,9 +333,7 @@ def test_import_merge_adds_new(tmp_path: Path, capsys: pytest.CaptureFixture[str
 
 
 @pytest.mark.unit
-def test_import_replace_drops_existing(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_import_replace_drops_existing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """Replace mode deletes existing entries; only the imported set remains."""
     db_path = str(tmp_path / "test.db")
     cfg_path = write_config(tmp_path, db_path)
@@ -366,9 +369,7 @@ def test_import_replace_drops_existing(
 
 
 @pytest.mark.unit
-def test_import_recomputes_embeddings(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_import_recomputes_embeddings(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """After import, entries in the store must have non-null embeddings."""
     db_path = str(tmp_path / "test.db")
     cfg_path = write_config(tmp_path, db_path)
@@ -387,9 +388,7 @@ def test_import_recomputes_embeddings(
 
     # Confirm embedding column is not NULL for imported entries.
     null_count = asyncio.run(_async_count_null_embeddings(db_path))
-    assert null_count == 0, (
-        f"Expected 0 NULL embeddings after import, got {null_count}"
-    )
+    assert null_count == 0, f"Expected 0 NULL embeddings after import, got {null_count}"
 
 
 # ---------------------------------------------------------------------------
@@ -483,9 +482,7 @@ def test_roundtrip_fidelity(tmp_path: Path, capsys: pytest.CaptureFixture[str]) 
 
 
 @pytest.mark.unit
-def test_import_feed_sources_merge(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_import_feed_sources_merge(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """Feed sources in the import payload are added; duplicate URLs are silently skipped."""
     db_path = str(tmp_path / "test.db")
     cfg_path = write_config(tmp_path, db_path)
@@ -547,6 +544,4 @@ def test_import_replace_requires_confirmation(tmp_path: Path) -> None:
 
     # On EOF (non-interactive), the import is cancelled — should return non-zero
     # so automation can distinguish a no-op from a successful restore.
-    assert rc == 1, (
-        f"Replace-mode cancellation should return 1 (cancelled), got {rc}"
-    )
+    assert rc == 1, f"Replace-mode cancellation should return 1 (cancelled), got {rc}"

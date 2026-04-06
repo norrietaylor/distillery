@@ -275,9 +275,7 @@ class DuckDBStore:
         current_duckdb_version: str = duckdb.__version__
 
         # Compare stored duckdb_version; warn on major/minor mismatch
-        stored_result = conn.execute(
-            "SELECT value FROM _meta WHERE key = 'duckdb_version'"
-        )
+        stored_result = conn.execute("SELECT value FROM _meta WHERE key = 'duckdb_version'")
         stored_row = stored_result.fetchone()
         if stored_row is not None:
             stored_version: str = stored_row[0]
@@ -306,8 +304,7 @@ class DuckDBStore:
         vss_version: str = ""
         try:
             vss_result = conn.execute(
-                "SELECT extension_version FROM duckdb_extensions() "
-                "WHERE extension_name = 'vss'"
+                "SELECT extension_version FROM duckdb_extensions() WHERE extension_name = 'vss'"
             )
             vss_row = vss_result.fetchone()
             if vss_row is not None:
@@ -422,9 +419,7 @@ class DuckDBStore:
                 #    applied when VSS was unavailable; this backfills the
                 #    index on a subsequent startup where VSS is present.
                 if self._vss_available:
-                    with contextlib.suppress(
-                        duckdb.CatalogException, duckdb.BinderException
-                    ):
+                    with contextlib.suppress(duckdb.CatalogException, duckdb.BinderException):
                         conn.execute(
                             "CREATE INDEX IF NOT EXISTS idx_entries_embedding "
                             "ON entries USING HNSW (embedding) "
