@@ -17,10 +17,10 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
 
       - name: Validate promptfoo config
-        run: npx promptfoo@latest validate config --config promptfooconfig.yaml
+        run: npx promptfoo@0.118.0 validate config --config promptfooconfig.yaml
 
   # Informational — runs live eval, does not block merge.
   eval:
@@ -46,7 +46,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
 
       - name: Install dependencies
         run: |
@@ -58,4 +58,4 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
-        run: npx promptfoo@latest eval --config promptfooconfig.yaml
+        run: npx promptfoo@0.118.0 eval --config promptfooconfig.yaml
