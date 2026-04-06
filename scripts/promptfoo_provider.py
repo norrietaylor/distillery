@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -32,13 +33,37 @@ def call_api(
         output: dict with ``text`` (response) and ``tool_calls`` list
         error: str | None
     """
+    # Each test invocation gets its own DuckDB file to avoid concurrent
+    # writer conflicts (DuckDB is single-writer). The eval config template
+    # is written alongside the MCP config in the same temp directory.
+    eval_dir = tempfile.mkdtemp(prefix="promptfoo-eval-")
+    db_path = os.path.join(eval_dir, "distillery-eval.db")
+
+    eval_config_path = os.path.join(eval_dir, "distillery-eval.yaml")
+    with open(eval_config_path, "w") as cfg:
+        cfg.write(
+            f"storage:\n"
+            f"  backend: duckdb\n"
+            f"  database_path: \"{db_path}\"\n"
+            f"embedding:\n"
+            f"  provider: jina\n"
+            f"  model: jina-embeddings-v3\n"
+            f"  dimensions: 1024\n"
+            f"  api_key_env: JINA_API_KEY\n"
+            f"team:\n"
+            f"  name: distillery-eval\n"
+            f"server:\n"
+            f"  auth:\n"
+            f"    provider: none\n"
+        )
+
     mcp_config = {
         "mcpServers": {
             "distillery": {
                 "command": "distillery-mcp",
                 "args": [],
                 "env": {
-                    "DISTILLERY_CONFIG": "distillery-dev.yaml",
+                    "DISTILLERY_CONFIG": eval_config_path,
                     "JINA_API_KEY": os.environ.get("JINA_API_KEY", ""),
                 },
             }
@@ -146,3 +171,4 @@ def call_api(
         return {"error": "Claude CLI timed out after 120s"}
     finally:
         Path(mcp_path).unlink(missing_ok=True)
+        shutil.rmtree(eval_dir, ignore_errors=True)
