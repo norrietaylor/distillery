@@ -79,10 +79,31 @@ To configure manually, add to `~/.claude/settings.json`:
 For offline use or a private knowledge base, run the MCP server locally. Requires Python 3.11+ and a local Distillery installation.
 
 ```bash
+# Recommended
+uvx distillery-mcp
+
+# Or with pip
 pip install distillery-mcp
 ```
 
-Add to `~/.claude/settings.json`:
+Add to `~/.claude/settings.json` (using `uvx`):
+
+```json
+{
+  "mcpServers": {
+    "distillery": {
+      "command": "uvx",
+      "args": ["distillery-mcp"],
+      "env": {
+        "JINA_API_KEY": "${JINA_API_KEY}",
+        "DISTILLERY_CONFIG": "${DISTILLERY_CONFIG}"
+      }
+    }
+  }
+}
+```
+
+Or using the installed entry point:
 
 ```json
 {

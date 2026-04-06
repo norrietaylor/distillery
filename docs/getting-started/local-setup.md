@@ -10,6 +10,10 @@ Run Distillery locally with your own DuckDB database and embedding provider. Thi
 ## Install
 
 ```bash
+# Recommended (no clone needed)
+uvx distillery-mcp
+
+# Or install from source
 git clone https://github.com/norrietaylor/distillery.git
 cd distillery
 pip install -e .
@@ -64,6 +68,22 @@ Add to your Claude Code MCP settings (`~/.claude/settings.json`):
       "env": {
         "JINA_API_KEY": "your-jina-api-key",
         "DISTILLERY_CONFIG": "/path/to/distillery.yaml"
+      }
+    }
+  }
+}
+```
+
+Or use `uvx` (recommended):
+
+```json
+{
+  "mcpServers": {
+    "distillery": {
+      "command": "uvx",
+      "args": ["distillery-mcp"],
+      "env": {
+        "JINA_API_KEY": "your-jina-api-key"
       }
     }
   }

@@ -69,7 +69,7 @@ For production team deployments:
 - Use GitHub OAuth for authentication
 - Enable "Private vulnerability reporting" in your repository settings
 - Run Distillery on a secure infrastructure (Fly.io, cloud VM, etc.)
-- Regularly update dependencies with `pip install --upgrade distillery`
+- Regularly update dependencies with `uv pip install --upgrade distillery-mcp` or `pip install --upgrade distillery-mcp`
 
 ### Dependency Security
 
