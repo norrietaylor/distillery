@@ -8,6 +8,8 @@
 
 <h1 align="center">Distillery</h1>
 
+<!-- mcp-name: io.github.norrietaylor/distillery-mcp -->
+
 <p align="center">
   <strong>Team Knowledge, Distilled</strong>
   <br>
