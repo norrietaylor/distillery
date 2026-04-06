@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -170,5 +171,4 @@ def call_api(
         return {"error": "Claude CLI timed out after 120s"}
     finally:
         Path(mcp_path).unlink(missing_ok=True)
-        import shutil
         shutil.rmtree(eval_dir, ignore_errors=True)
