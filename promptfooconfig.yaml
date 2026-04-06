@@ -48,7 +48,7 @@ tests:
           const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
           const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
           const ok = names.some(n => ['distillery_metrics','distillery_store','distillery_find_similar'].includes(n)) || /stored|saved|entry.*id|created/i.test(text);
-          return ok ? true : `FAIL: type=${typeof output}, text=${text.substring(0,120)}`;
+          return ok ? {pass: true} : {pass: false, reason: `type=${typeof output}, text=${text.substring(0,120)}`};
 
   # ---- /distill: dedup check before store -----------------------------------
   - description: "distill checks for duplicates before storing similar content"
@@ -61,7 +61,7 @@ tests:
           const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
           const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
           const ok = names.some(n => ['distillery_metrics','distillery_find_similar','distillery_store'].includes(n)) || /stored|saved|entry.*id|created|duplicate|dedup/i.test(text);
-          return ok ? true : `FAIL: type=${typeof output}, text=${text.substring(0,120)}`;
+          return ok ? {pass: true} : {pass: false, reason: `type=${typeof output}, text=${text.substring(0,120)}`};
 
   # ---- /recall: search for existing knowledge entries -----------------------
   - description: "recall searches knowledge base and returns relevant entries"
@@ -74,7 +74,7 @@ tests:
           const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
           const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
           const ok = names.includes('distillery_search') || /duckdb|storage|database/i.test(text);
-          return ok ? true : `FAIL: type=${typeof output}, text=${text.substring(0,120)}`;
+          return ok ? {pass: true} : {pass: false, reason: `type=${typeof output}, text=${text.substring(0,120)}`};
 
   # ---- /recall: graceful empty store response -------------------------------
   - description: "recall handles empty knowledge base gracefully"
@@ -87,7 +87,7 @@ tests:
           const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
           const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
           const ok = names.includes('distillery_search') || /no.*(?:entries|results|information|data)|knowledge base|search|cach|doesn.t have/i.test(text);
-          return ok ? true : `FAIL: type=${typeof output}, text=${text.substring(0,120)}`;
+          return ok ? {pass: true} : {pass: false, reason: `type=${typeof output}, text=${text.substring(0,120)}`};
       - type: not-regex
         value: "(Traceback|traceback|Exception at|exception at|internal error|Internal Error|500 error)"
 
@@ -102,7 +102,7 @@ tests:
           const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
           const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
           const ok = names.some(n => ['distillery_metrics','distillery_store','distillery_find_similar'].includes(n)) || /bookmark|stored|saved|entry.*id/i.test(text);
-          return ok ? true : `FAIL: type=${typeof output}, text=${text.substring(0,120)}`;
+          return ok ? {pass: true} : {pass: false, reason: `type=${typeof output}, text=${text.substring(0,120)}`};
 
   # ---- /bookmark: dedup check for known URL ---------------------------------
   - description: "bookmark checks dedup before storing a known URL"
@@ -115,7 +115,7 @@ tests:
           const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
           const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
           const ok = names.some(n => ['distillery_find_similar','distillery_store','distillery_metrics'].includes(n)) || /bookmark|stored|saved|duplicate|already|entry.*id/i.test(text);
-          return ok ? true : `FAIL: type=${typeof output}, text=${text.substring(0,120)}`;
+          return ok ? {pass: true} : {pass: false, reason: `type=${typeof output}, text=${text.substring(0,120)}`};
 
   # ---- /pour: synthesize entries into a narrative ---------------------------
   - description: "pour searches and synthesizes knowledge into a coherent narrative"
@@ -128,7 +128,7 @@ tests:
           const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
           const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
           const ok = names.includes('distillery_search') || /storage|architecture|duckdb|decision/i.test(text);
-          return ok ? true : `FAIL: type=${typeof output}, text=${text.substring(0,120)}`;
+          return ok ? {pass: true} : {pass: false, reason: `type=${typeof output}, text=${text.substring(0,120)}`};
 
   # ---- /pour: graceful with sparse data -------------------------------------
   - description: "pour handles sparse knowledge base without crashing"
@@ -141,7 +141,7 @@ tests:
           const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
           const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
           const ok = names.includes('distillery_search') || /decision|log|no.*(?:entries|results)|knowledge|pour|synthe/i.test(text);
-          return ok ? true : `FAIL: type=${typeof output}, text=${text.substring(0,120)}`;
+          return ok ? {pass: true} : {pass: false, reason: `type=${typeof output}, text=${text.substring(0,120)}`};
       - type: not-regex
         value: "(Traceback|traceback|Exception at|exception at|internal error|Internal Error|500 error)"
 
@@ -156,7 +156,7 @@ tests:
           const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
           const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
           const ok = names.some(n => ['distillery_watch','distillery_metrics'].includes(n)) || /feed.*source|watch|no.*(?:sources|feeds)|configured|empty|sources.*monitored/i.test(text);
-          return ok ? true : `FAIL: type=${typeof output}, text=${text.substring(0,120)}`;
+          return ok ? {pass: true} : {pass: false, reason: `type=${typeof output}, text=${text.substring(0,120)}`};
 
   # ---- /watch: add RSS feed source ------------------------------------------
   - description: "watch add registers a new RSS source via distillery_watch"
@@ -169,7 +169,7 @@ tests:
           const names = (p?.tool_calls ?? []).map(t => t.name ?? '');
           const text = p?.text ?? (typeof output === 'string' ? output : JSON.stringify(output));
           const ok = names.includes('distillery_watch') || /added|registered|hacker news|rss|feed.*source/i.test(text);
-          return ok ? true : `FAIL: type=${typeof output}, text=${text.substring(0,120)}`;
+          return ok ? {pass: true} : {pass: false, reason: `type=${typeof output}, text=${text.substring(0,120)}`};
 
 # ---------------------------------------------------------------------------
 # Output settings
