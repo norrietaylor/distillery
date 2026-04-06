@@ -1,0 +1,58 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-11-25/server.schema.json",
+  "name": "io.github.norrietaylor/distillery-mcp",
+  "title": "Distillery",
+  "description": "A configurable embedding system with DuckDB storage and MCP server integration",
+  "version": "0.1.1",
+  "repository": {
+    "url": "https://github.com/norrietaylor/distillery",
+    "source": "github",
+    "id": "norrietaylor/distillery"
+  },
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "distillery-mcp",
+      "version": "0.1.1",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "JINA_API_KEY",
+          "description": "API key for Jina embedding provider",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "OPENAI_API_KEY",
+          "description": "API key for OpenAI embedding provider (alternative to Jina)",
+          "isRequired": false,
+          "isSecret": true
+        }
+      ]
+    },
+    {
+      "registryType": "pypi",
+      "identifier": "distillery-mcp",
+      "version": "0.1.1",
+      "transport": {
+        "type": "streamable-http"
+      },
+      "environmentVariables": [
+        {
+          "name": "JINA_API_KEY",
+          "description": "API key for Jina embedding provider",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "OPENAI_API_KEY",
+          "description": "API key for OpenAI embedding provider (alternative to Jina)",
+          "isRequired": false,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}

@@ -5,8 +5,11 @@ WORKDIR /app
 ARG BUILD_SHA=unknown
 ENV DISTILLERY_BUILD_SHA=${BUILD_SHA}
 
-# Install Python 3.13 and pip
-RUN apk add --no-cache python-3.13 py3.13-pip
+# Install Python 3.13
+RUN apk add --no-cache python-3.13
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:0.11.3 /uv /usr/local/bin/uv
 
 # Create non-root user
 RUN adduser --disabled-password --uid 10001 appuser
@@ -15,7 +18,7 @@ RUN adduser --disabled-password --uid 10001 appuser
 COPY . .
 
 # Install the package (production only, no dev deps)
-RUN pip install --no-cache-dir .
+RUN uv pip install --system --no-cache .
 
 # Pre-install the DuckDB VSS extension so HNSW indexing is available at runtime
 # without a network download. Run as appuser so it lands in ~/.duckdb/extensions/.

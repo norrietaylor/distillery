@@ -8,6 +8,8 @@
 
 <h1 align="center">Distillery</h1>
 
+<!-- mcp-name: io.github.norrietaylor/distillery-mcp -->
+
 <p align="center">
   <strong>Team Knowledge, Distilled</strong>
   <br>
@@ -81,6 +83,13 @@ This verifies MCP connectivity, detects your transport, and configures auto-poll
 ### Local Setup
 
 ```bash
+# Run directly (no install needed)
+uvx distillery-mcp
+
+# Or install from PyPI
+pip install distillery-mcp
+
+# Or install from source
 git clone https://github.com/norrietaylor/distillery.git
 cd distillery
 pip install -e .
@@ -91,6 +100,8 @@ See the [Local Setup Guide](https://norrietaylor.github.io/distillery/getting-st
 ## Development
 
 ```bash
+uv pip install -e ".[dev]"
+# or
 pip install -e ".[dev]"
 pytest                              # run tests
 mypy --strict src/distillery/       # type check

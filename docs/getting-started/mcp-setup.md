@@ -7,6 +7,10 @@ Complete reference for the Distillery MCP server — all 18 tools, configuration
 ### stdio (local, default)
 
 ```bash
+# Recommended
+uvx distillery-mcp
+
+# Or using the installed entry point
 distillery-mcp
 # or
 python -m distillery.mcp
