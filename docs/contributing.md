@@ -13,6 +13,8 @@ Thank you for your interest in contributing to Distillery. This guide covers env
 ```bash
 git clone https://github.com/norrietaylor/distillery.git
 cd distillery
+uv pip install -e ".[dev]"
+# or
 pip install -e ".[dev]"
 ```
 
