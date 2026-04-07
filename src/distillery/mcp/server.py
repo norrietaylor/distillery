@@ -38,6 +38,7 @@ from distillery.mcp.tools.classify import (
 )
 from distillery.mcp.tools.configure import _handle_configure
 from distillery.mcp.tools.crud import (
+    _handle_correct,
     _handle_get,
     _handle_list,
     _handle_store,
@@ -75,6 +76,7 @@ __all__ = [
     "_handle_get",
     "_handle_update",
     "_handle_list",
+    "_handle_correct",
     "_handle_search",
     "_handle_find_similar",
     "_handle_aggregate",
@@ -340,6 +342,45 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         )
         result = await _handle_update(store=c["store"], arguments=args, last_modified_by=user)
         await _audit(c, user, "distillery_update", entry_id, "update", result)
+        return result
+
+    @server.tool
+    async def distillery_correct(  # noqa: PLR0913
+        ctx: Context,
+        wrong_entry_id: str,
+        content: str,
+        entry_type: str | None = None,
+        author: str | None = None,
+        project: str | None = None,
+        tags: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[types.TextContent]:
+        """Create a correction for an existing entry, archiving the original.
+
+        The new entry's corrects_id links to wrong_entry_id. The original is
+        archived automatically.
+        """
+        c = _lc(ctx)
+        user = _get_authenticated_user()
+        err = await _own(c, user, wrong_entry_id, "distillery_correct")
+        if err:
+            return err
+        args: dict[str, Any] = dict(
+            wrong_entry_id=wrong_entry_id,
+            content=content,
+            **_omit_none(
+                entry_type=entry_type,
+                author=author,
+                project=project,
+                tags=tags,
+                metadata=metadata,
+            ),
+        )
+        result = await _handle_correct(
+            store=c["store"], arguments=args, cfg=c["config"], created_by=user
+        )
+        rd = json.loads(result[0].text) if result else {}
+        await _audit(c, user, "distillery_correct", rd.get("new_entry_id", ""), "correct", result)
         return result
 
     @server.tool

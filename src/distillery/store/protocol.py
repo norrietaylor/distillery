@@ -93,6 +93,18 @@ class DistilleryStore(Protocol):
         """
         ...
 
+    async def get_corrections(self, entry_id: str) -> list[Entry]:
+        """Return entries that correct the given entry.
+
+        Args:
+            entry_id: UUID of the original entry.
+
+        Returns:
+            List of ``Entry`` objects with ``corrects_id == entry_id``,
+            ordered by ascending ``created_at``.
+        """
+        ...
+
     async def delete(self, entry_id: str) -> bool:
         """Soft-delete an entry by setting its status to ``archived``.
 

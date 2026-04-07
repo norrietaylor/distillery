@@ -681,11 +681,109 @@ def _build_filters_from_arguments(arguments: dict[str, Any]) -> dict[str, Any] |
     return filters if filters else None
 
 
+# ---------------------------------------------------------------------------
+# _handle_correct
+# ---------------------------------------------------------------------------
+
+
+async def _handle_correct(
+    store: Any,
+    arguments: dict[str, Any],
+    cfg: DistilleryConfig | None = None,
+    created_by: str = "",
+) -> list[types.TextContent]:
+    """Implement the ``distillery_correct`` tool.
+
+    Creates a new entry that corrects an existing one, archiving the original.
+
+    Args:
+        store: Initialised ``DuckDBStore``.
+        arguments: Tool argument dict.  Must contain ``wrong_entry_id`` and
+            ``content``.  Optionally accepts ``entry_type``, ``author``,
+            ``project``, ``tags``, ``metadata``.
+
+    Returns:
+        MCP content list with ``new_entry_id`` and ``archived_entry_id``.
+    """
+    from distillery.models import Entry, EntrySource, EntryStatus, EntryType
+
+    err = validate_required(arguments, "wrong_entry_id", "content")
+    if err:
+        return error_response("INVALID_PARAMS", err)
+
+    wrong_entry_id: str = arguments["wrong_entry_id"]
+
+    # Verify the original entry exists.
+    try:
+        original = await store.get(wrong_entry_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error fetching entry for correction")
+        return error_response("STORE_ERROR", f"Failed to fetch original entry: {exc}")
+
+    if original is None:
+        return error_response(
+            "NOT_FOUND",
+            f"No entry found with id={wrong_entry_id!r}.",
+            details={"entry_id": wrong_entry_id},
+        )
+
+    # Determine entry_type — use argument or inherit from original.
+    entry_type_str = arguments.get("entry_type", original.entry_type.value)
+    if entry_type_str not in _VALID_ENTRY_TYPES:
+        return error_response(
+            "INVALID_PARAMS",
+            f"Invalid entry_type {entry_type_str!r}. "
+            f"Must be one of: {', '.join(sorted(_VALID_ENTRY_TYPES))}.",
+        )
+
+    # Build the correction entry.
+    try:
+        entry = Entry(
+            content=arguments["content"],
+            entry_type=EntryType(entry_type_str),
+            source=EntrySource.CLAUDE_CODE,
+            author=arguments.get("author", original.author),
+            project=arguments.get("project", original.project),
+            tags=list(arguments.get("tags") or original.tags),
+            metadata=dict(arguments.get("metadata") or {}),
+            created_by=created_by,
+            corrects_id=wrong_entry_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return error_response("INVALID_PARAMS", f"Failed to construct correction entry: {exc}")
+
+    # Persist the correction entry.
+    try:
+        new_entry_id = await store.store(entry)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error storing correction entry")
+        return error_response("STORE_ERROR", f"Failed to store correction: {exc}")
+
+    # Archive the original entry.
+    try:
+        await store.update(wrong_entry_id, {"status": EntryStatus.ARCHIVED})
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error archiving original entry %s", wrong_entry_id)
+        return error_response(
+            "STORE_ERROR",
+            f"Correction stored (id={new_entry_id}) but failed to archive original: {exc}",
+        )
+
+    return success_response(
+        {
+            "new_entry_id": new_entry_id,
+            "archived_entry_id": wrong_entry_id,
+            "corrects_id": wrong_entry_id,
+        }
+    )
+
+
 __all__ = [
     "_handle_store",
     "_handle_get",
     "_handle_update",
     "_handle_list",
+    "_handle_correct",
     "_build_filters_from_arguments",
     "_VALID_ENTRY_TYPES",
     "_VALID_STATUSES",

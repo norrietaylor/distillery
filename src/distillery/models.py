@@ -311,6 +311,7 @@ class Entry:
     metadata: dict[str, Any] = field(default_factory=dict)
     accessed_at: datetime | None = None
     expires_at: datetime | None = None
+    corrects_id: str | None = None
 
     # --- ownership (populated when auth is enabled) ---
     created_by: str = ""
@@ -353,6 +354,7 @@ class Entry:
             "metadata": dict(self.metadata),
             "accessed_at": self.accessed_at.isoformat() if self.accessed_at is not None else None,
             "expires_at": self.expires_at.isoformat() if self.expires_at is not None else None,
+            "corrects_id": self.corrects_id,
             "created_by": self.created_by,
             "last_modified_by": self.last_modified_by,
         }
@@ -416,6 +418,7 @@ class Entry:
             metadata=dict(data.get("metadata", {})),
             accessed_at=accessed_at,
             expires_at=expires_at,
+            corrects_id=data.get("corrects_id"),
             created_by=str(data.get("created_by", "")),
             last_modified_by=str(data.get("last_modified_by", "")),
         )

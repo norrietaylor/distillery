@@ -594,8 +594,8 @@ class DuckDBStore:
             "INSERT INTO entries "
             "(id, content, entry_type, source, author, project, tags, status, "
             " metadata, created_at, updated_at, version, embedding, "
-            " created_by, last_modified_by, expires_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " created_by, last_modified_by, expires_at, corrects_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         params = [
             entry.id,
@@ -614,6 +614,7 @@ class DuckDBStore:
             entry.created_by,
             entry.last_modified_by,
             entry.expires_at,
+            entry.corrects_id,
         ]
         conn.execute(sql, params)
         # Rebuild FTS index so new content is searchable via BM25.
@@ -831,6 +832,30 @@ class DuckDBStore:
         return await asyncio.to_thread(self._sync_delete, entry_id)
 
     # ------------------------------------------------------------------
+    # Corrections chain
+    # ------------------------------------------------------------------
+
+    def _sync_get_corrections(self, entry_id: str) -> list[Entry]:
+        """Return all entries whose ``corrects_id`` points to *entry_id*."""
+        conn = self.connection
+        sql = f"SELECT {self._ENTRY_COLUMNS} FROM entries WHERE corrects_id = ? ORDER BY created_at ASC"
+        result = conn.execute(sql, [entry_id])
+        col_names = [desc[0] for desc in result.description]
+        return [self._row_to_entry(row, col_names) for row in result.fetchall()]
+
+    async def get_corrections(self, entry_id: str) -> list[Entry]:
+        """Return entries that correct the given entry.
+
+        Args:
+            entry_id: UUID of the original entry.
+
+        Returns:
+            List of ``Entry`` objects with ``corrects_id == entry_id``,
+            ordered by ascending ``created_at``.
+        """
+        return await asyncio.to_thread(self._sync_get_corrections, entry_id)
+
+    # ------------------------------------------------------------------
     # Filter helpers (shared by search, find_similar, list_entries)
     # ------------------------------------------------------------------
 
@@ -963,7 +988,7 @@ class DuckDBStore:
     _ENTRY_COLUMNS = (
         "id, content, entry_type, source, author, project, "
         "tags, status, metadata, created_at, updated_at, version, accessed_at, "
-        "created_by, last_modified_by, expires_at"
+        "created_by, last_modified_by, expires_at, corrects_id"
     )
 
     # ------------------------------------------------------------------

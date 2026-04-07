@@ -115,6 +115,10 @@ _ADD_EXPIRES_AT_COLUMN = """
 ALTER TABLE entries ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP;
 """
 
+_ADD_CORRECTS_ID_COLUMN = """
+ALTER TABLE entries ADD COLUMN IF NOT EXISTS corrects_id VARCHAR;
+"""
+
 _CREATE_FEED_SOURCES_TABLE = """
 CREATE TABLE IF NOT EXISTS feed_sources (
     url                    VARCHAR PRIMARY KEY,
@@ -228,6 +232,12 @@ def add_expires_at(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
     logger.info("Migration 8: expires_at column added")
 
 
+def add_corrects_id(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
+    """Migration 9: Add ``corrects_id`` column to ``entries``."""
+    conn.execute(_ADD_CORRECTS_ID_COLUMN)
+    logger.info("Migration 9: corrects_id column added")
+
+
 # ---------------------------------------------------------------------------
 # Migration registry
 # ---------------------------------------------------------------------------
@@ -241,6 +251,7 @@ MIGRATIONS: dict[int, MigrationFunc] = {
     6: create_hnsw_index,
     7: create_fts_index,
     8: add_expires_at,
+    9: add_corrects_id,
 }
 """Ordered mapping of schema version to migration function.
 
