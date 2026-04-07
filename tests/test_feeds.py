@@ -500,3 +500,109 @@ class TestRSSAdapter:
 
         assert len(items) == 2
         assert items[0].title == "Atom Entry One"
+
+
+# ---------------------------------------------------------------------------
+# _derive_source_tags
+# ---------------------------------------------------------------------------
+
+
+class TestDeriveSourceTags:
+    """Tests for _derive_source_tags() in poller.py."""
+
+    def _make_item(self, source_url: str, source_type: str) -> FeedItem:
+        return FeedItem(source_url=source_url, source_type=source_type, item_id="test-id")
+
+    def test_source_tag_rss_generic(self) -> None:
+        """All feeds get a source/{source_type} tag."""
+        from distillery.feeds.poller import _derive_source_tags
+
+        item = self._make_item("https://example.com/rss", "rss")
+        tags = _derive_source_tags(item, "rss")
+        assert "source/rss" in tags
+
+    def test_source_tag_github_type(self) -> None:
+        """GitHub feeds get source/github tag."""
+        from distillery.feeds.poller import _derive_source_tags
+
+        item = self._make_item("https://github.com/owner/repo", "github")
+        tags = _derive_source_tags(item, "github")
+        assert "source/github" in tags
+
+    def test_source_tag_github_owner_repo(self) -> None:
+        """GitHub feeds derive source/github/{owner}/{repo}."""
+        from distillery.feeds.poller import _derive_source_tags
+
+        item = self._make_item("https://github.com/owner/repo", "github")
+        tags = _derive_source_tags(item, "github")
+        assert "source/github/owner/repo" in tags
+
+    def test_source_tag_github_slug_format(self) -> None:
+        """GitHub bare slug also works for owner/repo derivation."""
+        from distillery.feeds.poller import _derive_source_tags
+
+        item = self._make_item("owner/repo", "github")
+        tags = _derive_source_tags(item, "github")
+        assert "source/github" in tags
+        assert "source/github/owner/repo" in tags
+
+    def test_source_tag_reddit(self) -> None:
+        """Reddit RSS URLs derive source/reddit/{subreddit}."""
+        from distillery.feeds.poller import _derive_source_tags
+
+        item = self._make_item("https://www.reddit.com/r/python/.rss", "rss")
+        tags = _derive_source_tags(item, "rss")
+        assert "source/rss" in tags
+        assert "source/reddit/python" in tags
+
+    def test_source_tag_reddit_no_generic_domain(self) -> None:
+        """Reddit URLs should not also produce a generic domain tag."""
+        from distillery.feeds.poller import _derive_source_tags
+
+        item = self._make_item("https://www.reddit.com/r/python/.rss", "rss")
+        tags = _derive_source_tags(item, "rss")
+        # Should not have a plain reddit.com domain tag — only source/reddit/{sub}
+        assert "source/reddit-com" not in tags
+
+    def test_source_tag_domain_extraction(self) -> None:
+        """Generic RSS feeds derive source/{domain-slug} with www. stripped and dots as hyphens."""
+        from distillery.feeds.poller import _derive_source_tags
+
+        item = self._make_item("https://www.example.com/feed.xml", "rss")
+        tags = _derive_source_tags(item, "rss")
+        assert "source/rss" in tags
+        # Dots replaced with hyphens; www. stripped
+        assert "source/example-com" in tags
+
+    def test_source_tag_domain_no_www_prefix(self) -> None:
+        """Domain without www. prefix also works, dots replaced with hyphens."""
+        from distillery.feeds.poller import _derive_source_tags
+
+        item = self._make_item("https://blog.example.com/atom.xml", "rss")
+        tags = _derive_source_tags(item, "rss")
+        assert "source/blog-example-com" in tags
+
+    def test_source_tag_invalid_github_url_still_returns_type_tag(self) -> None:
+        """Unparseable GitHub URL still returns source/github tag."""
+        from distillery.feeds.poller import _derive_source_tags
+
+        item = self._make_item("https://not-github.com/foo", "github")
+        tags = _derive_source_tags(item, "github")
+        assert "source/github" in tags
+        # No owner/repo tag — parsing failed silently
+        assert not any("source/github/" in t for t in tags)
+
+    def test_source_tag_invalid_tags_dropped(self) -> None:
+        """Tags that fail validate_tag() are silently dropped."""
+        from distillery.feeds.poller import _derive_source_tags
+
+        # URL with uppercase in domain would still be lowercased; test via empty domain
+        item = self._make_item("", "rss")
+        tags = _derive_source_tags(item, "rss")
+        # source/rss should still be valid
+        assert "source/rss" in tags
+        # No crashes; all returned tags should be valid
+        from distillery.models import validate_tag
+
+        for tag in tags:
+            validate_tag(tag)  # should not raise

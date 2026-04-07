@@ -17,6 +17,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 from distillery.feeds.scorer import RelevanceScorer
 
@@ -136,6 +137,77 @@ def _build_adapter(source: FeedSourceConfig) -> Any:
         )
 
 
+def _derive_source_tags(item: FeedItem, source_type: str) -> list[str]:
+    """Derive hierarchical source tags from feed item metadata.
+
+    Tag derivation rules:
+
+    - All feeds: ``source/{source_type}`` (e.g. ``source/rss``, ``source/github``).
+    - Reddit: parse subreddit from URL → ``source/reddit/{subreddit}``.
+    - GitHub: parse owner/repo from URL → ``source/github/{owner}/{repo}``.
+    - Other RSS: parse domain from URL → ``source/{domain}`` (lowercase,
+      ``www.`` prefix stripped).
+
+    Each candidate tag is validated via :func:`~distillery.models.validate_tag`.
+    Invalid tags are silently dropped with a DEBUG-level log message.
+
+    Args:
+        item: The normalised feed item.
+        source_type: The adapter type string (e.g. ``'rss'``, ``'github'``).
+
+    Returns:
+        A list of validated tag strings; never raises.
+    """
+    from distillery.models import validate_tag
+
+    candidates: list[str] = []
+
+    # All feeds: source/{source_type}
+    candidates.append(f"source/{source_type}")
+
+    url = item.source_url or ""
+
+    if source_type == "github":
+        # GitHub: source/github/{owner}/{repo}
+        try:
+            from distillery.feeds.github import _parse_github_url
+
+            owner, repo = _parse_github_url(url)
+            candidates.append(f"source/github/{owner}/{repo}")
+        except (ValueError, Exception):
+            logger.debug("_derive_source_tags: could not parse GitHub URL %r", url)
+    elif source_type == "rss":
+        # Reddit: source/reddit/{subreddit}
+        parsed = urlparse(url)
+        host = parsed.netloc.lower()
+        if "reddit.com" in host:
+            # URL pattern: https://www.reddit.com/r/{subreddit}/...
+            path_parts = [p for p in parsed.path.split("/") if p]
+            if len(path_parts) >= 2 and path_parts[0] == "r":
+                subreddit = path_parts[1].lower()
+                candidates.append(f"source/reddit/{subreddit}")
+        else:
+            # Generic RSS: source/{domain} (strip www. prefix, replace dots with hyphens
+            # so the resulting tag segment is valid per validate_tag())
+            if host.startswith("www."):
+                host = host[4:]
+            # Replace dots with hyphens to produce a valid tag segment
+            domain_slug = host.replace(".", "-")
+            if domain_slug:
+                candidates.append(f"source/{domain_slug}")
+
+    # Validate all candidates; drop invalid ones silently
+    tags: list[str] = []
+    for tag in candidates:
+        try:
+            validate_tag(tag)
+            tags.append(tag)
+        except ValueError:
+            logger.debug("_derive_source_tags: dropping invalid tag %r", tag)
+
+    return tags
+
+
 def _item_to_entry_kwargs(item: FeedItem, relevance_score: float) -> dict[str, Any]:
     """Convert a :class:`~distillery.feeds.models.FeedItem` to Entry constructor kwargs.
 
@@ -162,11 +234,14 @@ def _item_to_entry_kwargs(item: FeedItem, relevance_score: float) -> dict[str, A
     if item.published_at:
         metadata["published_at"] = item.published_at.isoformat()
 
+    tags = _derive_source_tags(item, item.source_type)
+
     return {
         "content": text or item.source_url,
         "entry_type": EntryType.FEED,
         "source": EntrySource.IMPORT,
         "author": "distillery-poller",
+        "tags": tags,
         "metadata": metadata,
     }
 
