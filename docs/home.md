@@ -35,26 +35,45 @@ Distillery provides 10 Claude Code slash commands:
 
 ## Quick Start
 
-The fastest way to get started:
+### Step 1: Install the Plugin
 
 ```bash
-# Install the plugin (all 10 skills + MCP connection)
 claude plugin marketplace add norrietaylor/distillery
 claude plugin install distillery
 ```
 
-Then run the onboarding wizard in Claude Code:
-
-```text
-/setup
-```
-
-This verifies MCP connectivity, detects your transport, and configures auto-poll for ambient intelligence.
+This installs all 10 skills. The plugin defaults to a hosted demo server — you can start using Distillery immediately.
 
 !!! warning "Demo Server"
-    The plugin defaults to the hosted instance at `distillery-mcp.fly.dev`, which is a **demo server** for evaluation only. Do not store sensitive or confidential data. For production use, [deploy your own instance](team/deployment.md) or use [local setup](getting-started/local-setup.md).
+    The plugin defaults to `distillery-mcp.fly.dev`, which is a **demo server** for evaluation only. Do not store sensitive or confidential data.
 
-For other installation options, see [Plugin Install](getting-started/plugin-install.md) or [Local Setup](getting-started/local-setup.md).
+### Step 2: Switch to Local with uvx (Recommended)
+
+For a private knowledge base, run the MCP server locally — no persistent install needed:
+
+```bash
+export JINA_API_KEY=jina_...   # free at jina.ai
+```
+
+Add to `~/.claude/settings.json` (overrides the plugin's demo server):
+
+```json
+{
+  "mcpServers": {
+    "distillery": {
+      "command": "uvx",
+      "args": ["distillery-mcp"],
+      "env": {
+        "JINA_API_KEY": "${JINA_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+Restart Claude Code and run `/setup` to complete onboarding.
+
+See [Local Setup](getting-started/local-setup.md) for full configuration (embedding providers, cloud storage, etc.) or [deploy your own instance](team/deployment.md) for team use.
 
 ## License
 
