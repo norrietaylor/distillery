@@ -70,24 +70,6 @@ Add to your Claude Code MCP settings (`~/.claude/settings.json`):
 {
   "mcpServers": {
     "distillery": {
-      "command": "python",
-      "args": ["-m", "distillery.mcp"],
-      "env": {
-        "JINA_API_KEY": "your-jina-api-key",
-        "DISTILLERY_CONFIG": "/path/to/distillery.yaml",
-        "GITHUB_TOKEN": "ghp_..."
-      }
-    }
-  }
-}
-```
-
-Or use `uvx` (recommended):
-
-```json
-{
-  "mcpServers": {
-    "distillery": {
       "command": "uvx",
       "args": ["distillery-mcp"],
       "env": {
@@ -100,7 +82,7 @@ Or use `uvx` (recommended):
 }
 ```
 
-Or use the installed entry point:
+Or use the installed entry point (if you ran `pip install`):
 
 ```json
 {
@@ -109,7 +91,27 @@ Or use the installed entry point:
       "command": "distillery-mcp",
       "env": {
         "JINA_API_KEY": "your-jina-api-key",
+        "DISTILLERY_CONFIG": "/path/to/distillery.yaml",
         "GITHUB_TOKEN": "ghp_..."
+      }
+    }
+  }
+}
+```
+
+Or use `python -m` (if installed from source):
+
+```json
+{
+  "mcpServers": {
+    "distillery": {
+      "command": "python",
+      "args": ["-m", "distillery.mcp"],
+      "env": {
+        "JINA_API_KEY": "your-jina-api-key",
+        "DISTILLERY_CONFIG": "/path/to/distillery.yaml",
+        "GITHUB_TOKEN": "ghp_..."
+
       }
     }
   }
