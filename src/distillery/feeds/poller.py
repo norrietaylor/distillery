@@ -208,6 +208,124 @@ def _derive_source_tags(item: FeedItem, source_type: str) -> list[str]:
     return tags
 
 
+def build_keyword_map(vocabulary: dict[str, int]) -> dict[str, str]:
+    """Build a keyword-to-tag-path map from a tag vocabulary.
+
+    For each tag in *vocabulary*:
+
+    - Extracts the leaf segment (the last ``/``-separated part).
+    - Maps the leaf directly to the full tag path.
+    - Splits hyphenated leaves into individual words and maps each word longer
+      than 3 characters to the full tag path.
+
+    When two tags produce the same keyword, the one with the higher occurrence
+    count (or alphabetically first on tie) wins.
+
+    Args:
+        vocabulary: Mapping of full tag path → occurrence count, as returned
+            by :meth:`~distillery.store.protocol.DistilleryStore.get_tag_vocabulary`.
+
+    Returns:
+        A dict mapping lowercase keyword strings to full tag paths.
+
+    Example::
+
+        vocab = {"domain/authentication": 5, "supply-chain-security": 2}
+        kw_map = build_keyword_map(vocab)
+        # kw_map["authentication"]    == "domain/authentication"
+        # kw_map["supply"]            == "supply-chain-security"
+        # kw_map["chain"]             == "supply-chain-security"
+        # kw_map["security"]          == "supply-chain-security"
+    """
+    # keyword -> (full_tag_path, occurrence_count)
+    best: dict[str, tuple[str, int]] = {}
+
+    for tag, count in vocabulary.items():
+        leaf = tag.rsplit("/", 1)[-1]
+        keywords: list[str] = [leaf]
+        # Split hyphenated leaf and keep words longer than 3 chars
+        for word in leaf.split("-"):
+            if len(word) > 3:
+                keywords.append(word)
+
+        for kw in keywords:
+            kw_lower = kw.lower()
+            if kw_lower not in best:
+                best[kw_lower] = (tag, count)
+            else:
+                existing_tag, existing_count = best[kw_lower]
+                # Higher count wins; alphabetical ordering breaks ties
+                if count > existing_count or (count == existing_count and tag < existing_tag):
+                    best[kw_lower] = (tag, count)
+
+    return {kw: tag for kw, (tag, _) in best.items()}
+
+
+def match_topic_tags(text: str, keyword_map: dict[str, str]) -> list[str]:
+    """Match feed item text against a keyword map to derive topic tags.
+
+    Tokenises *text* into lowercase words (splitting on any non-alphanumeric
+    character) and looks each token up in *keyword_map*.  Duplicate tag paths
+    are collapsed so the returned list contains at most one entry per tag.
+
+    Args:
+        text: The combined title + content text of a feed item.
+        keyword_map: A mapping of lowercase keyword → full tag path, as
+            produced by :func:`build_keyword_map`.
+
+    Returns:
+        A deduplicated list of matched full tag paths; empty if nothing matched.
+    """
+    import re
+
+    seen: set[str] = set()
+    matched: list[str] = []
+    for token in re.split(r"[^a-z0-9]+", text.lower()):
+        if not token:
+            continue
+        full_tag = keyword_map.get(token)
+        if full_tag is not None and full_tag not in seen:
+            seen.add(full_tag)
+            matched.append(full_tag)
+
+    return matched
+
+
+def derive_all_tags(
+    item: FeedItem,
+    source_type: str,
+    keyword_map: dict[str, str],
+) -> list[str]:
+    """Derive the complete tag list for a feed item.
+
+    Combines Tier-1 source tags (from :func:`_derive_source_tags`) with
+    Tier-2 topic tags (from :func:`match_topic_tags`) and deduplicates.
+
+    Args:
+        item: The normalised feed item.
+        source_type: The adapter type string (e.g. ``'rss'``, ``'github'``).
+        keyword_map: A mapping of lowercase keyword → full tag path as
+            produced by :func:`build_keyword_map`.
+
+    Returns:
+        A deduplicated list of validated tag paths; Tier-1 tags appear first.
+    """
+    source_tags = _derive_source_tags(item, source_type)
+
+    text = _item_text(item)
+    topic_tags = match_topic_tags(text, keyword_map)
+
+    # Deduplicate preserving order (source tags first)
+    seen: set[str] = set(source_tags)
+    combined = list(source_tags)
+    for tag in topic_tags:
+        if tag not in seen:
+            seen.add(tag)
+            combined.append(tag)
+
+    return combined
+
+
 def _item_to_entry_kwargs(item: FeedItem, relevance_score: float) -> dict[str, Any]:
     """Convert a :class:`~distillery.feeds.models.FeedItem` to Entry constructor kwargs.
 

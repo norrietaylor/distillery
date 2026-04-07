@@ -606,3 +606,218 @@ class TestDeriveSourceTags:
 
         for tag in tags:
             validate_tag(tag)  # should not raise
+
+
+# ---------------------------------------------------------------------------
+# build_keyword_map
+# ---------------------------------------------------------------------------
+
+
+class TestBuildKeywordMap:
+    """Tests for build_keyword_map() in poller.py."""
+
+    def test_leaf_segment_mapped(self) -> None:
+        """The leaf segment of a tag maps to the full tag path."""
+        from distillery.feeds.poller import build_keyword_map
+
+        kw_map = build_keyword_map({"domain/authentication": 5})
+        assert kw_map.get("authentication") == "domain/authentication"
+
+    def test_hyphenated_leaf_splits_long_words(self) -> None:
+        """Hyphenated leaf segments produce individual words > 3 chars."""
+        from distillery.feeds.poller import build_keyword_map
+
+        kw_map = build_keyword_map({"security/supply-chain": 3})
+        # leaf = "supply-chain"; both "supply" and "chain" are > 3 chars
+        assert kw_map.get("supply") == "security/supply-chain"
+        assert kw_map.get("chain") == "security/supply-chain"
+
+    def test_short_words_not_mapped(self) -> None:
+        """Words of 3 chars or fewer from hyphenated leaves are not mapped."""
+        from distillery.feeds.poller import build_keyword_map
+
+        kw_map = build_keyword_map({"ops/ci-cd": 1})
+        # leaf = "ci-cd"; "ci" (2 chars) and "cd" (2 chars) skipped
+        # The whole leaf "ci-cd" should still map
+        assert "ci" not in kw_map
+        assert "cd" not in kw_map
+        assert kw_map.get("ci-cd") == "ops/ci-cd"
+
+    def test_higher_count_wins_on_collision(self) -> None:
+        """When two tags produce the same keyword, the higher-count tag wins."""
+        from distillery.feeds.poller import build_keyword_map
+
+        vocab = {"domain/authentication": 10, "security/authentication": 2}
+        kw_map = build_keyword_map(vocab)
+        assert kw_map.get("authentication") == "domain/authentication"
+
+    def test_alphabetical_tiebreak(self) -> None:
+        """Equal counts resolve alphabetically (earlier tag path wins)."""
+        from distillery.feeds.poller import build_keyword_map
+
+        vocab = {"b-namespace/auth": 5, "a-namespace/auth": 5}
+        kw_map = build_keyword_map(vocab)
+        assert kw_map.get("auth") == "a-namespace/auth"
+
+    def test_case_insensitive_keyword(self) -> None:
+        """Keywords are stored lowercase regardless of input (tags must already be lowercase)."""
+        from distillery.feeds.poller import build_keyword_map
+
+        kw_map = build_keyword_map({"lang/python": 1})
+        assert kw_map.get("python") == "lang/python"
+
+    def test_empty_vocabulary_returns_empty_map(self) -> None:
+        """Empty vocabulary produces an empty keyword map."""
+        from distillery.feeds.poller import build_keyword_map
+
+        assert build_keyword_map({}) == {}
+
+
+# ---------------------------------------------------------------------------
+# match_topic_tags
+# ---------------------------------------------------------------------------
+
+
+class TestMatchTopicTags:
+    """Tests for match_topic_tags() in poller.py."""
+
+    def test_single_hit(self) -> None:
+        """A keyword present in the text returns the corresponding tag."""
+        from distillery.feeds.poller import match_topic_tags
+
+        kw_map = {"authentication": "domain/authentication"}
+        result = match_topic_tags("Using authentication tokens", kw_map)
+        assert "domain/authentication" in result
+
+    def test_case_insensitive(self) -> None:
+        """Matching is case-insensitive."""
+        from distillery.feeds.poller import match_topic_tags
+
+        kw_map = {"authentication": "domain/authentication"}
+        result = match_topic_tags("AUTHENTICATION is required", kw_map)
+        assert "domain/authentication" in result
+
+    def test_no_match_returns_empty(self) -> None:
+        """Text with no matching keywords returns an empty list."""
+        from distillery.feeds.poller import match_topic_tags
+
+        kw_map = {"authentication": "domain/authentication"}
+        result = match_topic_tags("Hello world, nothing to see here", kw_map)
+        assert result == []
+
+    def test_deduplication(self) -> None:
+        """The same keyword appearing multiple times produces only one tag entry."""
+        from distillery.feeds.poller import match_topic_tags
+
+        kw_map = {"authentication": "domain/authentication"}
+        result = match_topic_tags("authentication and more authentication", kw_map)
+        assert result.count("domain/authentication") == 1
+
+    def test_multiple_hits(self) -> None:
+        """Multiple distinct keywords each map to their respective tags."""
+        from distillery.feeds.poller import match_topic_tags
+
+        kw_map = {
+            "authentication": "domain/authentication",
+            "security": "domain/security",
+        }
+        result = match_topic_tags("authentication and security", kw_map)
+        assert "domain/authentication" in result
+        assert "domain/security" in result
+
+    def test_empty_text_returns_empty(self) -> None:
+        """Empty text produces no matches."""
+        from distillery.feeds.poller import match_topic_tags
+
+        kw_map = {"authentication": "domain/authentication"}
+        result = match_topic_tags("", kw_map)
+        assert result == []
+
+    def test_empty_keyword_map_returns_empty(self) -> None:
+        """Empty keyword map produces no matches."""
+        from distillery.feeds.poller import match_topic_tags
+
+        result = match_topic_tags("authentication security python", {})
+        assert result == []
+
+
+# ---------------------------------------------------------------------------
+# derive_all_tags (topic_tag matching integration)
+# ---------------------------------------------------------------------------
+
+
+class TestDeriveAllTagsTopicTag:
+    """Tests for derive_all_tags() in poller.py — Tier 1 + Tier 2 combination."""
+
+    def _make_item(
+        self,
+        source_url: str,
+        source_type: str,
+        title: str = "",
+        content: str = "",
+    ) -> FeedItem:
+        return FeedItem(
+            source_url=source_url,
+            source_type=source_type,
+            item_id="test-id",
+            title=title,
+            content=content,
+        )
+
+    def test_topic_tag_matched_from_title(self) -> None:
+        """An item with 'authentication' in its title gets the matching topic tag."""
+        from distillery.feeds.poller import derive_all_tags
+
+        kw_map = {"authentication": "domain/authentication"}
+        item = self._make_item(
+            "https://example.com/rss", "rss", title="OAuth authentication guide"
+        )
+        tags = derive_all_tags(item, "rss", kw_map)
+        assert "domain/authentication" in tags
+
+    def test_no_topic_match_only_source_tags(self) -> None:
+        """An item with no keyword matches gets only source tags."""
+        from distillery.feeds.poller import derive_all_tags
+
+        kw_map = {"authentication": "domain/authentication"}
+        item = self._make_item("https://example.com/rss", "rss", title="Random news update")
+        tags = derive_all_tags(item, "rss", kw_map)
+        assert "source/rss" in tags
+        assert "domain/authentication" not in tags
+
+    def test_source_tags_appear_before_topic_tags(self) -> None:
+        """Source tags (Tier 1) come before topic tags (Tier 2) in the result."""
+        from distillery.feeds.poller import derive_all_tags
+
+        kw_map = {"authentication": "domain/authentication"}
+        item = self._make_item(
+            "https://example.com/rss",
+            "rss",
+            content="authentication token management",
+        )
+        tags = derive_all_tags(item, "rss", kw_map)
+        source_indices = [i for i, t in enumerate(tags) if t.startswith("source/")]
+        topic_indices = [i for i, t in enumerate(tags) if not t.startswith("source/")]
+        if source_indices and topic_indices:
+            assert max(source_indices) < min(topic_indices)
+
+    def test_deduplication_across_tiers(self) -> None:
+        """A tag present in both source and topic tiers appears only once."""
+        from distillery.feeds.poller import derive_all_tags
+
+        # keyword_map maps "rss" -> "source/rss" — same as a source tag
+        kw_map = {"rss": "source/rss"}
+        item = self._make_item("https://example.com/rss", "rss", title="rss feeds are great")
+        tags = derive_all_tags(item, "rss", kw_map)
+        assert tags.count("source/rss") == 1
+
+    def test_empty_keyword_map_returns_source_tags_only(self) -> None:
+        """Empty keyword map still returns source tags."""
+        from distillery.feeds.poller import derive_all_tags
+
+        item = self._make_item(
+            "https://github.com/owner/repo", "github", title="New release"
+        )
+        tags = derive_all_tags(item, "github", {})
+        assert "source/github" in tags
+        assert "source/github/owner/repo" in tags
