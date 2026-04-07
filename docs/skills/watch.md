@@ -58,6 +58,24 @@ Removes a source by URL. If no sources remain after removal and transport is loc
 | `github` | Repository events via GitHub REST API |
 | `rss` | RSS/Atom feed entries |
 
+## Authentication
+
+GitHub sources support authenticated polling via the `GITHUB_TOKEN` environment variable. When set, all GitHub API requests include the token for:
+
+- **Private repository access** — poll events from repos that require authentication
+- **Higher rate limits** — 5,000 requests/hour (authenticated) vs 60/hour (unauthenticated)
+- **Transparent redirect following** — renamed or transferred repos are followed automatically
+
+The token is never stored in feed configuration or entry metadata. Set it in your MCP server config:
+
+```json
+"env": {
+  "GITHUB_TOKEN": "ghp_..."
+}
+```
+
+If `GITHUB_TOKEN` is not set, GitHub sources poll public repos only.
+
 ## Tips
 
 - Use `/watch` regularly to review your monitored sources

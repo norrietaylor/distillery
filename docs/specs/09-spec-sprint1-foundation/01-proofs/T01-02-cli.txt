@@ -1,8 +1,0 @@
-Type: cli
-Command: python3 -m mypy --strict src/distillery/feeds/poller.py src/distillery/feeds/github.py src/distillery/security.py
-Expected: No type errors in modified source files
-Timestamp: 2026-04-06T00:00:00Z
-
-Success: no issues found in 3 source files
-
-Status: PASS

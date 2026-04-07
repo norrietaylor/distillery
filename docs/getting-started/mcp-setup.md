@@ -61,7 +61,7 @@ See [`distillery.yaml.example`](https://github.com/norrietaylor/distillery/blob/
 | `distillery_classify` | Classify an entry by type with LLM-based confidence scoring |
 | `distillery_resolve_review` | Resolve a pending review entry (accept/reject/reclassify) |
 | **Observability** | |
-| `distillery_metrics` | Usage dashboard with configurable scope: `"summary"` (health check), `"full"` (all metrics), or `"search_quality"` (retrieval stats) |
+| `distillery_metrics` | Usage dashboard with configurable scope: `"summary"` (health check), `"full"` (all metrics), `"search_quality"` (retrieval stats), or `"audit"` (login history and operations) |
 | **Feeds** | |
 | `distillery_watch` | List, add, or remove monitored feed sources (RSS, GitHub) |
 | `distillery_poll` | Trigger a feed poll cycle (fetch, score, store) |
