@@ -387,6 +387,36 @@ class TestInterestExtractorExtract:
         profile = await ext.extract()
         assert "myfeed.com" in profile.suggestion_context
 
+    async def test_feed_entries_excluded_from_tag_profile(self) -> None:
+        """Feed entries should not contribute to the interest profile tags."""
+        entries = [
+            _make_entry(entry_type="session", tags=["domain/auth"]),
+            _make_entry(entry_type="feed", tags=["source/rss", "domain/auth", "domain/feed-topic"]),
+            _make_entry(entry_type="feed", tags=["source/rss", "domain/feed-topic"]),
+            _make_entry(entry_type="feed", tags=["source/rss", "domain/feed-topic"]),
+        ]
+        store = _make_store(entries)
+        ext = InterestExtractor(store=store)
+        profile = await ext.extract()
+        tag_names = [t for t, _ in profile.top_tags]
+        # Session tag should appear
+        assert "domain/auth" in tag_names
+        # Feed-only tags should not appear
+        assert "source/rss" not in tag_names
+        assert "domain/feed-topic" not in tag_names
+
+    async def test_feed_entries_excluded_from_entry_count(self) -> None:
+        """entry_count should only count non-feed entries."""
+        entries = [
+            _make_entry(entry_type="session", tags=["topic"]),
+            _make_entry(entry_type="feed", tags=["source/rss"]),
+            _make_entry(entry_type="feed", tags=["source/rss"]),
+        ]
+        store = _make_store(entries)
+        ext = InterestExtractor(store=store)
+        profile = await ext.extract()
+        assert profile.entry_count == 1
+
 
 # ---------------------------------------------------------------------------
 # _handle_interests
