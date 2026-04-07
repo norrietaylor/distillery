@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -279,8 +280,6 @@ def match_topic_tags(text: str, keyword_map: dict[str, str]) -> list[str]:
     Returns:
         A deduplicated list of matched full tag paths; empty if nothing matched.
     """
-    import re
-
     seen: set[str] = set()
     matched: list[str] = []
     for token in re.split(r"[^a-z0-9]+", text.lower()):
