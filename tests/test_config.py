@@ -94,6 +94,10 @@ class TestDefaultConfig:
         assert cfg.defaults.dedup_threshold == pytest.approx(0.92)
         assert cfg.defaults.dedup_limit == 3
         assert cfg.defaults.stale_days == 30
+        assert cfg.defaults.hybrid_search is True
+        assert cfg.defaults.rrf_k == 60
+        assert cfg.defaults.recency_window_days == 90
+        assert cfg.defaults.recency_min_weight == pytest.approx(0.5)
 
 
 # ---------------------------------------------------------------------------
@@ -167,6 +171,34 @@ class TestYAMLLoading:
         assert cfg.defaults.dedup_threshold == pytest.approx(0.85)
         assert cfg.defaults.dedup_limit == 5
         assert cfg.defaults.stale_days == 45
+
+    def test_hybrid_search_defaults(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Hybrid search fields use sensible defaults when absent from config."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        cfg = load_config()
+        assert cfg.defaults.hybrid_search is True
+        assert cfg.defaults.rrf_k == 60
+        assert cfg.defaults.recency_window_days == 90
+        assert cfg.defaults.recency_min_weight == pytest.approx(0.5)
+
+    def test_hybrid_search_overrides(self, tmp_path: Path) -> None:
+        """Hybrid search fields can be overridden via YAML config."""
+        yaml_content = """\
+            defaults:
+              hybrid_search: false
+              rrf_k: 100
+              recency_window_days: 30
+              recency_min_weight: 0.3
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.defaults.hybrid_search is False
+        assert cfg.defaults.rrf_k == 100
+        assert cfg.defaults.recency_window_days == 30
+        assert cfg.defaults.recency_min_weight == pytest.approx(0.3)
 
     def test_openai_provider(self, tmp_path: Path) -> None:
         yaml_content = """\

@@ -326,12 +326,23 @@ def derive_all_tags(
     return combined
 
 
-def _item_to_entry_kwargs(item: FeedItem, relevance_score: float) -> dict[str, Any]:
+def _item_to_entry_kwargs(
+    item: FeedItem,
+    relevance_score: float,
+    keyword_map: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """Convert a :class:`~distillery.feeds.models.FeedItem` to Entry constructor kwargs.
+
+    When *keyword_map* is provided, topic tags (Tier 2) are derived in addition
+    to source tags (Tier 1) via :func:`derive_all_tags`.  When absent, only
+    source tags are derived.
 
     Args:
         item: The normalised feed item.
         relevance_score: The computed cosine similarity score.
+        keyword_map: Optional keyword-to-tag-path mapping produced by
+            :func:`build_keyword_map` for the current poll cycle.  When
+            ``None`` only Tier-1 source tags are applied.
 
     Returns:
         A dict of keyword arguments for :class:`~distillery.models.Entry`.
@@ -352,7 +363,10 @@ def _item_to_entry_kwargs(item: FeedItem, relevance_score: float) -> dict[str, A
     if item.published_at:
         metadata["published_at"] = item.published_at.isoformat()
 
-    tags = _derive_source_tags(item, item.source_type)
+    if keyword_map is not None:
+        tags = derive_all_tags(item, item.source_type, keyword_map)
+    else:
+        tags = _derive_source_tags(item, item.source_type)
 
     return {
         "content": text or item.source_url,
@@ -458,8 +472,21 @@ class FeedPoller:
             interest_profile=interest_profile,
         )
 
+        # Build keyword map once per poll cycle for Tier-2 topic tag matching.
+        keyword_map: dict[str, str] = {}
+        try:
+            vocabulary = await self._store.get_tag_vocabulary()
+            keyword_map = build_keyword_map(vocabulary)
+            logger.debug(
+                "FeedPoller: built keyword map with %d keywords from %d tags",
+                len(keyword_map),
+                len(vocabulary),
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("FeedPoller: keyword map build failed — topic tagging disabled")
+
         for source in sources:
-            result = await self._poll_source(source, scorer)
+            result = await self._poll_source(source, scorer, keyword_map=keyword_map)
             summary.results.append(result)
             summary.total_fetched += result.items_fetched
             summary.total_stored += result.items_stored
@@ -476,12 +503,16 @@ class FeedPoller:
         self,
         source: FeedSourceConfig,
         scorer: RelevanceScorer,
+        *,
+        keyword_map: dict[str, str] | None = None,
     ) -> PollResult:
         """Poll a single source and return a :class:`PollResult`.
 
         Args:
             source: The configured feed source.
             scorer: The :class:`~distillery.feeds.scorer.RelevanceScorer` to use.
+            keyword_map: Optional keyword-to-tag-path mapping for Tier-2 topic
+                tag matching, built once per poll cycle by the caller.
 
         Returns:
             A :class:`PollResult` summarising what happened.
@@ -559,7 +590,7 @@ class FeedPoller:
             try:
                 from distillery.models import Entry
 
-                kwargs = _item_to_entry_kwargs(item, adjusted_score)
+                kwargs = _item_to_entry_kwargs(item, adjusted_score, keyword_map)
                 entry = Entry(**kwargs)
                 await self._store.store(entry)
                 batch_entry_ids.add(str(entry.id))

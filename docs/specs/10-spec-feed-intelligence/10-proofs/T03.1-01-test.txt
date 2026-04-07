@@ -1,43 +1,44 @@
-Proof Artifact: T03.1-01-test.txt
 Type: test
-Test Suite: Unit 1 (Source Tag Derivation + Store Protocol Extension)
-Command: uv run pytest tests/test_feeds.py::TestDeriveSourceTags tests/test_store_integration.py::TestGetTagVocabulary tests/test_mcp_analytics.py::TestTagTree tests/test_tags.py::TestTagTreeMCPTool -v
-Expected: All tests pass
-Timestamp: 2026-04-06T18:30:00Z
+Command: pytest tests/test_config.py -v
+Expected: Config tests pass with new fields
+Timestamp: 2026-04-06T00:00:00Z
 
 ============================= test session starts ==============================
-============================= TEST RESULTS ==============================
+platform linux -- Python 3.13.7, pytest-9.0.2, pluggy-1.6.0
+asyncio: mode=Mode.AUTO
+collected 91 items
 
-tests/test_feeds.py::TestDeriveSourceTags::test_source_tag_rss_generic PASSED
-tests/test_feeds.py::TestDeriveSourceTags::test_source_tag_github_type PASSED
-tests/test_feeds.py::TestDeriveSourceTags::test_source_tag_github_owner_repo PASSED
-tests/test_feeds.py::TestDeriveSourceTags::test_source_tag_github_slug_format PASSED
-tests/test_feeds.py::TestDeriveSourceTags::test_source_tag_reddit PASSED
-tests/test_feeds.py::TestDeriveSourceTags::test_source_tag_reddit_no_generic_domain PASSED
-tests/test_feeds.py::TestDeriveSourceTags::test_source_tag_domain_extraction PASSED
-tests/test_feeds.py::TestDeriveSourceTags::test_source_tag_domain_no_www_prefix PASSED
-tests/test_feeds.py::TestDeriveSourceTags::test_source_tag_invalid_github_url_still_returns_type_tag PASSED
-tests/test_feeds.py::TestDeriveSourceTags::test_source_tag_invalid_tags_dropped PASSED
+tests/test_config.py::TestDefaultConfig::test_returns_distillery_config PASSED
+tests/test_config.py::TestDefaultConfig::test_storage_defaults PASSED
+tests/test_config.py::TestDefaultConfig::test_embedding_defaults PASSED
+tests/test_config.py::TestDefaultConfig::test_team_defaults PASSED
+tests/test_config.py::TestDefaultConfig::test_classification_defaults PASSED
+tests/test_config.py::TestDefaultConfig::test_dedup_threshold_defaults PASSED
+tests/test_config.py::TestDefaultConfig::test_defaults_defaults PASSED
+tests/test_config.py::TestYAMLLoading::test_loads_storage PASSED
+tests/test_config.py::TestYAMLLoading::test_loads_embedding PASSED
+tests/test_config.py::TestYAMLLoading::test_loads_team PASSED
+tests/test_config.py::TestYAMLLoading::test_loads_classification PASSED
+tests/test_config.py::TestYAMLLoading::test_loads_dedup_thresholds PASSED
+tests/test_config.py::TestYAMLLoading::test_loads_defaults PASSED
+tests/test_config.py::TestYAMLLoading::test_hybrid_search_defaults PASSED  [NEW]
+tests/test_config.py::TestYAMLLoading::test_hybrid_search_overrides PASSED  [NEW]
+tests/test_config.py::TestYAMLLoading::test_openai_provider PASSED
+tests/test_config.py::TestYAMLLoading::test_partial_yaml_uses_defaults PASSED
+tests/test_config.py::TestYAMLLoading::test_empty_yaml_file_uses_defaults PASSED
+... (73 more tests) ...
 
-tests/test_store_integration.py::TestGetTagVocabulary::test_tag_vocabulary_empty_store PASSED
-tests/test_store_integration.py::TestGetTagVocabulary::test_tag_vocabulary_returns_correct_counts PASSED
-tests/test_store_integration.py::TestGetTagVocabulary::test_tag_vocabulary_excludes_archived PASSED
-tests/test_store_integration.py::TestGetTagVocabulary::test_tag_vocabulary_prefix_filtering PASSED
-tests/test_store_integration.py::TestGetTagVocabulary::test_tag_vocabulary_prefix_exact_match PASSED
-tests/test_store_integration.py::TestGetTagVocabulary::test_tag_vocabulary_prefix_no_partial_word_match PASSED
-
-tests/test_mcp_analytics.py::TestTagTree::test_tag_tree_empty_store PASSED
-tests/test_mcp_analytics.py::TestTagTree::test_tag_tree_single_tag PASSED
-tests/test_mcp_analytics.py::TestTagTree::test_tag_tree_nested_tags PASSED
-tests/test_mcp_analytics.py::TestTagTree::test_tag_tree_with_prefix PASSED
-tests/test_mcp_analytics.py::TestTagTree::test_tag_tree_counts_distinct_entries PASSED
-tests/test_mcp_analytics.py::TestTagTree::test_tag_tree_excludes_archived PASSED
-
-tests/test_tags.py::TestTagTreeMCPTool::test_tag_tree_returns_nested_structure PASSED
-tests/test_tags.py::TestTagTreeMCPTool::test_tag_tree_filters_by_prefix PASSED
-tests/test_tags.py::TestTagTreeMCPTool::test_tag_tree_empty_store_returns_empty_tree PASSED
-
-============================== 25 passed in 1.01s =======================================
+============================== 91 passed in 0.08s ==============================
 
 Status: PASS
-Summary: All 25 tests pass, covering source tag derivation, tag vocabulary API, and analytics refactoring.
+
+New fields added to DefaultsConfig:
+- hybrid_search: bool = True
+- rrf_k: int = 60
+- recency_window_days: int = 90
+- recency_min_weight: float = 0.5
+
+New tests added:
+- TestDefaultConfig::test_defaults_defaults - extended to assert new field defaults
+- TestYAMLLoading::test_hybrid_search_defaults - verifies defaults when absent from YAML
+- TestYAMLLoading::test_hybrid_search_overrides - verifies fields can be overridden via YAML

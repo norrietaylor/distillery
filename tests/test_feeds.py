@@ -821,3 +821,190 @@ class TestDeriveAllTagsTopicTag:
         tags = derive_all_tags(item, "github", {})
         assert "source/github" in tags
         assert "source/github/owner/repo" in tags
+
+
+# ---------------------------------------------------------------------------
+# Poll cycle integration — vocabulary caching and topic tag wiring
+# ---------------------------------------------------------------------------
+
+
+class TestPollCycleTopicTagIntegration:
+    """Tests for poll() vocabulary caching and _item_to_entry_kwargs topic tag wiring."""
+
+    def _make_item(
+        self,
+        *,
+        title: str = "Test item",
+        content: str = "",
+        source_url: str = "https://example.com/rss",
+        source_type: str = "rss",
+        item_id: str = "item-1",
+    ) -> FeedItem:
+        return FeedItem(
+            source_url=source_url,
+            source_type=source_type,
+            item_id=item_id,
+            title=title,
+            content=content,
+        )
+
+    def test_item_to_entry_kwargs_with_keyword_map_adds_topic_tags(self) -> None:
+        """_item_to_entry_kwargs applies topic tags when keyword_map is provided."""
+        from distillery.feeds.poller import _item_to_entry_kwargs
+
+        item = self._make_item(title="authentication guide for developers")
+        keyword_map = {"authentication": "domain/authentication"}
+        kwargs = _item_to_entry_kwargs(item, 0.8, keyword_map)
+        assert "domain/authentication" in kwargs["tags"]
+        assert "source/rss" in kwargs["tags"]
+
+    def test_item_to_entry_kwargs_without_keyword_map_only_source_tags(self) -> None:
+        """_item_to_entry_kwargs only returns source tags when keyword_map is None."""
+        from distillery.feeds.poller import _item_to_entry_kwargs
+
+        item = self._make_item(title="authentication guide for developers")
+        kwargs = _item_to_entry_kwargs(item, 0.8, None)
+        assert "source/rss" in kwargs["tags"]
+        assert "domain/authentication" not in kwargs["tags"]
+
+    def test_item_to_entry_kwargs_empty_keyword_map_only_source_tags(self) -> None:
+        """_item_to_entry_kwargs with empty keyword_map returns only source tags."""
+        from distillery.feeds.poller import _item_to_entry_kwargs
+
+        item = self._make_item(title="authentication guide for developers")
+        kwargs = _item_to_entry_kwargs(item, 0.8, {})
+        assert "source/rss" in kwargs["tags"]
+        assert "domain/authentication" not in kwargs["tags"]
+
+    @pytest.mark.asyncio
+    async def test_poll_with_vocabulary_produces_topic_tagged_entries(self) -> None:
+        """poll() fetches vocabulary, builds keyword map, and stores topic-tagged entries."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from distillery.feeds.poller import FeedPoller
+
+        # Set up config with one RSS source
+        source_cfg = MagicMock()
+        source_cfg.url = "https://example.com/rss"
+        source_cfg.source_type = "rss"
+        source_cfg.trust_weight = 1.0
+
+        config = MagicMock()
+        config.feeds.thresholds.digest = 0.0
+
+        # Mock store
+        store = AsyncMock()
+        store.list_feed_sources.return_value = [
+            {"url": "https://example.com/rss", "source_type": "rss", "trust_weight": 1.0}
+        ]
+        store.get_tag_vocabulary.return_value = {"domain/authentication": 5}
+        store.find_similar.return_value = []
+        store.list_entries.return_value = []  # no external_id duplicates
+
+        # Feed item mentioning "authentication" so keyword map should match
+        item = self._make_item(title="OAuth authentication guide", item_id="test-001")
+
+        stored_entries: list = []
+
+        async def capture_store(entry: object) -> None:
+            stored_entries.append(entry)
+
+        store.store.side_effect = capture_store
+
+        with (
+            patch(
+                "distillery.feeds.poller._build_adapter"
+            ) as mock_build_adapter,
+            patch(
+                "distillery.feeds.poller.RelevanceScorer"
+            ) as mock_scorer_cls,
+            patch(
+                "distillery.feeds.interests.InterestExtractor"
+            ) as mock_extractor_cls,
+        ):
+            mock_adapter = MagicMock()
+            mock_adapter.fetch.return_value = [item]
+            mock_build_adapter.return_value = mock_adapter
+
+            mock_scorer = AsyncMock()
+            mock_scorer.score.return_value = 0.9
+            mock_scorer_cls.return_value = mock_scorer
+
+            mock_extractor = AsyncMock()
+            mock_extractor.extract.return_value = MagicMock(
+                entry_count=0, top_tags=[]
+            )
+            mock_extractor_cls.return_value = mock_extractor
+
+            poller = FeedPoller(store=store, config=config)
+            summary = await poller.poll()
+
+        assert summary.total_stored == 1
+        assert len(stored_entries) == 1
+        stored_tags = stored_entries[0].tags
+        assert "domain/authentication" in stored_tags
+        assert "source/rss" in stored_tags
+
+    @pytest.mark.asyncio
+    async def test_poll_without_vocabulary_still_stores_source_tagged_entries(self) -> None:
+        """poll() continues without topic tags when get_tag_vocabulary() raises."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from distillery.feeds.poller import FeedPoller
+
+        config = MagicMock()
+        config.feeds.thresholds.digest = 0.0
+
+        store = AsyncMock()
+        store.list_feed_sources.return_value = [
+            {"url": "https://example.com/rss", "source_type": "rss", "trust_weight": 1.0}
+        ]
+        # Simulate vocabulary fetch failure
+        store.get_tag_vocabulary.side_effect = RuntimeError("db error")
+        store.find_similar.return_value = []
+        store.list_entries.return_value = []
+
+        item = self._make_item(title="Authentication in Python", item_id="test-002")
+
+        stored_entries: list = []
+
+        async def capture_store(entry: object) -> None:
+            stored_entries.append(entry)
+
+        store.store.side_effect = capture_store
+
+        with (
+            patch(
+                "distillery.feeds.poller._build_adapter"
+            ) as mock_build_adapter,
+            patch(
+                "distillery.feeds.poller.RelevanceScorer"
+            ) as mock_scorer_cls,
+            patch(
+                "distillery.feeds.interests.InterestExtractor"
+            ) as mock_extractor_cls,
+        ):
+            mock_adapter = MagicMock()
+            mock_adapter.fetch.return_value = [item]
+            mock_build_adapter.return_value = mock_adapter
+
+            mock_scorer = AsyncMock()
+            mock_scorer.score.return_value = 0.9
+            mock_scorer_cls.return_value = mock_scorer
+
+            mock_extractor = AsyncMock()
+            mock_extractor.extract.return_value = MagicMock(
+                entry_count=0, top_tags=[]
+            )
+            mock_extractor_cls.return_value = mock_extractor
+
+            poller = FeedPoller(store=store, config=config)
+            summary = await poller.poll()
+
+        # Should still store entries — with only source tags
+        assert summary.total_stored == 1
+        assert len(stored_entries) == 1
+        stored_tags = stored_entries[0].tags
+        assert "source/rss" in stored_tags
+        # No topic tags since vocabulary fetch failed
+        assert "domain/authentication" not in stored_tags
