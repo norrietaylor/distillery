@@ -63,39 +63,49 @@ Distillery provides 10 Claude Code slash commands:
 
 ## Quick Start
 
-### Plugin Install (Recommended)
+### Local with uvx (Recommended)
+
+No install needed — runs the MCP server ephemerally with your own private database:
+
+```bash
+# Get a free API key from jina.ai, then:
+export JINA_API_KEY=jina_...
+```
+
+Add to `~/.claude/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "distillery": {
+      "command": "uvx",
+      "args": ["distillery-mcp"],
+      "env": {
+        "JINA_API_KEY": "${JINA_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+Restart Claude Code and run the onboarding wizard:
+
+```
+/setup
+```
+
+See the [Local Setup Guide](https://norrietaylor.github.io/distillery/getting-started/local-setup/) for full configuration options.
+
+### Try without setup (Demo Server)
+
+Want to try Distillery without any local setup? Install the plugin to connect to the hosted demo server:
 
 ```bash
 claude plugin marketplace add norrietaylor/distillery
 claude plugin install distillery
 ```
 
-Then run the onboarding wizard in Claude Code:
-
-```
-/setup
-```
-
-This verifies MCP connectivity, detects your transport, and configures auto-poll for ambient intelligence.
-
-> **Demo Server:** The plugin defaults to `distillery-mcp.fly.dev`, which is a demo server for evaluation only. Do not store sensitive or confidential data. For production use, [deploy your own instance](https://norrietaylor.github.io/distillery/team/deployment/) or run locally.
-
-### Local Setup
-
-```bash
-# Run directly (no install needed)
-uvx distillery-mcp
-
-# Or install from PyPI
-pip install distillery-mcp
-
-# Or install from source
-git clone https://github.com/norrietaylor/distillery.git
-cd distillery
-pip install -e .
-```
-
-See the [Local Setup Guide](https://norrietaylor.github.io/distillery/getting-started/local-setup/) for configuration and MCP server connection.
+> **Note:** The demo server at `distillery-mcp.fly.dev` is for evaluation only. Do not store sensitive data. For production use, run locally with `uvx` (above) or [deploy your own instance](https://norrietaylor.github.io/distillery/team/deployment/).
 
 ## Development
 

@@ -55,38 +55,18 @@ ln -s ~/.claude/distillery/skills/setup     ~/.claude/skills/setup
 
 ## MCP Configuration
 
-The skills require the Distillery MCP server. The plugin defaults to the hosted server at `https://distillery-mcp.fly.dev/mcp` with GitHub OAuth authentication — no local installation or API key required.
+The skills require the Distillery MCP server. The recommended approach is to run it locally via `uvx` for a private knowledge base. The plugin also bundles a demo server connection for quick evaluation.
 
-### Default — Hosted HTTP (GitHub OAuth)
+### Recommended — Local stdio with uvx
 
-The plugin manifest configures this automatically on install. On first use, Claude Code opens a browser for GitHub OAuth login. After authorization, all MCP tools are available.
-
-To configure manually, add to `~/.claude/settings.json`:
-
-```json
-{
-  "mcpServers": {
-    "distillery": {
-      "url": "https://distillery-mcp.fly.dev/mcp",
-      "transport": "http"
-    }
-  }
-}
-```
-
-### Alternative — Local stdio
-
-For offline use or a private knowledge base, run the MCP server locally. Requires Python 3.11+ and a local Distillery installation.
+Run the MCP server locally for a private, self-contained knowledge base. Requires Python 3.11+.
 
 ```bash
-# Recommended
+# No install needed
 uvx distillery-mcp
-
-# Or with pip
-pip install distillery-mcp
 ```
 
-Add to `~/.claude/settings.json` (using `uvx`):
+Add to `~/.claude/settings.json`:
 
 ```json
 {
@@ -103,23 +83,27 @@ Add to `~/.claude/settings.json` (using `uvx`):
 }
 ```
 
-Or using the installed entry point:
+This overrides the plugin's default demo server connection. See [Local Setup](local-setup.md) for full configuration (embedding providers, cloud storage, etc.).
+
+### Alternative — Demo server (no setup)
+
+The plugin manifest configures a connection to the hosted demo at `https://distillery-mcp.fly.dev/mcp` with GitHub OAuth authentication. On first use, Claude Code opens a browser for GitHub OAuth login.
+
+!!! warning "Demo Server"
+    The demo server is for **evaluation only**. Do not store sensitive or confidential data. For production use, run locally with `uvx` (above) or deploy your own instance.
+
+To configure manually, add to `~/.claude/settings.json`:
 
 ```json
 {
   "mcpServers": {
     "distillery": {
-      "command": "distillery-mcp",
-      "env": {
-        "JINA_API_KEY": "${JINA_API_KEY}",
-        "DISTILLERY_CONFIG": "${DISTILLERY_CONFIG}"
-      }
+      "url": "https://distillery-mcp.fly.dev/mcp",
+      "transport": "http"
     }
   }
 }
 ```
-
-See [Local Setup](local-setup.md) for full local configuration and [MCP Server Reference](mcp-setup.md) for all options.
 
 ### Alternative — Self-hosted HTTP
 

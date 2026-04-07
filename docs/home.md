@@ -35,26 +35,48 @@ Distillery provides 10 Claude Code slash commands:
 
 ## Quick Start
 
-The fastest way to get started:
+### Local with uvx (Recommended)
+
+No install needed — runs the MCP server ephemerally with your own private database:
 
 ```bash
-# Install the plugin (all 10 skills + MCP connection)
+# Get a free API key from jina.ai, then:
+export JINA_API_KEY=jina_...
+```
+
+Add to `~/.claude/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "distillery": {
+      "command": "uvx",
+      "args": ["distillery-mcp"],
+      "env": {
+        "JINA_API_KEY": "${JINA_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+Restart Claude Code and run `/setup` to complete onboarding.
+
+See [Local Setup](getting-started/local-setup.md) for full configuration (embedding providers, cloud storage, etc.).
+
+### Try without setup (Demo Server)
+
+Want to try Distillery without any local setup? Install the plugin to connect to the hosted demo:
+
+```bash
 claude plugin marketplace add norrietaylor/distillery
 claude plugin install distillery
 ```
 
-Then run the onboarding wizard in Claude Code:
-
-```text
-/setup
-```
-
-This verifies MCP connectivity, detects your transport, and configures auto-poll for ambient intelligence.
-
 !!! warning "Demo Server"
-    The plugin defaults to the hosted instance at `distillery-mcp.fly.dev`, which is a **demo server** for evaluation only. Do not store sensitive or confidential data. For production use, [deploy your own instance](team/deployment.md) or use [local setup](getting-started/local-setup.md).
+    The plugin defaults to `distillery-mcp.fly.dev`, which is a **demo server** for evaluation only. Do not store sensitive or confidential data. For production use, run locally with `uvx` (above) or [deploy your own instance](team/deployment.md).
 
-For other installation options, see [Plugin Install](getting-started/plugin-install.md) or [Local Setup](getting-started/local-setup.md).
+For all installation options, see [Plugin Install](getting-started/plugin-install.md) or [Local Setup](getting-started/local-setup.md).
 
 ## License
 
