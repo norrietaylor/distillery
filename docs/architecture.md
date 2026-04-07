@@ -51,7 +51,7 @@ Distillery is built as a 4-layer system where skills (SKILL.md files) drive all 
   <!-- Layer 2: MCP Server -->
   <rect class="d-amber-bg" x="30" y="104" width="700" height="52" rx="10"/>
   <text class="d-white" x="380" y="128" text-anchor="middle">MCP Server</text>
-  <text class="d-white-sub" x="380" y="144" text-anchor="middle">FastMCP 2.x/3.x  ·  stdio + streamable-HTTP  ·  18 tools  ·  REST webhooks (/api/*)</text>
+  <text class="d-white-sub" x="380" y="144" text-anchor="middle">FastMCP 2.x/3.x  ·  stdio + streamable-HTTP  ·  tools  ·  REST webhooks (/api/*)</text>
 
   <!-- Connector: MCP to Auth + Protocols -->
   <line class="d-line" x1="380" y1="156" x2="380" y2="168"/>
@@ -75,7 +75,7 @@ Distillery is built as a 4-layer system where skills (SKILL.md files) drive all 
   <!-- Layer 3c: Feeds -->
   <rect class="d-feed" x="510" y="180" width="220" height="64" rx="8"/>
   <text class="d-feed-title" x="620" y="202" text-anchor="middle">Feed System</text>
-  <text class="d-box-sub" x="620" y="218" text-anchor="middle">GitHub · RSS/Atom adapters</text>
+  <text class="d-box-sub" x="620" y="218" text-anchor="middle">GitHub · RSS/Atom · Auto-tagging</text>
   <text class="d-box-sub" x="620" y="232" text-anchor="middle">Poller · Scorer · Interests</text>
 
   <!-- Connector: Protocols to Backends -->
@@ -88,9 +88,9 @@ Distillery is built as a 4-layer system where skills (SKILL.md files) drive all 
 
   <!-- Layer 4: Backends -->
   <rect class="d-box" x="30" y="268" width="210" height="72" rx="8"/>
-  <text class="d-box-title" x="135" y="290" text-anchor="middle">DuckDB + VSS</text>
-  <text class="d-box-sub" x="135" y="306" text-anchor="middle">HNSW cosine similarity</text>
-  <text class="d-box-sub" x="135" y="320" text-anchor="middle">Vector search + SQL storage</text>
+  <text class="d-box-title" x="135" y="290" text-anchor="middle">DuckDB + VSS + FTS</text>
+  <text class="d-box-sub" x="135" y="306" text-anchor="middle">HNSW + BM25 hybrid (RRF)</text>
+  <text class="d-box-sub" x="135" y="320" text-anchor="middle">Vector + keyword search</text>
 
   <rect class="d-box" x="254" y="268" width="152" height="72" rx="8"/>
   <text class="d-box-title" x="330" y="290" text-anchor="middle">Embedding</text>
@@ -140,12 +140,12 @@ Distillery is built as a 4-layer system where skills (SKILL.md files) drive all 
 | Layer | What it does | Key files |
 |-------|-------------|-----------|
 | **Skills** | 10 SKILL.md files — portable, version-controlled slash commands. Not Python code. | `skills/*/SKILL.md` |
-| **MCP Server** | 22 tools exposed over stdio (local) or streamable-HTTP (team). Built on FastMCP 2.x/3.x with `@server.tool` decorators. | `src/distillery/mcp/server.py` |
+| **MCP Server** | Tools exposed over stdio (local) or streamable-HTTP (team). Built on FastMCP 2.x/3.x with `@server.tool` decorators. | `src/distillery/mcp/server.py` |
 | **Webhook API** | REST endpoints (`/api/poll`, `/api/rescore`, `/api/maintenance`) for automated scheduling. Bearer token auth, per-endpoint cooldowns persisted to DuckDB. Mounted alongside MCP in HTTP mode. | `src/distillery/mcp/webhooks.py` |
 | **Auth** | MCP: GitHub OAuth with org-restricted access. Webhooks: bearer token via `DISTILLERY_WEBHOOK_SECRET`. Middleware handles logging, rate limiting, security headers, budget tracking. | `src/distillery/mcp/auth.py`, `middleware.py`, `budget.py` |
 | **Core Protocols** | Typed `Protocol` interfaces (structural subtyping, not ABCs). All storage operations are async. Includes `query_audit_log` for audit data access. | `src/distillery/store/protocol.py`, `embedding/protocol.py` |
-| **Feeds** | GitHub events and RSS/Atom polling. Authenticated via `GITHUB_TOKEN` for private repos. Relevance scoring via embeddings. Interest extraction for source suggestions. | `src/distillery/feeds/` |
-| **Backends** | DuckDB + VSS (HNSW cosine similarity), Jina v3 / OpenAI embeddings, LLM classification with dedup + conflict detection. | `src/distillery/store/duckdb.py`, `embedding/`, `classification/` |
+| **Feeds** | GitHub events and RSS/Atom polling. Authenticated via `GITHUB_TOKEN` for private repos. Auto-tagging (source + topic tags from KB vocabulary). Relevance scoring via embeddings. Interest extraction for source suggestions. | `src/distillery/feeds/` |
+| **Backends** | DuckDB + VSS (HNSW) + FTS (BM25). Hybrid search with RRF fusion and recency decay. Jina v3 / OpenAI embeddings. LLM classification with dedup + conflict detection. | `src/distillery/store/duckdb.py`, `embedding/`, `classification/` |
 
 ## Key Design Decisions
 
@@ -219,7 +219,7 @@ distillery/
 │   │   ├── engine.py        # ClassificationEngine
 │   │   └── dedup.py         # DeduplicationChecker
 │   ├── mcp/
-│   │   ├── server.py        # MCP server (18 tools, FastMCP 2.x)
+│   │   ├── server.py        # MCP server (FastMCP 2.x/3.x)
 │   │   ├── webhooks.py      # REST webhook endpoints (/api/poll, /api/rescore, /api/maintenance)
 │   │   ├── auth.py          # GitHub OAuth via FastMCP GitHubProvider
 │   │   ├── middleware.py     # Request logging, rate limiting, security headers
@@ -244,10 +244,23 @@ The ambient intelligence system monitors external sources and scores relevance:
 
 1. **Source registry** — managed via `/watch`, stored in DuckDB
 2. **Feed adapters** — GitHub REST API events, RSS/Atom feeds
-3. **Relevance scoring** — embedding-based cosine similarity against user interest profile
-4. **Interest extraction** — mines existing entries for tags, domains, repos, expertise
-5. **Digest generation** — `/radar` synthesizes recent feed entries into grouped summaries
-6. **Automated scheduling** — webhook endpoints (`/api/poll`, `/api/rescore`, `/api/maintenance`) called by GitHub Actions cron workflow (`.github/workflows/scheduler.yml`). Bearer token auth, per-endpoint cooldowns, and audit records in DuckDB metadata.
+3. **Auto-tagging** — source tags (`source/github/owner/repo`, `source/reddit/sub`, `source/domain`) and topic tags matched from KB vocabulary via keyword map. Tags applied at ingestion; backfill via `distillery retag` CLI.
+4. **Relevance scoring** — embedding-based cosine similarity against user interest profile, with interest boost (up to +0.15) and per-source trust weighting
+5. **Interest extraction** — mines existing entries for tags, domains, repos, expertise
+6. **Digest generation** — `/radar` uses interest-driven semantic search to surface the most relevant feed entries (falls back to newest-first listing when interests are unavailable)
+7. **Automated scheduling** — webhook endpoints (`/api/poll`, `/api/rescore`, `/api/maintenance`) called by GitHub Actions cron workflow (`.github/workflows/scheduler.yml`). Bearer token auth, per-endpoint cooldowns, and audit records in DuckDB metadata.
+
+## Search Architecture
+
+`distillery_search` uses hybrid ranking by default, combining two retrieval signals:
+
+1. **Vector search** — HNSW cosine similarity via DuckDB VSS extension
+2. **Keyword search** — BM25 via DuckDB FTS extension (migration 7)
+3. **Fusion** — Reciprocal Rank Fusion (RRF) with configurable k (default 60)
+4. **Recency decay** — linear weight from 1.0 (today) to `recency_min_weight` (default 0.5) over `recency_window_days` (default 90)
+5. **Graceful degradation** — falls back to vector-only if FTS extension unavailable
+
+`distillery_find_similar` uses pure cosine similarity (no hybrid) — dedup thresholds depend on calibrated absolute scores.
 
 ## Webhook Endpoints
 

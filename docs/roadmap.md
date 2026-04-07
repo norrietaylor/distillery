@@ -44,16 +44,24 @@
 - [x] Namespace taxonomy — hierarchical, validated tag system
 
 ### Ambient Intelligence
-- [x] `/radar` — ambient feed digest with AI source suggestions
+- [x] `/radar` — interest-driven feed digest with AI source suggestions
 - [x] `/watch` — add/remove/list monitored feed sources
 - [x] `/tune` — adjust relevance thresholds and trust weights
 - [x] Feed polling architecture — `FeedPoller` with configurable intervals
 - [x] Source adapters — GitHub events (REST API) and RSS/Atom
 - [x] Relevance scoring pipeline — embedding-based cosine similarity
 - [x] Interest extractor — mines entries for tags, domains, repos, expertise
+- [x] Auto-tagging — source tags (`source/github/owner/repo`, `source/reddit/sub`) and topic tags from KB vocabulary
+- [x] `distillery retag` CLI — backfill tags on existing feed entries
+
+### Search
+- [x] Hybrid BM25 + vector search — DuckDB FTS extension with Reciprocal Rank Fusion (RRF)
+- [x] Recency decay — configurable time-weighted scoring (90-day window, 0.5 min weight)
+- [x] Graceful degradation — falls back to vector-only if FTS extension unavailable
 
 ### Onboarding
 - [x] `/setup` skill — MCP connectivity wizard, auto-poll configuration
+- [x] uvx-first setup — `uvx distillery-mcp` as recommended first-time path
 
 ---
 
@@ -68,8 +76,9 @@
 - [ ] `/gh-sync` — GitHub issue/PR knowledge tracking
 
 ### Infrastructure
-- [ ] Elasticsearch migration — hybrid search (BM25 + kNN + RRF)
-- [ ] Access control — team/private visibility flag
+- [ ] RRF score normalization — hybrid search scores cluster near 1.0 (#170)
+- [ ] GitHub event content filtering — skip low-value WatchEvent/ForkEvent (#171)
+- [ ] Access control — team/private visibility flag (#149)
 
 ---
 
@@ -90,7 +99,8 @@
 | Interface | Claude Code skills | Same |
 | Transport | stdio + streamable-HTTP | Same |
 | Auth | GitHub OAuth (FastMCP) | + multi-team RBAC |
-| Storage | DuckDB + VSS / MotherDuck | + Elasticsearch |
-| Embeddings | Jina v3 / OpenAI | + ES native |
+| Storage | DuckDB + VSS + FTS / MotherDuck | Same |
+| Search | Hybrid BM25 + vector (RRF) | + score normalization |
+| Embeddings | Jina v3 / OpenAI | Same |
 | Language | Python 3.11+ | Same |
 | Hosting | Local / Fly.io / Prefect Horizon | Same |
