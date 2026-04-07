@@ -9,11 +9,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Sprint 1 Foundation (PR #165)
+---
+
+## [v0.2.0] - 2026-04-06
+
+**Theme: Feed Intelligence + Improved Retrieval**
+
+### Hybrid Search (PR #168, #164)
+
+- Hybrid BM25 + vector search with Reciprocal Rank Fusion (RRF) — combines keyword matching with semantic similarity
+- DuckDB FTS extension with full-text index on `entries.content` (migration 7)
+- Recency decay: configurable time-weighted scoring (`recency_window_days=90`, `recency_min_weight=0.5`)
+- Graceful degradation to vector-only if FTS extension unavailable
+- New config fields: `hybrid_search`, `rrf_k`, `recency_window_days`, `recency_min_weight` in `defaults` section
+
+### Feed Auto-Tagging (PR #168, #145)
+
+- Source tags derived at ingestion: `source/rss`, `source/github/{owner}/{repo}`, `source/reddit/{subreddit}`, `source/{domain}`
+- Topic tags matched from KB vocabulary via keyword map (no LLM/embedding cost)
+- `distillery retag` CLI command for backfilling tags on existing feed entries (`--dry-run`, `--force`)
+- `get_tag_vocabulary()` added to `DistilleryStore` protocol and `DuckDBStore`
+- `_handle_tag_tree` refactored to use `store.get_tag_vocabulary()` instead of direct DB access
+
+### Skill Retrieval Upgrades (PR #172)
+
+- `/radar` Step 3: switched from `distillery_list` (newest-first) to interest-driven `distillery_search` with fallback
+- `/pour` Pass 2: tag-based query expansion via `distillery_tag_tree` — discovers related topics from KB vocabulary
+- `distillery_tag_tree` added to `/pour` allowed-tools
+- `CONVENTIONS.md` Skills Registry updated for new tool usage
+
+### Sprint 1 Foundation (PR #165, #74, #148)
 
 - GitHub token passthrough: `_build_adapter()` forwards `GITHUB_TOKEN` env var to `GitHubAdapter`, enabling private repo polling with transparent redirect following
 - Audit log query method: `query_audit_log()` added to `DistilleryStore` protocol and `DuckDBStore` with filtering by user, operation, and date range
 - Audit metrics scope: `distillery_metrics(scope="audit")` returns login history, login summary, active users, and recent operations
+
+### Documentation (PR #166, #172)
+
+- uvx recommended as primary first-time setup path across README, docs, and `/setup` skill
+- Plugin install + uvx presented as two-step flow (install plugin for skills, switch to uvx for private DB)
+- Architecture docs updated: new Search Architecture section, Feed Architecture updated with auto-tagging
+- Roadmap updated: hybrid search and auto-tagging moved from Planned to Complete
 
 ### Webhook Endpoints (PR #94)
 
@@ -200,5 +236,6 @@ Initial public release of the Distillery MVP, covering three specification areas
 - `/classify` skill — classify entries by ID, process full inbox, and manage review queue
 - Config extensions: deduplication thresholds, classification taxonomy, review-queue settings
 
-[Unreleased]: https://github.com/norrietaylor/distillery/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/norrietaylor/distillery/compare/v0.2.0...HEAD
+[v0.2.0]: https://github.com/norrietaylor/distillery/compare/v0.1.1...v0.2.0
 [v0.1.0]: https://github.com/norrietaylor/distillery/releases/tag/v0.1.0
