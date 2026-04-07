@@ -31,6 +31,20 @@ _DEFAULT_PER_PAGE = 30
 # Request timeout in seconds.
 _REQUEST_TIMEOUT = 30.0
 
+# Event types that typically carry meaningful content (issue/PR bodies, comments,
+# release notes, commit messages).  Low-value events like WatchEvent, ForkEvent,
+# and bare CreateEvent/DeleteEvent are excluded by default because they have
+# very short content that dominates BM25 keyword matching (#171).
+_DEFAULT_INCLUDE_EVENT_TYPES: frozenset[str] = frozenset({
+    "IssuesEvent",
+    "IssueCommentEvent",
+    "PullRequestEvent",
+    "PullRequestReviewEvent",
+    "PullRequestReviewCommentEvent",
+    "PushEvent",
+    "ReleaseEvent",
+})
+
 # Pattern that matches a bare "owner/repo" slug so callers may pass either
 # the full URL or the short slug form.
 _SLUG_RE = re.compile(r"^[\w.\-]+/[\w.\-]+$")
@@ -185,11 +199,15 @@ class GitHubAdapter:
         url: str,
         token: str | None = None,
         per_page: int = _DEFAULT_PER_PAGE,
+        include_event_types: frozenset[str] | None = None,
     ) -> None:
         self._owner, self._repo = _parse_github_url(url)
         self._source_url = url
         self._token = token or os.environ.get("GITHUB_TOKEN", "")
         self._per_page = max(1, min(per_page, 100))
+        self._include_event_types = (
+            include_event_types if include_event_types is not None else _DEFAULT_INCLUDE_EVENT_TYPES
+        )
         self.last_polled_at: datetime | None = None
 
     # ------------------------------------------------------------------
@@ -248,9 +266,16 @@ class GitHubAdapter:
             return []
 
         items: list[FeedItem] = []
+        skipped = 0
         for event in events:
+            event_type = str(event.get("type", ""))
+            if self._include_event_types and event_type not in self._include_event_types:
+                skipped += 1
+                continue
             try:
                 items.append(_event_to_feed_item(event, self._source_url))
             except Exception:
                 logger.exception("GitHubAdapter: failed to convert event %r", event.get("id"))
+        if skipped:
+            logger.debug("GitHubAdapter: skipped %d low-value events", skipped)
         return items
