@@ -64,6 +64,9 @@ Run the MCP server locally for a private, self-contained knowledge base. Require
 ```bash
 # No install needed
 uvx distillery-mcp
+
+# Or install persistently
+pip install distillery-mcp
 ```
 
 Add to `~/.claude/settings.json`:
