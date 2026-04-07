@@ -63,39 +63,49 @@ Distillery provides 10 Claude Code slash commands:
 
 ## Quick Start
 
-### Plugin Install (Recommended)
+### Step 1: Install the Plugin
 
 ```bash
 claude plugin marketplace add norrietaylor/distillery
 claude plugin install distillery
 ```
 
-Then run the onboarding wizard in Claude Code:
+This installs all 10 skills. The plugin defaults to a hosted demo server — you can start using Distillery immediately.
+
+> **Demo Server:** `distillery-mcp.fly.dev` is for evaluation only. Do not store sensitive or confidential data.
+
+### Step 2: Switch to Local with uvx (Recommended)
+
+For a private knowledge base, run the MCP server locally with `uvx` — no persistent install needed:
+
+```bash
+# Get a free API key from jina.ai, then:
+export JINA_API_KEY=jina_...
+```
+
+Add to `~/.claude/settings.json` (overrides the plugin's demo server):
+
+```json
+{
+  "mcpServers": {
+    "distillery": {
+      "command": "uvx",
+      "args": ["distillery-mcp"],
+      "env": {
+        "JINA_API_KEY": "${JINA_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+Restart Claude Code and run the onboarding wizard:
 
 ```
 /setup
 ```
 
-This verifies MCP connectivity, detects your transport, and configures auto-poll for ambient intelligence.
-
-> **Demo Server:** The plugin defaults to `distillery-mcp.fly.dev`, which is a demo server for evaluation only. Do not store sensitive or confidential data. For production use, [deploy your own instance](https://norrietaylor.github.io/distillery/team/deployment/) or run locally.
-
-### Local Setup
-
-```bash
-# Run directly (no install needed)
-uvx distillery-mcp
-
-# Or install from PyPI
-pip install distillery-mcp
-
-# Or install from source
-git clone https://github.com/norrietaylor/distillery.git
-cd distillery
-pip install -e .
-```
-
-See the [Local Setup Guide](https://norrietaylor.github.io/distillery/getting-started/local-setup/) for configuration and MCP server connection.
+See the [Local Setup Guide](https://norrietaylor.github.io/distillery/getting-started/local-setup/) for full configuration options, or [deploy your own instance](https://norrietaylor.github.io/distillery/team/deployment/) for team use.
 
 ## Development
 
