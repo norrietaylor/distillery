@@ -180,7 +180,7 @@ async def _handle_type_schemas() -> list[types.TextContent]:
 # ---------------------------------------------------------------------------
 
 
-_VALID_METRICS_SCOPES = frozenset({"summary", "full", "search_quality"})
+_VALID_METRICS_SCOPES = frozenset({"summary", "full", "search_quality", "audit"})
 
 
 async def _handle_metrics(
@@ -198,7 +198,8 @@ async def _handle_metrics(
         embedding_provider: Active embedding provider (used to report model metadata).
         arguments: Tool arguments; supports optional ``period_days`` (int) specifying
             the lookback window in days (must be >= 1), and optional ``scope``
-            (``"summary"`` | ``"full"`` | ``"search_quality"``, default ``"full"``):
+            (``"summary"`` | ``"full"`` | ``"search_quality"`` | ``"audit"``,
+            default ``"full"``):
 
             - ``"summary"``: entry counts by type/status, database size, embedding model info
               (equivalent to the former ``distillery_status`` output).
@@ -206,6 +207,9 @@ async def _handle_metrics(
               staleness, and storage sections (default behaviour).
             - ``"search_quality"``: search totals, feedback rates, and quality breakdown
               (equivalent to the former ``distillery_quality`` output).
+            - ``"audit"``: login and operation audit data — recent_logins, login_summary,
+              active_users, and recent_operations sections.  Accepts optional ``date_from``
+              (ISO 8601 str) and ``user`` (str) filters.  Incompatible with ``entry_type``.
 
     Returns:
         MCP content list with aggregated metrics shaped by the requested scope.
@@ -230,6 +234,29 @@ async def _handle_metrics(
         except Exception as exc:  # noqa: BLE001
             logger.exception("Error gathering quality metrics")
             return error_response("METRICS_ERROR", f"Failed to gather quality metrics: {exc}")
+
+    # --- scope=audit -----------------------------------------------------------
+    if scope == "audit":
+        # entry_type is incompatible with audit scope
+        if "entry_type" in arguments:
+            return error_response(
+                "INVALID_PARAMS",
+                "Field 'entry_type' is not compatible with scope='audit'",
+            )
+        # validate date_from
+        date_from: str | None = arguments.get("date_from")
+        if date_from is not None and not isinstance(date_from, str):
+            return error_response("INVALID_PARAMS", "Field 'date_from' must be a string")
+        # validate user
+        audit_user: str | None = arguments.get("user")
+        if audit_user is not None and not isinstance(audit_user, str):
+            return error_response("INVALID_PARAMS", "Field 'user' must be a string")
+        try:
+            result_audit = await _gather_audit(store, date_from=date_from, user=audit_user)
+            return success_response(result_audit)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Error gathering audit metrics")
+            return error_response("METRICS_ERROR", f"Failed to gather audit metrics: {exc}")
 
     # --- scope=summary delegates to _sync_gather_summary --------------------
     if scope == "summary":
@@ -730,6 +757,110 @@ def _sync_gather_quality(
         "positive_rate": round(positive_rate, 4),
         "avg_result_count": round(avg_result_count, 4),
         "per_type_breakdown": per_type_breakdown,
+    }
+
+
+# ---------------------------------------------------------------------------
+# _gather_audit  (scope="audit" for _handle_metrics)
+# ---------------------------------------------------------------------------
+
+#: Tool names that represent authentication events.
+_AUTH_TOOLS = frozenset({"auth_login", "auth_login_failed", "auth_org_denied"})
+
+
+async def _gather_audit(
+    store: Any,
+    *,
+    date_from: str | None,
+    user: str | None,
+) -> dict[str, Any]:
+    """Gather audit metrics from the store's ``audit_log`` table.
+
+    Queries the audit log four times to build the response sections:
+
+    - **recent_logins**: up to 50 auth events (``auth_login``,
+      ``auth_login_failed``, ``auth_org_denied``), optionally filtered by
+      ``date_from``.
+    - **login_summary**: totals derived from recent_logins —
+      ``total_logins``, ``unique_users``, ``failed_attempts``,
+      ``org_denials``.
+    - **active_users**: unique users seen in *all* operations, with
+      ``last_seen`` and ``operation_count``, ordered by ``last_seen`` DESC.
+      Filtered by ``date_from`` and/or ``user`` when provided.
+    - **recent_operations**: up to 50 non-auth tool operations.
+      Filtered by ``date_from`` and/or ``user`` when provided.
+
+    Args:
+        store: Initialised store implementing ``query_audit_log``.
+        date_from: Optional ISO 8601 lower-bound timestamp applied to all
+            sections that support a ``date_from`` filter.
+        user: Optional user ID.  Applied to ``recent_operations`` and
+            ``active_users`` only.
+
+    Returns:
+        Dict with keys ``recent_logins``, ``login_summary``,
+        ``active_users``, and ``recent_operations``.
+    """
+    # Build the base filters shared by all auth-related queries.
+    base_filters: dict[str, Any] = {}
+    if date_from is not None:
+        base_filters["date_from"] = date_from
+
+    # --- recent_logins --------------------------------------------------
+    # We fetch a large batch and filter in Python because query_audit_log
+    # does not support an "operation IN (...)" clause.
+    all_rows: list[dict[str, Any]] = await store.query_audit_log(
+        filters=base_filters if base_filters else None,
+        limit=500,
+    )
+    recent_logins = [r for r in all_rows if r["tool"] in _AUTH_TOOLS][:50]
+
+    # --- login_summary --------------------------------------------------
+    total_logins = sum(1 for r in recent_logins if r["tool"] == "auth_login")
+    failed_attempts = sum(1 for r in recent_logins if r["tool"] == "auth_login_failed")
+    org_denials = sum(1 for r in recent_logins if r["tool"] == "auth_org_denied")
+    unique_users_set = {r["user_id"] for r in recent_logins if r["user_id"]}
+    login_summary: dict[str, Any] = {
+        "total_logins": total_logins,
+        "unique_users": len(unique_users_set),
+        "failed_attempts": failed_attempts,
+        "org_denials": org_denials,
+    }
+
+    # --- recent_operations (non-auth, filtered by user + date_from) ------
+    ops_filters: dict[str, Any] = dict(base_filters)
+    if user is not None:
+        ops_filters["user"] = user
+    ops_rows: list[dict[str, Any]] = await store.query_audit_log(
+        filters=ops_filters if ops_filters else None,
+        limit=500,
+    )
+    recent_operations = [r for r in ops_rows if r["tool"] not in _AUTH_TOOLS][:50]
+
+    # --- active_users (filtered by date_from + user) ---------------------
+    # Derive from ops_rows (which already respects date_from + user).
+    user_stats: dict[str, dict[str, Any]] = {}
+    for row in ops_rows:
+        uid = row["user_id"] or ""
+        if not uid:
+            continue
+        if uid not in user_stats:
+            user_stats[uid] = {"last_seen": row["timestamp"], "operation_count": 0}
+        user_stats[uid]["operation_count"] += 1
+        # rows are ordered DESC so first occurrence = most recent
+        if row["timestamp"] > user_stats[uid]["last_seen"]:
+            user_stats[uid]["last_seen"] = row["timestamp"]
+    active_users = sorted(
+        [{"user_id": uid, **stats} for uid, stats in user_stats.items()],
+        key=lambda x: x["last_seen"],
+        reverse=True,
+    )
+
+    return {
+        "recent_logins": recent_logins,
+        "login_summary": login_summary,
+        "active_users": active_users,
+        "recent_operations": recent_operations,
     }
 
 

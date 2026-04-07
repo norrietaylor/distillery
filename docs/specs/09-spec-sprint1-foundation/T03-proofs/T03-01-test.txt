@@ -1,0 +1,46 @@
+Type: test
+Command: python3 -m pytest tests/test_metrics_audit.py -v
+Expected: 27 passed, 0 failed
+Timestamp: 2026-04-07T01:07:23Z
+Status: PASS
+
+---
+
+============================= test session starts ==============================
+platform linux -- Python 3.13.7, pytest-9.0.2, pluggy-1.6.0 -- /usr/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/norrie.guest/code/distillery/.worktrees/feature-sprint1-foundation
+configfile: pyproject.toml
+plugins: asyncio-1.3.0, anyio-4.13.0, cov-7.1.0, typeguard-4.4.2
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 27 items
+
+tests/test_metrics_audit.py::TestAuditResponseStructure::test_all_four_sections_present PASSED [  3%]
+tests/test_metrics_audit.py::TestAuditResponseStructure::test_login_summary_keys_present PASSED [  7%]
+tests/test_metrics_audit.py::TestEmptyAuditLog::test_empty_returns_zeroed_summary PASSED [ 11%]
+tests/test_metrics_audit.py::TestEmptyAuditLog::test_empty_returns_empty_lists PASSED [ 14%]
+tests/test_metrics_audit.py::TestRecentLogins::test_auth_login_appears_in_recent_logins PASSED [ 18%]
+tests/test_metrics_audit.py::TestRecentLogins::test_auth_login_failed_appears_in_recent_logins PASSED [ 22%]
+tests/test_metrics_audit.py::TestRecentLogins::test_auth_org_denied_appears_in_recent_logins PASSED [ 25%]
+tests/test_metrics_audit.py::TestRecentLogins::test_non_auth_tool_excluded_from_recent_logins PASSED [ 29%]
+tests/test_metrics_audit.py::TestRecentLogins::test_mixed_tools_only_auth_in_recent_logins PASSED [ 33%]
+tests/test_metrics_audit.py::TestRecentOperations::test_non_auth_appears_in_recent_operations PASSED [ 37%]
+tests/test_metrics_audit.py::TestRecentOperations::test_auth_excluded_from_recent_operations PASSED [ 40%]
+tests/test_metrics_audit.py::TestRecentOperations::test_mixed_tools_only_non_auth_in_operations PASSED [ 44%]
+tests/test_metrics_audit.py::TestLoginSummary::test_total_logins_counts_auth_login_only PASSED [ 48%]
+tests/test_metrics_audit.py::TestLoginSummary::test_failed_attempts_counts_auth_login_failed PASSED [ 51%]
+tests/test_metrics_audit.py::TestLoginSummary::test_org_denials_counts_auth_org_denied PASSED [ 55%]
+tests/test_metrics_audit.py::TestLoginSummary::test_unique_users_counts_distinct_user_ids PASSED [ 59%]
+tests/test_metrics_audit.py::TestActiveUsers::test_active_users_has_correct_fields PASSED [ 62%]
+tests/test_metrics_audit.py::TestActiveUsers::test_active_users_counts_operations_per_user PASSED [ 66%]
+tests/test_metrics_audit.py::TestActiveUsers::test_active_users_ordered_by_last_seen_desc PASSED [ 70%]
+tests/test_metrics_audit.py::TestDateFromFilter::test_date_from_excludes_old_operations PASSED [ 74%]
+tests/test_metrics_audit.py::TestDateFromFilter::test_date_from_filters_recent_operations PASSED [ 77%]
+tests/test_metrics_audit.py::TestUserFilter::test_user_filter_narrows_recent_operations PASSED [ 81%]
+tests/test_metrics_audit.py::TestUserFilter::test_user_filter_narrows_active_users PASSED [ 85%]
+tests/test_metrics_audit.py::TestUserFilter::test_user_filter_does_not_affect_login_summary PASSED [ 88%]
+tests/test_metrics_audit.py::TestIncompatibleParams::test_entry_type_with_audit_scope_returns_error PASSED [ 92%]
+tests/test_metrics_audit.py::TestIncompatibleParams::test_invalid_date_from_type_returns_error PASSED [ 96%]
+tests/test_metrics_audit.py::TestIncompatibleParams::test_invalid_user_type_returns_error PASSED [100%]
+
+============================== 27 passed in 1.30s ==============================
