@@ -180,7 +180,7 @@ def _derive_source_tags(item: FeedItem, source_type: str) -> list[str]:
         # Reddit: source/reddit/{subreddit}
         parsed = urlparse(url)
         host = parsed.netloc.lower()
-        if "reddit.com" in host:
+        if host == "reddit.com" or host.endswith(".reddit.com"):
             # URL pattern: https://www.reddit.com/r/{subreddit}/...
             path_parts = [p for p in parsed.path.split("/") if p]
             if len(path_parts) >= 2 and path_parts[0] == "r":
