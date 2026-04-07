@@ -1,8 +1,0 @@
-Type: cli
-Command: ruff check src/distillery/store/duckdb.py tests/test_duckdb_store.py && mypy --strict src/distillery/store/duckdb.py
-Expected: No lint or type errors
-Timestamp: 2026-04-06T18:44:38-07:00
-Status: PASS
----
-All checks passed!
-Success: no issues found in 1 source file
