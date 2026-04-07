@@ -68,11 +68,15 @@ class EntryStatus(StrEnum):
         ACTIVE: The entry is live and visible to searches.
         PENDING_REVIEW: The entry has been created but not yet reviewed.
         ARCHIVED: The entry has been soft-deleted and is hidden from searches.
+        VERIFIED: The entry has been confirmed correct through testing.
+        TESTING: The entry is experimental and not yet confirmed.
     """
 
     ACTIVE = "active"
     PENDING_REVIEW = "pending_review"
     ARCHIVED = "archived"
+    VERIFIED = "verified"
+    TESTING = "testing"
 
 
 def _utcnow() -> datetime:

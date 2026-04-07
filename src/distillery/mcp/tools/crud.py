@@ -66,7 +66,7 @@ _VALID_ENTRY_TYPES = {
 }
 
 # Valid status values (mirrors EntryStatus enum).
-_VALID_STATUSES = {"active", "pending_review", "archived"}
+_VALID_STATUSES = {"active", "pending_review", "archived", "verified", "testing"}
 
 # Fields that callers may never overwrite via distillery_update.
 _IMMUTABLE_FIELDS = {"id", "created_at", "source"}
