@@ -37,6 +37,7 @@ from distillery.mcp.tools.classify import (
     _handle_resolve_review,
 )
 from distillery.mcp.tools.configure import _handle_configure
+from distillery.mcp.tools.context import _handle_context
 from distillery.mcp.tools.crud import (
     _handle_correct,
     _handle_get,
@@ -77,6 +78,7 @@ __all__ = [
     "_handle_update",
     "_handle_list",
     "_handle_correct",
+    "_handle_context",
     "_handle_search",
     "_handle_find_similar",
     "_handle_aggregate",
@@ -720,6 +722,29 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             config=c["config"],
             arguments={"section": section, "key": key, "value": value},
         )
+
+    @server.tool
+    async def distillery_context(  # noqa: PLR0913
+        ctx: Context,
+        project: str | None = None,
+        tags: list[str] | None = None,
+        scope: str = "all",
+        query: str | None = None,
+        limit: int = 20,
+    ) -> list[types.TextContent]:
+        """Retrieve contextual entries by project, tags, and/or semantic query.
+
+        scope: "all" (default), "semantic", or "tags". When query is provided
+        with scope="all", semantic search is used with project/tag filters.
+        Without a query, returns recent active entries matching the filters.
+        """
+        c = _lc(ctx)
+        args: dict[str, Any] = dict(
+            scope=scope,
+            limit=limit,
+            **_omit_none(project=project, tags=tags, query=query),
+        )
+        return await _handle_context(store=c["store"], arguments=args, cfg=c["config"])
 
     return server
 
