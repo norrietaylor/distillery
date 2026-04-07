@@ -1167,12 +1167,25 @@ class DuckDBStore:
 
             scored.sort(key=lambda x: x[1], reverse=True)
 
-            # Normalise scores to [0, 1] relative to the top score.
-            max_score = scored[0][1] if scored else 1.0
+            # Normalise scores to [0, 1] using min-max across the full
+            # candidate set.  This gives a meaningful spread instead of
+            # clustering near 1.0 (which happens when dividing by max
+            # alone, since RRF raw scores occupy a tiny range).
+            if len(scored) < 2:
+                max_score = scored[0][1] if scored else 1.0
+                min_score = 0.0
+            else:
+                max_score = scored[0][1]
+                min_score = scored[-1][1]
+
+            score_range = max_score - min_score
             results = []
             returned_ids = []
             for eid, raw in scored[:limit]:
-                norm = raw / max_score if max_score > 0 else 0.0
+                if score_range > 0:
+                    norm = (raw - min_score) / score_range
+                else:
+                    norm = 1.0  # all scores identical
                 results.append(SearchResult(entry=entry_map[eid], score=norm))
                 returned_ids.append(eid)
 
