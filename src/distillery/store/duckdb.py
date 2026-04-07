@@ -1182,10 +1182,7 @@ class DuckDBStore:
             results = []
             returned_ids = []
             for eid, raw in scored[:limit]:
-                if score_range > 0:
-                    norm = (raw - min_score) / score_range
-                else:
-                    norm = 1.0  # all scores identical
+                norm = (raw - min_score) / score_range if score_range > 0 else 1.0
                 results.append(SearchResult(entry=entry_map[eid], score=norm))
                 returned_ids.append(eid)
 
