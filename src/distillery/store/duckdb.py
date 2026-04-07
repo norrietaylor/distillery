@@ -1167,6 +1167,118 @@ class DuckDBStore:
             logger.debug("audit_log write failed (ignored)", exc_info=True)
 
     # ------------------------------------------------------------------
+    # Audit log queries
+    # ------------------------------------------------------------------
+
+    def _sync_query_audit_log(
+        self,
+        filters: dict[str, Any] | None,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        """Synchronous implementation of query_audit_log(); called via asyncio.to_thread.
+
+        Parameters
+        ----------
+        filters:
+            Optional dict of filter constraints.  Supported keys:
+            ``user`` (user_id exact match), ``operation`` (tool exact match),
+            ``date_from`` (ISO 8601 str, inclusive lower bound on timestamp),
+            ``date_to`` (ISO 8601 str, inclusive upper bound on timestamp).
+        limit:
+            Maximum number of rows to return.  Clamped to [1, 500].
+
+        Returns
+        -------
+        list[dict[str, Any]]
+            Rows ordered by timestamp DESC.  Each dict has keys:
+            ``id``, ``timestamp``, ``user_id``, ``tool``, ``entry_id``,
+            ``action``, ``outcome``.
+        """
+        limit = max(1, min(500, limit))
+
+        clauses: list[str] = []
+        params: list[Any] = []
+
+        if filters:
+            if "user" in filters:
+                clauses.append("user_id = ?")
+                params.append(filters["user"])
+            if "operation" in filters:
+                clauses.append("tool = ?")
+                params.append(filters["operation"])
+            if "date_from" in filters:
+                val = filters["date_from"]
+                if isinstance(val, str):
+                    val = datetime.fromisoformat(val)
+                clauses.append("timestamp >= ?")
+                params.append(val)
+            if "date_to" in filters:
+                val = filters["date_to"]
+                if isinstance(val, str):
+                    val = datetime.fromisoformat(val)
+                clauses.append("timestamp <= ?")
+                params.append(val)
+
+        where_sql = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+
+        # Cast TIMESTAMPTZ to VARCHAR in SQL to avoid pytz dependency when
+        # DuckDB deserialises timezone-aware timestamps to Python.
+        sql = (
+            f"SELECT id, strftime(timestamp::TIMESTAMP, '%Y-%m-%dT%H:%M:%S') || '+00:00', "
+            f"user_id, tool, entry_id, action, outcome "
+            f"FROM audit_log "
+            f"{where_sql} "
+            f"ORDER BY timestamp DESC "
+            f"LIMIT ?"
+        )
+        conn = self.connection
+        rows = conn.execute(sql, params + [limit]).fetchall()
+
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            result.append(
+                {
+                    "id": row[0],
+                    "timestamp": row[1],
+                    "user_id": row[2],
+                    "tool": row[3],
+                    "entry_id": row[4],
+                    "action": row[5],
+                    "outcome": row[6],
+                }
+            )
+        return result
+
+    async def query_audit_log(
+        self,
+        filters: dict[str, Any] | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Query the ``audit_log`` table with optional filters.
+
+        Supports filtering by user, operation (tool name), and date range.
+        Results are ordered by timestamp descending.
+
+        Supported filter keys:
+            - ``user`` (str) -- match ``user_id`` exactly
+            - ``operation`` (str) -- match ``tool`` exactly
+            - ``date_from`` (str) -- inclusive lower bound on ``timestamp`` (ISO 8601)
+            - ``date_to`` (str) -- inclusive upper bound on ``timestamp`` (ISO 8601)
+
+        Args:
+            filters: Optional dict of filter constraints.  ``None`` means no
+                filtering.
+            limit: Maximum number of rows to return.  Must be in [1, 500];
+                values outside this range are clamped.  Default is 50.
+
+        Returns:
+            List of dicts with keys: ``id``, ``timestamp`` (ISO 8601 str),
+            ``user_id``, ``tool``, ``entry_id``, ``action``, ``outcome``.
+            Ordered by descending timestamp.
+        """
+        return await asyncio.to_thread(self._sync_query_audit_log, filters, limit)
+
+    # ------------------------------------------------------------------
     # Feedback logging (T01.2)
     # ------------------------------------------------------------------
 

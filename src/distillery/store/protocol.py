@@ -332,3 +332,33 @@ class DistilleryStore(Protocol):
             value: String value to store.
         """
         ...
+
+    async def query_audit_log(
+        self,
+        filters: dict[str, Any] | None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Query the ``audit_log`` table with optional filters.
+
+        Supports filtering by user, operation (tool name), and date range.
+        Results are ordered by timestamp descending.
+
+        Supported filter keys:
+            - ``user`` (str) -- match ``user_id`` exactly
+            - ``operation`` (str) -- match ``tool`` exactly
+            - ``date_from`` (str) -- inclusive lower bound on ``timestamp`` (ISO 8601)
+            - ``date_to`` (str) -- inclusive upper bound on ``timestamp`` (ISO 8601)
+
+        Args:
+            filters: Optional dict of filter constraints.  ``None`` means no
+                filtering.
+            limit: Maximum number of rows to return.  Must be in [1, 500];
+                values below 1 are clamped to 1 and values above 500 are
+                clamped to 500.  Default is 50.
+
+        Returns:
+            List of dicts, each containing keys: ``id``, ``timestamp``
+            (ISO 8601 str), ``user_id``, ``tool``, ``entry_id``, ``action``,
+            ``outcome``.  Ordered by descending timestamp.
+        """
+        ...
