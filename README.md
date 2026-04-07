@@ -63,16 +63,27 @@ Distillery provides 10 Claude Code slash commands:
 
 ## Quick Start
 
-### Local with uvx (Recommended)
+### Step 1: Install the Plugin
 
-No install needed — runs the MCP server ephemerally with your own private database:
+```bash
+claude plugin marketplace add norrietaylor/distillery
+claude plugin install distillery
+```
+
+This installs all 10 skills. The plugin defaults to a hosted demo server — you can start using Distillery immediately.
+
+> **Demo Server:** `distillery-mcp.fly.dev` is for evaluation only. Do not store sensitive or confidential data.
+
+### Step 2: Switch to Local with uvx (Recommended)
+
+For a private knowledge base, run the MCP server locally with `uvx` — no persistent install needed:
 
 ```bash
 # Get a free API key from jina.ai, then:
 export JINA_API_KEY=jina_...
 ```
 
-Add to `~/.claude/settings.json`:
+Add to `~/.claude/settings.json` (overrides the plugin's demo server):
 
 ```json
 {
@@ -94,18 +105,7 @@ Restart Claude Code and run the onboarding wizard:
 /setup
 ```
 
-See the [Local Setup Guide](https://norrietaylor.github.io/distillery/getting-started/local-setup/) for full configuration options.
-
-### Try without setup (Demo Server)
-
-Want to try Distillery without any local setup? Install the plugin to connect to the hosted demo server:
-
-```bash
-claude plugin marketplace add norrietaylor/distillery
-claude plugin install distillery
-```
-
-> **Note:** The demo server at `distillery-mcp.fly.dev` is for evaluation only. Do not store sensitive data. For production use, run locally with `uvx` (above) or [deploy your own instance](https://norrietaylor.github.io/distillery/team/deployment/).
+See the [Local Setup Guide](https://norrietaylor.github.io/distillery/getting-started/local-setup/) for full configuration options, or [deploy your own instance](https://norrietaylor.github.io/distillery/team/deployment/) for team use.
 
 ## Development
 
