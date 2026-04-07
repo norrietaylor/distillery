@@ -680,5 +680,7 @@ class TestCreateServer:
             "distillery_poll",
             "distillery_rescore",
             "distillery_configure",
+            "distillery_correct",
+            "distillery_context",
         }
         assert expected == tool_names, f"Missing tools: {expected - tool_names}"

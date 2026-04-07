@@ -1,4 +1,4 @@
-"""MCP server for Distillery — 18 tools over stdio or HTTP.
+"""MCP server for Distillery — 20 tools over stdio or HTTP.
 
 Handlers live in ``src/distillery/mcp/tools/`` (crud, search, classify, quality,
 analytics, feeds, configure, meta). This module owns: FastMCP app creation,
