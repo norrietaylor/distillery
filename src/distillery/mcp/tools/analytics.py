@@ -788,7 +788,7 @@ async def _gather_audit(
     - **recent_logins**: up to 50 auth events (``auth_login``,
       ``auth_login_failed``, ``auth_org_denied``), optionally filtered by
       ``date_from``.
-    - **login_summary**: totals derived from recent_logins —
+    - **login_summary**: totals derived from all auth events (not truncated) —
       ``total_logins``, ``unique_users``, ``failed_attempts``,
       ``org_denials``.
     - **active_users**: unique users seen in *all* operations, with
