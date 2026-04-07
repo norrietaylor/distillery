@@ -87,13 +87,6 @@ Quickest setup — add to ~/.claude/settings.json:
 Get a free Jina API key at https://jina.ai
 Then restart Claude Code and run /setup again.
 
-If you haven't installed the plugin yet (for skills):
-  claude plugin marketplace add norrietaylor/distillery
-  claude plugin install distillery
-
-The plugin includes a demo server for quick evaluation.
-For production, use the uvx config above for a private local database.
-
 Full guide: https://norrietaylor.github.io/distillery/getting-started/local-setup/
 ```
 
