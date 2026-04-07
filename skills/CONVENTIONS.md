@@ -1,6 +1,6 @@
 # Distillery Skills — Shared Conventions
 
-This document establishes the common patterns and conventions used by all Distillery skills (`/distill`, `/recall`, `/pour`, `/bookmark`, `/minutes`).
+This document establishes the common patterns and conventions used by all Distillery skills (`/distill`, `/recall`, `/pour`, `/bookmark`, `/minutes`, `/classify`, `/watch`, `/radar`, `/tune`, `/setup`).
 
 ## SKILL.md Structure
 
@@ -306,12 +306,12 @@ The following skills are available in `skills/`:
 |-------|-----------|-------------------|---------|
 | `/distill` | `distill/` | distillery_store, distillery_find_similar | Capture knowledge from conversations |
 | `/recall` | `recall/` | distillery_search | Semantic search over the knowledge base |
-| `/pour` | `pour/` | distillery_search | Multi-entry synthesis with citations |
+| `/pour` | `pour/` | distillery_search, distillery_tag_tree | Multi-entry synthesis with citations and tag-based query expansion |
 | `/bookmark` | `bookmark/` | distillery_store, distillery_find_similar | Save and annotate URLs |
 | `/minutes` | `minutes/` | distillery_store, distillery_update, distillery_list | Record and update meeting notes |
 | `/classify` | `classify/` | distillery_classify, distillery_list(output_mode=review), distillery_resolve_review | Classify and review entries |
 | `/watch` | `watch/` | distillery_watch | Manage monitored feed sources + auto-poll scheduling (CronCreate local; GitHub Actions for hosted) |
-| `/radar` | `radar/` | distillery_list, distillery_interests, distillery_store | Ambient feed digest and source suggestions |
+| `/radar` | `radar/` | distillery_search, distillery_interests, distillery_list (fallback), distillery_store | Interest-driven feed digest and source suggestions |
 | `/tune` | `tune/` | distillery_metrics | Display and adjust feed relevance thresholds |
 | `/setup` | `setup/` | distillery_metrics | MCP connectivity wizard and transport configuration |
 
@@ -321,5 +321,5 @@ The `distillery-researcher` agent (`.claude/agents/distillery-researcher.md`) is
 
 ---
 
-**Document Version:** 2.1
-**Last Updated:** 2026-04-03
+**Document Version:** 2.2
+**Last Updated:** 2026-04-06
