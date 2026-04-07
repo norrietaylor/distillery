@@ -248,9 +248,7 @@ class DuckDBStore:
         if not self._fts_available:
             return
         try:
-            conn.execute(
-                "PRAGMA create_fts_index('entries', 'id', 'content', overwrite=1)"
-            )
+            conn.execute("PRAGMA create_fts_index('entries', 'id', 'content', overwrite=1)")
             logger.debug("FTS index rebuilt on entries.content")
         except duckdb.Error as exc:
             logger.warning("FTS index rebuild failed: %s", exc)
@@ -322,9 +320,7 @@ class DuckDBStore:
         current_duckdb_version: str = duckdb.__version__
 
         # Compare stored duckdb_version; warn on major/minor mismatch
-        stored_result = conn.execute(
-            "SELECT value FROM _meta WHERE key = 'duckdb_version'"
-        )
+        stored_result = conn.execute("SELECT value FROM _meta WHERE key = 'duckdb_version'")
         stored_row = stored_result.fetchone()
         if stored_row is not None:
             stored_version: str = stored_row[0]
@@ -353,8 +349,7 @@ class DuckDBStore:
         vss_version: str = ""
         try:
             vss_result = conn.execute(
-                "SELECT extension_version FROM duckdb_extensions() "
-                "WHERE extension_name = 'vss'"
+                "SELECT extension_version FROM duckdb_extensions() WHERE extension_name = 'vss'"
             )
             vss_row = vss_result.fetchone()
             if vss_row is not None:
@@ -473,9 +468,7 @@ class DuckDBStore:
                 #    applied when VSS was unavailable; this backfills the
                 #    index on a subsequent startup where VSS is present.
                 if self._vss_available:
-                    with contextlib.suppress(
-                        duckdb.CatalogException, duckdb.BinderException
-                    ):
+                    with contextlib.suppress(duckdb.CatalogException, duckdb.BinderException):
                         conn.execute(
                             "CREATE INDEX IF NOT EXISTS idx_entries_embedding "
                             "ON entries USING HNSW (embedding) "
@@ -517,9 +510,7 @@ class DuckDBStore:
             )
         else:
             reason = (
-                "disabled by config"
-                if not self._hybrid_search
-                else "FTS extension unavailable"
+                "disabled by config" if not self._hybrid_search else "FTS extension unavailable"
             )
             logger.info("Vector-only search active (%s)", reason)
 
@@ -589,6 +580,7 @@ class DuckDBStore:
             "status",
             "metadata",
             "last_modified_by",
+            "expires_at",
         }
     )
 
@@ -602,8 +594,8 @@ class DuckDBStore:
             "INSERT INTO entries "
             "(id, content, entry_type, source, author, project, tags, status, "
             " metadata, created_at, updated_at, version, embedding, "
-            " created_by, last_modified_by) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " created_by, last_modified_by, expires_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         params = [
             entry.id,
@@ -621,6 +613,7 @@ class DuckDBStore:
             embedding,
             entry.created_by,
             entry.last_modified_by,
+            entry.expires_at,
         ]
         conn.execute(sql, params)
         # Rebuild FTS index so new content is searchable via BM25.
@@ -970,7 +963,7 @@ class DuckDBStore:
     _ENTRY_COLUMNS = (
         "id, content, entry_type, source, author, project, "
         "tags, status, metadata, created_at, updated_at, version, accessed_at, "
-        "created_by, last_modified_by"
+        "created_by, last_modified_by, expires_at"
     )
 
     # ------------------------------------------------------------------
@@ -1031,9 +1024,7 @@ class DuckDBStore:
             return 1.0
         # Linear decay from 1.0 to recency_min_weight over another window span
         # beyond the window boundary, clamped at the minimum.
-        decay = 1.0 - (age_days - self._recency_window_days) / max(
-            self._recency_window_days, 1
-        )
+        decay = 1.0 - (age_days - self._recency_window_days) / max(self._recency_window_days, 1)
         return max(self._recency_min_weight, decay)
 
     async def search(
@@ -1135,9 +1126,7 @@ class DuckDBStore:
                     f"SELECT {self._ENTRY_COLUMNS} FROM entries "
                     f"WHERE id IN ({placeholders}){extra_where}"
                 )
-                fetch_result = conn.execute(
-                    fetch_sql, missing_ids + filter_params
-                )
+                fetch_result = conn.execute(fetch_sql, missing_ids + filter_params)
                 fetch_cols = [desc[0] for desc in fetch_result.description]
                 fetched_ids: set[str] = set()
                 for row in fetch_result.fetchall():
@@ -1182,17 +1171,14 @@ class DuckDBStore:
         return await asyncio.to_thread(_sync)
 
     @staticmethod
-    def _touch_accessed(
-        conn: duckdb.DuckDBPyConnection, entry_ids: list[str]
-    ) -> None:
+    def _touch_accessed(conn: duckdb.DuckDBPyConnection, entry_ids: list[str]) -> None:
         """Best-effort update of ``accessed_at`` for the given entry IDs."""
         if not entry_ids:
             return
         try:
             placeholders = ", ".join("?" for _ in entry_ids)
             conn.execute(
-                f"UPDATE entries SET accessed_at = current_timestamp "
-                f"WHERE id IN ({placeholders})",
+                f"UPDATE entries SET accessed_at = current_timestamp WHERE id IN ({placeholders})",
                 entry_ids,
             )
         except Exception:  # pragma: no cover
@@ -1749,8 +1735,10 @@ class DuckDBStore:
             if not tags_col:
                 continue
             for tag in tags_col:
-                if prefix is not None and tag != prefix and (
-                    prefix_slash is None or not tag.startswith(prefix_slash)
+                if (
+                    prefix is not None
+                    and tag != prefix
+                    and (prefix_slash is None or not tag.startswith(prefix_slash))
                 ):
                     continue
                 counts[tag] = counts.get(tag, 0) + 1

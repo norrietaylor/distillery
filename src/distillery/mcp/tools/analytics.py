@@ -91,7 +91,7 @@ async def _handle_tag_tree(
                     processed_tags[""] = count
                 elif tag.startswith(prefix_slash):
                     # Strip the prefix and its trailing slash
-                    stripped = tag[len(prefix_slash):]
+                    stripped = tag[len(prefix_slash) :]
                     processed_tags[stripped] = count
         else:
             processed_tags = vocab
@@ -939,12 +939,16 @@ async def _handle_stale(
         stale_entries = await asyncio.to_thread(
             _sync_gather_stale, store, days, limit, entry_type_filter
         )
+        expired_entries = await asyncio.to_thread(
+            _sync_gather_expired, store, limit, entry_type_filter
+        )
         return success_response(
             {
                 "days_threshold": days,
                 "entry_type_filter": entry_type_filter,
                 "stale_count": len(stale_entries),
-                "entries": stale_entries,
+                "expired_count": len(expired_entries),
+                "entries": stale_entries + expired_entries,
             }
         )
     except Exception as exc:  # noqa: BLE001
@@ -1031,6 +1035,77 @@ def _sync_gather_stale(
                 "project": project,
                 "last_accessed": last_accessed_iso,
                 "days_since_access": days_since,
+                "reason": "stale",
+            }
+        )
+
+    return result
+
+
+def _sync_gather_expired(
+    store: Any,
+    limit: int,
+    entry_type_filter: str | None,
+) -> list[dict[str, Any]]:
+    """Return active entries whose ``expires_at`` is in the past.
+
+    Parameters:
+        store: Initialized DuckDBStore used to query entries.
+        limit: Maximum number of entries to return.
+        entry_type_filter: Optional entry_type value to restrict results.
+
+    Returns:
+        List of expired entry summaries. Each dict mirrors the stale format
+        but includes ``"reason": "expired"`` and an ``expires_at`` field.
+    """
+    conn = store.connection
+
+    params: list[Any] = []
+    type_clause = ""
+    if entry_type_filter is not None:
+        type_clause = " AND entry_type = ?"
+        params.append(entry_type_filter)
+    params.append(limit)
+
+    sql = f"""
+        SELECT
+            id,
+            content,
+            entry_type,
+            author,
+            project,
+            expires_at
+        FROM entries
+        WHERE status != 'archived'
+          AND expires_at IS NOT NULL
+          AND expires_at < NOW()
+          {type_clause}
+        ORDER BY expires_at ASC
+        LIMIT ?
+    """
+
+    rows = conn.execute(sql, params).fetchall()
+
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        entry_id, content, entry_type, author, project, expires_at = row
+        content_preview = (content or "")[:200]
+
+        expires_at_iso: str | None = None
+        if expires_at is not None:
+            if hasattr(expires_at, "tzinfo") and expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=UTC)
+            expires_at_iso = expires_at.isoformat()
+
+        result.append(
+            {
+                "id": entry_id,
+                "content_preview": content_preview,
+                "entry_type": entry_type,
+                "author": author,
+                "project": project,
+                "expires_at": expires_at_iso,
+                "reason": "expired",
             }
         )
 

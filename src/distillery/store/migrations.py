@@ -28,9 +28,7 @@ class MigrationFunc(Protocol):
     for runtime configuration (e.g. ``dimensions``, ``vss_available``).
     """
 
-    def __call__(
-        self, conn: duckdb.DuckDBPyConnection, **kwargs: Any
-    ) -> None: ...
+    def __call__(self, conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None: ...
 
 
 # ---------------------------------------------------------------------------
@@ -113,6 +111,10 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 """
 
+_ADD_EXPIRES_AT_COLUMN = """
+ALTER TABLE entries ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP;
+"""
+
 _CREATE_FEED_SOURCES_TABLE = """
 CREATE TABLE IF NOT EXISTS feed_sources (
     url                    VARCHAR PRIMARY KEY,
@@ -162,9 +164,7 @@ def create_log_tables(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
     conn.execute(_CREATE_SEARCH_LOG_TABLE)
     conn.execute(_CREATE_FEEDBACK_LOG_TABLE)
     conn.execute(_CREATE_AUDIT_LOG_TABLE)
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_search_log_timestamp ON search_log (timestamp)"
-    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_search_log_timestamp ON search_log (timestamp)")
     logger.info("Migration 4: search_log, feedback_log, audit_log tables created")
 
 
@@ -222,6 +222,12 @@ def create_fts_index(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
         raise
 
 
+def add_expires_at(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
+    """Migration 8: Add ``expires_at`` column to ``entries``."""
+    conn.execute(_ADD_EXPIRES_AT_COLUMN)
+    logger.info("Migration 8: expires_at column added")
+
+
 # ---------------------------------------------------------------------------
 # Migration registry
 # ---------------------------------------------------------------------------
@@ -234,6 +240,7 @@ MIGRATIONS: dict[int, MigrationFunc] = {
     5: create_feed_sources,
     6: create_hnsw_index,
     7: create_fts_index,
+    8: add_expires_at,
 }
 """Ordered mapping of schema version to migration function.
 
@@ -254,9 +261,7 @@ def get_current_schema_version(conn: duckdb.DuckDBPyConnection) -> int:
     ``schema_version`` key has not been set.
     """
     try:
-        result = conn.execute(
-            "SELECT value FROM _meta WHERE key = 'schema_version'"
-        )
+        result = conn.execute("SELECT value FROM _meta WHERE key = 'schema_version'")
         row = result.fetchone()
         if row is not None:
             return int(row[0])
@@ -331,9 +336,7 @@ def run_pending_migrations(
         except Exception as exc:
             with contextlib.suppress(Exception):
                 conn.execute("ROLLBACK")
-            raise RuntimeError(
-                f"Migration {version} failed: {exc}"
-            ) from exc
+            raise RuntimeError(f"Migration {version} failed: {exc}") from exc
 
     new_version = pending[-1]
     logger.info("Schema migrated from version %d to %d", current, new_version)

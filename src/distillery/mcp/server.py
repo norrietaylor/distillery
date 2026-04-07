@@ -263,11 +263,13 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         metadata: dict[str, Any] | None = None,
         dedup_threshold: float | None = None,
         dedup_limit: int | None = None,
+        expires_at: str | None = None,
     ) -> list[types.TextContent]:
         """Store a new knowledge entry and return its ID with dedup/conflict information.
 
         entry_type must be one of: session, bookmark, minutes, meeting, reference,
         idea, inbox. dedup_threshold (0–1) controls near-duplicate warnings.
+        expires_at accepts ISO 8601 datetime; entries past expiry appear in stale results.
         """
         c = _lc(ctx)
         user = _get_authenticated_user()
@@ -281,6 +283,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 metadata=metadata,
                 dedup_threshold=dedup_threshold,
                 dedup_limit=dedup_limit,
+                expires_at=expires_at,
             ),
         )
         result = await _handle_store(
@@ -309,11 +312,13 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         tags: list[str] | None = None,
         status: str | None = None,
         metadata: dict[str, Any] | None = None,
+        expires_at: str | None = None,
     ) -> list[types.TextContent]:
         """Update one or more fields on an existing knowledge entry.
 
-        At least one field must be provided. status: active, pending_review, or archived.
-        entry_type: session, bookmark, minutes, meeting, reference, idea, or inbox.
+        At least one field must be provided. status: active, pending_review, archived,
+        verified, or testing. entry_type: session, bookmark, minutes, meeting, reference,
+        idea, or inbox. expires_at accepts ISO 8601 datetime.
         """
         c = _lc(ctx)
         user = _get_authenticated_user()
@@ -330,6 +335,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 tags=tags,
                 status=status,
                 metadata=metadata,
+                expires_at=expires_at,
             ),
         )
         result = await _handle_update(store=c["store"], arguments=args, last_modified_by=user)

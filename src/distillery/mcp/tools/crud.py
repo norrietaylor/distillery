@@ -177,6 +177,21 @@ async def _handle_store(
         except EmbeddingBudgetError as exc:
             return error_response("BUDGET_EXCEEDED", str(exc))
 
+    # --- parse expires_at (ISO 8601 string → datetime) ----------------------
+    expires_at_val: datetime | None = None
+    expires_at_raw = arguments.get("expires_at")
+    if expires_at_raw is not None:
+        if not isinstance(expires_at_raw, str):
+            return error_response("INVALID_PARAMS", "Field 'expires_at' must be an ISO 8601 string")
+        try:
+            expires_at_val = datetime.fromisoformat(expires_at_raw)
+            if expires_at_val.tzinfo is None:
+                expires_at_val = expires_at_val.replace(tzinfo=UTC)
+        except (ValueError, TypeError):
+            return error_response(
+                "INVALID_PARAMS", "Field 'expires_at' must be a valid ISO 8601 datetime string"
+            )
+
     # --- build entry --------------------------------------------------------
     try:
         # Determine EntrySource from arguments.
@@ -194,6 +209,7 @@ async def _handle_store(
             tags=list(arguments.get("tags") or []),
             metadata=dict(arguments.get("metadata") or {}),
             created_by=created_by,
+            expires_at=expires_at_val,
         )
     except Exception as exc:  # noqa: BLE001
         return error_response("INVALID_PARAMS", f"Failed to construct entry: {exc}")
@@ -401,11 +417,39 @@ async def _handle_update(
     entry_id: str = arguments["entry_id"]
 
     # Build the updates dict from all keys except entry_id.
-    updatable_keys = {"content", "entry_type", "author", "project", "tags", "status", "metadata"}
+    updatable_keys = {
+        "content",
+        "entry_type",
+        "author",
+        "project",
+        "tags",
+        "status",
+        "metadata",
+        "expires_at",
+    }
     updates: dict[str, Any] = {}
     for key in updatable_keys:
         if key in arguments:
             updates[key] = arguments[key]
+
+    # Parse expires_at from ISO 8601 string to datetime.
+    if "expires_at" in updates:
+        ea_raw = updates["expires_at"]
+        if ea_raw is not None:
+            if not isinstance(ea_raw, str):
+                return error_response(
+                    "INVALID_PARAMS", "Field 'expires_at' must be an ISO 8601 string"
+                )
+            try:
+                ea_dt = datetime.fromisoformat(ea_raw)
+                if ea_dt.tzinfo is None:
+                    ea_dt = ea_dt.replace(tzinfo=UTC)
+                updates["expires_at"] = ea_dt
+            except (ValueError, TypeError):
+                return error_response(
+                    "INVALID_PARAMS",
+                    "Field 'expires_at' must be a valid ISO 8601 datetime string",
+                )
 
     # Reject attempts to modify immutable fields.
     bad_keys = _IMMUTABLE_FIELDS & (set(arguments.keys()) - {"entry_id"})
