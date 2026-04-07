@@ -44,9 +44,35 @@ See CONVENTIONS.md — skip if already confirmed this conversation.
 
 ### Step 3: Retrieve Recent Feed Entries
 
-Call `distillery_list(entry_type="feed", limit=<limit>, output_mode="summary")`. If `--days N` was specified, also pass `date_from` as ISO 8601 date N days before today. If `--project` was specified, also pass `project=<name>`.
+Use interest-driven semantic search to surface the most relevant feed entries, not just the newest.
 
-If no feed entries are found, display:
+**3a. Get interest profile:**
+
+Call `distillery_interests(recency_days=<days>, top_n=5)`. Extract the top interest tags (e.g., `domain/authentication` → query `"authentication"`). Convert tag paths to natural language by taking the leaf segment and replacing hyphens with spaces.
+
+**3b. Search by interests (primary path):**
+
+For each of the top interest tags (up to 3 queries), call:
+
+`distillery_search(query="<interest>", entry_type="feed", limit=<ceil(limit/N)>, date_from=<date>)`
+
+Where N is the number of queries. If `--project` was specified, also pass `project=<name>`.
+
+Deduplicate results across queries by entry ID, keeping the highest similarity score.
+
+Report: `Retrieved <total> entries via interest-based search (<N> queries).`
+
+**3c. Fallback (if interests unavailable):**
+
+If `distillery_interests` returns no tags or errors, fall back to:
+
+`distillery_list(entry_type="feed", limit=<limit>, output_mode="summary", date_from=<date>)`
+
+Report: `Retrieved <total> entries via recent listing (fallback).`
+
+**3d. Empty results:**
+
+If no feed entries are found by either path, display:
 
 ```
 No feed entries found in the last <N> days.

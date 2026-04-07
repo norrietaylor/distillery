@@ -1,6 +1,6 @@
 # MCP Server Reference
 
-Complete reference for the Distillery MCP server — all 18 tools, configuration options, and troubleshooting.
+Complete reference for the Distillery MCP server — tools, configuration options, and troubleshooting.
 
 ## Starting the Server
 
@@ -52,7 +52,7 @@ See [`distillery.yaml.example`](https://github.com/norrietaylor/distillery/blob/
 | `distillery_update` | Partially update an existing entry (tags, status, metadata) |
 | `distillery_list` | List entries with filtering, pagination, and optional review-queue enrichment (`output_mode="review"`) |
 | **Discovery** | |
-| `distillery_search` | Semantic search using cosine similarity; returns ranked results |
+| `distillery_search` | Hybrid BM25 + vector search with RRF fusion; returns ranked results (falls back to vector-only if FTS unavailable) |
 | `distillery_find_similar` | Find similar entries — supports dedup mode (`dedup_action=true`) and conflict detection (`conflict_check=true`) |
 | `distillery_aggregate` | Group entry counts by field (type, status, project, author) |
 | `distillery_stale` | Surface entries not accessed within a configurable time window |
