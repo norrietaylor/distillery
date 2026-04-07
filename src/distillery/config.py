@@ -89,11 +89,24 @@ class DefaultsConfig:
             during deduplication checks. Default ``3``.
         stale_days: Default number of days without access after which an entry
             is considered stale. Default ``30``.
+        hybrid_search: Whether to enable hybrid BM25 + vector search with RRF
+            fusion. Default ``True``.
+        rrf_k: Reciprocal Rank Fusion constant controlling rank influence.
+            Higher values reduce the impact of top-ranked results. Default
+            ``60``.
+        recency_window_days: Number of days defining the recency window for
+            recency-weighted scoring. Default ``90``.
+        recency_min_weight: Minimum weight applied to entries outside the
+            recency window. Must be in range [0.0, 1.0]. Default ``0.5``.
     """
 
     dedup_threshold: float = 0.92
     dedup_limit: int = 3
     stale_days: int = 30
+    hybrid_search: bool = True
+    rrf_k: int = 60
+    recency_window_days: int = 90
+    recency_min_weight: float = 0.5
 
 
 @dataclass
@@ -414,10 +427,41 @@ def _parse_defaults(raw: dict[str, Any]) -> DefaultsConfig:
     stale_days_raw = raw.get("stale_days", 30)
     stale_days = _parse_strict_int(stale_days_raw, "defaults.stale_days")
 
+    hybrid_search_raw = raw.get("hybrid_search", True)
+    if not isinstance(hybrid_search_raw, bool):
+        raise ValueError(
+            f"defaults.hybrid_search must be a boolean, got: {hybrid_search_raw!r}"
+        )
+    hybrid_search = hybrid_search_raw
+
+    rrf_k_raw = raw.get("rrf_k", 60)
+    rrf_k = _parse_strict_int(rrf_k_raw, "defaults.rrf_k")
+    if rrf_k <= 0:
+        raise ValueError(f"defaults.rrf_k must be a positive integer, got: {rrf_k}")
+
+    recency_window_days_raw = raw.get("recency_window_days", 90)
+    recency_window_days = _parse_strict_int(recency_window_days_raw, "defaults.recency_window_days")
+    if recency_window_days <= 0:
+        raise ValueError(
+            f"defaults.recency_window_days must be a positive integer, got: {recency_window_days}"
+        )
+
+    recency_min_weight = _parse_float_field(
+        raw, "recency_min_weight", 0.5, "defaults.recency_min_weight"
+    )
+    if not (0.0 <= recency_min_weight <= 1.0):
+        raise ValueError(
+            f"defaults.recency_min_weight must be between 0.0 and 1.0, got: {recency_min_weight}"
+        )
+
     return DefaultsConfig(
         dedup_threshold=dedup_threshold,
         dedup_limit=dedup_limit,
         stale_days=stale_days,
+        hybrid_search=hybrid_search,
+        rrf_k=rrf_k,
+        recency_window_days=recency_window_days,
+        recency_min_weight=recency_min_weight,
     )
 
 

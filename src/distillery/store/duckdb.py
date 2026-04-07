@@ -109,6 +109,11 @@ class DuckDBStore:
         embedding_provider: EmbeddingProvider,
         s3_region: str | None = None,
         s3_endpoint: str | None = None,
+        *,
+        hybrid_search: bool = True,
+        rrf_k: int = 60,
+        recency_window_days: int = 90,
+        recency_min_weight: float = 0.5,
     ) -> None:
         self._db_path = db_path
         self._embedding_provider = embedding_provider
@@ -117,6 +122,11 @@ class DuckDBStore:
         self._conn: duckdb.DuckDBPyConnection | None = None
         self._initialized: bool = False
         self._vss_available: bool = False
+        self._fts_available: bool = False
+        self._hybrid_search: bool = hybrid_search
+        self._rrf_k: int = rrf_k
+        self._recency_window_days: int = recency_window_days
+        self._recency_min_weight: float = recency_min_weight
 
     # ------------------------------------------------------------------
     # Cloud path helpers
@@ -208,6 +218,43 @@ class DuckDBStore:
             )
         finally:
             cursor.close()
+
+    def _setup_fts(self, conn: duckdb.DuckDBPyConnection) -> None:
+        """Load the FTS extension and rebuild the full-text index.
+
+        If the FTS extension is unavailable (e.g. in constrained environments)
+        we log a warning and continue without it.  Search falls back to
+        vector-only mode.
+        """
+        try:
+            conn.execute("INSTALL fts")
+            conn.execute("LOAD fts")
+            self._fts_available = True
+            logger.info("FTS extension loaded")
+        except (duckdb.IOException, duckdb.CatalogException, duckdb.Error) as exc:
+            self._fts_available = False
+            logger.warning(
+                "FTS extension not available — hybrid search disabled, "
+                "falling back to vector-only search: %s",
+                exc,
+            )
+
+    def _rebuild_fts_index(self, conn: duckdb.DuckDBPyConnection) -> None:
+        """Rebuild the full-text search index on ``entries.content``.
+
+        Uses ``overwrite=1`` so the call is idempotent — safe to run on every
+        startup and after content mutations.
+        """
+        if not self._fts_available:
+            return
+        try:
+            conn.execute(
+                "PRAGMA create_fts_index('entries', 'id', 'content', overwrite=1)"
+            )
+            logger.debug("FTS index rebuilt on entries.content")
+        except duckdb.Error as exc:
+            logger.warning("FTS index rebuild failed: %s", exc)
+            self._fts_available = False
 
     def _setup_httpfs(self, conn: duckdb.DuckDBPyConnection) -> None:
         """Install and load the httpfs extension, then configure S3 credentials.
@@ -398,6 +445,10 @@ class DuckDBStore:
 
         self._setup_vss(conn)
 
+        # Load FTS extension for hybrid search (must happen before index rebuild).
+        if self._hybrid_search:
+            self._setup_fts(conn)
+
         # Wrap the entire initialization write path in a retry loop to handle
         # write-write conflicts during concurrent initialization.  All the
         # wrapped operations use CREATE IF NOT EXISTS / transactional upsert
@@ -449,6 +500,28 @@ class DuckDBStore:
                     time.sleep(0.1 * (attempt + 1))
                 else:
                     raise
+
+        # Rebuild the FTS index so it covers any entries inserted before the
+        # FTS extension was available or any content changes since last startup.
+        if self._fts_available:
+            self._rebuild_fts_index(conn)
+
+        # Log search mode.
+        if self._hybrid_search and self._fts_available:
+            logger.info(
+                "Hybrid search active (BM25 + vector, RRF k=%d, "
+                "recency_window=%dd, recency_min_weight=%.2f)",
+                self._rrf_k,
+                self._recency_window_days,
+                self._recency_min_weight,
+            )
+        else:
+            reason = (
+                "disabled by config"
+                if not self._hybrid_search
+                else "FTS extension unavailable"
+            )
+            logger.info("Vector-only search active (%s)", reason)
 
         self._conn = conn
         self._initialized = True
@@ -550,6 +623,8 @@ class DuckDBStore:
             entry.last_modified_by,
         ]
         conn.execute(sql, params)
+        # Rebuild FTS index so new content is searchable via BM25.
+        self._rebuild_fts_index(conn)
         logger.debug("Stored entry id=%s", entry.id)
         return entry.id
 
@@ -701,6 +776,9 @@ class DuckDBStore:
         set_params.append(entry_id)
 
         conn.execute(sql, set_params)
+        # Rebuild FTS index when content changes.
+        if "content" in updates:
+            self._rebuild_fts_index(conn)
         logger.debug("Updated entry id=%s", entry_id)
 
         # Re-fetch to return the updated state.
@@ -899,39 +977,94 @@ class DuckDBStore:
     # Search / similarity / listing (T02.4)
     # ------------------------------------------------------------------
 
+    def _bm25_search(
+        self,
+        query: str,
+        limit: int,
+    ) -> list[tuple[str, int]]:
+        """Run a BM25 full-text search and return ``(entry_id, rank)`` pairs.
+
+        Parameters
+        ----------
+        query:
+            Free-text search query.
+        limit:
+            Maximum number of results.
+
+        Returns
+        -------
+        list[tuple[str, int]]:
+            Pairs of ``(entry_id, 1-based_rank)`` ordered by BM25 score
+            descending.  Returns an empty list when FTS is unavailable or
+            the query produces no matches.
+        """
+        if not self._fts_available:
+            return []
+        conn = self.connection
+        try:
+            sql = (
+                "SELECT id, fts_main_entries.match_bm25(id, ?) AS bm25 "
+                "FROM entries "
+                "WHERE bm25 IS NOT NULL "
+                "ORDER BY bm25 DESC "
+                "LIMIT ?"
+            )
+            rows = conn.execute(sql, [query, limit]).fetchall()
+            return [(row[0], rank) for rank, row in enumerate(rows, start=1)]
+        except duckdb.Error as exc:
+            logger.warning("BM25 search failed, falling back to vector-only: %s", exc)
+            return []
+
+    def _recency_weight(self, created_at: datetime) -> float:
+        """Compute a recency decay weight in ``[recency_min_weight, 1.0]``.
+
+        Entries created within the last ``recency_window_days`` receive a
+        weight of 1.0.  Older entries decay linearly down to
+        ``recency_min_weight``.
+        """
+        now = datetime.now(tz=UTC)
+        # DuckDB may return timezone-naive datetimes; treat them as UTC.
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=UTC)
+        age_days = (now - created_at).total_seconds() / 86400.0
+        if age_days <= self._recency_window_days:
+            return 1.0
+        # Linear decay from 1.0 to recency_min_weight over another window span
+        # beyond the window boundary, clamped at the minimum.
+        decay = 1.0 - (age_days - self._recency_window_days) / max(
+            self._recency_window_days, 1
+        )
+        return max(self._recency_min_weight, decay)
+
     async def search(
         self,
         query: str,
         filters: dict[str, Any] | None,
         limit: int,
     ) -> list[SearchResult]:
-        """
-        Search the store for entries semantically similar to the provided query, optionally constrained by metadata filters.
+        """Search using hybrid BM25 + vector RRF fusion (with recency decay).
 
-        Applies the given metadata filters to restrict candidates and returns matches sorted by descending similarity. Scores in each SearchResult are normalized to the range [0, 1].
+        When hybrid search is active and FTS is available, both a vector
+        similarity search and a BM25 full-text search are performed.  Results
+        are fused using Reciprocal Rank Fusion (RRF) with an optional recency
+        decay multiplier.  Falls back gracefully to vector-only when FTS is
+        unavailable or hybrid search is disabled.
 
         Parameters:
-            query (str): Text to search for.
-            filters (dict[str, Any] | None): Optional metadata filters. Supported keys include
-                `entry_type`, `author`, `project`, `tags`, `status`, `date_from`, and `date_to`.
-            limit (int): Maximum number of results to return.
+            query: Text to search for.
+            filters: Optional metadata filters.
+            limit: Maximum number of results to return.
 
         Returns:
-            list[SearchResult]: Matches ordered by decreasing similarity; each result contains the matched Entry and a `score` in [0, 1].
+            list[SearchResult]: Matches ordered by decreasing fused score;
+            each result contains the matched Entry and a ``score`` in [0, 1].
         """
         from distillery.store.protocol import SearchResult
 
         embedding = self._embedding_provider.embed(query)
+        use_hybrid = self._hybrid_search and self._fts_available
 
         def _sync() -> list[SearchResult]:
-            """
-            Execute a synchronous similarity search using the prepared embedding and filters, returning matching entries ordered by similarity.
-
-            Performs a SQL query that computes cosine similarity between stored embeddings and the provided embedding, orders results by similarity descending, and returns a list of SearchResult objects. As a best-effort side effect, updates the `accessed_at` timestamp for returned entries; failures to update are ignored.
-
-            Returns:
-                list[SearchResult]: A list of search results ordered by descending similarity. Each result's `score` is normalized to the range [0.0, 1.0].
-            """
             conn = self.connection
 
             where_clauses, params = self._build_filter_clauses(filters)
@@ -939,8 +1072,7 @@ class DuckDBStore:
             if where_clauses:
                 where_sql = "WHERE " + " AND ".join(where_clauses)
 
-            # DuckDB's array_cosine_similarity returns a value in [-1, 1].
-            # We normalise to [0, 1] for the SearchResult.score field.
+            # --- Vector search (always performed) ---
             sql = (
                 f"SELECT {self._ENTRY_COLUMNS}, "
                 f"array_cosine_similarity(embedding, ?::FLOAT[{self._embedding_provider.dimensions}]) AS score "
@@ -949,39 +1081,122 @@ class DuckDBStore:
                 f"ORDER BY score DESC "
                 f"LIMIT ?"
             )
-            all_params = [embedding] + params + [limit]
+            # Fetch more candidates for fusion when hybrid is active.
+            vector_limit = limit * 3 if use_hybrid else limit
+            all_params = [embedding] + params + [vector_limit]
             result = conn.execute(sql, all_params)
             col_names = [desc[0] for desc in result.description]
-
             rows = result.fetchall()
-            results: list[SearchResult] = []
-            returned_ids: list[str] = []
-            for row in rows:
+
+            # Build entry lookup and vector ranks.
+            entry_map: dict[str, Entry] = {}
+            vector_ranks: dict[str, int] = {}
+            entry_created: dict[str, datetime] = {}
+            for rank, row in enumerate(rows, start=1):
                 row_dict = dict(zip(col_names, row, strict=True))
-                raw_score = float(row_dict.pop("score"))
-                score = (raw_score + 1.0) / 2.0
+                row_dict.pop("score")
                 entry = self._row_to_entry(
                     tuple(row_dict.values()),
                     list(row_dict.keys()),
                 )
-                results.append(SearchResult(entry=entry, score=score))
-                returned_ids.append(entry.id)
+                entry_map[entry.id] = entry
+                vector_ranks[entry.id] = rank
+                entry_created[entry.id] = entry.created_at
 
-            # Update accessed_at for all returned entries (fire-and-forget).
-            if returned_ids:
-                try:
-                    placeholders = ", ".join("?" for _ in returned_ids)
-                    conn.execute(
-                        f"UPDATE entries SET accessed_at = current_timestamp "
-                        f"WHERE id IN ({placeholders})",
-                        returned_ids,
-                    )
-                except Exception:  # pragma: no cover
-                    logger.debug("accessed_at bulk update failed (ignored)")
+            if not use_hybrid:
+                # Vector-only: normalise cosine similarity to [0, 1].
+                results: list[SearchResult] = []
+                returned_ids: list[str] = []
+                for _rank, row in enumerate(rows[:limit], start=1):
+                    row_dict = dict(zip(col_names, row, strict=True))
+                    raw_score = float(row_dict.pop("score"))
+                    score = (raw_score + 1.0) / 2.0
+                    eid = row_dict["id"]
+                    results.append(SearchResult(entry=entry_map[eid], score=score))
+                    returned_ids.append(eid)
+                self._touch_accessed(conn, returned_ids)
+                return results
 
+            # --- BM25 search ---
+            bm25_results = self._bm25_search(query, vector_limit)
+            bm25_ranks: dict[str, int] = dict(bm25_results)
+
+            # Fetch entries found by BM25 but not by the vector search so we
+            # have a complete entry_map for RRF scoring.  Apply the same
+            # filters so BM25-only entries that don't match are excluded.
+            missing_ids = [eid for eid in bm25_ranks if eid not in entry_map]
+            if missing_ids:
+                placeholders = ", ".join("?" for _ in missing_ids)
+                filter_clauses, filter_params = self._build_filter_clauses(filters)
+                extra_where = ""
+                if filter_clauses:
+                    extra_where = " AND " + " AND ".join(filter_clauses)
+                fetch_sql = (
+                    f"SELECT {self._ENTRY_COLUMNS} FROM entries "
+                    f"WHERE id IN ({placeholders}){extra_where}"
+                )
+                fetch_result = conn.execute(
+                    fetch_sql, missing_ids + filter_params
+                )
+                fetch_cols = [desc[0] for desc in fetch_result.description]
+                fetched_ids: set[str] = set()
+                for row in fetch_result.fetchall():
+                    entry = self._row_to_entry(row, fetch_cols)
+                    entry_map[entry.id] = entry
+                    entry_created[entry.id] = entry.created_at
+                    fetched_ids.add(entry.id)
+                # Remove BM25-only entries that were excluded by filters.
+                for eid in missing_ids:
+                    if eid not in fetched_ids:
+                        del bm25_ranks[eid]
+
+            # --- RRF fusion with recency decay ---
+            k = self._rrf_k
+            all_ids = set(vector_ranks.keys()) | set(bm25_ranks.keys())
+            scored: list[tuple[str, float]] = []
+            for eid in all_ids:
+                rrf_score = 0.0
+                if eid in vector_ranks:
+                    rrf_score += 1.0 / (k + vector_ranks[eid])
+                if eid in bm25_ranks:
+                    rrf_score += 1.0 / (k + bm25_ranks[eid])
+                # Apply recency decay.
+                recency = self._recency_weight(entry_created[eid])
+                rrf_score *= recency
+                scored.append((eid, rrf_score))
+
+            scored.sort(key=lambda x: x[1], reverse=True)
+
+            # Normalise scores to [0, 1] relative to the top score.
+            max_score = scored[0][1] if scored else 1.0
+            results = []
+            returned_ids = []
+            for eid, raw in scored[:limit]:
+                norm = raw / max_score if max_score > 0 else 0.0
+                results.append(SearchResult(entry=entry_map[eid], score=norm))
+                returned_ids.append(eid)
+
+            self._touch_accessed(conn, returned_ids)
             return results
 
         return await asyncio.to_thread(_sync)
+
+    @staticmethod
+    def _touch_accessed(
+        conn: duckdb.DuckDBPyConnection, entry_ids: list[str]
+    ) -> None:
+        """Best-effort update of ``accessed_at`` for the given entry IDs."""
+        if not entry_ids:
+            return
+        try:
+            placeholders = ", ".join("?" for _ in entry_ids)
+            conn.execute(
+                f"UPDATE entries SET accessed_at = current_timestamp "
+                f"WHERE id IN ({placeholders})",
+                entry_ids,
+            )
+        except Exception:  # pragma: no cover
+            logger.debug("accessed_at bulk update failed (ignored)")
 
     async def find_similar(
         self,
@@ -1517,3 +1732,38 @@ class DuckDBStore:
     async def set_metadata(self, key: str, value: str) -> None:
         """Write a value to the ``_meta`` key-value table (upsert)."""
         await asyncio.to_thread(self._sync_set_metadata, key, value)
+
+    # ------------------------------------------------------------------
+    # Tag vocabulary
+    # ------------------------------------------------------------------
+
+    def _sync_get_tag_vocabulary(self, prefix: str | None) -> dict[str, int]:
+        """Synchronous implementation of get_tag_vocabulary(); called via asyncio.to_thread."""
+        assert self._conn is not None
+        result = self._conn.execute("SELECT tags FROM entries WHERE status != 'archived'")
+        rows = result.fetchall()
+
+        counts: dict[str, int] = {}
+        prefix_slash = (prefix + "/") if prefix is not None else None
+        for (tags_col,) in rows:
+            if not tags_col:
+                continue
+            for tag in tags_col:
+                if prefix is not None and tag != prefix and (
+                    prefix_slash is None or not tag.startswith(prefix_slash)
+                ):
+                    continue
+                counts[tag] = counts.get(tag, 0) + 1
+
+        return counts
+
+    async def get_tag_vocabulary(self, prefix: str | None = None) -> dict[str, int]:
+        """Return a mapping of tag to occurrence count across active entries.
+
+        Args:
+            prefix: Optional hierarchical tag prefix to filter by.
+
+        Returns:
+            Dict mapping each matching tag string to its occurrence count.
+        """
+        return await asyncio.to_thread(self._sync_get_tag_vocabulary, prefix)

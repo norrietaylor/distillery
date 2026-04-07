@@ -500,3 +500,511 @@ class TestRSSAdapter:
 
         assert len(items) == 2
         assert items[0].title == "Atom Entry One"
+
+
+# ---------------------------------------------------------------------------
+# _derive_source_tags
+# ---------------------------------------------------------------------------
+
+
+class TestDeriveSourceTags:
+    """Tests for _derive_source_tags() in poller.py."""
+
+    def _make_item(self, source_url: str, source_type: str) -> FeedItem:
+        return FeedItem(source_url=source_url, source_type=source_type, item_id="test-id")
+
+    def test_source_tag_rss_generic(self) -> None:
+        """All feeds get a source/{source_type} tag."""
+        from distillery.feeds.poller import _derive_source_tags
+
+        item = self._make_item("https://example.com/rss", "rss")
+        tags = _derive_source_tags(item, "rss")
+        assert "source/rss" in tags
+
+    def test_source_tag_github_type(self) -> None:
+        """GitHub feeds get source/github tag."""
+        from distillery.feeds.poller import _derive_source_tags
+
+        item = self._make_item("https://github.com/owner/repo", "github")
+        tags = _derive_source_tags(item, "github")
+        assert "source/github" in tags
+
+    def test_source_tag_github_owner_repo(self) -> None:
+        """GitHub feeds derive source/github/{owner}/{repo}."""
+        from distillery.feeds.poller import _derive_source_tags
+
+        item = self._make_item("https://github.com/owner/repo", "github")
+        tags = _derive_source_tags(item, "github")
+        assert "source/github/owner/repo" in tags
+
+    def test_source_tag_github_slug_format(self) -> None:
+        """GitHub bare slug also works for owner/repo derivation."""
+        from distillery.feeds.poller import _derive_source_tags
+
+        item = self._make_item("owner/repo", "github")
+        tags = _derive_source_tags(item, "github")
+        assert "source/github" in tags
+        assert "source/github/owner/repo" in tags
+
+    def test_source_tag_reddit(self) -> None:
+        """Reddit RSS URLs derive source/reddit/{subreddit}."""
+        from distillery.feeds.poller import _derive_source_tags
+
+        item = self._make_item("https://www.reddit.com/r/python/.rss", "rss")
+        tags = _derive_source_tags(item, "rss")
+        assert "source/rss" in tags
+        assert "source/reddit/python" in tags
+
+    def test_source_tag_reddit_no_generic_domain(self) -> None:
+        """Reddit URLs should not also produce a generic domain tag."""
+        from distillery.feeds.poller import _derive_source_tags
+
+        item = self._make_item("https://www.reddit.com/r/python/.rss", "rss")
+        tags = _derive_source_tags(item, "rss")
+        # Should not have a plain reddit.com domain tag — only source/reddit/{sub}
+        assert "source/reddit-com" not in tags
+
+    def test_source_tag_domain_extraction(self) -> None:
+        """Generic RSS feeds derive source/{domain-slug} with www. stripped and dots as hyphens."""
+        from distillery.feeds.poller import _derive_source_tags
+
+        item = self._make_item("https://www.example.com/feed.xml", "rss")
+        tags = _derive_source_tags(item, "rss")
+        assert "source/rss" in tags
+        # Dots replaced with hyphens; www. stripped
+        assert "source/example-com" in tags
+
+    def test_source_tag_domain_no_www_prefix(self) -> None:
+        """Domain without www. prefix also works, dots replaced with hyphens."""
+        from distillery.feeds.poller import _derive_source_tags
+
+        item = self._make_item("https://blog.example.com/atom.xml", "rss")
+        tags = _derive_source_tags(item, "rss")
+        assert "source/blog-example-com" in tags
+
+    def test_source_tag_invalid_github_url_still_returns_type_tag(self) -> None:
+        """Unparseable GitHub URL still returns source/github tag."""
+        from distillery.feeds.poller import _derive_source_tags
+
+        item = self._make_item("https://not-github.com/foo", "github")
+        tags = _derive_source_tags(item, "github")
+        assert "source/github" in tags
+        # No owner/repo tag — parsing failed silently
+        assert not any("source/github/" in t for t in tags)
+
+    def test_source_tag_invalid_tags_dropped(self) -> None:
+        """Tags that fail validate_tag() are silently dropped."""
+        from distillery.feeds.poller import _derive_source_tags
+
+        # URL with uppercase in domain would still be lowercased; test via empty domain
+        item = self._make_item("", "rss")
+        tags = _derive_source_tags(item, "rss")
+        # source/rss should still be valid
+        assert "source/rss" in tags
+        # No crashes; all returned tags should be valid
+        from distillery.models import validate_tag
+
+        for tag in tags:
+            validate_tag(tag)  # should not raise
+
+
+# ---------------------------------------------------------------------------
+# build_keyword_map
+# ---------------------------------------------------------------------------
+
+
+class TestBuildKeywordMap:
+    """Tests for build_keyword_map() in poller.py."""
+
+    def test_leaf_segment_mapped(self) -> None:
+        """The leaf segment of a tag maps to the full tag path."""
+        from distillery.feeds.poller import build_keyword_map
+
+        kw_map = build_keyword_map({"domain/authentication": 5})
+        assert kw_map.get("authentication") == "domain/authentication"
+
+    def test_hyphenated_leaf_splits_long_words(self) -> None:
+        """Hyphenated leaf segments produce individual words > 3 chars."""
+        from distillery.feeds.poller import build_keyword_map
+
+        kw_map = build_keyword_map({"security/supply-chain": 3})
+        # leaf = "supply-chain"; both "supply" and "chain" are > 3 chars
+        assert kw_map.get("supply") == "security/supply-chain"
+        assert kw_map.get("chain") == "security/supply-chain"
+
+    def test_short_words_not_mapped(self) -> None:
+        """Words of 3 chars or fewer from hyphenated leaves are not mapped."""
+        from distillery.feeds.poller import build_keyword_map
+
+        kw_map = build_keyword_map({"ops/ci-cd": 1})
+        # leaf = "ci-cd"; "ci" (2 chars) and "cd" (2 chars) skipped
+        # The whole leaf "ci-cd" should still map
+        assert "ci" not in kw_map
+        assert "cd" not in kw_map
+        assert kw_map.get("ci-cd") == "ops/ci-cd"
+
+    def test_higher_count_wins_on_collision(self) -> None:
+        """When two tags produce the same keyword, the higher-count tag wins."""
+        from distillery.feeds.poller import build_keyword_map
+
+        vocab = {"domain/authentication": 10, "security/authentication": 2}
+        kw_map = build_keyword_map(vocab)
+        assert kw_map.get("authentication") == "domain/authentication"
+
+    def test_alphabetical_tiebreak(self) -> None:
+        """Equal counts resolve alphabetically (earlier tag path wins)."""
+        from distillery.feeds.poller import build_keyword_map
+
+        vocab = {"b-namespace/auth": 5, "a-namespace/auth": 5}
+        kw_map = build_keyword_map(vocab)
+        assert kw_map.get("auth") == "a-namespace/auth"
+
+    def test_case_insensitive_keyword(self) -> None:
+        """Keywords are stored lowercase regardless of input (tags must already be lowercase)."""
+        from distillery.feeds.poller import build_keyword_map
+
+        kw_map = build_keyword_map({"lang/python": 1})
+        assert kw_map.get("python") == "lang/python"
+
+    def test_empty_vocabulary_returns_empty_map(self) -> None:
+        """Empty vocabulary produces an empty keyword map."""
+        from distillery.feeds.poller import build_keyword_map
+
+        assert build_keyword_map({}) == {}
+
+
+# ---------------------------------------------------------------------------
+# match_topic_tags
+# ---------------------------------------------------------------------------
+
+
+class TestMatchTopicTags:
+    """Tests for match_topic_tags() in poller.py."""
+
+    def test_single_hit(self) -> None:
+        """A keyword present in the text returns the corresponding tag."""
+        from distillery.feeds.poller import match_topic_tags
+
+        kw_map = {"authentication": "domain/authentication"}
+        result = match_topic_tags("Using authentication tokens", kw_map)
+        assert "domain/authentication" in result
+
+    def test_case_insensitive(self) -> None:
+        """Matching is case-insensitive."""
+        from distillery.feeds.poller import match_topic_tags
+
+        kw_map = {"authentication": "domain/authentication"}
+        result = match_topic_tags("AUTHENTICATION is required", kw_map)
+        assert "domain/authentication" in result
+
+    def test_no_match_returns_empty(self) -> None:
+        """Text with no matching keywords returns an empty list."""
+        from distillery.feeds.poller import match_topic_tags
+
+        kw_map = {"authentication": "domain/authentication"}
+        result = match_topic_tags("Hello world, nothing to see here", kw_map)
+        assert result == []
+
+    def test_deduplication(self) -> None:
+        """The same keyword appearing multiple times produces only one tag entry."""
+        from distillery.feeds.poller import match_topic_tags
+
+        kw_map = {"authentication": "domain/authentication"}
+        result = match_topic_tags("authentication and more authentication", kw_map)
+        assert result.count("domain/authentication") == 1
+
+    def test_multiple_hits(self) -> None:
+        """Multiple distinct keywords each map to their respective tags."""
+        from distillery.feeds.poller import match_topic_tags
+
+        kw_map = {
+            "authentication": "domain/authentication",
+            "security": "domain/security",
+        }
+        result = match_topic_tags("authentication and security", kw_map)
+        assert "domain/authentication" in result
+        assert "domain/security" in result
+
+    def test_empty_text_returns_empty(self) -> None:
+        """Empty text produces no matches."""
+        from distillery.feeds.poller import match_topic_tags
+
+        kw_map = {"authentication": "domain/authentication"}
+        result = match_topic_tags("", kw_map)
+        assert result == []
+
+    def test_empty_keyword_map_returns_empty(self) -> None:
+        """Empty keyword map produces no matches."""
+        from distillery.feeds.poller import match_topic_tags
+
+        result = match_topic_tags("authentication security python", {})
+        assert result == []
+
+
+# ---------------------------------------------------------------------------
+# derive_all_tags (topic_tag matching integration)
+# ---------------------------------------------------------------------------
+
+
+class TestDeriveAllTagsTopicTag:
+    """Tests for derive_all_tags() in poller.py — Tier 1 + Tier 2 combination."""
+
+    def _make_item(
+        self,
+        source_url: str,
+        source_type: str,
+        title: str = "",
+        content: str = "",
+    ) -> FeedItem:
+        return FeedItem(
+            source_url=source_url,
+            source_type=source_type,
+            item_id="test-id",
+            title=title,
+            content=content,
+        )
+
+    def test_topic_tag_matched_from_title(self) -> None:
+        """An item with 'authentication' in its title gets the matching topic tag."""
+        from distillery.feeds.poller import derive_all_tags
+
+        kw_map = {"authentication": "domain/authentication"}
+        item = self._make_item(
+            "https://example.com/rss", "rss", title="OAuth authentication guide"
+        )
+        tags = derive_all_tags(item, "rss", kw_map)
+        assert "domain/authentication" in tags
+
+    def test_no_topic_match_only_source_tags(self) -> None:
+        """An item with no keyword matches gets only source tags."""
+        from distillery.feeds.poller import derive_all_tags
+
+        kw_map = {"authentication": "domain/authentication"}
+        item = self._make_item("https://example.com/rss", "rss", title="Random news update")
+        tags = derive_all_tags(item, "rss", kw_map)
+        assert "source/rss" in tags
+        assert "domain/authentication" not in tags
+
+    def test_source_tags_appear_before_topic_tags(self) -> None:
+        """Source tags (Tier 1) come before topic tags (Tier 2) in the result."""
+        from distillery.feeds.poller import derive_all_tags
+
+        kw_map = {"authentication": "domain/authentication"}
+        item = self._make_item(
+            "https://example.com/rss",
+            "rss",
+            content="authentication token management",
+        )
+        tags = derive_all_tags(item, "rss", kw_map)
+        source_indices = [i for i, t in enumerate(tags) if t.startswith("source/")]
+        topic_indices = [i for i, t in enumerate(tags) if not t.startswith("source/")]
+        if source_indices and topic_indices:
+            assert max(source_indices) < min(topic_indices)
+
+    def test_deduplication_across_tiers(self) -> None:
+        """A tag present in both source and topic tiers appears only once."""
+        from distillery.feeds.poller import derive_all_tags
+
+        # keyword_map maps "rss" -> "source/rss" — same as a source tag
+        kw_map = {"rss": "source/rss"}
+        item = self._make_item("https://example.com/rss", "rss", title="rss feeds are great")
+        tags = derive_all_tags(item, "rss", kw_map)
+        assert tags.count("source/rss") == 1
+
+    def test_empty_keyword_map_returns_source_tags_only(self) -> None:
+        """Empty keyword map still returns source tags."""
+        from distillery.feeds.poller import derive_all_tags
+
+        item = self._make_item(
+            "https://github.com/owner/repo", "github", title="New release"
+        )
+        tags = derive_all_tags(item, "github", {})
+        assert "source/github" in tags
+        assert "source/github/owner/repo" in tags
+
+
+# ---------------------------------------------------------------------------
+# Poll cycle integration — vocabulary caching and topic tag wiring
+# ---------------------------------------------------------------------------
+
+
+class TestPollCycleTopicTagIntegration:
+    """Tests for poll() vocabulary caching and _item_to_entry_kwargs topic tag wiring."""
+
+    def _make_item(
+        self,
+        *,
+        title: str = "Test item",
+        content: str = "",
+        source_url: str = "https://example.com/rss",
+        source_type: str = "rss",
+        item_id: str = "item-1",
+    ) -> FeedItem:
+        return FeedItem(
+            source_url=source_url,
+            source_type=source_type,
+            item_id=item_id,
+            title=title,
+            content=content,
+        )
+
+    def test_item_to_entry_kwargs_with_keyword_map_adds_topic_tags(self) -> None:
+        """_item_to_entry_kwargs applies topic tags when keyword_map is provided."""
+        from distillery.feeds.poller import _item_to_entry_kwargs
+
+        item = self._make_item(title="authentication guide for developers")
+        keyword_map = {"authentication": "domain/authentication"}
+        kwargs = _item_to_entry_kwargs(item, 0.8, keyword_map)
+        assert "domain/authentication" in kwargs["tags"]
+        assert "source/rss" in kwargs["tags"]
+
+    def test_item_to_entry_kwargs_without_keyword_map_only_source_tags(self) -> None:
+        """_item_to_entry_kwargs only returns source tags when keyword_map is None."""
+        from distillery.feeds.poller import _item_to_entry_kwargs
+
+        item = self._make_item(title="authentication guide for developers")
+        kwargs = _item_to_entry_kwargs(item, 0.8, None)
+        assert "source/rss" in kwargs["tags"]
+        assert "domain/authentication" not in kwargs["tags"]
+
+    def test_item_to_entry_kwargs_empty_keyword_map_only_source_tags(self) -> None:
+        """_item_to_entry_kwargs with empty keyword_map returns only source tags."""
+        from distillery.feeds.poller import _item_to_entry_kwargs
+
+        item = self._make_item(title="authentication guide for developers")
+        kwargs = _item_to_entry_kwargs(item, 0.8, {})
+        assert "source/rss" in kwargs["tags"]
+        assert "domain/authentication" not in kwargs["tags"]
+
+    @pytest.mark.asyncio
+    async def test_poll_with_vocabulary_produces_topic_tagged_entries(self) -> None:
+        """poll() fetches vocabulary, builds keyword map, and stores topic-tagged entries."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from distillery.feeds.poller import FeedPoller
+
+        # Set up config with one RSS source
+        source_cfg = MagicMock()
+        source_cfg.url = "https://example.com/rss"
+        source_cfg.source_type = "rss"
+        source_cfg.trust_weight = 1.0
+
+        config = MagicMock()
+        config.feeds.thresholds.digest = 0.0
+
+        # Mock store
+        store = AsyncMock()
+        store.list_feed_sources.return_value = [
+            {"url": "https://example.com/rss", "source_type": "rss", "trust_weight": 1.0}
+        ]
+        store.get_tag_vocabulary.return_value = {"domain/authentication": 5}
+        store.find_similar.return_value = []
+        store.list_entries.return_value = []  # no external_id duplicates
+
+        # Feed item mentioning "authentication" so keyword map should match
+        item = self._make_item(title="OAuth authentication guide", item_id="test-001")
+
+        stored_entries: list = []
+
+        async def capture_store(entry: object) -> None:
+            stored_entries.append(entry)
+
+        store.store.side_effect = capture_store
+
+        with (
+            patch(
+                "distillery.feeds.poller._build_adapter"
+            ) as mock_build_adapter,
+            patch(
+                "distillery.feeds.poller.RelevanceScorer"
+            ) as mock_scorer_cls,
+            patch(
+                "distillery.feeds.interests.InterestExtractor"
+            ) as mock_extractor_cls,
+        ):
+            mock_adapter = MagicMock()
+            mock_adapter.fetch.return_value = [item]
+            mock_build_adapter.return_value = mock_adapter
+
+            mock_scorer = AsyncMock()
+            mock_scorer.score.return_value = 0.9
+            mock_scorer_cls.return_value = mock_scorer
+
+            mock_extractor = AsyncMock()
+            mock_extractor.extract.return_value = MagicMock(
+                entry_count=0, top_tags=[]
+            )
+            mock_extractor_cls.return_value = mock_extractor
+
+            poller = FeedPoller(store=store, config=config)
+            summary = await poller.poll()
+
+        assert summary.total_stored == 1
+        assert len(stored_entries) == 1
+        stored_tags = stored_entries[0].tags
+        assert "domain/authentication" in stored_tags
+        assert "source/rss" in stored_tags
+
+    @pytest.mark.asyncio
+    async def test_poll_without_vocabulary_still_stores_source_tagged_entries(self) -> None:
+        """poll() continues without topic tags when get_tag_vocabulary() raises."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from distillery.feeds.poller import FeedPoller
+
+        config = MagicMock()
+        config.feeds.thresholds.digest = 0.0
+
+        store = AsyncMock()
+        store.list_feed_sources.return_value = [
+            {"url": "https://example.com/rss", "source_type": "rss", "trust_weight": 1.0}
+        ]
+        # Simulate vocabulary fetch failure
+        store.get_tag_vocabulary.side_effect = RuntimeError("db error")
+        store.find_similar.return_value = []
+        store.list_entries.return_value = []
+
+        item = self._make_item(title="Authentication in Python", item_id="test-002")
+
+        stored_entries: list = []
+
+        async def capture_store(entry: object) -> None:
+            stored_entries.append(entry)
+
+        store.store.side_effect = capture_store
+
+        with (
+            patch(
+                "distillery.feeds.poller._build_adapter"
+            ) as mock_build_adapter,
+            patch(
+                "distillery.feeds.poller.RelevanceScorer"
+            ) as mock_scorer_cls,
+            patch(
+                "distillery.feeds.interests.InterestExtractor"
+            ) as mock_extractor_cls,
+        ):
+            mock_adapter = MagicMock()
+            mock_adapter.fetch.return_value = [item]
+            mock_build_adapter.return_value = mock_adapter
+
+            mock_scorer = AsyncMock()
+            mock_scorer.score.return_value = 0.9
+            mock_scorer_cls.return_value = mock_scorer
+
+            mock_extractor = AsyncMock()
+            mock_extractor.extract.return_value = MagicMock(
+                entry_count=0, top_tags=[]
+            )
+            mock_extractor_cls.return_value = mock_extractor
+
+            poller = FeedPoller(store=store, config=config)
+            summary = await poller.poll()
+
+        # Should still store entries — with only source tags
+        assert summary.total_stored == 1
+        assert len(stored_entries) == 1
+        stored_tags = stored_entries[0].tags
+        assert "source/rss" in stored_tags
+        # No topic tags since vocabulary fetch failed
+        assert "domain/authentication" not in stored_tags

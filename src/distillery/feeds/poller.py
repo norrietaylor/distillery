@@ -14,9 +14,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 from distillery.feeds.scorer import RelevanceScorer
 
@@ -147,12 +149,213 @@ def _build_adapter(source: FeedSourceConfig) -> Any:
         )
 
 
-def _item_to_entry_kwargs(item: FeedItem, relevance_score: float) -> dict[str, Any]:
+def _derive_source_tags(item: FeedItem, source_type: str) -> list[str]:
+    """Derive hierarchical source tags from feed item metadata.
+
+    Tag derivation rules:
+
+    - All feeds: ``source/{source_type}`` (e.g. ``source/rss``, ``source/github``).
+    - Reddit: parse subreddit from URL → ``source/reddit/{subreddit}``.
+    - GitHub: parse owner/repo from URL → ``source/github/{owner}/{repo}``.
+    - Other RSS: parse domain from URL → ``source/{domain}`` (lowercase,
+      ``www.`` prefix stripped).
+
+    Each candidate tag is validated via :func:`~distillery.models.validate_tag`.
+    Invalid tags are silently dropped with a DEBUG-level log message.
+
+    Args:
+        item: The normalised feed item.
+        source_type: The adapter type string (e.g. ``'rss'``, ``'github'``).
+
+    Returns:
+        A list of validated tag strings; never raises.
+    """
+    from distillery.models import validate_tag
+
+    candidates: list[str] = []
+
+    # All feeds: source/{source_type}
+    candidates.append(f"source/{source_type}")
+
+    url = item.source_url or ""
+
+    if source_type == "github":
+        # GitHub: source/github/{owner}/{repo}
+        try:
+            from distillery.feeds.github import _parse_github_url
+
+            owner, repo = _parse_github_url(url)
+            candidates.append(f"source/github/{owner}/{repo}")
+        except Exception:
+            logger.debug("_derive_source_tags: could not parse GitHub URL %r", url)
+    elif source_type == "rss":
+        # Reddit: source/reddit/{subreddit}
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+        if host == "reddit.com" or host.endswith(".reddit.com"):
+            # URL pattern: https://www.reddit.com/r/{subreddit}/...
+            path_parts = [p for p in parsed.path.split("/") if p]
+            if len(path_parts) >= 2 and path_parts[0] == "r":
+                subreddit = path_parts[1].lower()
+                candidates.append(f"source/reddit/{subreddit}")
+        else:
+            # Generic RSS: source/{domain} (strip www. prefix, replace dots with hyphens
+            # so the resulting tag segment is valid per validate_tag())
+            if host.startswith("www."):
+                host = host[4:]
+            # Replace dots with hyphens to produce a valid tag segment
+            domain_slug = host.replace(".", "-")
+            if domain_slug:
+                candidates.append(f"source/{domain_slug}")
+
+    # Validate all candidates; drop invalid ones silently
+    tags: list[str] = []
+    for tag in candidates:
+        try:
+            validate_tag(tag)
+            tags.append(tag)
+        except ValueError:
+            logger.debug("_derive_source_tags: dropping invalid tag %r", tag)
+
+    return tags
+
+
+def build_keyword_map(vocabulary: dict[str, int]) -> dict[str, str]:
+    """Build a keyword-to-tag-path map from a tag vocabulary.
+
+    For each tag in *vocabulary*:
+
+    - Extracts the leaf segment (the last ``/``-separated part).
+    - Maps the leaf directly to the full tag path.
+    - Splits hyphenated leaves into individual words and maps each word longer
+      than 3 characters to the full tag path.
+
+    When two tags produce the same keyword, the one with the higher occurrence
+    count (or alphabetically first on tie) wins.
+
+    Args:
+        vocabulary: Mapping of full tag path → occurrence count, as returned
+            by :meth:`~distillery.store.protocol.DistilleryStore.get_tag_vocabulary`.
+
+    Returns:
+        A dict mapping lowercase keyword strings to full tag paths.
+
+    Example::
+
+        vocab = {"domain/authentication": 5, "supply-chain-security": 2}
+        kw_map = build_keyword_map(vocab)
+        # kw_map["authentication"]    == "domain/authentication"
+        # kw_map["supply"]            == "supply-chain-security"
+        # kw_map["chain"]             == "supply-chain-security"
+        # kw_map["security"]          == "supply-chain-security"
+    """
+    # keyword -> (full_tag_path, occurrence_count)
+    best: dict[str, tuple[str, int]] = {}
+
+    for tag, count in vocabulary.items():
+        # Skip Tier-1 source tags — they're applied via _derive_source_tags
+        if tag.startswith("source/"):
+            continue
+        leaf = tag.rsplit("/", 1)[-1]
+        keywords: list[str] = [leaf]
+        # Split hyphenated leaf and keep words longer than 3 chars
+        for word in leaf.split("-"):
+            if len(word) > 3:
+                keywords.append(word)
+
+        for kw in keywords:
+            kw_lower = kw.lower()
+            if kw_lower not in best:
+                best[kw_lower] = (tag, count)
+            else:
+                existing_tag, existing_count = best[kw_lower]
+                # Higher count wins; alphabetical ordering breaks ties
+                if count > existing_count or (count == existing_count and tag < existing_tag):
+                    best[kw_lower] = (tag, count)
+
+    return {kw: tag for kw, (tag, _) in best.items()}
+
+
+def match_topic_tags(text: str, keyword_map: dict[str, str]) -> list[str]:
+    """Match feed item text against a keyword map to derive topic tags.
+
+    Tokenises *text* into lowercase words (splitting on any non-alphanumeric
+    character) and looks each token up in *keyword_map*.  Duplicate tag paths
+    are collapsed so the returned list contains at most one entry per tag.
+
+    Args:
+        text: The combined title + content text of a feed item.
+        keyword_map: A mapping of lowercase keyword → full tag path, as
+            produced by :func:`build_keyword_map`.
+
+    Returns:
+        A deduplicated list of matched full tag paths; empty if nothing matched.
+    """
+    seen: set[str] = set()
+    matched: list[str] = []
+    for token in re.split(r"[^a-z0-9]+", text.lower()):
+        if not token:
+            continue
+        full_tag = keyword_map.get(token)
+        if full_tag is not None and full_tag not in seen:
+            seen.add(full_tag)
+            matched.append(full_tag)
+
+    return matched
+
+
+def derive_all_tags(
+    item: FeedItem,
+    source_type: str,
+    keyword_map: dict[str, str],
+) -> list[str]:
+    """Derive the complete tag list for a feed item.
+
+    Combines Tier-1 source tags (from :func:`_derive_source_tags`) with
+    Tier-2 topic tags (from :func:`match_topic_tags`) and deduplicates.
+
+    Args:
+        item: The normalised feed item.
+        source_type: The adapter type string (e.g. ``'rss'``, ``'github'``).
+        keyword_map: A mapping of lowercase keyword → full tag path as
+            produced by :func:`build_keyword_map`.
+
+    Returns:
+        A deduplicated list of validated tag paths; Tier-1 tags appear first.
+    """
+    source_tags = _derive_source_tags(item, source_type)
+
+    text = _item_text(item)
+    topic_tags = match_topic_tags(text, keyword_map)
+
+    # Deduplicate preserving order (source tags first)
+    seen: set[str] = set(source_tags)
+    combined = list(source_tags)
+    for tag in topic_tags:
+        if tag not in seen:
+            seen.add(tag)
+            combined.append(tag)
+
+    return combined
+
+
+def _item_to_entry_kwargs(
+    item: FeedItem,
+    relevance_score: float,
+    keyword_map: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """Convert a :class:`~distillery.feeds.models.FeedItem` to Entry constructor kwargs.
+
+    When *keyword_map* is provided, topic tags (Tier 2) are derived in addition
+    to source tags (Tier 1) via :func:`derive_all_tags`.  When absent, only
+    source tags are derived.
 
     Args:
         item: The normalised feed item.
         relevance_score: The computed cosine similarity score.
+        keyword_map: Optional keyword-to-tag-path mapping produced by
+            :func:`build_keyword_map` for the current poll cycle.  When
+            ``None`` only Tier-1 source tags are applied.
 
     Returns:
         A dict of keyword arguments for :class:`~distillery.models.Entry`.
@@ -173,11 +376,17 @@ def _item_to_entry_kwargs(item: FeedItem, relevance_score: float) -> dict[str, A
     if item.published_at:
         metadata["published_at"] = item.published_at.isoformat()
 
+    if keyword_map is not None:
+        tags = derive_all_tags(item, item.source_type, keyword_map)
+    else:
+        tags = _derive_source_tags(item, item.source_type)
+
     return {
         "content": text or item.source_url,
         "entry_type": EntryType.FEED,
         "source": EntrySource.IMPORT,
         "author": "distillery-poller",
+        "tags": tags,
         "metadata": metadata,
     }
 
@@ -276,8 +485,21 @@ class FeedPoller:
             interest_profile=interest_profile,
         )
 
+        # Build keyword map once per poll cycle for Tier-2 topic tag matching.
+        keyword_map: dict[str, str] = {}
+        try:
+            vocabulary = await self._store.get_tag_vocabulary()
+            keyword_map = build_keyword_map(vocabulary)
+            logger.debug(
+                "FeedPoller: built keyword map with %d keywords from %d tags",
+                len(keyword_map),
+                len(vocabulary),
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("FeedPoller: keyword map build failed — topic tagging disabled")
+
         for source in sources:
-            result = await self._poll_source(source, scorer)
+            result = await self._poll_source(source, scorer, keyword_map=keyword_map)
             summary.results.append(result)
             summary.total_fetched += result.items_fetched
             summary.total_stored += result.items_stored
@@ -294,12 +516,16 @@ class FeedPoller:
         self,
         source: FeedSourceConfig,
         scorer: RelevanceScorer,
+        *,
+        keyword_map: dict[str, str] | None = None,
     ) -> PollResult:
         """Poll a single source and return a :class:`PollResult`.
 
         Args:
             source: The configured feed source.
             scorer: The :class:`~distillery.feeds.scorer.RelevanceScorer` to use.
+            keyword_map: Optional keyword-to-tag-path mapping for Tier-2 topic
+                tag matching, built once per poll cycle by the caller.
 
         Returns:
             A :class:`PollResult` summarising what happened.
@@ -377,7 +603,7 @@ class FeedPoller:
             try:
                 from distillery.models import Entry
 
-                kwargs = _item_to_entry_kwargs(item, adjusted_score)
+                kwargs = _item_to_entry_kwargs(item, adjusted_score, keyword_map)
                 entry = Entry(**kwargs)
                 await self._store.store(entry)
                 batch_entry_ids.add(str(entry.id))

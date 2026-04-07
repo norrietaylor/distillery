@@ -333,6 +333,26 @@ class DistilleryStore(Protocol):
         """
         ...
 
+    async def get_tag_vocabulary(self, prefix: str | None = None) -> dict[str, int]:
+        """Return a mapping of tag to occurrence count across active entries.
+
+        Counts how many active (non-archived) entries carry each tag.  When
+        *prefix* is supplied, only tags that equal the prefix or start with
+        ``"{prefix}/"`` are included in the result.
+
+        Args:
+            prefix: Optional hierarchical tag prefix to filter by (e.g.
+                ``"python"`` matches ``"python"`` and ``"python/3.11"`` but not
+                ``"python-legacy"``).
+
+        Returns:
+            Dict mapping each matching tag string to the number of active
+            entries that carry it, sorted by count descending then tag
+            ascending.  Returns an empty dict when the store contains no
+            active entries with matching tags.
+        """
+        ...
+
     async def query_audit_log(
         self,
         filters: dict[str, Any] | None,
