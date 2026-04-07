@@ -557,6 +557,7 @@ async def _handle_list(
 
     try:
         entries = await store.list_entries(filters=filters, limit=limit, offset=offset)
+        total_count = await store.count_entries(filters=filters)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error in distillery_list")
         return error_response("LIST_ERROR", f"list_entries failed: {exc}")
@@ -596,6 +597,7 @@ async def _handle_list(
         {
             "entries": serialised,
             "count": len(entries),
+            "total_count": total_count,
             "limit": limit,
             "offset": offset,
             "output_mode": output_mode,

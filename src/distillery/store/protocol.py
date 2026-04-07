@@ -182,6 +182,21 @@ class DistilleryStore(Protocol):
         """
         ...
 
+    async def count_entries(
+        self,
+        filters: dict[str, Any] | None,
+    ) -> int:
+        """
+        Count entries matching the given filters without fetching them.
+
+        Parameters:
+            filters (dict[str, Any] | None): Same filter keys as ``list_entries``.
+
+        Returns:
+            int: Total number of matching entries.
+        """
+        ...
+
     async def log_search(
         self,
         query: str,
