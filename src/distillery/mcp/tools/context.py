@@ -75,6 +75,18 @@ async def _handle_context(
     tags: list[str] | None = arguments.get("tags")
     query: str | None = arguments.get("query")
 
+    # --- validate project type ------------------------------------------------
+    if project is not None and not isinstance(project, str):
+        return error_response("INVALID_PARAMS", "Field 'project' must be a string.")
+
+    # --- validate tags item types ---------------------------------------------
+    if tags is not None and not all(isinstance(t, str) for t in tags):
+        return error_response("INVALID_PARAMS", "All items in 'tags' must be strings.")
+
+    # --- strip whitespace-only queries ----------------------------------------
+    if query is not None:
+        query = query.strip() or None
+
     # Build filters for project/tags.
     filters: dict[str, Any] = {"status": "active"}
     if project is not None:
