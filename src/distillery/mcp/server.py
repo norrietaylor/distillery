@@ -526,6 +526,8 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         scope: str = "full",
         period_days: int = 30,
         entry_type: str | None = None,
+        date_from: str | None = None,
+        user: str | None = None,
     ) -> list[types.TextContent]:
         """Return usage metrics and statistics for the knowledge store.
 
@@ -533,11 +535,16 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
           "full" (default): complete metrics — entries, activity, search, quality, staleness, storage.
           "summary": entry counts by type/status, database size, embedding model info.
           "search_quality": search totals, feedback rates, quality breakdown (entry_type optional).
+          "audit": login history, user activity, and recent operations.
+            Accepts optional date_from (ISO 8601 string) and user (string) filters.
+            Incompatible with entry_type.
         period_days >= 1 (used for "full" scope only).
         """
         c = _lc(ctx)
         args: dict[str, Any] = dict(
-            scope=scope, period_days=period_days, **_omit_none(entry_type=entry_type)
+            scope=scope,
+            period_days=period_days,
+            **_omit_none(entry_type=entry_type, date_from=date_from, user=user),
         )
         return await _handle_metrics(
             store=c["store"],

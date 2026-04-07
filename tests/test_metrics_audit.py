@@ -444,6 +444,18 @@ class TestIncompatibleParams:
         data = _parse(response)
         assert "INVALID_PARAMS" in str(data)
 
+    async def test_invalid_date_from_format_returns_error(
+        self, store: DuckDBStore
+    ) -> None:
+        config = _make_config()
+        ep = MockEmbeddingProvider()
+        response = await _handle_metrics(
+            store, config, ep, {"scope": "audit", "date_from": "not-a-date"}
+        )
+        data = _parse(response)
+        assert "INVALID_PARAMS" in str(data)
+        assert "ISO 8601" in str(data)
+
     async def test_invalid_user_type_returns_error(
         self, store: DuckDBStore
     ) -> None:

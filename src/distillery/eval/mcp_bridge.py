@@ -262,6 +262,7 @@ DISTILLERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "description": (
             "Retrieve aggregate metrics. scope='summary' gives entry counts and server info "
             "(replaces distillery_status). scope='search_quality' gives search quality metrics. "
+            "scope='audit' gives login history and operations. "
             "scope='full' (default) gives complete metrics."
         ),
         "input_schema": {
@@ -269,9 +270,24 @@ DISTILLERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
             "properties": {
                 "scope": {
                     "type": "string",
-                    "description": "One of: 'summary', 'full', 'search_quality' (default: 'full').",
+                    "description": (
+                        "One of: 'summary', 'full', 'search_quality', 'audit' (default: 'full')."
+                    ),
                 },
                 "period_days": {"type": "integer", "description": "Lookback window in days."},
+                "date_from": {
+                    "type": "string",
+                    "description": (
+                        "ISO 8601 timestamp lower bound. Used with scope='audit'."
+                    ),
+                },
+                "user": {
+                    "type": "string",
+                    "description": (
+                        "Filter by user ID. Used with scope='audit' "
+                        "(narrows recent_operations and active_users only)."
+                    ),
+                },
             },
             "required": [],
         },

@@ -247,6 +247,13 @@ async def _handle_metrics(
         date_from: str | None = arguments.get("date_from")
         if date_from is not None and not isinstance(date_from, str):
             return error_response("INVALID_PARAMS", "Field 'date_from' must be a string")
+        if date_from is not None:
+            try:
+                datetime.fromisoformat(date_from)
+            except (ValueError, TypeError):
+                return error_response(
+                    "INVALID_PARAMS", "Field 'date_from' must be a valid ISO 8601 string"
+                )
         # validate user
         audit_user: str | None = arguments.get("user")
         if audit_user is not None and not isinstance(audit_user, str):
