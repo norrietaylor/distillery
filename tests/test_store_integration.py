@@ -8,10 +8,12 @@ retrieval, search ranking, and similarity detection.
 
 from __future__ import annotations
 
+import duckdb
 import pytest
 
 from distillery.models import EntryStatus, EntryType
 from distillery.store.duckdb import DuckDBStore
+from distillery.store.migrations import MIGRATIONS, create_fts_index
 from distillery.store.protocol import SearchResult
 from tests.conftest import DeterministicEmbeddingProvider, make_entry
 
@@ -506,3 +508,70 @@ class TestGetTagVocabulary:
 
         assert "python" not in vocab
         assert "py/test" in vocab
+
+
+# ---------------------------------------------------------------------------
+# Migration 7 — FTS index
+# ---------------------------------------------------------------------------
+
+
+class TestMigration7FtsIndex:
+    """Verify that migration 7 installs the FTS extension and creates the index."""
+
+    def _make_conn_with_entries(self) -> duckdb.DuckDBPyConnection:
+        """Return an in-memory DuckDB connection with a minimal entries table."""
+        conn = duckdb.connect(":memory:")
+        conn.execute(
+            "CREATE TABLE entries (id VARCHAR PRIMARY KEY, content VARCHAR NOT NULL)"
+        )
+        conn.execute(
+            "INSERT INTO entries VALUES ('1', 'machine learning models'), "
+            "('2', 'knowledge base retrieval'), ('3', 'vector embeddings')"
+        )
+        return conn
+
+    def _fts_loaded(self, conn: duckdb.DuckDBPyConnection) -> bool:
+        """Return True if the FTS macro is accessible on the entries table."""
+        try:
+            conn.execute(
+                "SELECT id, fts_main_entries.match_bm25(id, 'test') AS score"
+                " FROM entries LIMIT 1"
+            )
+            return True
+        except Exception:
+            return False
+
+    def test_migration_7_is_registered(self) -> None:
+        """Migration 7 is present in the MIGRATIONS registry."""
+        assert 7 in MIGRATIONS
+        assert MIGRATIONS[7] is create_fts_index
+
+    def test_migration_7_runs_without_error(self) -> None:
+        """Migration 7 completes without raising an exception."""
+        conn = self._make_conn_with_entries()
+        # Must not raise; gracefully degrades when FTS extension is unavailable.
+        create_fts_index(conn)
+
+    def test_migration_7_is_idempotent(self) -> None:
+        """Running migration 7 twice does not raise an error."""
+        conn = self._make_conn_with_entries()
+        create_fts_index(conn)
+        # Second invocation must not raise — overwrite=1 handles idempotency.
+        create_fts_index(conn)
+
+    def test_migration_7_fts_search_functional(self) -> None:
+        """After migration 7, BM25 search returns matching rows."""
+        conn = self._make_conn_with_entries()
+        create_fts_index(conn)
+
+        if not self._fts_loaded(conn):
+            pytest.skip("FTS extension not available in this environment")
+
+        rows = conn.execute(
+            "SELECT id FROM ("
+            "  SELECT id, fts_main_entries.match_bm25(id, 'machine') AS score"
+            "  FROM entries"
+            ") WHERE score IS NOT NULL"
+        ).fetchall()
+        ids = [r[0] for r in rows]
+        assert "1" in ids, "Entry with 'machine learning models' should match 'machine'"

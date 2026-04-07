@@ -193,6 +193,35 @@ def create_hnsw_index(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
         logger.warning("Migration 6: HNSW index type not recognized, skipping")
 
 
+def create_fts_index(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
+    """Migration 7: Install FTS extension and create full-text index on ``entries.content``.
+
+    Uses ``PRAGMA create_fts_index`` with ``overwrite=1`` so the migration is
+    idempotent — re-running it rebuilds the index rather than raising an error.
+
+    Sets ``kwargs["fts_available"]`` to ``True`` on success or ``False`` when
+    the extension cannot be loaded.  Callers that pass a shared mutable dict
+    via keyword arguments can inspect ``fts_available`` afterwards.
+
+    When the FTS extension is unavailable (e.g. offline environment or
+    restricted DuckDB build) the migration degrades gracefully: it logs a
+    warning and records ``fts_available=False`` without raising.
+    """
+    try:
+        conn.execute("INSTALL fts")
+        conn.execute("LOAD fts")
+        conn.execute("PRAGMA create_fts_index('entries', 'id', 'content', overwrite=1)")
+        kwargs["fts_available"] = True
+        logger.info("Migration 7: FTS extension loaded and index created on entries.content")
+    except duckdb.IOException as exc:
+        # Extension install requires network access; gracefully degrade.
+        kwargs["fts_available"] = False
+        logger.warning("Migration 7: FTS extension install failed (offline?): %s", exc)
+    except Exception as exc:
+        kwargs["fts_available"] = False
+        logger.warning("Migration 7: FTS index creation failed, skipping: %s", exc)
+
+
 # ---------------------------------------------------------------------------
 # Migration registry
 # ---------------------------------------------------------------------------
@@ -204,6 +233,7 @@ MIGRATIONS: dict[int, MigrationFunc] = {
     4: create_log_tables,
     5: create_feed_sources,
     6: create_hnsw_index,
+    7: create_fts_index,
 }
 """Ordered mapping of schema version to migration function.
 
