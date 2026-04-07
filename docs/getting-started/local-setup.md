@@ -111,7 +111,6 @@ Or use `python -m` (if installed from source):
         "JINA_API_KEY": "your-jina-api-key",
         "DISTILLERY_CONFIG": "/path/to/distillery.yaml",
         "GITHUB_TOKEN": "ghp_..."
-
       }
     }
   }
