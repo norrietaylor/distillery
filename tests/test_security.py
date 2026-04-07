@@ -159,3 +159,4 @@ class TestSecretRedactFilter:
         filt.filter(record)
         assert isinstance(record.args, tuple)
         assert "gho_oauthtoken9876543" not in record.args[0]
+        assert "gho_oaut****" in record.args[0]

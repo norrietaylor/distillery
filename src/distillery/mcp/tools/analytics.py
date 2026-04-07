@@ -813,13 +813,15 @@ async def _gather_audit(
         filters=base_filters if base_filters else None,
         limit=500,
     )
-    recent_logins = [r for r in all_rows if r["tool"] in _AUTH_TOOLS][:50]
+    auth_events = [r for r in all_rows if r["tool"] in _AUTH_TOOLS]
+    recent_logins = auth_events[:50]
 
     # --- login_summary --------------------------------------------------
-    total_logins = sum(1 for r in recent_logins if r["tool"] == "auth_login")
-    failed_attempts = sum(1 for r in recent_logins if r["tool"] == "auth_login_failed")
-    org_denials = sum(1 for r in recent_logins if r["tool"] == "auth_org_denied")
-    unique_users_set = {r["user_id"] for r in recent_logins if r["user_id"]}
+    # Compute from full auth_events (not truncated recent_logins) for accurate totals.
+    total_logins = sum(1 for r in auth_events if r["tool"] == "auth_login")
+    failed_attempts = sum(1 for r in auth_events if r["tool"] == "auth_login_failed")
+    org_denials = sum(1 for r in auth_events if r["tool"] == "auth_org_denied")
+    unique_users_set = {r["user_id"] for r in auth_events if r["user_id"]}
     login_summary: dict[str, Any] = {
         "total_logins": total_logins,
         "unique_users": len(unique_users_set),
@@ -839,6 +841,9 @@ async def _gather_audit(
 
     # --- active_users (filtered by date_from + user) ---------------------
     # Derive from ops_rows (which already respects date_from + user).
+    # Note: operation_count includes all operations (auth + non-auth) to
+    # represent total user activity.  Rows are ordered DESC so the first
+    # occurrence of each user is their most recent timestamp.
     user_stats: dict[str, dict[str, Any]] = {}
     for row in ops_rows:
         uid = row["user_id"] or ""
@@ -847,9 +852,6 @@ async def _gather_audit(
         if uid not in user_stats:
             user_stats[uid] = {"last_seen": row["timestamp"], "operation_count": 0}
         user_stats[uid]["operation_count"] += 1
-        # rows are ordered DESC so first occurrence = most recent
-        if row["timestamp"] > user_stats[uid]["last_seen"]:
-            user_stats[uid]["last_seen"] = row["timestamp"]
     active_users = sorted(
         [{"user_id": uid, **stats} for uid, stats in user_stats.items()],
         key=lambda x: x["last_seen"],

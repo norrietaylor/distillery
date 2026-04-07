@@ -1221,10 +1221,10 @@ class DuckDBStore:
 
         where_sql = ("WHERE " + " AND ".join(clauses)) if clauses else ""
 
-        # Cast TIMESTAMPTZ to VARCHAR in SQL to avoid pytz dependency when
+        # Format TIMESTAMPTZ as ISO 8601 in UTC to avoid pytz dependency when
         # DuckDB deserialises timezone-aware timestamps to Python.
         sql = (
-            f"SELECT id, strftime(timestamp::TIMESTAMP, '%Y-%m-%dT%H:%M:%S') || '+00:00', "
+            f"SELECT id, strftime(timestamp AT TIME ZONE 'UTC', '%Y-%m-%dT%H:%M:%S+00:00'), "
             f"user_id, tool, entry_id, action, outcome "
             f"FROM audit_log "
             f"{where_sql} "

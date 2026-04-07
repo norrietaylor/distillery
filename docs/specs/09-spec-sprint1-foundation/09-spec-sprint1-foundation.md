@@ -108,7 +108,7 @@ No specific design requirements identified. All changes are backend/API only.
 ## Technical Considerations
 
 - **Token propagation**: `_build_adapter()` in `poller.py` needs access to `GITHUB_TOKEN` env var or config. Simplest path: read `os.environ.get("GITHUB_TOKEN", "")` directly in `_build_adapter()`, matching the existing pattern in `GitHubAdapter.__init__()`.
-- **httpx redirect behavior**: httpx follows redirects by default (`follow_redirects=True` is the default for `Client.get()`). Verify this is not overridden. If using `httpx.Client(follow_redirects=...)` explicitly, ensure `True`.
+- **httpx redirect behavior**: httpx does **not** follow redirects by default (`follow_redirects=False`). The `GitHubAdapter` must explicitly set `follow_redirects=True` on `httpx.Client(...)` to handle 301 redirects from renamed/transferred repos.
 - **Audit log query performance**: The audit_log table has no indexes beyond the PK. For large deployments, consider whether a timestamp index is needed. For now, `LIMIT 50` keeps queries fast.
 - **Protocol extension**: Adding `query_audit_log` to the Protocol is a breaking change for any external implementations. Since `DuckDBStore` is the only implementation, this is acceptable.
 

@@ -18,6 +18,7 @@ Covers:
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -109,7 +110,7 @@ def _ts_past(days: float) -> str:
 
 
 @pytest.fixture
-async def store() -> DuckDBStore:  # type: ignore[return]
+async def store() -> AsyncGenerator[DuckDBStore, None]:
     s = DuckDBStore(db_path=":memory:", embedding_provider=MockEmbeddingProvider())
     await s.initialize()
     yield s

@@ -12,6 +12,8 @@ Covers:
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
+
 import pytest
 
 from distillery.store.duckdb import DuckDBStore
@@ -26,7 +28,7 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
-async def store() -> DuckDBStore:  # type: ignore[return]
+async def store() -> AsyncGenerator[DuckDBStore, None]:
     """Initialised in-memory DuckDBStore, yielded for test use, then closed."""
     s = DuckDBStore(db_path=":memory:", embedding_provider=MockEmbeddingProvider())
     await s.initialize()
