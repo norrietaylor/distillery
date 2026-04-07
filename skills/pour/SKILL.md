@@ -54,9 +54,9 @@ Analyze Pass 1 for related concepts, people, sub-topics, or terms not directly c
 
 `distillery_search(query="<related concept>", limit=10, project="<project if specified>")`
 
-**Tag-based expansion:** Additionally, extract tags from Pass 1 results and call `distillery_tag_tree(prefix="<topic>")` to discover related tag namespaces. Convert the most frequently occurring related tags to search queries (leaf segment, hyphens to spaces — e.g., `domain/oauth` → `"oauth"`, `domain/session-management` → `"session management"`). Run up to 3 additional tag-derived searches, skipping any that duplicate an existing Pass 2 query.
+**Tag-based expansion:** Extract tags from Pass 1 results and identify their namespace prefixes (e.g., tags like `domain/authentication`, `domain/oauth` → namespace prefix `domain`). For each relevant namespace, call `distillery_tag_tree(prefix="<namespace>")` to get the subtree. Traverse the returned tree's children nodes and collect leaf tags, ranking them by entry count (the `count` field on each node). Convert the top-ranked leaf segments to search queries by taking the leaf segment and replacing hyphens with spaces (e.g., `domain/oauth` → `"oauth"`, `domain/session-management` → `"session management"`). Run up to 3 `distillery_search` calls from these ranked tag-derived queries, skipping any that duplicate an existing Pass 2 concept query.
 
-Report: `Tag expansion: discovered <N> related topics from tag vocabulary.` (Omit if no tags found — Pass 2 proceeds with concept-based queries only.)
+Report: `Tag expansion: discovered <N> related topics from tag vocabulary.` (Omit this line entirely if no tags are found in Pass 1 results — Pass 2 proceeds with concept-based queries only.)
 
 **Pass 3 -- Gap-filling (up to 2):**
 
