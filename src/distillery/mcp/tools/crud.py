@@ -763,7 +763,12 @@ async def _handle_correct(
     try:
         await store.update(wrong_entry_id, {"status": EntryStatus.ARCHIVED})
     except Exception as exc:  # noqa: BLE001
-        logger.exception("Error archiving original entry %s", wrong_entry_id)
+        logger.exception(
+            "Correction stored (ID: %s) but failed to archive original (ID: %s). "
+            "Manual reconciliation needed.",
+            new_entry_id,
+            wrong_entry_id,
+        )
         return error_response(
             "STORE_ERROR",
             f"Correction stored (id={new_entry_id}) but failed to archive original: {exc}",

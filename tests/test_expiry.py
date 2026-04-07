@@ -194,6 +194,7 @@ class TestStaleHandlerExpired:
         assert entry.id in stale_ids
 
 
+@pytest.mark.unit
 class TestEntryRoundtrip:
     """expires_at survives to_dict/from_dict roundtrip."""
 

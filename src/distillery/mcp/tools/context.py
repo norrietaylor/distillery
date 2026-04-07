@@ -103,11 +103,6 @@ async def _handle_context(
             entries = await store.list_entries(filters=filters, limit=limit, offset=0)
             entries_out = [e.to_dict() for e in entries]
 
-        else:
-            # scope == "all" with query — handled above
-            entries = await store.list_entries(filters=filters, limit=limit, offset=0)
-            entries_out = [e.to_dict() for e in entries]
-
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error in distillery_context")
         return error_response("CONTEXT_ERROR", f"Failed to retrieve context: {exc}")

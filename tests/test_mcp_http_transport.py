@@ -2,7 +2,7 @@
 
 Tests verify:
 - HTTP server starts and responds to MCP initialize
-- All 18 tools are accessible over HTTP transport
+- All 20 tools are accessible over HTTP transport
 - Stateless HTTP singleton: two requests share same store instance
 - stdio mode (no flags) backward compatibility
 """
@@ -32,7 +32,7 @@ MCP_HEADERS = {
     "Accept": "application/json, text/event-stream",
 }
 
-# All 18 tools that the Distillery MCP server exposes.
+# All 20 tools that the Distillery MCP server exposes.
 EXPECTED_TOOLS = {
     "distillery_store",
     "distillery_get",
