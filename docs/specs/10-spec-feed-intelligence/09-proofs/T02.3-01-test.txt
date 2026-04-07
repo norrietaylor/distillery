@@ -1,0 +1,22 @@
+Type: test
+Command: pytest tests/test_cli.py -k 'retag' -v
+Expected: Retag CLI tests pass
+Timestamp: 2026-04-06T00:00:00Z
+
+============================= test session starts ==============================
+platform linux -- Python 3.13.7, pytest-8.x, pluggy-1.x
+asyncio: mode=Mode.AUTO
+collecting ... collected 57 items / 49 deselected / 8 selected
+
+tests/test_cli.py::TestRetagCommand::test_retag_dry_run_no_entries_exits_zero PASSED [ 12%]
+tests/test_cli.py::TestRetagCommand::test_retag_dry_run_json_format PASSED [ 25%]
+tests/test_cli.py::TestRetagCommand::test_retag_dry_run_does_not_modify_entries PASSED [ 37%]
+tests/test_cli.py::TestRetagCommand::test_retag_updates_untagged_entries PASSED [ 50%]
+tests/test_cli.py::TestRetagCommand::test_retag_force_retags_all_entries PASSED [ 62%]
+tests/test_cli.py::TestRetagCommand::test_retag_skips_tagged_without_force PASSED [ 75%]
+tests/test_cli.py::TestRetagCommand::test_retag_missing_config_returns_one PASSED [ 87%]
+tests/test_cli.py::TestRetagCommand::test_retag_via_main_dispatches PASSED [100%]
+
+======================= 8 passed, 49 deselected in 1.40s =======================
+
+Status: PASS

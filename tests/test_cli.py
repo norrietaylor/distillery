@@ -14,6 +14,7 @@ from distillery.cli import (
     _cmd_export,
     _cmd_health,
     _cmd_import,
+    _cmd_retag,
     _cmd_status,
     _query_status,
     main,
@@ -729,4 +730,239 @@ class TestImportCommand:
                     "--yes",
                 ]
             )
+        assert exc.value.code == 0
+
+
+# ---------------------------------------------------------------------------
+# retag subcommand
+# ---------------------------------------------------------------------------
+
+
+class TestRetagCommand:
+    """Tests for the ``distillery retag`` subcommand."""
+
+    def _write_config(self, tmp_path: Path, db_path: str) -> Path:
+        return write_config(tmp_path, db_path)
+
+    def test_retag_dry_run_no_entries_exits_zero(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Dry-run against empty DB reports 0 scanned and exits 0."""
+        db_path = str(tmp_path / "test.db")
+        cfg_path = self._write_config(tmp_path, db_path)
+        rc = _cmd_retag(str(cfg_path), "text", dry_run=True, force=False)
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "total_scanned: 0" in out
+
+    def test_retag_dry_run_json_format(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """JSON output includes dry_run flag and counts."""
+        db_path = str(tmp_path / "test.db")
+        cfg_path = self._write_config(tmp_path, db_path)
+        rc = _cmd_retag(str(cfg_path), "json", dry_run=True, force=False)
+        assert rc == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data["dry_run"] is True
+        assert data["total_scanned"] == 0
+        assert data["total_updated"] == 0
+
+    def test_retag_dry_run_does_not_modify_entries(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Dry-run with feed entries present does not persist tag changes."""
+        import asyncio
+
+        from distillery.models import EntrySource, EntryType
+        from distillery.store.duckdb import DuckDBStore
+        from tests.conftest import make_entry
+
+        db_path = str(tmp_path / "test.db")
+        cfg_path = self._write_config(tmp_path, db_path)
+
+        async def _setup() -> None:
+            from distillery.mcp._stub_embedding import StubEmbeddingProvider
+            store = DuckDBStore(db_path=db_path, embedding_provider=StubEmbeddingProvider())
+            await store.initialize()
+            # Add vocabulary via a tagged inbox entry.
+            seed = make_entry(
+                content="seed",
+                tags=["security"],
+                entry_type=EntryType.INBOX,
+                source=EntrySource.MANUAL,
+            )
+            await store.store(seed)
+            # Feed entry without tags.
+            feed_entry = make_entry(
+                content="critical security vulnerability disclosed",
+                entry_type=EntryType.FEED,
+                source=EntrySource.MANUAL,
+                tags=[],
+                metadata={"source_type": "rss", "source_url": "https://example.com/feed"},
+            )
+            await store.store(feed_entry)
+            await store.close()
+
+        asyncio.run(_setup())
+
+        rc = _cmd_retag(str(cfg_path), "text", dry_run=True, force=False)
+        assert rc == 0
+
+        async def _check() -> list[str]:
+            from distillery.mcp._stub_embedding import StubEmbeddingProvider
+            store = DuckDBStore(db_path=db_path, embedding_provider=StubEmbeddingProvider())
+            await store.initialize()
+            entries = await store.list_entries(
+                filters={"entry_type": "feed"}, limit=10, offset=0
+            )
+            await store.close()
+            return entries[0].tags if entries else []
+
+        tags_after = asyncio.run(_check())
+        # Tags must remain empty after dry-run.
+        assert tags_after == []
+
+    def test_retag_updates_untagged_entries(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Retag writes derived tags to entries that have none."""
+        import asyncio
+
+        from distillery.models import EntrySource, EntryType
+        from distillery.store.duckdb import DuckDBStore
+        from tests.conftest import make_entry
+
+        db_path = str(tmp_path / "test.db")
+        cfg_path = self._write_config(tmp_path, db_path)
+
+        async def _setup() -> None:
+            from distillery.mcp._stub_embedding import StubEmbeddingProvider
+            store = DuckDBStore(db_path=db_path, embedding_provider=StubEmbeddingProvider())
+            await store.initialize()
+            # Seed vocabulary.
+            seed = make_entry(
+                content="seed",
+                tags=["security"],
+                entry_type=EntryType.INBOX,
+                source=EntrySource.MANUAL,
+            )
+            await store.store(seed)
+            # Feed entry without tags whose content mentions security.
+            feed_entry = make_entry(
+                content="critical security patch released",
+                entry_type=EntryType.FEED,
+                source=EntrySource.MANUAL,
+                tags=[],
+                metadata={"source_type": "rss", "source_url": "https://example.com/feed"},
+            )
+            await store.store(feed_entry)
+            await store.close()
+
+        asyncio.run(_setup())
+
+        rc = _cmd_retag(str(cfg_path), "json", dry_run=False, force=False)
+        assert rc == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data["total_scanned"] >= 1
+
+    def test_retag_force_retags_all_entries(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """--force causes already-tagged feed entries to be re-evaluated."""
+        import asyncio
+
+        from distillery.models import EntrySource, EntryType
+        from distillery.store.duckdb import DuckDBStore
+        from tests.conftest import make_entry
+
+        db_path = str(tmp_path / "test.db")
+        cfg_path = self._write_config(tmp_path, db_path)
+
+        async def _setup() -> None:
+            from distillery.mcp._stub_embedding import StubEmbeddingProvider
+            store = DuckDBStore(db_path=db_path, embedding_provider=StubEmbeddingProvider())
+            await store.initialize()
+            # Feed entry that already has a tag.
+            feed_entry = make_entry(
+                content="already tagged item",
+                entry_type=EntryType.FEED,
+                source=EntrySource.MANUAL,
+                tags=["existing-tag"],
+                metadata={"source_type": "rss", "source_url": "https://example.com/feed"},
+            )
+            await store.store(feed_entry)
+            await store.close()
+
+        asyncio.run(_setup())
+
+        rc = _cmd_retag(str(cfg_path), "json", dry_run=False, force=True)
+        assert rc == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data["total_scanned"] == 1
+
+    def test_retag_skips_tagged_without_force(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Without --force, entries with existing tags are not retagged."""
+        import asyncio
+
+        from distillery.models import EntrySource, EntryType
+        from distillery.store.duckdb import DuckDBStore
+        from tests.conftest import make_entry
+
+        db_path = str(tmp_path / "test.db")
+        cfg_path = self._write_config(tmp_path, db_path)
+
+        async def _setup() -> None:
+            from distillery.mcp._stub_embedding import StubEmbeddingProvider
+            store = DuckDBStore(db_path=db_path, embedding_provider=StubEmbeddingProvider())
+            await store.initialize()
+            tagged = make_entry(
+                content="already has tags",
+                entry_type=EntryType.FEED,
+                source=EntrySource.MANUAL,
+                tags=["keeps-tag"],
+                metadata={"source_type": "rss", "source_url": "https://example.com/feed"},
+            )
+            await store.store(tagged)
+            await store.close()
+
+        asyncio.run(_setup())
+
+        rc = _cmd_retag(str(cfg_path), "json", dry_run=False, force=False)
+        assert rc == 0
+        data = json.loads(capsys.readouterr().out)
+        # Entry was scanned but not updated (it already had tags).
+        assert data["total_scanned"] == 1
+        assert data["total_updated"] == 0
+
+    def test_retag_missing_config_returns_one(self, tmp_path: Path) -> None:
+        """Bad config path returns exit code 1."""
+        missing = str(tmp_path / "no_such.yaml")
+        rc = _cmd_retag(missing, "text", dry_run=True, force=False)
+        assert rc == 1
+
+    def test_retag_via_main_dispatches(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """``distillery retag`` can be invoked via main()."""
+        db_path = str(tmp_path / "test.db")
+        cfg_path = write_config(tmp_path, db_path)
+        with pytest.raises(SystemExit) as exc:
+            main(["retag", "--config", str(cfg_path), "--dry-run"])
         assert exc.value.code == 0

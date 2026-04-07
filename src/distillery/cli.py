@@ -97,6 +97,24 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Poll only the source with this URL (polls all sources when omitted)",
     )
 
+    retag_parser = subparsers.add_parser(
+        "retag",
+        help="Backfill topic tags on existing feed entries",
+        parents=[shared],
+    )
+    retag_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help="Preview which entries would be updated without writing changes",
+    )
+    retag_parser.add_argument(
+        "--force",
+        action="store_true",
+        default=False,
+        help="Retag all feed entries, not just those with empty tags",
+    )
+
     export_parser = subparsers.add_parser(
         "export",
         help="Export all entries and feed sources to a JSON file",
@@ -508,6 +526,137 @@ def _cmd_poll(config_path: str | None, fmt: str, source_url: str | None) -> int:
                 print(f"    error: {err}", file=sys.stderr)
 
     return 0 if summary.sources_errored == 0 else 1
+
+
+# ---------------------------------------------------------------------------
+# Retag subcommand
+# ---------------------------------------------------------------------------
+
+_RETAG_BATCH_SIZE = 100
+
+
+def _cmd_retag(
+    config_path: str | None,
+    fmt: str,
+    dry_run: bool,
+    force: bool,
+) -> int:
+    """Implement the ``retag`` subcommand.
+
+    Backfills topic tags on existing feed entries by running
+    :func:`~distillery.feeds.poller.derive_all_tags` against the current tag
+    vocabulary.
+
+    Args:
+        config_path: Path to configuration file, or ``None`` to use defaults.
+        fmt: Output format (``"text"`` or ``"json"``).
+        dry_run: When ``True``, report counts without persisting changes.
+        force: When ``True``, retag *all* feed entries regardless of whether
+            they already have tags.
+
+    Returns:
+        Exit code (0 on success, 1 on error).
+    """
+    try:
+        cfg = load_config(config_path)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Error loading configuration: {exc}", file=sys.stderr)
+        return 1
+
+    async def _run() -> tuple[int, int]:
+        """Return (total_scanned, total_updated)."""
+        from distillery.feeds.models import FeedItem
+        from distillery.feeds.poller import build_keyword_map, derive_all_tags
+        from distillery.mcp.server import _create_embedding_provider, _normalize_db_path
+        from distillery.models import EntryType
+        from distillery.store.duckdb import DuckDBStore
+
+        embedding_provider = _create_embedding_provider(cfg)
+        db_path = _normalize_db_path(cfg.storage.database_path)
+
+        store = DuckDBStore(
+            db_path=db_path,
+            embedding_provider=embedding_provider,
+            s3_region=cfg.storage.s3_region,
+            s3_endpoint=cfg.storage.s3_endpoint,
+        )
+        await store.initialize()
+
+        # Build keyword map once for the entire backfill cycle.
+        vocabulary = await store.get_tag_vocabulary()
+        keyword_map = build_keyword_map(vocabulary)
+
+        total_scanned = 0
+        total_updated = 0
+        offset = 0
+
+        while True:
+            batch = await store.list_entries(
+                filters={"entry_type": EntryType.FEED.value},
+                limit=_RETAG_BATCH_SIZE,
+                offset=offset,
+            )
+            if not batch:
+                break
+
+            for entry in batch:
+                total_scanned += 1
+
+                # Skip already-tagged entries unless --force.
+                if not force and entry.tags:
+                    continue
+
+                # Reconstruct a minimal FeedItem from entry metadata for tag derivation.
+                meta = entry.metadata or {}
+                source_type: str = meta.get("source_type", "rss")
+                item = FeedItem(
+                    source_url=str(entry.source),
+                    source_type=source_type,
+                    item_id=entry.id,
+                    title=meta.get("title") or None,
+                    url=meta.get("url") or None,
+                    content=entry.content or None,
+                    published_at=entry.created_at,
+                    extra=meta,
+                )
+                new_tags = derive_all_tags(item, source_type, keyword_map)
+
+                if set(new_tags) != set(entry.tags):
+                    if not dry_run:
+                        await store.update(entry.id, {"tags": new_tags})
+                    total_updated += 1
+
+            offset += len(batch)
+            if len(batch) < _RETAG_BATCH_SIZE:
+                break
+
+        await store.close()
+        return total_scanned, total_updated
+
+    try:
+        total_scanned, total_updated = asyncio.run(_run())
+    except Exception as exc:
+        print(f"Error during retag: {exc}", file=sys.stderr)
+        return 1
+
+    action = "would update" if dry_run else "updated"
+    if fmt == "json":
+        print(
+            json.dumps(
+                {
+                    "dry_run": dry_run,
+                    "force": force,
+                    "total_scanned": total_scanned,
+                    "total_updated": total_updated,
+                }
+            )
+        )
+    else:
+        print(f"Retag complete (dry_run={dry_run}, force={force}):")
+        print(f"  total_scanned: {total_scanned}")
+        print(f"  total_{action.replace(' ', '_')}: {total_updated}")
+
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -1372,6 +1521,15 @@ def main(argv: list[str] | None = None) -> None:
                 input_path=args.input,
                 mode=args.mode,
                 yes=args.yes,
+            )
+        )
+    elif command == "retag":
+        sys.exit(
+            _cmd_retag(
+                config_path=config_path,
+                fmt=fmt,
+                dry_run=getattr(args, "dry_run", False),
+                force=getattr(args, "force", False),
             )
         )
     elif command == "eval":
