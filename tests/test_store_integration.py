@@ -439,3 +439,70 @@ class TestMetaTableIntegration:
             store_b = DuckDBStore(db_path=db_path, embedding_provider=provider_b)
             with pytest.raises(RuntimeError, match="mismatch"):
                 await store_b.initialize()
+
+
+# ---------------------------------------------------------------------------
+# Tag vocabulary
+# ---------------------------------------------------------------------------
+
+
+class TestGetTagVocabulary:
+    async def test_tag_vocabulary_empty_store(self, store: DuckDBStore) -> None:
+        """Empty store returns an empty dict."""
+        result = await store.get_tag_vocabulary()
+        assert result == {}
+
+    async def test_tag_vocabulary_returns_correct_counts(self, store: DuckDBStore) -> None:
+        """Entries with tags return correct per-tag counts."""
+        await store.store(make_entry(tags=["python", "ml"]))
+        await store.store(make_entry(tags=["python", "duckdb"]))
+        await store.store(make_entry(tags=["ml"]))
+
+        vocab = await store.get_tag_vocabulary()
+
+        assert vocab["python"] == 2
+        assert vocab["ml"] == 2
+        assert vocab["duckdb"] == 1
+
+    async def test_tag_vocabulary_excludes_archived(self, store: DuckDBStore) -> None:
+        """Archived entries are not counted in the vocabulary."""
+        entry_id = await store.store(make_entry(tags=["python"]))
+        await store.delete(entry_id)  # soft-deletes (archives) the entry
+
+        vocab = await store.get_tag_vocabulary()
+
+        assert vocab == {}
+
+    async def test_tag_vocabulary_prefix_filtering(self, store: DuckDBStore) -> None:
+        """Only tags matching the prefix are returned."""
+        await store.store(make_entry(tags=["python/stable", "python/beta"]))
+        await store.store(make_entry(tags=["python/stable", "duckdb"]))
+        await store.store(make_entry(tags=["ruby"]))
+
+        vocab = await store.get_tag_vocabulary(prefix="python")
+
+        assert "python/stable" in vocab
+        assert vocab["python/stable"] == 2
+        assert "python/beta" in vocab
+        assert vocab["python/beta"] == 1
+        assert "duckdb" not in vocab
+        assert "ruby" not in vocab
+
+    async def test_tag_vocabulary_prefix_exact_match(self, store: DuckDBStore) -> None:
+        """Prefix filtering includes tags that exactly equal the prefix."""
+        await store.store(make_entry(tags=["python"]))
+        await store.store(make_entry(tags=["python/stable"]))
+
+        vocab = await store.get_tag_vocabulary(prefix="python")
+
+        assert vocab.get("python") == 1
+        assert vocab.get("python/stable") == 1
+
+    async def test_tag_vocabulary_prefix_no_partial_word_match(self, store: DuckDBStore) -> None:
+        """Prefix 'py' does not match 'python' (must be exact or follow '/')."""
+        await store.store(make_entry(tags=["python", "py/test"]))
+
+        vocab = await store.get_tag_vocabulary(prefix="py")
+
+        assert "python" not in vocab
+        assert "py/test" in vocab

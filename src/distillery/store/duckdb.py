@@ -1405,3 +1405,38 @@ class DuckDBStore:
     async def set_metadata(self, key: str, value: str) -> None:
         """Write a value to the ``_meta`` key-value table (upsert)."""
         await asyncio.to_thread(self._sync_set_metadata, key, value)
+
+    # ------------------------------------------------------------------
+    # Tag vocabulary
+    # ------------------------------------------------------------------
+
+    def _sync_get_tag_vocabulary(self, prefix: str | None) -> dict[str, int]:
+        """Synchronous implementation of get_tag_vocabulary(); called via asyncio.to_thread."""
+        assert self._conn is not None
+        result = self._conn.execute("SELECT tags FROM entries WHERE status != 'archived'")
+        rows = result.fetchall()
+
+        counts: dict[str, int] = {}
+        prefix_slash = (prefix + "/") if prefix is not None else None
+        for (tags_col,) in rows:
+            if not tags_col:
+                continue
+            for tag in tags_col:
+                if prefix is not None and tag != prefix and (
+                    prefix_slash is None or not tag.startswith(prefix_slash)
+                ):
+                    continue
+                counts[tag] = counts.get(tag, 0) + 1
+
+        return counts
+
+    async def get_tag_vocabulary(self, prefix: str | None = None) -> dict[str, int]:
+        """Return a mapping of tag to occurrence count across active entries.
+
+        Args:
+            prefix: Optional hierarchical tag prefix to filter by.
+
+        Returns:
+            Dict mapping each matching tag string to its occurrence count.
+        """
+        return await asyncio.to_thread(self._sync_get_tag_vocabulary, prefix)
