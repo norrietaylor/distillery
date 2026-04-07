@@ -268,14 +268,17 @@ class GitHubAdapter:
         items: list[FeedItem] = []
         skipped = 0
         for event in events:
-            event_type = str(event.get("type", ""))
-            if self._include_event_types and event_type not in self._include_event_types:
-                skipped += 1
-                continue
             try:
+                if not isinstance(event, dict):
+                    skipped += 1
+                    continue
+                event_type = str(event.get("type", ""))
+                if self._include_event_types and event_type not in self._include_event_types:
+                    skipped += 1
+                    continue
                 items.append(_event_to_feed_item(event, self._source_url))
             except Exception:
-                logger.exception("GitHubAdapter: failed to convert event %r", event.get("id"))
+                logger.exception("GitHubAdapter: failed to convert event %r", event.get("id") if isinstance(event, dict) else event)
         if skipped:
             logger.debug("GitHubAdapter: skipped %d low-value events", skipped)
         return items
