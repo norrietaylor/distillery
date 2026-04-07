@@ -59,10 +59,17 @@ class TestVersion:
         captured = capsys.readouterr()
         assert f"distillery {__version__}" in captured.out
 
-    def test_version_matches_package(self) -> None:
+    def test_version_matches_pyproject(self) -> None:
+        """__version__ must match the version in pyproject.toml."""
+        import tomllib
+        from pathlib import Path
+
         from distillery import __version__ as ver
 
-        assert ver == "0.1.0"
+        pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+        with open(pyproject, "rb") as f:
+            meta = tomllib.load(f)
+        assert ver == meta["project"]["version"]
 
 
 # ---------------------------------------------------------------------------

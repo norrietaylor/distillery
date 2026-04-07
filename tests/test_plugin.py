@@ -103,10 +103,12 @@ class TestPluginManifestMetadata:
         version = manifest["version"]
         assert re.fullmatch(r"\d+\.\d+\.\d+", version), f"version '{version}' is not semver"
 
-    def test_version_value(self) -> None:
-        """version must be '0.1.0'."""
+    def test_version_matches_package(self) -> None:
+        """plugin.json version must match __version__."""
+        from distillery import __version__
+
         manifest = load_plugin_manifest()
-        assert manifest["version"] == "0.1.0"
+        assert manifest["version"] == __version__
 
     def test_description_present_and_non_empty(self) -> None:
         """description field must be a non-empty string."""
