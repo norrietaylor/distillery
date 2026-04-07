@@ -242,19 +242,20 @@ def test_migration_failure_rollback() -> None:
     def _bad_migration(conn: duckdb.DuckDBPyConnection, **kwargs: object) -> None:
         raise ValueError("injected failure")
 
-    # Patch MIGRATIONS to add a failing migration at version 7.
+    # Patch MIGRATIONS to add a failing migration one version beyond the latest.
+    next_version = max(MIGRATIONS) + 1
     patched: dict[int, object] = dict(MIGRATIONS)
-    patched[7] = _bad_migration
+    patched[next_version] = _bad_migration
 
     conn = duckdb.connect(":memory:")
     try:
-        # Run all real migrations first so we reach a stable state at version 6.
+        # Run all real migrations first so we reach a stable state.
         run_pending_migrations(conn, dimensions=_DIMENSIONS, vss_available=False)
         assert get_current_schema_version(conn) == max(MIGRATIONS)
 
         with (
             patch("distillery.store.migrations.MIGRATIONS", patched),
-            pytest.raises(RuntimeError, match="Migration 7 failed"),
+            pytest.raises(RuntimeError, match=f"Migration {next_version} failed"),
         ):
             run_pending_migrations(conn, dimensions=_DIMENSIONS, vss_available=False)
 

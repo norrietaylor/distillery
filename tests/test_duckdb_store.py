@@ -661,3 +661,306 @@ class TestClose:
         """Calling close() twice does not raise."""
         await store.close()
         await store.close()  # should be a no-op
+
+
+# ---------------------------------------------------------------------------
+# Hybrid search (BM25 + vector RRF fusion with recency decay)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+async def hybrid_store(mock_embedding_provider):
+    """Initialised in-memory DuckDBStore with hybrid search enabled."""
+    s = DuckDBStore(
+        db_path=":memory:",
+        embedding_provider=mock_embedding_provider,
+        hybrid_search=True,
+        rrf_k=60,
+        recency_window_days=90,
+        recency_min_weight=0.5,
+    )
+    await s.initialize()
+    yield s
+    await s.close()
+
+
+@pytest.fixture
+async def vector_only_store(mock_embedding_provider):
+    """Initialised in-memory DuckDBStore with hybrid search disabled."""
+    s = DuckDBStore(
+        db_path=":memory:",
+        embedding_provider=mock_embedding_provider,
+        hybrid_search=False,
+    )
+    await s.initialize()
+    yield s
+    await s.close()
+
+
+class TestHybridSearchInit:
+    """Verify hybrid / vector-only initialization flags."""
+
+    async def test_hybrid_search_sets_fts_available(self, hybrid_store: DuckDBStore) -> None:
+        """When hybrid_search=True the FTS extension should be loaded."""
+        assert hybrid_store._fts_available is True  # noqa: SLF001
+
+    async def test_vector_only_fts_not_loaded(self, vector_only_store: DuckDBStore) -> None:
+        """When hybrid_search=False the FTS extension should not be loaded."""
+        assert vector_only_store._fts_available is False  # noqa: SLF001
+
+    async def test_hybrid_search_flag_persisted(self, hybrid_store: DuckDBStore) -> None:
+        """The _hybrid_search flag matches constructor argument."""
+        assert hybrid_store._hybrid_search is True  # noqa: SLF001
+
+    async def test_rrf_k_persisted(self, hybrid_store: DuckDBStore) -> None:
+        assert hybrid_store._rrf_k == 60  # noqa: SLF001
+
+    async def test_recency_window_persisted(self, hybrid_store: DuckDBStore) -> None:
+        assert hybrid_store._recency_window_days == 90  # noqa: SLF001
+
+    async def test_recency_min_weight_persisted(self, hybrid_store: DuckDBStore) -> None:
+        assert hybrid_store._recency_min_weight == 0.5  # noqa: SLF001
+
+
+class TestBM25Search:
+    """Tests for the private _bm25_search method."""
+
+    async def test_bm25_returns_empty_when_fts_unavailable(
+        self, vector_only_store: DuckDBStore
+    ) -> None:
+        """BM25 search returns [] when FTS is not loaded."""
+        result = vector_only_store._bm25_search("anything", limit=10)  # noqa: SLF001
+        assert result == []
+
+    async def test_bm25_returns_matching_entries(self, hybrid_store: DuckDBStore) -> None:
+        """BM25 search returns ranked results for matching content."""
+        await hybrid_store.store(
+            make_entry(content="The quick brown fox jumps over the lazy dog")
+        )
+        await hybrid_store.store(
+            make_entry(content="A slow red cat sleeps under a busy table")
+        )
+        results = hybrid_store._bm25_search("quick fox", limit=10)  # noqa: SLF001
+        assert len(results) >= 1
+        # First result should be rank 1.
+        assert results[0][1] == 1
+
+    async def test_bm25_respects_limit(self, hybrid_store: DuckDBStore) -> None:
+        """BM25 should return at most `limit` results."""
+        for i in range(5):
+            await hybrid_store.store(
+                make_entry(content=f"Document number {i} about machine learning algorithms")
+            )
+        results = hybrid_store._bm25_search("machine learning", limit=2)  # noqa: SLF001
+        assert len(results) <= 2
+
+    async def test_bm25_returns_empty_for_no_match(self, hybrid_store: DuckDBStore) -> None:
+        """BM25 returns [] when no content matches the query."""
+        await hybrid_store.store(
+            make_entry(content="The quick brown fox jumps over the lazy dog")
+        )
+        results = hybrid_store._bm25_search("xylophone", limit=10)  # noqa: SLF001
+        assert results == []
+
+
+class TestHybridSearch:
+    """End-to-end tests for hybrid search (BM25 + vector RRF)."""
+
+    async def test_hybrid_search_returns_results(self, hybrid_store: DuckDBStore) -> None:
+        """Hybrid search returns non-empty results for matching content."""
+        await hybrid_store.store(
+            make_entry(content="Python programming language best practices guide")
+        )
+        results = await hybrid_store.search("Python programming", filters=None, limit=10)
+        assert len(results) >= 1
+        assert isinstance(results[0], SearchResult)
+
+    async def test_hybrid_scores_normalised_zero_to_one(
+        self, hybrid_store: DuckDBStore
+    ) -> None:
+        """All hybrid search scores should be in [0, 1]."""
+        await hybrid_store.store(
+            make_entry(content="Database query optimisation techniques for performance")
+        )
+        await hybrid_store.store(
+            make_entry(content="Web application security testing methodology")
+        )
+        results = await hybrid_store.search("database optimisation", filters=None, limit=10)
+        for r in results:
+            assert 0.0 <= r.score <= 1.0
+
+    async def test_hybrid_search_top_score_is_one(self, hybrid_store: DuckDBStore) -> None:
+        """The top result in hybrid search should have a normalised score of 1.0."""
+        await hybrid_store.store(
+            make_entry(content="Artificial intelligence and machine learning overview")
+        )
+        results = await hybrid_store.search(
+            "artificial intelligence machine learning", filters=None, limit=10
+        )
+        assert len(results) >= 1
+        assert results[0].score == 1.0
+
+    async def test_hybrid_search_respects_limit(self, hybrid_store: DuckDBStore) -> None:
+        """Hybrid search should respect the limit parameter."""
+        for i in range(10):
+            await hybrid_store.store(
+                make_entry(content=f"Document {i} about software engineering practices")
+            )
+        results = await hybrid_store.search("software engineering", filters=None, limit=3)
+        assert len(results) <= 3
+
+    async def test_hybrid_search_applies_filters(self, hybrid_store: DuckDBStore) -> None:
+        """Hybrid search should respect metadata filters."""
+        await hybrid_store.store(
+            make_entry(
+                content="Python web framework comparison guide",
+                author="alice",
+            )
+        )
+        await hybrid_store.store(
+            make_entry(
+                content="Python data science libraries overview",
+                author="bob",
+            )
+        )
+        results = await hybrid_store.search(
+            "Python", filters={"author": "alice"}, limit=10
+        )
+        for r in results:
+            assert r.entry.author == "alice"
+
+    async def test_hybrid_search_empty_for_no_match(
+        self, hybrid_store: DuckDBStore
+    ) -> None:
+        """Hybrid search returns [] when filters exclude everything."""
+        await hybrid_store.store(make_entry(content="content", author="alice"))
+        results = await hybrid_store.search(
+            "content", filters={"author": "nobody"}, limit=10
+        )
+        assert results == []
+
+
+class TestVectorOnlySearch:
+    """Tests for vector-only fallback when hybrid is disabled."""
+
+    async def test_vector_only_returns_results(
+        self, vector_only_store: DuckDBStore
+    ) -> None:
+        """Vector-only search still returns results."""
+        await vector_only_store.store(make_entry(content="test content for search"))
+        results = await vector_only_store.search("test content", filters=None, limit=10)
+        assert len(results) >= 1
+
+    async def test_vector_only_scores_normalised(
+        self, vector_only_store: DuckDBStore
+    ) -> None:
+        """Vector-only search scores should be in [0, 1]."""
+        await vector_only_store.store(make_entry(content="normalisation test"))
+        results = await vector_only_store.search("normalisation", filters=None, limit=10)
+        for r in results:
+            assert 0.0 <= r.score <= 1.0
+
+    async def test_vector_only_applies_filters(
+        self, vector_only_store: DuckDBStore
+    ) -> None:
+        """Vector-only search should respect metadata filters."""
+        await vector_only_store.store(
+            make_entry(content="alpha entry", author="alice")
+        )
+        await vector_only_store.store(
+            make_entry(content="beta entry", author="bob")
+        )
+        results = await vector_only_store.search(
+            "entry", filters={"author": "alice"}, limit=10
+        )
+        for r in results:
+            assert r.entry.author == "alice"
+
+
+class TestRecencyWeight:
+    """Tests for _recency_weight calculation."""
+
+    async def test_recent_entry_weight_is_one(self, hybrid_store: DuckDBStore) -> None:
+        """An entry created now should have recency weight 1.0."""
+        now = datetime.now(tz=UTC)
+        weight = hybrid_store._recency_weight(now)  # noqa: SLF001
+        assert weight == 1.0
+
+    async def test_old_entry_weight_at_minimum(self, hybrid_store: DuckDBStore) -> None:
+        """A very old entry should have weight at recency_min_weight."""
+        from datetime import timedelta
+
+        old = datetime.now(tz=UTC) - timedelta(days=365 * 10)
+        weight = hybrid_store._recency_weight(old)  # noqa: SLF001
+        assert weight == pytest.approx(0.5)
+
+    async def test_entry_within_window_weight_is_one(
+        self, hybrid_store: DuckDBStore
+    ) -> None:
+        """An entry created within recency_window_days gets weight 1.0."""
+        from datetime import timedelta
+
+        within = datetime.now(tz=UTC) - timedelta(days=45)
+        weight = hybrid_store._recency_weight(within)  # noqa: SLF001
+        assert weight == 1.0
+
+    async def test_entry_just_outside_window_decays(
+        self, hybrid_store: DuckDBStore
+    ) -> None:
+        """An entry just past the window should have weight < 1.0 but > min."""
+        from datetime import timedelta
+
+        just_past = datetime.now(tz=UTC) - timedelta(days=100)
+        weight = hybrid_store._recency_weight(just_past)  # noqa: SLF001
+        assert 0.5 < weight < 1.0
+
+    async def test_naive_datetime_handled(self, hybrid_store: DuckDBStore) -> None:
+        """Timezone-naive datetimes (from DuckDB) should not raise."""
+        naive = datetime(2026, 1, 1)  # noqa: DTZ001
+        weight = hybrid_store._recency_weight(naive)  # noqa: SLF001
+        assert 0.0 < weight <= 1.0
+
+
+class TestFTSRebuildOnMutation:
+    """Verify that FTS index is rebuilt on content-changing mutations."""
+
+    async def test_new_entry_searchable_via_bm25(self, hybrid_store: DuckDBStore) -> None:
+        """After storing an entry, it should be findable via BM25."""
+        await hybrid_store.store(
+            make_entry(content="Kubernetes container orchestration platform overview")
+        )
+        results = hybrid_store._bm25_search("kubernetes container", limit=10)  # noqa: SLF001
+        assert len(results) >= 1
+
+    async def test_updated_content_searchable_via_bm25(
+        self, hybrid_store: DuckDBStore
+    ) -> None:
+        """After updating content, the new text should be BM25-searchable."""
+        entry = make_entry(content="Original placeholder text here")
+        await hybrid_store.store(entry)
+        await hybrid_store.update(
+            entry.id, {"content": "Terraform infrastructure provisioning automation"}
+        )
+        results = hybrid_store._bm25_search("terraform infrastructure", limit=10)  # noqa: SLF001
+        assert len(results) >= 1
+        # The updated entry should be in the results.
+        result_ids = [eid for eid, _rank in results]
+        assert entry.id in result_ids
+
+
+class TestHybridGracefulFallback:
+    """Verify graceful fallback to vector-only when FTS is unavailable."""
+
+    async def test_search_works_when_hybrid_disabled(
+        self, vector_only_store: DuckDBStore
+    ) -> None:
+        """Search should work normally when hybrid_search=False."""
+        await vector_only_store.store(make_entry(content="fallback test content"))
+        results = await vector_only_store.search("fallback test", filters=None, limit=10)
+        assert len(results) >= 1
+
+    async def test_fts_flag_false_when_hybrid_disabled(
+        self, vector_only_store: DuckDBStore
+    ) -> None:
+        """_fts_available should be False when hybrid_search is disabled."""
+        assert vector_only_store._fts_available is False  # noqa: SLF001

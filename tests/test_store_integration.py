@@ -8,10 +8,12 @@ retrieval, search ranking, and similarity detection.
 
 from __future__ import annotations
 
+import duckdb
 import pytest
 
 from distillery.models import EntryStatus, EntryType
 from distillery.store.duckdb import DuckDBStore
+from distillery.store.migrations import MIGRATIONS, create_fts_index
 from distillery.store.protocol import SearchResult
 from tests.conftest import DeterministicEmbeddingProvider, make_entry
 
@@ -439,3 +441,137 @@ class TestMetaTableIntegration:
             store_b = DuckDBStore(db_path=db_path, embedding_provider=provider_b)
             with pytest.raises(RuntimeError, match="mismatch"):
                 await store_b.initialize()
+
+
+# ---------------------------------------------------------------------------
+# Tag vocabulary
+# ---------------------------------------------------------------------------
+
+
+class TestGetTagVocabulary:
+    async def test_tag_vocabulary_empty_store(self, store: DuckDBStore) -> None:
+        """Empty store returns an empty dict."""
+        result = await store.get_tag_vocabulary()
+        assert result == {}
+
+    async def test_tag_vocabulary_returns_correct_counts(self, store: DuckDBStore) -> None:
+        """Entries with tags return correct per-tag counts."""
+        await store.store(make_entry(tags=["python", "ml"]))
+        await store.store(make_entry(tags=["python", "duckdb"]))
+        await store.store(make_entry(tags=["ml"]))
+
+        vocab = await store.get_tag_vocabulary()
+
+        assert vocab["python"] == 2
+        assert vocab["ml"] == 2
+        assert vocab["duckdb"] == 1
+
+    async def test_tag_vocabulary_excludes_archived(self, store: DuckDBStore) -> None:
+        """Archived entries are not counted in the vocabulary."""
+        entry_id = await store.store(make_entry(tags=["python"]))
+        await store.delete(entry_id)  # soft-deletes (archives) the entry
+
+        vocab = await store.get_tag_vocabulary()
+
+        assert vocab == {}
+
+    async def test_tag_vocabulary_prefix_filtering(self, store: DuckDBStore) -> None:
+        """Only tags matching the prefix are returned."""
+        await store.store(make_entry(tags=["python/stable", "python/beta"]))
+        await store.store(make_entry(tags=["python/stable", "duckdb"]))
+        await store.store(make_entry(tags=["ruby"]))
+
+        vocab = await store.get_tag_vocabulary(prefix="python")
+
+        assert "python/stable" in vocab
+        assert vocab["python/stable"] == 2
+        assert "python/beta" in vocab
+        assert vocab["python/beta"] == 1
+        assert "duckdb" not in vocab
+        assert "ruby" not in vocab
+
+    async def test_tag_vocabulary_prefix_exact_match(self, store: DuckDBStore) -> None:
+        """Prefix filtering includes tags that exactly equal the prefix."""
+        await store.store(make_entry(tags=["python"]))
+        await store.store(make_entry(tags=["python/stable"]))
+
+        vocab = await store.get_tag_vocabulary(prefix="python")
+
+        assert vocab.get("python") == 1
+        assert vocab.get("python/stable") == 1
+
+    async def test_tag_vocabulary_prefix_no_partial_word_match(self, store: DuckDBStore) -> None:
+        """Prefix 'py' does not match 'python' (must be exact or follow '/')."""
+        await store.store(make_entry(tags=["python", "py/test"]))
+
+        vocab = await store.get_tag_vocabulary(prefix="py")
+
+        assert "python" not in vocab
+        assert "py/test" in vocab
+
+
+# ---------------------------------------------------------------------------
+# Migration 7 — FTS index
+# ---------------------------------------------------------------------------
+
+
+class TestMigration7FtsIndex:
+    """Verify that migration 7 installs the FTS extension and creates the index."""
+
+    def _make_conn_with_entries(self) -> duckdb.DuckDBPyConnection:
+        """Return an in-memory DuckDB connection with a minimal entries table."""
+        conn = duckdb.connect(":memory:")
+        conn.execute(
+            "CREATE TABLE entries (id VARCHAR PRIMARY KEY, content VARCHAR NOT NULL)"
+        )
+        conn.execute(
+            "INSERT INTO entries VALUES ('1', 'machine learning models'), "
+            "('2', 'knowledge base retrieval'), ('3', 'vector embeddings')"
+        )
+        return conn
+
+    def _fts_loaded(self, conn: duckdb.DuckDBPyConnection) -> bool:
+        """Return True if the FTS macro is accessible on the entries table."""
+        try:
+            conn.execute(
+                "SELECT id, fts_main_entries.match_bm25(id, 'test') AS score"
+                " FROM entries LIMIT 1"
+            )
+            return True
+        except Exception:
+            return False
+
+    def test_migration_7_is_registered(self) -> None:
+        """Migration 7 is present in the MIGRATIONS registry."""
+        assert 7 in MIGRATIONS
+        assert MIGRATIONS[7] is create_fts_index
+
+    def test_migration_7_runs_without_error(self) -> None:
+        """Migration 7 completes without raising an exception."""
+        conn = self._make_conn_with_entries()
+        # Must not raise; gracefully degrades when FTS extension is unavailable.
+        create_fts_index(conn)
+
+    def test_migration_7_is_idempotent(self) -> None:
+        """Running migration 7 twice does not raise an error."""
+        conn = self._make_conn_with_entries()
+        create_fts_index(conn)
+        # Second invocation must not raise — overwrite=1 handles idempotency.
+        create_fts_index(conn)
+
+    def test_migration_7_fts_search_functional(self) -> None:
+        """After migration 7, BM25 search returns matching rows."""
+        conn = self._make_conn_with_entries()
+        create_fts_index(conn)
+
+        if not self._fts_loaded(conn):
+            pytest.skip("FTS extension not available in this environment")
+
+        rows = conn.execute(
+            "SELECT id FROM ("
+            "  SELECT id, fts_main_entries.match_bm25(id, 'machine') AS score"
+            "  FROM entries"
+            ") WHERE score IS NOT NULL"
+        ).fetchall()
+        ids = [r[0] for r in rows]
+        assert "1" in ids, "Entry with 'machine learning models' should match 'machine'"

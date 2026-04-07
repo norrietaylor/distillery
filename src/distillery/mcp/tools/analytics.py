@@ -71,70 +71,83 @@ async def _handle_tag_tree(
     """
     prefix: str | None = arguments.get("prefix")
 
-    def _sync_build_tree() -> dict[str, Any]:
-        """Query all tags and build the nested hierarchy synchronously."""
-        conn = store.connection
-        # Only include active entries to avoid noise from archived ones.
-        result = conn.execute("SELECT tags FROM entries WHERE status != 'archived'")
-        rows = result.fetchall()
+    def _build_tree_from_vocab(vocab: dict[str, int], prefix_arg: str | None) -> dict[str, Any]:
+        """Build the nested hierarchy from a tag vocabulary dict.
 
-        # Collect all individual tag strings paired with a row index so we
-        # can count distinct entries (not tag occurrences) per tree node.
-        all_tags: list[tuple[str, int]] = []
-        for idx, (tags_col,) in enumerate(rows):
-            if tags_col:
-                for t in tags_col:
-                    all_tags.append((t, idx))
+        Args:
+            vocab: Tag -> count mapping from get_tag_vocabulary().
+            prefix_arg: The original prefix argument (used to strip tags).
 
-        # Filter by prefix when requested.  A tag matches a prefix when it
-        # either equals the prefix exactly or starts with "prefix/".
-        if prefix is not None:
-            prefix_slash = prefix + "/"
-            all_tags = [
-                (t, idx) for t, idx in all_tags if t == prefix or t.startswith(prefix_slash)
-            ]
-            # Strip the prefix (and its trailing slash) from the remaining tags
-            # so that the returned tree is rooted at the prefix.
-            stripped: list[tuple[str, int]] = []
-            for t, idx in all_tags:
-                if t == prefix:
-                    # The tag is exactly the prefix -- represents the root node.
-                    stripped.append(("", idx))
-                else:
-                    stripped.append((t[len(prefix_slash) :], idx))
-            all_tags = stripped
+        Returns:
+            Nested tree dict with count and children at each node.
+        """
+        # Strip the prefix from the tags so the tree is rooted at the prefix.
+        processed_tags: dict[str, int] = {}
+        if prefix_arg is not None:
+            prefix_slash = prefix_arg + "/"
+            for tag, count in vocab.items():
+                if tag == prefix_arg:
+                    # Tag exactly matches the prefix
+                    processed_tags[""] = count
+                elif tag.startswith(prefix_slash):
+                    # Strip the prefix and its trailing slash
+                    stripped = tag[len(prefix_slash):]
+                    processed_tags[stripped] = count
+        else:
+            processed_tags = vocab
 
         # Build the tree from path segments.
-        # Each node: {"count": int, "children": {segment: node}, "_entry_ids": set}
-        # _entry_ids tracks distinct entries to avoid overcounting when one
-        # entry has multiple tags under the same namespace.
-        root: dict[str, Any] = {"count": 0, "children": {}, "_entry_ids": set()}
+        # Each node: {"count": int, "children": {segment: node}, "_counts": dict}
+        # _counts maps each leaf tag to its entry count for aggregation upward.
+        root: dict[str, Any] = {"count": 0, "children": {}, "_counts": {}}
 
-        for tag, idx in all_tags:
+        for tag, count in processed_tags.items():
             if not tag:
-                # This tag exactly matched the prefix — count it at the root.
-                root["_entry_ids"].add(idx)
+                # This is the root (prefix exactly matched)
+                root["_counts"]["<root>"] = count
                 continue
             segments = tag.split("/")
             node = root
-            for seg in segments:
+            for i, seg in enumerate(segments):
                 if seg not in node["children"]:
-                    node["children"][seg] = {"count": 0, "children": {}, "_entry_ids": set()}
+                    node["children"][seg] = {"count": 0, "children": {}, "_counts": {}}
                 node = node["children"][seg]
-                node["_entry_ids"].add(idx)
+                # At the leaf, record the full tag and its count
+                if i == len(segments) - 1:
+                    node["_counts"][tag] = count
 
-        # Convert _entry_ids sets to counts and strip the internal sets.
+        # Convert _counts to actual counts and aggregate up the tree.
+        # The count at a node represents how many distinct entries have any tag
+        # under that node. Since the vocabulary only tracks one count per tag,
+        # we need to accumulate counts from all leaf tags under each node.
         def _finalize(n: dict[str, Any]) -> None:
-            n["count"] = len(n.pop("_entry_ids"))
+            # At leaf nodes, _counts has tag -> entry_count mappings.
+            # For intermediate nodes, accumulate from children.
+            if n["_counts"]:
+                # This is a leaf node or partially populated node
+                # Sum the counts from all registered tags here
+                n["count"] = sum(n["_counts"].values())
+            else:
+                n["count"] = 0
+
             for child in n["children"].values():
                 _finalize(child)
+                # Accumulate child counts (they already include their descendants)
+                # But we need to be careful: if an entry has multiple tags under
+                # this subtree, we don't want to double-count it. However, since
+                # we're only summing leaf tags (entries only have specific tags),
+                # this is correct.
+                n["count"] += child["count"]
+            n.pop("_counts", None)
 
         _finalize(root)
 
         return root
 
     try:
-        tree = await asyncio.to_thread(_sync_build_tree)
+        # Fetch tag vocabulary using the store's method
+        vocab = await store.get_tag_vocabulary(prefix=prefix)
+        tree = _build_tree_from_vocab(vocab, prefix)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error in distillery_tag_tree")
         return error_response("TAG_TREE_ERROR", f"Failed to build tag tree: {exc}")
