@@ -110,3 +110,53 @@ class TestSecretRedactFilter:
             exc_info=None,
         )
         assert filt.filter(record) is True
+
+    def test_filter_redacts_ghp_token_in_log_args(self) -> None:
+        """GitHub classic PAT in log tuple args is redacted."""
+        filt = SecretRedactFilter()
+        record = logging.LogRecord(
+            name="distillery",
+            level=logging.DEBUG,
+            pathname="",
+            lineno=0,
+            msg="adapter token: %s",
+            args=("ghp_realtoken123456789",),
+            exc_info=None,
+        )
+        filt.filter(record)
+        assert isinstance(record.args, tuple)
+        assert "ghp_realtoken123456789" not in record.args[0]
+        assert "ghp_real****" in record.args[0]
+
+    def test_filter_redacts_github_pat_in_log_message(self) -> None:
+        """GitHub fine-grained PAT in log message is redacted."""
+        filt = SecretRedactFilter()
+        record = logging.LogRecord(
+            name="distillery",
+            level=logging.DEBUG,
+            pathname="",
+            lineno=0,
+            msg="using token github_pat_abcdef1234567890",
+            args=None,
+            exc_info=None,
+        )
+        filt.filter(record)
+        assert "github_pat_abcdef1234567890" not in record.msg
+        assert "github_pat_abcd****" in record.msg
+
+    def test_filter_redacts_gho_oauth_token_in_log_args(self) -> None:
+        """GitHub OAuth token in log tuple args is redacted."""
+        filt = SecretRedactFilter()
+        record = logging.LogRecord(
+            name="distillery",
+            level=logging.DEBUG,
+            pathname="",
+            lineno=0,
+            msg="oauth token: %s",
+            args=("gho_oauthtoken9876543",),
+            exc_info=None,
+        )
+        filt.filter(record)
+        assert isinstance(record.args, tuple)
+        assert "gho_oauthtoken9876543" not in record.args[0]
+        assert "gho_oaut****" in record.args[0]

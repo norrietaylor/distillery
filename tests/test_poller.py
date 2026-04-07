@@ -558,3 +558,49 @@ class TestCLIPollSubcommand:
         parser = _build_parser()
         args = parser.parse_args(["poll", "--source", "https://example.com/rss"])
         assert args.source == "https://example.com/rss"
+
+
+# ---------------------------------------------------------------------------
+# _build_adapter — GitHub token passthrough
+# ---------------------------------------------------------------------------
+
+
+class TestBuildAdapterGitHubToken:
+    """_build_adapter() passes GITHUB_TOKEN to GitHubAdapter when set."""
+
+    def test_passes_token_from_env_to_github_adapter(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from distillery.feeds.poller import _build_adapter
+
+        monkeypatch.setenv("GITHUB_TOKEN", "ghp_testtoken123")
+        src = FeedSourceConfig(url="https://github.com/owner/repo", source_type="github")
+        adapter = _build_adapter(src)
+        assert adapter._token == "ghp_testtoken123"  # noqa: SLF001
+
+    def test_no_token_in_env_gives_empty_token(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from distillery.feeds.poller import _build_adapter
+
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+        src = FeedSourceConfig(url="https://github.com/owner/repo", source_type="github")
+        adapter = _build_adapter(src)
+        # Adapter should still be created; token is empty/falsy
+        assert not adapter._token  # noqa: SLF001
+
+    def test_token_not_logged_at_debug(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+
+        from distillery.feeds.poller import _build_adapter
+
+        monkeypatch.setenv("GITHUB_TOKEN", "ghp_secrettoken9999")
+        src = FeedSourceConfig(url="https://github.com/owner/repo", source_type="github")
+        with caplog.at_level(logging.DEBUG, logger="distillery.feeds.poller"):
+            _build_adapter(src)
+        for record in caplog.records:
+            assert "ghp_secrettoken9999" not in record.getMessage(), (
+                "Raw token must not appear in log output"
+            )

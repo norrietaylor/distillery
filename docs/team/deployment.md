@@ -39,6 +39,9 @@ export JINA_API_KEY="<your-jina-api-key>"
 
 # Optional: MotherDuck (if using shared cloud storage)
 export MOTHERDUCK_TOKEN="<your-motherduck-token>"
+
+# Optional: GitHub token for private repo feed polling
+export GITHUB_TOKEN="ghp_..."
 ```
 
 !!! warning "Secrets"
@@ -218,6 +221,23 @@ Content is re-embedded using the new model during import.
 ### DuckDB Version Compatibility
 
 DuckDB's on-disk format is not guaranteed stable across minor versions. Distillery pins DuckDB to a compatible release range (`~=1.5.0`) and logs a warning if the stored `duckdb_version` in `_meta` differs from the running version.
+
+## Audit Log
+
+All authenticated tool invocations and login events are recorded in the `audit_log` table. Operators can query this data via the metrics tool:
+
+```text
+distillery_metrics(scope="audit")
+```
+
+Returns four sections:
+
+- **recent_logins** — last 50 login events (successful, failed, org-denied)
+- **login_summary** — aggregate counts: total logins, unique users, failed attempts, org denials
+- **active_users** — unique users with last-seen timestamp and operation count
+- **recent_operations** — last 50 non-login tool invocations
+
+Optional filters: `date_from` (ISO 8601 string, narrows all sections) and `user` (narrows operations and active users only — login sections always show all users for security visibility).
 
 ## Scaling
 

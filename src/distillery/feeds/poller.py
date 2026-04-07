@@ -114,6 +114,10 @@ def _item_text(item: FeedItem) -> str:
 def _build_adapter(source: FeedSourceConfig) -> Any:
     """Instantiate the correct adapter for *source*.
 
+    For GitHub sources the ``GITHUB_TOKEN`` environment variable is read and
+    forwarded to :class:`~distillery.feeds.github.GitHubAdapter` so that
+    private-repository polling works without storing credentials anywhere.
+
     Args:
         source: The configured feed source.
 
@@ -124,9 +128,16 @@ def _build_adapter(source: FeedSourceConfig) -> Any:
         ValueError: If ``source.source_type`` is not a supported adapter type.
     """
     if source.source_type == "github":
+        import os
+
         from distillery.feeds.github import GitHubAdapter
 
-        return GitHubAdapter(url=source.url)
+        token = os.environ.get("GITHUB_TOKEN", "")
+        if token:
+            logger.debug("_build_adapter: GitHub adapter using authenticated token for %s", source.url)
+        else:
+            logger.debug("_build_adapter: GitHub adapter using unauthenticated mode for %s", source.url)
+        return GitHubAdapter(url=source.url, token=token or None)
     elif source.source_type == "rss":
         from distillery.feeds.rss import RSSAdapter
 

@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Sprint 1 Foundation (PR #165)
+
+- GitHub token passthrough: `_build_adapter()` forwards `GITHUB_TOKEN` env var to `GitHubAdapter`, enabling private repo polling with transparent redirect following
+- Audit log query method: `query_audit_log()` added to `DistilleryStore` protocol and `DuckDBStore` with filtering by user, operation, and date range
+- Audit metrics scope: `distillery_metrics(scope="audit")` returns login history, login summary, active users, and recent operations
+
 ### Webhook Endpoints (PR #94)
 
 - REST webhook API (`/api/poll`, `/api/rescore`, `/api/maintenance`) with bearer token auth

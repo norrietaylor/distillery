@@ -74,7 +74,8 @@ Add to your Claude Code MCP settings (`~/.claude/settings.json`):
       "args": ["distillery-mcp"],
       "env": {
         "JINA_API_KEY": "your-jina-api-key",
-        "DISTILLERY_CONFIG": "/path/to/distillery.yaml"
+        "DISTILLERY_CONFIG": "/path/to/distillery.yaml",
+        "GITHUB_TOKEN": "ghp_..."
       }
     }
   }
@@ -90,7 +91,8 @@ Or use the installed entry point (if you ran `pip install`):
       "command": "distillery-mcp",
       "env": {
         "JINA_API_KEY": "your-jina-api-key",
-        "DISTILLERY_CONFIG": "/path/to/distillery.yaml"
+        "DISTILLERY_CONFIG": "/path/to/distillery.yaml",
+        "GITHUB_TOKEN": "ghp_..."
       }
     }
   }
@@ -107,7 +109,8 @@ Or use `python -m` (if installed from source):
       "args": ["-m", "distillery.mcp"],
       "env": {
         "JINA_API_KEY": "your-jina-api-key",
-        "DISTILLERY_CONFIG": "/path/to/distillery.yaml"
+        "DISTILLERY_CONFIG": "/path/to/distillery.yaml",
+        "GITHUB_TOKEN": "ghp_..."
       }
     }
   }
@@ -119,6 +122,18 @@ Restart Claude Code and verify:
 ```text
 distillery_metrics(scope="summary")
 ```
+
+## Private Repository Polling
+
+To monitor private GitHub repositories via `/watch`, set the `GITHUB_TOKEN` environment variable. This is optional — public repos work without it.
+
+```bash
+export GITHUB_TOKEN=ghp_...
+```
+
+The token is passed to the GitHub adapter at poll time. It is never stored in entry metadata or logged. Distillery's security module redacts `ghp_`, `gho_`, and `github_pat_` patterns from all log output.
+
+If `GITHUB_TOKEN` is not set, feeds poll public repos only. A DEBUG-level log message indicates which mode is active.
 
 ## Embedding Providers
 

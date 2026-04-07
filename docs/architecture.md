@@ -143,8 +143,8 @@ Distillery is built as a 4-layer system where skills (SKILL.md files) drive all 
 | **MCP Server** | 22 tools exposed over stdio (local) or streamable-HTTP (team). Built on FastMCP 2.x/3.x with `@server.tool` decorators. | `src/distillery/mcp/server.py` |
 | **Webhook API** | REST endpoints (`/api/poll`, `/api/rescore`, `/api/maintenance`) for automated scheduling. Bearer token auth, per-endpoint cooldowns persisted to DuckDB. Mounted alongside MCP in HTTP mode. | `src/distillery/mcp/webhooks.py` |
 | **Auth** | MCP: GitHub OAuth with org-restricted access. Webhooks: bearer token via `DISTILLERY_WEBHOOK_SECRET`. Middleware handles logging, rate limiting, security headers, budget tracking. | `src/distillery/mcp/auth.py`, `middleware.py`, `budget.py` |
-| **Core Protocols** | Typed `Protocol` interfaces (structural subtyping, not ABCs). All storage operations are async. | `src/distillery/store/protocol.py`, `embedding/protocol.py` |
-| **Feeds** | GitHub events and RSS/Atom polling. Relevance scoring via embeddings. Interest extraction for source suggestions. | `src/distillery/feeds/` |
+| **Core Protocols** | Typed `Protocol` interfaces (structural subtyping, not ABCs). All storage operations are async. Includes `query_audit_log` for audit data access. | `src/distillery/store/protocol.py`, `embedding/protocol.py` |
+| **Feeds** | GitHub events and RSS/Atom polling. Authenticated via `GITHUB_TOKEN` for private repos. Relevance scoring via embeddings. Interest extraction for source suggestions. | `src/distillery/feeds/` |
 | **Backends** | DuckDB + VSS (HNSW cosine similarity), Jina v3 / OpenAI embeddings, LLM classification with dedup + conflict detection. | `src/distillery/store/duckdb.py`, `embedding/`, `classification/` |
 
 ## Key Design Decisions
@@ -263,4 +263,4 @@ REST endpoints mounted at `/api/*` alongside the MCP server in HTTP mode. Enable
 
 **Hardening:** Per-endpoint `asyncio.Lock` serializes cooldown checks. `BodySizeLimitMiddleware` + `RateLimitMiddleware` (10 req/min, 100 req/hour). Cooldown timestamps persisted to DuckDB via `get_metadata`/`set_metadata`.
 
-**Audit:** Each invocation stores a `webhook_audit:{endpoint}` metadata record with timestamp, status, and response data.
+**Audit:** Each invocation stores a `webhook_audit:{endpoint}` metadata record with timestamp, status, and response data. All tool invocations and login events are recorded in the `audit_log` table, queryable via `distillery_metrics(scope="audit")` or `store.query_audit_log()`.
