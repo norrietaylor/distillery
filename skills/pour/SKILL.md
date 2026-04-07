@@ -6,6 +6,7 @@ allowed-tools:
   - "mcp__*__distillery_get"
   - "mcp__*__distillery_store"
   - "mcp__*__distillery_metrics"
+  - "mcp__*__distillery_tag_tree"
 context: fork
 effort: high
 ---
@@ -47,11 +48,15 @@ Extract from arguments:
 
 Record all entries and similarity scores.
 
-**Pass 2 -- Follow-up Searches (up to 3):**
+**Pass 2 -- Follow-up Searches (up to 3) + Tag Expansion (up to 3):**
 
 Analyze Pass 1 for related concepts, people, sub-topics, or terms not directly covered by the original query. For each significant one:
 
 `distillery_search(query="<related concept>", limit=10, project="<project if specified>")`
+
+**Tag-based expansion:** Additionally, extract tags from Pass 1 results and call `distillery_tag_tree(prefix="<topic>")` to discover related tag namespaces. Convert the most frequently occurring related tags to search queries (leaf segment, hyphens to spaces — e.g., `domain/oauth` → `"oauth"`, `domain/session-management` → `"session management"`). Run up to 3 additional tag-derived searches, skipping any that duplicate an existing Pass 2 query.
+
+Report: `Tag expansion: discovered <N> related topics from tag vocabulary.` (Omit if no tags found — Pass 2 proceeds with concept-based queries only.)
 
 **Pass 3 -- Gap-filling (up to 2):**
 
