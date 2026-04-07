@@ -174,12 +174,12 @@ def _derive_source_tags(item: FeedItem, source_type: str) -> list[str]:
 
             owner, repo = _parse_github_url(url)
             candidates.append(f"source/github/{owner}/{repo}")
-        except (ValueError, Exception):
+        except Exception:
             logger.debug("_derive_source_tags: could not parse GitHub URL %r", url)
     elif source_type == "rss":
         # Reddit: source/reddit/{subreddit}
         parsed = urlparse(url)
-        host = parsed.netloc.lower()
+        host = (parsed.hostname or "").lower()
         if host == "reddit.com" or host.endswith(".reddit.com"):
             # URL pattern: https://www.reddit.com/r/{subreddit}/...
             path_parts = [p for p in parsed.path.split("/") if p]
@@ -241,6 +241,9 @@ def build_keyword_map(vocabulary: dict[str, int]) -> dict[str, str]:
     best: dict[str, tuple[str, int]] = {}
 
     for tag, count in vocabulary.items():
+        # Skip Tier-1 source tags — they're applied via _derive_source_tags
+        if tag.startswith("source/"):
+            continue
         leaf = tag.rsplit("/", 1)[-1]
         keywords: list[str] = [leaf]
         # Split hyphenated leaf and keep words longer than 3 chars

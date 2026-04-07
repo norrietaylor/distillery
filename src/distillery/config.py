@@ -436,13 +436,23 @@ def _parse_defaults(raw: dict[str, Any]) -> DefaultsConfig:
 
     rrf_k_raw = raw.get("rrf_k", 60)
     rrf_k = _parse_strict_int(rrf_k_raw, "defaults.rrf_k")
+    if rrf_k <= 0:
+        raise ValueError(f"defaults.rrf_k must be a positive integer, got: {rrf_k}")
 
     recency_window_days_raw = raw.get("recency_window_days", 90)
     recency_window_days = _parse_strict_int(recency_window_days_raw, "defaults.recency_window_days")
+    if recency_window_days <= 0:
+        raise ValueError(
+            f"defaults.recency_window_days must be a positive integer, got: {recency_window_days}"
+        )
 
     recency_min_weight = _parse_float_field(
         raw, "recency_min_weight", 0.5, "defaults.recency_min_weight"
     )
+    if not (0.0 <= recency_min_weight <= 1.0):
+        raise ValueError(
+            f"defaults.recency_min_weight must be between 0.0 and 1.0, got: {recency_min_weight}"
+        )
 
     return DefaultsConfig(
         dedup_threshold=dedup_threshold,

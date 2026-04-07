@@ -217,9 +217,9 @@ def create_fts_index(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
         # Extension install requires network access; gracefully degrade.
         kwargs["fts_available"] = False
         logger.warning("Migration 7: FTS extension install failed (offline?): %s", exc)
-    except Exception as exc:
-        kwargs["fts_available"] = False
-        logger.warning("Migration 7: FTS index creation failed, skipping: %s", exc)
+    except Exception:
+        logger.exception("Migration 7: unexpected FTS index creation failure")
+        raise
 
 
 # ---------------------------------------------------------------------------

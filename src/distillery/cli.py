@@ -432,6 +432,10 @@ def _cmd_poll(config_path: str | None, fmt: str, source_url: str | None) -> int:
             embedding_provider=embedding_provider,
             s3_region=cfg.storage.s3_region,
             s3_endpoint=cfg.storage.s3_endpoint,
+            hybrid_search=cfg.defaults.hybrid_search,
+            rrf_k=cfg.defaults.rrf_k,
+            recency_window_days=cfg.defaults.recency_window_days,
+            recency_min_weight=cfg.defaults.recency_min_weight,
         )
         await store.initialize()
 
@@ -579,6 +583,10 @@ def _cmd_retag(
             embedding_provider=embedding_provider,
             s3_region=cfg.storage.s3_region,
             s3_endpoint=cfg.storage.s3_endpoint,
+            hybrid_search=cfg.defaults.hybrid_search,
+            rrf_k=cfg.defaults.rrf_k,
+            recency_window_days=cfg.defaults.recency_window_days,
+            recency_min_weight=cfg.defaults.recency_min_weight,
         )
         await store.initialize()
 
@@ -610,7 +618,7 @@ def _cmd_retag(
                 meta = entry.metadata or {}
                 source_type: str = meta.get("source_type", "rss")
                 item = FeedItem(
-                    source_url=str(entry.source),
+                    source_url=meta.get("source_url", ""),
                     source_type=source_type,
                     item_id=entry.id,
                     title=meta.get("title") or None,
@@ -880,6 +888,10 @@ def _cmd_import(
             embedding_provider=embedding_provider,
             s3_region=cfg.storage.s3_region,
             s3_endpoint=cfg.storage.s3_endpoint,
+            hybrid_search=cfg.defaults.hybrid_search,
+            rrf_k=cfg.defaults.rrf_k,
+            recency_window_days=cfg.defaults.recency_window_days,
+            recency_min_weight=cfg.defaults.recency_min_weight,
         )
         await store.initialize()
 
