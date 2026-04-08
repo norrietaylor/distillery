@@ -68,6 +68,27 @@ _VALID_ENTRY_TYPES = {
 # Valid status values (mirrors EntryStatus enum).
 _VALID_STATUSES = {"active", "pending_review", "archived"}
 
+
+def _parse_iso8601_utc(
+    raw: Any,
+    field_name: str = "expires_at",
+) -> datetime | list[types.TextContent]:
+    """Parse an ISO 8601 string and normalise to UTC.
+
+    Returns a UTC ``datetime`` on success, or an ``error_response`` list on
+    failure (caller should return it directly).
+    """
+    if not isinstance(raw, str):
+        return error_response("INVALID_PARAMS", f"Field '{field_name}' must be an ISO 8601 string")
+    try:
+        dt = datetime.fromisoformat(raw)
+        return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
+    except (ValueError, TypeError):
+        return error_response(
+            "INVALID_PARAMS",
+            f"Field '{field_name}' must be a valid ISO 8601 datetime string",
+        )
+
 # Fields that callers may never overwrite via distillery_update.
 _IMMUTABLE_FIELDS = {"id", "created_at", "source"}
 
@@ -181,19 +202,10 @@ async def _handle_store(
     expires_at_val: datetime | None = None
     expires_at_raw = arguments.get("expires_at")
     if expires_at_raw is not None:
-        if not isinstance(expires_at_raw, str):
-            return error_response("INVALID_PARAMS", "Field 'expires_at' must be an ISO 8601 string")
-        try:
-            expires_at_val = datetime.fromisoformat(expires_at_raw)
-            expires_at_val = (
-                expires_at_val.replace(tzinfo=UTC)
-                if expires_at_val.tzinfo is None
-                else expires_at_val.astimezone(UTC)
-            )
-        except (ValueError, TypeError):
-            return error_response(
-                "INVALID_PARAMS", "Field 'expires_at' must be a valid ISO 8601 datetime string"
-            )
+        result = _parse_iso8601_utc(expires_at_raw)
+        if not isinstance(result, datetime):
+            return result
+        expires_at_val = result
 
     # --- build entry --------------------------------------------------------
     try:
@@ -480,19 +492,10 @@ async def _handle_update(
     if "expires_at" in updates:
         ea_raw = updates["expires_at"]
         if ea_raw is not None:
-            if not isinstance(ea_raw, str):
-                return error_response(
-                    "INVALID_PARAMS", "Field 'expires_at' must be an ISO 8601 string"
-                )
-            try:
-                ea_dt = datetime.fromisoformat(ea_raw)
-                ea_dt = ea_dt.replace(tzinfo=UTC) if ea_dt.tzinfo is None else ea_dt.astimezone(UTC)
-                updates["expires_at"] = ea_dt
-            except (ValueError, TypeError):
-                return error_response(
-                    "INVALID_PARAMS",
-                    "Field 'expires_at' must be a valid ISO 8601 datetime string",
-                )
+            result = _parse_iso8601_utc(ea_raw)
+            if not isinstance(result, datetime):
+                return result
+            updates["expires_at"] = result
 
     tags_err = validate_type(updates, "tags", list, "list of strings")
     if tags_err:
