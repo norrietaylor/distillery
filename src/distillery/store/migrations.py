@@ -260,12 +260,13 @@ def create_entry_relations(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> No
             if to_id not in existing_ids:
                 continue
             relation_id = str(uuid.uuid4())
-            conn.execute(
+            inserted = conn.execute(
                 "INSERT OR IGNORE INTO entry_relations (id, from_id, to_id, relation_type) "
-                "VALUES (?, ?, ?, 'link')",
+                "VALUES (?, ?, ?, 'link') RETURNING id",
                 [relation_id, entry_id, to_id],
-            )
-            backfilled += 1
+            ).fetchone()
+            if inserted:
+                backfilled += 1
 
     if backfilled:
         logger.info("Migration 8: backfilled %d entry_relations rows from metadata", backfilled)

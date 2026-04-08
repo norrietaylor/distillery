@@ -10,6 +10,7 @@ import re
 import pytest
 
 from distillery.feeds.github_sync import (
+    _MAX_RETRIES,
     GitHubSyncAdapter,
     SyncResult,
     _build_content,
@@ -406,10 +407,12 @@ class TestGitHubSyncAdapterSync:
             url=re.compile(r".*/repos/test/repo/issues\?.*"),
             json=[_mock_issue(number=1)],
         )
-        httpx_mock.add_response(
-            url=re.compile(r".*/repos/test/repo/issues/1/comments.*"),
-            status_code=500,
-        )
+        # Provide enough 500 responses for all retry attempts.
+        for _ in range(_MAX_RETRIES + 1):
+            httpx_mock.add_response(
+                url=re.compile(r".*/repos/test/repo/issues/1/comments.*"),
+                status_code=500,
+            )
 
         adapter = GitHubSyncAdapter(store=store, url="test/repo")
         result = await adapter.sync()

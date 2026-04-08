@@ -13,9 +13,11 @@ of issue/PR content suitable for deep knowledge capture.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -40,6 +42,9 @@ _DEFAULT_PER_PAGE = 100
 
 # Maximum total items to fetch across all pages (safety cap).
 _MAX_FETCH_ITEMS = 1000
+
+# Maximum retries for transient errors (429 / 5xx).
+_MAX_RETRIES = 3
 
 # Pattern for GitHub cross-references in issue/PR bodies and comments.
 # Matches: #123, Closes #123, Fixes #123, Resolves #123, closes #123, etc.
@@ -192,6 +197,51 @@ class GitHubSyncAdapter:
             headers["Authorization"] = f"Bearer {self._token}"
         return headers
 
+    async def _request_with_retry(
+        self,
+        client: httpx.AsyncClient,
+        url: str,
+        params: dict[str, str | int],
+    ) -> httpx.Response:
+        """GET with retry on rate-limit (403/429) and transient 5xx errors."""
+        for attempt in range(_MAX_RETRIES + 1):
+            response = await client.get(
+                url, params=params, headers=self._headers()
+            )
+            if response.status_code == 429 or (
+                response.status_code == 403
+                and "rate limit" in response.text.lower()
+            ):
+                retry_after = response.headers.get("Retry-After")
+                reset = response.headers.get("X-RateLimit-Reset")
+                if retry_after:
+                    wait = float(retry_after)
+                elif reset:
+                    wait = max(0.0, float(reset) - datetime.now(UTC).timestamp())
+                else:
+                    wait = 2.0 ** attempt
+                wait = min(wait, 60.0)
+                logger.warning(
+                    "GitHub rate limited (attempt %d/%d), waiting %.0fs",
+                    attempt + 1, _MAX_RETRIES + 1, wait,
+                )
+                if attempt < _MAX_RETRIES:
+                    await asyncio.sleep(wait)
+                    continue
+            if response.status_code >= 500 and attempt < _MAX_RETRIES:
+                wait = 2.0 ** attempt
+                logger.warning(
+                    "GitHub %d (attempt %d/%d), retrying in %.0fs",
+                    response.status_code, attempt + 1, _MAX_RETRIES + 1, wait,
+                )
+                await asyncio.sleep(wait)
+                continue
+            response.raise_for_status()
+            return response
+        # Unreachable, but satisfies type checker.
+        response.raise_for_status()
+        return response  # pragma: no cover
+
     async def _fetch_issues(
         self,
         since: str | None = None,
@@ -229,10 +279,7 @@ class GitHubSyncAdapter:
             page = 1
             while len(all_issues) < _MAX_FETCH_ITEMS:
                 params["page"] = page
-                response = await client.get(
-                    api_url, params=params, headers=self._headers()
-                )
-                response.raise_for_status()
+                response = await self._request_with_retry(client, api_url, params)
                 batch: list[dict[str, Any]] = response.json()
                 if not isinstance(batch, list):
                     break
@@ -271,10 +318,7 @@ class GitHubSyncAdapter:
                 timeout=_REQUEST_TIMEOUT, follow_redirects=True
             )
         try:
-            response = await client.get(
-                api_url, params=params, headers=self._headers()
-            )
-            response.raise_for_status()
+            response = await self._request_with_retry(client, api_url, params)
             result: list[dict[str, Any]] = response.json()
             return result if isinstance(result, list) else []
         finally:
@@ -514,36 +558,20 @@ class GitHubSyncAdapter:
         return result
 
 
+@dataclass
 class SyncResult:
-    """Summary of a GitHub sync operation.
+    """Summary of a GitHub sync operation."""
 
-    Attributes
-    ----------
-    repo:
-        The ``owner/repo`` string.
-    created:
-        Number of new entries created.
-    updated:
-        Number of existing entries updated.
-    relations_created:
-        Number of cross-reference link relations created.
-    sync_timestamp:
-        UTC timestamp when the sync started.
-    """
-
-    def __init__(
-        self,
-        repo: str,
-        created: int,
-        updated: int,
-        relations_created: int,
-        sync_timestamp: datetime,
-    ) -> None:
-        self.repo = repo
-        self.created = created
-        self.updated = updated
-        self.relations_created = relations_created
-        self.sync_timestamp = sync_timestamp
+    repo: str
+    """The ``owner/repo`` string."""
+    created: int
+    """Number of new entries created."""
+    updated: int
+    """Number of existing entries updated."""
+    relations_created: int
+    """Number of cross-reference link relations created."""
+    sync_timestamp: datetime
+    """UTC timestamp when the sync started."""
 
     def __repr__(self) -> str:
         return (
