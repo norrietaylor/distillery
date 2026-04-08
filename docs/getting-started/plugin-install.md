@@ -26,7 +26,7 @@ This verifies MCP connectivity, detects your transport, and configures auto-poll
     The plugin defaults to the hosted instance at `distillery-mcp.fly.dev`, which is a **demo server** for evaluation only. Do not store sensitive or confidential data. For production use, [deploy your own instance](../team/deployment.md) or use [local setup](local-setup.md).
 
 !!! note "Claude Desktop"
-    The Claude desktop app does not support Claude Code skills or the plugin install system. Desktop users can connect the MCP server directly (all 19 tools are available) but slash commands like `/distill` and `/recall` are CLI-only features.
+    The Claude Desktop app does not support Claude Code skills or the plugin install system. Desktop users can connect the MCP server directly (all 19 tools are available) but slash commands like `/distill` and `/recall` are CLI-only features.
 
 ## Manual Install (Copy Skills)
 
