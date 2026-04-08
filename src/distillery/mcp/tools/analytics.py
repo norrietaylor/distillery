@@ -330,7 +330,7 @@ def _sync_gather_summary(
         ``status``, ``total_entries``, ``entries_by_type``, ``entries_by_status``,
         ``database_size_bytes``, ``embedding_model``, ``embedding_dimensions``,
         ``database_path``, ``embedding_usage_today``, ``embedding_budget_daily``,
-        and optionally ``warnings``.
+        ``version``, and optionally ``warnings``.
     """
     import contextlib
 
@@ -397,8 +397,11 @@ def _sync_gather_summary(
             "calls used."
         )
 
+    from distillery import __version__
+
     result: dict[str, Any] = {
         "status": "ok",
+        "version": __version__,
         "total_entries": total_entries,
         "entries_by_type": entries_by_type,
         "entries_by_status": entries_by_status,

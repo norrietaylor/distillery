@@ -102,11 +102,15 @@ jobs:
             .version = $v |
             .packages[].version = $v
           ' server.json > server.tmp && mv server.tmp server.json
-          jq --arg v "$VERSION" '.version = $v' \
-            .claude-plugin/plugin.json > .claude-plugin/plugin.tmp && \
+          jq --arg v "$VERSION" '
+            .version = $v |
+            .hooks.SessionStart[0].hooks[0].command = (.hooks.SessionStart[0].hooks[0].command | gsub("v[0-9]+\\.[0-9]+\\.[0-9]+"; "v" + $v))
+          ' .claude-plugin/plugin.json > .claude-plugin/plugin.tmp && \
             mv .claude-plugin/plugin.tmp .claude-plugin/plugin.json
-          jq --arg v "$VERSION" '.plugins[0].version = $v' \
-            .claude-plugin/marketplace.json > .claude-plugin/marketplace.tmp && \
+          jq --arg v "$VERSION" '
+            .metadata.version = $v |
+            .plugins[0].version = $v
+          ' .claude-plugin/marketplace.json > .claude-plugin/marketplace.tmp && \
             mv .claude-plugin/marketplace.tmp .claude-plugin/marketplace.json
 
       - name: Install mcp-publisher

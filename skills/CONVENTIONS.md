@@ -108,7 +108,7 @@ Stop immediately if MCP is unavailable.
 
 Skills that require MCP tools added in a specific server version should declare `min_server_version` in their frontmatter. During the MCP health check, if `distillery_metrics(scope="summary")` succeeds, compare the returned `version` field against `min_server_version`. If the server version is older, display:
 
-```
+```text
 Warning: This skill requires Distillery MCP server >= {min_server_version}.
 Your server is running {actual_version}. Update with: pip install --upgrade distillery-mcp
 ```
