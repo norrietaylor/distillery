@@ -39,6 +39,10 @@ EXPECTED_SKILL_NAMES = {
     "radar",
     "tune",
     "setup",
+    "digest",
+    "gh-sync",
+    "investigate",
+    "briefing",
 }
 
 
@@ -195,8 +199,8 @@ class TestPluginSkills:
                 f"Skill file missing YAML frontmatter: {skill_file}"
             )
 
-    def test_exactly_ten_skill_subdirectories(self) -> None:
-        """The skills directory must contain exactly ten skill subdirectories with SKILL.md files."""
+    def test_exactly_fourteen_skill_subdirectories(self) -> None:
+        """The skills directory must contain exactly fourteen skill subdirectories with SKILL.md files."""
         found = {d.name for d in SKILLS_DIR.iterdir() if d.is_dir() and (d / "SKILL.md").exists()}
         assert found == EXPECTED_SKILL_NAMES
 

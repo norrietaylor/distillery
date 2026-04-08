@@ -2,7 +2,7 @@
 
 Tests verify:
 - HTTP server starts and responds to MCP initialize
-- All 18 tools are accessible over HTTP transport
+- All 19 tools are accessible over HTTP transport
 - Stateless HTTP singleton: two requests share same store instance
 - stdio mode (no flags) backward compatibility
 """
@@ -32,7 +32,7 @@ MCP_HEADERS = {
     "Accept": "application/json, text/event-stream",
 }
 
-# All 18 tools that the Distillery MCP server exposes.
+# All 19 tools that the Distillery MCP server exposes.
 EXPECTED_TOOLS = {
     "distillery_store",
     "distillery_get",
@@ -52,6 +52,7 @@ EXPECTED_TOOLS = {
     "distillery_poll",
     "distillery_rescore",
     "distillery_configure",
+    "distillery_relations",
 }
 
 
@@ -147,7 +148,7 @@ class TestHttpServerStarts:
 
 class TestAllToolsAccessibleOverHttp:
     async def test_all_tools_accessible_over_http(self) -> None:
-        """All 18 tools appear in tools/list response over HTTP."""
+        """All 19 tools appear in tools/list response over HTTP."""
         port = _free_port()
         config = _make_server_config()
         uv_server, task = await _start_http_server(port, config)
@@ -164,7 +165,7 @@ class TestAllToolsAccessibleOverHttp:
             assert "result" in data, f"Expected result in: {data}"
             tools = data["result"]["tools"]
             tool_names = {t["name"] for t in tools}
-            assert len(tool_names) == 18, f"Expected 18 tools, got {len(tool_names)}: {tool_names}"
+            assert len(tool_names) == 19, f"Expected 19 tools, got {len(tool_names)}: {tool_names}"
             assert tool_names == EXPECTED_TOOLS, (
                 f"Tool mismatch.\nExpected: {EXPECTED_TOOLS}\nGot: {tool_names}"
             )

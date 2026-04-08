@@ -1,6 +1,6 @@
 # Plugin Install
 
-The Distillery plugin packages all ten knowledge-base skills for distribution and installation via the Claude Code plugin mechanism. Once installed, the skills are available in every project without copying files.
+The Distillery plugin packages all fourteen knowledge-base skills for distribution and installation via the Claude Code plugin mechanism. Once installed, the skills are available in every project without copying files.
 
 ## Install via Plugin Marketplace (Recommended)
 
@@ -26,7 +26,7 @@ This verifies MCP connectivity, detects your transport, and configures auto-poll
     The plugin defaults to the hosted instance at `distillery-mcp.fly.dev`, which is a **demo server** for evaluation only. Do not store sensitive or confidential data. For production use, [deploy your own instance](../team/deployment.md) or use [local setup](local-setup.md).
 
 !!! note "Claude Desktop"
-    The Claude desktop app does not support Claude Code skills or the plugin install system. Desktop users can connect the MCP server directly (all 18 tools are available) but slash commands like `/distill` and `/recall` are CLI-only features.
+    The Claude Desktop app does not support Claude Code skills or the plugin install system. Desktop users can connect the MCP server directly (all 19 tools are available) but slash commands like `/distill` and `/recall` are CLI-only features.
 
 ## Manual Install (Copy Skills)
 
@@ -50,6 +50,10 @@ ln -s ~/.claude/distillery/skills/classify  ~/.claude/skills/classify
 ln -s ~/.claude/distillery/skills/watch     ~/.claude/skills/watch
 ln -s ~/.claude/distillery/skills/radar     ~/.claude/skills/radar
 ln -s ~/.claude/distillery/skills/tune      ~/.claude/skills/tune
+ln -s ~/.claude/distillery/skills/digest      ~/.claude/skills/digest
+ln -s ~/.claude/distillery/skills/gh-sync     ~/.claude/skills/gh-sync
+ln -s ~/.claude/distillery/skills/investigate  ~/.claude/skills/investigate
+ln -s ~/.claude/distillery/skills/briefing    ~/.claude/skills/briefing
 ln -s ~/.claude/distillery/skills/setup     ~/.claude/skills/setup
 ```
 
@@ -169,6 +173,10 @@ distillery health
 | `/watch` | "add feed", "remove source", "show my sources" | Manage feed sources with auto-poll scheduling |
 | `/radar` | "what's new", "show my digest", "what have I missed" | Ambient intelligence digest from feed entries |
 | `/tune` | "adjust thresholds", "tune my feed" | Display and adjust feed relevance thresholds |
+| `/digest` | "team digest", "weekly summary" | Team activity summary from internal entries |
+| `/gh-sync` | "sync GitHub", "import issues" | Sync GitHub issues/PRs into the knowledge base |
+| `/investigate` | "investigate", "deep context" | Deep context builder with relationship traversal |
+| `/briefing` | "team briefing", "dashboard" | Team knowledge dashboard with metrics and activity |
 | `/setup` | "setup", "configure distillery" | Onboarding wizard — connectivity, connector registration, auto-poll |
 
 ## Troubleshooting

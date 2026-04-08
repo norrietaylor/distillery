@@ -124,6 +124,26 @@ CREATE TABLE IF NOT EXISTS feed_sources (
 );
 """
 
+_CREATE_ENTRY_RELATIONS_TABLE = """
+CREATE TABLE IF NOT EXISTS entry_relations (
+    id            VARCHAR PRIMARY KEY,
+    from_id       VARCHAR NOT NULL,
+    to_id         VARCHAR NOT NULL,
+    relation_type VARCHAR NOT NULL,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT current_timestamp
+);
+"""
+
+_CREATE_ENTRY_RELATIONS_UNIQUE_INDEX = """
+CREATE UNIQUE INDEX IF NOT EXISTS idx_entry_relations_unique
+ON entry_relations (from_id, to_id, relation_type);
+"""
+
+_CREATE_ENTRY_RELATIONS_TO_ID_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_entry_relations_to_id
+ON entry_relations (to_id);
+"""
+
 
 # ---------------------------------------------------------------------------
 # Migration functions
@@ -193,6 +213,67 @@ def create_hnsw_index(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
         logger.warning("Migration 6: HNSW index type not recognized, skipping")
 
 
+def create_entry_relations(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
+    """Migration 8: Create ``entry_relations`` table and backfill from metadata.
+
+    Creates the ``entry_relations`` table for typed, queryable relationships
+    between entries.  After table creation, backfills existing entries whose
+    ``metadata`` JSON column contains a ``related_entries`` list: each element
+    is inserted as a row with ``relation_type='link'``.
+
+    The backfill is idempotent because the ``CREATE TABLE IF NOT EXISTS`` guard
+    means this migration is only executed once per database.
+    """
+    import json
+    import uuid
+
+    conn.execute(_CREATE_ENTRY_RELATIONS_TABLE)
+    conn.execute(_CREATE_ENTRY_RELATIONS_UNIQUE_INDEX)
+    conn.execute(_CREATE_ENTRY_RELATIONS_TO_ID_INDEX)
+    logger.info("Migration 8: entry_relations table created")
+
+    # Backfill: scan all entries whose metadata contains a 'related_entries' list.
+    # Collect all existing entry IDs so we only create relations to valid targets.
+    existing_ids: set[str] = {
+        r[0] for r in conn.execute("SELECT id FROM entries").fetchall()
+    }
+    rows = conn.execute("SELECT id, metadata FROM entries WHERE metadata IS NOT NULL").fetchall()
+    backfilled = 0
+    for entry_id, metadata_raw in rows:
+        try:
+            if isinstance(metadata_raw, str):
+                meta = json.loads(metadata_raw)
+            elif isinstance(metadata_raw, dict):
+                meta = metadata_raw
+            else:
+                continue
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        related: object = meta.get("related_entries")
+        if not isinstance(related, list):
+            continue
+
+        for to_id in related:
+            if not isinstance(to_id, str) or not to_id:
+                continue
+            if to_id not in existing_ids:
+                continue
+            relation_id = str(uuid.uuid4())
+            inserted = conn.execute(
+                "INSERT OR IGNORE INTO entry_relations (id, from_id, to_id, relation_type) "
+                "VALUES (?, ?, ?, 'link') RETURNING id",
+                [relation_id, entry_id, to_id],
+            ).fetchone()
+            if inserted:
+                backfilled += 1
+
+    if backfilled:
+        logger.info("Migration 8: backfilled %d entry_relations rows from metadata", backfilled)
+    else:
+        logger.debug("Migration 8: no metadata.related_entries found to backfill")
+
+
 def create_fts_index(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
     """Migration 7: Install FTS extension and create full-text index on ``entries.content``.
 
@@ -234,6 +315,7 @@ MIGRATIONS: dict[int, MigrationFunc] = {
     5: create_feed_sources,
     6: create_hnsw_index,
     7: create_fts_index,
+    8: create_entry_relations,
 }
 """Ordered mapping of schema version to migration function.
 
