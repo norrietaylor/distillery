@@ -28,7 +28,7 @@ jobs:
           url="https://github.com/orhun/git-cliff/releases/download/v${GIT_CLIFF_VERSION}/${tarball}"
           curl -fsSL "${url}" -o git-cliff.tar.gz
           echo "${GIT_CLIFF_SHA512}  git-cliff.tar.gz" | sha512sum -c -
-          tar -xzf git-cliff.tar.gz git-cliff
+          tar -xzf git-cliff.tar.gz --strip-components=1 --wildcards '*/git-cliff'
           sudo install -m 0755 git-cliff /usr/local/bin/git-cliff
 
       - name: Generate changelog
