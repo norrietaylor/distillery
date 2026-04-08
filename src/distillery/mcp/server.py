@@ -265,11 +265,13 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         metadata: dict[str, Any] | None = None,
         dedup_threshold: float | None = None,
         dedup_limit: int | None = None,
+        verification: str | None = None,
     ) -> list[types.TextContent]:
         """Store a new knowledge entry and return its ID with dedup/conflict information.
 
         entry_type must be one of: session, bookmark, minutes, meeting, reference,
         idea, inbox. dedup_threshold (0–1) controls near-duplicate warnings.
+        verification: unverified, testing, or verified (default: unverified).
         """
         c = _lc(ctx)
         user = _get_authenticated_user()
@@ -283,6 +285,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 metadata=metadata,
                 dedup_threshold=dedup_threshold,
                 dedup_limit=dedup_limit,
+                verification=verification,
             ),
         )
         result = await _handle_store(
@@ -310,12 +313,14 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         project: str | None = None,
         tags: list[str] | None = None,
         status: str | None = None,
+        verification: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> list[types.TextContent]:
         """Update one or more fields on an existing knowledge entry.
 
         At least one field must be provided. status: active, pending_review, or archived.
         entry_type: session, bookmark, minutes, meeting, reference, idea, or inbox.
+        verification: unverified, testing, or verified.
         """
         c = _lc(ctx)
         user = _get_authenticated_user()
@@ -331,6 +336,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 project=project,
                 tags=tags,
                 status=status,
+                verification=verification,
                 metadata=metadata,
             ),
         )
@@ -346,6 +352,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         project: str | None = None,
         tags: list[str] | None = None,
         status: str | None = None,
+        verification: str | None = None,
         date_from: str | None = None,
         date_to: str | None = None,
         limit: int = 20,
@@ -356,7 +363,8 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
     ) -> list[types.TextContent]:
         """List knowledge entries with optional filters and pagination (newest first).
 
-        date_from/date_to accept ISO 8601. output_mode: "full" (default), "summary", "ids",
+        date_from/date_to accept ISO 8601. verification: unverified, testing, or verified.
+        output_mode: "full" (default), "summary", "ids",
         or "review" (filters to pending_review and enriches with confidence/classification_reasoning).
         """
         c = _lc(ctx)
@@ -370,6 +378,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 project=project,
                 tags=tags,
                 status=status,
+                verification=verification,
                 date_from=date_from,
                 date_to=date_to,
                 tag_prefix=tag_prefix,

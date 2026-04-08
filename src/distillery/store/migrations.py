@@ -303,6 +303,17 @@ def create_fts_index(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
         raise
 
 
+_ADD_VERIFICATION_COLUMN = """
+ALTER TABLE entries ADD COLUMN IF NOT EXISTS verification VARCHAR DEFAULT 'unverified';
+"""
+
+
+def add_verification(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
+    """Migration 10: Add ``verification`` column to ``entries``."""
+    conn.execute(_ADD_VERIFICATION_COLUMN)
+    logger.info("Migration 10: verification column added")
+
+
 # ---------------------------------------------------------------------------
 # Migration registry
 # ---------------------------------------------------------------------------
@@ -316,6 +327,7 @@ MIGRATIONS: dict[int, MigrationFunc] = {
     6: create_hnsw_index,
     7: create_fts_index,
     8: create_entry_relations,
+    10: add_verification,
 }
 """Ordered mapping of schema version to migration function.
 

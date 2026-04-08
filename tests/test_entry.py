@@ -225,6 +225,7 @@ class TestEntryToDict:
             "version",
             "metadata",
             "accessed_at",
+            "verification",
             "created_by",
             "last_modified_by",
         }

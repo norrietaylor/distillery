@@ -587,6 +587,7 @@ class DuckDBStore:
             "project",
             "tags",
             "status",
+            "verification",
             "metadata",
             "last_modified_by",
         }
@@ -601,9 +602,9 @@ class DuckDBStore:
         sql = (
             "INSERT INTO entries "
             "(id, content, entry_type, source, author, project, tags, status, "
-            " metadata, created_at, updated_at, version, embedding, "
+            " verification, metadata, created_at, updated_at, version, embedding, "
             " created_by, last_modified_by) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         params = [
             entry.id,
@@ -614,6 +615,7 @@ class DuckDBStore:
             entry.project,
             list(entry.tags),
             entry.status.value,
+            entry.verification.value,
             json.dumps(entry.metadata),
             entry.created_at,
             entry.updated_at,
@@ -858,6 +860,7 @@ class DuckDBStore:
         - ``project`` (str)
         - ``tags`` (list[str]) -- matches entries containing *any* listed tag
         - ``status`` (str)
+        - ``verification`` (str) -- one of "unverified", "testing", "verified"
         - ``date_from`` (datetime | str) -- inclusive lower bound on ``created_at``
         - ``date_to`` (datetime | str) -- inclusive upper bound on ``created_at``
         """
@@ -896,6 +899,10 @@ class DuckDBStore:
         if "status" in filters:
             clauses.append("status = ?")
             params.append(str(filters["status"]))
+
+        if "verification" in filters:
+            clauses.append("verification = ?")
+            params.append(str(filters["verification"]))
 
         if "tag_prefix" in filters and filters["tag_prefix"]:
             prefix = filters["tag_prefix"]
@@ -969,7 +976,7 @@ class DuckDBStore:
     # Column list used by search / find_similar (excludes ``embedding``).
     _ENTRY_COLUMNS = (
         "id, content, entry_type, source, author, project, "
-        "tags, status, metadata, created_at, updated_at, version, accessed_at, "
+        "tags, status, verification, metadata, created_at, updated_at, version, accessed_at, "
         "created_by, last_modified_by"
     )
 

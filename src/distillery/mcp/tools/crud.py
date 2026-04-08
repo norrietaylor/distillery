@@ -68,6 +68,9 @@ _VALID_ENTRY_TYPES = {
 # Valid status values (mirrors EntryStatus enum).
 _VALID_STATUSES = {"active", "pending_review", "archived"}
 
+# Valid verification values (mirrors VerificationStatus enum).
+_VALID_VERIFICATIONS = {"unverified", "testing", "verified"}
+
 # Fields that callers may never overwrite via distillery_update.
 _IMMUTABLE_FIELDS = {"id", "created_at", "source"}
 
@@ -98,7 +101,7 @@ async def _handle_store(
           - `conflict_message`: guidance message when conflict candidates are returned.
     """
     from distillery.mcp.budget import EmbeddingBudgetError, record_and_check
-    from distillery.models import Entry, EntrySource, EntryType
+    from distillery.models import Entry, EntrySource, EntryType, VerificationStatus
 
     # --- input validation ---------------------------------------------------
     err = validate_required(arguments, "content", "entry_type", "author")
@@ -177,6 +180,18 @@ async def _handle_store(
         except EmbeddingBudgetError as exc:
             return error_response("BUDGET_EXCEEDED", str(exc))
 
+    # --- parse verification ---------------------------------------------------
+    verification_val = VerificationStatus.UNVERIFIED
+    verification_raw = arguments.get("verification")
+    if verification_raw is not None:
+        if verification_raw not in _VALID_VERIFICATIONS:
+            return error_response(
+                "INVALID_PARAMS",
+                f"Invalid verification {verification_raw!r}. "
+                f"Must be one of: {', '.join(sorted(_VALID_VERIFICATIONS))}.",
+            )
+        verification_val = VerificationStatus(verification_raw)
+
     # --- build entry --------------------------------------------------------
     try:
         # Determine EntrySource from arguments.
@@ -194,6 +209,7 @@ async def _handle_store(
             tags=list(arguments.get("tags") or []),
             metadata=dict(arguments.get("metadata") or {}),
             created_by=created_by,
+            verification=verification_val,
         )
     except Exception as exc:  # noqa: BLE001
         return error_response("INVALID_PARAMS", f"Failed to construct entry: {exc}")
@@ -392,7 +408,7 @@ async def _handle_update(
     Returns:
         MCP content list with the serialised updated entry or an error.
     """
-    from distillery.models import EntryStatus, EntryType
+    from distillery.models import EntryStatus, EntryType, VerificationStatus
 
     err = validate_required(arguments, "entry_id")
     if err:
@@ -401,7 +417,9 @@ async def _handle_update(
     entry_id: str = arguments["entry_id"]
 
     # Build the updates dict from all keys except entry_id.
-    updatable_keys = {"content", "entry_type", "author", "project", "tags", "status", "metadata"}
+    updatable_keys = {
+        "content", "entry_type", "author", "project", "tags", "status", "verification", "metadata",
+    }
     updates: dict[str, Any] = {}
     for key in updatable_keys:
         if key in arguments:
@@ -447,6 +465,16 @@ async def _handle_update(
                 f"Invalid status {st_str!r}. Must be one of: {', '.join(sorted(_VALID_STATUSES))}.",
             )
         updates["status"] = EntryStatus(st_str)
+
+    if "verification" in updates:
+        vf_str = updates["verification"]
+        if vf_str not in _VALID_VERIFICATIONS:
+            return error_response(
+                "INVALID_PARAMS",
+                f"Invalid verification {vf_str!r}. "
+                f"Must be one of: {', '.join(sorted(_VALID_VERIFICATIONS))}.",
+            )
+        updates["verification"] = VerificationStatus(vf_str)
 
     tags_err = validate_type(updates, "tags", list, "list of strings")
     if tags_err:
@@ -619,7 +647,7 @@ def _build_filters_from_arguments(arguments: dict[str, Any]) -> dict[str, Any] |
     """Extract known filter keys from *arguments* into a filters dict.
 
     Keys extracted: ``entry_type``, ``author``, ``project``, ``tags``,
-    ``status``, ``date_from``, ``date_to``.
+    ``status``, ``verification``, ``date_from``, ``date_to``.
 
     Args:
         arguments: The tool argument dict.
@@ -633,6 +661,7 @@ def _build_filters_from_arguments(arguments: dict[str, Any]) -> dict[str, Any] |
         "project",
         "tags",
         "status",
+        "verification",
         "date_from",
         "date_to",
         "tag_prefix",
@@ -652,6 +681,7 @@ __all__ = [
     "_build_filters_from_arguments",
     "_VALID_ENTRY_TYPES",
     "_VALID_STATUSES",
+    "_VALID_VERIFICATIONS",
     "_IMMUTABLE_FIELDS",
     "_VALID_OUTPUT_MODES",
     "_entry_to_summary_dict",
