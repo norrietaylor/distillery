@@ -324,6 +324,10 @@ The following skills are available in `skills/`:
 | `/radar` | `radar/` | distillery_search, distillery_interests, distillery_list (fallback), distillery_store | Interest-driven feed digest and source suggestions |
 | `/tune` | `tune/` | distillery_metrics | Display and adjust feed relevance thresholds |
 | `/setup` | `setup/` | distillery_metrics | MCP connectivity wizard and transport configuration |
+| `/digest` | `digest/` | distillery_list, distillery_aggregate, distillery_metrics, distillery_search, distillery_store, distillery_find_similar | Generate structured summaries of internal team activity |
+| `/gh-sync` | `gh-sync/` | distillery_store, distillery_get, distillery_update, distillery_list, distillery_relations | Sync GitHub issues and PRs into the knowledge base |
+| `/investigate` | `investigate/` | distillery_search, distillery_get, distillery_relations, distillery_tag_tree, distillery_list, distillery_metrics | Deep context builder combining semantic search with relationship traversal |
+| `/briefing` | `briefing/` | distillery_metrics, distillery_list, distillery_aggregate, distillery_interests, distillery_search, distillery_stale, distillery_tag_tree | Single-command team knowledge dashboard |
 
 ## Custom Agents
 
@@ -331,5 +335,5 @@ The `distillery-researcher` agent (`.claude/agents/distillery-researcher.md`) is
 
 ---
 
-**Document Version:** 2.2
-**Last Updated:** 2026-04-06
+**Document Version:** 2.3
+**Last Updated:** 2026-04-07

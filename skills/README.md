@@ -76,7 +76,7 @@ To create a new skill:
 
 ## MCP Tools Available
 
-The Distillery MCP server provides 18 tools:
+The Distillery MCP server provides 19 tools:
 
 **CRUD:** `distillery_store`, `distillery_get`, `distillery_update`, `distillery_list`
 **Discovery:** `distillery_search`, `distillery_find_similar`, `distillery_aggregate`, `distillery_stale`, `distillery_tag_tree`
@@ -84,6 +84,7 @@ The Distillery MCP server provides 18 tools:
 **Observability:** `distillery_metrics` (scopes: `"summary"`, `"full"`, `"search_quality"`)
 **Feeds:** `distillery_watch`, `distillery_poll`, `distillery_rescore`, `distillery_interests`
 **Configuration:** `distillery_configure`, `distillery_type_schemas`
+**Relations:** `distillery_relations` (actions: `"add"`, `"get"`, `"remove"`)
 
 See `/docs/getting-started/mcp-setup.md` for full tool documentation.
 

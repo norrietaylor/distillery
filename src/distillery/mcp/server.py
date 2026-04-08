@@ -55,6 +55,7 @@ from distillery.mcp.tools.quality import (
     run_conflict_evaluation,
     run_dedup_check,
 )
+from distillery.mcp.tools.relations import _handle_relations
 from distillery.mcp.tools.search import (
     _handle_aggregate,
     _handle_find_similar,
@@ -93,6 +94,7 @@ __all__ = [
     "_handle_watch",
     "_handle_poll",
     "_handle_rescore",
+    "_handle_relations",
 ]
 
 
@@ -698,6 +700,39 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         c = _lc(ctx)
         return await _handle_rescore(
             store=c["store"], config=c["config"], arguments={"limit": limit}
+        )
+
+    @server.tool
+    async def distillery_relations(  # noqa: PLR0913
+        ctx: Context,
+        action: str,
+        from_id: str | None = None,
+        to_id: str | None = None,
+        relation_type: str | None = None,
+        entry_id: str | None = None,
+        direction: str = "both",
+        relation_id: str | None = None,
+    ) -> list[types.TextContent]:
+        """Manage typed relations between knowledge entries: action is "add", "get", or "remove".
+
+        add requires from_id, to_id, and relation_type (e.g. "link", "blocks", "related").
+        get requires entry_id; accepts optional relation_type and direction ("outgoing", "incoming", "both").
+        remove requires relation_id.
+        """
+        c = _lc(ctx)
+        return await _handle_relations(
+            store=c["store"],
+            arguments=dict(
+                action=action,
+                **_omit_none(
+                    from_id=from_id,
+                    to_id=to_id,
+                    relation_type=relation_type,
+                    entry_id=entry_id,
+                    direction=direction,
+                    relation_id=relation_id,
+                ),
+            ),
         )
 
     @server.tool

@@ -18,7 +18,7 @@ Runs locally over stdio or as a hosted HTTP service with GitHub OAuth for team a
 
 ## Skills
 
-Distillery provides 10 Claude Code slash commands:
+Distillery provides 14 Claude Code slash commands:
 
 | Skill | Purpose | Example |
 |-------|---------|---------|
@@ -42,7 +42,7 @@ claude plugin marketplace add norrietaylor/distillery
 claude plugin install distillery
 ```
 
-This installs all 10 skills. The plugin defaults to a hosted demo server — you can start using Distillery immediately.
+This installs all 14 skills. The plugin defaults to a hosted demo server — you can start using Distillery immediately.
 
 !!! warning "Demo Server"
     The plugin defaults to `distillery-mcp.fly.dev`, which is a **demo server** for evaluation only. Do not store sensitive or confidential data.
