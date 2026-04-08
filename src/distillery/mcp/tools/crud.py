@@ -187,6 +187,8 @@ async def _handle_store(
             expires_at_val = datetime.fromisoformat(expires_at_raw)
             if expires_at_val.tzinfo is None:
                 expires_at_val = expires_at_val.replace(tzinfo=UTC)
+            else:
+                expires_at_val = expires_at_val.astimezone(UTC)
         except (ValueError, TypeError):
             return error_response(
                 "INVALID_PARAMS", "Field 'expires_at' must be a valid ISO 8601 datetime string"
@@ -478,6 +480,8 @@ async def _handle_update(
                 ea_dt = datetime.fromisoformat(ea_raw)
                 if ea_dt.tzinfo is None:
                     ea_dt = ea_dt.replace(tzinfo=UTC)
+                else:
+                    ea_dt = ea_dt.astimezone(UTC)
                 updates["expires_at"] = ea_dt
             except (ValueError, TypeError):
                 return error_response(
