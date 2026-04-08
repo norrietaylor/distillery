@@ -42,11 +42,17 @@ Extract from arguments:
 
 ### Step 3: Multi-Pass Retrieval
 
-**Pass 1 -- Broad Search:**
+**Pass 1a -- Curated Content Search:**
+
+Search for high-value curated entries first to ensure they aren't drowned out by feed volume:
+
+`distillery_search(query="<topic>", limit=10, entry_type=["session", "bookmark", "minutes", "reference", "idea", "digest"], project="<project if specified>")`
+
+**Pass 1b -- Broad Search:**
 
 `distillery_search(query="<topic>", limit=20, project="<project if specified>")`
 
-Record all entries and similarity scores.
+Deduplicate Pass 1a and 1b results by entry ID, keeping the higher similarity score. Record all entries and scores.
 
 **Pass 2 -- Follow-up Searches (up to 3) + Tag Expansion (up to 3):**
 
