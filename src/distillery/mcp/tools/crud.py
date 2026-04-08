@@ -561,6 +561,12 @@ async def _handle_list(
         logger.exception("Error in distillery_list")
         return error_response("LIST_ERROR", f"list_entries failed: {exc}")
 
+    try:
+        total_count = await store.count_entries(filters=filters)
+    except Exception:  # noqa: BLE001
+        logger.debug("count_entries failed, falling back to len(entries)", exc_info=True)
+        total_count = len(entries)
+
     if output_mode == "summary":
         serialised = [_entry_to_summary_dict(e) for e in entries]
     elif output_mode == "ids":
@@ -596,6 +602,7 @@ async def _handle_list(
         {
             "entries": serialised,
             "count": len(entries),
+            "total_count": total_count,
             "limit": limit,
             "offset": offset,
             "output_mode": output_mode,

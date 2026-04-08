@@ -171,6 +171,54 @@ class TestListOutputModes:
         assert data["error"] is True
         assert data["code"] == "INVALID_PARAMS"
 
+    async def test_total_count_present_in_response(self, populated_store) -> None:
+        result = await _handle_list(
+            store=populated_store,
+            arguments={"limit": 2},
+        )
+        data = parse_mcp_response(result)
+        assert "total_count" in data
+        assert data["count"] == 2
+        assert data["total_count"] == 5  # populated_store has 5 entries total
+
+    async def test_total_count_with_filter(self, populated_store) -> None:
+        result = await _handle_list(
+            store=populated_store,
+            arguments={"limit": 100, "entry_type": "feed"},
+        )
+        data = parse_mcp_response(result)
+        assert data["count"] == 3  # 3 feed entries in populated_store
+        assert data["total_count"] == 3
+
+    async def test_total_count_empty_result(self, store) -> None:
+        result = await _handle_list(
+            store=store,
+            arguments={"limit": 10, "entry_type": "feed"},
+        )
+        data = parse_mcp_response(result)
+        assert data["total_count"] == 0
+        assert data["count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Integration tests: count_entries store method
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestCountEntries:
+    async def test_count_all(self, populated_store) -> None:
+        count = await populated_store.count_entries(filters=None)
+        assert count == 5  # populated_store fixture has 5 entries
+
+    async def test_count_with_type_filter(self, populated_store) -> None:
+        count = await populated_store.count_entries(filters={"entry_type": "feed"})
+        assert count == 3  # 3 feed entries in populated_store
+
+    async def test_count_empty_store(self, store) -> None:
+        count = await store.count_entries(filters=None)
+        assert count == 0
+
 
 # ---------------------------------------------------------------------------
 # Integration tests: distillery_aggregate

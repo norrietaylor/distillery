@@ -1274,12 +1274,6 @@ class DuckDBStore:
         """
 
         def _sync() -> list[Entry]:
-            """
-            Fetch entries from the database applying filters, ordering by creation time, and paginating the results.
-
-            Returns:
-                list[Entry]: Entries that match the provided filters, ordered by created_at descending and limited/offset according to the surrounding scope.
-            """
             conn = self.connection
 
             where_clauses, params = self._build_filter_clauses(filters)
@@ -1300,6 +1294,24 @@ class DuckDBStore:
 
             rows = result.fetchall()
             return [self._row_to_entry(row, col_names) for row in rows]
+
+        return await asyncio.to_thread(_sync)
+
+    async def count_entries(
+        self,
+        filters: dict[str, Any] | None,
+    ) -> int:
+        """Return the total number of entries matching *filters*."""
+
+        def _sync() -> int:
+            conn = self.connection
+            where_clauses, params = self._build_filter_clauses(filters)
+            where_sql = ""
+            if where_clauses:
+                where_sql = "WHERE " + " AND ".join(where_clauses)
+            sql = f"SELECT COUNT(*) FROM entries {where_sql}"
+            row = conn.execute(sql, params).fetchone()
+            return int(row[0]) if row else 0
 
         return await asyncio.to_thread(_sync)
 
