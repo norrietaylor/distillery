@@ -11,6 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.2.1] - 2026-04-07
+
+### Fixes
+
+- **RRF score normalization** — min-max normalization across the full candidate set instead of top-1 division; hybrid search scores now spread meaningfully across [0, 1] (#170, PR #184)
+- **Interest profile feed exclusion** — feed entries excluded from `InterestExtractor` to prevent feedback loop where polled content drifts the profile (#175, PR #181)
+- **`/pour` curated-first pass** — Pass 1a searches curated entry types (session, bookmark, minutes, etc.) before the broad search, preventing feed volume from drowning out decisions and bookmarks (#175, PR #181)
+- **GitHub event type filtering** — `GitHubAdapter` filters low-value events (WatchEvent, ForkEvent, etc.) by default; configurable via `include_event_types` parameter (#171, PR #183)
+- **`distillery_list` total_count** — response includes `total_count` (total matching entries before pagination) via new `count_entries()` store method; falls back to `len(entries)` on error (#179, PR #182)
+- **Dynamic version tests** — version assertions now compare against `pyproject.toml` and `__version__` instead of hardcoded strings
+
+---
+
 ## [v0.2.0] - 2026-04-06
 
 **Theme: Feed Intelligence + Improved Retrieval**
@@ -236,6 +249,7 @@ Initial public release of the Distillery MVP, covering three specification areas
 - `/classify` skill — classify entries by ID, process full inbox, and manage review queue
 - Config extensions: deduplication thresholds, classification taxonomy, review-queue settings
 
-[Unreleased]: https://github.com/norrietaylor/distillery/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/norrietaylor/distillery/compare/v0.2.1...HEAD
+[v0.2.1]: https://github.com/norrietaylor/distillery/compare/v0.2.0...v0.2.1
 [v0.2.0]: https://github.com/norrietaylor/distillery/compare/v0.1.1...v0.2.0
 [v0.1.0]: https://github.com/norrietaylor/distillery/releases/tag/v0.1.0

@@ -1,8 +1,8 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/distillery-logo-dark-512.png" width="180">
-    <source media="(prefers-color-scheme: light)" srcset="docs/assets/distillery-logo-512.png" width="180">
-    <img alt="Distillery" src="docs/assets/distillery-logo-512.png" width="180">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/norrietaylor/distillery/main/docs/assets/distillery-logo-dark-512.png" width="180">
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/norrietaylor/distillery/main/docs/assets/distillery-logo-512.png" width="180">
+    <img alt="Distillery" src="https://raw.githubusercontent.com/norrietaylor/distillery/main/docs/assets/distillery-logo-512.png" width="180">
   </picture>
 </p>
 
@@ -41,7 +41,7 @@ Distillery captures the highest-value transformation — from noise to signal �
 > **Full documentation:** [norrietaylor.github.io/distillery](https://norrietaylor.github.io/distillery/)
 
 <p align="center">
-  <img src="docs/assets/distillery-demo.gif" alt="Distillery demo — /distill captures a decision, /pour synthesizes it" width="600">
+  <img src="https://raw.githubusercontent.com/norrietaylor/distillery/main/docs/assets/distillery-demo.gif" alt="Distillery demo — /distill captures a decision, /pour synthesizes it" width="600">
 </p>
 
 ## Skills
