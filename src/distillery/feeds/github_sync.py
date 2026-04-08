@@ -115,7 +115,7 @@ def _build_content(
     body: str | None,
     comments: list[dict[str, Any]],
 ) -> str:
-    """Concatenate title, body, and top comments into entry content."""
+    """Concatenate title, body, and first 10 comments (chronological order) into entry content."""
     parts = [f"# {title}"]
     if body and body.strip():
         parts.append(body.strip())

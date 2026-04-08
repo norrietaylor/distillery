@@ -187,8 +187,11 @@ def test_migration_8_backfill_ignores_non_string_related_entries() -> None:
 
         rows = conn.execute("SELECT to_id FROM entry_relations").fetchall()
         to_ids = {r[0] for r in rows}
-        # entry_b is valid; "valid-but-no-target" is a non-empty string so it is inserted too
+        # entry_b exists in entries table so it should be linked
         assert entry_b in to_ids
+        # "valid-but-no-target" is a non-empty string but no entry exists with
+        # that ID, so the migration must skip it
+        assert "valid-but-no-target" not in to_ids
         # None and 42 must NOT be in results
         assert None not in to_ids
     finally:

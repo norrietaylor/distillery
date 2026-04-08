@@ -1873,6 +1873,11 @@ class DuckDBStore:
     ) -> list[dict[str, Any]]:
         """Synchronous implementation of get_related(); called via asyncio.to_thread."""
         assert self._conn is not None
+        _valid_directions = ("outgoing", "incoming", "both")
+        if direction not in _valid_directions:
+            raise ValueError(
+                f"Invalid direction {direction!r}, must be one of {_valid_directions}"
+            )
         conditions: list[str] = []
         params: list[Any] = []
 

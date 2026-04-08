@@ -80,7 +80,7 @@ Report: `Phase 1 (Seed): <N> entries retrieved.`
 
 If Phase 1 returns zero entries, display:
 
-```
+```text
 No entries found for "<topic>".
 
 Suggestions:
@@ -160,7 +160,7 @@ Report: `Phase 4 (Gap Fill): <N> new entries from <G> targeted gap searches.`
 
 **Summary line:**
 
-```
+```text
 Investigated "<topic>": <total_N> entries across <phases_with_results> phases, <K> relationship edges traversed.
 ```
 
@@ -178,7 +178,7 @@ Example: `The team evaluated DuckDB as the storage backend in early 2026 [Entry 
 
 Text-based representation of connections between entries:
 
-```
+```text
 Entry 550e8400 [session] "DuckDB evaluation"
   —[citation]→ Entry 7c9e6679 [reference] "Analytical query requirements"
   —[link]→ Entry a1b2c3d4 [github] "Issue #42: storage backend decision"
@@ -232,7 +232,7 @@ Table of all entries in the result set:
 
 Heading `# Investigate: <Topic>`, then the summary line, then sections: Context Summary, Relationship Map, Timeline, Key People, Knowledge Gaps, Sources — each as described above. Omit empty sections.
 
-```
+```text
 # Investigate: <topic or "Entry <short-id>">
 
 Investigated "<topic>": <N> entries across <phases> phases, <K> relationship edges traversed.

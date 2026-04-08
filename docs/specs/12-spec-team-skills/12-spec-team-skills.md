@@ -79,10 +79,10 @@ Ship four team-oriented skills (`/digest`, `/gh-sync`, `/investigate`, `/briefin
 - The skill shall accept a repository argument: `/gh-sync owner/repo`, `/gh-sync owner/repo --issues`, `/gh-sync owner/repo --prs`
 - The system shall add a `GitHubSyncAdapter` class in `src/distillery/feeds/github_sync.py` that uses the GitHub REST API (not GraphQL — simpler, PAT already works):
   - `GET /repos/{owner}/{repo}/issues?state=all&per_page=100&since=<last_sync>` (issues + PRs share this endpoint; filter by `pull_request` key presence)
-  - Fetch issue/PR body, title, labels, state, assignees, comments (top 10 by reactions)
+  - Fetch issue/PR body, title, labels, state, assignees, comments (first 10 comments, chronological order)
 - The system shall store each issue/PR as `entry_type="github"` with metadata: `repo`, `ref_type` ("issue" or "pr"), `ref_number`, `title`, `url`, `state`, `labels`, `assignees`
 - The system shall use `external_id` = `{owner}/{repo}#issue-{number}` for dedup (same pattern as feed entries)
-- The system shall track last sync timestamp per repo via `store.set_metadata("gh_sync:{owner}/{repo}", <ISO timestamp>)`
+- The system shall track last sync timestamp per repo via `store.set_metadata("gh_sync_last_{owner}/{repo}", <ISO timestamp>)`
 - The system shall concatenate title + body + top comments into entry `content`, with markdown separators
 - The system shall create `link` relations between issues that reference each other (e.g., "Closes #123" → link from PR entry to issue entry)
 - The system shall read `GITHUB_TOKEN` from environment (same pattern as GitHubAdapter)
@@ -164,7 +164,7 @@ No UI requirements. All skills are SKILL.md files following CONVENTIONS.md patte
 
 - **entry_relations table**: Separate table (not a list column) enables typed relationships, bidirectional queries, and clean indexing. Migration 8 creates the table and backfills from `metadata.related_entries`.
 - **GitHub REST vs GraphQL**: REST API is simpler, already authenticated via `GITHUB_TOKEN`, and supports `since` parameter for incremental sync. GraphQL would be more efficient for bulk fetching but adds client complexity.
-- **Incremental sync state**: Stored in `_meta` table as `gh_sync:{owner}/{repo}` → ISO timestamp. Same pattern as webhook cooldowns.
+- **Incremental sync state**: Stored in `_meta` table as `gh_sync_last_{owner}/{repo}` → ISO timestamp. Same pattern as webhook cooldowns.
 - **Cross-reference parsing**: Parse `#123`, `Closes #123`, `Fixes #123` patterns in issue/PR bodies to create `link` relations between entries. Regex-based, no NLP needed.
 - **Relationship traversal depth**: `/investigate` Phase 2 follows relationships one hop by default. Configurable via `--depth N` in future, but v1 does single-hop to avoid explosion.
 - **Skills depend on Unit 1**: Units 3 and 4 use `distillery_relations`. Unit 1 must be implemented first. Units 2 and 5 have no dependency on Unit 1.

@@ -95,7 +95,7 @@ distillery_aggregate(
 distillery_interests(recency_days=<days>, top_n=10, suggest_sources=true)
 ```
 
-Record: top interest tags and suggested sources. If this call fails, omit the Top Interests and Suggested Actions sections rather than stopping.
+Record: top interest tags and suggested sources. If this call fails, omit the Top Interests section and the "suggested sources" action item from Suggested Actions, but still show other computable actions (review queue count, low activity warnings).
 
 **3f. Top feed signals (non-fatal):**
 

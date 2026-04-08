@@ -227,6 +227,10 @@ def create_entry_relations(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> No
     logger.info("Migration 8: entry_relations table created")
 
     # Backfill: scan all entries whose metadata contains a 'related_entries' list.
+    # Collect all existing entry IDs so we only create relations to valid targets.
+    existing_ids: set[str] = {
+        r[0] for r in conn.execute("SELECT id FROM entries").fetchall()
+    }
     rows = conn.execute("SELECT id, metadata FROM entries WHERE metadata IS NOT NULL").fetchall()
     backfilled = 0
     for entry_id, metadata_raw in rows:
@@ -246,6 +250,8 @@ def create_entry_relations(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> No
 
         for to_id in related:
             if not isinstance(to_id, str) or not to_id:
+                continue
+            if to_id not in existing_ids:
                 continue
             relation_id = str(uuid.uuid4())
             conn.execute(
