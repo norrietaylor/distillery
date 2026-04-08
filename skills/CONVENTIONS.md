@@ -314,6 +314,7 @@ The following skills are available in `skills/`:
 | `/radar` | `radar/` | distillery_search, distillery_interests, distillery_list (fallback), distillery_store | Interest-driven feed digest and source suggestions |
 | `/tune` | `tune/` | distillery_metrics | Display and adjust feed relevance thresholds |
 | `/setup` | `setup/` | distillery_metrics | MCP connectivity wizard and transport configuration |
+| `/digest` | `digest/` | distillery_list, distillery_aggregate, distillery_metrics, distillery_search, distillery_store, distillery_find_similar | Generate structured summaries of internal team activity |
 
 ## Custom Agents
 
