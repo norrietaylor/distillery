@@ -159,6 +159,13 @@ class InterestExtractor:
                 if total >= self._max_entries:
                     break
 
+                # Exclude feed entries from the interest profile.
+                # Feed entries are *outputs* of relevance scoring — including
+                # them creates a feedback loop where the profile drifts toward
+                # whatever sources poll most frequently.
+                if entry.entry_type == "feed":
+                    continue
+
                 # Apply hard age cutoff
                 created = entry.created_at
                 if created.tzinfo is None:
