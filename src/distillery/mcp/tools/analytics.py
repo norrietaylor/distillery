@@ -1087,7 +1087,8 @@ def _sync_gather_expired(
             entry_type,
             author,
             project,
-            expires_at
+            expires_at,
+            COALESCE(accessed_at, updated_at) AS last_accessed
         FROM entries
         WHERE status != 'archived'
           AND expires_at IS NOT NULL
@@ -1101,7 +1102,7 @@ def _sync_gather_expired(
 
     result: list[dict[str, Any]] = []
     for row in rows:
-        entry_id, content, entry_type, author, project, expires_at = row
+        entry_id, content, entry_type, author, project, expires_at, last_accessed = row
         content_preview = (content or "")[:200]
 
         expires_at_iso: str | None = None
@@ -1110,6 +1111,16 @@ def _sync_gather_expired(
                 expires_at = expires_at.replace(tzinfo=UTC)
             expires_at_iso = expires_at.isoformat()
 
+        # Compute last_accessed / days_since_access to match stale entry shape.
+        if last_accessed is not None:
+            if hasattr(last_accessed, "tzinfo") and last_accessed.tzinfo is None:
+                last_accessed = last_accessed.replace(tzinfo=UTC)
+            days_since: int | None = (datetime.now(UTC) - last_accessed).days
+            last_accessed_iso: str | None = last_accessed.isoformat()
+        else:
+            days_since = None
+            last_accessed_iso = None
+
         result.append(
             {
                 "id": entry_id,
@@ -1117,6 +1128,8 @@ def _sync_gather_expired(
                 "entry_type": entry_type,
                 "author": author,
                 "project": project,
+                "last_accessed": last_accessed_iso,
+                "days_since_access": days_since,
                 "expires_at": expires_at_iso,
                 "reason": "expired",
             }

@@ -304,7 +304,7 @@ def create_fts_index(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
 
 
 _ADD_EXPIRES_AT_COLUMN = """
-ALTER TABLE entries ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+ALTER TABLE entries ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP;
 """
 
 
