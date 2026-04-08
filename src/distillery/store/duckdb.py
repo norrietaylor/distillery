@@ -1797,7 +1797,7 @@ class DuckDBStore:
     def _sync_add_relation(self, from_id: str, to_id: str, relation_type: str) -> str:
         """Synchronous implementation of add_relation(); called via asyncio.to_thread."""
         assert self._conn is not None
-        # Validate that both entries exist (not archived)
+        # Validate that both entries exist (including archived — preserves historical links)
         from_row = self._conn.execute(
             "SELECT id FROM entries WHERE id = ?", [from_id]
         ).fetchone()

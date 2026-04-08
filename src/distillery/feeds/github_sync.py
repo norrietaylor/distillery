@@ -38,6 +38,9 @@ _MAX_COMMENTS = 10
 # Per-page limit for the issues endpoint (GitHub max is 100).
 _DEFAULT_PER_PAGE = 100
 
+# Maximum total items to fetch across all pages (safety cap).
+_MAX_FETCH_ITEMS = 1000
+
 # Pattern for GitHub cross-references in issue/PR bodies and comments.
 # Matches: #123, Closes #123, Fixes #123, Resolves #123, closes #123, etc.
 _XREF_PATTERN = re.compile(
@@ -224,7 +227,7 @@ class GitHubSyncAdapter:
         try:
             all_issues: list[dict[str, Any]] = []
             page = 1
-            while True:
+            while len(all_issues) < _MAX_FETCH_ITEMS:
                 params["page"] = page
                 response = await client.get(
                     api_url, params=params, headers=self._headers()
@@ -237,7 +240,7 @@ class GitHubSyncAdapter:
                 if len(batch) < _DEFAULT_PER_PAGE:
                     break
                 page += 1
-            return all_issues
+            return all_issues[:_MAX_FETCH_ITEMS]
         finally:
             if should_close:
                 await client.aclose()

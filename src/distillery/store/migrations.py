@@ -139,6 +139,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_entry_relations_unique
 ON entry_relations (from_id, to_id, relation_type);
 """
 
+_CREATE_ENTRY_RELATIONS_TO_ID_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_entry_relations_to_id
+ON entry_relations (to_id);
+"""
+
 
 # ---------------------------------------------------------------------------
 # Migration functions
@@ -224,6 +229,7 @@ def create_entry_relations(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> No
 
     conn.execute(_CREATE_ENTRY_RELATIONS_TABLE)
     conn.execute(_CREATE_ENTRY_RELATIONS_UNIQUE_INDEX)
+    conn.execute(_CREATE_ENTRY_RELATIONS_TO_ID_INDEX)
     logger.info("Migration 8: entry_relations table created")
 
     # Backfill: scan all entries whose metadata contains a 'related_entries' list.
