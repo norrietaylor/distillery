@@ -644,11 +644,144 @@ def _build_filters_from_arguments(arguments: dict[str, Any]) -> dict[str, Any] |
     return filters if filters else None
 
 
+# ---------------------------------------------------------------------------
+# _handle_correct
+# ---------------------------------------------------------------------------
+
+
+async def _handle_correct(
+    store: Any,
+    arguments: dict[str, Any],
+    cfg: DistilleryConfig | None = None,
+) -> list[types.TextContent]:
+    """Implement the ``distillery_correct`` tool.
+
+    Stores a correction entry that supersedes an existing (wrong) entry.
+    The original entry is archived and the new entry carries a metadata
+    reference to it via ``related_entries`` / ``relation_type``.
+
+    This uses the metadata-based relationship convention as a stepping
+    stone until the relationship table from #146 lands, at which point
+    the storage mechanism will migrate but the tool API stays the same.
+
+    Args:
+        store: Initialised ``DuckDBStore``.
+        arguments: Raw MCP tool arguments dict.  Required keys:
+            ``wrong_entry_id``, ``content``.  Optional keys:
+            ``entry_type``, ``author``, ``project``, ``tags``,
+            ``metadata``.
+        cfg: Optional configuration (currently unused, accepted for
+            handler signature consistency).
+
+    Returns:
+        MCP content list with the new and archived entry IDs, or an error.
+    """
+    from distillery.models import Entry, EntryStatus, EntryType
+
+    # --- input validation ---------------------------------------------------
+    err = validate_required(arguments, "wrong_entry_id", "content")
+    if err:
+        return error_response("INVALID_PARAMS", err)
+
+    wrong_entry_id: str = arguments["wrong_entry_id"]
+
+    # --- fetch original entry -----------------------------------------------
+    try:
+        original = await store.get(wrong_entry_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error fetching entry id=%s for correction", wrong_entry_id)
+        return error_response("STORE_ERROR", f"Failed to retrieve original entry: {exc}")
+
+    if original is None:
+        return error_response(
+            "NOT_FOUND",
+            f"No entry found with id={wrong_entry_id!r}.",
+            details={"wrong_entry_id": wrong_entry_id},
+        )
+
+    if original.status == EntryStatus.ARCHIVED:
+        return error_response(
+            "INVALID_STATE",
+            "Cannot correct an archived entry.",
+            details={"wrong_entry_id": wrong_entry_id, "status": original.status.value},
+        )
+
+    # --- resolve fields (inherit from original if not provided) -------------
+    entry_type_str = arguments.get("entry_type", original.entry_type.value)
+    if entry_type_str not in _VALID_ENTRY_TYPES:
+        return error_response(
+            "INVALID_PARAMS",
+            f"Invalid entry_type {entry_type_str!r}. "
+            f"Must be one of: {', '.join(sorted(_VALID_ENTRY_TYPES))}.",
+        )
+
+    author = arguments.get("author", original.author)
+    project = arguments.get("project", original.project)
+    tags = list(arguments.get("tags") or original.tags)
+
+    tags_err = validate_type(arguments, "tags", list, "list of strings")
+    if tags_err:
+        return error_response("INVALID_PARAMS", tags_err)
+
+    metadata_err = validate_type(arguments, "metadata", dict, "object")
+    if metadata_err:
+        return error_response("INVALID_PARAMS", metadata_err)
+
+    # Build metadata: user-provided metadata merged with correction references.
+    user_metadata = dict(arguments.get("metadata") or {})
+    user_metadata["related_entries"] = [wrong_entry_id]
+    user_metadata["relation_type"] = "corrects"
+
+    # --- build new entry ----------------------------------------------------
+    try:
+        new_entry = Entry(
+            content=arguments["content"],
+            entry_type=EntryType(entry_type_str),
+            source=original.source,
+            author=author,
+            project=project,
+            tags=tags,
+            metadata=user_metadata,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return error_response("INVALID_PARAMS", f"Failed to construct correction entry: {exc}")
+
+    # --- persist new entry --------------------------------------------------
+    try:
+        new_entry_id = await store.store(new_entry)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error storing correction entry")
+        return error_response("STORE_ERROR", f"Failed to store correction entry: {exc}")
+
+    # --- archive original ---------------------------------------------------
+    try:
+        await store.update(wrong_entry_id, {"status": EntryStatus.ARCHIVED})
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error archiving original entry id=%s", wrong_entry_id)
+        return error_response(
+            "STORE_ERROR",
+            f"Correction entry stored (id={new_entry_id}) but failed to archive "
+            f"original entry: {exc}",
+        )
+
+    return success_response(
+        {
+            "correction_entry_id": new_entry_id,
+            "archived_entry_id": wrong_entry_id,
+            "note": (
+                "Correction linked via metadata.related_entries "
+                "(pending migration to relationship table, see #146)."
+            ),
+        }
+    )
+
+
 __all__ = [
     "_handle_store",
     "_handle_get",
     "_handle_update",
     "_handle_list",
+    "_handle_correct",
     "_build_filters_from_arguments",
     "_VALID_ENTRY_TYPES",
     "_VALID_STATUSES",
