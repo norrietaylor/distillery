@@ -708,8 +708,7 @@ def _cmd_export(config_path: str | None, fmt: str, output_path: str) -> int:
         try:
             # Verify the entries table exists.
             table_check = conn.execute(
-                "SELECT COUNT(*) FROM information_schema.tables "
-                "WHERE table_name = 'entries'"
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'entries'"
             ).fetchone()
             if table_check is None or table_check[0] == 0:
                 return [], [], {}
@@ -721,9 +720,21 @@ def _cmd_export(config_path: str | None, fmt: str, output_path: str) -> int:
                 "last_modified_by, expires_at FROM entries"
             ).fetchall()
             entry_cols = [
-                "id", "content", "entry_type", "source", "status", "tags",
-                "metadata", "version", "project", "author", "created_at",
-                "updated_at", "created_by", "last_modified_by", "expires_at",
+                "id",
+                "content",
+                "entry_type",
+                "source",
+                "status",
+                "tags",
+                "metadata",
+                "version",
+                "project",
+                "author",
+                "created_at",
+                "updated_at",
+                "created_by",
+                "last_modified_by",
+                "expires_at",
             ]
             entries: list[dict[str, Any]] = []
             for row in entry_rows:

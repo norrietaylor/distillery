@@ -185,10 +185,11 @@ async def _handle_store(
             return error_response("INVALID_PARAMS", "Field 'expires_at' must be an ISO 8601 string")
         try:
             expires_at_val = datetime.fromisoformat(expires_at_raw)
-            if expires_at_val.tzinfo is None:
-                expires_at_val = expires_at_val.replace(tzinfo=UTC)
-            else:
-                expires_at_val = expires_at_val.astimezone(UTC)
+            expires_at_val = (
+                expires_at_val.replace(tzinfo=UTC)
+                if expires_at_val.tzinfo is None
+                else expires_at_val.astimezone(UTC)
+            )
         except (ValueError, TypeError):
             return error_response(
                 "INVALID_PARAMS", "Field 'expires_at' must be a valid ISO 8601 datetime string"
@@ -420,7 +421,14 @@ async def _handle_update(
 
     # Build the updates dict from all keys except entry_id.
     updatable_keys = {
-        "content", "entry_type", "author", "project", "tags", "status", "metadata", "expires_at",
+        "content",
+        "entry_type",
+        "author",
+        "project",
+        "tags",
+        "status",
+        "metadata",
+        "expires_at",
     }
     updates: dict[str, Any] = {}
     for key in updatable_keys:
@@ -478,10 +486,7 @@ async def _handle_update(
                 )
             try:
                 ea_dt = datetime.fromisoformat(ea_raw)
-                if ea_dt.tzinfo is None:
-                    ea_dt = ea_dt.replace(tzinfo=UTC)
-                else:
-                    ea_dt = ea_dt.astimezone(UTC)
+                ea_dt = ea_dt.replace(tzinfo=UTC) if ea_dt.tzinfo is None else ea_dt.astimezone(UTC)
                 updates["expires_at"] = ea_dt
             except (ValueError, TypeError):
                 return error_response(
