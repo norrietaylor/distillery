@@ -1789,3 +1789,146 @@ class DuckDBStore:
             Dict mapping each matching tag string to its occurrence count.
         """
         return await asyncio.to_thread(self._sync_get_tag_vocabulary, prefix)
+
+    # ------------------------------------------------------------------
+    # Entry relations
+    # ------------------------------------------------------------------
+
+    def _sync_add_relation(self, from_id: str, to_id: str, relation_type: str) -> str:
+        """Synchronous implementation of add_relation(); called via asyncio.to_thread."""
+        assert self._conn is not None
+        # Validate that both entries exist (not archived)
+        from_row = self._conn.execute(
+            "SELECT id FROM entries WHERE id = ?", [from_id]
+        ).fetchone()
+        if from_row is None:
+            raise ValueError(f"Entry not found: from_id={from_id!r}")
+        to_row = self._conn.execute(
+            "SELECT id FROM entries WHERE id = ?", [to_id]
+        ).fetchone()
+        if to_row is None:
+            raise ValueError(f"Entry not found: to_id={to_id!r}")
+        relation_id = str(uuid.uuid4())
+        self._conn.execute(
+            "INSERT INTO entry_relations (id, from_id, to_id, relation_type) "
+            "VALUES (?, ?, ?, ?)",
+            [relation_id, from_id, to_id, relation_type],
+        )
+        logger.debug(
+            "Added relation id=%s from=%s to=%s type=%s",
+            relation_id,
+            from_id,
+            to_id,
+            relation_type,
+        )
+        return relation_id
+
+    async def add_relation(
+        self,
+        from_id: str,
+        to_id: str,
+        relation_type: str,
+    ) -> str:
+        """Create a typed relation between two entries and return its UUID.
+
+        Args:
+            from_id: UUID string of the source entry.
+            to_id: UUID string of the target entry.
+            relation_type: Freeform label for the relation (e.g. ``"link"``,
+                ``"blocks"``, ``"related"``).
+
+        Returns:
+            The UUID string of the newly created relation row.
+
+        Raises:
+            ValueError: If either ``from_id`` or ``to_id`` does not exist in
+                the store.
+        """
+        return await asyncio.to_thread(self._sync_add_relation, from_id, to_id, relation_type)
+
+    def _sync_get_related(
+        self,
+        entry_id: str,
+        direction: str,
+        relation_type: str | None,
+    ) -> list[dict[str, Any]]:
+        """Synchronous implementation of get_related(); called via asyncio.to_thread."""
+        assert self._conn is not None
+        conditions: list[str] = []
+        params: list[Any] = []
+
+        if direction == "outgoing":
+            conditions.append("from_id = ?")
+            params.append(entry_id)
+        elif direction == "incoming":
+            conditions.append("to_id = ?")
+            params.append(entry_id)
+        else:  # "both"
+            conditions.append("(from_id = ? OR to_id = ?)")
+            params.extend([entry_id, entry_id])
+
+        if relation_type is not None:
+            conditions.append("relation_type = ?")
+            params.append(relation_type)
+
+        where_clause = " AND ".join(conditions)
+        sql = (
+            f"SELECT id, from_id, to_id, relation_type, "
+            f"strftime(created_at, '%Y-%m-%dT%H:%M:%S') || 'Z' "
+            f"FROM entry_relations WHERE {where_clause} ORDER BY created_at ASC"
+        )
+        result = self._conn.execute(sql, params)
+        rows = result.fetchall()
+        return [
+            {
+                "id": row[0],
+                "from_id": row[1],
+                "to_id": row[2],
+                "relation_type": row[3],
+                "created_at": row[4],
+            }
+            for row in rows
+        ]
+
+    async def get_related(
+        self,
+        entry_id: str,
+        direction: str = "both",
+        relation_type: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return relations for an entry, optionally filtered by direction and type.
+
+        Args:
+            entry_id: UUID string of the entry whose relations to fetch.
+            direction: One of ``"outgoing"``, ``"incoming"``, or ``"both"``
+                (default).
+            relation_type: Optional filter restricting results to this type.
+
+        Returns:
+            List of dicts with keys: ``id``, ``from_id``, ``to_id``,
+            ``relation_type``, ``created_at`` (ISO 8601 str).
+        """
+        return await asyncio.to_thread(self._sync_get_related, entry_id, direction, relation_type)
+
+    def _sync_remove_relation(self, relation_id: str) -> bool:
+        """Synchronous implementation of remove_relation(); called via asyncio.to_thread."""
+        assert self._conn is not None
+        result = self._conn.execute(
+            "DELETE FROM entry_relations WHERE id = ? RETURNING id", [relation_id]
+        )
+        deleted = result.fetchall()
+        found = len(deleted) > 0
+        if found:
+            logger.debug("Removed relation id=%s", relation_id)
+        return found
+
+    async def remove_relation(self, relation_id: str) -> bool:
+        """Delete a relation row by its UUID.
+
+        Args:
+            relation_id: UUID string of the ``entry_relations`` row to remove.
+
+        Returns:
+            ``True`` if the row existed and was deleted, ``False`` otherwise.
+        """
+        return await asyncio.to_thread(self._sync_remove_relation, relation_id)

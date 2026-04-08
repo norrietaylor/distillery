@@ -1,0 +1,8 @@
+Type: cli
+Command: PYTHONPATH=src mypy --strict src/distillery/store/protocol.py src/distillery/store/duckdb.py
+Expected: No type errors
+Timestamp: 2026-04-07T00:00:00Z
+
+Success: no issues found in 2 source files
+
+Status: PASS

@@ -328,6 +328,64 @@ class DistilleryStore(Protocol):
         """
         ...
 
+    async def add_relation(
+        self,
+        from_id: str,
+        to_id: str,
+        relation_type: str,
+    ) -> str:
+        """Create a typed relation between two entries and return its UUID.
+
+        Args:
+            from_id: UUID string of the source entry.
+            to_id: UUID string of the target entry.
+            relation_type: Freeform label for the relation (e.g. ``"link"``,
+                ``"blocks"``, ``"related"``).
+
+        Returns:
+            The UUID string of the newly created relation row.
+
+        Raises:
+            ValueError: If either ``from_id`` or ``to_id`` does not exist in
+                the store.
+        """
+        ...
+
+    async def get_related(
+        self,
+        entry_id: str,
+        direction: str = "both",
+        relation_type: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return relations for an entry, optionally filtered by direction and type.
+
+        Args:
+            entry_id: UUID string of the entry whose relations to fetch.
+            direction: One of ``"outgoing"`` (entry is ``from_id``),
+                ``"incoming"`` (entry is ``to_id``), or ``"both"``
+                (default, returns all).
+            relation_type: Optional filter restricting results to rows with
+                this ``relation_type`` value.  ``None`` returns all types.
+
+        Returns:
+            List of dicts, each containing keys: ``id``, ``from_id``,
+            ``to_id``, ``relation_type``, ``created_at`` (ISO 8601 str).
+            Ordered by ascending ``created_at``.
+        """
+        ...
+
+    async def remove_relation(self, relation_id: str) -> bool:
+        """Delete a relation row by its UUID.
+
+        Args:
+            relation_id: UUID string of the ``entry_relations`` row to remove.
+
+        Returns:
+            ``True`` if the row existed and was deleted, ``False`` if no row
+            with that ID existed.
+        """
+        ...
+
     async def get_metadata(self, key: str) -> str | None:
         """Read a value from the ``_meta`` key-value table.
 
