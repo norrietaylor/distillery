@@ -80,6 +80,11 @@ def _parse_iso8601_utc(
     """
     if not isinstance(raw, str):
         return error_response("INVALID_PARAMS", f"Field '{field_name}' must be an ISO 8601 string")
+    if "T" not in raw and " " not in raw:
+        return error_response(
+            "INVALID_PARAMS",
+            f"Field '{field_name}' must include date and time (ISO 8601 datetime)",
+        )
     try:
         dt = datetime.fromisoformat(raw)
         return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
