@@ -10,6 +10,7 @@ All skills follow the same structure for consistency and clarity:
 ---
 name: <skill-name>
 description: "Description of the skill's purpose and trigger phrases (case-insensitive: e.g., 'use when user says ...', 'triggered by ...')"
+min_server_version: "0.3.0"  # optional — minimum MCP server version required
 ---
 
 # <Skill Name> — Purpose/Tagline
@@ -102,6 +103,15 @@ Setup: see docs/mcp-setup.md
 Stop immediately if MCP is unavailable.
 
 **Authentication errors** (HTTP transport with OAuth): If `distillery_metrics(scope="summary")` returns an authentication error rather than a connection failure, direct the user to run `/setup` or complete the OAuth flow via the MCP server menu.
+
+### Server Version Compatibility
+
+Skills that require MCP tools added in a specific server version should declare `min_server_version` in their frontmatter. During the MCP health check, if `distillery_metrics(scope="summary")` succeeds, compare the returned `version` field against `min_server_version`. If the server version is older, display:
+
+```
+Warning: This skill requires Distillery MCP server >= {min_server_version}.
+Your server is running {actual_version}. Update with: pip install --upgrade distillery-mcp
+```
 
 ## Canonical Dedup Flow
 
