@@ -174,7 +174,7 @@ distillery health
 | `/radar` | "what's new", "show my digest", "what have I missed" | Ambient intelligence digest from feed entries |
 | `/tune` | "adjust thresholds", "tune my feed" | Display and adjust feed relevance thresholds |
 | `/digest` | "team digest", "weekly summary" | Team activity summary from internal entries |
-| `/gh-sync` | "sync github", "import issues" | Sync GitHub issues/PRs into the knowledge base |
+| `/gh-sync` | "sync GitHub", "import issues" | Sync GitHub issues/PRs into the knowledge base |
 | `/investigate` | "investigate", "deep context" | Deep context builder with relationship traversal |
 | `/briefing` | "team briefing", "dashboard" | Team knowledge dashboard with metrics and activity |
 | `/setup` | "setup", "configure distillery" | Onboarding wizard — connectivity, connector registration, auto-poll |
