@@ -210,7 +210,7 @@ def test_migration_8_runs_in_full_sequence() -> None:
     try:
         version = run_pending_migrations(conn, dimensions=_DIMENSIONS, vss_available=False)
 
-        assert version == 8, f"Expected schema version 8, got {version}"
+        assert version == 9, f"Expected schema version 9, got {version}"
 
         tables = {
             row[0]
@@ -231,7 +231,7 @@ def test_migration_8_idempotent() -> None:
         first = run_pending_migrations(conn, dimensions=_DIMENSIONS, vss_available=False)
         second = run_pending_migrations(conn, dimensions=_DIMENSIONS, vss_available=False)
 
-        assert first == second == 8
+        assert first == second == 9
         tables = {
             row[0]
             for row in conn.execute(
@@ -245,14 +245,14 @@ def test_migration_8_idempotent() -> None:
 
 @pytest.mark.unit
 def test_migration_8_partial_from_7() -> None:
-    """Starting from schema_version=7 applies only migration 8."""
+    """Starting from schema_version=7 applies migrations 8 and 9."""
     conn = duckdb.connect(":memory:")
     try:
         _setup_db_through_migration_7(conn)
 
         version = run_pending_migrations(conn, dimensions=_DIMENSIONS, vss_available=False)
 
-        assert version == 8
+        assert version == 9
         tables = {
             row[0]
             for row in conn.execute(
