@@ -8,7 +8,7 @@ allowed-tools:
   - "mcp__*__distillery_search"
   - "mcp__*__distillery_store"
   - "mcp__*__distillery_find_similar"
-  - "mcp__*__distillery_metrics"
+  - "mcp__*__distillery_update"
 context: fork
 effort: high
 ---

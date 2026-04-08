@@ -1808,6 +1808,21 @@ class DuckDBStore:
         ).fetchone()
         if to_row is None:
             raise ValueError(f"Entry not found: to_id={to_id!r}")
+        # Check for existing relation with the same (from_id, to_id, relation_type)
+        existing = self._conn.execute(
+            "SELECT id FROM entry_relations "
+            "WHERE from_id = ? AND to_id = ? AND relation_type = ?",
+            [from_id, to_id, relation_type],
+        ).fetchone()
+        if existing is not None:
+            logger.debug(
+                "Relation already exists id=%s from=%s to=%s type=%s",
+                existing[0],
+                from_id,
+                to_id,
+                relation_type,
+            )
+            return str(existing[0])
         relation_id = str(uuid.uuid4())
         self._conn.execute(
             "INSERT INTO entry_relations (id, from_id, to_id, relation_type) "
@@ -1831,6 +1846,10 @@ class DuckDBStore:
     ) -> str:
         """Create a typed relation between two entries and return its UUID.
 
+        The method is idempotent: if a relation with the same ``(from_id,
+        to_id, relation_type)`` triple already exists, its existing UUID is
+        returned instead of creating a duplicate row.
+
         Args:
             from_id: UUID string of the source entry.
             to_id: UUID string of the target entry.
@@ -1838,7 +1857,7 @@ class DuckDBStore:
                 ``"blocks"``, ``"related"``).
 
         Returns:
-            The UUID string of the newly created relation row.
+            The UUID string of the relation row (existing or newly created).
 
         Raises:
             ValueError: If either ``from_id`` or ``to_id`` does not exist in

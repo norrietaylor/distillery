@@ -8,7 +8,7 @@ Ship four team-oriented skills (`/digest`, `/gh-sync`, `/investigate`, `/briefin
 
 1. `related_entries` promoted from metadata convention to a queryable `entry_relations` table with typed relationships and bidirectional traversal
 2. `/digest` generates team activity summaries from internal entries (not feeds)
-3. `/gh-sync` syncs GitHub issue/PR content into the knowledge base via GraphQL API
+3. `/gh-sync` syncs GitHub issue/PR content into the knowledge base via REST API
 4. `/investigate` compiles deep context by combining semantic search with relationship traversal
 5. `/briefing` produces a team dashboard combining digest, metrics, interests, and feed intelligence
 

@@ -222,12 +222,22 @@ class GitHubSyncAdapter:
                 timeout=_REQUEST_TIMEOUT, follow_redirects=True
             )
         try:
-            response = await client.get(
-                api_url, params=params, headers=self._headers()
-            )
-            response.raise_for_status()
-            result: list[dict[str, Any]] = response.json()
-            return result if isinstance(result, list) else []
+            all_issues: list[dict[str, Any]] = []
+            page = 1
+            while True:
+                params["page"] = page
+                response = await client.get(
+                    api_url, params=params, headers=self._headers()
+                )
+                response.raise_for_status()
+                batch: list[dict[str, Any]] = response.json()
+                if not isinstance(batch, list):
+                    break
+                all_issues.extend(batch)
+                if len(batch) < _DEFAULT_PER_PAGE:
+                    break
+                page += 1
+            return all_issues
         finally:
             if should_close:
                 await client.aclose()
@@ -428,6 +438,8 @@ class GitHubSyncAdapter:
         created = 0
         updated = 0
         relations_created: list[str] = []
+        # Collect pending cross-refs to resolve after all items are stored.
+        pending_xrefs: list[tuple[str, list[int]]] = []
 
         for issue in issues:
             number = issue.get("number", 0)
@@ -468,16 +480,20 @@ class GitHubSyncAdapter:
                 entry_id = await self._store.store(entry)
                 created += 1
 
-            # Parse cross-references and create relations.
+            # Parse cross-references; defer resolution until all items stored.
             all_text = entry.content
             cross_refs = _extract_cross_refs(all_text)
             # Exclude self-references.
             cross_refs = [r for r in cross_refs if r != number]
             if cross_refs:
-                new_rels = await self._create_cross_ref_relations(
-                    entry_id, cross_refs
-                )
-                relations_created.extend(new_rels)
+                pending_xrefs.append((entry_id, cross_refs))
+
+        # Second pass: resolve cross-references now that all items are stored.
+        for entry_id, cross_refs in pending_xrefs:
+            new_rels = await self._create_cross_ref_relations(
+                entry_id, cross_refs
+            )
+            relations_created.extend(new_rels)
 
         # Update last sync timestamp.
         await self._store.set_metadata(

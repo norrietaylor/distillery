@@ -32,7 +32,16 @@ Investigate compiles comprehensive context on a topic by executing a 4-phase ret
 
 See CONVENTIONS.md — skip if already confirmed this conversation.
 
-### Step 2: Parse Arguments
+### Step 2: Determine Author & Project
+
+Determine author and project per CONVENTIONS.md (Author & Project Resolution). Although `/investigate` is display-only and does not store entries, project is needed to scope searches via `--project`, and author is used for project resolution context.
+
+- **Author**: `git config user.name` → `DISTILLERY_AUTHOR` env var → ask user. Cache for the conversation.
+- **Project**: `--project` flag if provided → `basename $(git rev-parse --show-toplevel)` → ask user. Cache for the conversation.
+
+If already resolved earlier in the conversation, reuse the cached values.
+
+### Step 3: Parse Arguments
 
 If no arguments provided, ask:
 
@@ -43,7 +52,7 @@ Extract from arguments:
 - **--entry `<uuid>`**: if present, start Phase 1 from this specific entry instead of a search
 - **--project `<name>`**: if present, scope Phase 1 and Phase 4 searches to that project
 
-### Step 3: 4-Phase Retrieval
+### Step 4: 4-Phase Retrieval
 
 Track a **result set** keyed by entry ID throughout all phases. Each entry is counted once — the phase that first discovered it is recorded. Track relationship edges separately.
 
@@ -86,7 +95,7 @@ Stop here if Phase 1 returns zero entries.
 
 **Phase 2 — Expand Relationships:**
 
-For each entry in the current result set, call:
+For each seed entry from Phase 1 (do not recurse into entries added during Phase 2), call:
 
 ```python
 distillery_relations(action="get", entry_id="<id>")
@@ -155,7 +164,7 @@ Report: `Phase 4 (Gap Fill): <N> new entries from <G> targeted gap searches.`
 Investigated "<topic>": <total_N> entries across <phases_with_results> phases, <K> relationship edges traversed.
 ```
 
-### Step 4: Synthesize Output
+### Step 5: Synthesize Output
 
 You (the executing Claude instance) produce the synthesis. Do not dump raw entries.
 
@@ -204,7 +213,7 @@ From Phase 4 gap analysis:
 
 Suggest follow-up actions using appropriate skills (e.g., `/distill`, `/gh-sync`, `/minutes`).
 
-### Step 5: Source Attribution
+### Step 6: Source Attribution
 
 Table of all entries in the result set:
 

@@ -86,6 +86,8 @@ distillery_list(
 )
 ```
 
+Note the `total_count` field from the response. If `total_count > 500`, paginate by calling `distillery_list` with increasing `offset` (500, 1000, ...) until all entries are retrieved.
+
 Use the `metadata.external_id` field of each returned entry to build a lookup map: `{external_id: entry_id}`. This map determines whether an incoming item should be stored (new) or updated (existing).
 
 ### Step 5: Sync Issues and PRs
