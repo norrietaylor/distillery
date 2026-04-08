@@ -43,6 +43,7 @@ dev = [
     "pytest-cov>=4.0",
     "types-PyYAML>=6.0",
     "types-defusedxml>=0.7.0",
+    "pytest-httpx>=0.30.0",
 ]
 docs = [
     "mkdocs-material>=9.5",

@@ -46,7 +46,7 @@ Distillery captures the highest-value transformation — from noise to signal �
 
 ## Skills
 
-Distillery provides 10 Claude Code slash commands:
+Distillery provides 14 Claude Code slash commands:
 
 | Skill | Purpose | Example |
 |-------|---------|---------|
@@ -59,6 +59,10 @@ Distillery provides 10 Claude Code slash commands:
 | `/watch` | Manage monitored feed sources | `/watch add github:duckdb/duckdb` |
 | `/radar` | Ambient feed digest with source suggestions | `/radar --days 7` |
 | `/tune` | Adjust feed relevance thresholds | `/tune relevance 0.4` |
+| `/digest` | Team activity summary from internal entries | `/digest --days 7 --project myapp` |
+| `/gh-sync` | Sync GitHub issues/PRs into the knowledge base | `/gh-sync owner/repo --issues` |
+| `/investigate` | Deep context builder with relationship traversal | `/investigate distributed caching` |
+| `/briefing` | Team knowledge dashboard with metrics | `/briefing --days 7` |
 | `/setup` | Onboarding wizard for MCP connectivity and config | `/setup` |
 
 ## Quick Start
@@ -70,7 +74,7 @@ claude plugin marketplace add norrietaylor/distillery
 claude plugin install distillery
 ```
 
-This installs all 10 skills. The plugin defaults to a hosted demo server — you can start using Distillery immediately.
+This installs all 14 skills. The plugin defaults to a hosted demo server — you can start using Distillery immediately.
 
 > **Demo Server:** `distillery-mcp.fly.dev` is for evaluation only. Do not store sensitive or confidential data.
 

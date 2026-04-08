@@ -2,7 +2,7 @@
 
 Tests verify:
 - HTTP server starts and responds to MCP initialize
-- All 18 tools are accessible over HTTP transport
+- All 19 tools are accessible over HTTP transport
 - Stateless HTTP singleton: two requests share same store instance
 - stdio mode (no flags) backward compatibility
 """
@@ -148,7 +148,7 @@ class TestHttpServerStarts:
 
 class TestAllToolsAccessibleOverHttp:
     async def test_all_tools_accessible_over_http(self) -> None:
-        """All 18 tools appear in tools/list response over HTTP."""
+        """All 19 tools appear in tools/list response over HTTP."""
         port = _free_port()
         config = _make_server_config()
         uv_server, task = await _start_http_server(port, config)
