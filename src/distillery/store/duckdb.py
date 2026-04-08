@@ -1167,12 +1167,22 @@ class DuckDBStore:
 
             scored.sort(key=lambda x: x[1], reverse=True)
 
-            # Normalise scores to [0, 1] relative to the top score.
-            max_score = scored[0][1] if scored else 1.0
+            # Normalise scores to [0, 1] using min-max across the full
+            # candidate set.  This gives a meaningful spread instead of
+            # clustering near 1.0 (which happens when dividing by max
+            # alone, since RRF raw scores occupy a tiny range).
+            if len(scored) < 2:
+                max_score = scored[0][1] if scored else 1.0
+                min_score = 0.0
+            else:
+                max_score = scored[0][1]
+                min_score = scored[-1][1]
+
+            score_range = max_score - min_score
             results = []
             returned_ids = []
             for eid, raw in scored[:limit]:
-                norm = raw / max_score if max_score > 0 else 0.0
+                norm = (raw - min_score) / score_range if score_range > 0 else 1.0
                 results.append(SearchResult(entry=entry_map[eid], score=norm))
                 returned_ids.append(eid)
 
@@ -1264,12 +1274,6 @@ class DuckDBStore:
         """
 
         def _sync() -> list[Entry]:
-            """
-            Fetch entries from the database applying filters, ordering by creation time, and paginating the results.
-
-            Returns:
-                list[Entry]: Entries that match the provided filters, ordered by created_at descending and limited/offset according to the surrounding scope.
-            """
             conn = self.connection
 
             where_clauses, params = self._build_filter_clauses(filters)
@@ -1290,6 +1294,24 @@ class DuckDBStore:
 
             rows = result.fetchall()
             return [self._row_to_entry(row, col_names) for row in rows]
+
+        return await asyncio.to_thread(_sync)
+
+    async def count_entries(
+        self,
+        filters: dict[str, Any] | None,
+    ) -> int:
+        """Return the total number of entries matching *filters*."""
+
+        def _sync() -> int:
+            conn = self.connection
+            where_clauses, params = self._build_filter_clauses(filters)
+            where_sql = ""
+            if where_clauses:
+                where_sql = "WHERE " + " AND ".join(where_clauses)
+            sql = f"SELECT COUNT(*) FROM entries {where_sql}"
+            row = conn.execute(sql, params).fetchone()
+            return int(row[0]) if row else 0
 
         return await asyncio.to_thread(_sync)
 

@@ -262,6 +262,119 @@ class TestGitHubAdapter:
         # Token should have been picked up from the environment
         assert adapter._token == "ghp_testtoken"  # noqa: SLF001
 
+    def test_fetch_filters_low_value_events(self) -> None:
+        events = [
+            {
+                "id": "1",
+                "type": "IssuesEvent",
+                "actor": {"login": "alice"},
+                "repo": {"name": "owner/repo"},
+                "payload": {"body": "Bug report details"},
+                "created_at": "2024-03-25T09:00:00Z",
+            },
+            {
+                "id": "2",
+                "type": "WatchEvent",
+                "actor": {"login": "bob"},
+                "repo": {"name": "owner/repo"},
+                "payload": {},
+                "created_at": "2024-03-25T09:01:00Z",
+            },
+            {
+                "id": "3",
+                "type": "ForkEvent",
+                "actor": {"login": "carol"},
+                "repo": {"name": "owner/repo"},
+                "payload": {},
+                "created_at": "2024-03-25T09:02:00Z",
+            },
+        ]
+        mock_response = MagicMock()
+        mock_response.json.return_value = events
+        mock_response.raise_for_status.return_value = None
+
+        with patch("distillery.feeds.github.httpx.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.get.return_value = mock_response
+            mock_client_cls.return_value = mock_client
+
+            adapter = GitHubAdapter("owner/repo")
+            items = adapter.fetch()
+
+        # Only IssuesEvent should pass the default filter
+        assert len(items) == 1
+        assert items[0].item_id == "1"
+
+    def test_fetch_no_filter_when_empty_set(self) -> None:
+        events = [
+            {
+                "id": "1",
+                "type": "WatchEvent",
+                "actor": {"login": "bob"},
+                "repo": {"name": "owner/repo"},
+                "payload": {},
+                "created_at": "2024-03-25T09:00:00Z",
+            },
+        ]
+        mock_response = MagicMock()
+        mock_response.json.return_value = events
+        mock_response.raise_for_status.return_value = None
+
+        with patch("distillery.feeds.github.httpx.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.get.return_value = mock_response
+            mock_client_cls.return_value = mock_client
+
+            # Pass empty frozenset to disable filtering
+            adapter = GitHubAdapter("owner/repo", include_event_types=frozenset())
+            items = adapter.fetch()
+
+        # All events should pass when filter is empty
+        assert len(items) == 1
+
+    def test_fetch_custom_event_types(self) -> None:
+        events = [
+            {
+                "id": "1",
+                "type": "WatchEvent",
+                "actor": {"login": "bob"},
+                "repo": {"name": "owner/repo"},
+                "payload": {},
+                "created_at": "2024-03-25T09:00:00Z",
+            },
+            {
+                "id": "2",
+                "type": "PushEvent",
+                "actor": {"login": "alice"},
+                "repo": {"name": "owner/repo"},
+                "payload": {"commits": [{"message": "fix"}]},
+                "created_at": "2024-03-25T09:01:00Z",
+            },
+        ]
+        mock_response = MagicMock()
+        mock_response.json.return_value = events
+        mock_response.raise_for_status.return_value = None
+
+        with patch("distillery.feeds.github.httpx.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.get.return_value = mock_response
+            mock_client_cls.return_value = mock_client
+
+            # Only allow WatchEvent
+            adapter = GitHubAdapter(
+                "owner/repo", include_event_types=frozenset({"WatchEvent"})
+            )
+            items = adapter.fetch()
+
+        assert len(items) == 1
+        assert items[0].item_id == "1"
+
 
 # ---------------------------------------------------------------------------
 # parse_feed_xml — RSS 2.0
