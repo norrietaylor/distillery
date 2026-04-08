@@ -1,0 +1,64 @@
+Type: file
+Description: Verify skills/investigate/SKILL.md exists with correct structure
+Expected: File exists with YAML frontmatter, 4-phase retrieval process, and all required sections
+Timestamp: 2026-04-07T00:00:00Z
+
+--- CHECK: File exists ---
+PASS: skills/investigate/SKILL.md exists (284 lines)
+
+--- CHECK: YAML frontmatter ---
+PASS: name: investigate
+PASS: description: "Compile deep context on a topic by combining semantic search with relationship traversal across 4 retrieval phases"
+PASS: allowed-tools includes mcp__*__distillery_search
+PASS: allowed-tools includes mcp__*__distillery_get
+PASS: allowed-tools includes mcp__*__distillery_relations
+PASS: allowed-tools includes mcp__*__distillery_tag_tree
+PASS: allowed-tools includes mcp__*__distillery_list
+PASS: allowed-tools includes mcp__*__distillery_metrics
+PASS: context: fork
+PASS: effort: high
+
+--- CHECK: Required sections ---
+PASS: # Investigate — Deep Context Builder (title)
+PASS: ## When to Use
+PASS: ## Process
+PASS: ### Step 1: Check MCP
+PASS: ### Step 2: Parse Arguments
+PASS: ### Step 3: 4-Phase Retrieval
+PASS: Phase 1 — Seed
+PASS: Phase 2 — Expand Relationships
+PASS: Phase 3 — Tag Expansion
+PASS: Phase 4 — Gap Fill
+PASS: ### Step 4: Synthesize Output
+PASS: Context Summary section
+PASS: Relationship Map section
+PASS: Timeline section
+PASS: Key People section
+PASS: Knowledge Gaps section
+PASS: ### Step 5: Source Attribution
+PASS: ## Output Format
+PASS: ## Rules
+
+--- CHECK: Argument support ---
+PASS: --entry <uuid> flag supported
+PASS: topic argument supported
+PASS: --project <name> flag supported
+
+--- CHECK: Required MCP tool calls ---
+PASS: distillery_search (Phase 1 seed, Phase 3 tag expansion, Phase 4 gap fill)
+PASS: distillery_get (Phase 1 entry-based start, Phase 2 fetch related)
+PASS: distillery_relations (Phase 2 relationship expansion)
+PASS: distillery_tag_tree (Phase 3 tag expansion)
+
+--- CHECK: Output sections ---
+PASS: Context Summary with [Entry <short-id>] citation format
+PASS: Relationship Map (text-based, omit if no relations)
+PASS: Timeline (omit if all same day or fewer than 3 entries)
+PASS: Key People (omit if single author)
+PASS: Knowledge Gaps (omit if none)
+PASS: Sources table with Phase, Short ID, Type, Author, Date, Relation Edges, Preview columns
+
+--- CHECK: Summary report line ---
+PASS: 'Investigated "<topic>": <N> entries across <M> phases, <K> relationship edges traversed.'
+
+Status: PASS

@@ -1,0 +1,40 @@
+Type: file
+Description: Verify CONVENTIONS.md Skills Registry includes /investigate
+Expected: /investigate entry present in Skills Registry table with correct MCP tools listed
+Timestamp: 2026-04-07T00:00:00Z
+
+--- CHECK: /investigate in Skills Registry ---
+PASS: Found in CONVENTIONS.md line 319:
+  | `/investigate` | `investigate/` | distillery_search, distillery_get, distillery_relations, distillery_tag_tree, distillery_list, distillery_metrics | Deep context builder combining semantic search with relationship traversal |
+
+--- CHECK: All 6 required MCP tools listed ---
+PASS: distillery_search
+PASS: distillery_get
+PASS: distillery_relations
+PASS: distillery_tag_tree
+PASS: distillery_list
+PASS: distillery_metrics
+
+--- CHECK: investigate/ directory listed as skill directory ---
+PASS: `investigate/` directory listed in Skills Registry
+
+--- CHECK: Description matches spec ---
+PASS: "Deep context builder combining semantic search with relationship traversal"
+
+--- CHECK: Skills Registry completeness (all 14 skills present) ---
+PASS: /distill
+PASS: /recall
+PASS: /pour
+PASS: /bookmark
+PASS: /minutes
+PASS: /classify
+PASS: /watch
+PASS: /radar
+PASS: /tune
+PASS: /setup
+PASS: /digest
+PASS: /gh-sync
+PASS: /investigate
+PASS: /briefing
+
+Status: PASS
