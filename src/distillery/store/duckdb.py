@@ -589,6 +589,7 @@ class DuckDBStore:
             "status",
             "metadata",
             "last_modified_by",
+            "expires_at",
         }
     )
 
@@ -602,8 +603,8 @@ class DuckDBStore:
             "INSERT INTO entries "
             "(id, content, entry_type, source, author, project, tags, status, "
             " metadata, created_at, updated_at, version, embedding, "
-            " created_by, last_modified_by) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " created_by, last_modified_by, expires_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         params = [
             entry.id,
@@ -621,6 +622,7 @@ class DuckDBStore:
             embedding,
             entry.created_by,
             entry.last_modified_by,
+            entry.expires_at,
         ]
         conn.execute(sql, params)
         # Rebuild FTS index so new content is searchable via BM25.
@@ -970,7 +972,7 @@ class DuckDBStore:
     _ENTRY_COLUMNS = (
         "id, content, entry_type, source, author, project, "
         "tags, status, metadata, created_at, updated_at, version, accessed_at, "
-        "created_by, last_modified_by"
+        "created_by, last_modified_by, expires_at"
     )
 
     # ------------------------------------------------------------------

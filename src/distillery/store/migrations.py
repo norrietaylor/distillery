@@ -303,6 +303,17 @@ def create_fts_index(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
         raise
 
 
+_ADD_EXPIRES_AT_COLUMN = """
+ALTER TABLE entries ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+"""
+
+
+def add_expires_at(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
+    """Migration 9: Add ``expires_at`` column to ``entries``."""
+    conn.execute(_ADD_EXPIRES_AT_COLUMN)
+    logger.info("Migration 9: expires_at column added")
+
+
 # ---------------------------------------------------------------------------
 # Migration registry
 # ---------------------------------------------------------------------------
@@ -316,6 +327,7 @@ MIGRATIONS: dict[int, MigrationFunc] = {
     6: create_hnsw_index,
     7: create_fts_index,
     8: create_entry_relations,
+    9: add_expires_at,
 }
 """Ordered mapping of schema version to migration function.
 
