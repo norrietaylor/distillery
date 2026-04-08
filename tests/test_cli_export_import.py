@@ -86,6 +86,7 @@ def _make_entry_dict(
         "updated_at": "2026-01-01T00:00:00+00:00",
         "created_by": "tester",
         "last_modified_by": "tester",
+        "expires_at": None,
     }
     defaults.update(kwargs)
     return defaults
@@ -130,12 +131,14 @@ async def _async_seed_store(db_path: str, entries: list[dict[str, Any]]) -> None
             return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
 
         embedding = provider.embed(raw.get("content", ""))
+        expires_at_raw = raw.get("expires_at")
+        expires_at_val = _parse_dt(expires_at_raw) if expires_at_raw is not None else None
         conn.execute(
             "INSERT INTO entries "
             "(id, content, entry_type, source, author, project, tags, status, "
             " metadata, created_at, updated_at, version, embedding, "
-            " created_by, last_modified_by) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " created_by, last_modified_by, expires_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 raw["id"],
                 raw["content"],
@@ -152,6 +155,7 @@ async def _async_seed_store(db_path: str, entries: list[dict[str, Any]]) -> None
                 embedding,
                 raw.get("created_by", ""),
                 raw.get("last_modified_by", ""),
+                expires_at_val,
             ],
         )
     await store.close()
@@ -434,6 +438,11 @@ def test_roundtrip_fidelity(tmp_path: Path, capsys: pytest.CaptureFixture[str]) 
             "22222222-0000-0000-0000-000000000002",
             "Round-trip entry beta",
             project="my-project",
+        ),
+        _make_entry_dict(
+            "22222222-0000-0000-0000-000000000003",
+            "Round-trip entry with expiry",
+            expires_at="2027-06-01T00:00:00+00:00",
         ),
     ]
     _seed_store(db_path1, entries)
