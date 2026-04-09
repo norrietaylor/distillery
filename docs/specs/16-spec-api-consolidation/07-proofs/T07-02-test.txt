@@ -1,0 +1,13 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.7, pytest-9.0.2, pluggy-1.6.0
+rootdir: /home/norrie.guest/code/distillery/.worktrees/feature-api-consolidation
+configfile: pyproject.toml
+plugins: httpx-0.36.0, asyncio-1.3.0, anyio-4.13.0, cov-7.1.0, typeguard-4.4.2
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 40 items
+
+tests/test_mcp_tools/test_list_extensions.py ........................xx. [ 67%]
+.............                                                            [100%]
+
+======================== 38 passed, 2 xfailed in 3.70s =========================
+Exit code: 0
