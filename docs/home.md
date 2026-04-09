@@ -32,6 +32,10 @@ Distillery provides 14 Claude Code slash commands:
 | [`/radar`](skills/radar.md) | Ambient feed digest with source suggestions | `/radar --days 7` |
 | [`/tune`](skills/tune.md) | Adjust feed relevance thresholds | `/tune --digest 0.40` |
 | [`/setup`](skills/setup.md) | Onboarding wizard for MCP connectivity and config | `/setup` |
+| [`/digest`](skills/digest.md) | Team activity summary from internal entries | `/digest --days 7` |
+| [`/gh-sync`](skills/gh-sync.md) | Sync GitHub issues/PRs into the knowledge base | `/gh-sync owner/repo` |
+| [`/investigate`](skills/investigate.md) | Deep context builder with relationship traversal | `/investigate authentication flow` |
+| [`/briefing`](skills/briefing.md) | Knowledge dashboard (solo and team mode) | `/briefing --project distillery` |
 
 ## Quick Start
 

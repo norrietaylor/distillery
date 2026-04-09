@@ -1,6 +1,6 @@
 # Skills Overview
 
-Distillery provides 10 Claude Code slash commands organized into three categories: knowledge capture, knowledge retrieval, and ambient intelligence.
+Distillery provides 14 Claude Code slash commands organized into five categories: knowledge capture, knowledge retrieval, ambient intelligence, team skills, and onboarding.
 
 ## Knowledge Capture
 
@@ -26,11 +26,20 @@ Distillery provides 10 Claude Code slash commands organized into three categorie
 | [`/radar`](radar.md) | Generate a digest of recent feed activity |
 | [`/tune`](tune.md) | Adjust feed relevance thresholds |
 
+## Team
+
+| Skill | Purpose |
+|-------|---------|
+| [`/digest`](digest.md) | Team activity summary from internal entries |
+| [`/gh-sync`](gh-sync.md) | Sync GitHub issues/PRs into the knowledge base |
+| [`/investigate`](investigate.md) | Deep context builder with relationship traversal |
+| [`/briefing`](briefing.md) | Knowledge dashboard with metrics (solo and team mode) |
+
 ## Onboarding
 
 | Skill | Purpose |
 |-------|---------|
-| [`/setup`](setup.md) | First-time configuration wizard |
+| [`/setup`](setup.md) | First-time configuration wizard with session hook setup |
 
 ## How Skills Work
 

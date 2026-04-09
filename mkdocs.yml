@@ -77,6 +77,10 @@ nav:
     - /radar: skills/radar.md
     - /tune: skills/tune.md
     - /setup: skills/setup.md
+    - /digest: skills/digest.md
+    - /gh-sync: skills/gh-sync.md
+    - /investigate: skills/investigate.md
+    - /briefing: skills/briefing.md
   - Team Access:
     - Team Member Guide: team/team-setup.md
     - Operator Deployment: team/deployment.md

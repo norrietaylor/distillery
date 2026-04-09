@@ -3,7 +3,7 @@
 Distillery is built as a 4-layer system where skills (SKILL.md files) drive all user interaction, the MCP server mediates all storage access, and backends are swappable through typed Protocol interfaces.
 
 <div markdown="0">
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 560" font-family="Inter, -apple-system, system-ui, sans-serif" style="max-width: 760px; width: 100%; height: auto;">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 584" font-family="Inter, -apple-system, system-ui, sans-serif" style="max-width: 760px; width: 100%; height: auto;">
   <defs>
     <style>
       .d-bg { fill: #0f0f0f; }
@@ -29,11 +29,11 @@ Distillery is built as a 4-layer system where skills (SKILL.md files) drive all 
   </defs>
 
   <!-- Background -->
-  <rect class="d-bg" width="760" height="560" rx="16"/>
+  <rect class="d-bg" width="760" height="584" rx="16"/>
 
   <!-- Layer 1: Skills -->
-  <rect class="d-layer" x="30" y="16" width="700" height="72" rx="12"/>
-  <text class="d-label" x="50" y="36">10 Claude Code Skills</text>
+  <rect class="d-layer" x="30" y="16" width="700" height="96" rx="12"/>
+  <text class="d-label" x="50" y="36">14 Claude Code Skills</text>
   <rect class="d-pill" x="50" y="44" width="62" height="26" rx="6"/><text class="d-pill-text" x="81" y="61" text-anchor="middle">/distill</text>
   <rect class="d-pill" x="120" y="44" width="56" height="26" rx="6"/><text class="d-pill-text" x="148" y="61" text-anchor="middle">/recall</text>
   <rect class="d-pill" x="184" y="44" width="50" height="26" rx="6"/><text class="d-pill-text" x="209" y="61" text-anchor="middle">/pour</text>
@@ -44,94 +44,99 @@ Distillery is built as a 4-layer system where skills (SKILL.md files) drive all 
   <rect class="d-pill" x="538" y="44" width="54" height="26" rx="6"/><text class="d-pill-text" x="565" y="61" text-anchor="middle">/radar</text>
   <rect class="d-pill" x="600" y="44" width="50" height="26" rx="6"/><text class="d-pill-text" x="625" y="61" text-anchor="middle">/tune</text>
   <rect class="d-pill" x="658" y="44" width="54" height="26" rx="6"/><text class="d-pill-text" x="685" y="61" text-anchor="middle">/setup</text>
+  <!-- Row 2: Team skills -->
+  <rect class="d-pill" x="50" y="76" width="56" height="26" rx="6"/><text class="d-pill-text" x="78" y="93" text-anchor="middle">/digest</text>
+  <rect class="d-pill" x="114" y="76" width="70" height="26" rx="6"/><text class="d-pill-text" x="149" y="93" text-anchor="middle">/gh-sync</text>
+  <rect class="d-pill" x="192" y="76" width="86" height="26" rx="6"/><text class="d-pill-text" x="235" y="93" text-anchor="middle">/investigate</text>
+  <rect class="d-pill" x="286" y="76" width="68" height="26" rx="6"/><text class="d-pill-text" x="320" y="93" text-anchor="middle">/briefing</text>
 
   <!-- Connector -->
-  <line class="d-line" x1="380" y1="88" x2="380" y2="104"/>
+  <line class="d-line" x1="380" y1="112" x2="380" y2="128"/>
 
   <!-- Layer 2: MCP Server -->
-  <rect class="d-amber-bg" x="30" y="104" width="700" height="52" rx="10"/>
-  <text class="d-white" x="380" y="128" text-anchor="middle">MCP Server</text>
-  <text class="d-white-sub" x="380" y="144" text-anchor="middle">FastMCP 2.x/3.x  ·  stdio + streamable-HTTP  ·  tools  ·  REST webhooks (/api/*)</text>
+  <rect class="d-amber-bg" x="30" y="128" width="700" height="52" rx="10"/>
+  <text class="d-white" x="380" y="152" text-anchor="middle">MCP Server</text>
+  <text class="d-white-sub" x="380" y="168" text-anchor="middle">FastMCP 2.x/3.x  ·  stdio + streamable-HTTP  ·  tools  ·  REST webhooks (/api/*)</text>
 
   <!-- Connector: MCP to Auth + Protocols -->
-  <line class="d-line" x1="380" y1="156" x2="380" y2="168"/>
-  <line class="d-line" x1="190" y1="168" x2="570" y2="168"/>
-  <line class="d-line" x1="190" y1="168" x2="190" y2="180"/>
-  <line class="d-line" x1="380" y1="168" x2="380" y2="180"/>
-  <line class="d-line" x1="570" y1="168" x2="570" y2="180"/>
+  <line class="d-line" x1="380" y1="180" x2="380" y2="192"/>
+  <line class="d-line" x1="190" y1="192" x2="570" y2="192"/>
+  <line class="d-line" x1="190" y1="192" x2="190" y2="204"/>
+  <line class="d-line" x1="380" y1="192" x2="380" y2="204"/>
+  <line class="d-line" x1="570" y1="192" x2="570" y2="204"/>
 
   <!-- Layer 3a: Auth -->
-  <rect class="d-auth" x="30" y="180" width="220" height="64" rx="8"/>
-  <text class="d-auth-title" x="140" y="202" text-anchor="middle">GitHub OAuth</text>
-  <text class="d-box-sub" x="140" y="218" text-anchor="middle">OrgRestrictedGitHubProvider</text>
-  <text class="d-box-sub" x="140" y="232" text-anchor="middle">Middleware · Budget · Rate limits</text>
+  <rect class="d-auth" x="30" y="204" width="220" height="64" rx="8"/>
+  <text class="d-auth-title" x="140" y="226" text-anchor="middle">GitHub OAuth</text>
+  <text class="d-box-sub" x="140" y="242" text-anchor="middle">OrgRestrictedGitHubProvider</text>
+  <text class="d-box-sub" x="140" y="256" text-anchor="middle">Middleware · Budget · Rate limits</text>
 
   <!-- Layer 3b: Core Protocols -->
-  <rect class="d-box" x="268" y="180" width="224" height="64" rx="8"/>
-  <text class="d-box-title" x="380" y="202" text-anchor="middle">Core Protocols</text>
-  <text class="d-box-sub" x="380" y="218" text-anchor="middle">DistilleryStore · EmbeddingProvider</text>
-  <text class="d-box-sub" x="380" y="232" text-anchor="middle">Typed Protocol interfaces (async)</text>
+  <rect class="d-box" x="268" y="204" width="224" height="64" rx="8"/>
+  <text class="d-box-title" x="380" y="226" text-anchor="middle">Core Protocols</text>
+  <text class="d-box-sub" x="380" y="242" text-anchor="middle">DistilleryStore · EmbeddingProvider</text>
+  <text class="d-box-sub" x="380" y="256" text-anchor="middle">Typed Protocol interfaces (async)</text>
 
   <!-- Layer 3c: Feeds -->
-  <rect class="d-feed" x="510" y="180" width="220" height="64" rx="8"/>
-  <text class="d-feed-title" x="620" y="202" text-anchor="middle">Feed System</text>
-  <text class="d-box-sub" x="620" y="218" text-anchor="middle">GitHub · RSS/Atom · Auto-tagging</text>
-  <text class="d-box-sub" x="620" y="232" text-anchor="middle">Poller · Scorer · Interests</text>
+  <rect class="d-feed" x="510" y="204" width="220" height="64" rx="8"/>
+  <text class="d-feed-title" x="620" y="226" text-anchor="middle">Feed System</text>
+  <text class="d-box-sub" x="620" y="242" text-anchor="middle">GitHub · RSS/Atom · Auto-tagging</text>
+  <text class="d-box-sub" x="620" y="256" text-anchor="middle">Poller · Scorer · Interests</text>
 
   <!-- Connector: Protocols to Backends -->
-  <line class="d-line" x1="380" y1="244" x2="380" y2="256"/>
-  <line class="d-line" x1="140" y1="256" x2="620" y2="256"/>
-  <line class="d-line" x1="140" y1="256" x2="140" y2="268"/>
-  <line class="d-line" x1="285" y1="256" x2="285" y2="268"/>
-  <line class="d-line" x1="475" y1="256" x2="475" y2="268"/>
-  <line class="d-line" x1="620" y1="256" x2="620" y2="268"/>
+  <line class="d-line" x1="380" y1="268" x2="380" y2="280"/>
+  <line class="d-line" x1="140" y1="280" x2="620" y2="280"/>
+  <line class="d-line" x1="140" y1="280" x2="140" y2="292"/>
+  <line class="d-line" x1="285" y1="280" x2="285" y2="292"/>
+  <line class="d-line" x1="475" y1="280" x2="475" y2="292"/>
+  <line class="d-line" x1="620" y1="280" x2="620" y2="292"/>
 
   <!-- Layer 4: Backends -->
-  <rect class="d-box" x="30" y="268" width="210" height="72" rx="8"/>
-  <text class="d-box-title" x="135" y="290" text-anchor="middle">DuckDB + VSS + FTS</text>
-  <text class="d-box-sub" x="135" y="306" text-anchor="middle">HNSW + BM25 hybrid (RRF)</text>
-  <text class="d-box-sub" x="135" y="320" text-anchor="middle">Vector + keyword search</text>
+  <rect class="d-box" x="30" y="292" width="210" height="72" rx="8"/>
+  <text class="d-box-title" x="135" y="314" text-anchor="middle">DuckDB + VSS + FTS</text>
+  <text class="d-box-sub" x="135" y="330" text-anchor="middle">HNSW + BM25 hybrid (RRF)</text>
+  <text class="d-box-sub" x="135" y="344" text-anchor="middle">Vector + keyword search</text>
 
-  <rect class="d-box" x="254" y="268" width="152" height="72" rx="8"/>
-  <text class="d-box-title" x="330" y="290" text-anchor="middle">Embedding</text>
-  <text class="d-box-sub" x="330" y="306" text-anchor="middle">Jina v3 / OpenAI</text>
-  <text class="d-box-sub" x="330" y="320" text-anchor="middle">Configurable provider</text>
+  <rect class="d-box" x="254" y="292" width="152" height="72" rx="8"/>
+  <text class="d-box-title" x="330" y="314" text-anchor="middle">Embedding</text>
+  <text class="d-box-sub" x="330" y="330" text-anchor="middle">Jina v3 / OpenAI</text>
+  <text class="d-box-sub" x="330" y="344" text-anchor="middle">Configurable provider</text>
 
-  <rect class="d-box" x="420" y="268" width="160" height="72" rx="8"/>
-  <text class="d-box-title" x="500" y="290" text-anchor="middle">Classification</text>
-  <text class="d-box-sub" x="500" y="306" text-anchor="middle">LLM engine + Dedup</text>
-  <text class="d-box-sub" x="500" y="320" text-anchor="middle">Conflicts + Tag validation</text>
+  <rect class="d-box" x="420" y="292" width="160" height="72" rx="8"/>
+  <text class="d-box-title" x="500" y="314" text-anchor="middle">Classification</text>
+  <text class="d-box-sub" x="500" y="330" text-anchor="middle">LLM engine + Dedup</text>
+  <text class="d-box-sub" x="500" y="344" text-anchor="middle">Conflicts + Tag validation</text>
 
-  <rect class="d-box" x="594" y="268" width="136" height="72" rx="8"/>
-  <text class="d-box-title" x="662" y="290" text-anchor="middle">Config</text>
-  <text class="d-box-sub" x="662" y="306" text-anchor="middle">distillery.yaml</text>
-  <text class="d-box-sub" x="662" y="320" text-anchor="middle">Security · Validation</text>
+  <rect class="d-box" x="594" y="292" width="136" height="72" rx="8"/>
+  <text class="d-box-title" x="662" y="314" text-anchor="middle">Config</text>
+  <text class="d-box-sub" x="662" y="330" text-anchor="middle">distillery.yaml</text>
+  <text class="d-box-sub" x="662" y="344" text-anchor="middle">Security · Validation</text>
 
   <!-- Entry Types -->
-  <text class="d-label" x="50" y="370">12 Entry Types</text>
-  <rect class="d-pill" x="50" y="380" width="56" height="22" rx="5"/><text class="d-type-text" x="78" y="395" text-anchor="middle">session</text>
-  <rect class="d-pill" x="114" y="380" width="66" height="22" rx="5"/><text class="d-type-text" x="147" y="395" text-anchor="middle">bookmark</text>
-  <rect class="d-pill" x="188" y="380" width="58" height="22" rx="5"/><text class="d-type-text" x="217" y="395" text-anchor="middle">minutes</text>
-  <rect class="d-pill" x="254" y="380" width="60" height="22" rx="5"/><text class="d-type-text" x="284" y="395" text-anchor="middle">meeting</text>
-  <rect class="d-pill" x="322" y="380" width="66" height="22" rx="5"/><text class="d-type-text" x="355" y="395" text-anchor="middle">reference</text>
-  <rect class="d-pill" x="396" y="380" width="38" height="22" rx="5"/><text class="d-type-text" x="415" y="395" text-anchor="middle">idea</text>
-  <rect class="d-pill" x="442" y="380" width="42" height="22" rx="5"/><text class="d-type-text" x="463" y="395" text-anchor="middle">inbox</text>
-  <rect class="d-pill" x="492" y="380" width="52" height="22" rx="5"/><text class="d-type-text" x="518" y="395" text-anchor="middle">person</text>
-  <rect class="d-pill" x="552" y="380" width="52" height="22" rx="5"/><text class="d-type-text" x="578" y="395" text-anchor="middle">project</text>
-  <rect class="d-pill" x="612" y="380" width="48" height="22" rx="5"/><text class="d-type-text" x="636" y="395" text-anchor="middle">digest</text>
-  <rect class="d-pill" x="668" y="380" width="48" height="22" rx="5"/><text class="d-type-text" x="692" y="395" text-anchor="middle">github</text>
-  <rect class="d-pill" x="50" y="408" width="40" height="22" rx="5"/><text class="d-type-text" x="70" y="423" text-anchor="middle">feed</text>
+  <text class="d-label" x="50" y="394">12 Entry Types</text>
+  <rect class="d-pill" x="50" y="404" width="56" height="22" rx="5"/><text class="d-type-text" x="78" y="419" text-anchor="middle">session</text>
+  <rect class="d-pill" x="114" y="404" width="66" height="22" rx="5"/><text class="d-type-text" x="147" y="419" text-anchor="middle">bookmark</text>
+  <rect class="d-pill" x="188" y="404" width="58" height="22" rx="5"/><text class="d-type-text" x="217" y="419" text-anchor="middle">minutes</text>
+  <rect class="d-pill" x="254" y="404" width="60" height="22" rx="5"/><text class="d-type-text" x="284" y="419" text-anchor="middle">meeting</text>
+  <rect class="d-pill" x="322" y="404" width="66" height="22" rx="5"/><text class="d-type-text" x="355" y="419" text-anchor="middle">reference</text>
+  <rect class="d-pill" x="396" y="404" width="38" height="22" rx="5"/><text class="d-type-text" x="415" y="419" text-anchor="middle">idea</text>
+  <rect class="d-pill" x="442" y="404" width="42" height="22" rx="5"/><text class="d-type-text" x="463" y="419" text-anchor="middle">inbox</text>
+  <rect class="d-pill" x="492" y="404" width="52" height="22" rx="5"/><text class="d-type-text" x="518" y="419" text-anchor="middle">person</text>
+  <rect class="d-pill" x="552" y="404" width="52" height="22" rx="5"/><text class="d-type-text" x="578" y="419" text-anchor="middle">project</text>
+  <rect class="d-pill" x="612" y="404" width="48" height="22" rx="5"/><text class="d-type-text" x="636" y="419" text-anchor="middle">digest</text>
+  <rect class="d-pill" x="668" y="404" width="48" height="22" rx="5"/><text class="d-type-text" x="692" y="419" text-anchor="middle">github</text>
+  <rect class="d-pill" x="50" y="432" width="40" height="22" rx="5"/><text class="d-type-text" x="70" y="447" text-anchor="middle">feed</text>
 
   <!-- Dedup Thresholds -->
-  <text class="d-label" x="50" y="456">Dedup Thresholds</text>
-  <rect class="d-pill" x="50" y="466" width="140" height="22" rx="5"/><text class="d-type-text" x="120" y="481" text-anchor="middle">skip >= 0.95</text>
-  <rect class="d-pill" x="200" y="466" width="140" height="22" rx="5"/><text class="d-type-text" x="270" y="481" text-anchor="middle">merge >= 0.80</text>
-  <rect class="d-pill" x="350" y="466" width="140" height="22" rx="5"/><text class="d-type-text" x="420" y="481" text-anchor="middle">link >= 0.60</text>
-  <rect class="d-pill" x="500" y="466" width="140" height="22" rx="5"/><text class="d-type-text" x="570" y="481" text-anchor="middle">unique &lt; 0.60</text>
+  <text class="d-label" x="50" y="480">Dedup Thresholds</text>
+  <rect class="d-pill" x="50" y="490" width="140" height="22" rx="5"/><text class="d-type-text" x="120" y="505" text-anchor="middle">skip >= 0.95</text>
+  <rect class="d-pill" x="200" y="490" width="140" height="22" rx="5"/><text class="d-type-text" x="270" y="505" text-anchor="middle">merge >= 0.80</text>
+  <rect class="d-pill" x="350" y="490" width="140" height="22" rx="5"/><text class="d-type-text" x="420" y="505" text-anchor="middle">link >= 0.60</text>
+  <rect class="d-pill" x="500" y="490" width="140" height="22" rx="5"/><text class="d-type-text" x="570" y="505" text-anchor="middle">unique &lt; 0.60</text>
 
   <!-- Tag Namespaces -->
-  <text class="d-label" x="50" y="516">Hierarchical Tags</text>
-  <text class="d-tag-text" x="50" y="536">project/distillery/sessions  ·  domain/storage  ·  source/bookmark/duckdb-org  ·  team/distillery</text>
+  <text class="d-label" x="50" y="540">Hierarchical Tags</text>
+  <text class="d-tag-text" x="50" y="560">project/distillery/sessions  ·  domain/storage  ·  source/bookmark/duckdb-org  ·  team/distillery</text>
 </svg>
 </div>
 
@@ -139,7 +144,7 @@ Distillery is built as a 4-layer system where skills (SKILL.md files) drive all 
 
 | Layer | What it does | Key files |
 |-------|-------------|-----------|
-| **Skills** | 10 SKILL.md files — portable, version-controlled slash commands. Not Python code. | `skills/*/SKILL.md` |
+| **Skills** | 14 SKILL.md files — portable, version-controlled slash commands. Not Python code. | `skills/*/SKILL.md` |
 | **MCP Server** | Tools exposed over stdio (local) or streamable-HTTP (team). Built on FastMCP 2.x/3.x with `@server.tool` decorators. | `src/distillery/mcp/server.py` |
 | **Webhook API** | REST endpoints (`/api/poll`, `/api/rescore`, `/api/maintenance`) for automated scheduling. Bearer token auth, per-endpoint cooldowns persisted to DuckDB. Mounted alongside MCP in HTTP mode. | `src/distillery/mcp/webhooks.py` |
 | **Auth** | MCP: GitHub OAuth with org-restricted access. Webhooks: bearer token via `DISTILLERY_WEBHOOK_SECRET`. Middleware handles logging, rate limiting, security headers, budget tracking. | `src/distillery/mcp/auth.py`, `middleware.py`, `budget.py` |
@@ -177,7 +182,7 @@ The `Entry` dataclass (`src/distillery/models.py`) is the fundamental unit of kn
 | `id` | str (UUID4) | Unique identifier |
 | `content` | str | The knowledge content |
 | `entry_type` | EntryType | session, bookmark, minutes, meeting, reference, idea, inbox, person, project, digest, github, feed |
-| `source` | EntrySource | claude_code, manual, import |
+| `source` | EntrySource | claude_code, manual, import, inference, documentation, external |
 | `status` | EntryStatus | active, pending_review, archived |
 | `tags` | list[str] | Hierarchical tags (`project/distillery/decisions`) |
 | `metadata` | dict | Type-specific fields (validated per entry type) |
@@ -185,6 +190,9 @@ The `Entry` dataclass (`src/distillery/models.py`) is the fundamental unit of kn
 | `author` | str | Who created the entry |
 | `project` | str \| None | Which project context |
 | `created_at` | datetime | Creation timestamp |
+| `session_id` | str \| None | Session grouping identifier |
+| `verification` | VerificationStatus | Unverified, Testing, or Verified |
+| `expires_at` | datetime \| None | Optional expiration timestamp |
 | `updated_at` | datetime | Last modification |
 
 ## Project Structure
@@ -202,6 +210,10 @@ distillery/
 │   ├── radar/SKILL.md
 │   ├── tune/SKILL.md
 │   ├── setup/SKILL.md
+│   ├── digest/SKILL.md
+│   ├── gh-sync/SKILL.md
+│   ├── investigate/SKILL.md
+│   ├── briefing/SKILL.md
 │   └── CONVENTIONS.md
 ├── src/distillery/
 │   ├── models.py            # Entry, SearchResult, enums
