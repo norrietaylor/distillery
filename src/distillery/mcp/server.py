@@ -269,6 +269,8 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         project: str | None = None,
         tags: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
+        source: str | None = None,
+        session_id: str | None = None,
         dedup_threshold: float | None = None,
         dedup_limit: int | None = None,
         verification: str | None = None,
@@ -277,7 +279,9 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         """Store a new knowledge entry and return its ID with dedup/conflict information.
 
         entry_type must be one of: session, bookmark, minutes, meeting, reference,
-        idea, inbox. dedup_threshold (0–1) controls near-duplicate warnings.
+        idea, inbox. source: claude-code (default), manual, import, inference,
+        documentation, or external. session_id: opaque session identifier for grouping.
+        dedup_threshold (0–1) controls near-duplicate warnings.
         verification: unverified, testing, or verified (default: unverified).
         expires_at accepts ISO 8601 datetime; entries past expiry appear in stale results.
         """
@@ -291,6 +295,8 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 project=project,
                 tags=tags,
                 metadata=metadata,
+                source=source,
+                session_id=session_id,
                 dedup_threshold=dedup_threshold,
                 dedup_limit=dedup_limit,
                 verification=verification,
@@ -325,6 +331,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         status: str | None = None,
         verification: str | None = None,
         metadata: dict[str, Any] | None = None,
+        session_id: str | None = None,
         expires_at: str | None = _UNSET,
     ) -> list[types.TextContent]:
         """Update one or more fields on an existing knowledge entry.
@@ -332,6 +339,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         At least one field must be provided. status: active, pending_review, or
         archived. entry_type: session, bookmark, minutes, meeting, reference,
         idea, or inbox. verification: unverified, testing, or verified.
+        session_id: opaque session identifier for grouping.
         expires_at accepts ISO 8601 datetime; pass null to clear.
         """
         c = _lc(ctx)
@@ -350,6 +358,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 status=status,
                 verification=verification,
                 metadata=metadata,
+                session_id=session_id,
             ),
         )
         if expires_at is not _UNSET:
@@ -367,6 +376,8 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         tags: list[str] | None = None,
         status: str | None = None,
         verification: str | None = None,
+        source: str | None = None,
+        session_id: str | None = None,
         date_from: str | None = None,
         date_to: str | None = None,
         limit: int = 20,
@@ -378,6 +389,8 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         """List knowledge entries with optional filters and pagination (newest first).
 
         date_from/date_to accept ISO 8601. verification: unverified, testing, or verified.
+        source: filter by entry source (claude-code, manual, import, inference, documentation, external).
+        session_id: filter by session identifier.
         output_mode: "full" (default), "summary", "ids",
         or "review" (filters to pending_review and enriches with confidence/classification_reasoning).
         """
@@ -393,6 +406,8 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 tags=tags,
                 status=status,
                 verification=verification,
+                source=source,
+                session_id=session_id,
                 date_from=date_from,
                 date_to=date_to,
                 tag_prefix=tag_prefix,
@@ -407,12 +422,17 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         group_by: str,
         entry_type: str | None = None,
         status: str | None = None,
+        source: str | None = None,
+        session_id: str | None = None,
         date_from: str | None = None,
         date_to: str | None = None,
         tag_prefix: str | None = None,
         limit: int = 50,
     ) -> list[types.TextContent]:
-        """Aggregate entry counts grouped by a field (entry_type, status, author, project, source, etc.)."""
+        """Aggregate entry counts grouped by a field (entry_type, status, author, project, source, etc.).
+
+        source and session_id filter the entries before aggregation.
+        """
         c = _lc(ctx)
         args: dict[str, Any] = dict(
             group_by=group_by,
@@ -420,6 +440,8 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             **_omit_none(
                 entry_type=entry_type,
                 status=status,
+                source=source,
+                session_id=session_id,
                 date_from=date_from,
                 date_to=date_to,
                 tag_prefix=tag_prefix,
@@ -436,6 +458,8 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         project: str | None = None,
         tags: list[str] | None = None,
         status: str | None = None,
+        source: str | None = None,
+        session_id: str | None = None,
         date_from: str | None = None,
         date_to: str | None = None,
         limit: int = 10,
@@ -444,6 +468,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         """Search the knowledge store using semantic similarity (cosine, ranked descending).
 
         limit 1–200. date_from/date_to accept ISO 8601. tag_prefix filters by namespace.
+        source: filter by entry source. session_id: filter by session identifier.
         """
         c = _lc(ctx)
         args: dict[str, Any] = dict(
@@ -455,6 +480,8 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 project=project,
                 tags=tags,
                 status=status,
+                source=source,
+                session_id=session_id,
                 date_from=date_from,
                 date_to=date_to,
                 tag_prefix=tag_prefix,
