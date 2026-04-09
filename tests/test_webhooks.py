@@ -516,3 +516,181 @@ async def test_handler_error_returns_500(
     body = resp.json()
     assert body["ok"] is False
     assert "feed source unavailable" in body["error"]
+
+
+# ---------------------------------------------------------------------------
+# /hooks/poll and /hooks/rescore endpoint tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_hooks_poll_route_exists(store: DuckDBStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    """POST /hooks/poll is a valid route that returns 200 with a valid bearer token."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from distillery.feeds.poller import PollerSummary, PollResult
+
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+    config = _make_config()
+    shared = _make_shared_state(store)
+
+    result = PollResult(
+        source_url="https://example.com/feed", source_type="rss", items_fetched=5, items_stored=3
+    )
+    summary = PollerSummary(results=[result], total_fetched=5, total_stored=3, sources_polled=1)
+
+    mock_poller = MagicMock()
+    mock_poller.poll = AsyncMock(return_value=summary)
+
+    with patch("distillery.feeds.poller.FeedPoller", return_value=mock_poller):
+        app = create_webhook_app(shared, config)
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.post("/hooks/poll", headers=_AUTH_HEADER)
+
+    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+    body = resp.json()
+    assert body["ok"] is True
+    assert "data" in body
+
+
+@pytest.mark.unit
+async def test_hooks_poll_rejects_unauthenticated(
+    store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """POST /hooks/poll without a bearer token returns 401 unauthorized."""
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+    config = _make_config()
+    shared = _make_shared_state(store)
+    app = create_webhook_app(shared, config)
+
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.post("/hooks/poll")
+
+    assert resp.status_code == 401
+    assert resp.json() == {"ok": False, "error": "unauthorized"}
+
+
+@pytest.mark.unit
+async def test_hooks_poll_source_url_query_param(
+    store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """POST /hooks/poll?source_url=<url> passes source_url to FeedPoller.poll()."""
+    from unittest.mock import AsyncMock, MagicMock, call, patch
+
+    from distillery.feeds.poller import PollerSummary, PollResult
+
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+    config = _make_config()
+    shared = _make_shared_state(store)
+
+    target_url = "https://example.com/feed"
+    result = PollResult(
+        source_url=target_url, source_type="rss", items_fetched=3, items_stored=2
+    )
+    summary = PollerSummary(results=[result], total_fetched=3, total_stored=2, sources_polled=1)
+
+    mock_poller = MagicMock()
+    mock_poller.poll = AsyncMock(return_value=summary)
+
+    with patch("distillery.feeds.poller.FeedPoller", return_value=mock_poller):
+        app = create_webhook_app(shared, config)
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.post(
+            f"/hooks/poll?source_url={target_url}",
+            headers=_AUTH_HEADER,
+        )
+
+    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+    body = resp.json()
+    assert body["ok"] is True
+    # Verify poll was called with the specific source_url.
+    mock_poller.poll.assert_awaited_once_with(source_url=target_url)
+
+
+@pytest.mark.unit
+async def test_hooks_rescore_route_exists(
+    store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """POST /hooks/rescore is a valid route that returns 200 with a valid bearer token."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+    config = _make_config()
+    shared = _make_shared_state(store)
+
+    rescore_stats = {"rescored": 20, "upgraded": 5, "downgraded": 2, "errors": 0}
+    mock_poller = MagicMock()
+    mock_poller.rescore = AsyncMock(return_value=rescore_stats)
+
+    with patch("distillery.feeds.poller.FeedPoller", return_value=mock_poller):
+        app = create_webhook_app(shared, config)
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.post("/hooks/rescore", headers=_AUTH_HEADER)
+
+    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+    body = resp.json()
+    assert body["ok"] is True
+    assert "data" in body
+
+
+@pytest.mark.unit
+async def test_hooks_rescore_rejects_unauthenticated(
+    store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """POST /hooks/rescore without a bearer token returns 401 unauthorized."""
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+    config = _make_config()
+    shared = _make_shared_state(store)
+    app = create_webhook_app(shared, config)
+
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.post("/hooks/rescore")
+
+    assert resp.status_code == 401
+    assert resp.json() == {"ok": False, "error": "unauthorized"}
+
+
+@pytest.mark.unit
+async def test_hooks_rescore_limit_query_param(
+    store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """POST /hooks/rescore?limit=50 passes limit=50 to FeedPoller.rescore()."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+    config = _make_config()
+    shared = _make_shared_state(store)
+
+    rescore_stats = {"rescored": 50, "upgraded": 10, "downgraded": 3, "errors": 0}
+    mock_poller = MagicMock()
+    mock_poller.rescore = AsyncMock(return_value=rescore_stats)
+
+    with patch("distillery.feeds.poller.FeedPoller", return_value=mock_poller):
+        app = create_webhook_app(shared, config)
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.post("/hooks/rescore?limit=50", headers=_AUTH_HEADER)
+
+    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+    body = resp.json()
+    assert body["ok"] is True
+    # Verify rescore was called with limit=50.
+    mock_poller.rescore.assert_awaited_once_with(limit=50)
+
+
+@pytest.mark.unit
+async def test_hooks_rescore_invalid_limit_query_param(
+    store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """POST /hooks/rescore?limit=abc returns 400 bad request."""
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+    config = _make_config()
+    shared = _make_shared_state(store)
+    app = create_webhook_app(shared, config)
+
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.post("/hooks/rescore?limit=abc", headers=_AUTH_HEADER)
+
+    assert resp.status_code == 400
+    body = resp.json()
+    assert body["ok"] is False
+    assert "integer" in body["error"]
