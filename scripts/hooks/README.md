@@ -2,12 +2,21 @@
 
 This directory contains Claude Code hook scripts for Distillery integration.
 
-## distillery-hooks.sh (recommended)
+## Automatic Setup (recommended)
+
+Run `/setup` after installing the Distillery plugin. It detects your plugin
+installation scope (user or project) and configures hooks in the appropriate
+`settings.json` automatically.
+
+> **Why not plugin.json?** Plugin manifest hooks only support `SessionStart`
+> and `Stop` events. `UserPromptSubmit` is silently ignored by the plugin
+> system, so these hooks must be registered in `settings.json`.
+
+## distillery-hooks.sh
 
 A single **dispatcher script** that routes all Claude Code hook events to the
 appropriate Distillery handler. Register this one script for `UserPromptSubmit`,
-`PreCompact`, and `SessionStart` in `~/.claude/settings.json` — no need to
-manage multiple hook entries.
+`PreCompact`, and `SessionStart` — no need to manage multiple hook entries.
 
 ### Hook Events
 
@@ -22,13 +31,15 @@ manage multiple hook entries.
 - Distillery MCP server running with **HTTP transport** (`distillery-mcp --transport http`)
   (required only for the `SessionStart` briefing; the `UserPromptSubmit` nudge works offline)
 - `curl` available on the system PATH (for `SessionStart` briefing)
-- Claude Code with hook support (`~/.claude/settings.json`)
+- Claude Code with hook support
 
 > **Note:** The SessionStart handler targets the HTTP MCP transport, not stdio.
 > Hooks run as shell commands outside of an MCP session, so they must
 > communicate with the server over HTTP.
 
-### Setup
+### Manual Setup
+
+If you prefer not to use `/setup`, configure hooks manually.
 
 **1. Make the dispatcher executable** (already done if cloned from the repo):
 
@@ -36,27 +47,33 @@ manage multiple hook entries.
 chmod +x /path/to/distillery/scripts/hooks/distillery-hooks.sh
 ```
 
-**2. Register the dispatcher in `~/.claude/settings.json`:**
+**2. Register the dispatcher in your settings.json:**
+
+Choose the appropriate file based on desired scope:
+- **User scope** (all projects): `~/.claude/settings.json`
+- **Project scope** (this project only): `.claude/settings.json`
 
 ```json
 {
   "hooks": {
     "UserPromptSubmit": [
       {
-        "type": "command",
-        "command": "/absolute/path/to/distillery/scripts/hooks/distillery-hooks.sh"
-      }
-    ],
-    "PreCompact": [
-      {
-        "type": "command",
-        "command": "/absolute/path/to/distillery/scripts/hooks/distillery-hooks.sh"
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /absolute/path/to/distillery/scripts/hooks/distillery-hooks.sh"
+          }
+        ]
       }
     ],
     "SessionStart": [
       {
-        "type": "command",
-        "command": "/absolute/path/to/distillery/scripts/hooks/distillery-hooks.sh"
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /absolute/path/to/distillery/scripts/hooks/distillery-hooks.sh"
+          }
+        ]
       }
     ]
   }
@@ -148,43 +165,10 @@ requiring a manual `/briefing` invocation.
 
 - Distillery MCP server running with **HTTP transport** (`distillery-mcp --transport http`)
 - `curl` available on the system PATH
-- Claude Code with hook support (`~/.claude/settings.json`)
 
 > **Note:** The hook targets the HTTP MCP transport, not stdio. Hooks run as
 > shell commands outside of an MCP session, so they must communicate with the
 > server over HTTP.
-
-### Setup
-
-**1. Make the script executable** (already done if cloned from the repo):
-
-```bash
-chmod +x /path/to/distillery/scripts/hooks/session-start-briefing.sh
-```
-
-**2. Register the hook in `~/.claude/settings.json`:**
-
-```json
-{
-  "hooks": {
-    "SessionStart": [
-      {
-        "type": "command",
-        "command": "/absolute/path/to/distillery/scripts/hooks/session-start-briefing.sh"
-      }
-    ]
-  }
-}
-```
-
-Replace `/absolute/path/to/distillery` with the actual path to your Distillery
-installation.
-
-**3. Start the Distillery MCP server with HTTP transport:**
-
-```bash
-distillery-mcp --transport http --port 8000
-```
 
 ### Configuration
 
@@ -202,12 +186,6 @@ Example — custom port and more entries:
 ```bash
 export DISTILLERY_MCP_URL="http://localhost:9000/mcp"
 export DISTILLERY_BRIEFING_LIMIT="10"
-```
-
-Example — with OAuth bearer token:
-
-```bash
-export DISTILLERY_BEARER_TOKEN="your-token-here"
 ```
 
 > **Security note:** Do not commit `DISTILLERY_BEARER_TOKEN` or other secrets
