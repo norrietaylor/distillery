@@ -54,6 +54,14 @@ Users install the server via `pip install distillery-mcp` or `uvx distillery-mcp
 
 4. **Skill compatibility** — If new MCP tools were added, ensure skills that use them have `min_server_version` in their frontmatter.
 
+## Plugin Manifest Policy
+
+Files in `.claude-plugin/` are read by the marketplace from `main`. To avoid advertising unreleased tools or skills:
+
+- **Feature PRs must not bump versions in `.claude-plugin/`**. New skills and tools can land on `main`, but the plugin manifest should not reference them until a release branch is cut.
+- **Version bumps to plugin.json and marketplace.json happen only on `release/X.Y.Z` branches**, alongside the `pyproject.toml` bump.
+- The SessionStart echo in `plugin.json` should only list skills available in the last published PyPI version.
+
 ## Cutting the Release
 
 ### Step 1: Create a release branch
