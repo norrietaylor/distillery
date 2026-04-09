@@ -1,0 +1,13 @@
+Type: cli
+Command: grep -rn "distillery_(metrics|stale|aggregate|tag_tree|interests|type_schemas|poll|rescore)" skills/*/SKILL.md
+Expected: No matches (all removed tool references eliminated from SKILL.md files)
+Timestamp: 2026-04-09T00:00:00Z
+
+RESULT: (empty — no matches found)
+
+Status: PASS
+
+Notes: All 8 removed tools (distillery_stale, distillery_aggregate, distillery_tag_tree,
+distillery_metrics, distillery_interests, distillery_type_schemas, distillery_poll,
+distillery_rescore) have been removed from all 14 skill SKILL.md frontmatter allowed-tools lists
+and from skill body instructions.

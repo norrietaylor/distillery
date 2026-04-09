@@ -1,0 +1,53 @@
+Type: file
+Command: Manual verification of logic replacements in skill bodies
+Expected: All removed tool calls replaced with equivalent 12-tool-surface calls
+Timestamp: 2026-04-09T00:00:00Z
+
+LOGIC CHANGES VERIFIED:
+
+briefing/SKILL.md:
+  - distillery_stale(days=30) → distillery_list(stale_days=30, project=<p>, output_mode="full")
+  - distillery_aggregate(group_by="author") → distillery_list(group_by="author", output_mode="stats")
+  - Rule: "distillery_metrics(scope="summary") first" → "distillery_list(limit=1) first"
+  - Rule: team-mode detection updated to reference distillery_list
+
+digest/SKILL.md:
+  - distillery_aggregate(group_by="author") → distillery_list(group_by="author", output_mode="stats")
+  - distillery_aggregate(group_by="entry_type") → distillery_list(group_by="entry_type", output_mode="stats")
+  - distillery_metrics(scope="audit") step removed
+  - Body reference "distillery_aggregate response" → "distillery_list(group_by=...) responses"
+  - Rule: "distillery_metrics failure non-fatal" → "distillery_list(group_by=...) failures non-fatal"
+
+investigate/SKILL.md:
+  - Phase 3: distillery_tag_tree(prefix=<ns>) → distillery_list(group_by="tags", output_mode="stats")
+    with client-side namespace filtering
+
+pour/SKILL.md:
+  - Tag-based expansion: distillery_tag_tree(prefix=<ns>) → distillery_list(group_by="tags", output_mode="stats")
+    with client-side namespace filtering
+
+radar/SKILL.md:
+  - Step 3a: distillery_interests(recency_days=N, top_n=5) → distillery_list(group_by="tags", output_mode="stats")
+  - Fallback unchanged (distillery_list already used)
+  - Step 5: distillery_interests(suggest_sources=true) → heuristic source suggestions from interest tags
+  - Empty results: "Run distillery_poll" → "POST to /hooks/poll"
+
+setup/SKILL.md:
+  - Step 1b health check: distillery_metrics(scope="summary") → distillery_list(limit=1)
+  - Step 1c Connected state: distillery_metrics fields → distillery_list + distillery_configure(action="get")
+  - Step 4a cron prompt: "Use distillery_poll" → "POST to <webhook-base-url>/hooks/poll"
+  - Step 4b cron prompt: "Use distillery_rescore(limit=200)" → "POST to .../hooks/rescore?limit=200"
+  - Step 4c weekly maintenance: replaced distillery_metrics, distillery_stale, distillery_interests
+    with distillery_list(stale_days=30), distillery_list(group_by="tags"),
+    and POST to /hooks/classify-batch?mode=heuristic
+  - Rules updated to reference webhook URLs and new tools
+
+watch/SKILL.md:
+  - CronCreate prompt: "Use distillery_poll" → "POST to <webhook-base-url>/hooks/poll"
+  - CronList check: "prompt contains distillery_poll" → "prompt contains /hooks/poll"
+
+tune/SKILL.md:
+  - Step 3: distillery_metrics(scope="summary") → distillery_configure(action="get", section="feeds.thresholds")
+  - Rule updated to reference distillery_configure for health check
+
+Status: PASS
