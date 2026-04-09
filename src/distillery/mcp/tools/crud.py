@@ -587,6 +587,7 @@ async def _handle_update(
 # ---------------------------------------------------------------------------
 
 _VALID_OUTPUT_MODES = frozenset({"full", "summary", "ids", "review"})
+_VALID_GROUP_BY_VALUES = frozenset({"entry_type", "status", "author", "project", "source", "tags"})
 
 
 def _entry_to_summary_dict(entry: Any) -> dict[str, Any]:
@@ -655,6 +656,46 @@ async def _handle_list(
             return error_response("INVALID_PARAMS", "Field 'content_max_length' must be >= 1")
         content_max_length = content_max_length_raw
 
+    # --- validate stale_days -------------------------------------------------
+    stale_days_raw = arguments.get("stale_days")
+    stale_days: int | None = None
+    if stale_days_raw is not None:
+        if not isinstance(stale_days_raw, int):
+            return error_response("INVALID_PARAMS", "Field 'stale_days' must be an integer")
+        if stale_days_raw < 1:
+            return error_response("INVALID_PARAMS", "Field 'stale_days' must be >= 1")
+        stale_days = stale_days_raw
+
+    # --- validate group_by ---------------------------------------------------
+    group_by_raw = arguments.get("group_by")
+    group_by: str | None = None
+    if group_by_raw is not None:
+        if not isinstance(group_by_raw, str):
+            return error_response("INVALID_PARAMS", "Field 'group_by' must be a string")
+        if group_by_raw not in _VALID_GROUP_BY_VALUES:
+            return error_response(
+                "INVALID_PARAMS",
+                f"Field 'group_by' must be one of: {', '.join(sorted(_VALID_GROUP_BY_VALUES))}",
+            )
+        group_by = group_by_raw
+
+    # --- validate output -----------------------------------------------------
+    output_raw = arguments.get("output")
+    output: str | None = None
+    if output_raw is not None:
+        if not isinstance(output_raw, str):
+            return error_response("INVALID_PARAMS", "Field 'output' must be a string")
+        if output_raw != "stats":
+            return error_response("INVALID_PARAMS", "Field 'output' only accepts 'stats'")
+        output = output_raw
+
+    # --- mutual exclusivity: group_by and output="stats" ---------------------
+    if group_by is not None and output == "stats":
+        return error_response(
+            "INVALID_PARAMS",
+            "Fields 'group_by' and 'output' are mutually exclusive",
+        )
+
     filters = _build_filters_from_arguments(arguments)
 
     # review mode implicitly filters to pending_review status.
@@ -663,8 +704,43 @@ async def _handle_list(
             filters = {}
         filters["status"] = "pending_review"
 
+    # --- group_by mode -------------------------------------------------------
+    if group_by is not None:
+        try:
+            result = await store.list_entries(
+                filters=filters,
+                limit=limit,
+                offset=offset,
+                group_by=group_by,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Error in distillery_list (group_by mode)")
+            return error_response("LIST_ERROR", f"list_entries failed: {exc}")
+        return success_response(result)
+
+    # --- stats mode ----------------------------------------------------------
+    if output == "stats":
+        try:
+            result = await store.list_entries(
+                filters=filters,
+                limit=limit,
+                offset=offset,
+                stale_days=stale_days,
+                output="stats",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Error in distillery_list (stats mode)")
+            return error_response("LIST_ERROR", f"list_entries failed: {exc}")
+        return success_response(result)
+
+    # --- default list mode ---------------------------------------------------
     try:
-        entries = await store.list_entries(filters=filters, limit=limit, offset=offset)
+        entries = await store.list_entries(
+            filters=filters,
+            limit=limit,
+            offset=offset,
+            stale_days=stale_days,
+        )
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error in distillery_list")
         return error_response("LIST_ERROR", f"list_entries failed: {exc}")

@@ -1,0 +1,15 @@
+Type: cli
+Command: python3 inline validation script for _handle_list new parameter logic
+Expected: All 8 validation scenarios pass
+Timestamp: 2026-04-09T00:00:00Z
+
+[PASS] stale_days invalid type
+[PASS] stale_days=0 invalid
+[PASS] group_by invalid enum
+[PASS] output invalid value
+[PASS] mutual exclusivity error
+[PASS] group_by returns groups
+[PASS] output=stats returns stats
+[PASS] stale_days valid passthrough
+
+Status: PASS
