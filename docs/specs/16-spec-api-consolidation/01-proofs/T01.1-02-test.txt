@@ -1,0 +1,12 @@
+Type: test
+Command: python3 -m mypy --strict src/distillery/store/
+Expected: No type errors in protocol.py or duckdb.py after adding union return type
+Timestamp: 2026-04-09T00:00:00Z
+
+Result: Success: no issues found in 5 source files
+Status: PASS
+
+Notes:
+- list_entries return type changed from list[Entry] to list[Entry] | dict[str, Any]
+- Protocol and implementation both use the same union return type
+- _get_entry_stats private method properly typed with dict[str, Any] return

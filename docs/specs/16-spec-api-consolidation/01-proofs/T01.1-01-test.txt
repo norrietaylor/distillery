@@ -1,0 +1,14 @@
+Type: test
+Command: python3 -m pytest tests/test_duckdb_store.py -x -v --tb=short
+Expected: All 104 existing tests pass (no regressions from store layer extension)
+Timestamp: 2026-04-09T00:00:00Z
+
+Result: 104 passed in 7.74s
+Status: PASS
+
+Notes:
+- All existing list_entries tests continue to pass with the new optional parameters
+- The signature change (adding stale_days, group_by, output as keyword-only args)
+  is fully backward-compatible since all new params default to None
+- Tests covering aggregate_entries (in test_session_id.py and test_source_provenance.py)
+  also pass (146 total store-related tests)

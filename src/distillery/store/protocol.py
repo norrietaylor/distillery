@@ -167,19 +167,40 @@ class DistilleryStore(Protocol):
         filters: dict[str, Any] | None,
         limit: int,
         offset: int,
-    ) -> list[Entry]:
+        *,
+        stale_days: int | None = None,
+        group_by: str | None = None,
+        output: str | None = None,
+    ) -> list[Entry] | dict[str, Any]:
         """
         List entries filtered by metadata with pagination.
 
-        Returns entries in insertion order (sorted by descending `created_at`) and does not perform semantic ranking.
+        Returns entries in insertion order (sorted by descending ``created_at``)
+        and does not perform semantic ranking.  When *group_by* or
+        *output="stats"* is specified the return type changes to a dict.
 
         Parameters:
-            filters (dict[str, Any] | None): Optional metadata constraints. Supported keys: `entry_type`, `author`, `project`, `tags` (matches any tag), `status`, `verification` (one of "unverified", "testing", "verified"), `date_from`, `date_to`.
-            limit (int): Maximum number of entries to return.
-            offset (int): Number of entries to skip for pagination.
+            filters: Optional metadata constraints. Supported keys:
+                ``entry_type``, ``author``, ``project``, ``tags`` (matches any
+                tag), ``status``, ``verification``, ``date_from``, ``date_to``.
+            limit: Maximum number of entries (or groups) to return.
+            offset: Number of entries to skip for pagination (ignored in
+                group_by / stats modes).
+            stale_days: When set, restricts results to entries whose last
+                access (``COALESCE(accessed_at, updated_at)``) is older than
+                *stale_days* days.  Composes with all other filters.
+            group_by: When set, returns ``{"groups": [...], "total_groups": N,
+                "total_entries": N}`` instead of a list of entries.  Supported
+                values mirror ``aggregate_entries`` plus ``"tags"`` (unnests
+                the tags array).  When ``group_by="tags"`` the ``tag_prefix``
+                filter key is honoured.
+            output: When ``"stats"``, returns aggregate statistics:
+                ``entries_by_type``, ``entries_by_status``, ``total_entries``,
+                ``storage_bytes``.  Mutually exclusive with *group_by*.
 
         Returns:
-            list[Entry]: Entries matching the filters, ordered by descending `created_at`.
+            ``list[Entry]`` in default mode; ``dict[str, Any]`` when
+            *group_by* or *output="stats"* is supplied.
         """
         ...
 
