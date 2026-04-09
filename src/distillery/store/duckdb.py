@@ -582,6 +582,7 @@ class DuckDBStore:
             "metadata",
             "last_modified_by",
             "expires_at",
+            "session_id",
         }
     )
 
@@ -595,8 +596,8 @@ class DuckDBStore:
             "INSERT INTO entries "
             "(id, content, entry_type, source, author, project, tags, status, "
             " verification, metadata, created_at, updated_at, version, embedding, "
-            " created_by, last_modified_by, expires_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " created_by, last_modified_by, expires_at, session_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         params = [
             entry.id,
@@ -616,6 +617,7 @@ class DuckDBStore:
             entry.created_by,
             entry.last_modified_by,
             entry.expires_at,
+            entry.session_id,
         ]
         conn.execute(sql, params)
         # Rebuild FTS index so new content is searchable via BM25.
@@ -854,6 +856,7 @@ class DuckDBStore:
         - ``tags`` (list[str]) -- matches entries containing *any* listed tag
         - ``status`` (str)
         - ``verification`` (str) -- one of "unverified", "testing", "verified"
+        - ``source`` (str) -- entry origin (e.g. "claude-code", "manual", "inference", etc.)
         - ``date_from`` (datetime | str) -- inclusive lower bound on ``created_at``
         - ``date_to`` (datetime | str) -- inclusive upper bound on ``created_at``
         """
@@ -897,6 +900,10 @@ class DuckDBStore:
             clauses.append("verification = ?")
             params.append(str(filters["verification"]))
 
+        if "source" in filters:
+            clauses.append("source = ?")
+            params.append(filters["source"])
+
         if "tag_prefix" in filters and filters["tag_prefix"]:
             prefix = filters["tag_prefix"]
             # Match entries where any tag equals the prefix exactly or starts with
@@ -919,6 +926,10 @@ class DuckDBStore:
                 val = datetime.fromisoformat(val)
             clauses.append("created_at <= ?")
             params.append(val)
+
+        if "session_id" in filters:
+            clauses.append("session_id = ?")
+            params.append(str(filters["session_id"]))
 
         # Support metadata path filters like "metadata.external_id".
         # DuckDB stores metadata as a JSON string; use json_extract_string
@@ -970,7 +981,7 @@ class DuckDBStore:
     _ENTRY_COLUMNS = (
         "id, content, entry_type, source, author, project, "
         "tags, status, verification, metadata, created_at, updated_at, version, accessed_at, "
-        "created_by, last_modified_by, expires_at"
+        "created_by, last_modified_by, expires_at, session_id"
     )
 
     # ------------------------------------------------------------------

@@ -71,6 +71,16 @@ _VALID_STATUSES = {"active", "pending_review", "archived"}
 # Valid verification values (mirrors VerificationStatus enum).
 _VALID_VERIFICATIONS = {"unverified", "testing", "verified"}
 
+# Valid source values (mirrors EntrySource enum).
+_VALID_SOURCES = {
+    "claude-code",
+    "manual",
+    "import",
+    "inference",
+    "documentation",
+    "external",
+}
+
 
 def _parse_iso8601_utc(
     raw: Any,
@@ -219,6 +229,14 @@ async def _handle_store(
             )
         verification_val = VerificationStatus(verification_raw)
 
+    # --- parse source --------------------------------------------------------
+    if entry_source_str not in _VALID_SOURCES:
+        return error_response(
+            "INVALID_PARAMS",
+            f"Invalid source {entry_source_str!r}. "
+            f"Must be one of: {', '.join(sorted(_VALID_SOURCES))}.",
+        )
+
     # --- parse expires_at (ISO 8601 string → datetime) ----------------------
     expires_at_val: datetime | None = None
     expires_at_raw = arguments.get("expires_at")
@@ -230,11 +248,8 @@ async def _handle_store(
 
     # --- build entry --------------------------------------------------------
     try:
-        # Determine EntrySource from arguments.
-        try:
-            resolved_source = EntrySource(entry_source_str)
-        except ValueError:
-            resolved_source = EntrySource.CLAUDE_CODE
+        # Determine EntrySource from arguments (already validated above).
+        resolved_source = EntrySource(entry_source_str)
 
         entry = Entry(
             content=arguments["content"],
@@ -247,6 +262,7 @@ async def _handle_store(
             created_by=created_by,
             verification=verification_val,
             expires_at=expires_at_val,
+            session_id=arguments.get("session_id") or None,
         )
     except Exception as exc:  # noqa: BLE001
         return error_response("INVALID_PARAMS", f"Failed to construct entry: {exc}")
@@ -464,6 +480,7 @@ async def _handle_update(
         "verification",
         "metadata",
         "expires_at",
+        "session_id",
     }
     updates: dict[str, Any] = {}
     for key in updatable_keys:
@@ -701,7 +718,7 @@ def _build_filters_from_arguments(arguments: dict[str, Any]) -> dict[str, Any] |
     """Extract known filter keys from *arguments* into a filters dict.
 
     Keys extracted: ``entry_type``, ``author``, ``project``, ``tags``,
-    ``status``, ``verification``, ``date_from``, ``date_to``.
+    ``status``, ``verification``, ``source``, ``date_from``, ``date_to``.
 
     Args:
         arguments: The tool argument dict.
@@ -716,9 +733,11 @@ def _build_filters_from_arguments(arguments: dict[str, Any]) -> dict[str, Any] |
         "tags",
         "status",
         "verification",
+        "source",
         "date_from",
         "date_to",
         "tag_prefix",
+        "session_id",
     )
     filters: dict[str, Any] = {}
     for key in filter_keys:
@@ -736,6 +755,7 @@ __all__ = [
     "_VALID_ENTRY_TYPES",
     "_VALID_STATUSES",
     "_VALID_VERIFICATIONS",
+    "_VALID_SOURCES",
     "_IMMUTABLE_FIELDS",
     "_VALID_OUTPUT_MODES",
     "_entry_to_summary_dict",
