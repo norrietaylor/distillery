@@ -36,25 +36,11 @@ jobs:
         run: git-cliff --output CHANGELOG.md
 
       - name: Create changelog PR
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG_NAME: ${{ github.event.release.tag_name }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add CHANGELOG.md
-          if git diff --cached --quiet; then
-            echo "No changelog changes to commit"
-            exit 0
-          fi
-          BRANCH="docs/changelog-${TAG_NAME}"
-          git checkout -b "$BRANCH"
-          git commit -m "docs: update changelog for ${TAG_NAME}"
-          git push origin "$BRANCH"
-          gh pr create \
-            --title "docs: update changelog for ${TAG_NAME}" \
-            --body "Auto-generated changelog update from release ${TAG_NAME}." \
-            --base "$DEFAULT_BRANCH" \
-            --head "$BRANCH"
+        uses: peter-evans/create-pull-request@271a8d0340265f705b14b6d32b9829c1cb33d45e # v7
+        with:
+          commit-message: "docs: update changelog for ${{ github.event.release.tag_name }}"
+          title: "docs: update changelog for ${{ github.event.release.tag_name }}"
+          body: "Auto-generated changelog update from release ${{ github.event.release.tag_name }}."
+          branch: "docs/changelog-${{ github.event.release.tag_name }}"
+          base: ${{ github.event.repository.default_branch }}
+          add-paths: CHANGELOG.md
