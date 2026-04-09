@@ -1,0 +1,14 @@
+Type: cli
+Command: distillery maintenance classify --format json
+Expected: JSON output with classified, pending_review, errors, by_type keys
+Timestamp: 2026-04-09T00:00:00Z
+
+Output:
+{
+  "classified": 0,
+  "pending_review": 0,
+  "errors": 0,
+  "by_type": {}
+}
+
+Status: PASS

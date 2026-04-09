@@ -1,0 +1,13 @@
+Type: test
+Command: python3 -m pytest tests/test_cli.py -v
+Expected: All CLI tests pass including new maintenance classify tests
+Timestamp: 2026-04-09T00:00:00Z
+
+Summary:
+============================== 63 passed in 2.92s ==============================
+
+All existing tests (57 tests) continue to pass.
+New maintenance classify tests (6 tests) all pass.
+No regressions detected.
+
+Status: PASS
