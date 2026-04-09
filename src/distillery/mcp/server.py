@@ -24,6 +24,7 @@ from fastmcp import Context, FastMCP  # noqa: F401
 from mcp import types
 
 from distillery.config import DistilleryConfig, load_config
+from distillery.mcp.resources import register_dashboard_resource
 from distillery.mcp.tools._common import (
     _get_authenticated_user,
     error_response,
@@ -77,6 +78,7 @@ _UNSET: Any = object()
 # Explicit re-exports for mypy --strict (no_implicit_reexport).
 __all__ = [
     "create_server",
+    "register_dashboard_resource",
     "error_response",
     "success_response",
     "_get_authenticated_user",
@@ -1123,6 +1125,9 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         """
         result = await _handle_type_schemas()
         return result[0].text if result else "{}"
+
+    # Register ui:// resources (MCP Apps dashboard).
+    register_dashboard_resource(server)
 
     return server
 
