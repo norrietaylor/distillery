@@ -1,4 +1,4 @@
-"""MCP server for Distillery — 19 tools over stdio or HTTP.
+"""MCP server for Distillery — 20 tools over stdio or HTTP.
 
 Handlers live in ``src/distillery/mcp/tools/`` (crud, search, classify, quality,
 analytics, feeds, configure, meta). This module owns: FastMCP app creation,
@@ -38,6 +38,7 @@ from distillery.mcp.tools.classify import (
 )
 from distillery.mcp.tools.configure import _handle_configure
 from distillery.mcp.tools.crud import (
+    _handle_correct,
     _handle_get,
     _handle_list,
     _handle_store,
@@ -77,6 +78,7 @@ __all__ = [
     "_handle_store",
     "_handle_get",
     "_handle_update",
+    "_handle_correct",
     "_handle_list",
     "_handle_search",
     "_handle_find_similar",
@@ -352,6 +354,51 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             args["expires_at"] = expires_at
         result = await _handle_update(store=c["store"], arguments=args, last_modified_by=user)
         await _audit(c, user, "distillery_update", entry_id, "update", result)
+        return result
+
+    @server.tool
+    async def distillery_correct(  # noqa: PLR0913
+        ctx: Context,
+        wrong_entry_id: str,
+        content: str,
+        entry_type: str | None = None,
+        author: str | None = None,
+        project: str | None = None,
+        tags: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[types.TextContent]:
+        """Store a correction that supersedes an existing entry.
+
+        The original entry is archived and a 'corrects' relation is created
+        linking the new entry to the original. Fields (entry_type, author,
+        project, tags) are inherited from the original when not provided.
+        """
+        c = _lc(ctx)
+        user = _get_authenticated_user()
+        err = await _own(c, user, wrong_entry_id, "distillery_correct")
+        if err:
+            return err
+        args: dict[str, Any] = dict(
+            wrong_entry_id=wrong_entry_id,
+            content=content,
+            **_omit_none(
+                entry_type=entry_type,
+                author=author,
+                project=project,
+                tags=tags,
+                metadata=metadata,
+            ),
+        )
+        result = await _handle_correct(store=c["store"], arguments=args, cfg=c["config"])
+        rd = json.loads(result[0].text) if result else {}
+        await _audit(
+            c,
+            user,
+            "distillery_correct",
+            rd.get("correction_entry_id", ""),
+            "correct",
+            result,
+        )
         return result
 
     @server.tool
