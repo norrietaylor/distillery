@@ -59,8 +59,31 @@
 - [x] Recency decay — configurable time-weighted scoring (90-day window, 0.5 min weight)
 - [x] Graceful degradation — falls back to vector-only if FTS extension unavailable
 
+### Team Skills
+- [x] `/digest` — team activity summaries over configurable time windows
+- [x] `/gh-sync` — sync GitHub issues/PRs into the knowledge base as searchable entries
+- [x] `/investigate` — deep context builder with 4-phase retrieval and relationship traversal
+- [x] `/briefing` — knowledge dashboard with solo mode (5 sections) and team mode (8 sections)
+
+### Entry Relations & Corrections
+- [x] `entry_relations` table with backfill migration
+- [x] `distillery_correct` tool for structured corrections
+- [x] `distillery_relations` tool for managing entry links
+
+### New Entry Fields
+- [x] `expires_at` — time-limited entries with UTC normalization
+- [x] `verification` — orthogonal quality tracking (Unverified, Testing, Verified)
+- [x] `session_id` — first-class field for session-scoped entries
+- [x] Extended `EntrySource` — added inference, documentation, external provenance values
+
+### Session Hooks
+- [x] Hook dispatcher script (`distillery-hooks.sh`) — routes UserPromptSubmit, SessionStart, PreCompact
+- [x] Memory nudge — periodic reminder to `/distill` every 30 prompts
+- [x] SessionStart briefing — automatic context injection via HTTP MCP
+- [x] Scope-aware `/setup` hook configuration — detects plugin install scope (user/project)
+
 ### Onboarding
-- [x] `/setup` skill — MCP connectivity wizard, auto-poll configuration
+- [x] `/setup` skill — MCP connectivity wizard, auto-poll configuration, session hook setup
 - [x] uvx-first setup — `uvx distillery-mcp` as recommended first-time path
 
 ---
@@ -69,16 +92,11 @@
 
 ### New Skills
 - [ ] `/whois` — evidence-backed expertise map
-- [ ] `/investigate` — deep domain context builder
-- [ ] `/digest` — team activity summaries
-- [ ] `/briefing` — team knowledge dashboard
 - [ ] `/process` — batch classify + digest + stale detection pipeline
-- [ ] `/gh-sync` — GitHub issue/PR knowledge tracking
 
 ### Infrastructure
-- [ ] RRF score normalization — hybrid search scores cluster near 1.0 (#170)
-- [ ] GitHub event content filtering — skip low-value WatchEvent/ForkEvent (#171)
 - [ ] Access control — team/private visibility flag (#149)
+- [ ] PreCompact auto-extraction — capture knowledge before context compression
 
 ---
 

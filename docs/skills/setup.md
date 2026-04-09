@@ -19,7 +19,7 @@ Walks through first-time Distillery configuration: verifying MCP connectivity, d
 
 ## What It Does
 
-The wizard runs through up to 5 steps, showing a summary at the end regardless of how far it gets.
+The wizard runs through up to 6 steps, showing a summary at the end regardless of how far it gets.
 
 ### Step 1: Check MCP Availability
 
@@ -64,7 +64,26 @@ Scheduling depends on your transport:
 - Checks for existing jobs before creating (no duplicates)
 - If no feed sources exist, poll/rescore are skipped but weekly maintenance is still offered
 
-### Step 5: Summary
+### Step 5: Configure Session Hooks
+
+Configures session lifecycle hooks in the appropriate `settings.json` based on your plugin installation scope.
+
+!!! note "Plugin Hooks Limitation"
+    Plugin manifest hooks (`plugin.json`) support `SessionStart` and `Stop` events but **not** `UserPromptSubmit`. To enable the memory nudge and full session lifecycle hooks, they must be configured in `settings.json` via `/setup`.
+
+The wizard:
+
+1. **Detects plugin scope** — checks `enabledPlugins` in user (`~/.claude/settings.json`) or project (`.claude/settings.json`) settings
+2. **Locates the dispatcher** — finds `scripts/hooks/distillery-hooks.sh` in the repo or plugin cache
+3. **Checks existing hooks** — skips if both `UserPromptSubmit` and `SessionStart` already reference the dispatcher
+4. **Installs hooks** — merges hook config into the scope-appropriate settings file
+
+| Hook | Behaviour |
+|------|-----------|
+| **UserPromptSubmit** | Memory nudge every 30 prompts — reminds you to `/distill` |
+| **SessionStart** | Injects a condensed briefing with recent entries and stale items |
+
+### Step 6: Summary
 
 Always displayed, even if the wizard exits early:
 
@@ -83,7 +102,8 @@ Always displayed, even if the wizard exits early:
 
 ### Available Skills
 /distill, /recall, /pour, /bookmark, /minutes,
-/classify, /watch, /radar, /tune
+/classify, /watch, /radar, /tune, /digest,
+/gh-sync, /investigate, /briefing
 ```
 
 ## Tips
