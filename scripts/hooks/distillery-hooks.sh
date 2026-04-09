@@ -47,29 +47,19 @@ handle_user_prompt_submit() {
   local counter_file="/tmp/distillery-prompt-count-${SESSION_ID}"
   local count=0
 
-  # Atomically increment the counter using flock
-  # The lock file is the counter file itself; flock releases on subshell exit
-  (
-    exec 200>"${counter_file}.lock"
-    flock -x 200
+  # Read current count (file may not exist yet on first prompt)
+  if [[ -f "$counter_file" ]]; then
+    count="$(cat "$counter_file" 2>/dev/null || echo 0)"
+    [[ "$count" =~ ^[0-9]+$ ]] || count=0
+  fi
 
-    # Read current count (file may not exist yet on first prompt)
-    if [[ -f "$counter_file" ]]; then
-      count="$(cat "$counter_file" 2>/dev/null || echo 0)"
-      # Ensure count is a non-negative integer
-      if ! [[ "$count" =~ ^[0-9]+$ ]]; then
-        count=0
-      fi
-    fi
+  count=$((count + 1))
+  echo "$count" > "$counter_file"
 
-    count=$((count + 1))
-    echo "$count" > "$counter_file"
-
-    # Output nudge at interval boundary
-    if (( count % NUDGE_INTERVAL == 0 )); then
-      echo "[Distillery] You've exchanged ${count} messages this session. Consider whether any decisions, insights, or corrections from this conversation should be stored with /distill."
-    fi
-  ) || return 0
+  # Output nudge at interval boundary
+  if (( count % NUDGE_INTERVAL == 0 )); then
+    echo "[Distillery] You've exchanged ${count} messages this session. Consider whether any decisions, insights, or corrections from this conversation should be stored with /distill."
+  fi
 }
 
 # ── Handler: PreCompact ───────────────────────────────────────────────────────
