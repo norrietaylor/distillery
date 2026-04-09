@@ -1,6 +1,6 @@
 {
   "name": "distillery",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Knowledge base skills for Claude Code — capture, search, and synthesize project knowledge",
   "author": {
     "name": "norrietaylor",
@@ -38,7 +38,7 @@
     "SessionStart": [
       {
         "type": "command",
-        "command": "echo '[Distillery v0.3.1] Knowledge base available. Skills: /recall (search), /pour (synthesize), /distill (capture), /classify (review queue), /radar (feed digest).'"
+        "command": "echo '[Distillery v0.3.2] Knowledge base available. Skills: /recall (search), /pour (synthesize), /distill (capture), /classify (review queue), /radar (feed digest).'"
       }
     ],
     "Stop": [
