@@ -5,6 +5,9 @@ allowed-tools:
   - "mcp__*__distillery_metrics"
   - "CronCreate"
   - "RemoteTrigger"
+  - "Bash(mkdir:*)"
+  - "Bash(cp:*)"
+  - "Bash(chmod:*)"
 effort: low
 ---
 
@@ -57,7 +60,7 @@ MCP server connected.
 
 Proceed to Step 2.
 
-**State: Needs Authentication** — Server entry found but `distillery_metrics(scope="summary")` is unavailable or fails (including auth-related failures). See `references/transport-detection.md` for display instructions. Skip to Step 5 with `MCP Server: needs authentication`.
+**State: Needs Authentication** — Server entry found but `distillery_metrics(scope="summary")` is unavailable or fails (including auth-related failures). See `references/transport-detection.md` for display instructions. Skip to Step 6 with `MCP Server: needs authentication`.
 
 ---
 
@@ -90,7 +93,7 @@ Then restart Claude Code and run /setup again.
 Full guide: https://norrietaylor.github.io/distillery/getting-started/local-setup/
 ```
 
-Skip to Step 5 with `MCP Server: not connected`.
+Skip to Step 6 with `MCP Server: not connected`.
 
 ### Step 2: Detect Transport Mode
 
@@ -215,7 +218,114 @@ Weekly maintenance enabled: Mondays at 07:<minute> UTC (cron job <job_id>)
   Stores: weekly digest entry for tracking trends
 ```
 
-### Step 5: Summary
+### Step 5: Configure Session Hooks
+
+Plugin manifest hooks do not support `UserPromptSubmit` events — only `SessionStart` works from `plugin.json`. To enable the memory nudge (every 30 prompts) and session lifecycle hooks, the dispatcher script must be configured in the appropriate settings.json based on plugin installation scope.
+
+**5a. Detect plugin installation scope:**
+
+Check which settings file contains the Distillery plugin in `enabledPlugins`:
+
+1. `~/.claude/settings.json` → **user scope** (hooks apply to all projects)
+2. `.claude/settings.json` → **project scope** (hooks apply to this project only)
+3. `.claude/settings.local.json` → **local scope** (treat as project scope)
+
+If the plugin isn't found in any file (e.g., running from the Distillery repo itself), default to **project scope**.
+
+Set `SCOPE_FILE` to the matching settings file and `SCOPE_LABEL` to "user" or "project".
+
+**5b. Locate the hook scripts:**
+
+The hook scripts ship with the plugin under `scripts/hooks/`. Determine the absolute path:
+
+1. If `scripts/hooks/distillery-hooks.sh` exists relative to cwd → use that path
+2. Otherwise, check `~/.claude/plugins/cache/` for a `distillery-*/scripts/hooks/` directory
+
+Required files:
+- `distillery-hooks.sh` — main dispatcher (routes events to handlers)
+- `session-start-briefing.sh` — SessionStart briefing handler (called by dispatcher)
+
+If the scripts cannot be found, display:
+
+```text
+Session hooks: skipped (hook scripts not found)
+  Run /setup from inside the Distillery repo to install hooks.
+```
+
+Skip to Step 6.
+
+**5c. Check existing hooks:**
+
+Read `SCOPE_FILE` and check if `hooks.UserPromptSubmit` already references `distillery-hooks.sh`.
+
+If already configured:
+
+```text
+Session hooks: active (<SCOPE_LABEL> scope)
+  Memory nudge:  every 30 prompts
+  Session start: briefing context injection
+```
+
+Skip to Step 6.
+
+**5d. Install hooks:**
+
+Ask the user:
+
+```text
+Enable session hooks? This configures hooks in <SCOPE_FILE> (<SCOPE_LABEL> scope).
+  • Memory nudge — reminder to /distill every 30 prompts
+  • Session start — briefing context injection
+(yes / no)
+```
+
+If yes, merge the following hooks into `SCOPE_FILE` (do not overwrite other settings). Use the absolute path to the dispatcher script found in 5b:
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash <absolute-path-to>/scripts/hooks/distillery-hooks.sh"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash <absolute-path-to>/scripts/hooks/distillery-hooks.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Display:
+
+```text
+Session hooks installed:
+  Config:        <SCOPE_FILE> (<SCOPE_LABEL> scope)
+  Dispatcher:    <absolute-path-to>/scripts/hooks/distillery-hooks.sh
+  Memory nudge:  every 30 prompts
+  Session start: briefing context injection
+```
+
+If no:
+
+```text
+Session hooks: skipped
+  Enable later by running /setup again.
+```
+
+### Step 6: Summary
 
 Always display the configuration summary, regardless of which steps were completed or skipped.
 
@@ -232,6 +342,10 @@ Distillery Setup Complete
     Feed rescore:  <active (daily 06:XX UTC) | inactive | managed by GitHub Actions>
     KB maintenance:<active (weekly Mon 07:XX UTC) | inactive | managed by GitHub Actions>
 
+  Session Hooks:   <SCOPE_LABEL> scope
+    Memory nudge:  <active (every 30 prompts) | inactive | skipped>
+    Session start: <active | inactive | skipped>
+
 Available skills:
   /distill   — capture knowledge      /recall   — search knowledge
   /bookmark  — save URLs              /pour     — synthesize topics
@@ -244,13 +358,18 @@ Run /watch add <url> to start monitoring feeds.
 
 ## Output Format
 
-The setup wizard uses a sequential, conversational format. Each step prints its result before proceeding to the next. The summary in Step 5 is always shown — even when MCP is unavailable or steps are skipped.
+The setup wizard uses a sequential, conversational format. Each step prints its result before proceeding to the next. The summary in Step 6 is always shown — even when MCP is unavailable or steps are skipped.
 
 ## Rules
 
 - Always start by checking MCP availability — distinguish between "not configured", "needs authentication", and "connected"
 - When an MCP server entry exists but tools are unavailable, treat this as "needs authentication" — guide the user through the OAuth flow
-- Always show the Step 5 summary — even on early exits (MCP unavailable, auth needed)
+- Always show the Step 6 summary — even on early exits (MCP unavailable, auth needed)
+- Session hooks are installed to the same scope as the plugin (user or project) — detect via `enabledPlugins`
+- Merge hook config into the scope-appropriate settings file — never overwrite other settings
+- If hook scripts can't be found (not in repo or plugin cache), skip gracefully
+- The dispatcher uses `BASH_SOURCE[0]` to find sibling scripts — both files must be in the same directory
+- Use absolute paths to the dispatcher script in hook commands
 - For hosted/team transport, skip local cron creation — scheduling is handled by GitHub Actions
 - Never create duplicate cron jobs — always check `CronList` first for each job type (poll, rescore, maintenance)
 - Pick an off-peak cron minute (not :00 or :30) for all schedules; use different random minutes for each job
