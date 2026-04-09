@@ -1,0 +1,40 @@
+Type: file
+Command: Manual requirements checklist against background.js implementation
+Expected: All 6 task requirements satisfied
+Timestamp: 2026-04-01T00:00:00Z
+
+--- REQUIREMENTS CHECKLIST ---
+
+[PASS] 1. On startup/install: load options, probe localhost:{port}/mcp with
+          initialize (1s timeout). On success use local, on failure fall back
+          to remote URL.
+          -> connect() calls loadOptions(), probeLocal() with AbortController
+             1000ms timeout. Falls back to remoteServerUrl on failure.
+
+[PASS] 2. Re-probe local every 5 minutes and on options change.
+          -> chrome.alarms.create('distillery-probe', { periodInMinutes: 5 })
+          -> chrome.storage.onChanged listener triggers connect() on relevant
+             option key changes.
+
+[PASS] 3. Maintain MCP client instance (import from mcp-client.js).
+          -> importScripts('mcp-client.js') at top.
+          -> Single `mcpClient = new MCPClient()` instance; reused across calls.
+          -> mcpClient.disconnect() called before each reconnect.
+
+[PASS] 4. Expose message handlers for popup/content script communication
+          (chrome.runtime.onMessage).
+          -> Handles: getConnectionStatus, reconnect, callTool,
+             OPTIONS_UPDATED, setAuthToken.
+
+[PASS] 5. Track connection state (connected/disconnected, local/remote) and
+          broadcast to popup.
+          -> `connectionState` object tracks { connected, serverType, serverUrl,
+             username, queuedOperations }.
+          -> broadcastConnectionState() sends connectionStatusChanged action
+             after every connect() call and auth error.
+
+[PASS] 6. Handle chrome.runtime.onInstalled to open options page on first install.
+          -> onInstalled listener checks details.reason === 'install' and calls
+             chrome.runtime.openOptionsPage().
+
+Status: PASS (6/6 requirements met)

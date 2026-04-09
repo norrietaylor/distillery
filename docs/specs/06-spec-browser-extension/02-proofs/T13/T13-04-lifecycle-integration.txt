@@ -1,0 +1,56 @@
+Type: file-artifact
+Description: Lifecycle event integration and listener registration
+Expected: Context menu registered on install/update and listener attached for click events
+Timestamp: 2026-04-01T00:00:00Z
+Status: PASS
+
+File: browser-extension/src/background.js
+
+1. Context Menu Listener Registration (Line 754):
+   chrome.contextMenus.onClicked.addListener(handleContextMenuClick);
+   - Placed in dedicated section after auth error handling
+   - Registers handler to respond to context menu clicks
+   - Handler receives (info, tab) parameters
+
+2. Lifecycle Integration - onInstalled (Lines 784-798):
+   chrome.runtime.onInstalled.addListener((details) => {
+     if (details.reason === 'install') {
+       // Open options page on first install
+       chrome.runtime.openOptionsPage();
+     }
+
+     // Register context menu on install/update
+     registerContextMenu();
+
+     // Start periodic probe
+     startPeriodicProbe();
+
+     // Connect to MCP server
+     connect();
+   });
+
+   - registerContextMenu() called for both install and update
+   - Ensures menu exists even after extension updates
+   - Placed before other initialization steps
+
+3. Startup Listener (Lines 800-803):
+   chrome.runtime.onStartup.addListener(() => {
+     startPeriodicProbe();
+     connect();
+   });
+   - Note: registerContextMenu() NOT called on startup
+   - Chrome persists context menu across restarts
+   - Only needs registration on install/update
+
+Integration Details:
+- Context menu created via registerContextMenu() during onInstalled
+- Click handler attached globally at module init
+- Handler passes info (context menu event data) and tab (active tab)
+- Handler accesses global mcpClient and offlineQueue instances
+- Integrates with existing connection lifecycle
+
+Testing:
+- Syntax validation passed (node -c background.js)
+- Manifest.json validated as valid JSON
+- No circular dependencies or ordering issues
+- Follows Chrome extension best practices for lifecycle management

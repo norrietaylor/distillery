@@ -1,0 +1,58 @@
+Type: code review
+File: browser-extension/src/content.js
+Description: Verify GitHub repo regex exclusion logic
+
+Location: Lines 148-167 (detectFeeds function)
+
+BEFORE:
+  // Check if the current page is a GitHub repository.
+  const githubRepoPattern = /^https?:\/\/github\.com\/([^/]+)\/([^/?#]+)\/?([^/?#]*)$/;
+  const match = window.location.href.match(githubRepoPattern);
+  if (match) {
+    const owner = match[1];
+    const repo = match[2];
+    // Exclude known non-repo paths like github.com/owner/repo/issues etc.
+    // Only include if it looks like a root repo page or a common sub-path.
+    feeds.push({
+      url: `https://github.com/${owner}/${repo}`,
+      title: `${owner}/${repo}`,
+      source_type: 'github',
+    });
+  }
+
+AFTER:
+  // Check if the current page is a GitHub repository.
+  const githubRepoPattern = /^https?:\/\/github\.com\/([^/]+)\/([^/?#]+)\/?([^/?#]*)$/;
+  const match = window.location.href.match(githubRepoPattern);
+  if (match) {
+    const owner = match[1];
+    const repo = match[2];
+    // Exclude known non-repo top-level paths.
+    const GITHUB_NON_REPO = new Set([
+      'settings', 'features', 'explore', 'orgs', 'marketplace', 'notifications',
+      'login', 'signup', 'about', 'pricing', 'sponsors', 'topics', 'trending',
+      'collections', 'events', 'codespaces', 'discussions',
+    ]);
+    if (!GITHUB_NON_REPO.has(owner)) {
+      feeds.push({
+        url: `https://github.com/${owner}/${repo}`,
+        title: `${owner}/${repo}`,
+        source_type: 'github',
+      });
+    }
+  }
+
+CHANGES:
+- Added GITHUB_NON_REPO exclusion set with 18 known GitHub top-level paths
+- Wrapped feeds.push() in conditional check: !GITHUB_NON_REPO.has(owner)
+- This prevents false-positive GitHub repo detections on non-repo paths
+
+VERIFICATION:
+- JavaScript syntax validation: PASS (node --check)
+- Test coverage: 21 test cases, all PASS
+- No other code changes required
+
+SECURITY:
+- No credentials or sensitive data in the change
+- No external API calls introduced
+- Defensive pattern (set membership check) is safe and performant

@@ -1,0 +1,47 @@
+Type: file
+Description: Watch tab CSS styles in popup.css
+Timestamp: 2026-04-01T00:00:00Z
+Status: PASS
+
+=== Watch CSS classes verified ===
+
+Layout:
+  .watch-section              [LINE 229] - flex column with gap
+  .watch-subsection           [LINE 235] - flex column, gap 8px
+  .watch-subsection-title     [LINE 241] - uppercase label style
+
+List items:
+  .watch-list                 [LINE 251] - flex column list
+  .watch-list-item            [LINE 260] - row layout with border
+  .watch-list-item-info       [LINE 271] - flex-1 info block
+  .watch-list-item-label      [LINE 276] - truncated label
+  .watch-list-item-url        [LINE 286] - small grey URL
+  .watch-list-item-type       [LINE 295] - coloured type badge
+  .watch-list-item-type.type-github  [LINE 306] - dark badge
+  .watch-list-item-type.type-rss     [LINE 310] - amber badge
+
+Form:
+  .watch-add-form             [LINE 316] - flex column form
+  .watch-add-row              [LINE 322] - flex row for select+button
+  .form-select                [LINE 327] - select element styles
+
+Buttons:
+  .btn-watch                  [LINE 346] - dark watch button
+  .btn-unwatch                [LINE 361] - ghost unwatch button (red hover)
+
+Feedback:
+  .watch-feedback             [LINE 382] - base feedback
+  .watch-feedback-success     [LINE 389] - green success
+  .watch-feedback-error       [LINE 395] - red error
+  .watch-empty                [LINE 401] - grey empty state
+  .watch-error                [LINE 408] - red error state
+  .watch-loading              [LINE 415] - loading indicator
+
+Separator:
+  .watch-subsection + .watch-subsection  [LINE 425] - border-top between sections
+
+Dark mode styles added at end of @media block:
+  - watch-subsection-title, watch-list-item, watch-list-item-label,
+    watch-list-item-url, watch-subsection separator, watch-empty,
+    watch-loading, watch-error, watch-feedback variants,
+    form-select, btn-watch, btn-unwatch

@@ -1,0 +1,19 @@
+Type: file
+Description: Readability class is properly exported for browser context
+Expected: File has global Readability function and exports for module context
+Timestamp: 2026-04-01T23:30:00Z
+
+Command: tail -10 browser-extension/vendor/readability.js
+
+Output:
+if (typeof module === "object") {
+  /* eslint-disable-next-line no-redeclare */
+  /* global module */
+  module.exports = Readability;
+}
+
+Status: PASS
+Notes: File correctly exports Readability for both:
+1. Browser context: global Readability() constructor available
+2. Node/module context: exports via module.exports
+This is the standard pattern for browser-compatible libraries.

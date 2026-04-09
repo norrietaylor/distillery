@@ -1,0 +1,29 @@
+Type: file
+Command: node -e "verify popup.html structure"
+Expected: All required bookmark form elements present, Bookmark tab active by default
+Timestamp: 2026-04-01T00:00:00Z
+
+--- Verification Output ---
+
+Checking popup.html for required elements...
+
+PASS: element #bookmark-tab
+PASS: element #bookmark-loading
+PASS: element #bookmark-error
+PASS: element #bookmark-form
+PASS: element #bookmark-title (editable title input)
+PASS: element #bookmark-url (read-only URL field)
+PASS: element #bookmark-description (editable textarea)
+PASS: element #bookmark-tags (comma-separated tags input)
+PASS: element #bookmark-project (project dropdown/input)
+PASS: element #bookmark-save-btn (Save button)
+PASS: element #save-success (success state)
+PASS: element #save-error (error state)
+PASS: bookmark-tab is active by default (tab-panel active class)
+
+Tab bar order verified:
+  - Bookmark (active, data-tab="bookmark")
+  - Watch (data-tab="watch")
+  - Status (data-tab="status")
+
+Status: PASS

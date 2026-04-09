@@ -1,0 +1,36 @@
+Type: file
+Description: Background service worker watch message handlers
+Timestamp: 2026-04-01T00:00:00Z
+Status: PASS
+
+=== Watch message handlers in background.js ===
+
+case 'watchList' [LINE 656]:
+  - calls mcpClient.callTool('distillery_watch', { action: 'list' })
+  - parses text/content response looking for JSON code block
+  - returns { status: 'ok', data: sources[] }
+  - async: returns true to keep channel open
+
+case 'watchAdd' [LINE 692]:
+  - takes { url, source_type, label } from request
+  - calls mcpClient.callTool('distillery_watch', { action: 'add', url, source_type, label })
+  - on MCPAuthError: calls handleAuthError()
+  - returns { status: 'ok', data: result } or { status: 'error', error, errorType }
+  - async: returns true to keep channel open
+
+case 'watchRemove' [LINE 714]:
+  - takes { url } from request
+  - calls mcpClient.callTool('distillery_watch', { action: 'remove', url })
+  - on MCPAuthError: calls handleAuthError()
+  - returns { status: 'ok', data: result } or { status: 'error', error, errorType }
+  - async: returns true to keep channel open
+
+=== Syntax check ===
+
+$ node --check browser-extension/src/background.js
+(exit code 0 - valid)
+
+=== JavaScript syntax validation ===
+
+All three handler cases use correct async promise chain pattern (mcpClient.callTool().then().catch()).
+Pattern is consistent with existing 'bookmark' case (lines 698-761).

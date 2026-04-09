@@ -1,0 +1,36 @@
+Type: file-artifact
+Description: Context menu registration function
+Expected: Function to register "Save to Distillery" context menu item on install
+Timestamp: 2026-04-01T00:00:00Z
+Status: PASS
+
+File: browser-extension/src/background.js
+Lines: 303-314
+
+/**
+ * Register the context menu item on installation.
+ *
+ * Creates a "Save to Distillery" context menu that appears on any page.
+ */
+function registerContextMenu() {
+  chrome.contextMenus.create({
+    id: 'save-to-distillery',
+    title: 'Save to Distillery',
+    contexts: ['page'],
+  });
+}
+
+---
+
+Proof Details:
+- Function registered in background.js module
+- Creates context menu with ID "save-to-distillery"
+- Title: "Save to Distillery"
+- Contexts: ["page"] - appears on all pages
+- Called during chrome.runtime.onInstalled lifecycle event
+- Called on both install and update to ensure menu exists
+
+Validation:
+- Syntax check passed: node -c background.js
+- Function is properly exported and available to listeners
+- Follows existing code patterns for chrome API usage

@@ -1,0 +1,44 @@
+Type: file
+Description: Verify popup.html structure and elements
+Expected: HTML file with header, tab bar, and status content area
+Timestamp: 2026-04-01T23:20:00Z
+File: browser-extension/src/popup.html
+
+STRUCTURE VERIFICATION:
+======================
+
+Required Elements Present:
+✓ DOCTYPE and html lang="en"
+✓ head with charset and viewport meta
+✓ title element: "Distillery"
+✓ link to popup.css
+✓ body with popup-container
+
+Header Section:
+✓ class="popup-header"
+✓ Connection status indicator (span#status-indicator)
+✓ Status label (span#status-label)
+✓ Server type indicator (span#server-type)
+✓ Settings button (button#settings-btn with ⚙ icon)
+
+Tab Navigation:
+✓ nav.tab-bar with 3 buttons
+✓ Status tab (data-tab="status")
+✓ Bookmark tab (data-tab="bookmark")
+✓ Watch tab (data-tab="watch")
+
+Content Areas:
+✓ div#status-tab (active by default)
+✓ div#bookmark-tab (hidden, for T02)
+✓ div#watch-tab (hidden, for T04)
+✓ Status message area (p#status-message)
+✓ Offline queue section (div#offline-queue)
+
+Script:
+✓ popup.js referenced at end of body
+
+File Size: 2041 bytes
+Line Count: 56 lines
+
+Status: PASS
+All required HTML elements present and properly structured

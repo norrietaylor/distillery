@@ -1,0 +1,25 @@
+Type: file-snapshot
+Description: manifest.json host_permissions AFTER fix
+File: browser-extension/manifest.json
+Timestamp: 2026-04-02T00:07:00Z
+
+AFTER FIX (lines 19-23):
+  "host_permissions": [
+    "http://localhost:*/*",
+    "https://distillery-mcp.fly.dev/*",
+    "https://api.github.com/*"
+  ],
+
+FIXES APPLIED:
+1. Changed "http://localhost:*/" to "http://localhost:*/*"
+   - Now matches all paths under localhost (including /mcp endpoint)
+   - MCP client requests to localhost:3000/mcp or similar will now work
+
+2. Added "https://api.github.com/*"
+   - Allows auth.js to call fetch(https://api.github.com/user) without CORS blockage
+   - Required for _fetchUsername() to resolve GitHub username after OAuth
+
+COMPLIANCE:
+✓ Matches spec requirement for host_permissions in issue #25
+✓ Both APIs now explicitly listed
+✓ No CORS errors expected for either endpoint

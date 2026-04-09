@@ -1,0 +1,43 @@
+{
+  "manifest_version": 3,
+  "name": "Distillery",
+  "version": "0.1.0",
+  "description": "Save pages and subscribe to feeds directly into your Distillery knowledge base",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "permissions": [
+    "storage",
+    "activeTab",
+    "contextMenus",
+    "identity",
+    "notifications",
+    "alarms"
+  ],
+  "host_permissions": [
+    "http://localhost:*/*",
+    "https://distillery-mcp.fly.dev/*",
+    "https://api.github.com/*"
+  ],
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["vendor/readability.js", "src/content.js"],
+      "run_at": "document_end"
+    }
+  ],
+  "action": {
+    "default_popup": "src/popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "options_page": "src/options.html"
+}

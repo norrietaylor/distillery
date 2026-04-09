@@ -1,0 +1,73 @@
+Type: test
+Description: Verify popup.js implements required functionality
+Expected: Script exports update functions and initializes on DOM load
+Timestamp: 2026-04-01T23:20:00Z
+File: browser-extension/src/popup.js
+
+FUNCTIONALITY VERIFICATION:
+============================
+
+Syntax Check:
+✓ node --check passed
+✓ No syntax errors
+
+Core Functions Present:
+✓ updateConnectionStatus(connectionState)
+  - Updates status indicator (connected/disconnected)
+  - Updates status label ("Connected" or "Disconnected")
+  - Updates server type ("local" or "remote")
+  - Updates status message
+  - Displays username if available
+  - Updates offline queue display
+
+✓ updateOfflineQueueDisplay(connectionState)
+  - Checks queuedOperations count
+  - Shows/hides queue indicator
+  - Updates queue count display
+
+✓ initializePopup()
+  - Sends "getConnectionStatus" message to background worker
+  - Calls updateConnectionStatus with response
+  - Handles errors gracefully with fallback state
+
+✓ setupTabNavigation()
+  - Attaches click handlers to all .tab-btn elements
+  - Manages active class toggling
+  - Shows/hides tab panels on click
+
+✓ setupSettingsButton()
+  - Attaches click handler to settings button
+  - Opens options page via chrome.runtime.openOptionsPage()
+
+✓ setupAutoRefresh()
+  - Calls initializePopup on startup
+  - Sets up 5-second refresh interval
+  - Listens for connectionStatusChanged messages from background worker
+
+✓ DOMContentLoaded event listener
+  - Calls setupTabNavigation()
+  - Calls setupSettingsButton()
+  - Calls setupAutoRefresh()
+
+Features Implemented:
+✓ Connection status indicator update
+✓ Server type display (local/remote)
+✓ Username display for authenticated sessions
+✓ Offline queue indicator
+✓ Tab switching between Status/Bookmark/Watch
+✓ Settings button navigation
+✓ Auto-refresh every 5 seconds
+✓ Message listener for connection status changes
+
+Integration Points:
+✓ Uses chrome.runtime.sendMessage() for background communication
+✓ Uses chrome.runtime.openOptionsPage() for settings
+✓ Uses chrome.runtime.onMessage.addListener() for background notifications
+✓ Compatible with T01.4 background worker interface
+
+File Size: 5129 bytes
+Line Count: 161 lines
+Functions: 6
+
+Status: PASS
+All required functionality implemented and syntactically valid

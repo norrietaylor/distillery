@@ -1,0 +1,22 @@
+Type: file
+Command: node -e "..." (validate file exists and exports)
+Expected: mcp-client.js exists with initialize(), callTool(), disconnect(), setAuthToken(), isConnected()
+Timestamp: 2026-04-01T23:30:00Z
+
+--- Validation ---
+
+File exists:
+-rw-rw-r-- 1 norrie norrie 9556 Apr  1 23:19 browser-extension/src/mcp-client.js
+
+Exported methods (grep for method names):
+54: *   client.disconnect();
+82:  async initialize(serverUrl) {
+124:  async callTool(toolName, args) {
+141:  disconnect() {
+154:  setAuthToken(token) {
+163:  isConnected() {
+
+Syntax check:
+PASS: Valid JavaScript syntax
+
+Status: PASS

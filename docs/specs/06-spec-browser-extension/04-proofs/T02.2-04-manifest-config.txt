@@ -1,0 +1,16 @@
+Type: file
+Description: Verify manifest.json declares content.js as a content script after vendor/readability.js
+Expected: manifest.json content_scripts includes ["vendor/readability.js", "src/content.js"]
+Timestamp: 2026-04-01T00:00:00Z
+
+Command: grep -n "vendor/readability.js.*src/content.js\|src/content.js" browser-extension/manifest.json
+
+Output:
+27:      "js": ["vendor/readability.js", "src/content.js"],
+
+Explanation:
+- vendor/readability.js is loaded first, making Readability available globally
+- src/content.js is loaded second and can use Readability
+- run_at: "document_end" ensures DOM is ready when content.js executes
+
+Status: PASS

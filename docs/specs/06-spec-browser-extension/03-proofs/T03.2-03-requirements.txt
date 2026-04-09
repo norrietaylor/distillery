@@ -1,0 +1,64 @@
+Type: file
+Description: Requirements coverage review for T03.2
+Timestamp: 2026-04-01T00:00:00Z
+
+=== REQUIREMENTS vs IMPLEMENTATION ===
+
+Popup changes:
+  REQ: Header shows GitHub username when authenticated on remote server
+  IMPL: updateAuthUI() shows authUsername element with connectionState.username when connected+remote+username
+  STATUS: PASS
+
+  REQ: "Sign in with GitHub" button shown when remote + unauthenticated
+  IMPL: signin-btn shown when serverType='remote' and no username (both connected and disconnected from remote)
+  STATUS: PASS
+
+  REQ: "Sign out" button shown when authenticated
+  IMPL: auth-user div (with signout-btn) shown when serverType='remote' and username present
+  STATUS: PASS
+
+  REQ: Sign in triggers OAuth flow via background message
+  IMPL: setupSignInButton sends {action:'startOAuth'} to background, shows 'Signing in...' while pending
+  STATUS: PASS
+
+  REQ: Sign out calls clearAuth and refreshes connection state
+  IMPL: setupSignOutButton sends {action:'signOut'} to background; background calls clearAuth() then connect()
+  STATUS: PASS
+
+  REQ: Local connections: no auth UI, show configured author name instead
+  IMPL: updateAuthUI hides auth-section for local, shows local-author div with defaultAuthor from storage
+  STATUS: PASS
+
+MCP client changes:
+  REQ: background.js: after OAuth success, call mcpClient.setAuthToken(token)
+  IMPL: startOAuth handler calls mcpClient.setAuthToken(token) after startOAuthFlow succeeds
+  STATUS: PASS
+
+  REQ: On 401 response from MCP: clear stored token, update popup to show sign-in prompt
+  IMPL: Existing handleAuthError() clears token; popup updateAuthUI now shows sign-in btn when disconnected+remote
+  STATUS: PASS
+
+  REQ: Options page: add GitHub OAuth client ID field (already created in T01.3, just wire it)
+  IMPL: githubClientId field exists in options.html; loaded/saved in options.js; loaded in background.js loadOptions
+  STATUS: PASS
+
+Background changes:
+  REQ: Handle "startOAuth" message from popup
+  IMPL: case 'startOAuth' in onMessage handler — loads options, calls startOAuthFlow(clientId, serverUrl)
+  STATUS: PASS
+
+  REQ: Handle "signOut" message from popup
+  IMPL: case 'signOut' in onMessage handler — calls clearAuth(), then connect()
+  STATUS: PASS
+
+  REQ: On 401 from any MCP call, trigger re-auth flow
+  IMPL: Existing handleAuthError() handles 401; combined with popup showing sign-in button when disconnected from remote
+  STATUS: PASS
+
+  REQ: importScripts('auth.js') in background.js
+  IMPL: importScripts('auth.js') added alongside mcp-client.js and offline-queue.js
+  STATUS: PASS
+
+=== SUMMARY ===
+All 12 requirements: PASS
+Status: PASS

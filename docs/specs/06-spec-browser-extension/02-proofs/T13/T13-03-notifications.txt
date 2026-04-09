@@ -1,0 +1,42 @@
+Type: file-artifact
+Description: Success and error notification functions
+Expected: Functions to display badge with text and color, show desktop notification, auto-clear success badge
+Timestamp: 2026-04-01T00:00:00Z
+Status: PASS
+
+File: browser-extension/src/background.js
+Lines: 440-492
+
+Success Notification (showContextMenuSuccess):
+- Sets badge text to "✓"
+- Sets badge background color to green (#10B981)
+- Shows desktop notification:
+  - Title: "Saved to Distillery"
+  - Message: "Page has been saved to your Distillery knowledge base."
+  - Icon: icons/icon-128.png
+- Clears badge text after 2000ms (2 seconds)
+- Non-fatal exception handling for notifications API
+
+Error Notification (showContextMenuError):
+- Sets badge text to "!"
+- Sets badge background color to red (#EF4444)
+- Shows desktop notification:
+  - Title: "Failed to Save"
+  - Message: "Could not save page to Distillery. Check your connection and try again."
+  - Icon: icons/icon-128.png
+- No auto-clear; user must take action
+- Non-fatal exception handling for notifications API
+
+Implementation Details:
+- Uses chrome.action.setBadgeText() and chrome.action.setBadgeBackgroundColor()
+- Uses chrome.notifications.create() with type 'basic'
+- setTimeout() used for 2-second auto-clear of success badge
+- Notifications wrapped in try/catch for graceful degradation
+- Both functions follow same pattern as existing badge updates in code
+
+Validation:
+- Syntax check passed
+- Colors match requirements (green for success, red for error)
+- 2-second timer verified for success badge
+- Desktop notifications properly configured
+- Non-fatal error handling prevents crashes

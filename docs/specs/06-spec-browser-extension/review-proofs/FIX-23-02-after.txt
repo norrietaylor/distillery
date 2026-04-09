@@ -1,0 +1,27 @@
+Type: file
+Description: After - fixed probeLocal() with fetch always restored via finally block
+Timestamp: 2026-04-01T00:00:00Z
+
+AFTER (lines 118-131 of background.js):
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (url, init = {}) =>
+    originalFetch(url, { ...init, signal: controller.signal });
+
+  try {
+    await probe.initialize(localUrl);
+    return true;
+  } catch (_err) {
+    return false;
+  } finally {
+    // Always restore the original fetch, whether the probe succeeded or failed.
+    globalThis.fetch = originalFetch;
+    clearTimeout(timeoutId);
+  }
+
+FIX: Moved originalFetch declaration and the monkey-patch to before the try block,
+so both the catch and finally blocks can access originalFetch. Moved the restore
+and clearTimeout into a finally block to guarantee they execute on both the success
+and failure paths.
+
+Status: PASS (fix verified via code inspection)
