@@ -53,6 +53,7 @@ _AGGREGATE_EXPR_MAP: dict[str, str] = {
     "author": "author",
     "project": "project",
     "source": "source",
+    "tags": "UNNEST(tags)",
     "metadata.source_url": "json_extract_string(metadata, '$.source_url')",
     "metadata.source_type": "json_extract_string(metadata, '$.source_type')",
 }
@@ -1264,23 +1265,54 @@ class DuckDBStore:
         filters: dict[str, Any] | None,
         limit: int,
         offset: int,
-    ) -> list[Entry]:
+        *,
+        stale_days: int | None = None,
+        group_by: str | None = None,
+        output: str | None = None,
+    ) -> list[Entry] | dict[str, Any]:
         """
         Retrieve entries matching optional filters, ordered by created_at descending.
 
+        When *group_by* is set, delegates to :meth:`aggregate_entries` and
+        returns grouped counts.  When *output="stats"*, returns aggregate
+        statistics.  Otherwise returns a paginated list of :class:`Entry`
+        objects.
+
         Parameters:
-            filters (dict[str, Any] | None): Filter criteria accepted by the store (see `_build_filter_clauses`). If None, no filtering is applied.
-            limit (int): Maximum number of entries to return.
-            offset (int): Number of entries to skip before returning results.
-
-        Returns:
-            list[Entry]: Entries matching the filters for the requested page, ordered newest first.
+            filters: Filter criteria accepted by the store (see
+                ``_build_filter_clauses``).  ``None`` means no filtering.
+            limit: Maximum number of entries (or groups) to return.
+            offset: Number of entries to skip before returning results
+                (ignored in group_by / stats modes).
+            stale_days: Restrict to entries whose last access
+                (``COALESCE(accessed_at, updated_at)``) is older than N days.
+            group_by: Return grouped counts instead of entries.
+            output: ``"stats"`` for aggregate statistics.
         """
+        # ----- group_by mode: delegate to aggregate_entries -----
+        if group_by is not None:
+            return await self.aggregate_entries(
+                group_by=group_by,
+                filters=filters,
+                limit=limit,
+            )
 
+        # ----- stats mode -----
+        if output == "stats":
+            return await self._get_entry_stats(filters, stale_days=stale_days)
+
+        # ----- default list mode -----
         def _sync() -> list[Entry]:
             conn = self.connection
 
             where_clauses, params = self._build_filter_clauses(filters)
+
+            if stale_days is not None:
+                where_clauses.append(
+                    "COALESCE(accessed_at, updated_at) < NOW() - INTERVAL (CAST(? AS INT)) DAYS"
+                )
+                params.append(stale_days)
+
             where_sql = ""
             if where_clauses:
                 where_sql = "WHERE " + " AND ".join(where_clauses)
@@ -1298,6 +1330,80 @@ class DuckDBStore:
 
             rows = result.fetchall()
             return [self._row_to_entry(row, col_names) for row in rows]
+
+        return await asyncio.to_thread(_sync)
+
+    async def _get_entry_stats(
+        self,
+        filters: dict[str, Any] | None,
+        *,
+        stale_days: int | None = None,
+    ) -> dict[str, Any]:
+        """Return aggregate statistics for entries matching *filters*.
+
+        Returns a dict with ``entries_by_type``, ``entries_by_status``,
+        ``total_entries``, and ``storage_bytes``.
+        """
+
+        def _sync() -> dict[str, Any]:
+            conn = self.connection
+
+            where_clauses, params = self._build_filter_clauses(filters)
+
+            if stale_days is not None:
+                where_clauses.append(
+                    "COALESCE(accessed_at, updated_at) < NOW() - INTERVAL (CAST(? AS INT)) DAYS"
+                )
+                params.append(stale_days)
+
+            where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+            # Total count
+            total_row = conn.execute(
+                f"SELECT COUNT(*) FROM entries {where_sql}", list(params)
+            ).fetchone()
+            total_entries = int(total_row[0]) if total_row else 0
+
+            # Entries by type
+            type_rows = conn.execute(
+                f"SELECT entry_type, COUNT(*) AS cnt FROM entries {where_sql} "
+                f"GROUP BY entry_type ORDER BY cnt DESC",
+                list(params),
+            ).fetchall()
+            entries_by_type = {str(row[0]): int(row[1]) for row in type_rows}
+
+            # Entries by status
+            status_rows = conn.execute(
+                f"SELECT status, COUNT(*) AS cnt FROM entries {where_sql} "
+                f"GROUP BY status ORDER BY cnt DESC",
+                list(params),
+            ).fetchall()
+            entries_by_status = {str(row[0]): int(row[1]) for row in status_rows}
+
+            # Storage bytes via PRAGMA database_size
+            try:
+                size_row = conn.execute("PRAGMA database_size").fetchone()
+                # PRAGMA database_size returns columns including database_size
+                # which is a human-readable string.  For in-memory DBs the
+                # bytes column (index 4) gives the raw value.
+                if size_row:
+                    # DuckDB returns (database_name, database_size, block_size,
+                    # total_blocks, used_blocks, free_blocks, wal_size, ...)
+                    # total_blocks * block_size gives total allocated bytes.
+                    block_size = int(size_row[2]) if size_row[2] else 0
+                    total_blocks = int(size_row[3]) if size_row[3] else 0
+                    storage_bytes = block_size * total_blocks
+                else:
+                    storage_bytes = 0
+            except Exception:  # noqa: BLE001
+                storage_bytes = 0
+
+            return {
+                "entries_by_type": entries_by_type,
+                "entries_by_status": entries_by_status,
+                "total_entries": total_entries,
+                "storage_bytes": storage_bytes,
+            }
 
         return await asyncio.to_thread(_sync)
 
