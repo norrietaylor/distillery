@@ -16,7 +16,7 @@ GitHub Release (tag: vX.Y.Z)
   │   └─ Publish to Smithery
   └─ changelog.yml
       ├─ Generate CHANGELOG.md via git-cliff
-      └─ Commit to main
+      └─ Open PR to main (branch protection prevents direct push)
 ```
 
 Users install the server via `pip install distillery-mcp` or `uvx distillery-mcp`, both pulling from PyPI.
@@ -128,7 +128,7 @@ This triggers pypi-publish.yml and changelog.yml automatically.
 1. **PyPI**: Check https://pypi.org/project/distillery-mcp/ for the new version
 2. **Install**: `pip install distillery-mcp==X.Y.Z` or `uvx distillery-mcp --version`
 3. **MCP Registry**: Verify the server listing is updated
-4. **Changelog**: Check that CHANGELOG.md was auto-committed to main
+4. **Changelog**: Merge the auto-generated changelog PR (created by changelog.yml)
 
 ## Deploying the Hosted Server
 
