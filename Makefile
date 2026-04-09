@@ -6,7 +6,7 @@ PYTEST ?= $(shell command -v pytest 2>/dev/null || echo .venv/bin/pytest)
 RUFF   ?= $(shell command -v ruff 2>/dev/null || echo .venv/bin/ruff)
 MYPY   ?= $(shell command -v mypy 2>/dev/null || echo .venv/bin/mypy)
 
-.PHONY: install test test-unit test-integration test-cov lint format typecheck check ci clean docs-serve docs-build
+.PHONY: install test test-unit test-integration test-cov lint format typecheck check ci clean docs-serve docs-build dashboard
 
 ## Install in editable mode with dev dependencies
 install:
@@ -53,6 +53,10 @@ docs-serve:
 ## Build documentation (strict mode)
 docs-build:
 	mkdocs build --strict
+
+## Build the Svelte dashboard (produces dashboard/dist/)
+dashboard:
+	cd dashboard && npm install && npm run build
 
 ## Remove build artifacts
 clean:

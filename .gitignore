@@ -70,6 +70,10 @@ docs/specs/**/*-proofs/
 docs/specs/**/*-validation-*.md
 site/
 
+# Dashboard build output
+dashboard/dist/
+dashboard/node_modules/
+
 # Working demo files (committed versions live in docs/assets/)
 *.cast
 *.gif
