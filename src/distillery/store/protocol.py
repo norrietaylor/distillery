@@ -123,6 +123,7 @@ class DistilleryStore(Protocol):
             - ``project`` (str)
             - ``tags`` (list[str]) -- matches entries containing *any* tag
             - ``status`` (str)
+            - ``verification`` (str) -- one of ``"unverified"``, ``"testing"``, ``"verified"``
             - ``date_from`` (datetime | str) -- inclusive lower bound on ``created_at``
             - ``date_to`` (datetime | str) -- inclusive upper bound on ``created_at``
 

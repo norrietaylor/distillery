@@ -15,7 +15,6 @@ pytestmark = pytest.mark.unit
 class TestVerificationDefault:
     """Entries stored without an explicit verification get UNVERIFIED."""
 
-    @pytest.mark.asyncio
     async def test_store_default_verification(self, store):
         entry = make_entry(content="default verification entry")
         entry_id = await store.store(entry)
@@ -28,7 +27,6 @@ class TestVerificationDefault:
 class TestVerificationExplicit:
     """Entries can be stored with an explicit verification value."""
 
-    @pytest.mark.asyncio
     async def test_store_with_testing(self, store):
         entry = make_entry(
             content="testing verification entry",
@@ -39,7 +37,6 @@ class TestVerificationExplicit:
         assert fetched is not None
         assert fetched.verification == VerificationStatus.TESTING
 
-    @pytest.mark.asyncio
     async def test_store_with_verified(self, store):
         entry = make_entry(
             content="verified entry",
@@ -54,7 +51,6 @@ class TestVerificationExplicit:
 class TestVerificationUpdate:
     """Verification can be updated independently of status."""
 
-    @pytest.mark.asyncio
     async def test_update_verification(self, store):
         entry = make_entry(content="entry to verify later")
         entry_id = await store.store(entry)
@@ -65,7 +61,6 @@ class TestVerificationUpdate:
         # Status should be unchanged.
         assert updated.status == EntryStatus.ACTIVE
 
-    @pytest.mark.asyncio
     async def test_update_status_preserves_verification(self, store):
         entry = make_entry(
             content="verified then archived",
@@ -81,7 +76,6 @@ class TestVerificationUpdate:
 class TestVerificationFilter:
     """Entries can be filtered by verification status via list_entries."""
 
-    @pytest.mark.asyncio
     async def test_filter_by_verification(self, store):
         e1 = make_entry(content="unverified one")
         e2 = make_entry(content="verified one", verification=VerificationStatus.VERIFIED)
@@ -136,10 +130,9 @@ class TestVerificationValidation:
     """Invalid verification values are rejected."""
 
     def test_invalid_enum_value(self):
-        with pytest.raises(ValueError, match="'bogus' is not a valid VerificationStatus"):
+        with pytest.raises(ValueError, match="is not a valid VerificationStatus"):
             VerificationStatus("bogus")
 
-    @pytest.mark.asyncio
     async def test_crud_rejects_invalid_verification(self, store):
         from distillery.mcp.tools.crud import _handle_store
 
@@ -156,7 +149,6 @@ class TestVerificationValidation:
         assert parsed.get("code") == "INVALID_PARAMS"
         assert "verification" in parsed.get("message", "").lower()
 
-    @pytest.mark.asyncio
     async def test_crud_update_rejects_invalid_verification(self, store):
         from distillery.mcp.tools.crud import _handle_update
 
