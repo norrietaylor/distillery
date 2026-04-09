@@ -317,6 +317,21 @@ Search results must include: entry ID, `[type]` badge, author, created date, sim
 
 Format: `ID: <uuid> | Author: <name> | Project: <project> | <date>`
 
+## Corrections
+
+When a user disputes or corrects information in a retrieved entry — "that's wrong", "actually it's X", "this is outdated" — use `distillery_correct(wrong_entry_id, content)` instead of `distillery_update`. Update edits in place; correct creates an audit trail.
+
+**When to correct (not update):**
+- The entry's factual content is wrong ("the API uses OAuth" → actually it uses API keys)
+- Information has become false since it was stored ("we use Postgres" → migrated to DuckDB)
+- The user explicitly says an entry is incorrect
+
+**When to update (not correct):**
+- Adding tags, changing status, fixing typos, appending notes
+- The original content isn't wrong, just incomplete
+
+**Flow:** Compose the full corrected text (not a diff), call `distillery_correct` with the wrong entry's ID. The tool inherits entry_type, author, project, and tags from the original — only override these if they also changed. The original is archived automatically; the correction links to it via a `corrects` relation.
+
 ## Consistency Rules
 
 1. Errors first — report and stop before proceeding
@@ -352,5 +367,5 @@ The `distillery-researcher` agent (`.claude/agents/distillery-researcher.md`) is
 
 ---
 
-**Document Version:** 2.3
-**Last Updated:** 2026-04-07
+**Document Version:** 2.4
+**Last Updated:** 2026-04-08

@@ -1865,6 +1865,104 @@ class DuckDBStore:
         """
         return await asyncio.to_thread(self._sync_add_relation, from_id, to_id, relation_type)
 
+    def _sync_apply_correction(
+        self,
+        new_entry: Entry,
+        wrong_entry_id: str,
+    ) -> str:
+        """Store a correction entry, link it to the original, and archive the original.
+
+        All three mutations (INSERT new entry, INSERT relation, UPDATE original
+        status) run inside a single transaction so the write set is atomic.
+
+        Args:
+            new_entry: The fully constructed correction ``Entry``.
+            wrong_entry_id: UUID of the original entry being corrected.
+
+        Returns:
+            The UUID string of the newly stored correction entry.
+
+        Raises:
+            RuntimeError: If any step fails; the transaction is rolled back.
+        """
+        conn = self.connection
+        embedding = self._embedding_provider.embed(new_entry.content)
+
+        try:
+            conn.execute("BEGIN TRANSACTION")
+
+            # 1. Store the correction entry.
+            insert_sql = (
+                "INSERT INTO entries "
+                "(id, content, entry_type, source, author, project, tags, status, "
+                " verification, metadata, created_at, updated_at, version, embedding, "
+                " created_by, last_modified_by, expires_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            )
+            conn.execute(insert_sql, [
+                new_entry.id,
+                new_entry.content,
+                new_entry.entry_type.value,
+                new_entry.source.value,
+                new_entry.author,
+                new_entry.project,
+                list(new_entry.tags),
+                new_entry.status.value,
+                new_entry.verification.value,
+                json.dumps(new_entry.metadata),
+                new_entry.created_at,
+                new_entry.updated_at,
+                new_entry.version,
+                embedding,
+                new_entry.created_by,
+                new_entry.last_modified_by,
+                new_entry.expires_at,
+            ])
+
+            # 2. Create the "corrects" relation.
+            relation_id = str(uuid.uuid4())
+            conn.execute(
+                "INSERT INTO entry_relations (id, from_id, to_id, relation_type) "
+                "VALUES (?, ?, ?, ?)",
+                [relation_id, new_entry.id, wrong_entry_id, "corrects"],
+            )
+
+            # 3. Archive the original entry.
+            now = datetime.now(tz=UTC)
+            conn.execute(
+                "UPDATE entries SET status = ?, updated_at = ?, version = version + 1 "
+                "WHERE id = ?",
+                ["archived", now, wrong_entry_id],
+            )
+
+            conn.execute("COMMIT")
+        except Exception:
+            with contextlib.suppress(Exception):
+                conn.execute("ROLLBACK")
+            raise
+
+        # Rebuild FTS index outside the transaction (non-critical).
+        self._rebuild_fts_index(conn)
+        logger.debug(
+            "Applied correction: new=%s original=%s (archived)",
+            new_entry.id,
+            wrong_entry_id,
+        )
+        return new_entry.id
+
+    async def apply_correction(
+        self,
+        new_entry: Entry,
+        wrong_entry_id: str,
+    ) -> str:
+        """Atomically store a correction, link it, and archive the original.
+
+        See :meth:`_sync_apply_correction` for details.
+        """
+        return await asyncio.to_thread(
+            self._sync_apply_correction, new_entry, wrong_entry_id
+        )
+
     def _sync_get_related(
         self,
         entry_id: str,
