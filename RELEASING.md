@@ -31,15 +31,17 @@ Users install the server via `pip install distillery-mcp` or `uvx distillery-mcp
    | `src/distillery/__init__.py` | `__version__` | Reported by `distillery_metrics` |
    | `.claude-plugin/plugin.json` | `version`, SessionStart echo string | Plugin manifest |
    | `.claude-plugin/marketplace.json` | `plugins[0].version` | Marketplace listing |
+   | `server.json` | `version`, `packages[*].version` | MCP Registry listing |
    | `uv.lock` | auto-updated | Run `uv lock` after editing `pyproject.toml` |
    | `CHANGELOG.md` | `[Unreleased]` comparison link | Update base tag in footer links |
 
    ```bash
    # 1. Edit pyproject.toml and src/distillery/__init__.py
    # 2. Edit .claude-plugin/plugin.json and marketplace.json
-   # 3. Regenerate lockfile
+   # 3. Edit server.json (version + packages[*].version)
+   # 4. Regenerate lockfile
    uv lock
-   # 4. Update CHANGELOG.md comparison links (done automatically on release by changelog.yml)
+   # 5. Update CHANGELOG.md comparison links (done automatically on release by changelog.yml)
    ```
 
 2. **Merge all PRs** — Ensure all feature branches for this release are merged to `main`.

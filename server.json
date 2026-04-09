@@ -1,9 +1,9 @@
 {
-  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-11-25/server.schema.json",
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.norrietaylor/distillery-mcp",
   "title": "Distillery",
-  "description": "A configurable embedding system with DuckDB storage and MCP server integration",
-  "version": "0.1.1",
+  "description": "Knowledge base system for Claude Code with semantic search, feed intelligence, and team collaboration",
+  "version": "0.3.0",
   "repository": {
     "url": "https://github.com/norrietaylor/distillery",
     "source": "github",
@@ -13,7 +13,7 @@
     {
       "registryType": "pypi",
       "identifier": "distillery-mcp",
-      "version": "0.1.1",
+      "version": "0.3.0",
       "transport": {
         "type": "stdio"
       },
@@ -35,9 +35,10 @@
     {
       "registryType": "pypi",
       "identifier": "distillery-mcp",
-      "version": "0.1.1",
+      "version": "0.3.0",
       "transport": {
-        "type": "streamable-http"
+        "type": "streamable-http",
+        "url": "https://distillery-mcp.fly.dev/mcp"
       },
       "environmentVariables": [
         {
