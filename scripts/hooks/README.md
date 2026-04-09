@@ -22,7 +22,10 @@ manage multiple hook entries.
 - Distillery MCP server running with **HTTP transport** (`distillery-mcp --transport http`)
   (required only for the `SessionStart` briefing; the `UserPromptSubmit` nudge works offline)
 - `curl` available on the system PATH (for `SessionStart` briefing)
-- `flock` available on the system PATH (for atomic counter — standard on Linux; on macOS install via `brew install util-linux` or use an alternative such as `lockf` or coreutils)
+- `flock` available on the system PATH (for atomic counter — **hard runtime requirement** unless the script is patched):
+  - **Linux**: typically included with util-linux (already present on most distributions)
+  - **macOS**: install via `brew install util-linux` and ensure the `flock` binary is on your PATH
+  - **Alternative**: manually patch `scripts/hooks/distillery-hooks.sh` to replace the `flock -x 200` invocation (line 54) with a wrapper for `lockf` or coreutils equivalents — note that semantics may differ (exclusive vs. shared locks, timeout behavior)
 - Claude Code with hook support (`~/.claude/settings.json`)
 
 > **Note:** The SessionStart handler targets the HTTP MCP transport, not stdio.
