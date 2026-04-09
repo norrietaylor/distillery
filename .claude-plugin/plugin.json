@@ -37,14 +37,24 @@
   "hooks": {
     "SessionStart": [
       {
-        "type": "command",
-        "command": "echo '[Distillery v0.3.2] Knowledge base available. Skills: /recall (search), /pour (synthesize), /distill (capture), /classify (review queue), /radar (feed digest).'"
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '[Distillery v0.3.2] Knowledge base available. Skills: /recall (search), /pour (synthesize), /distill (capture), /classify (review queue), /radar (feed digest).'"
+          }
+        ]
       }
     ],
     "Stop": [
       {
-        "type": "command",
-        "command": "echo '[Distillery] If this response produced decisions or insights, run /distill to capture them. If it surfaced interesting URLs, use /watch to add as a feed source or /bookmark to save as an entry.'"
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '[Distillery] If this response produced decisions or insights, run /distill to capture them. If it surfaced interesting URLs, use /watch to add as a feed source or /bookmark to save as an entry.'"
+          }
+        ]
       }
     ]
   }
