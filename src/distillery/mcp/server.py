@@ -63,6 +63,8 @@ from distillery.mcp.tools.search import (
 
 logger = logging.getLogger(__name__)
 
+_UNSET: Any = object()
+
 # Explicit re-exports for mypy --strict (no_implicit_reexport).
 __all__ = [
     "create_server",
@@ -266,12 +268,14 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         dedup_threshold: float | None = None,
         dedup_limit: int | None = None,
         verification: str | None = None,
+        expires_at: str | None = _UNSET,
     ) -> list[types.TextContent]:
         """Store a new knowledge entry and return its ID with dedup/conflict information.
 
         entry_type must be one of: session, bookmark, minutes, meeting, reference,
         idea, inbox. dedup_threshold (0–1) controls near-duplicate warnings.
         verification: unverified, testing, or verified (default: unverified).
+        expires_at accepts ISO 8601 datetime; entries past expiry appear in stale results.
         """
         c = _lc(ctx)
         user = _get_authenticated_user()
@@ -288,6 +292,8 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 verification=verification,
             ),
         )
+        if expires_at is not _UNSET:
+            args["expires_at"] = expires_at
         result = await _handle_store(
             store=c["store"], arguments=args, cfg=c["config"], created_by=user
         )
@@ -315,12 +321,14 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         status: str | None = None,
         verification: str | None = None,
         metadata: dict[str, Any] | None = None,
+        expires_at: str | None = _UNSET,
     ) -> list[types.TextContent]:
         """Update one or more fields on an existing knowledge entry.
 
-        At least one field must be provided. status: active, pending_review, or archived.
-        entry_type: session, bookmark, minutes, meeting, reference, idea, or inbox.
-        verification: unverified, testing, or verified.
+        At least one field must be provided. status: active, pending_review, or
+        archived. entry_type: session, bookmark, minutes, meeting, reference,
+        idea, or inbox. verification: unverified, testing, or verified.
+        expires_at accepts ISO 8601 datetime; pass null to clear.
         """
         c = _lc(ctx)
         user = _get_authenticated_user()
@@ -340,6 +348,8 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 metadata=metadata,
             ),
         )
+        if expires_at is not _UNSET:
+            args["expires_at"] = expires_at
         result = await _handle_update(store=c["store"], arguments=args, last_modified_by=user)
         await _audit(c, user, "distillery_update", entry_id, "update", result)
         return result

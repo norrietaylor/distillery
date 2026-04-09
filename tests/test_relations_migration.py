@@ -205,12 +205,13 @@ def test_migration_8_backfill_ignores_non_string_related_entries() -> None:
 
 @pytest.mark.unit
 def test_migration_8_runs_in_full_sequence() -> None:
-    """run_pending_migrations from zero produces schema_version=8 with entry_relations table."""
+    """run_pending_migrations from zero produces terminal schema version with entry_relations."""
+    expected = max(MIGRATIONS)
     conn = duckdb.connect(":memory:")
     try:
         version = run_pending_migrations(conn, dimensions=_DIMENSIONS, vss_available=False)
 
-        assert version == 8, f"Expected schema version 8, got {version}"
+        assert version == expected, f"Expected schema version {expected}, got {version}"
 
         tables = {
             row[0]
@@ -228,10 +229,11 @@ def test_migration_8_idempotent() -> None:
     """Running all migrations twice leaves entry_relations intact with no errors."""
     conn = duckdb.connect(":memory:")
     try:
+        expected = max(MIGRATIONS)
         first = run_pending_migrations(conn, dimensions=_DIMENSIONS, vss_available=False)
         second = run_pending_migrations(conn, dimensions=_DIMENSIONS, vss_available=False)
 
-        assert first == second == 8
+        assert first == second == expected
         tables = {
             row[0]
             for row in conn.execute(
@@ -245,14 +247,15 @@ def test_migration_8_idempotent() -> None:
 
 @pytest.mark.unit
 def test_migration_8_partial_from_7() -> None:
-    """Starting from schema_version=7 applies only migration 8."""
+    """Starting from schema_version=7 applies remaining migrations."""
+    expected = max(MIGRATIONS)
     conn = duckdb.connect(":memory:")
     try:
         _setup_db_through_migration_7(conn)
 
         version = run_pending_migrations(conn, dimensions=_DIMENSIONS, vss_available=False)
 
-        assert version == 8
+        assert version == expected
         tables = {
             row[0]
             for row in conn.execute(

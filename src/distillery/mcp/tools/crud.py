@@ -71,6 +71,33 @@ _VALID_STATUSES = {"active", "pending_review", "archived"}
 # Valid verification values (mirrors VerificationStatus enum).
 _VALID_VERIFICATIONS = {"unverified", "testing", "verified"}
 
+
+def _parse_iso8601_utc(
+    raw: Any,
+    field_name: str = "expires_at",
+) -> datetime | list[types.TextContent]:
+    """Parse an ISO 8601 string and normalise to UTC.
+
+    Returns a UTC ``datetime`` on success, or an ``error_response`` list on
+    failure (caller should return it directly).
+    """
+    if not isinstance(raw, str):
+        return error_response("INVALID_PARAMS", f"Field '{field_name}' must be an ISO 8601 string")
+    if "T" not in raw and " " not in raw:
+        return error_response(
+            "INVALID_PARAMS",
+            f"Field '{field_name}' must include date and time (ISO 8601 datetime)",
+        )
+    try:
+        dt = datetime.fromisoformat(raw)
+        return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
+    except (ValueError, TypeError):
+        return error_response(
+            "INVALID_PARAMS",
+            f"Field '{field_name}' must be a valid ISO 8601 datetime string",
+        )
+
+
 # Fields that callers may never overwrite via distillery_update.
 _IMMUTABLE_FIELDS = {"id", "created_at", "source"}
 
@@ -192,6 +219,15 @@ async def _handle_store(
             )
         verification_val = VerificationStatus(verification_raw)
 
+    # --- parse expires_at (ISO 8601 string → datetime) ----------------------
+    expires_at_val: datetime | None = None
+    expires_at_raw = arguments.get("expires_at")
+    if expires_at_raw is not None:
+        result = _parse_iso8601_utc(expires_at_raw)
+        if not isinstance(result, datetime):
+            return result
+        expires_at_val = result
+
     # --- build entry --------------------------------------------------------
     try:
         # Determine EntrySource from arguments.
@@ -210,6 +246,7 @@ async def _handle_store(
             metadata=dict(arguments.get("metadata") or {}),
             created_by=created_by,
             verification=verification_val,
+            expires_at=expires_at_val,
         )
     except Exception as exc:  # noqa: BLE001
         return error_response("INVALID_PARAMS", f"Failed to construct entry: {exc}")
@@ -418,7 +455,15 @@ async def _handle_update(
 
     # Build the updates dict from all keys except entry_id.
     updatable_keys = {
-        "content", "entry_type", "author", "project", "tags", "status", "verification", "metadata",
+        "content",
+        "entry_type",
+        "author",
+        "project",
+        "tags",
+        "status",
+        "verification",
+        "metadata",
+        "expires_at",
     }
     updates: dict[str, Any] = {}
     for key in updatable_keys:
@@ -475,6 +520,15 @@ async def _handle_update(
                 f"Must be one of: {', '.join(sorted(_VALID_VERIFICATIONS))}.",
             )
         updates["verification"] = VerificationStatus(vf_str)
+
+    # Parse expires_at from ISO 8601 string to datetime.
+    if "expires_at" in updates:
+        ea_raw = updates["expires_at"]
+        if ea_raw is not None:
+            result = _parse_iso8601_utc(ea_raw)
+            if not isinstance(result, datetime):
+                return result
+            updates["expires_at"] = result
 
     tags_err = validate_type(updates, "tags", list, "list of strings")
     if tags_err:

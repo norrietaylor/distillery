@@ -325,6 +325,7 @@ class Entry:
     verification: VerificationStatus = VerificationStatus.UNVERIFIED
     metadata: dict[str, Any] = field(default_factory=dict)
     accessed_at: datetime | None = None
+    expires_at: datetime | None = None
 
     # --- ownership (populated when auth is enabled) ---
     created_by: str = ""
@@ -369,6 +370,7 @@ class Entry:
             "accessed_at": self.accessed_at.isoformat() if self.accessed_at is not None else None,
             "created_by": self.created_by,
             "last_modified_by": self.last_modified_by,
+            "expires_at": self.expires_at.isoformat() if self.expires_at is not None else None,
         }
 
     @classmethod
@@ -411,6 +413,8 @@ class Entry:
 
         accessed_at_raw = data.get("accessed_at")
         accessed_at = _parse_dt(accessed_at_raw) if accessed_at_raw is not None else None
+        expires_at_raw = data.get("expires_at")
+        expires_at = _parse_dt(expires_at_raw) if expires_at_raw is not None else None
 
         return cls(
             id=data["id"],
@@ -429,6 +433,7 @@ class Entry:
             version=int(data.get("version", 1)),
             metadata=dict(data.get("metadata", {})),
             accessed_at=accessed_at,
+            expires_at=expires_at,
             created_by=str(data.get("created_by", "")),
             last_modified_by=str(data.get("last_modified_by", "")),
         )
