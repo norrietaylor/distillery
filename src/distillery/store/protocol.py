@@ -123,6 +123,7 @@ class DistilleryStore(Protocol):
             - ``project`` (str)
             - ``tags`` (list[str]) -- matches entries containing *any* tag
             - ``status`` (str)
+            - ``verification`` (str) -- one of ``"unverified"``, ``"testing"``, ``"verified"``
             - ``date_from`` (datetime | str) -- inclusive lower bound on ``created_at``
             - ``date_to`` (datetime | str) -- inclusive upper bound on ``created_at``
 
@@ -173,7 +174,7 @@ class DistilleryStore(Protocol):
         Returns entries in insertion order (sorted by descending `created_at`) and does not perform semantic ranking.
 
         Parameters:
-            filters (dict[str, Any] | None): Optional metadata constraints. Supported keys: `entry_type`, `author`, `project`, `tags` (matches any tag), `status`, `date_from`, `date_to`.
+            filters (dict[str, Any] | None): Optional metadata constraints. Supported keys: `entry_type`, `author`, `project`, `tags` (matches any tag), `status`, `verification` (one of "unverified", "testing", "verified"), `date_from`, `date_to`.
             limit (int): Maximum number of entries to return.
             offset (int): Number of entries to skip for pagination.
 

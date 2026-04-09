@@ -75,6 +75,24 @@ class EntryStatus(StrEnum):
     ARCHIVED = "archived"
 
 
+class VerificationStatus(StrEnum):
+    """The quality/verification state of an entry.
+
+    Orthogonal to :class:`EntryStatus` (lifecycle).  An entry can be
+    ``active + unverified`` or ``archived + verified`` — the two
+    dimensions are independent.
+
+    Attributes:
+        UNVERIFIED: Not yet reviewed for correctness (default).
+        TESTING: Under review or being validated.
+        VERIFIED: Confirmed correct by a human or automated check.
+    """
+
+    UNVERIFIED = "unverified"
+    TESTING = "testing"
+    VERIFIED = "verified"
+
+
 def _utcnow() -> datetime:
     """Return the current UTC datetime with timezone info."""
     return datetime.now(tz=UTC)
@@ -304,8 +322,10 @@ class Entry:
     project: str | None = None
     tags: list[str] = field(default_factory=list)
     status: EntryStatus = EntryStatus.ACTIVE
+    verification: VerificationStatus = VerificationStatus.UNVERIFIED
     metadata: dict[str, Any] = field(default_factory=dict)
     accessed_at: datetime | None = None
+    expires_at: datetime | None = None
 
     # --- ownership (populated when auth is enabled) ---
     created_by: str = ""
@@ -342,6 +362,7 @@ class Entry:
             "project": self.project,
             "tags": list(self.tags),
             "status": self.status.value,
+            "verification": self.verification.value,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
             "version": self.version,
@@ -349,6 +370,7 @@ class Entry:
             "accessed_at": self.accessed_at.isoformat() if self.accessed_at is not None else None,
             "created_by": self.created_by,
             "last_modified_by": self.last_modified_by,
+            "expires_at": self.expires_at.isoformat() if self.expires_at is not None else None,
         }
 
     @classmethod
@@ -391,6 +413,8 @@ class Entry:
 
         accessed_at_raw = data.get("accessed_at")
         accessed_at = _parse_dt(accessed_at_raw) if accessed_at_raw is not None else None
+        expires_at_raw = data.get("expires_at")
+        expires_at = _parse_dt(expires_at_raw) if expires_at_raw is not None else None
 
         return cls(
             id=data["id"],
@@ -401,11 +425,15 @@ class Entry:
             project=data.get("project"),
             tags=list(data.get("tags", [])),
             status=EntryStatus(data.get("status", EntryStatus.ACTIVE.value)),
+            verification=VerificationStatus(
+                data.get("verification") or VerificationStatus.UNVERIFIED.value
+            ),
             created_at=_parse_dt(data["created_at"]),
             updated_at=_parse_dt(data["updated_at"]),
             version=int(data.get("version", 1)),
             metadata=dict(data.get("metadata", {})),
             accessed_at=accessed_at,
+            expires_at=expires_at,
             created_by=str(data.get("created_by", "")),
             last_modified_by=str(data.get("last_modified_by", "")),
         )
