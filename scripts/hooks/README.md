@@ -2,12 +2,149 @@
 
 This directory contains Claude Code hook scripts for Distillery integration.
 
+## distillery-hooks.sh (recommended)
+
+A single **dispatcher script** that routes all Claude Code hook events to the
+appropriate Distillery handler. Register this one script for `UserPromptSubmit`,
+`PreCompact`, and `SessionStart` in `~/.claude/settings.json` — no need to
+manage multiple hook entries.
+
+### Hook Events
+
+| Hook Event | Behaviour |
+|---|---|
+| `UserPromptSubmit` | Outputs a memory nudge every N prompts (default 30) |
+| `PreCompact` | Placeholder — silently exits (future spec) |
+| `SessionStart` | Delegates to `session-start-briefing.sh` for briefing injection |
+
+### Prerequisites
+
+- Distillery MCP server running with **HTTP transport** (`distillery-mcp --transport http`)
+  (required only for the `SessionStart` briefing; the `UserPromptSubmit` nudge works offline)
+- `curl` available on the system PATH (for `SessionStart` briefing)
+- `flock` available on the system PATH (for atomic counter — standard on Linux/macOS)
+- Claude Code with hook support (`~/.claude/settings.json`)
+
+> **Note:** The SessionStart handler targets the HTTP MCP transport, not stdio.
+> Hooks run as shell commands outside of an MCP session, so they must
+> communicate with the server over HTTP.
+
+### Setup
+
+**1. Make the dispatcher executable** (already done if cloned from the repo):
+
+```bash
+chmod +x /path/to/distillery/scripts/hooks/distillery-hooks.sh
+```
+
+**2. Register the dispatcher in `~/.claude/settings.json`:**
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "type": "command",
+        "command": "/absolute/path/to/distillery/scripts/hooks/distillery-hooks.sh"
+      }
+    ],
+    "PreCompact": [
+      {
+        "type": "command",
+        "command": "/absolute/path/to/distillery/scripts/hooks/distillery-hooks.sh"
+      }
+    ],
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "/absolute/path/to/distillery/scripts/hooks/distillery-hooks.sh"
+      }
+    ]
+  }
+}
+```
+
+Replace `/absolute/path/to/distillery` with the actual path to your Distillery
+installation.
+
+**3. (Optional) Start the Distillery MCP server for SessionStart briefing:**
+
+```bash
+distillery-mcp --transport http --port 8000
+```
+
+If the MCP server is not running, `SessionStart` exits silently and `UserPromptSubmit`
+nudges still work independently.
+
+### Configuration
+
+Configure all hooks via environment variables. Set these in your shell profile
+(`~/.bashrc`, `~/.zshrc`) or in the Claude Code hook environment:
+
+| Variable | Default | Description |
+|---|---|---|
+| `DISTILLERY_MCP_URL` | `http://localhost:8000/mcp` | MCP HTTP endpoint URL |
+| `DISTILLERY_NUDGE_INTERVAL` | `30` | Prompts between memory nudge outputs |
+| `DISTILLERY_BRIEFING_LIMIT` | `5` | Recent entries in SessionStart briefing |
+| `DISTILLERY_BEARER_TOKEN` | _(empty)_ | Bearer token if OAuth is enabled |
+
+Example — nudge every 20 prompts, custom port:
+
+```bash
+export DISTILLERY_NUDGE_INTERVAL=20
+export DISTILLERY_MCP_URL="http://localhost:9000/mcp"
+```
+
+> **Security note:** Do not commit `DISTILLERY_BEARER_TOKEN` or other secrets
+> to version control. Use your shell profile or a secrets manager to set
+> these values. The hook scripts themselves contain no credentials.
+
+### Expected Behaviour
+
+**UserPromptSubmit:** On each prompt, the dispatcher increments a per-session
+counter in `/tmp/distillery-prompt-count-<session_id>`. Every `DISTILLERY_NUDGE_INTERVAL`
+prompts it writes a reminder to stdout:
+
+```
+[Distillery] You've exchanged 30 messages this session. Consider whether any decisions, insights, or corrections from this conversation should be stored with /distill.
+```
+
+All other prompts produce no output. The counter file is created automatically
+on the first prompt and cleaned up on reboot (lives in `/tmp`).
+
+**PreCompact:** Silently exits. Auto-extraction is planned for a future spec.
+
+**SessionStart:** Delegates to `session-start-briefing.sh` in the same directory.
+If that script is not present or not executable, exits silently with no output.
+
+### Troubleshooting
+
+**Nudge never fires:**
+- Ensure `flock` is installed (`which flock`)
+- Check `/tmp/distillery-prompt-count-<session_id>` exists and increments
+- Verify `DISTILLERY_NUDGE_INTERVAL` is not accidentally set to a large value
+
+**SessionStart produces no output:**
+- Check the MCP server is running: `curl http://localhost:8000/health`
+- Verify `DISTILLERY_MCP_URL` is correct
+- Ensure `session-start-briefing.sh` is present and executable in the same directory
+
+**Hook not executing:**
+- Verify the script path in `settings.json` is absolute
+- Check the script is executable: `ls -la scripts/hooks/distillery-hooks.sh`
+- Check Claude Code logs for hook execution errors
+
+---
+
 ## session-start-briefing.sh
 
 A `SessionStart` hook that injects a condensed Distillery briefing as a system
 reminder at the start of every Claude Code session. This gives Claude awareness
 of recent knowledge entries and stale items for the current project without
 requiring a manual `/briefing` invocation.
+
+> This script is called automatically by `distillery-hooks.sh` for `SessionStart`
+> events. You only need to register it separately if you do not use the dispatcher.
 
 ### Prerequisites
 
