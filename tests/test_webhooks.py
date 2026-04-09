@@ -513,7 +513,7 @@ async def test_hooks_poll_source_url_query_param(
     store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """POST /hooks/poll?source_url=<url> passes source_url to FeedPoller.poll()."""
-    from unittest.mock import AsyncMock, MagicMock, call, patch
+    from unittest.mock import AsyncMock, MagicMock, patch
 
     from distillery.feeds.poller import PollerSummary, PollResult
 
