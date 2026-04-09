@@ -54,11 +54,17 @@ class EntrySource(StrEnum):
         CLAUDE_CODE: Created by a Claude Code skill (e.g. ``/distill``).
         MANUAL: Created directly by a human operator.
         IMPORT: Bulk-imported from an external source.
+        INFERENCE: Auto-extracted by hooks or LLM analysis (lower trust).
+        DOCUMENTATION: Extracted from docs, README, or other verifiable sources.
+        EXTERNAL: From web search, external APIs, or third-party data.
     """
 
     CLAUDE_CODE = "claude-code"
     MANUAL = "manual"
     IMPORT = "import"
+    INFERENCE = "inference"
+    DOCUMENTATION = "documentation"
+    EXTERNAL = "external"
 
 
 class EntryStatus(StrEnum):
@@ -326,6 +332,7 @@ class Entry:
     metadata: dict[str, Any] = field(default_factory=dict)
     accessed_at: datetime | None = None
     expires_at: datetime | None = None
+    session_id: str | None = None
 
     # --- ownership (populated when auth is enabled) ---
     created_by: str = ""
@@ -371,6 +378,7 @@ class Entry:
             "created_by": self.created_by,
             "last_modified_by": self.last_modified_by,
             "expires_at": self.expires_at.isoformat() if self.expires_at is not None else None,
+            "session_id": self.session_id,
         }
 
     @classmethod
@@ -436,6 +444,7 @@ class Entry:
             expires_at=expires_at,
             created_by=str(data.get("created_by", "")),
             last_modified_by=str(data.get("last_modified_by", "")),
+            session_id=data.get("session_id"),
         )
 
 

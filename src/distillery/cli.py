@@ -717,7 +717,7 @@ def _cmd_export(config_path: str | None, fmt: str, output_path: str) -> int:
             entry_rows = conn.execute(
                 "SELECT id, content, entry_type, source, status, tags, metadata, "
                 "version, project, author, created_at, updated_at, created_by, "
-                "last_modified_by, expires_at FROM entries"
+                "last_modified_by, expires_at, session_id FROM entries"
             ).fetchall()
             entry_cols = [
                 "id",
@@ -735,6 +735,7 @@ def _cmd_export(config_path: str | None, fmt: str, output_path: str) -> int:
                 "created_by",
                 "last_modified_by",
                 "expires_at",
+                "session_id",
             ]
             entries: list[dict[str, Any]] = []
             for row in entry_rows:
@@ -967,6 +968,7 @@ def _cmd_import(
                     expires_at=(
                         _parse_dt(raw["expires_at"]) if raw.get("expires_at") is not None else None
                     ),
+                    session_id=raw.get("session_id"),
                 )
                 staged_rows.append((entry, embedding))
 
@@ -989,8 +991,8 @@ def _cmd_import(
                     "INSERT INTO entries "
                     "(id, content, entry_type, source, author, project, tags, status, "
                     " metadata, created_at, updated_at, version, embedding, "
-                    " created_by, last_modified_by, expires_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " created_by, last_modified_by, expires_at, session_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     [
                         entry.id,
                         entry.content,
@@ -1008,6 +1010,7 @@ def _cmd_import(
                         entry.created_by,
                         entry.last_modified_by,
                         entry.expires_at,
+                        entry.session_id,
                     ],
                 )
                 imported += 1

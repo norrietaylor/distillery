@@ -582,6 +582,7 @@ class DuckDBStore:
             "metadata",
             "last_modified_by",
             "expires_at",
+            "session_id",
         }
     )
 
@@ -595,8 +596,8 @@ class DuckDBStore:
             "INSERT INTO entries "
             "(id, content, entry_type, source, author, project, tags, status, "
             " verification, metadata, created_at, updated_at, version, embedding, "
-            " created_by, last_modified_by, expires_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " created_by, last_modified_by, expires_at, session_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         params = [
             entry.id,
@@ -616,6 +617,7 @@ class DuckDBStore:
             entry.created_by,
             entry.last_modified_by,
             entry.expires_at,
+            entry.session_id,
         ]
         conn.execute(sql, params)
         # Rebuild FTS index so new content is searchable via BM25.
@@ -854,6 +856,7 @@ class DuckDBStore:
         - ``tags`` (list[str]) -- matches entries containing *any* listed tag
         - ``status`` (str)
         - ``verification`` (str) -- one of "unverified", "testing", "verified"
+        - ``source`` (str) -- entry origin (e.g. "claude-code", "manual", "inference", etc.)
         - ``date_from`` (datetime | str) -- inclusive lower bound on ``created_at``
         - ``date_to`` (datetime | str) -- inclusive upper bound on ``created_at``
         """
@@ -897,6 +900,10 @@ class DuckDBStore:
             clauses.append("verification = ?")
             params.append(str(filters["verification"]))
 
+        if "source" in filters:
+            clauses.append("source = ?")
+            params.append(filters["source"])
+
         if "tag_prefix" in filters and filters["tag_prefix"]:
             prefix = filters["tag_prefix"]
             # Match entries where any tag equals the prefix exactly or starts with
@@ -919,6 +926,10 @@ class DuckDBStore:
                 val = datetime.fromisoformat(val)
             clauses.append("created_at <= ?")
             params.append(val)
+
+        if "session_id" in filters:
+            clauses.append("session_id = ?")
+            params.append(str(filters["session_id"]))
 
         # Support metadata path filters like "metadata.external_id".
         # DuckDB stores metadata as a JSON string; use json_extract_string
@@ -970,7 +981,7 @@ class DuckDBStore:
     _ENTRY_COLUMNS = (
         "id, content, entry_type, source, author, project, "
         "tags, status, verification, metadata, created_at, updated_at, version, accessed_at, "
-        "created_by, last_modified_by, expires_at"
+        "created_by, last_modified_by, expires_at, session_id"
     )
 
     # ------------------------------------------------------------------
@@ -1853,6 +1864,104 @@ class DuckDBStore:
                 the store.
         """
         return await asyncio.to_thread(self._sync_add_relation, from_id, to_id, relation_type)
+
+    def _sync_apply_correction(
+        self,
+        new_entry: Entry,
+        wrong_entry_id: str,
+    ) -> str:
+        """Store a correction entry, link it to the original, and archive the original.
+
+        All three mutations (INSERT new entry, INSERT relation, UPDATE original
+        status) run inside a single transaction so the write set is atomic.
+
+        Args:
+            new_entry: The fully constructed correction ``Entry``.
+            wrong_entry_id: UUID of the original entry being corrected.
+
+        Returns:
+            The UUID string of the newly stored correction entry.
+
+        Raises:
+            RuntimeError: If any step fails; the transaction is rolled back.
+        """
+        conn = self.connection
+        embedding = self._embedding_provider.embed(new_entry.content)
+
+        try:
+            conn.execute("BEGIN TRANSACTION")
+
+            # 1. Store the correction entry.
+            insert_sql = (
+                "INSERT INTO entries "
+                "(id, content, entry_type, source, author, project, tags, status, "
+                " verification, metadata, created_at, updated_at, version, embedding, "
+                " created_by, last_modified_by, expires_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            )
+            conn.execute(insert_sql, [
+                new_entry.id,
+                new_entry.content,
+                new_entry.entry_type.value,
+                new_entry.source.value,
+                new_entry.author,
+                new_entry.project,
+                list(new_entry.tags),
+                new_entry.status.value,
+                new_entry.verification.value,
+                json.dumps(new_entry.metadata),
+                new_entry.created_at,
+                new_entry.updated_at,
+                new_entry.version,
+                embedding,
+                new_entry.created_by,
+                new_entry.last_modified_by,
+                new_entry.expires_at,
+            ])
+
+            # 2. Create the "corrects" relation.
+            relation_id = str(uuid.uuid4())
+            conn.execute(
+                "INSERT INTO entry_relations (id, from_id, to_id, relation_type) "
+                "VALUES (?, ?, ?, ?)",
+                [relation_id, new_entry.id, wrong_entry_id, "corrects"],
+            )
+
+            # 3. Archive the original entry.
+            now = datetime.now(tz=UTC)
+            conn.execute(
+                "UPDATE entries SET status = ?, updated_at = ?, version = version + 1 "
+                "WHERE id = ?",
+                ["archived", now, wrong_entry_id],
+            )
+
+            conn.execute("COMMIT")
+        except Exception:
+            with contextlib.suppress(Exception):
+                conn.execute("ROLLBACK")
+            raise
+
+        # Rebuild FTS index outside the transaction (non-critical).
+        self._rebuild_fts_index(conn)
+        logger.debug(
+            "Applied correction: new=%s original=%s (archived)",
+            new_entry.id,
+            wrong_entry_id,
+        )
+        return new_entry.id
+
+    async def apply_correction(
+        self,
+        new_entry: Entry,
+        wrong_entry_id: str,
+    ) -> str:
+        """Atomically store a correction, link it, and archive the original.
+
+        See :meth:`_sync_apply_correction` for details.
+        """
+        return await asyncio.to_thread(
+            self._sync_apply_correction, new_entry, wrong_entry_id
+        )
 
     def _sync_get_related(
         self,

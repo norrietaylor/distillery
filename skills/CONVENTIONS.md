@@ -273,6 +273,23 @@ The following table lists all valid `entry_type` values, their producing skills,
 - Optional metadata fields may be included but are not required.
 - The `metadata.meeting_id` for `minutes` entries follows the format `<slugified-title>-<YYYY-MM-DD>`.
 
+## Entry Sources
+
+The following table lists all valid `source` values, describing their origin and trust semantics.
+
+| Source | Trust Level | Use Case |
+|--------|-------------|----------|
+| `claude-code` | High | Created by a Claude Code skill (e.g., `/distill`, `/bookmark`, `/minutes`). Verify once before trusting. |
+| `manual` | High | Created directly by a human operator. Most trustworthy; user-curated. |
+| `import` | Medium | Bulk-imported from an external source or dump. May need review or reconciliation. |
+| `inference` | Low | Auto-extracted by hooks or LLM analysis (e.g., code comments, error logs, transcripts). Verify before using in decisions. |
+| `documentation` | Medium-High | Extracted from docs, README, API references, or other verifiable sources. Trustworthy if the source is current. |
+| `external` | Low | From web search, external APIs, or third-party data (e.g., Stack Overflow, RSS feeds). May be outdated or inaccurate. |
+
+**Trust Hierarchy (highest to lowest):** `manual` > `claude-code` > `documentation` > `import` > `external` > `inference`.
+
+Use the `source` filter in `/recall` to retrieve entries by provenance (e.g., search only documentation sources for verified facts).
+
 ## Error Handling
 
 If any MCP tool returns an error, display it and stop (no retry loops):
@@ -299,6 +316,21 @@ Actions:
 Search results must include: entry ID, `[type]` badge, author, created date, similarity %.
 
 Format: `ID: <uuid> | Author: <name> | Project: <project> | <date>`
+
+## Corrections
+
+When a user disputes or corrects information in a retrieved entry — "that's wrong", "actually it's X", "this is outdated" — use `distillery_correct(wrong_entry_id, content)` instead of `distillery_update`. Update edits in place; correct creates an audit trail.
+
+**When to correct (not update):**
+- The entry's factual content is wrong ("the API uses OAuth" → actually it uses API keys)
+- Information has become false since it was stored ("we use Postgres" → migrated to DuckDB)
+- The user explicitly says an entry is incorrect
+
+**When to update (not correct):**
+- Adding tags, changing status, fixing typos, appending notes
+- The original content isn't wrong, just incomplete
+
+**Flow:** Compose the full corrected text (not a diff), call `distillery_correct` with the wrong entry's ID. The tool inherits entry_type, author, project, and tags from the original — only override these if they also changed. The original is archived automatically; the correction links to it via a `corrects` relation.
 
 ## Consistency Rules
 
@@ -335,5 +367,5 @@ The `distillery-researcher` agent (`.claude/agents/distillery-researcher.md`) is
 
 ---
 
-**Document Version:** 2.3
-**Last Updated:** 2026-04-07
+**Document Version:** 2.4
+**Last Updated:** 2026-04-08
