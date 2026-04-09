@@ -49,12 +49,18 @@ class TestEntrySourceEnum:
         assert EntrySource.CLAUDE_CODE.value == "claude-code"
         assert EntrySource.MANUAL.value == "manual"
         assert EntrySource.IMPORT.value == "import"
+        assert EntrySource.INFERENCE.value == "inference"
+        assert EntrySource.DOCUMENTATION.value == "documentation"
+        assert EntrySource.EXTERNAL.value == "external"
 
     def test_is_str_subclass(self) -> None:
         assert isinstance(EntrySource.MANUAL, str)
 
     def test_from_string(self) -> None:
         assert EntrySource("manual") is EntrySource.MANUAL
+        assert EntrySource("inference") is EntrySource.INFERENCE
+        assert EntrySource("documentation") is EntrySource.DOCUMENTATION
+        assert EntrySource("external") is EntrySource.EXTERNAL
 
 
 class TestEntryStatusEnum:
@@ -229,6 +235,7 @@ class TestEntryToDict:
             "expires_at",
             "created_by",
             "last_modified_by",
+            "session_id",
         }
         assert set(d.keys()) == expected_keys
 

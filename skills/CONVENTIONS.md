@@ -273,6 +273,23 @@ The following table lists all valid `entry_type` values, their producing skills,
 - Optional metadata fields may be included but are not required.
 - The `metadata.meeting_id` for `minutes` entries follows the format `<slugified-title>-<YYYY-MM-DD>`.
 
+## Entry Sources
+
+The following table lists all valid `source` values, describing their origin and trust semantics.
+
+| Source | Trust Level | Use Case |
+|--------|-------------|----------|
+| `claude-code` | High | Created by a Claude Code skill (e.g., `/distill`, `/bookmark`, `/minutes`). Verify once before trusting. |
+| `manual` | High | Created directly by a human operator. Most trustworthy; user-curated. |
+| `import` | Medium | Bulk-imported from an external source or dump. May need review or reconciliation. |
+| `inference` | Low | Auto-extracted by hooks or LLM analysis (e.g., code comments, error logs, transcripts). Verify before using in decisions. |
+| `documentation` | Medium-High | Extracted from docs, README, API references, or other verifiable sources. Trustworthy if the source is current. |
+| `external` | Low | From web search, external APIs, or third-party data (e.g., Stack Overflow, RSS feeds). May be outdated or inaccurate. |
+
+**Trust Hierarchy (highest to lowest):** `manual` > `claude-code` > `documentation` > `import` > `external` > `inference`.
+
+Use the `source` filter in `/recall` to retrieve entries by provenance (e.g., search only documentation sources for verified facts).
+
 ## Error Handling
 
 If any MCP tool returns an error, display it and stop (no retry loops):
