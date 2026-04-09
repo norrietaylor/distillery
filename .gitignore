@@ -74,6 +74,9 @@ site/
 dashboard/dist/
 dashboard/node_modules/
 
+# Dashboard source lib — not Python lib output, must be tracked
+!dashboard/src/lib/
+
 # Working demo files (committed versions live in docs/assets/)
 *.cast
 *.gif

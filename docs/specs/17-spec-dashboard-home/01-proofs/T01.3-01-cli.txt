@@ -1,0 +1,26 @@
+Type: cli
+Command: cd dashboard && npm run build
+Expected: builds successfully with shell components
+Timestamp: 2026-04-09T15:17:00Z
+
+--- OUTPUT ---
+
+> distillery-dashboard@0.1.0 build
+> vite build
+
+vite v6.4.2 building for production...
+transforming...
+✓ 256 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.40 kB │ gzip:  0.27 kB
+dist/assets/index-3cwmdIep.css    3.13 kB │ gzip:  0.98 kB
+dist/assets/index-CBaXQ7S6.js   170.10 kB │ gzip: 50.65 kB
+✓ built in 583ms
+
+--- RESULT ---
+Status: PASS
+Notes: Build succeeded with 256 modules transformed (up from 108 in T01.1, reflecting
+       NavBar.svelte, ProjectSelector.svelte, LoadingSkeleton.svelte components and
+       stores.ts being included). CSS grew from 0.37kB to 3.13kB, JS from 26kB to
+       170kB, confirming all shell components are compiled into the bundle.
