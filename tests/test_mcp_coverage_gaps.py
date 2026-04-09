@@ -370,8 +370,8 @@ class TestStoreGaps:
             assert data["error"] is True
             assert data["code"] == "STORE_ERROR"
 
-    async def test_store_invalid_source_fallback(self, store: DuckDBStore) -> None:
-        """Invalid source value falls back to CLAUDE_CODE."""
+    async def test_store_invalid_source_rejected(self, store: DuckDBStore) -> None:
+        """Invalid source value is rejected with INVALID_PARAMS error."""
         response = await _handle_store(
             store,
             {
@@ -382,7 +382,9 @@ class TestStoreGaps:
             },
         )
         data = parse_mcp_response(response)
-        assert "entry_id" in data
+        assert data.get("error") is True
+        assert data.get("code") == "INVALID_PARAMS"
+        assert "nonexistent_source" in data.get("message", "")
 
     async def test_store_with_dedup_warnings(self, store: DuckDBStore) -> None:
         """Storing similar content generates dedup warnings."""
