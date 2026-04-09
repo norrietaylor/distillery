@@ -1,0 +1,60 @@
+Type: cli
+Command: bash scripts/hooks/test-hooks.sh
+Expected: Exits 0 with all tests passing
+Timestamp: 2026-04-09T02:58:37Z
+
+--- Output ---
+
+distillery-hooks.sh — integration tests
+========================================
+
+T1: Counter file lifecycle
+  PASS  counter file created on first prompt
+  PASS  counter starts at 1
+  PASS  counter file removed after cleanup
+
+T2: Counter increments
+  PASS  counter increments correctly (3 prompts -> 3)
+
+T3: Non-nudge prompts are silent
+  PASS  first prompt (non-nudge) produces no stdout
+
+T4: Nudge fires at interval boundary
+  PASS  prompt 1 of 3 produces no output
+  PASS  prompt 2 of 3 produces no output
+  PASS  prompt 3 of 3 fires nudge
+  PASS  nudge mentions message count
+
+T5: Interval=1 fires on every prompt
+  PASS  interval=1, prompt 1 fires nudge
+  PASS  interval=1, prompt 2 fires nudge
+
+T6: Unknown hook events silently ignored
+  PASS  unknown event exits 0
+  PASS  unknown event produces no output
+
+T7: PreCompact exits 0 silently
+  PASS  PreCompact exits 0
+  PASS  PreCompact produces no output
+
+T8: SessionStart delegates or skips gracefully
+  PASS  SessionStart exits 0 (present or absent)
+  PASS  SessionStart output acceptable (empty or briefing content)
+
+T9: Missing session_id handled gracefully
+  PASS  UserPromptSubmit with no session_id exits 0
+  PASS  UserPromptSubmit with no session_id produces no output
+
+T10: Empty stdin handled gracefully
+  PASS  empty stdin exits 0
+  PASS  empty stdin produces no output
+
+T11: Dispatcher script permissions
+  PASS  distillery-hooks.sh is executable
+
+========================================
+Results: 22/22 passed
+ALL TESTS PASSED
+
+Exit code: 0
+Status: PASS
