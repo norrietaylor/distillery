@@ -1,0 +1,30 @@
+Type: cli
+Command: python3 -c "import asyncio, ...; tools = await server.list_tools(); print(len(tools))"
+Expected: Exactly 12 tools registered
+Timestamp: 2026-04-09T00:00:00Z
+Status: PASS
+
+Output:
+Total tools: 12
+  distillery_classify
+  distillery_configure
+  distillery_correct
+  distillery_find_similar
+  distillery_get
+  distillery_list
+  distillery_relations
+  distillery_resolve_review
+  distillery_search
+  distillery_store
+  distillery_update
+  distillery_watch
+
+Removed tools (moved to webhooks/resources):
+  distillery_stale        -> webhook /api/maintenance or list stale_days param
+  distillery_aggregate    -> list group_by param
+  distillery_tag_tree     -> webhook /api/maintenance
+  distillery_metrics      -> webhook /api/maintenance
+  distillery_interests    -> webhook /api/maintenance
+  distillery_type_schemas -> MCP resource distillery://schemas/entry-types
+  distillery_poll         -> webhook /api/poll
+  distillery_rescore      -> webhook /api/rescore
