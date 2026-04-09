@@ -89,7 +89,7 @@ If already resolved earlier in the conversation, reuse the cached values without
 
 ## MCP Health Check
 
-Skills depend on the Distillery MCP server. Call `distillery_metrics(scope="summary")` at the start of the first skill invoked in a conversation. **If `distillery_metrics(scope="summary")` has already succeeded earlier in the same conversation, skip the check and proceed directly.**
+Skills depend on the Distillery MCP server. Call `distillery_list(limit=1)` at the start of the first skill invoked in a conversation. **If this check has already succeeded earlier in the same conversation, skip and proceed directly.**
 
 If the check fails, display:
 
@@ -102,11 +102,11 @@ Setup: see docs/mcp-setup.md
 
 Stop immediately if MCP is unavailable.
 
-**Authentication errors** (HTTP transport with OAuth): If `distillery_metrics(scope="summary")` returns an authentication error rather than a connection failure, direct the user to run `/setup` or complete the OAuth flow via the MCP server menu.
+**Authentication errors** (HTTP transport with OAuth): If the health check returns an authentication error rather than a connection failure, direct the user to run `/setup` or complete the OAuth flow via the MCP server menu.
 
 ### Server Version Compatibility
 
-Skills that require MCP tools added in a specific server version should declare `min_server_version` in their frontmatter. During the MCP health check, if `distillery_metrics(scope="summary")` succeeds, compare the returned `version` field against `min_server_version`. If the server version is older, display:
+Skills that require MCP tools added in a specific server version should declare `min_server_version` in their frontmatter. During the MCP health check, compare the returned server version against `min_server_version`. If the server version is older, display:
 
 ```text
 Warning: This skill requires Distillery MCP server >= {min_server_version}.
@@ -348,18 +348,18 @@ The following skills are available in `skills/`:
 |-------|-----------|-------------------|---------|
 | `/distill` | `distill/` | distillery_store, distillery_find_similar | Capture knowledge from conversations |
 | `/recall` | `recall/` | distillery_search | Semantic search over the knowledge base |
-| `/pour` | `pour/` | distillery_search, distillery_tag_tree | Multi-entry synthesis with citations and tag-based query expansion |
+| `/pour` | `pour/` | distillery_search, distillery_list | Multi-entry synthesis with citations and tag-based query expansion |
 | `/bookmark` | `bookmark/` | distillery_store, distillery_find_similar | Save and annotate URLs |
 | `/minutes` | `minutes/` | distillery_store, distillery_update, distillery_list | Record and update meeting notes |
 | `/classify` | `classify/` | distillery_classify, distillery_list(output_mode=review), distillery_resolve_review | Classify and review entries |
 | `/watch` | `watch/` | distillery_watch | Manage monitored feed sources + auto-poll scheduling (CronCreate local; GitHub Actions for hosted) |
-| `/radar` | `radar/` | distillery_search, distillery_interests, distillery_list (fallback), distillery_store | Interest-driven feed digest and source suggestions |
-| `/tune` | `tune/` | distillery_metrics | Display and adjust feed relevance thresholds |
-| `/setup` | `setup/` | distillery_metrics | MCP connectivity wizard and transport configuration |
-| `/digest` | `digest/` | distillery_list, distillery_aggregate, distillery_metrics, distillery_search, distillery_store, distillery_find_similar | Generate structured summaries of internal team activity |
+| `/radar` | `radar/` | distillery_search, distillery_list, distillery_store | Interest-driven feed digest and source suggestions |
+| `/tune` | `tune/` | distillery_configure | Display and adjust feed relevance thresholds |
+| `/setup` | `setup/` | distillery_list, distillery_watch, distillery_configure | MCP connectivity wizard and transport configuration |
+| `/digest` | `digest/` | distillery_list, distillery_search, distillery_store, distillery_find_similar | Generate structured summaries of internal team activity |
 | `/gh-sync` | `gh-sync/` | distillery_store, distillery_get, distillery_update, distillery_list, distillery_relations | Sync GitHub issues and PRs into the knowledge base |
-| `/investigate` | `investigate/` | distillery_search, distillery_get, distillery_relations, distillery_tag_tree, distillery_list, distillery_metrics | Deep context builder combining semantic search with relationship traversal |
-| `/briefing` | `briefing/` | distillery_metrics, distillery_list, distillery_stale, distillery_relations, distillery_aggregate, distillery_search | Solo-first knowledge dashboard with optional team mode |
+| `/investigate` | `investigate/` | distillery_search, distillery_get, distillery_relations, distillery_list | Deep context builder combining semantic search with relationship traversal |
+| `/briefing` | `briefing/` | distillery_list, distillery_relations, distillery_search | Solo-first knowledge dashboard with optional team mode |
 
 ## Custom Agents
 
