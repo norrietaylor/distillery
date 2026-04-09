@@ -1,0 +1,183 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.7, pytest-9.0.2, pluggy-1.6.0 -- /usr/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/norrie.guest/code/distillery/.worktrees/feature-api-consolidation
+configfile: pyproject.toml
+plugins: httpx-0.36.0, asyncio-1.3.0, anyio-4.13.0, cov-7.1.0, typeguard-4.4.2
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 123 items
+
+tests/test_mcp_server.py::TestHelpers::test_error_response_structure PASSED [  0%]
+tests/test_mcp_server.py::TestHelpers::test_error_response_with_details PASSED [  1%]
+tests/test_mcp_server.py::TestHelpers::test_success_response_structure PASSED [  2%]
+tests/test_mcp_server.py::TestEndToEndFlow::test_full_lifecycle PASSED   [  3%]
+tests/test_mcp_server.py::TestStatusTool::test_status_returns_ok PASSED  [  4%]
+tests/test_mcp_server.py::TestStatusTool::test_status_shows_entry_counts PASSED [  4%]
+tests/test_mcp_server.py::TestStatusTool::test_status_shows_embedding_model PASSED [  5%]
+tests/test_mcp_server.py::TestStoreTool::test_store_valid_entry PASSED   [  6%]
+tests/test_mcp_server.py::TestStoreTool::test_store_returns_string_id PASSED [  7%]
+tests/test_mcp_server.py::TestStoreTool::test_store_with_tags_and_project PASSED [  8%]
+tests/test_mcp_server.py::TestStoreTool::test_store_missing_content_returns_error PASSED [  8%]
+tests/test_mcp_server.py::TestStoreTool::test_store_missing_author_returns_error PASSED [  9%]
+tests/test_mcp_server.py::TestStoreTool::test_store_invalid_entry_type_returns_error PASSED [ 10%]
+tests/test_mcp_server.py::TestStoreTool::test_store_all_valid_entry_types PASSED [ 11%]
+tests/test_mcp_server.py::TestStoreTool::test_store_tags_must_be_list PASSED [ 12%]
+tests/test_mcp_server.py::TestStoreTool::test_store_dedup_warning_on_duplicate PASSED [ 13%]
+tests/test_mcp_server.py::TestGetTool::test_get_existing_entry PASSED    [ 13%]
+tests/test_mcp_server.py::TestGetTool::test_get_missing_entry_returns_not_found PASSED [ 14%]
+tests/test_mcp_server.py::TestGetTool::test_get_missing_entry_id_arg_returns_error PASSED [ 15%]
+tests/test_mcp_server.py::TestGetTool::test_get_returns_all_fields PASSED [ 16%]
+tests/test_mcp_server.py::TestUpdateTool::test_update_content PASSED     [ 17%]
+tests/test_mcp_server.py::TestUpdateTool::test_update_version_increments PASSED [ 17%]
+tests/test_mcp_server.py::TestUpdateTool::test_update_tags PASSED        [ 18%]
+tests/test_mcp_server.py::TestUpdateTool::test_update_status PASSED      [ 19%]
+tests/test_mcp_server.py::TestUpdateTool::test_update_invalid_status_returns_error PASSED [ 20%]
+tests/test_mcp_server.py::TestUpdateTool::test_update_nonexistent_entry_returns_not_found PASSED [ 21%]
+tests/test_mcp_server.py::TestUpdateTool::test_update_missing_entry_id_returns_error PASSED [ 21%]
+tests/test_mcp_server.py::TestUpdateTool::test_update_no_fields_returns_error PASSED [ 22%]
+tests/test_mcp_server.py::TestUpdateTool::test_update_immutable_field_returns_error PASSED [ 23%]
+tests/test_mcp_server.py::TestSearchTool::test_search_returns_results PASSED [ 24%]
+tests/test_mcp_server.py::TestSearchTool::test_search_results_have_score_and_entry PASSED [ 25%]
+tests/test_mcp_server.py::TestSearchTool::test_search_missing_query_returns_error PASSED [ 26%]
+tests/test_mcp_server.py::TestSearchTool::test_search_respects_limit PASSED [ 26%]
+tests/test_mcp_server.py::TestSearchTool::test_search_invalid_limit_returns_error PASSED [ 27%]
+tests/test_mcp_server.py::TestSearchTool::test_search_filters_by_entry_type PASSED [ 28%]
+tests/test_mcp_server.py::TestFindSimilarTool::test_find_similar_returns_results PASSED [ 29%]
+tests/test_mcp_server.py::TestFindSimilarTool::test_find_similar_missing_content_returns_error PASSED [ 30%]
+tests/test_mcp_server.py::TestFindSimilarTool::test_find_similar_threshold_out_of_range_returns_error PASSED [ 30%]
+tests/test_mcp_server.py::TestFindSimilarTool::test_find_similar_default_threshold_returned_in_response PASSED [ 31%]
+tests/test_mcp_server.py::TestFindSimilarTool::test_find_similar_respects_limit PASSED [ 32%]
+tests/test_mcp_server.py::TestListTool::test_list_returns_entries PASSED [ 33%]
+tests/test_mcp_server.py::TestListTool::test_list_empty_store_returns_empty PASSED [ 34%]
+tests/test_mcp_server.py::TestListTool::test_list_respects_limit PASSED  [ 34%]
+tests/test_mcp_server.py::TestListTool::test_list_respects_offset PASSED [ 35%]
+tests/test_mcp_server.py::TestListTool::test_list_filters_by_author PASSED [ 36%]
+tests/test_mcp_server.py::TestListTool::test_list_invalid_limit_returns_error PASSED [ 37%]
+tests/test_mcp_server.py::TestListTool::test_list_invalid_offset_returns_error PASSED [ 38%]
+tests/test_mcp_server.py::TestListTool::test_list_includes_limit_and_offset_in_response PASSED [ 39%]
+tests/test_mcp_server.py::TestCreateServer::test_create_server_returns_server_instance PASSED [ 39%]
+tests/test_mcp_server.py::TestCreateServer::test_server_registers_all_tools PASSED [ 40%]
+tests/test_mcp_server.py::TestCreateServer::test_server_registers_entry_type_schemas_resource PASSED [ 41%]
+tests/test_mcp_server.py::TestRemovedTools::test_removed_tools_not_registered PASSED [ 42%]
+tests/test_mcp_server.py::TestRemovedTools::test_removed_tools_count_unchanged PASSED [ 43%]
+tests/test_mcp_analytics.py::TestTagTree::test_tag_tree_empty_store PASSED [ 43%]
+tests/test_mcp_analytics.py::TestTagTree::test_tag_tree_single_tag PASSED [ 44%]
+tests/test_mcp_analytics.py::TestTagTree::test_tag_tree_nested_tags PASSED [ 45%]
+tests/test_mcp_analytics.py::TestTagTree::test_tag_tree_with_prefix PASSED [ 46%]
+tests/test_mcp_analytics.py::TestTagTree::test_tag_tree_counts_distinct_entries PASSED [ 47%]
+tests/test_mcp_analytics.py::TestTagTree::test_tag_tree_excludes_archived PASSED [ 47%]
+tests/test_mcp_analytics.py::TestTypeSchemas::test_type_schemas_returns_all_types PASSED [ 48%]
+tests/test_mcp_analytics.py::TestTypeSchemas::test_type_schemas_structured_type_has_required PASSED [ 49%]
+tests/test_mcp_analytics.py::TestTypeSchemas::test_type_schemas_legacy_type_has_empty_dicts PASSED [ 50%]
+tests/test_mcp_analytics.py::TestMetrics::test_metrics_empty_store PASSED [ 51%]
+tests/test_mcp_analytics.py::TestMetrics::test_metrics_with_entries PASSED [ 52%]
+tests/test_mcp_analytics.py::TestMetrics::test_metrics_custom_period_days PASSED [ 52%]
+tests/test_mcp_analytics.py::TestMetrics::test_metrics_invalid_period_days_type PASSED [ 53%]
+tests/test_mcp_analytics.py::TestMetrics::test_metrics_period_days_zero PASSED [ 54%]
+tests/test_mcp_analytics.py::TestMetrics::test_metrics_storage_section PASSED [ 55%]
+tests/test_mcp_analytics.py::TestMetrics::test_metrics_by_status PASSED  [ 56%]
+tests/test_mcp_analytics.py::TestQuality::test_quality_empty_store PASSED [ 56%]
+tests/test_mcp_analytics.py::TestQuality::test_quality_with_entry_type_filter PASSED [ 57%]
+tests/test_mcp_analytics.py::TestQuality::test_quality_no_error_on_missing_tables PASSED [ 58%]
+tests/test_mcp_analytics.py::TestStale::test_stale_empty_store PASSED    [ 59%]
+tests/test_mcp_analytics.py::TestStale::test_stale_with_old_entry PASSED [ 60%]
+tests/test_mcp_analytics.py::TestStale::test_stale_with_recent_entry PASSED [ 60%]
+tests/test_mcp_analytics.py::TestStale::test_stale_custom_days PASSED    [ 61%]
+tests/test_mcp_analytics.py::TestStale::test_stale_invalid_days_type PASSED [ 62%]
+tests/test_mcp_analytics.py::TestStale::test_stale_days_zero PASSED      [ 63%]
+tests/test_mcp_analytics.py::TestStale::test_stale_invalid_limit_type PASSED [ 64%]
+tests/test_mcp_analytics.py::TestStale::test_stale_limit_zero PASSED     [ 65%]
+tests/test_mcp_analytics.py::TestStale::test_stale_respects_limit PASSED [ 65%]
+tests/test_mcp_analytics.py::TestStale::test_stale_filters_by_entry_type PASSED [ 66%]
+tests/test_mcp_analytics.py::TestStale::test_stale_entry_fields PASSED   [ 67%]
+tests/test_mcp_analytics.py::TestStale::test_stale_invalid_entry_type_type PASSED [ 68%]
+tests/test_mcp_analytics.py::TestInterests::test_interests_success PASSED [ 69%]
+tests/test_mcp_analytics.py::TestInterests::test_interests_custom_recency_days PASSED [ 69%]
+tests/test_mcp_analytics.py::TestInterests::test_interests_custom_top_n PASSED [ 70%]
+tests/test_mcp_analytics.py::TestInterests::test_interests_invalid_recency_days PASSED [ 71%]
+tests/test_mcp_analytics.py::TestInterests::test_interests_negative_recency_days PASSED [ 72%]
+tests/test_mcp_analytics.py::TestInterests::test_interests_invalid_top_n PASSED [ 73%]
+tests/test_mcp_analytics.py::TestInterests::test_interests_zero_top_n PASSED [ 73%]
+tests/test_mcp_analytics.py::TestInterests::test_interests_extraction_error PASSED [ 74%]
+tests/test_poller.py::TestRelevanceScorer::test_empty_text_returns_zero PASSED [ 75%]
+tests/test_poller.py::TestRelevanceScorer::test_returns_max_similarity PASSED [ 76%]
+tests/test_poller.py::TestRelevanceScorer::test_no_results_returns_zero PASSED [ 77%]
+tests/test_poller.py::TestRelevanceScorer::test_passes_threshold_to_store PASSED [ 78%]
+tests/test_poller.py::TestRelevanceScorer::test_exception_propagates PASSED [ 78%]
+tests/test_poller.py::TestRelevanceScorer::test_single_result_returns_that_score PASSED [ 79%]
+tests/test_poller.py::TestItemText::test_title_and_content PASSED        [ 80%]
+tests/test_poller.py::TestItemText::test_title_only PASSED               [ 81%]
+tests/test_poller.py::TestItemText::test_content_only PASSED             [ 82%]
+tests/test_poller.py::TestItemText::test_both_none PASSED                [ 82%]
+tests/test_poller.py::TestFeedPollerEmptySources::test_empty_sources_returns_empty_summary PASSED [ 83%]
+tests/test_poller.py::TestFeedPollerRSS::test_items_above_threshold_are_stored PASSED [ 84%]
+tests/test_poller.py::TestFeedPollerRSS::test_items_below_threshold_not_stored PASSED [ 85%]
+tests/test_poller.py::TestFeedPollerRSS::test_duplicate_items_are_skipped PASSED [ 86%]
+tests/test_poller.py::TestFeedPollerRSS::test_adapter_fetch_error_recorded PASSED [ 86%]
+tests/test_poller.py::TestFeedPollerRSS::test_unsupported_source_type_records_error PASSED [ 87%]
+tests/test_poller.py::TestFeedPollerRSS::test_trust_weight_applied_to_score PASSED [ 88%]
+tests/test_poller.py::TestFeedPollerRSS::test_item_with_no_text_skipped PASSED [ 89%]
+tests/test_poller.py::TestFeedPollerMultipleSources::test_aggregates_across_sources PASSED [ 90%]
+tests/test_poller.py::TestHandlePoll::test_no_sources_returns_empty_summary PASSED [ 91%]
+tests/test_poller.py::TestHandlePoll::test_source_url_filter_not_found_returns_error PASSED [ 91%]
+tests/test_poller.py::TestHandlePoll::test_source_url_filter_narrows_poll PASSED [ 92%]
+tests/test_poller.py::TestHandlePoll::test_returns_all_expected_fields PASSED [ 93%]
+tests/test_poller.py::TestCLIPollSubcommand::test_no_sources_exits_zero PASSED [ 94%]
+tests/test_poller.py::TestCLIPollSubcommand::test_source_not_found_exits_one PASSED [ 95%]
+tests/test_poller.py::TestCLIPollSubcommand::test_poll_runs_and_exits_zero_on_no_errors PASSED [ 95%]
+tests/test_poller.py::TestCLIPollSubcommand::test_poll_json_format_accepted PASSED [ 96%]
+tests/test_poller.py::TestCLIPollSubcommand::test_poll_source_flag PASSED [ 97%]
+tests/test_poller.py::TestBuildAdapterGitHubToken::test_passes_token_from_env_to_github_adapter PASSED [ 98%]
+tests/test_poller.py::TestBuildAdapterGitHubToken::test_no_token_in_env_gives_empty_token PASSED [ 99%]
+tests/test_poller.py::TestBuildAdapterGitHubToken::test_token_not_logged_at_debug PASSED [100%]
+
+=============================== warnings summary ===============================
+tests/test_mcp_server.py::TestCreateServer::test_create_server_returns_server_instance
+tests/test_mcp_server.py::TestCreateServer::test_server_registers_all_tools
+tests/test_mcp_server.py::TestCreateServer::test_server_registers_entry_type_schemas_resource
+tests/test_mcp_server.py::TestRemovedTools::test_removed_tools_not_registered
+tests/test_mcp_server.py::TestRemovedTools::test_removed_tools_count_unchanged
+  /home/norrie.guest/.local/lib/python3.13/site-packages/pydantic/json_schema.py:2448: PydanticJsonSchemaWarning: Default value <object object at 0xe58abd183c80> is not JSON serializable; excluding default from JSON schema [non-serializable-default]
+    warnings.warn(message, PydanticJsonSchemaWarning)
+
+tests/test_poller.py::TestFeedPollerRSS::test_items_above_threshold_are_stored
+tests/test_poller.py::TestFeedPollerRSS::test_items_below_threshold_not_stored
+tests/test_poller.py::TestFeedPollerRSS::test_duplicate_items_are_skipped
+tests/test_poller.py::TestFeedPollerRSS::test_adapter_fetch_error_recorded
+tests/test_poller.py::TestFeedPollerRSS::test_unsupported_source_type_records_error
+tests/test_poller.py::TestFeedPollerRSS::test_trust_weight_applied_to_score
+tests/test_poller.py::TestFeedPollerRSS::test_item_with_no_text_skipped
+tests/test_poller.py::TestFeedPollerMultipleSources::test_aggregates_across_sources
+tests/test_poller.py::TestHandlePoll::test_source_url_filter_narrows_poll
+  /home/norrie.guest/code/distillery/.worktrees/feature-api-consolidation/src/distillery/feeds/poller.py:259: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    for tag, count in vocabulary.items():
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_poller.py::TestCLIPollSubcommand::test_poll_json_format_accepted
+  <frozen os>:717: RuntimeWarning: coroutine '_cmd_poll.<locals>._run' was never awaited
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 123 passed, 15 warnings in 6.38s =======================
+============================= test session starts ==============================
+platform linux -- Python 3.13.7, pytest-9.0.2, pluggy-1.6.0 -- /usr/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/norrie.guest/code/distillery/.worktrees/feature-api-consolidation
+configfile: pyproject.toml
+plugins: httpx-0.36.0, asyncio-1.3.0, anyio-4.13.0, cov-7.1.0, typeguard-4.4.2
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 2 items
+
+tests/test_mcp_server.py::TestRemovedTools::test_removed_tools_not_registered PASSED [ 50%]
+tests/test_mcp_server.py::TestRemovedTools::test_removed_tools_count_unchanged PASSED [100%]
+
+=============================== warnings summary ===============================
+tests/test_mcp_server.py::TestRemovedTools::test_removed_tools_not_registered
+tests/test_mcp_server.py::TestRemovedTools::test_removed_tools_count_unchanged
+  /home/norrie.guest/.local/lib/python3.13/site-packages/pydantic/json_schema.py:2448: PydanticJsonSchemaWarning: Default value <object object at 0xe191691abc70> is not JSON serializable; excluding default from JSON schema [non-serializable-default]
+    warnings.warn(message, PydanticJsonSchemaWarning)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================== 2 passed, 2 warnings in 0.35s =========================

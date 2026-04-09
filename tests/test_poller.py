@@ -1,10 +1,15 @@
-"""Tests for RelevanceScorer, FeedPoller, and the distillery_poll MCP handler.
+"""Tests for RelevanceScorer, FeedPoller, and the _handle_poll feed handler.
+
+Note: distillery_poll and distillery_rescore were removed from the MCP tool
+surface in T02.2 and moved to /api/poll and /api/rescore webhook endpoints.
+The underlying handler functions (_handle_poll, _handle_rescore) still exist
+in distillery.mcp.tools.feeds and are tested here directly as unit tests.
 
 Covers:
   - RelevanceScorer.score: returns max similarity, handles empty text, handles errors
   - FeedPoller.poll: empty sources, items stored, dedup skipping, threshold filtering
   - FeedPoller._is_duplicate: similarity-based dedup
-  - _handle_poll: MCP handler success path and error paths
+  - _handle_poll: feed handler success path and error paths (not an MCP tool)
   - distillery poll CLI subcommand
 """
 
