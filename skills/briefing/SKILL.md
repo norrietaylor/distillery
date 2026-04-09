@@ -1,32 +1,31 @@
 ---
 name: briefing
-description: "Produce a single-command team knowledge dashboard combining activity, metrics, interests, and feed intelligence"
+description: "Produce a knowledge dashboard with recent entries, corrections, expiring soon, stale knowledge, and unresolved items. In team mode, also shows team activity, related entries from teammates, and the review queue."
 allowed-tools:
   - "mcp__*__distillery_metrics"
   - "mcp__*__distillery_list"
-  - "mcp__*__distillery_aggregate"
-  - "mcp__*__distillery_interests"
-  - "mcp__*__distillery_search"
   - "mcp__*__distillery_stale"
-  - "mcp__*__distillery_tag_tree"
+  - "mcp__*__distillery_relations"
+  - "mcp__*__distillery_aggregate"
+  - "mcp__*__distillery_search"
 context: fork
-effort: high
+effort: medium
 ---
 
-<!-- Trigger phrases: briefing, /briefing, team briefing, knowledge dashboard, team overview, situational awareness, team status -->
+<!-- Trigger phrases: briefing, /briefing, knowledge briefing, knowledge dashboard, project overview, my briefing, team briefing -->
 
-# Briefing — Team Knowledge Dashboard
+# Briefing — Knowledge Dashboard (Solo & Team)
 
-Briefing produces a single-command team overview: system health, recent team activity, trending interests, top feed signals, and suggested actions — all in one display.
+Briefing produces a single-command knowledge dashboard: recent entries, pending corrections, soon-to-expire items, stale knowledge, and unresolved work — all scoped to your project. When multiple authors are detected (or `--team` is passed), team sections are added automatically.
 
 ## When to Use
 
-- Starting a team meeting or standup (`/briefing`)
-- Checking knowledge base health and team activity at a glance
-- Getting situational awareness across internal activity and external feeds
-- "team briefing", "knowledge dashboard", "team overview", "team status"
-- Scoping activity to a project (`/briefing --project distillery`)
-- Adjusting the lookback window (`/briefing --days 14`)
+- Starting a work session to orient yourself (`/briefing`)
+- Checking the state of your knowledge base at a glance
+- Getting a project-scoped overview of what needs attention
+- "knowledge briefing", "project dashboard", "my briefing", "knowledge overview"
+- Scoping to a specific project (`/briefing --project distillery`)
+- Viewing team activity and cross-author context (`/briefing --team`)
 
 ## Process
 
@@ -34,196 +33,321 @@ Briefing produces a single-command team overview: system health, recent team act
 
 See CONVENTIONS.md — skip if already confirmed this conversation.
 
-### Step 2: Parse Arguments
+### Step 2: Resolve Project
+
+Determine project using the standard resolution order from CONVENTIONS.md:
+
+1. `--project <name>` flag if provided
+2. `basename $(git rev-parse --show-toplevel)` from the current working directory
+3. Ask the user
+
+If already resolved earlier in the conversation, reuse the cached value.
+
+### Step 3: Parse Arguments
 
 | Flag | Description |
 |------|-------------|
-| `--days N` | Look back N days for activity (default: 7) |
-| `--project <name>` | Scope results to a specific project |
+| `--project <name>` | Scope results to a specific project (auto-detected if omitted) |
+| `--team` | Force team mode regardless of author count |
 
-Compute `date_from` as today's date minus N days in ISO 8601 format (`YYYY-MM-DD`).
+This is a display-only skill with no configurable lookback window. Team mode is activated by `--team` or auto-detected in Step 4f.
 
-### Step 3: Gather Data
+### Step 4: Gather Data
 
 Execute all calls in sequence. Non-fatal calls are noted — continue if they fail.
 
-**3a. System metrics (summary):**
+**4a. Recent entries:**
 
 ```python
-distillery_metrics(scope="summary")
+distillery_list(project=<project>, limit=10, output_mode="full")
 ```
 
-Record: total entry count, DB size, embedding model, review queue count.
+Returns the 10 most recent entries for the project, sorted newest first. Record all returned entries.
 
-**3b. Audit metrics (non-fatal):**
+**4b. Corrections (non-fatal):**
 
 ```python
-distillery_metrics(scope="audit", date_from=<date_from>)
+distillery_list(project=<project>, limit=50, output_mode="full")
 ```
 
-Record: active users in period. If this call fails or returns no data, continue without it.
-
-**3c. Recent internal activity:**
+From the result, collect all entry IDs. For each entry that has `metadata.corrects` or `metadata.corrected_by` set, or for entries with `entry_type` that suggests a correction chain, call:
 
 ```python
-distillery_list(
-    entry_type=["session", "bookmark", "minutes"],
-    limit=50,
-    date_from=<date_from>,
-    output_mode="full",
-    # project=<name>  # only if --project specified
-)
+distillery_relations(action="get", entry_id=<id>, relation_type="corrects")
 ```
 
-If `--project` was specified, pass `project=<name>`.
+Collect entries with outgoing `corrects` relations (the correction) and their targets (the original entry). Build a list of correction pairs: `(corrector_entry, original_entry)`. Limit to 5 correction chains. If this call fails, omit the Corrections section.
 
-Record the `total_count` from the response. Report: `Found <len(entries)> of <total_count> internal entries from the last <N> days.`
+**4c. Expiring soon (non-fatal):**
 
-**3d. Per-author activity counts:**
+From the entries returned in Step 4a, and the 50 fetched in Step 4b, post-filter for entries where `expires_at` is set and falls within the next 7 days (between today and today + 7 days inclusive). Sort ascending by `expires_at`. If no entries have an upcoming `expires_at`, omit the Expiring Soon section.
+
+**4d. Stale knowledge (non-fatal):**
 
 ```python
-distillery_aggregate(
-    group_by="author",
-    date_from=<date_from>,
-    # project=<name>  # only if --project specified
-)
+distillery_stale(days=30, limit=5)
 ```
 
-**3e. Interest profile and source suggestions:**
+Record stale entries. If scoped to a project, filter results to entries matching `project=<project>`. If this call fails, omit the Stale Knowledge section.
+
+**4e. Unresolved (non-fatal):**
 
 ```python
-distillery_interests(recency_days=<days>, top_n=10, suggest_sources=true)
+distillery_list(project=<project>, verification="testing", limit=5, output_mode="full")
 ```
 
-Record: top interest tags and suggested sources. If this call fails, omit the Top Interests section and the "suggested sources" action item from Suggested Actions, but still show other computable actions (review queue count, low activity warnings).
+Returns entries in the "testing" verification state (entries that have been flagged as needing review but are not yet verified). If this call fails or returns nothing, omit the Unresolved section.
 
-**3f. Top feed signals (non-fatal):**
+**4f. Team mode detection:**
 
-Using the top interest tag from Step 3e (converted to a natural-language query), call:
+If `--team` was passed, set `team_mode = true` and skip the author count check.
+
+Otherwise, call:
 
 ```python
-distillery_search(
-    query=<top_interest_query>,
-    entry_type="feed",
-    limit=5,
-    date_from=<date_from>,
-)
+distillery_aggregate(group_by="author", project=<project>)
 ```
 
-Convert the top tag to a query by taking the leaf segment and replacing hyphens with spaces (e.g., `domain/vector-search` → `"vector search"`). If `distillery_interests` failed or returned no tags, skip this call. If the search fails, omit the Feed Highlights section.
+If the response contains more than one author group, set `team_mode = true`. If the call fails, set `team_mode = false` and continue (non-fatal).
 
-### Step 4: Synthesize Briefing
+**4g. Team activity (team mode only, non-fatal):**
 
-You (the executing Claude instance) produce the synthesis. Do not dump raw entries.
+Only execute if `team_mode = true`.
 
-**System Health:**
+```python
+distillery_list(project=<project>, limit=20, output_mode="full")
+```
 
-Report counts and sizing from `distillery_metrics(scope="summary")`. Flag conditions that need attention:
-- Review queue count > 0: surface as an action item
-- If audit data is available, note the number of active users in the period
+From the returned entries, filter to those created within the past 7 days. Group by author. For each author, count entries by `entry_type`. If this call fails or yields no entries, omit the Team Activity section.
 
-**Team Activity:**
+**4h. Related from team (team mode only, non-fatal):**
 
-Using data from Steps 3c and 3d:
-- For each author with entries in the period, summarize their contributions: how many of each type, notable topics from tag analysis
-- Present per-author counts in a compact table
+Only execute if `team_mode = true`.
 
-**Top Interests:**
+Use the project name and recent entry content as context for the query. Call:
 
-Present the top interest tags as a ranked list (tag → relevance or frequency). Group by namespace if helpful (e.g., `domain/`, `project/`, `source/`).
+```python
+distillery_search(query=<project_context>, limit=5, output_mode="full")
+```
 
-**Feed Highlights:**
+where `<project_context>` is formed from the project name combined with a short summary of the most recent entries (first 50 chars of each). Do not apply an author filter — this surfaces entries from all authors. Record similarity percentage for each result. If this call fails or yields no results, omit the Related from Team section.
 
-For each result from Step 3f:
-- Title or content snippet
-- Source URL if available in metadata
-- Relevance to team interests
+**4i. Pending review (team mode only, non-fatal):**
 
-Omit this section entirely if no feed entries were found.
+Only execute if `team_mode = true`.
 
-**Suggested Actions:**
+```python
+distillery_list(status="pending_review", limit=5, output_mode="full")
+```
 
-Combine signals from all data into concrete next steps:
-- If review queue count > 0: "Run /classify to clear <N> entries in the review queue"
-- If `distillery_interests` returned suggested sources: list each with `/watch add <url>` command
-- If no activity from an author in an unusually long time (computable from audit data): note it
-- If fewer than 5 internal entries in the period: "Activity is low — encourage team to /distill, /minutes, or /bookmark"
+Returns entries awaiting classification. If this call fails or returns nothing, omit the Pending Review section.
 
-Omit suggestions that do not apply.
+### Step 5: Synthesize Briefing
 
-### Step 5: Confirm
+Produce the briefing in markdown. Omit any section entirely if it has no data.
 
-Display the full briefing. This skill is display-only — there is no `--store` flag.
+**Header:**
+
+```
+# Briefing: <project> (solo)       ← when team_mode = false
+# Briefing: <project> (team)       ← when team_mode = true
+Generated: <YYYY-MM-DD HH:MM> UTC
+```
+
+**Section 1 — Recent Entries:**
+
+For each of the 10 most recent entries from Step 4a, show one line:
+
+```
+- [<TYPE>] <content preview, max 100 chars> — <relative timestamp>
+```
+
+- `[TYPE]` badge: entry type in uppercase, e.g., `[SESSION]`, `[BOOKMARK]`, `[MINUTES]`
+- Content preview: first 100 characters of entry content, truncated with `…` if longer
+- Relative timestamp: human-readable age, e.g., "2 hours ago", "3 days ago", "just now"
+
+**Section 2 — Corrections:**
+
+For each correction chain from Step 4b:
+
+```
+- [<TYPE>] <corrector preview, max 100 chars> corrects → [<TYPE>] <original preview, max 100 chars>
+```
+
+Show at most 5 chains. Omit this section if no correction relations exist.
+
+**Section 3 — Expiring Soon:**
+
+For each entry expiring within 7 days from Step 4c, sorted soonest first:
+
+```
+- [<TYPE>] <content preview, max 100 chars> — expires <relative timestamp> (<YYYY-MM-DD>)
+```
+
+Omit this section if no entries are expiring soon.
+
+**Section 4 — Stale Knowledge:**
+
+For each stale entry from Step 4d:
+
+```
+- [<TYPE>] <content preview, max 100 chars> — last accessed <relative timestamp>
+```
+
+Omit this section if no stale entries are found.
+
+**Section 5 — Unresolved:**
+
+For each entry from Step 4e:
+
+```
+- [<TYPE>] <content preview, max 100 chars> — <relative timestamp>
+```
+
+Omit this section if no unresolved entries exist.
+
+**Section 6 — Team Activity (team mode only):**
+
+Only render if `team_mode = true`. Omit if no data from Step 4g.
+
+For each author group (sorted by entry count descending), show:
+
+```
+## Team Activity (7 days)
+
+- <Author>: <N> entries (<type1_count> <type1>, <type2_count> <type2>, …)
+```
+
+Example:
+
+```
+- Alice: 5 entries (3 sessions, 2 bookmarks)
+- Bob: 2 entries (1 reference, 1 idea)
+```
+
+Include only entry types with count > 0. Omit this section entirely if no team entries found in the past 7 days.
+
+**Section 7 — Related from Team (team mode only):**
+
+Only render if `team_mode = true`. Omit if no data from Step 4h.
+
+For each result from the team semantic search:
+
+```
+- [<TYPE>] <Author> — <content preview, max 100 chars> — <similarity>% relevant
+```
+
+Show at most 5 results. Omit this section if the search returned no results.
+
+**Section 8 — Pending Review (team mode only):**
+
+Only render if `team_mode = true`. Omit if no data from Step 4i.
+
+For each entry from Step 4i:
+
+```
+- [<TYPE>] <content preview, max 100 chars> — awaiting review
+```
+
+Show at most 5 entries. Omit this section if no entries are in `pending_review` status.
+
+### Step 6: Display
+
+Display the synthesized briefing. This skill is display-only — there is no `--store` flag.
 
 ## Output Format
 
+Solo mode (`/briefing` or `/briefing --project distillery` with single author):
+
 ```
-# Team Briefing — <YYYY-MM-DD> (last <N> days)
+# Briefing: <project> (solo)
+Generated: 2026-04-08 09:15 UTC
 
 ---
 
-## System Health
+## Recent Entries
 
-- **Total Entries:** <N>
-- **DB Size:** <size>
-- **Embedding Model:** <model>
-- **Review Queue:** <N> entries pending classification
-- **Active Users (last <N> days):** <N> (or "unavailable" if audit call failed)
+- [SESSION] Refactored the dedup flow to handle four outcomes… — 2 hours ago
+- [BOOKMARK] Vector search in DuckDB — key patterns and pitfalls… — 1 day ago
+- [MINUTES] Standup 2026-04-07: decided to ship the briefing ski… — 1 day ago
 
 ---
 
-## Team Activity
+## Corrections
 
-Found <M> of <total> internal entries from the last <N> days.
-
-### By Author
-
-| Author | Sessions | Minutes | Bookmarks | Total |
-|--------|----------|---------|-----------|-------|
-| <name> | <N>      | <N>     | <N>       | <N>   |
-
-### Highlights
-
-- **<Author>:** <1–2 sentence summary of key contributions and topics>
-- **<Author>:** <1–2 sentence summary>
+- [SESSION] The correct threshold for merge is 0.80, not 0.75… corrects → [SESSION] Dedup thresholds: skip=0.95, merge=0.75…
 
 ---
 
-## Top Interests
+## Expiring Soon
 
-| # | Topic | Tag Path |
-|---|-------|----------|
-| 1 | <topic> | <tag> |
-| 2 | <topic> | <tag> |
+- [BOOKMARK] Trial API key for embedding provider — expires in 3 days (2026-04-11)
 
 ---
 
-## Feed Highlights
+## Stale Knowledge
 
-*Showing top signals matching team interests from the last <N> days.*
-
-- **<title or snippet>** — <brief description> ([source](<url>))
-- **<title or snippet>** — <brief description>
+- [REFERENCE] Old deployment notes for the pre-Fly.io setup… — last accessed 45 days ago
 
 ---
 
-## Suggested Actions
+## Unresolved
 
-- <action 1>
-- <action 2>
+- [SESSION] Spike: evaluate pgvector as an alternative to DuckDB… — 5 days ago
+```
+
+Team mode appends these additional sections after the solo sections (`/briefing --team` or auto-detected when >1 author):
+
+```
+# Briefing: <project> (team)
+Generated: 2026-04-08 09:15 UTC
+
+---
+
+## Recent Entries
+…(same solo sections)…
+
+---
+
+## Team Activity (7 days)
+
+- Alice: 5 entries (3 sessions, 2 bookmarks)
+- Bob: 2 entries (1 reference, 1 idea)
+
+---
+
+## Related from Team
+
+- [SESSION] Alice — DuckDB VSS benchmarks show HNSW outperforms flat… — 87% relevant
+- [BOOKMARK] Bob — FastMCP 3.1 migration guide with async context… — 74% relevant
+
+---
+
+## Pending Review
+
+- [INBOX] Unclassified feed item about vector search… — awaiting review
 ```
 
 ## Rules
 
-- Default lookback is 7 days — respect `--days` override
+- Always call `distillery_metrics(scope="summary")` first as the MCP health check; stop if it fails
+- Auto-detect project from `basename $(git rev-parse --show-toplevel)` when `--project` is not provided
 - Display-only — no `--store` flag, no storing of output
-- Always call `distillery_metrics(scope="summary")` first; if it fails, stop (it is the MCP health check)
-- `distillery_metrics(scope="audit")` failure is non-fatal — continue without audit data
-- `distillery_interests` failure is non-fatal — omit Top Interests and Suggested Actions sections
-- Feed Highlights failure is non-fatal — omit the section if search fails or returns nothing
-- Only include `session`, `bookmark`, `minutes` in the internal activity list (not `feed`, `github`, `digest`)
-- Omit empty sections — if no feed highlights, no top interests, no suggestions, omit those sections entirely
-- Omit per-author rows with zero entries in the period
-- Suggested Actions are concrete and actionable — include slash commands where applicable
+- Omit any section that has no data — never show empty section headings
+- Entry previews are capped at 100 characters with `…` truncation; never show raw multi-line content inline
+- Type badges are uppercase: `[SESSION]`, `[BOOKMARK]`, `[MINUTES]`, `[REFERENCE]`, `[FEED]`, `[DIGEST]`, `[GITHUB]`, `[INBOX]`, `[IDEA]`, `[PERSON]`, `[PROJECT]`
+- Relative timestamps use human-readable form: "just now", "5 minutes ago", "2 hours ago", "3 days ago"
+- Expiring-soon filter is applied client-side from already-fetched entries — no extra MCP call needed
+- Corrections section uses `distillery_relations(action="get", relation_type="corrects")` — failure is non-fatal
+- Stale knowledge failure is non-fatal — omit the section and continue
+- Unresolved failure is non-fatal — omit the section and continue
+- Team mode is activated by `--team` flag or auto-detected: `distillery_aggregate(group_by="author")` returning >1 author
+- Header shows `(solo)` or `(team)` based on detected mode
+- Team sections (6, 7, 8) are additive — solo sections are always rendered unchanged
+- Team activity groups entries by author from the past 7 days only — entries older than 7 days are excluded
+- Related from team uses `distillery_search` without author filter — all authors are included
+- Pending review uses `status="pending_review"` — limited to 5 entries
+- Team aggregate call failure is non-fatal — fall back to solo mode
+- Team activity, related from team, and pending review failures are non-fatal — omit each failed section
 - On MCP errors in fatal calls (summary metrics), see CONVENTIONS.md error handling — display and stop
 - No retry loops — report errors and stop

@@ -1899,25 +1899,28 @@ class DuckDBStore:
                 " created_by, last_modified_by, expires_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             )
-            conn.execute(insert_sql, [
-                new_entry.id,
-                new_entry.content,
-                new_entry.entry_type.value,
-                new_entry.source.value,
-                new_entry.author,
-                new_entry.project,
-                list(new_entry.tags),
-                new_entry.status.value,
-                new_entry.verification.value,
-                json.dumps(new_entry.metadata),
-                new_entry.created_at,
-                new_entry.updated_at,
-                new_entry.version,
-                embedding,
-                new_entry.created_by,
-                new_entry.last_modified_by,
-                new_entry.expires_at,
-            ])
+            conn.execute(
+                insert_sql,
+                [
+                    new_entry.id,
+                    new_entry.content,
+                    new_entry.entry_type.value,
+                    new_entry.source.value,
+                    new_entry.author,
+                    new_entry.project,
+                    list(new_entry.tags),
+                    new_entry.status.value,
+                    new_entry.verification.value,
+                    json.dumps(new_entry.metadata),
+                    new_entry.created_at,
+                    new_entry.updated_at,
+                    new_entry.version,
+                    embedding,
+                    new_entry.created_by,
+                    new_entry.last_modified_by,
+                    new_entry.expires_at,
+                ],
+            )
 
             # 2. Create the "corrects" relation.
             relation_id = str(uuid.uuid4())
@@ -1930,8 +1933,7 @@ class DuckDBStore:
             # 3. Archive the original entry.
             now = datetime.now(tz=UTC)
             conn.execute(
-                "UPDATE entries SET status = ?, updated_at = ?, version = version + 1 "
-                "WHERE id = ?",
+                "UPDATE entries SET status = ?, updated_at = ?, version = version + 1 WHERE id = ?",
                 ["archived", now, wrong_entry_id],
             )
 
@@ -1959,9 +1961,7 @@ class DuckDBStore:
 
         See :meth:`_sync_apply_correction` for details.
         """
-        return await asyncio.to_thread(
-            self._sync_apply_correction, new_entry, wrong_entry_id
-        )
+        return await asyncio.to_thread(self._sync_apply_correction, new_entry, wrong_entry_id)
 
     def _sync_get_related(
         self,

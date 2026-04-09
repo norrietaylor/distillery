@@ -112,9 +112,17 @@ class TestSessionIdAggregateFilter:
     """aggregate_entries filtered by session_id reflects only matching entries."""
 
     async def test_aggregate_filter_by_session_id(self, store: object) -> None:
-        await store.store(make_entry(content="sess-A idea", entry_type=EntryType.IDEA, session_id="sess-A"))  # type: ignore[attr-defined]
-        await store.store(make_entry(content="sess-A inbox", entry_type=EntryType.INBOX, session_id="sess-A"))  # type: ignore[attr-defined]
-        await store.store(make_entry(content="sess-B reference", entry_type=EntryType.REFERENCE, session_id="sess-B"))  # type: ignore[attr-defined]
+        await store.store(
+            make_entry(content="sess-A idea", entry_type=EntryType.IDEA, session_id="sess-A")
+        )  # type: ignore[attr-defined]
+        await store.store(
+            make_entry(content="sess-A inbox", entry_type=EntryType.INBOX, session_id="sess-A")
+        )  # type: ignore[attr-defined]
+        await store.store(
+            make_entry(
+                content="sess-B reference", entry_type=EntryType.REFERENCE, session_id="sess-B"
+            )
+        )  # type: ignore[attr-defined]
 
         result = await store.aggregate_entries(  # type: ignore[attr-defined]
             group_by="entry_type",
@@ -333,8 +341,6 @@ class TestMigration11:
         entry_id = await store.store(entry)  # type: ignore[attr-defined]
 
         conn = store._conn  # type: ignore[attr-defined]
-        row = conn.execute(
-            "SELECT session_id FROM entries WHERE id = ?", [entry_id]
-        ).fetchone()
+        row = conn.execute("SELECT session_id FROM entries WHERE id = ?", [entry_id]).fetchone()
         assert row is not None
         assert row[0] is None

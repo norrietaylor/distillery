@@ -796,6 +796,7 @@ class TestRetagCommand:
 
         async def _setup() -> None:
             from distillery.mcp._stub_embedding import StubEmbeddingProvider
+
             store = DuckDBStore(db_path=db_path, embedding_provider=StubEmbeddingProvider())
             await store.initialize()
             # Add vocabulary via a tagged inbox entry.
@@ -824,11 +825,10 @@ class TestRetagCommand:
 
         async def _check() -> list[str]:
             from distillery.mcp._stub_embedding import StubEmbeddingProvider
+
             store = DuckDBStore(db_path=db_path, embedding_provider=StubEmbeddingProvider())
             await store.initialize()
-            entries = await store.list_entries(
-                filters={"entry_type": "feed"}, limit=10, offset=0
-            )
+            entries = await store.list_entries(filters={"entry_type": "feed"}, limit=10, offset=0)
             await store.close()
             return entries[0].tags if entries else []
 
@@ -853,6 +853,7 @@ class TestRetagCommand:
 
         async def _setup() -> None:
             from distillery.mcp._stub_embedding import StubEmbeddingProvider
+
             store = DuckDBStore(db_path=db_path, embedding_provider=StubEmbeddingProvider())
             await store.initialize()
             # Seed vocabulary.
@@ -898,6 +899,7 @@ class TestRetagCommand:
 
         async def _setup() -> None:
             from distillery.mcp._stub_embedding import StubEmbeddingProvider
+
             store = DuckDBStore(db_path=db_path, embedding_provider=StubEmbeddingProvider())
             await store.initialize()
             # Feed entry that already has a tag.
@@ -935,6 +937,7 @@ class TestRetagCommand:
 
         async def _setup() -> None:
             from distillery.mcp._stub_embedding import StubEmbeddingProvider
+
             store = DuckDBStore(db_path=db_path, embedding_provider=StubEmbeddingProvider())
             await store.initialize()
             tagged = make_entry(

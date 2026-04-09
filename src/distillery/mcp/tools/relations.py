@@ -62,36 +62,24 @@ async def _handle_relations(
     if action == "add":
         from_id_raw = arguments.get("from_id")
         if from_id_raw is None or not isinstance(from_id_raw, str):
-            return error_response(
-                "MISSING_FIELD", "from_id is required for action='add'"
-            )
+            return error_response("MISSING_FIELD", "from_id is required for action='add'")
         from_id = from_id_raw.strip()
         if not from_id:
-            return error_response(
-                "MISSING_FIELD", "from_id must be a non-empty string"
-            )
+            return error_response("MISSING_FIELD", "from_id must be a non-empty string")
 
         to_id_raw = arguments.get("to_id")
         if to_id_raw is None or not isinstance(to_id_raw, str):
-            return error_response(
-                "MISSING_FIELD", "to_id is required for action='add'"
-            )
+            return error_response("MISSING_FIELD", "to_id is required for action='add'")
         to_id = to_id_raw.strip()
         if not to_id:
-            return error_response(
-                "MISSING_FIELD", "to_id must be a non-empty string"
-            )
+            return error_response("MISSING_FIELD", "to_id must be a non-empty string")
 
         relation_type_raw = arguments.get("relation_type")
         if relation_type_raw is None or not isinstance(relation_type_raw, str):
-            return error_response(
-                "MISSING_FIELD", "relation_type is required for action='add'"
-            )
+            return error_response("MISSING_FIELD", "relation_type is required for action='add'")
         relation_type = relation_type_raw.strip()
         if not relation_type:
-            return error_response(
-                "MISSING_FIELD", "relation_type must be a non-empty string"
-            )
+            return error_response("MISSING_FIELD", "relation_type must be a non-empty string")
 
         try:
             relation_id = await store.add_relation(from_id, to_id, relation_type)
@@ -119,14 +107,10 @@ async def _handle_relations(
     if action == "get":
         entry_id_raw = arguments.get("entry_id")
         if entry_id_raw is None or not isinstance(entry_id_raw, str):
-            return error_response(
-                "MISSING_FIELD", "entry_id is required for action='get'"
-            )
+            return error_response("MISSING_FIELD", "entry_id is required for action='get'")
         entry_id = entry_id_raw.strip()
         if not entry_id:
-            return error_response(
-                "MISSING_FIELD", "entry_id must be a non-empty string"
-            )
+            return error_response("MISSING_FIELD", "entry_id must be a non-empty string")
 
         direction_raw = arguments.get("direction", "both")
         if not isinstance(direction_raw, str):
@@ -174,14 +158,10 @@ async def _handle_relations(
     # ------------------------------------------------------------------
     relation_id_raw = arguments.get("relation_id")
     if relation_id_raw is None or not isinstance(relation_id_raw, str):
-        return error_response(
-            "MISSING_FIELD", "relation_id is required for action='remove'"
-        )
+        return error_response("MISSING_FIELD", "relation_id is required for action='remove'")
     relation_id = relation_id_raw.strip()
     if not relation_id:
-        return error_response(
-            "MISSING_FIELD", "relation_id must be a non-empty string"
-        )
+        return error_response("MISSING_FIELD", "relation_id must be a non-empty string")
 
     try:
         removed = await store.remove_relation(relation_id)

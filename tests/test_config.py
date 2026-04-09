@@ -172,9 +172,7 @@ class TestYAMLLoading:
         assert cfg.defaults.dedup_limit == 5
         assert cfg.defaults.stale_days == 45
 
-    def test_hybrid_search_defaults(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_hybrid_search_defaults(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Hybrid search fields use sensible defaults when absent from config."""
         monkeypatch.chdir(tmp_path)
         monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)

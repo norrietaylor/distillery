@@ -568,9 +568,7 @@ class TestCLIPollSubcommand:
 class TestBuildAdapterGitHubToken:
     """_build_adapter() passes GITHUB_TOKEN to GitHubAdapter when set."""
 
-    def test_passes_token_from_env_to_github_adapter(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_passes_token_from_env_to_github_adapter(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from distillery.feeds.poller import _build_adapter
 
         monkeypatch.setenv("GITHUB_TOKEN", "ghp_testtoken123")
@@ -578,9 +576,7 @@ class TestBuildAdapterGitHubToken:
         adapter = _build_adapter(src)
         assert adapter._token == "ghp_testtoken123"  # noqa: SLF001
 
-    def test_no_token_in_env_gives_empty_token(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_no_token_in_env_gives_empty_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from distillery.feeds.poller import _build_adapter
 
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)

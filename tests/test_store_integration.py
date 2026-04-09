@@ -521,9 +521,7 @@ class TestMigration7FtsIndex:
     def _make_conn_with_entries(self) -> duckdb.DuckDBPyConnection:
         """Return an in-memory DuckDB connection with a minimal entries table."""
         conn = duckdb.connect(":memory:")
-        conn.execute(
-            "CREATE TABLE entries (id VARCHAR PRIMARY KEY, content VARCHAR NOT NULL)"
-        )
+        conn.execute("CREATE TABLE entries (id VARCHAR PRIMARY KEY, content VARCHAR NOT NULL)")
         conn.execute(
             "INSERT INTO entries VALUES ('1', 'machine learning models'), "
             "('2', 'knowledge base retrieval'), ('3', 'vector embeddings')"
@@ -534,8 +532,7 @@ class TestMigration7FtsIndex:
         """Return True if the FTS macro is accessible on the entries table."""
         try:
             conn.execute(
-                "SELECT id, fts_main_entries.match_bm25(id, 'test') AS score"
-                " FROM entries LIMIT 1"
+                "SELECT id, fts_main_entries.match_bm25(id, 'test') AS score FROM entries LIMIT 1"
             )
             return True
         except Exception:

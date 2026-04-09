@@ -35,15 +35,17 @@ _REQUEST_TIMEOUT = 30.0
 # release notes, commit messages).  Low-value events like WatchEvent, ForkEvent,
 # and bare CreateEvent/DeleteEvent are excluded by default because they have
 # very short content that dominates BM25 keyword matching (#171).
-_DEFAULT_INCLUDE_EVENT_TYPES: frozenset[str] = frozenset({
-    "IssuesEvent",
-    "IssueCommentEvent",
-    "PullRequestEvent",
-    "PullRequestReviewEvent",
-    "PullRequestReviewCommentEvent",
-    "PushEvent",
-    "ReleaseEvent",
-})
+_DEFAULT_INCLUDE_EVENT_TYPES: frozenset[str] = frozenset(
+    {
+        "IssuesEvent",
+        "IssueCommentEvent",
+        "PullRequestEvent",
+        "PullRequestReviewEvent",
+        "PullRequestReviewCommentEvent",
+        "PushEvent",
+        "ReleaseEvent",
+    }
+)
 
 # Pattern that matches a bare "owner/repo" slug so callers may pass either
 # the full URL or the short slug form.
@@ -278,7 +280,10 @@ class GitHubAdapter:
                     continue
                 items.append(_event_to_feed_item(event, self._source_url))
             except Exception:
-                logger.exception("GitHubAdapter: failed to convert event %r", event.get("id") if isinstance(event, dict) else event)
+                logger.exception(
+                    "GitHubAdapter: failed to convert event %r",
+                    event.get("id") if isinstance(event, dict) else event,
+                )
         if skipped:
             logger.debug("GitHubAdapter: skipped %d low-value events", skipped)
         return items

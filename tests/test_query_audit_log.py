@@ -87,7 +87,15 @@ class TestQueryAuditLogBasic:
         result = await store.query_audit_log(filters=None)
         assert len(result) == 1
         row = result[0]
-        assert set(row.keys()) == {"id", "timestamp", "user_id", "tool", "entry_id", "action", "outcome"}
+        assert set(row.keys()) == {
+            "id",
+            "timestamp",
+            "user_id",
+            "tool",
+            "entry_id",
+            "action",
+            "outcome",
+        }
 
     async def test_timestamp_is_iso8601_string(self, store: DuckDBStore) -> None:
         await _write(store)
@@ -96,6 +104,7 @@ class TestQueryAuditLogBasic:
         assert isinstance(ts, str)
         # Should be parseable as ISO 8601
         from datetime import datetime
+
         dt = datetime.fromisoformat(ts)
         assert dt is not None
 
@@ -180,6 +189,7 @@ class TestQueryAuditLogOrdering:
         assert len(result) == 3
         # Timestamps should be in descending (or equal) order.
         from datetime import datetime
+
         timestamps = [datetime.fromisoformat(r["timestamp"]) for r in result]
         for i in range(len(timestamps) - 1):
             assert timestamps[i] >= timestamps[i + 1]

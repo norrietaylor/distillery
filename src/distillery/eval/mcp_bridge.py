@@ -277,9 +277,7 @@ DISTILLERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
                 "period_days": {"type": "integer", "description": "Lookback window in days."},
                 "date_from": {
                     "type": "string",
-                    "description": (
-                        "ISO 8601 timestamp lower bound. Used with scope='audit'."
-                    ),
+                    "description": ("ISO 8601 timestamp lower bound. Used with scope='audit'."),
                 },
                 "user": {
                     "type": "string",

@@ -126,10 +126,7 @@ class TestBuildContent:
 
     @pytest.mark.unit
     def test_max_comments_limit(self) -> None:
-        comments = [
-            {"user": {"login": f"user{i}"}, "body": f"Comment {i}"}
-            for i in range(15)
-        ]
+        comments = [{"user": {"login": f"user{i}"}, "body": f"Comment {i}"} for i in range(15)]
         result = _build_content("Title", None, comments)
         assert "user9" in result
         assert "user10" not in result
@@ -138,6 +135,7 @@ class TestBuildContent:
 # ---------------------------------------------------------------------------
 # Mock GitHub API responses
 # ---------------------------------------------------------------------------
+
 
 def _mock_issue(
     number: int = 1,
@@ -243,9 +241,7 @@ class TestGitHubSyncAdapterSync:
         result = await adapter.sync()
 
         assert result.created == 1
-        entries = await store.list_entries(
-            filters={"entry_type": "github"}, limit=10, offset=0
-        )
+        entries = await store.list_entries(filters={"entry_type": "github"}, limit=10, offset=0)
         assert entries[0].metadata["ref_type"] == "pr"
         assert entries[0].metadata["external_id"] == "test/repo#pr-5"
 
@@ -281,9 +277,7 @@ class TestGitHubSyncAdapterSync:
         assert result2.updated == 1
 
         # Should still be exactly one entry.
-        entries = await store.list_entries(
-            filters={"entry_type": "github"}, limit=10, offset=0
-        )
+        entries = await store.list_entries(filters={"entry_type": "github"}, limit=10, offset=0)
         assert len(entries) == 1
         assert "Updated title" in entries[0].content
 
@@ -335,9 +329,7 @@ class TestGitHubSyncAdapterSync:
         assert result.relations_created == 1
 
         # Verify the relation was stored.
-        entries = await store.list_entries(
-            filters={"entry_type": "github"}, limit=10, offset=0
-        )
+        entries = await store.list_entries(filters={"entry_type": "github"}, limit=10, offset=0)
         # Find the referencing entry.
         ref_entry = next(e for e in entries if e.metadata["ref_number"] == 2)
         relations = await store.get_related(ref_entry.id, direction="outgoing")
@@ -364,9 +356,7 @@ class TestGitHubSyncAdapterSync:
         adapter = GitHubSyncAdapter(store=store, url="test/repo")
         await adapter.sync()
 
-        entries = await store.list_entries(
-            filters={"entry_type": "github"}, limit=10, offset=0
-        )
+        entries = await store.list_entries(filters={"entry_type": "github"}, limit=10, offset=0)
         assert "bug" in entries[0].tags
         assert "high-priority" in entries[0].tags
 

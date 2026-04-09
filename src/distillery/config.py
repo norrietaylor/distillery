@@ -429,9 +429,7 @@ def _parse_defaults(raw: dict[str, Any]) -> DefaultsConfig:
 
     hybrid_search_raw = raw.get("hybrid_search", True)
     if not isinstance(hybrid_search_raw, bool):
-        raise ValueError(
-            f"defaults.hybrid_search must be a boolean, got: {hybrid_search_raw!r}"
-        )
+        raise ValueError(f"defaults.hybrid_search must be a boolean, got: {hybrid_search_raw!r}")
     hybrid_search = hybrid_search_raw
 
     rrf_k_raw = raw.get("rrf_k", 60)
