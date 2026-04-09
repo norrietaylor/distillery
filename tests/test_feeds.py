@@ -367,9 +367,7 @@ class TestGitHubAdapter:
             mock_client_cls.return_value = mock_client
 
             # Only allow WatchEvent
-            adapter = GitHubAdapter(
-                "owner/repo", include_event_types=frozenset({"WatchEvent"})
-            )
+            adapter = GitHubAdapter("owner/repo", include_event_types=frozenset({"WatchEvent"}))
             items = adapter.fetch()
 
         assert len(items) == 1
@@ -882,9 +880,7 @@ class TestDeriveAllTagsTopicTag:
         from distillery.feeds.poller import derive_all_tags
 
         kw_map = {"authentication": "domain/authentication"}
-        item = self._make_item(
-            "https://example.com/rss", "rss", title="OAuth authentication guide"
-        )
+        item = self._make_item("https://example.com/rss", "rss", title="OAuth authentication guide")
         tags = derive_all_tags(item, "rss", kw_map)
         assert "domain/authentication" in tags
 
@@ -928,9 +924,7 @@ class TestDeriveAllTagsTopicTag:
         """Empty keyword map still returns source tags."""
         from distillery.feeds.poller import derive_all_tags
 
-        item = self._make_item(
-            "https://github.com/owner/repo", "github", title="New release"
-        )
+        item = self._make_item("https://github.com/owner/repo", "github", title="New release")
         tags = derive_all_tags(item, "github", {})
         assert "source/github" in tags
         assert "source/github/owner/repo" in tags
@@ -1025,15 +1019,9 @@ class TestPollCycleTopicTagIntegration:
         store.store.side_effect = capture_store
 
         with (
-            patch(
-                "distillery.feeds.poller._build_adapter"
-            ) as mock_build_adapter,
-            patch(
-                "distillery.feeds.poller.RelevanceScorer"
-            ) as mock_scorer_cls,
-            patch(
-                "distillery.feeds.interests.InterestExtractor"
-            ) as mock_extractor_cls,
+            patch("distillery.feeds.poller._build_adapter") as mock_build_adapter,
+            patch("distillery.feeds.poller.RelevanceScorer") as mock_scorer_cls,
+            patch("distillery.feeds.interests.InterestExtractor") as mock_extractor_cls,
         ):
             mock_adapter = MagicMock()
             mock_adapter.fetch.return_value = [item]
@@ -1044,9 +1032,7 @@ class TestPollCycleTopicTagIntegration:
             mock_scorer_cls.return_value = mock_scorer
 
             mock_extractor = AsyncMock()
-            mock_extractor.extract.return_value = MagicMock(
-                entry_count=0, top_tags=[]
-            )
+            mock_extractor.extract.return_value = MagicMock(entry_count=0, top_tags=[])
             mock_extractor_cls.return_value = mock_extractor
 
             poller = FeedPoller(store=store, config=config)
@@ -1087,15 +1073,9 @@ class TestPollCycleTopicTagIntegration:
         store.store.side_effect = capture_store
 
         with (
-            patch(
-                "distillery.feeds.poller._build_adapter"
-            ) as mock_build_adapter,
-            patch(
-                "distillery.feeds.poller.RelevanceScorer"
-            ) as mock_scorer_cls,
-            patch(
-                "distillery.feeds.interests.InterestExtractor"
-            ) as mock_extractor_cls,
+            patch("distillery.feeds.poller._build_adapter") as mock_build_adapter,
+            patch("distillery.feeds.poller.RelevanceScorer") as mock_scorer_cls,
+            patch("distillery.feeds.interests.InterestExtractor") as mock_extractor_cls,
         ):
             mock_adapter = MagicMock()
             mock_adapter.fetch.return_value = [item]
@@ -1106,9 +1086,7 @@ class TestPollCycleTopicTagIntegration:
             mock_scorer_cls.return_value = mock_scorer
 
             mock_extractor = AsyncMock()
-            mock_extractor.extract.return_value = MagicMock(
-                entry_count=0, top_tags=[]
-            )
+            mock_extractor.extract.return_value = MagicMock(entry_count=0, top_tags=[])
             mock_extractor_cls.return_value = mock_extractor
 
             poller = FeedPoller(store=store, config=config)

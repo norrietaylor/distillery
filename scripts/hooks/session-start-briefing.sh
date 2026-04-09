@@ -90,20 +90,25 @@ call_tool() {
 
 # ── Fetch recent entries ──────────────────────────────────────────────────────
 RECENT_RAW=""
-RECENT_RAW="$(call_tool "distillery_list" \
-  "{\"project\":\"${PROJECT}\",\"limit\":${LIMIT}}" 2>/dev/null || true)"
+RECENT_PARAMS="$(jq -n --arg project "$PROJECT" --argjson limit "$LIMIT" '{project:$project,limit:$limit}')"
+RECENT_RAW="$(call_tool "distillery_list" "$RECENT_PARAMS" 2>/dev/null || true)"
 
 # ── Fetch stale entries ───────────────────────────────────────────────────────
 STALE_RAW=""
-STALE_RAW="$(call_tool "distillery_stale" \
-  "{\"days\":30,\"limit\":3}" 2>/dev/null || true)"
+STALE_PARAMS="$(jq -n --argjson days 30 --argjson limit 3 '{days:$days,limit:$limit}')"
+STALE_RAW="$(call_tool "distillery_stale" "$STALE_PARAMS" 2>/dev/null || true)"
 
 # ── Parse and format output ───────────────────────────────────────────────────
-# Extract content snippets using portable shell parsing
+# Extract content snippets using robust JSON parsing
 # The MCP response wraps content in: {"result":{"content":[{"type":"text","text":"..."}]}}
 extract_text() {
   local raw="$1"
-  echo "$raw" | grep -o '"text":"[^"]*"' | head -1 | sed 's/"text":"//;s/"$//' || true
+  if command -v jq >/dev/null 2>&1; then
+    echo "$raw" | jq -r '.result.content[0].text // empty' 2>/dev/null || true
+  else
+    # Fallback to Python if jq is not available
+    echo "$raw" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("result",{}).get("content",[{}])[0].get("text",""))' 2>/dev/null || true
+  fi
 }
 
 RECENT_TEXT="$(extract_text "$RECENT_RAW")"

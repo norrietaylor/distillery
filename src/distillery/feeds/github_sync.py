@@ -84,7 +84,7 @@ def _parse_github_url(url: str) -> tuple[str, str]:
         "http://github.com/",
     ):
         if stripped.startswith(prefix):
-            remainder = stripped[len(prefix):]
+            remainder = stripped[len(prefix) :]
             parts = remainder.split("/")
             if len(parts) >= 2:
                 return parts[0], parts[1]
@@ -205,12 +205,9 @@ class GitHubSyncAdapter:
     ) -> httpx.Response:
         """GET with retry on rate-limit (403/429) and transient 5xx errors."""
         for attempt in range(_MAX_RETRIES + 1):
-            response = await client.get(
-                url, params=params, headers=self._headers()
-            )
+            response = await client.get(url, params=params, headers=self._headers())
             if response.status_code == 429 or (
-                response.status_code == 403
-                and "rate limit" in response.text.lower()
+                response.status_code == 403 and "rate limit" in response.text.lower()
             ):
                 retry_after = response.headers.get("Retry-After")
                 reset = response.headers.get("X-RateLimit-Reset")
@@ -219,20 +216,25 @@ class GitHubSyncAdapter:
                 elif reset:
                     wait = max(0.0, float(reset) - datetime.now(UTC).timestamp())
                 else:
-                    wait = 2.0 ** attempt
+                    wait = 2.0**attempt
                 wait = min(wait, 60.0)
                 logger.warning(
                     "GitHub rate limited (attempt %d/%d), waiting %.0fs",
-                    attempt + 1, _MAX_RETRIES + 1, wait,
+                    attempt + 1,
+                    _MAX_RETRIES + 1,
+                    wait,
                 )
                 if attempt < _MAX_RETRIES:
                     await asyncio.sleep(wait)
                     continue
             if response.status_code >= 500 and attempt < _MAX_RETRIES:
-                wait = 2.0 ** attempt
+                wait = 2.0**attempt
                 logger.warning(
                     "GitHub %d (attempt %d/%d), retrying in %.0fs",
-                    response.status_code, attempt + 1, _MAX_RETRIES + 1, wait,
+                    response.status_code,
+                    attempt + 1,
+                    _MAX_RETRIES + 1,
+                    wait,
                 )
                 await asyncio.sleep(wait)
                 continue
@@ -257,9 +259,7 @@ class GitHubSyncAdapter:
         client:
             Optional pre-built httpx client (for testing).
         """
-        api_url = (
-            f"{_GITHUB_API_BASE}/repos/{self._owner}/{self._repo}/issues"
-        )
+        api_url = f"{_GITHUB_API_BASE}/repos/{self._owner}/{self._repo}/issues"
         params: dict[str, str | int] = {
             "state": "all",
             "per_page": _DEFAULT_PER_PAGE,
@@ -271,9 +271,7 @@ class GitHubSyncAdapter:
 
         should_close = client is None
         if client is None:
-            client = httpx.AsyncClient(
-                timeout=_REQUEST_TIMEOUT, follow_redirects=True
-            )
+            client = httpx.AsyncClient(timeout=_REQUEST_TIMEOUT, follow_redirects=True)
         try:
             all_issues: list[dict[str, Any]] = []
             page = 1
@@ -306,17 +304,12 @@ class GitHubSyncAdapter:
         client:
             Optional pre-built httpx client (for testing).
         """
-        api_url = (
-            f"{_GITHUB_API_BASE}/repos/{self._owner}/{self._repo}"
-            f"/issues/{number}/comments"
-        )
+        api_url = f"{_GITHUB_API_BASE}/repos/{self._owner}/{self._repo}/issues/{number}/comments"
         params: dict[str, str | int] = {"per_page": _MAX_COMMENTS}
 
         should_close = client is None
         if client is None:
-            client = httpx.AsyncClient(
-                timeout=_REQUEST_TIMEOUT, follow_redirects=True
-            )
+            client = httpx.AsyncClient(timeout=_REQUEST_TIMEOUT, follow_redirects=True)
         try:
             response = await self._request_with_retry(client, api_url, params)
             result: list[dict[str, Any]] = response.json()
@@ -352,12 +345,10 @@ class GitHubSyncAdapter:
         state: str = issue.get("state", "unknown")
         html_url: str = issue.get("html_url", "")
         labels = [
-            lbl.get("name", "") for lbl in (issue.get("labels") or [])
-            if isinstance(lbl, dict)
+            lbl.get("name", "") for lbl in (issue.get("labels") or []) if isinstance(lbl, dict)
         ]
         assignees = [
-            a.get("login", "") for a in (issue.get("assignees") or [])
-            if isinstance(a, dict)
+            a.get("login", "") for a in (issue.get("assignees") or []) if isinstance(a, dict)
         ]
 
         external_id = _make_external_id(self._owner, self._repo, ref_type, number)
@@ -423,9 +414,7 @@ class GitHubSyncAdapter:
         for ref_number in cross_refs:
             # Try both issue and PR external IDs.
             for ref_type in ("issue", "pr"):
-                ext_id = _make_external_id(
-                    self._owner, self._repo, ref_type, ref_number
-                )
+                ext_id = _make_external_id(self._owner, self._repo, ref_type, ref_number)
                 target = await self._find_existing(ext_id)
                 if target is not None:
                     try:
@@ -492,17 +481,13 @@ class GitHubSyncAdapter:
             number = issue.get("number", 0)
             is_pr = "pull_request" in issue
             ref_type = "pr" if is_pr else "issue"
-            external_id = _make_external_id(
-                self._owner, self._repo, ref_type, number
-            )
+            external_id = _make_external_id(self._owner, self._repo, ref_type, number)
 
             # Fetch comments.
             try:
                 comments = await self._fetch_comments(number, client=client)
             except httpx.HTTPError:
-                logger.warning(
-                    "Failed to fetch comments for %s #%d", external_id, number
-                )
+                logger.warning("Failed to fetch comments for %s #%d", external_id, number)
                 comments = []
 
             entry = self._issue_to_entry(issue, comments)
@@ -537,15 +522,11 @@ class GitHubSyncAdapter:
 
         # Second pass: resolve cross-references now that all items are stored.
         for entry_id, cross_refs in pending_xrefs:
-            new_rels = await self._create_cross_ref_relations(
-                entry_id, cross_refs
-            )
+            new_rels = await self._create_cross_ref_relations(entry_id, cross_refs)
             relations_created.extend(new_rels)
 
         # Update last sync timestamp.
-        await self._store.set_metadata(
-            self._metadata_key, sync_start.isoformat()
-        )
+        await self._store.set_metadata(self._metadata_key, sync_start.isoformat())
 
         result = SyncResult(
             repo=f"{self._owner}/{self._repo}",

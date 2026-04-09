@@ -125,14 +125,21 @@ async def store() -> AsyncGenerator[DuckDBStore, None]:
 class TestAuditResponseStructure:
     async def test_all_four_sections_present(self, store: DuckDBStore) -> None:
         data = await _audit(store)
-        assert set(data.keys()) >= {"recent_logins", "login_summary", "active_users",
-                                     "recent_operations"}
+        assert set(data.keys()) >= {
+            "recent_logins",
+            "login_summary",
+            "active_users",
+            "recent_operations",
+        }
 
     async def test_login_summary_keys_present(self, store: DuckDBStore) -> None:
         data = await _audit(store)
         summary = data["login_summary"]
         assert set(summary.keys()) >= {
-            "total_logins", "unique_users", "failed_attempts", "org_denials"
+            "total_logins",
+            "unique_users",
+            "failed_attempts",
+            "org_denials",
         }
 
 
@@ -169,32 +176,24 @@ class TestRecentLogins:
         tools_in_logins = [r["tool"] for r in data["recent_logins"]]
         assert "auth_login" in tools_in_logins
 
-    async def test_auth_login_failed_appears_in_recent_logins(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_auth_login_failed_appears_in_recent_logins(self, store: DuckDBStore) -> None:
         await _write(store, user_id="bob", tool="auth_login_failed")
         data = await _audit(store)
         tools_in_logins = [r["tool"] for r in data["recent_logins"]]
         assert "auth_login_failed" in tools_in_logins
 
-    async def test_auth_org_denied_appears_in_recent_logins(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_auth_org_denied_appears_in_recent_logins(self, store: DuckDBStore) -> None:
         await _write(store, user_id="carol", tool="auth_org_denied")
         data = await _audit(store)
         tools_in_logins = [r["tool"] for r in data["recent_logins"]]
         assert "auth_org_denied" in tools_in_logins
 
-    async def test_non_auth_tool_excluded_from_recent_logins(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_non_auth_tool_excluded_from_recent_logins(self, store: DuckDBStore) -> None:
         await _write(store, user_id="alice", tool="recall")
         data = await _audit(store)
         assert data["recent_logins"] == []
 
-    async def test_mixed_tools_only_auth_in_recent_logins(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_mixed_tools_only_auth_in_recent_logins(self, store: DuckDBStore) -> None:
         await _write(store, user_id="alice", tool="auth_login")
         await _write(store, user_id="alice", tool="recall")
         await _write(store, user_id="alice", tool="distill")
@@ -209,24 +208,18 @@ class TestRecentLogins:
 
 
 class TestRecentOperations:
-    async def test_non_auth_appears_in_recent_operations(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_non_auth_appears_in_recent_operations(self, store: DuckDBStore) -> None:
         await _write(store, user_id="alice", tool="recall")
         data = await _audit(store)
         tools = [r["tool"] for r in data["recent_operations"]]
         assert "recall" in tools
 
-    async def test_auth_excluded_from_recent_operations(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_auth_excluded_from_recent_operations(self, store: DuckDBStore) -> None:
         await _write(store, user_id="alice", tool="auth_login")
         data = await _audit(store)
         assert data["recent_operations"] == []
 
-    async def test_mixed_tools_only_non_auth_in_operations(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_mixed_tools_only_non_auth_in_operations(self, store: DuckDBStore) -> None:
         await _write(store, user_id="alice", tool="auth_login")
         await _write(store, user_id="alice", tool="recall")
         await _write(store, user_id="alice", tool="distill")
@@ -242,33 +235,25 @@ class TestRecentOperations:
 
 
 class TestLoginSummary:
-    async def test_total_logins_counts_auth_login_only(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_total_logins_counts_auth_login_only(self, store: DuckDBStore) -> None:
         await _write(store, user_id="alice", tool="auth_login")
         await _write(store, user_id="bob", tool="auth_login")
         await _write(store, user_id="carol", tool="auth_login_failed")
         data = await _audit(store)
         assert data["login_summary"]["total_logins"] == 2
 
-    async def test_failed_attempts_counts_auth_login_failed(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_failed_attempts_counts_auth_login_failed(self, store: DuckDBStore) -> None:
         await _write(store, user_id="alice", tool="auth_login_failed")
         await _write(store, user_id="alice", tool="auth_login_failed")
         data = await _audit(store)
         assert data["login_summary"]["failed_attempts"] == 2
 
-    async def test_org_denials_counts_auth_org_denied(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_org_denials_counts_auth_org_denied(self, store: DuckDBStore) -> None:
         await _write(store, user_id="alice", tool="auth_org_denied")
         data = await _audit(store)
         assert data["login_summary"]["org_denials"] == 1
 
-    async def test_unique_users_counts_distinct_user_ids(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_unique_users_counts_distinct_user_ids(self, store: DuckDBStore) -> None:
         await _write(store, user_id="alice", tool="auth_login")
         await _write(store, user_id="alice", tool="auth_login")
         await _write(store, user_id="bob", tool="auth_login")
@@ -282,9 +267,7 @@ class TestLoginSummary:
 
 
 class TestActiveUsers:
-    async def test_active_users_has_correct_fields(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_active_users_has_correct_fields(self, store: DuckDBStore) -> None:
         await _write(store, user_id="alice", tool="recall")
         data = await _audit(store)
         assert len(data["active_users"]) == 1
@@ -293,9 +276,7 @@ class TestActiveUsers:
         assert "last_seen" in user_row
         assert "operation_count" in user_row
 
-    async def test_active_users_counts_operations_per_user(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_active_users_counts_operations_per_user(self, store: DuckDBStore) -> None:
         await _write(store, user_id="alice", tool="recall")
         await _write(store, user_id="alice", tool="distill")
         await _write(store, user_id="bob", tool="recall")
@@ -304,9 +285,7 @@ class TestActiveUsers:
         assert by_user["alice"]["operation_count"] == 2
         assert by_user["bob"]["operation_count"] == 1
 
-    async def test_active_users_ordered_by_last_seen_desc(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_active_users_ordered_by_last_seen_desc(self, store: DuckDBStore) -> None:
         await _write(store, user_id="alice", tool="recall")
         await _write(store, user_id="bob", tool="distill")
         data = await _audit(store)
@@ -323,9 +302,7 @@ class TestActiveUsers:
 
 
 class TestDateFromFilter:
-    async def test_date_from_excludes_old_operations(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_date_from_excludes_old_operations(self, store: DuckDBStore) -> None:
         # Write an old auth_login and a recent one.
         # We can only control timestamps via direct DB insertion.
         conn = store.connection
@@ -351,9 +328,7 @@ class TestDateFromFilter:
         assert len(data["recent_logins"]) == 1
         assert data["recent_logins"][0]["entry_id"] == "e-new"
 
-    async def test_date_from_filters_recent_operations(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_date_from_filters_recent_operations(self, store: DuckDBStore) -> None:
         conn = store.connection
         import uuid as _uuid
 
@@ -382,27 +357,21 @@ class TestDateFromFilter:
 
 
 class TestUserFilter:
-    async def test_user_filter_narrows_recent_operations(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_user_filter_narrows_recent_operations(self, store: DuckDBStore) -> None:
         await _write(store, user_id="alice", tool="recall")
         await _write(store, user_id="bob", tool="recall")
         data = await _audit(store, user="alice")
         for row in data["recent_operations"]:
             assert row["user_id"] == "alice"
 
-    async def test_user_filter_narrows_active_users(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_user_filter_narrows_active_users(self, store: DuckDBStore) -> None:
         await _write(store, user_id="alice", tool="recall")
         await _write(store, user_id="bob", tool="recall")
         data = await _audit(store, user="alice")
         user_ids = {u["user_id"] for u in data["active_users"]}
         assert user_ids == {"alice"}
 
-    async def test_user_filter_does_not_affect_login_summary(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_user_filter_does_not_affect_login_summary(self, store: DuckDBStore) -> None:
         """login_summary is based on recent_logins which uses only date_from, not user."""
         await _write(store, user_id="alice", tool="auth_login")
         await _write(store, user_id="bob", tool="auth_login")
@@ -418,9 +387,7 @@ class TestUserFilter:
 
 
 class TestIncompatibleParams:
-    async def test_entry_type_with_audit_scope_returns_error(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_entry_type_with_audit_scope_returns_error(self, store: DuckDBStore) -> None:
         config = _make_config()
         ep = MockEmbeddingProvider()
         response = await _handle_metrics(
@@ -429,24 +396,16 @@ class TestIncompatibleParams:
         data = _parse(response)
         assert data.get("error") is not None or "error_code" in data or "error" in str(data)
         # More precisely: check the error_code field in the response
-        assert data.get("error_code") == "INVALID_PARAMS" or (
-            "INVALID_PARAMS" in str(data)
-        )
+        assert data.get("error_code") == "INVALID_PARAMS" or ("INVALID_PARAMS" in str(data))
 
-    async def test_invalid_date_from_type_returns_error(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_invalid_date_from_type_returns_error(self, store: DuckDBStore) -> None:
         config = _make_config()
         ep = MockEmbeddingProvider()
-        response = await _handle_metrics(
-            store, config, ep, {"scope": "audit", "date_from": 12345}
-        )
+        response = await _handle_metrics(store, config, ep, {"scope": "audit", "date_from": 12345})
         data = _parse(response)
         assert "INVALID_PARAMS" in str(data)
 
-    async def test_invalid_date_from_format_returns_error(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_invalid_date_from_format_returns_error(self, store: DuckDBStore) -> None:
         config = _make_config()
         ep = MockEmbeddingProvider()
         response = await _handle_metrics(
@@ -456,13 +415,9 @@ class TestIncompatibleParams:
         assert "INVALID_PARAMS" in str(data)
         assert "ISO 8601" in str(data)
 
-    async def test_invalid_user_type_returns_error(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_invalid_user_type_returns_error(self, store: DuckDBStore) -> None:
         config = _make_config()
         ep = MockEmbeddingProvider()
-        response = await _handle_metrics(
-            store, config, ep, {"scope": "audit", "user": 99}
-        )
+        response = await _handle_metrics(store, config, ep, {"scope": "audit", "user": 99})
         data = _parse(response)
         assert "INVALID_PARAMS" in str(data)

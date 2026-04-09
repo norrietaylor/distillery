@@ -22,7 +22,7 @@ manage multiple hook entries.
 - Distillery MCP server running with **HTTP transport** (`distillery-mcp --transport http`)
   (required only for the `SessionStart` briefing; the `UserPromptSubmit` nudge works offline)
 - `curl` available on the system PATH (for `SessionStart` briefing)
-- `flock` available on the system PATH (for atomic counter — standard on Linux/macOS)
+- `flock` available on the system PATH (for atomic counter — standard on Linux; on macOS install via `brew install util-linux` or use an alternative such as `lockf` or coreutils)
 - Claude Code with hook support (`~/.claude/settings.json`)
 
 > **Note:** The SessionStart handler targets the HTTP MCP transport, not stdio.
@@ -171,12 +171,8 @@ chmod +x /path/to/distillery/scripts/hooks/session-start-briefing.sh
   "hooks": {
     "SessionStart": [
       {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/absolute/path/to/distillery/scripts/hooks/session-start-briefing.sh"
-          }
-        ]
+        "type": "command",
+        "command": "/absolute/path/to/distillery/scripts/hooks/session-start-briefing.sh"
       }
     ]
   }

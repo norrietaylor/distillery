@@ -91,7 +91,7 @@ async def _handle_tag_tree(
                     processed_tags[""] = count
                 elif tag.startswith(prefix_slash):
                     # Strip the prefix and its trailing slash
-                    stripped = tag[len(prefix_slash):]
+                    stripped = tag[len(prefix_slash) :]
                     processed_tags[stripped] = count
         else:
             processed_tags = vocab

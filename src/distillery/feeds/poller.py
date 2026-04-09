@@ -134,9 +134,13 @@ def _build_adapter(source: FeedSourceConfig) -> Any:
 
         token = os.environ.get("GITHUB_TOKEN", "")
         if token:
-            logger.debug("_build_adapter: GitHub adapter using authenticated token for %s", source.url)
+            logger.debug(
+                "_build_adapter: GitHub adapter using authenticated token for %s", source.url
+            )
         else:
-            logger.debug("_build_adapter: GitHub adapter using unauthenticated mode for %s", source.url)
+            logger.debug(
+                "_build_adapter: GitHub adapter using unauthenticated mode for %s", source.url
+            )
         return GitHubAdapter(url=source.url, token=token or None)
     elif source.source_type == "rss":
         from distillery.feeds.rss import RSSAdapter
