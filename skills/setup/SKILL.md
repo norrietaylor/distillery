@@ -5,6 +5,11 @@ allowed-tools:
   - "mcp__*__distillery_metrics"
   - "CronCreate"
   - "RemoteTrigger"
+  - "Bash(test:*)"
+  - "Bash(cat:*)"
+  - "Bash(find:*)"
+  - "Bash(ls:*)"
+  - "Bash(jq:*)"
   - "Bash(mkdir:*)"
   - "Bash(cp:*)"
   - "Bash(chmod:*)"
@@ -220,7 +225,7 @@ Weekly maintenance enabled: Mondays at 07:<minute> UTC (cron job <job_id>)
 
 ### Step 5: Configure Session Hooks
 
-Plugin manifest hooks do not support `UserPromptSubmit` events — only `SessionStart` works from `plugin.json`. To enable the memory nudge (every 30 prompts) and session lifecycle hooks, the dispatcher script must be configured in the appropriate settings.json based on plugin installation scope.
+Plugin manifest hooks do not support `UserPromptSubmit` events. Manifest hooks support `SessionStart` and `Stop`, so `UserPromptSubmit` must be configured in `settings.json`. To enable the memory nudge (every 30 prompts) and full session lifecycle hooks via the dispatcher, the script must be configured in the appropriate settings.json based on plugin installation scope.
 
 **5a. Detect plugin installation scope:**
 
@@ -256,9 +261,9 @@ Skip to Step 6.
 
 **5c. Check existing hooks:**
 
-Read `SCOPE_FILE` and check if `hooks.UserPromptSubmit` already references `distillery-hooks.sh`.
+Read `SCOPE_FILE` and check whether **both** `hooks.UserPromptSubmit` and `hooks.SessionStart` reference `distillery-hooks.sh` (same dispatcher path).
 
-If already configured:
+If both are already configured:
 
 ```text
 Session hooks: active (<SCOPE_LABEL> scope)
