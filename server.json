@@ -2,8 +2,8 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.norrietaylor/distillery-mcp",
   "title": "Distillery",
-  "description": "Knowledge base system for Claude Code with semantic search, feed intelligence, and team collaboration",
-  "version": "0.3.1",
+  "description": "Knowledge base for Claude Code with semantic search, feed intelligence, and teams",
+  "version": "0.3.2",
   "repository": {
     "url": "https://github.com/norrietaylor/distillery",
     "source": "github",
@@ -13,7 +13,7 @@
     {
       "registryType": "pypi",
       "identifier": "distillery-mcp",
-      "version": "0.3.1",
+      "version": "0.3.2",
       "transport": {
         "type": "stdio"
       },
@@ -35,7 +35,7 @@
     {
       "registryType": "pypi",
       "identifier": "distillery-mcp",
-      "version": "0.3.1",
+      "version": "0.3.2",
       "transport": {
         "type": "streamable-http",
         "url": "https://distillery-mcp.fly.dev/mcp"
