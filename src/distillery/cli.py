@@ -708,8 +708,7 @@ def _cmd_export(config_path: str | None, fmt: str, output_path: str) -> int:
         try:
             # Verify the entries table exists.
             table_check = conn.execute(
-                "SELECT COUNT(*) FROM information_schema.tables "
-                "WHERE table_name = 'entries'"
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'entries'"
             ).fetchone()
             if table_check is None or table_check[0] == 0:
                 return [], [], {}
@@ -718,12 +717,24 @@ def _cmd_export(config_path: str | None, fmt: str, output_path: str) -> int:
             entry_rows = conn.execute(
                 "SELECT id, content, entry_type, source, status, tags, metadata, "
                 "version, project, author, created_at, updated_at, created_by, "
-                "last_modified_by FROM entries"
+                "last_modified_by, expires_at FROM entries"
             ).fetchall()
             entry_cols = [
-                "id", "content", "entry_type", "source", "status", "tags",
-                "metadata", "version", "project", "author", "created_at",
-                "updated_at", "created_by", "last_modified_by",
+                "id",
+                "content",
+                "entry_type",
+                "source",
+                "status",
+                "tags",
+                "metadata",
+                "version",
+                "project",
+                "author",
+                "created_at",
+                "updated_at",
+                "created_by",
+                "last_modified_by",
+                "expires_at",
             ]
             entries: list[dict[str, Any]] = []
             for row in entry_rows:
@@ -953,6 +964,9 @@ def _cmd_import(
                     ),
                     created_by=raw.get("created_by", ""),
                     last_modified_by=raw.get("last_modified_by", ""),
+                    expires_at=(
+                        _parse_dt(raw["expires_at"]) if raw.get("expires_at") is not None else None
+                    ),
                 )
                 staged_rows.append((entry, embedding))
 
@@ -975,8 +989,8 @@ def _cmd_import(
                     "INSERT INTO entries "
                     "(id, content, entry_type, source, author, project, tags, status, "
                     " metadata, created_at, updated_at, version, embedding, "
-                    " created_by, last_modified_by) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " created_by, last_modified_by, expires_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     [
                         entry.id,
                         entry.content,
@@ -993,6 +1007,7 @@ def _cmd_import(
                         embedding,
                         entry.created_by,
                         entry.last_modified_by,
+                        entry.expires_at,
                     ],
                 )
                 imported += 1

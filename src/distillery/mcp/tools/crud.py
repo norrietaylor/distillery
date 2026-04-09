@@ -68,6 +68,36 @@ _VALID_ENTRY_TYPES = {
 # Valid status values (mirrors EntryStatus enum).
 _VALID_STATUSES = {"active", "pending_review", "archived"}
 
+# Valid verification values (mirrors VerificationStatus enum).
+_VALID_VERIFICATIONS = {"unverified", "testing", "verified"}
+
+
+def _parse_iso8601_utc(
+    raw: Any,
+    field_name: str = "expires_at",
+) -> datetime | list[types.TextContent]:
+    """Parse an ISO 8601 string and normalise to UTC.
+
+    Returns a UTC ``datetime`` on success, or an ``error_response`` list on
+    failure (caller should return it directly).
+    """
+    if not isinstance(raw, str):
+        return error_response("INVALID_PARAMS", f"Field '{field_name}' must be an ISO 8601 string")
+    if "T" not in raw and " " not in raw:
+        return error_response(
+            "INVALID_PARAMS",
+            f"Field '{field_name}' must include date and time (ISO 8601 datetime)",
+        )
+    try:
+        dt = datetime.fromisoformat(raw)
+        return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
+    except (ValueError, TypeError):
+        return error_response(
+            "INVALID_PARAMS",
+            f"Field '{field_name}' must be a valid ISO 8601 datetime string",
+        )
+
+
 # Fields that callers may never overwrite via distillery_update.
 _IMMUTABLE_FIELDS = {"id", "created_at", "source"}
 
@@ -98,7 +128,7 @@ async def _handle_store(
           - `conflict_message`: guidance message when conflict candidates are returned.
     """
     from distillery.mcp.budget import EmbeddingBudgetError, record_and_check
-    from distillery.models import Entry, EntrySource, EntryType
+    from distillery.models import Entry, EntrySource, EntryType, VerificationStatus
 
     # --- input validation ---------------------------------------------------
     err = validate_required(arguments, "content", "entry_type", "author")
@@ -177,6 +207,27 @@ async def _handle_store(
         except EmbeddingBudgetError as exc:
             return error_response("BUDGET_EXCEEDED", str(exc))
 
+    # --- parse verification ---------------------------------------------------
+    verification_val = VerificationStatus.UNVERIFIED
+    verification_raw = arguments.get("verification")
+    if verification_raw is not None:
+        if verification_raw not in _VALID_VERIFICATIONS:
+            return error_response(
+                "INVALID_PARAMS",
+                f"Invalid verification {verification_raw!r}. "
+                f"Must be one of: {', '.join(sorted(_VALID_VERIFICATIONS))}.",
+            )
+        verification_val = VerificationStatus(verification_raw)
+
+    # --- parse expires_at (ISO 8601 string → datetime) ----------------------
+    expires_at_val: datetime | None = None
+    expires_at_raw = arguments.get("expires_at")
+    if expires_at_raw is not None:
+        result = _parse_iso8601_utc(expires_at_raw)
+        if not isinstance(result, datetime):
+            return result
+        expires_at_val = result
+
     # --- build entry --------------------------------------------------------
     try:
         # Determine EntrySource from arguments.
@@ -194,6 +245,8 @@ async def _handle_store(
             tags=list(arguments.get("tags") or []),
             metadata=dict(arguments.get("metadata") or {}),
             created_by=created_by,
+            verification=verification_val,
+            expires_at=expires_at_val,
         )
     except Exception as exc:  # noqa: BLE001
         return error_response("INVALID_PARAMS", f"Failed to construct entry: {exc}")
@@ -392,7 +445,7 @@ async def _handle_update(
     Returns:
         MCP content list with the serialised updated entry or an error.
     """
-    from distillery.models import EntryStatus, EntryType
+    from distillery.models import EntryStatus, EntryType, VerificationStatus
 
     err = validate_required(arguments, "entry_id")
     if err:
@@ -401,7 +454,17 @@ async def _handle_update(
     entry_id: str = arguments["entry_id"]
 
     # Build the updates dict from all keys except entry_id.
-    updatable_keys = {"content", "entry_type", "author", "project", "tags", "status", "metadata"}
+    updatable_keys = {
+        "content",
+        "entry_type",
+        "author",
+        "project",
+        "tags",
+        "status",
+        "verification",
+        "metadata",
+        "expires_at",
+    }
     updates: dict[str, Any] = {}
     for key in updatable_keys:
         if key in arguments:
@@ -447,6 +510,25 @@ async def _handle_update(
                 f"Invalid status {st_str!r}. Must be one of: {', '.join(sorted(_VALID_STATUSES))}.",
             )
         updates["status"] = EntryStatus(st_str)
+
+    if "verification" in updates:
+        vf_str = updates["verification"]
+        if vf_str not in _VALID_VERIFICATIONS:
+            return error_response(
+                "INVALID_PARAMS",
+                f"Invalid verification {vf_str!r}. "
+                f"Must be one of: {', '.join(sorted(_VALID_VERIFICATIONS))}.",
+            )
+        updates["verification"] = VerificationStatus(vf_str)
+
+    # Parse expires_at from ISO 8601 string to datetime.
+    if "expires_at" in updates:
+        ea_raw = updates["expires_at"]
+        if ea_raw is not None:
+            result = _parse_iso8601_utc(ea_raw)
+            if not isinstance(result, datetime):
+                return result
+            updates["expires_at"] = result
 
     tags_err = validate_type(updates, "tags", list, "list of strings")
     if tags_err:
@@ -619,7 +701,7 @@ def _build_filters_from_arguments(arguments: dict[str, Any]) -> dict[str, Any] |
     """Extract known filter keys from *arguments* into a filters dict.
 
     Keys extracted: ``entry_type``, ``author``, ``project``, ``tags``,
-    ``status``, ``date_from``, ``date_to``.
+    ``status``, ``verification``, ``date_from``, ``date_to``.
 
     Args:
         arguments: The tool argument dict.
@@ -633,6 +715,7 @@ def _build_filters_from_arguments(arguments: dict[str, Any]) -> dict[str, Any] |
         "project",
         "tags",
         "status",
+        "verification",
         "date_from",
         "date_to",
         "tag_prefix",
@@ -652,6 +735,7 @@ __all__ = [
     "_build_filters_from_arguments",
     "_VALID_ENTRY_TYPES",
     "_VALID_STATUSES",
+    "_VALID_VERIFICATIONS",
     "_IMMUTABLE_FIELDS",
     "_VALID_OUTPUT_MODES",
     "_entry_to_summary_dict",

@@ -942,12 +942,26 @@ async def _handle_stale(
         stale_entries = await asyncio.to_thread(
             _sync_gather_stale, store, days, limit, entry_type_filter
         )
+        expired_entries = await asyncio.to_thread(
+            _sync_gather_expired, store, limit, entry_type_filter
+        )
+        # Deduplicate: expired entries take priority over stale entries.
+        # An entry that is both stale and expired should only appear once
+        # with reason="expired".
+        expired_ids = {e["id"] for e in expired_entries}
+        deduped_stale = [e for e in stale_entries if e["id"] not in expired_ids]
+        # Merge expired first (higher priority), then stale, apply single limit.
+        merged = expired_entries + deduped_stale
+        merged = merged[:limit]
+        stale_in_result = [e for e in merged if e.get("reason") == "stale"]
+        expired_in_result = [e for e in merged if e.get("reason") == "expired"]
         return success_response(
             {
                 "days_threshold": days,
                 "entry_type_filter": entry_type_filter,
-                "stale_count": len(stale_entries),
-                "entries": stale_entries,
+                "stale_count": len(stale_in_result),
+                "expired_count": len(expired_in_result),
+                "entries": merged,
             }
         )
     except Exception as exc:  # noqa: BLE001
@@ -1034,6 +1048,90 @@ def _sync_gather_stale(
                 "project": project,
                 "last_accessed": last_accessed_iso,
                 "days_since_access": days_since,
+                "reason": "stale",
+            }
+        )
+
+    return result
+
+
+def _sync_gather_expired(
+    store: Any,
+    limit: int,
+    entry_type_filter: str | None,
+) -> list[dict[str, Any]]:
+    """Return active entries whose ``expires_at`` is in the past.
+
+    Parameters:
+        store: Initialized DuckDBStore used to query entries.
+        limit: Maximum number of entries to return.
+        entry_type_filter: Optional entry_type value to restrict results.
+
+    Returns:
+        List of expired entry summaries. Each dict mirrors the stale format
+        but includes ``"reason": "expired"`` and an ``expires_at`` field.
+    """
+    conn = store.connection
+
+    params: list[Any] = []
+    type_clause = ""
+    if entry_type_filter is not None:
+        type_clause = " AND entry_type = ?"
+        params.append(entry_type_filter)
+    params.append(limit)
+
+    sql = f"""
+        SELECT
+            id,
+            content,
+            entry_type,
+            author,
+            project,
+            expires_at,
+            COALESCE(accessed_at, updated_at) AS last_accessed
+        FROM entries
+        WHERE status != 'archived'
+          AND expires_at IS NOT NULL
+          AND expires_at < NOW()
+          {type_clause}
+        ORDER BY expires_at ASC
+        LIMIT ?
+    """
+
+    rows = conn.execute(sql, params).fetchall()
+
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        entry_id, content, entry_type, author, project, expires_at, last_accessed = row
+        content_preview = (content or "")[:200]
+
+        expires_at_iso: str | None = None
+        if expires_at is not None:
+            if hasattr(expires_at, "tzinfo") and expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=UTC)
+            expires_at_iso = expires_at.isoformat()
+
+        # Compute last_accessed / days_since_access to match stale entry shape.
+        if last_accessed is not None:
+            if hasattr(last_accessed, "tzinfo") and last_accessed.tzinfo is None:
+                last_accessed = last_accessed.replace(tzinfo=UTC)
+            days_since: int | None = (datetime.now(UTC) - last_accessed).days
+            last_accessed_iso: str | None = last_accessed.isoformat()
+        else:
+            days_since = None
+            last_accessed_iso = None
+
+        result.append(
+            {
+                "id": entry_id,
+                "content_preview": content_preview,
+                "entry_type": entry_type,
+                "author": author,
+                "project": project,
+                "last_accessed": last_accessed_iso,
+                "days_since_access": days_since,
+                "expires_at": expires_at_iso,
+                "reason": "expired",
             }
         )
 
