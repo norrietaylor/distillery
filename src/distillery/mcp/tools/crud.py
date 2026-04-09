@@ -868,36 +868,12 @@ async def _handle_correct(
         except EmbeddingBudgetError as exc:
             return error_response("BUDGET_EXCEEDED", str(exc))
 
-    # --- persist new entry --------------------------------------------------
+    # --- atomically persist entry, relation, and archive original -----------
     try:
-        new_entry_id = await store.store(new_entry)
+        new_entry_id = await store.apply_correction(new_entry, wrong_entry_id)
     except Exception as exc:  # noqa: BLE001
-        logger.exception("Error storing correction entry")
-        return error_response("STORE_ERROR", f"Failed to store correction entry: {exc}")
-
-    # --- create relationship ------------------------------------------------
-    try:
-        await store.add_relation(new_entry_id, wrong_entry_id, "corrects")
-    except Exception as exc:  # noqa: BLE001
-        logger.exception(
-            "Error creating corrects relation from %s to %s", new_entry_id, wrong_entry_id
-        )
-        return error_response(
-            "STORE_ERROR",
-            f"Correction entry stored (id={new_entry_id}) but failed to create "
-            f"relation: {exc}",
-        )
-
-    # --- archive original ---------------------------------------------------
-    try:
-        await store.update(wrong_entry_id, {"status": EntryStatus.ARCHIVED})
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Error archiving original entry id=%s", wrong_entry_id)
-        return error_response(
-            "STORE_ERROR",
-            f"Correction entry stored (id={new_entry_id}) but failed to archive "
-            f"original entry: {exc}",
-        )
+        logger.exception("Error applying correction for entry id=%s", wrong_entry_id)
+        return error_response("STORE_ERROR", f"Failed to apply correction: {exc}")
 
     return success_response(
         {
