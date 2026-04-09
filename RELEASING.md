@@ -56,7 +56,38 @@ Users install the server via `pip install distillery-mcp` or `uvx distillery-mcp
 
 ## Cutting the Release
 
-### Step 1: Create and push the tag
+### Step 1: Create a release branch
+
+Cut a release branch from `main` for version validation before tagging. This
+branch is where you bump versions, run the full test suite, and deploy to the
+hosted server for smoke-testing — without committing to a public tag.
+
+```bash
+git checkout main
+git pull origin main
+git checkout -b release/X.Y.Z
+```
+
+### Step 2: Bump versions and test
+
+Follow the version bump checklist in step 1 of the pre-release checklist above,
+then push and open a PR against `main`:
+
+```bash
+git push -u origin release/X.Y.Z
+gh pr create --title "release: vX.Y.Z" --body "Version bump and release validation"
+```
+
+Validate on the release branch:
+
+- CI passes (tests, mypy, ruff, coverage)
+- `promptfoo eval` passes against the MCP server
+- Deploy to the hosted server (`fly deploy` from distill_ops) and smoke-test
+- Verify `distillery_metrics` reports the correct version
+
+Once validated, merge the PR to `main`.
+
+### Step 3: Tag and release
 
 ```bash
 # IMPORTANT: Tag format is vX.Y.Z (no extra dots, no prefix other than 'v')
@@ -66,15 +97,15 @@ Users install the server via `pip install distillery-mcp` or `uvx distillery-mcp
 
 git checkout main
 git pull origin main
-git tag v0.2.1
-git push origin v0.2.1
+git tag vX.Y.Z
+git push origin vX.Y.Z
 ```
 
-### Step 2: Create the GitHub release
+### Step 4: Create the GitHub release
 
 ```bash
-gh release create v0.2.1 \
-  --title "v0.2.1 — Short Description" \
+gh release create vX.Y.Z \
+  --title "vX.Y.Z — Short Description" \
   --generate-notes
 ```
 
@@ -82,7 +113,7 @@ Or create via the GitHub UI at `https://github.com/norrietaylor/distillery/relea
 
 This triggers pypi-publish.yml and changelog.yml automatically.
 
-### Step 3: Verify
+### Step 5: Verify
 
 1. **PyPI**: Check https://pypi.org/project/distillery-mcp/ for the new version
 2. **Install**: `pip install distillery-mcp==X.Y.Z` or `uvx distillery-mcp --version`
