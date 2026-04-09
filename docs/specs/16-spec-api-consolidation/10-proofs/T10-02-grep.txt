@@ -1,0 +1,40 @@
+Type: cli
+Command: grep -rn "distillery_stale|distillery_aggregate|distillery_tag_tree|distillery_metrics|distillery_interests|distillery_type_schemas|distillery_poll|distillery_rescore" tests/test_mcp_server.py tests/test_mcp_analytics.py tests/test_poller.py
+Expected: References only appear in negative test cases and docstrings, not as active tool calls
+Timestamp: 2026-04-09T22:00:00Z
+
+=== GREP OUTPUT ===
+
+tests/test_mcp_server.py:12:  distillery_stale, distillery_aggregate, distillery_tag_tree,
+tests/test_mcp_server.py:13:  distillery_metrics, distillery_interests, distillery_type_schemas,
+tests/test_mcp_server.py:14:  distillery_poll, distillery_rescore
+tests/test_mcp_server.py:181:        # Step 7: distillery_metrics(scope="summary") — replaces status     #
+tests/test_mcp_server.py:198:# distillery_metrics (scope=summary) — replaces distillery_status
+tests/test_mcp_server.py:714:    """Verify that the 8 tools removed from the MCP surface are not registered.
+tests/test_mcp_server.py:716:    These tools were removed in T02.2: stale, aggregate, tag_tree, metrics,
+tests/test_mcp_server.py:719:    Calling a removed tool name through the registered tool set must not
+tests/test_mcp_server.py:728:        "distillery_stale",
+tests/test_mcp_server.py:729:        "distillery_aggregate",
+tests/test_mcp_server.py:730:        "distillery_tag_tree",
+tests/test_mcp_server.py:731:        "distillery_metrics",
+tests/test_mcp_server.py:732:        "distillery_interests",
+tests/test_mcp_server.py:733:        "distillery_type_schemas",
+tests/test_mcp_server.py:734:        "distillery_poll",
+tests/test_mcp_server.py:735:        "distillery_rescore",
+
+tests/test_poller.py:3:Note: distillery_poll and distillery_rescore were removed from the MCP tool
+tests/test_poller.py:8:  - _handle_poll: feed handler success path and error paths (not an MCP tool)
+
+=== ANALYSIS ===
+
+All references to removed tool names in the key test files are:
+  1. Module-level docstrings documenting the architecture change (PERMITTED)
+  2. Negative test cases in TestRemovedTools explicitly verifying non-registration (REQUIRED)
+
+No references to removed tool names exist as active tool calls or positive assertions
+that those tools are registered MCP tools.
+
+test_mcp_analytics.py: NO references to removed tool names as tool names
+  (tests handlers directly by function name, e.g. _handle_stale not distillery_stale)
+
+Status: PASS
