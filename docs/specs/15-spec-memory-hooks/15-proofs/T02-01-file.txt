@@ -1,9 +1,0 @@
-Type: file
-Command: test -x scripts/hooks/test-hooks.sh && echo executable
-Expected: executable
-Timestamp: 2026-04-09T02:58:33Z
-
---- Output ---
-executable
-
-Status: PASS
