@@ -661,6 +661,8 @@ class TestCreateServer:
         tools = await server.list_tools()
         tool_names = {t.name for t in tools}
 
+        # 8 tools removed: aggregate, metrics, stale, tag_tree, type_schemas,
+        # interests, poll, rescore — moved to webhooks or MCP resources.
         expected = {
             "distillery_store",
             "distillery_get",
@@ -669,18 +671,36 @@ class TestCreateServer:
             "distillery_search",
             "distillery_find_similar",
             "distillery_list",
-            "distillery_aggregate",
             "distillery_classify",
             "distillery_resolve_review",
-            "distillery_metrics",
-            "distillery_stale",
-            "distillery_tag_tree",
-            "distillery_type_schemas",
-            "distillery_interests",
             "distillery_watch",
-            "distillery_poll",
-            "distillery_rescore",
             "distillery_configure",
             "distillery_relations",
         }
-        assert expected == tool_names, f"Missing tools: {expected - tool_names}"
+        assert expected == tool_names, (
+            f"Tool mismatch — extra: {tool_names - expected}, missing: {expected - tool_names}"
+        )
+
+    async def test_server_registers_entry_type_schemas_resource(self) -> None:
+        """distillery://schemas/entry-types resource must be registered and return JSON."""
+        import json
+
+        config = DistilleryConfig(
+            storage=StorageConfig(database_path=":memory:"),
+            embedding=EmbeddingConfig(provider="", model="stub", dimensions=4),
+        )
+        server = create_server(config)
+
+        resources = await server.list_resources()
+        resource_uris = {str(r.uri) for r in resources}
+        assert "distillery://schemas/entry-types" in resource_uris
+
+        # Read the resource content — must be valid JSON with a "schemas" key.
+        result = await server.read_resource("distillery://schemas/entry-types")
+        # FastMCP returns a ResourceResult with a contents list.
+        raw = result.contents[0].content if hasattr(result, "contents") else str(result)
+        payload = json.loads(raw)
+        assert "schemas" in payload
+        assert isinstance(payload["schemas"], dict)
+        # Spot-check a known entry type is present.
+        assert "session" in payload["schemas"]
