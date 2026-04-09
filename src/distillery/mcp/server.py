@@ -389,7 +389,9 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 metadata=metadata,
             ),
         )
-        result = await _handle_correct(store=c["store"], arguments=args, cfg=c["config"])
+        result = await _handle_correct(
+            store=c["store"], arguments=args, cfg=c["config"], created_by=user
+        )
         rd = json.loads(result[0].text) if result else {}
         await _audit(
             c,

@@ -9,6 +9,8 @@ from distillery.models import EntrySource, EntryStatus, EntryType
 from distillery.store.duckdb import DuckDBStore
 from tests.conftest import make_entry, parse_mcp_response
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 async def original_entry(store: DuckDBStore) -> str:
@@ -201,3 +203,19 @@ async def test_correct_invalid_entry_type(store: DuckDBStore, original_entry: st
     data = parse_mcp_response(result)
     assert data["error"] is True
     assert data["code"] == "INVALID_PARAMS"
+
+
+async def test_correct_empty_tags_clears(store: DuckDBStore, original_entry: str) -> None:
+    """Passing tags=[] explicitly clears tags instead of inheriting."""
+    result = await _handle_correct(
+        store=store,
+        arguments={
+            "wrong_entry_id": original_entry,
+            "content": "Corrected.",
+            "tags": [],
+        },
+    )
+    data = parse_mcp_response(result)
+    new = await store.get(data["correction_entry_id"])
+    assert new is not None
+    assert new.tags == []

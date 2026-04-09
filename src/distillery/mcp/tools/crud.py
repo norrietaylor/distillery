@@ -737,6 +737,7 @@ async def _handle_correct(
     store: Any,
     arguments: dict[str, Any],
     cfg: DistilleryConfig | None = None,
+    created_by: str = "",
 ) -> list[types.TextContent]:
     """Implement the ``distillery_correct`` tool.
 
@@ -755,11 +756,12 @@ async def _handle_correct(
             ``metadata``.
         cfg: Optional configuration (currently unused, accepted for
             handler signature consistency).
+        created_by: Authenticated user identity to record on the new entry.
 
     Returns:
         MCP content list with the new and archived entry IDs, or an error.
     """
-    from distillery.models import Entry, EntryStatus, EntryType
+    from distillery.models import Entry, EntrySource, EntryStatus, EntryType
 
     # --- input validation ---------------------------------------------------
     err = validate_required(arguments, "wrong_entry_id", "content")
@@ -800,7 +802,7 @@ async def _handle_correct(
 
     author = arguments.get("author", original.author)
     project = arguments.get("project", original.project)
-    tags = list(arguments.get("tags") or original.tags)
+    tags = list(arguments["tags"]) if "tags" in arguments else list(original.tags)
 
     tags_err = validate_type(arguments, "tags", list, "list of strings")
     if tags_err:
@@ -817,11 +819,12 @@ async def _handle_correct(
         new_entry = Entry(
             content=arguments["content"],
             entry_type=EntryType(entry_type_str),
-            source=original.source,
+            source=EntrySource.MANUAL,
             author=author,
             project=project,
             tags=tags,
             metadata=user_metadata,
+            created_by=created_by,
         )
     except Exception as exc:  # noqa: BLE001
         return error_response("INVALID_PARAMS", f"Failed to construct correction entry: {exc}")

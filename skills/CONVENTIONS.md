@@ -330,7 +330,7 @@ The following skills are available in `skills/`:
 | Skill | Directory | Primary MCP Tools | Purpose |
 |-------|-----------|-------------------|---------|
 | `/distill` | `distill/` | distillery_store, distillery_find_similar | Capture knowledge from conversations |
-| `/recall` | `recall/` | distillery_search, distillery_correct | Semantic search over the knowledge base |
+| `/recall` | `recall/` | distillery_search | Semantic search over the knowledge base |
 | `/pour` | `pour/` | distillery_search, distillery_tag_tree | Multi-entry synthesis with citations and tag-based query expansion |
 | `/bookmark` | `bookmark/` | distillery_store, distillery_find_similar | Save and annotate URLs |
 | `/minutes` | `minutes/` | distillery_store, distillery_update, distillery_list | Record and update meeting notes |
