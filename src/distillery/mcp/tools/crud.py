@@ -4,6 +4,7 @@ Implements the following tools:
   - distillery_store: Create and persist a new entry
   - distillery_get: Retrieve an entry by ID
   - distillery_update: Update an existing entry
+  - distillery_correct: Store a correction that supersedes an existing entry
   - distillery_list: List entries with optional filtering and pagination
 """
 
@@ -727,10 +728,166 @@ def _build_filters_from_arguments(arguments: dict[str, Any]) -> dict[str, Any] |
     return filters if filters else None
 
 
+# ---------------------------------------------------------------------------
+# _handle_correct
+# ---------------------------------------------------------------------------
+
+
+async def _handle_correct(
+    store: Any,
+    arguments: dict[str, Any],
+    cfg: DistilleryConfig | None = None,
+    created_by: str = "",
+) -> list[types.TextContent]:
+    """Implement the ``distillery_correct`` tool.
+
+    Stores a correction entry that supersedes an existing (wrong) entry.
+    The original entry is archived and a ``corrects`` relation is created
+    in the ``entry_relations`` table linking the new entry to the original.
+
+    Fields (entry_type, author, project, tags) are inherited from the
+    original when not provided.
+
+    Args:
+        store: Initialised ``DuckDBStore``.
+        arguments: Raw MCP tool arguments dict.  Required keys:
+            ``wrong_entry_id``, ``content``.  Optional keys:
+            ``entry_type``, ``author``, ``project``, ``tags``,
+            ``metadata``.
+        cfg: Optional configuration (currently unused, accepted for
+            handler signature consistency).
+        created_by: Authenticated user identity to record on the new entry.
+
+    Returns:
+        MCP content list with the new and archived entry IDs, or an error.
+    """
+    from distillery.models import Entry, EntrySource, EntryStatus, EntryType
+
+    # --- input validation ---------------------------------------------------
+    err = validate_required(arguments, "wrong_entry_id", "content")
+    if err:
+        return error_response("INVALID_PARAMS", err)
+
+    wrong_entry_id: str = arguments["wrong_entry_id"]
+
+    # --- fetch original entry -----------------------------------------------
+    try:
+        original = await store.get(wrong_entry_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error fetching entry id=%s for correction", wrong_entry_id)
+        return error_response("STORE_ERROR", f"Failed to retrieve original entry: {exc}")
+
+    if original is None:
+        return error_response(
+            "NOT_FOUND",
+            f"No entry found with id={wrong_entry_id!r}.",
+            details={"wrong_entry_id": wrong_entry_id},
+        )
+
+    if original.status == EntryStatus.ARCHIVED:
+        return error_response(
+            "INVALID_STATE",
+            "Cannot correct an archived entry.",
+            details={"wrong_entry_id": wrong_entry_id, "status": original.status.value},
+        )
+
+    # --- resolve fields (inherit from original if not provided) -------------
+    entry_type_str = arguments.get("entry_type", original.entry_type.value)
+    if entry_type_str not in _VALID_ENTRY_TYPES:
+        return error_response(
+            "INVALID_PARAMS",
+            f"Invalid entry_type {entry_type_str!r}. "
+            f"Must be one of: {', '.join(sorted(_VALID_ENTRY_TYPES))}.",
+        )
+
+    author = arguments.get("author", original.author)
+    project = arguments.get("project", original.project)
+
+    tags_err = validate_type(arguments, "tags", list, "list of strings")
+    if tags_err:
+        return error_response("INVALID_PARAMS", tags_err)
+    tags = list(arguments["tags"]) if "tags" in arguments else list(original.tags)
+
+    # --- reserved prefix enforcement (match distillery_store guard) ---------
+    if cfg is not None and cfg.tags.reserved_prefixes:
+        for tag in tags:
+            if not isinstance(tag, str):
+                return error_response(
+                    "INVALID_PARAMS", f"Each tag must be a string, got: {type(tag).__name__}"
+                )
+            top = tag.split("/")[0]
+            if top in cfg.tags.reserved_prefixes:
+                return error_response(
+                    "RESERVED_PREFIX",
+                    f"Tag {tag!r} uses reserved prefix {top!r}. "
+                    "Only internal sources may use this namespace.",
+                )
+
+    metadata_err = validate_type(arguments, "metadata", dict, "object")
+    if metadata_err:
+        return error_response("INVALID_PARAMS", metadata_err)
+
+    user_metadata = dict(arguments.get("metadata") or {})
+
+    # --- build new entry ----------------------------------------------------
+    try:
+        new_entry = Entry(
+            content=arguments["content"],
+            entry_type=EntryType(entry_type_str),
+            source=EntrySource.MANUAL,
+            author=author,
+            project=project,
+            tags=tags,
+            metadata=user_metadata,
+            created_by=created_by,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return error_response("INVALID_PARAMS", f"Failed to construct correction entry: {exc}")
+
+    # --- db size / embedding budget checks (match distillery_store gates) ----
+    if cfg is not None and cfg.rate_limit.max_db_size_mb > 0:
+        db_path = _normalize_db_path(cfg.storage.database_path)
+        if db_path != ":memory:" and not _is_remote_db_path(db_path):
+            try:
+                size_mb = Path(db_path).stat().st_size / (1024 * 1024)
+                if size_mb >= cfg.rate_limit.max_db_size_mb:
+                    return error_response(
+                        "DB_SIZE_EXCEEDED",
+                        f"Database size ({size_mb:.1f} MB) exceeds limit "
+                        f"({cfg.rate_limit.max_db_size_mb} MB). "
+                        "Delete old entries or increase rate_limit.max_db_size_mb.",
+                    )
+            except OSError:
+                pass  # can't stat, skip check
+
+    if cfg is not None:
+        from distillery.mcp.budget import EmbeddingBudgetError, record_and_check
+
+        try:
+            record_and_check(store.connection, cfg.rate_limit.embedding_budget_daily, count=1)
+        except EmbeddingBudgetError as exc:
+            return error_response("BUDGET_EXCEEDED", str(exc))
+
+    # --- atomically persist entry, relation, and archive original -----------
+    try:
+        new_entry_id = await store.apply_correction(new_entry, wrong_entry_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error applying correction for entry id=%s", wrong_entry_id)
+        return error_response("STORE_ERROR", f"Failed to apply correction: {exc}")
+
+    return success_response(
+        {
+            "correction_entry_id": new_entry_id,
+            "archived_entry_id": wrong_entry_id,
+        }
+    )
+
+
 __all__ = [
     "_handle_store",
     "_handle_get",
     "_handle_update",
+    "_handle_correct",
     "_handle_list",
     "_build_filters_from_arguments",
     "_VALID_ENTRY_TYPES",
