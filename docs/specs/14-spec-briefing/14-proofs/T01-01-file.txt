@@ -1,3 +1,8 @@
+PROOF ARTIFACT: file
+Command: cat skills/briefing/SKILL.md
+Expected: YAML frontmatter present, follows CONVENTIONS.md structure
+Timestamp: 2026-04-08T09:15:00Z
+---
 ---
 name: briefing
 description: "Produce a solo knowledge dashboard with recent entries, corrections, expiring soon, stale knowledge, and unresolved items"
@@ -215,3 +220,6 @@ Generated: 2026-04-08 09:15 UTC
 - Unresolved failure is non-fatal — omit the section and continue
 - On MCP errors in fatal calls (summary metrics), see CONVENTIONS.md error handling — display and stop
 - No retry loops — report errors and stop
+---
+Status: PASS
+Rationale: YAML frontmatter present (name, description, allowed-tools, context, effort). Follows CONVENTIONS.md structure: When to Use, Process (Steps), Output Format, Rules. Step 1 references CONVENTIONS.md MCP health check. Step 2 resolves project per CONVENTIONS.md author/project resolution order.
