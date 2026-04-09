@@ -3,7 +3,7 @@
   "name": "io.github.norrietaylor/distillery-mcp",
   "title": "Distillery",
   "description": "Knowledge base system for Claude Code with semantic search, feed intelligence, and team collaboration",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "repository": {
     "url": "https://github.com/norrietaylor/distillery",
     "source": "github",
@@ -13,7 +13,7 @@
     {
       "registryType": "pypi",
       "identifier": "distillery-mcp",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "transport": {
         "type": "stdio"
       },
@@ -35,7 +35,7 @@
     {
       "registryType": "pypi",
       "identifier": "distillery-mcp",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "transport": {
         "type": "streamable-http",
         "url": "https://distillery-mcp.fly.dev/mcp"
