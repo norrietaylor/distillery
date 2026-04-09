@@ -1,20 +1,22 @@
 ---
 name: briefing
-description: "Produce a solo knowledge dashboard with recent entries, corrections, expiring soon, stale knowledge, and unresolved items"
+description: "Produce a knowledge dashboard with recent entries, corrections, expiring soon, stale knowledge, and unresolved items. In team mode, also shows team activity, related entries from teammates, and the review queue."
 allowed-tools:
   - "mcp__*__distillery_metrics"
   - "mcp__*__distillery_list"
   - "mcp__*__distillery_stale"
   - "mcp__*__distillery_relations"
+  - "mcp__*__distillery_aggregate"
+  - "mcp__*__distillery_search"
 context: fork
 effort: medium
 ---
 
-<!-- Trigger phrases: briefing, /briefing, knowledge briefing, knowledge dashboard, project overview, my briefing -->
+<!-- Trigger phrases: briefing, /briefing, knowledge briefing, knowledge dashboard, project overview, my briefing, team briefing -->
 
-# Briefing — Solo Knowledge Dashboard
+# Briefing — Knowledge Dashboard (Solo & Team)
 
-Briefing produces a single-command personal knowledge dashboard: recent entries, pending corrections, soon-to-expire items, stale knowledge, and unresolved work — all scoped to your project.
+Briefing produces a single-command knowledge dashboard: recent entries, pending corrections, soon-to-expire items, stale knowledge, and unresolved work — all scoped to your project. When multiple authors are detected (or `--team` is passed), team sections are added automatically.
 
 ## When to Use
 
@@ -23,6 +25,7 @@ Briefing produces a single-command personal knowledge dashboard: recent entries,
 - Getting a project-scoped overview of what needs attention
 - "knowledge briefing", "project dashboard", "my briefing", "knowledge overview"
 - Scoping to a specific project (`/briefing --project distillery`)
+- Viewing team activity and cross-author context (`/briefing --team`)
 
 ## Process
 
@@ -45,8 +48,9 @@ If already resolved earlier in the conversation, reuse the cached value.
 | Flag | Description |
 |------|-------------|
 | `--project <name>` | Scope results to a specific project (auto-detected if omitted) |
+| `--team` | Force team mode regardless of author count |
 
-No other flags — this is a display-only skill with no configurable lookback window.
+This is a display-only skill with no configurable lookback window. Team mode is activated by `--team` or auto-detected in Step 4f.
 
 ### Step 4: Gather Data
 
@@ -94,6 +98,50 @@ distillery_list(project=<project>, verification="testing", limit=5, output_mode=
 
 Returns entries in the "testing" verification state (entries that have been flagged as needing review but are not yet verified). If this call fails or returns nothing, omit the Unresolved section.
 
+**4f. Team mode detection:**
+
+If `--team` was passed, set `team_mode = true` and skip the author count check.
+
+Otherwise, call:
+
+```python
+distillery_aggregate(group_by="author", project=<project>)
+```
+
+If the response contains more than one author group, set `team_mode = true`. If the call fails, set `team_mode = false` and continue (non-fatal).
+
+**4g. Team activity (team mode only, non-fatal):**
+
+Only execute if `team_mode = true`.
+
+```python
+distillery_list(project=<project>, limit=20, output_mode="full")
+```
+
+From the returned entries, filter to those created within the past 7 days. Group by author. For each author, count entries by `entry_type`. If this call fails or yields no entries, omit the Team Activity section.
+
+**4h. Related from team (team mode only, non-fatal):**
+
+Only execute if `team_mode = true`.
+
+Use the project name and recent entry content as context for the query. Call:
+
+```python
+distillery_search(query=<project_context>, limit=5, output_mode="full")
+```
+
+where `<project_context>` is formed from the project name combined with a short summary of the most recent entries (first 50 chars of each). Do not apply an author filter — this surfaces entries from all authors. Record similarity percentage for each result. If this call fails or yields no results, omit the Related from Team section.
+
+**4i. Pending review (team mode only, non-fatal):**
+
+Only execute if `team_mode = true`.
+
+```python
+distillery_list(status="pending_review", limit=5, output_mode="full")
+```
+
+Returns entries awaiting classification. If this call fails or returns nothing, omit the Pending Review section.
+
 ### Step 5: Synthesize Briefing
 
 Produce the briefing in markdown. Omit any section entirely if it has no data.
@@ -101,7 +149,8 @@ Produce the briefing in markdown. Omit any section entirely if it has no data.
 **Header:**
 
 ```
-# Briefing: <project> (solo)
+# Briefing: <project> (solo)       ← when team_mode = false
+# Briefing: <project> (team)       ← when team_mode = true
 Generated: <YYYY-MM-DD HH:MM> UTC
 ```
 
@@ -157,11 +206,58 @@ For each entry from Step 4e:
 
 Omit this section if no unresolved entries exist.
 
+**Section 6 — Team Activity (team mode only):**
+
+Only render if `team_mode = true`. Omit if no data from Step 4g.
+
+For each author group (sorted by entry count descending), show:
+
+```
+## Team Activity (7 days)
+
+- <Author>: <N> entries (<type1_count> <type1>, <type2_count> <type2>, …)
+```
+
+Example:
+
+```
+- Alice: 5 entries (3 sessions, 2 bookmarks)
+- Bob: 2 entries (1 reference, 1 idea)
+```
+
+Include only entry types with count > 0. Omit this section entirely if no team entries found in the past 7 days.
+
+**Section 7 — Related from Team (team mode only):**
+
+Only render if `team_mode = true`. Omit if no data from Step 4h.
+
+For each result from the team semantic search:
+
+```
+- [<TYPE>] <Author> — <content preview, max 100 chars> — <similarity>% relevant
+```
+
+Show at most 5 results. Omit this section if the search returned no results.
+
+**Section 8 — Pending Review (team mode only):**
+
+Only render if `team_mode = true`. Omit if no data from Step 4i.
+
+For each entry from Step 4i:
+
+```
+- [<TYPE>] <content preview, max 100 chars> — awaiting review
+```
+
+Show at most 5 entries. Omit this section if no entries are in `pending_review` status.
+
 ### Step 6: Display
 
 Display the synthesized briefing. This skill is display-only — there is no `--store` flag.
 
 ## Output Format
+
+Solo mode (`/briefing` or `/briefing --project distillery` with single author):
 
 ```
 # Briefing: <project> (solo)
@@ -200,6 +296,38 @@ Generated: 2026-04-08 09:15 UTC
 - [SESSION] Spike: evaluate pgvector as an alternative to DuckDB… — 5 days ago
 ```
 
+Team mode appends these additional sections after the solo sections (`/briefing --team` or auto-detected when >1 author):
+
+```
+# Briefing: <project> (team)
+Generated: 2026-04-08 09:15 UTC
+
+---
+
+## Recent Entries
+…(same solo sections)…
+
+---
+
+## Team Activity (7 days)
+
+- Alice: 5 entries (3 sessions, 2 bookmarks)
+- Bob: 2 entries (1 reference, 1 idea)
+
+---
+
+## Related from Team
+
+- [SESSION] Alice — DuckDB VSS benchmarks show HNSW outperforms flat… — 87% relevant
+- [BOOKMARK] Bob — FastMCP 3.1 migration guide with async context… — 74% relevant
+
+---
+
+## Pending Review
+
+- [INBOX] Unclassified feed item about vector search… — awaiting review
+```
+
 ## Rules
 
 - Always call `distillery_metrics(scope="summary")` first as the MCP health check; stop if it fails
@@ -213,5 +341,13 @@ Generated: 2026-04-08 09:15 UTC
 - Corrections section uses `distillery_relations(action="get", relation_type="corrects")` — failure is non-fatal
 - Stale knowledge failure is non-fatal — omit the section and continue
 - Unresolved failure is non-fatal — omit the section and continue
+- Team mode is activated by `--team` flag or auto-detected: `distillery_aggregate(group_by="author")` returning >1 author
+- Header shows `(solo)` or `(team)` based on detected mode
+- Team sections (6, 7, 8) are additive — solo sections are always rendered unchanged
+- Team activity groups entries by author from the past 7 days only — entries older than 7 days are excluded
+- Related from team uses `distillery_search` without author filter — all authors are included
+- Pending review uses `status="pending_review"` — limited to 5 entries
+- Team aggregate call failure is non-fatal — fall back to solo mode
+- Team activity, related from team, and pending review failures are non-fatal — omit each failed section
 - On MCP errors in fatal calls (summary metrics), see CONVENTIONS.md error handling — display and stop
 - No retry loops — report errors and stop

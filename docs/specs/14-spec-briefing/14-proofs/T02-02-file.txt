@@ -1,0 +1,24 @@
+Type: file
+Command: grep -E '(--team|team_mode|Team Activity|Related from Team|Pending Review|distillery_aggregate|distillery_search)' skills/briefing/SKILL.md
+Expected: All team mode requirements implemented in SKILL.md
+Timestamp: 2026-04-08T00:00:00Z
+
+Output (key lines):
+R02.1 - --team flag: "| `--team` | Force team mode regardless of author count |" PASS
+R02.2 - Auto-detect: "distillery_aggregate(group_by="author", project=<project>)" PASS
+R02.2 - Auto-detect: "If the response contains more than one author group, set `team_mode = true`" PASS
+R02.3 - Team activity: "**4g. Team activity (team mode only, non-fatal):**" PASS
+R02.3 - Team activity: "distillery_list(project=<project>, limit=20, output_mode="full")" PASS
+R02.3 - Team activity: "Group by author. For each author, count entries by `entry_type`" PASS
+R02.4 - Related from team: "**4h. Related from team (team mode only, non-fatal):**" PASS
+R02.4 - Related from team: "distillery_search(query=<project_context>, limit=5, output_mode="full")" PASS
+R02.4 - Related from team: "Record similarity percentage for each result" PASS
+R02.5 - Pending review: "**4i. Pending review (team mode only, non-fatal):**" PASS
+R02.5 - Pending review: "distillery_list(status="pending_review", limit=5, output_mode="full")" PASS
+R02.6 - Header: "# Briefing: <project> (team)       <- when team_mode = true" PASS
+R02.7 - Solo sections unchanged: "Team sections (6, 7, 8) are additive — solo sections are always rendered unchanged" PASS
+R02.8 - Empty sections omitted: "Omit this section entirely if no team entries found in the past 7 days" PASS
+R02.8 - Empty sections omitted: "Omit this section if the search returned no results" PASS
+R02.8 - Empty sections omitted: "Omit this section if no entries are in `pending_review` status" PASS
+
+Status: PASS
