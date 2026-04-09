@@ -32,11 +32,12 @@ MCP_HEADERS = {
     "Accept": "application/json, text/event-stream",
 }
 
-# All 19 tools that the Distillery MCP server exposes.
+# All 20 tools that the Distillery MCP server exposes.
 EXPECTED_TOOLS = {
     "distillery_store",
     "distillery_get",
     "distillery_update",
+    "distillery_correct",
     "distillery_search",
     "distillery_find_similar",
     "distillery_list",
@@ -165,7 +166,7 @@ class TestAllToolsAccessibleOverHttp:
             assert "result" in data, f"Expected result in: {data}"
             tools = data["result"]["tools"]
             tool_names = {t["name"] for t in tools}
-            assert len(tool_names) == 19, f"Expected 19 tools, got {len(tool_names)}: {tool_names}"
+            assert len(tool_names) == 20, f"Expected 20 tools, got {len(tool_names)}: {tool_names}"
             assert tool_names == EXPECTED_TOOLS, (
                 f"Tool mismatch.\nExpected: {EXPECTED_TOOLS}\nGot: {tool_names}"
             )

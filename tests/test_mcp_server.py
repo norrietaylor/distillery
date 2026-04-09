@@ -665,6 +665,7 @@ class TestCreateServer:
             "distillery_store",
             "distillery_get",
             "distillery_update",
+            "distillery_correct",
             "distillery_search",
             "distillery_find_similar",
             "distillery_list",
