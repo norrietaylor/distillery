@@ -22,10 +22,6 @@ manage multiple hook entries.
 - Distillery MCP server running with **HTTP transport** (`distillery-mcp --transport http`)
   (required only for the `SessionStart` briefing; the `UserPromptSubmit` nudge works offline)
 - `curl` available on the system PATH (for `SessionStart` briefing)
-- `flock` available on the system PATH (for atomic counter — **hard runtime requirement** unless the script is patched):
-  - **Linux**: typically included with util-linux (already present on most distributions)
-  - **macOS**: install via `brew install util-linux` and ensure the `flock` binary is on your PATH
-  - **Alternative**: manually patch `scripts/hooks/distillery-hooks.sh` to replace the `flock -x 200` invocation (line 54) with a wrapper for `lockf` or coreutils equivalents — note that semantics may differ (exclusive vs. shared locks, timeout behavior)
 - Claude Code with hook support (`~/.claude/settings.json`)
 
 > **Note:** The SessionStart handler targets the HTTP MCP transport, not stdio.
@@ -108,7 +104,7 @@ export DISTILLERY_MCP_URL="http://localhost:9000/mcp"
 counter in `/tmp/distillery-prompt-count-<session_id>`. Every `DISTILLERY_NUDGE_INTERVAL`
 prompts it writes a reminder to stdout:
 
-```
+```text
 [Distillery] You've exchanged 30 messages this session. Consider whether any decisions, insights, or corrections from this conversation should be stored with /distill.
 ```
 
@@ -123,9 +119,8 @@ If that script is not present or not executable, exits silently with no output.
 ### Troubleshooting
 
 **Nudge never fires:**
-- Ensure `flock` is installed (`which flock`)
 - Check `/tmp/distillery-prompt-count-<session_id>` exists and increments
-- Verify `DISTILLERY_NUDGE_INTERVAL` is not accidentally set to a large value
+- Verify `DISTILLERY_NUDGE_INTERVAL` is a positive integer (non-zero, non-empty)
 
 **SessionStart produces no output:**
 - Check the MCP server is running: `curl http://localhost:8000/health`
@@ -237,7 +232,7 @@ about prior decisions and stale knowledge without any explicit prompting.
 
 When the MCP server is reachable and entries exist:
 
-```
+```text
 [Distillery] Project: distillery
 Recent (5): Implemented corrections chain with entry_relations, FastMCP 3.1 migration guide, ...
 Stale (2): Sprint planning notes, DuckDB VSS index rebuild...

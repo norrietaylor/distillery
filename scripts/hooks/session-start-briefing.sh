@@ -22,7 +22,7 @@ BEARER_TOKEN="${DISTILLERY_BEARER_TOKEN:-}"
 
 # ── Read hook input ───────────────────────────────────────────────────────────
 HOOK_JSON="$(cat)"
-CWD="$(echo "$HOOK_JSON" | grep -o '"cwd":"[^"]*"' | head -1 | sed 's/"cwd":"//;s/"//')"
+CWD="$(echo "$HOOK_JSON" | grep -oE '"cwd"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/"cwd"[[:space:]]*:[[:space:]]*"//;s/"//')"
 
 # Fall back to current directory if cwd not found in hook JSON
 if [[ -z "$CWD" ]]; then

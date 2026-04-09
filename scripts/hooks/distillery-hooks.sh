@@ -10,7 +10,6 @@
 # Output: hook-specific output on stdout (nudge text, briefing, etc.)
 #
 # Configuration (environment variables):
-#   DISTILLERY_MCP_URL         MCP HTTP endpoint (default: http://localhost:8000/mcp)
 #   DISTILLERY_NUDGE_INTERVAL  Prompts between memory nudges (default: 30)
 #   DISTILLERY_BEARER_TOKEN    Optional bearer token if OAuth is enabled
 
@@ -21,16 +20,19 @@ trap 'exit 0' ERR
 set -euo pipefail
 
 # ── Configuration ────────────────────────────────────────────────────────────
-MCP_URL="${DISTILLERY_MCP_URL:-http://localhost:8000/mcp}"
 NUDGE_INTERVAL="${DISTILLERY_NUDGE_INTERVAL:-30}"
+if ! [[ "$NUDGE_INTERVAL" =~ ^[1-9][0-9]*$ ]]; then
+  NUDGE_INTERVAL=30
+fi
 
 # ── Read hook input ───────────────────────────────────────────────────────────
 HOOK_JSON="$(cat)" || exit 0
 
 # Parse fields from hook JSON (no jq dependency — portable grep/sed)
-HOOK_EVENT="$(echo "$HOOK_JSON" | grep -o '"hook_event_name":"[^"]*"' | head -1 | sed 's/"hook_event_name":"//;s/"//')" || true
-SESSION_ID="$(echo "$HOOK_JSON" | grep -o '"session_id":"[^"]*"' | head -1 | sed 's/"session_id":"//;s/"//')" || true
-CWD="$(echo "$HOOK_JSON" | grep -o '"cwd":"[^"]*"' | head -1 | sed 's/"cwd":"//;s/"//')" || true
+# Patterns allow optional whitespace around the colon for flexibility
+HOOK_EVENT="$(echo "$HOOK_JSON" | grep -oE '"hook_event_name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/"hook_event_name"[[:space:]]*:[[:space:]]*"//;s/"//')" || true
+SESSION_ID="$(echo "$HOOK_JSON" | grep -oE '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/"session_id"[[:space:]]*:[[:space:]]*"//;s/"//')" || true
+CWD="$(echo "$HOOK_JSON" | grep -oE '"cwd"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/"cwd"[[:space:]]*:[[:space:]]*"//;s/"//')" || true
 
 # Fall back to current directory if cwd not found
 if [[ -z "${CWD:-}" ]]; then

@@ -231,8 +231,14 @@ EXIT8=$?
 
 # The briefing hook may or may not be present — either way must exit 0
 assert_exit_zero "SessionStart exits 0 (present or absent)" "$EXIT8"
-# If output is non-empty it should contain something meaningful; if empty, that's fine too
-pass "SessionStart output acceptable (empty or briefing content)"
+# If output is non-empty it must start with the expected briefing prefix
+if [[ -z "$OUTPUT8" ]]; then
+  pass "SessionStart output empty (no MCP server — expected)"
+elif [[ "$OUTPUT8" == *"[Distillery]"* ]]; then
+  pass "SessionStart output contains valid briefing prefix"
+else
+  fail "SessionStart output is non-empty but malformed: ${OUTPUT8:0:100}"
+fi
 
 # ── T9: Missing session_id handled gracefully ─────────────────────────────────
 echo ""
