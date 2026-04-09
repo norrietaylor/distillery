@@ -39,6 +39,7 @@ _COOLDOWN_SECONDS: dict[str, int] = {
     "poll": 300,  # 5 minutes
     "rescore": 3600,  # 1 hour
     "maintenance": 21600,  # 6 hours
+    "classify-batch": 300,  # 5 minutes
 }
 
 # Per-endpoint locks to serialize dispatch and prevent TOCTOU races on
@@ -623,6 +624,175 @@ async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONRe
     )
 
 
+async def _run_classify_batch(
+    state: dict[str, Any],
+    entry_type: str = "inbox",
+    mode: str | None = None,
+) -> JSONResponse:
+    """Core classify-batch logic shared by ``/hooks/classify-batch`` route.
+
+    Fetches entries matching *entry_type* filter with
+    ``status=pending_review``, classifies each one using either the LLM-based
+    :class:`~distillery.classification.engine.ClassificationEngine` (``mode="llm"``)
+    or the embedding-centroid-based
+    :class:`~distillery.classification.heuristic.HeuristicClassifier`
+    (``mode="heuristic"``), then updates each entry in the store.
+
+    Args:
+        state: The populated shared-state dict containing ``"store"``,
+            ``"config"``, and ``"embedding_provider"`` keys.
+        entry_type: Only entries with this ``entry_type`` are classified.
+            Defaults to ``"inbox"``.
+        mode: Classification mode — ``"llm"`` or ``"heuristic"``.  When
+            ``None``, the value from ``config.classification.mode`` (falling
+            back to ``"llm"``) is used.
+
+    Returns:
+        JSON response ``{"ok": true, "data": {"classified": N,
+        "pending_review": N, "errors": N, "by_type": {type: count}}}``,
+        or ``{"ok": false, "error": "<message>"}`` with status 500 on failure.
+    """
+    from distillery.classification import ClassificationEngine, HeuristicClassifier
+    from distillery.models import EntryStatus
+
+    store = state["store"]
+    config = state["config"]
+    embedding_provider = state.get("embedding_provider")
+
+    # Resolve effective mode.
+    effective_mode = mode
+    if effective_mode is None:
+        effective_mode = getattr(config.classification, "mode", "llm")
+
+    logger.info(
+        "Webhook classify-batch: starting (entry_type=%r, mode=%r)",
+        entry_type,
+        effective_mode,
+    )
+
+    try:
+        # Fetch entries awaiting classification.
+        result = await store.list_entries(
+            filters={"entry_type": entry_type, "status": EntryStatus.PENDING_REVIEW.value},
+            limit=500,
+            offset=0,
+        )
+        entries = result if isinstance(result, list) else []
+
+        classified_count = 0
+        pending_review_count = 0
+        error_count = 0
+        by_type: dict[str, int] = {}
+
+        if effective_mode == "heuristic":
+            classifier = HeuristicClassifier()
+            if embedding_provider is None:
+                return JSONResponse(
+                    {
+                        "ok": False,
+                        "error": "heuristic mode requires an embedding provider",
+                    },
+                    status_code=500,
+                )
+            for entry in entries:
+                try:
+                    classification = await classifier.classify(
+                        entry, store, embedding_provider
+                    )
+                    await store.update(
+                        entry.id,
+                        {
+                            "entry_type": classification.entry_type.value,
+                            "status": classification.status.value,
+                        },
+                    )
+                    if classification.status == EntryStatus.ACTIVE:
+                        classified_count += 1
+                        type_key = classification.entry_type.value
+                        by_type[type_key] = by_type.get(type_key, 0) + 1
+                    else:
+                        pending_review_count += 1
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "Webhook classify-batch: heuristic classification failed for %s: %s",
+                        entry.id,
+                        exc,
+                    )
+                    error_count += 1
+        else:
+            # LLM mode: use ClassificationEngine.
+            # The ClassificationEngine formats prompts and parses LLM responses,
+            # but does not itself call an LLM.  In a headless webhook context
+            # there is no LLM client, so we record each entry as pending_review
+            # to signal that it requires a /classify skill invocation.
+            engine = ClassificationEngine(config.classification)
+            for entry in entries:
+                try:
+                    _ = engine.build_prompt(entry.content)  # validates content
+                    pending_review_count += 1
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "Webhook classify-batch: llm classification failed for %s: %s",
+                        entry.id,
+                        exc,
+                    )
+                    error_count += 1
+
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Webhook classify-batch: batch operation failed")
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+    logger.info(
+        "Webhook classify-batch: completed — classified=%d pending_review=%d errors=%d",
+        classified_count,
+        pending_review_count,
+        error_count,
+    )
+    return JSONResponse(
+        {
+            "ok": True,
+            "data": {
+                "classified": classified_count,
+                "pending_review": pending_review_count,
+                "errors": error_count,
+                "by_type": by_type,
+            },
+        }
+    )
+
+
+async def _handle_classify_batch(
+    request: Request, state: dict[str, Any]
+) -> JSONResponse:
+    """Handler for ``POST /hooks/classify-batch``.
+
+    Delegates to :func:`_run_classify_batch`.  Accepts optional query
+    parameters:
+
+    - ``entry_type`` (default ``"inbox"``): filter entries by type.
+    - ``mode`` (default from config): ``"llm"`` or ``"heuristic"``.
+
+    Args:
+        request: The incoming Starlette request.
+        state: The populated shared-state dict.
+
+    Returns:
+        A :class:`~starlette.responses.JSONResponse` from
+        :func:`_run_classify_batch`.
+    """
+    entry_type = request.query_params.get("entry_type", "inbox")
+    mode_param = request.query_params.get("mode")
+    mode: str | None = mode_param if isinstance(mode_param, str) and mode_param else None
+
+    if mode is not None and mode not in ("llm", "heuristic"):
+        return JSONResponse(
+            {"ok": False, "error": f"mode must be 'llm' or 'heuristic', got: {mode!r}"},
+            status_code=400,
+        )
+
+    return await _run_classify_batch(state, entry_type=entry_type, mode=mode)
+
+
 # Mapping of endpoint names to their handler callables.
 # Each handler receives (request, state) where state is the populated
 # shared-state dict containing "store", "config", and "embedding_provider".
@@ -630,6 +800,7 @@ _HANDLERS: dict[str, Any] = {
     "poll": _handle_poll,
     "rescore": _handle_rescore,
     "maintenance": _handle_maintenance,
+    "classify-batch": _handle_classify_batch,
 }
 
 
@@ -751,12 +922,24 @@ def create_webhook_app(
         """
         return await _authenticated_endpoint(request, "rescore")
 
+    async def hooks_classify_batch_route(request: Request) -> JSONResponse:
+        """Route handler for ``POST /hooks/classify-batch``.
+
+        Classify pending entries in batch using LLM or heuristic mode.
+        Accepts optional query parameters:
+
+        - ``entry_type`` (default ``"inbox"``): filter entries by type.
+        - ``mode``: ``"llm"`` or ``"heuristic"`` (defaults to config value).
+        """
+        return await _authenticated_endpoint(request, "classify-batch")
+
     routes: list[Route] = [
         Route("/poll", poll_route, methods=["POST"]),
         Route("/rescore", rescore_route, methods=["POST"]),
         Route("/maintenance", maintenance_route, methods=["POST"]),
         Route("/hooks/poll", hooks_poll_route, methods=["POST"]),
         Route("/hooks/rescore", hooks_rescore_route, methods=["POST"]),
+        Route("/hooks/classify-batch", hooks_classify_batch_route, methods=["POST"]),
     ]
 
     # Apply rate limiting with tighter webhook-specific limits via
