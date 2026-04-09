@@ -373,44 +373,33 @@ async def test_rescore_handler(store: DuckDBStore, monkeypatch: pytest.MonkeyPat
 
 @pytest.mark.unit
 async def test_maintenance_handler(store: DuckDBStore, monkeypatch: pytest.MonkeyPatch) -> None:
-    """POST /maintenance runs all 5 operations and returns a response that contains
-    metrics, quality, stale_count, top_interests, suggested_sources, and digest_entry_id."""
-    import json as _json
-    from unittest.mock import AsyncMock, patch
+    """POST /maintenance orchestrates poll → rescore → classify-batch and returns a
+    combined response with poll, rescore, and classify_batch keys."""
+    from unittest.mock import AsyncMock, MagicMock, patch
 
-    import mcp.types as mcp_types
+    from distillery.feeds.poller import PollerSummary, PollResult
 
     monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
     config = _make_config()
     shared = _make_shared_state(store)
 
-    def _text(data: dict) -> list[mcp_types.TextContent]:
-        return [mcp_types.TextContent(type="text", text=_json.dumps(data))]
-
-    # _handle_metrics is called twice: once for full metrics, once for scope=search_quality.
-    metrics_mock = AsyncMock(
-        side_effect=[
-            _text({"entries": {"total": 42}}),
-            _text({"score": 0.85}),
-        ]
+    # Mock FeedPoller for both poll and rescore sub-operations.
+    poll_result = PollResult(
+        source_url="https://example.com/feed",
+        source_type="rss",
+        items_fetched=5,
+        items_stored=3,
     )
-    stale_mock = AsyncMock(return_value=_text({"stale_count": 3, "entries": []}))
-    interests_mock = AsyncMock(
-        return_value=_text(
-            {
-                "top_tags": [["python", 10], ["ai", 7]],
-                "suggestions": [{"url": "https://news.example.com"}],
-            }
-        )
+    poll_summary = PollerSummary(
+        results=[poll_result], total_fetched=5, total_stored=3, sources_polled=1
     )
+    rescore_stats = {"rescored": 20, "upgraded": 4, "downgraded": 1}
 
-    # The server handlers are imported lazily in _handle_maintenance; patch at source.
-    # Each test receives a fresh in-memory store (no pre-existing cooldowns).
-    with (
-        patch("distillery.mcp.server._handle_metrics", metrics_mock),
-        patch("distillery.mcp.server._handle_stale", stale_mock),
-        patch("distillery.mcp.server._handle_interests", interests_mock),
-    ):
+    mock_poller = MagicMock()
+    mock_poller.poll = AsyncMock(return_value=poll_summary)
+    mock_poller.rescore = AsyncMock(return_value=rescore_stats)
+
+    with patch("distillery.feeds.poller.FeedPoller", return_value=mock_poller):
         app = create_webhook_app(shared, config)
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.post("/maintenance", headers=_AUTH_HEADER)
@@ -420,74 +409,23 @@ async def test_maintenance_handler(store: DuckDBStore, monkeypatch: pytest.Monke
     assert body["ok"] is True
     data = body["data"]
 
-    # All 3 handlers ran (metrics called twice, stale and interests once each).
-    assert metrics_mock.await_count == 2
-    stale_mock.assert_awaited_once()
-    interests_mock.assert_awaited_once()
+    # Response must contain all three sub-operation keys.
+    assert "poll" in data
+    assert "rescore" in data
+    assert "classify_batch" in data
 
-    # Response shape.
-    assert "metrics" in data
-    assert "quality" in data
-    assert "stale_count" in data
-    assert "top_interests" in data
-    assert "suggested_sources" in data
-    assert "digest_entry_id" in data
-    assert isinstance(data["digest_entry_id"], str)
-    assert len(data["digest_entry_id"]) > 0
+    # poll sub-result contains expected fields.
+    assert data["poll"]["sources_polled"] == 1
+    assert data["poll"]["items_fetched"] == 5
+    assert data["poll"]["items_stored"] == 3
 
+    # rescore sub-result contains expected fields.
+    assert data["rescore"]["rescored"] == 20
+    assert data["rescore"]["upgraded"] == 4
+    assert data["rescore"]["downgraded"] == 1
 
-@pytest.mark.unit
-async def test_maintenance_stores_digest(
-    store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """POST /maintenance stores a digest Entry with the expected type, author, tags,
-    and period_start/period_end metadata keys."""
-    import json as _json
-    from unittest.mock import AsyncMock, patch
-
-    import mcp.types as mcp_types
-
-    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
-    config = _make_config()
-    shared = _make_shared_state(store)
-
-    def _text(data: dict) -> list[mcp_types.TextContent]:
-        return [mcp_types.TextContent(type="text", text=_json.dumps(data))]
-
-    # The server handlers are imported lazily in _handle_maintenance; patch at source.
-    # Each test receives a fresh in-memory store (no pre-existing cooldowns).
-    # _handle_metrics is called twice: first for full metrics, then for scope=search_quality.
-    with (
-        patch(
-            "distillery.mcp.server._handle_metrics",
-            AsyncMock(side_effect=[_text({"entries": {"total": 0}}), _text({})]),
-        ),
-        patch(
-            "distillery.mcp.server._handle_stale",
-            AsyncMock(return_value=_text({"stale_count": 0, "entries": []})),
-        ),
-        patch(
-            "distillery.mcp.server._handle_interests",
-            AsyncMock(return_value=_text({"top_tags": [], "suggestions": []})),
-        ),
-    ):
-        app = create_webhook_app(shared, config)
-        client = TestClient(app, raise_server_exceptions=False)
-        resp = client.post("/maintenance", headers=_AUTH_HEADER)
-
-    assert resp.status_code == 200
-    digest_entry_id = resp.json()["data"]["digest_entry_id"]
-
-    # Retrieve the stored entry and verify its properties.
-    entry = await store.get(digest_entry_id)
-    assert entry is not None, "Digest entry was not found in the store"
-    assert entry.entry_type.value == "session"
-    assert entry.author == "distillery-maintenance"
-    assert "system/digest" in entry.tags
-    assert "system/weekly" in entry.tags
-    assert "system/maintenance" in entry.tags
-    assert "period_start" in entry.metadata
-    assert "period_end" in entry.metadata
+    # classify_batch sub-result is present (no pending entries → zeros).
+    assert "classified" in data["classify_batch"]
 
 
 @pytest.mark.unit

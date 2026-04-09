@@ -18,7 +18,7 @@ import hmac
 import json
 import logging
 import os
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 from starlette.applications import Starlette
@@ -257,36 +257,6 @@ async def _record_audit(store: Any, endpoint: str, response: JSONResponse) -> No
 
 
 # ---------------------------------------------------------------------------
-# Maintenance helpers
-# ---------------------------------------------------------------------------
-
-#: The maintenance digest covers a trailing 7-day window.
-_MAINTENANCE_PERIOD = timedelta(days=7)
-
-
-def _parse_mcp_response(result: Any) -> dict[str, Any]:
-    """Extract the JSON payload from an MCP ``TextContent`` response list.
-
-    MCP handler functions return ``list[types.TextContent]``.  Each element
-    has a ``.text`` attribute containing a JSON-serialised string.  This
-    helper parses the first element and returns the dict, falling back to
-    an empty dict on any parse error.
-
-    Args:
-        result: The return value of an ``_handle_*`` function from
-            :mod:`distillery.mcp.server`.
-
-    Returns:
-        The parsed dict, or ``{}`` on failure.
-    """
-    try:
-        return dict(json.loads(result[0].text))
-    except Exception:  # noqa: BLE001
-        logger.warning("Failed to parse MCP response: %r", result)
-        return {}
-
-
-# ---------------------------------------------------------------------------
 # Route handlers
 # ---------------------------------------------------------------------------
 
@@ -490,18 +460,22 @@ async def _handle_rescore(request: Request, state: dict[str, Any]) -> JSONRespon
 async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONResponse:
     """Handler for ``POST /maintenance``.
 
-    Sequentially executes four knowledge-base maintenance operations:
+    Sequentially orchestrates three sub-operations:
 
-    1. **metrics** -- 7-day usage metrics (scope="summary")
-    2. **quality** -- search/feedback quality summary (scope="search_quality")
-    3. **stale_detection** -- entries not accessed in 30 days (limit 10)
-    4. **interests** -- top 10 interests over the past 30 days, including up
-       to 3 feed source suggestions (via ``suggest_sources=True``)
+    1. **poll** -- fetch new items from all configured feed sources.
+    2. **rescore** -- re-score existing feed entries against the current
+       interest profile (up to 200 entries).
+    3. **classify-batch** -- classify pending inbox entries using the
+       configured classification mode.
 
-    On success a one-paragraph digest entry is stored in the knowledge base
-    with ``entry_type="session"``, ``author="distillery-maintenance"``, and
-    system tags for downstream retrieval.  The digest entry ID is returned
-    in the response.
+    Each sub-operation is invoked via its internal ``_run_*`` helper so that
+    no HTTP self-calls are made.  Each sub-operation returns its result dict;
+    all three are merged into the combined response under ``poll``,
+    ``rescore``, and ``classify_batch`` keys.
+
+    If a sub-operation fails, its result is recorded as
+    ``{"ok": false, "error": "<message>"}`` and the remaining sub-operations
+    still run — maintenance is best-effort.
 
     Args:
         request: The incoming Starlette request (unused beyond signature
@@ -510,115 +484,57 @@ async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONRe
             ``"config"``, and ``"embedding_provider"`` keys.
 
     Returns:
-        JSON response with ``{"ok": true, "data": {"metrics": {...},
-        "quality": {...}, "stale_count": N, "top_interests": [...],
-        "suggested_sources": [...], "digest_entry_id": "..."}}``, or
-        ``{"ok": false, "error": "<message>"}`` with status 500 on failure.
+        JSON response with ``{"ok": true, "data": {"poll": {...},
+        "rescore": {...}, "classify_batch": {...}}}``.  The top-level
+        ``ok`` is ``true`` even when individual sub-operations fail so that
+        the caller always receives the combined report.  A status 500 is
+        returned only when maintenance cannot start at all (e.g. store
+        unavailable).
     """
-    from distillery.mcp.server import (
-        _handle_interests,
-        _handle_metrics,
-        _handle_stale,
-    )
-    from distillery.models import Entry, EntrySource, EntryType
+    logger.info("Webhook maintenance: starting maintenance cycle (poll → rescore → classify-batch)")
 
-    store = state["store"]
-    config: DistilleryConfig = state["config"]
-    embedding_provider = state.get("embedding_provider")
+    # Helper to extract the data payload from a JSONResponse produced by _run_* helpers.
+    def _extract(response: JSONResponse) -> dict[str, Any]:
+        try:
+            body: dict[str, Any] = json.loads(bytes(response.body).decode())
+        except Exception:  # noqa: BLE001
+            return {"ok": False, "error": "failed to parse sub-operation response"}
+        return body
 
-    logger.info("Webhook maintenance: starting maintenance cycle")
-    try:
-        # 1. Metrics (7-day period)
-        metrics_result = await _handle_metrics(
-            store=store,
-            config=config,
-            embedding_provider=embedding_provider,
-            arguments={"period_days": 7},
-        )
-        metrics_data = _parse_mcp_response(metrics_result)
+    # 1. Poll — fetch new feed items.
+    poll_response = await _run_poll(state)
+    poll_body = _extract(poll_response)
+    poll_result: dict[str, Any] = poll_body.get("data", poll_body) if poll_body.get("ok") else {
+        "ok": False, "error": poll_body.get("error", "poll failed")
+    }
 
-        # 2. Quality (via metrics with scope=search_quality)
-        quality_result = await _handle_metrics(
-            store=store,
-            config=config,
-            embedding_provider=embedding_provider,
-            arguments={"scope": "search_quality"},
-        )
-        quality_data = _parse_mcp_response(quality_result)
+    # 2. Rescore — re-score existing entries (default limit 200).
+    rescore_response = await _run_rescore(state)
+    rescore_body = _extract(rescore_response)
+    rescore_result: dict[str, Any] = rescore_body.get("data", rescore_body) if rescore_body.get("ok") else {
+        "ok": False, "error": rescore_body.get("error", "rescore failed")
+    }
 
-        # 3. Stale detection (30 days, limit 10)
-        stale_result = await _handle_stale(
-            store=store,
-            config=config,
-            arguments={"days": 30, "limit": 10},
-        )
-        stale_data = _parse_mcp_response(stale_result)
-        stale_count: int = stale_data.get("stale_count", 0)
-
-        # 4. Interests (30 days, top 10) with source suggestions (max 3)
-        interests_result = await _handle_interests(
-            store=store,
-            config=config,
-            arguments={
-                "recency_days": 30,
-                "top_n": 10,
-                "suggest_sources": True,
-                "max_suggestions": 3,
-            },
-        )
-        interests_data = _parse_mcp_response(interests_result)
-        top_interests: list[Any] = interests_data.get("top_tags", [])
-        suggested_sources: list[Any] = interests_data.get("suggestions", [])
-
-        # Compose digest summary
-        now = datetime.now(UTC)
-        period_start = (now - _MAINTENANCE_PERIOD).isoformat()
-        period_end = now.isoformat()
-
-        total_entries = metrics_data.get("entries", {}).get("total", 0)
-        digest_content = (
-            f"Weekly maintenance completed on {now.strftime('%Y-%m-%d')}. "
-            f"Knowledge base contains {total_entries} entries with "
-            f"{stale_count} stale items detected (30-day threshold). "
-            f"Top interests: {', '.join(t[0] for t in top_interests[:5]) or 'none identified'}. "
-            f"Source suggestions: {len(suggested_sources)} new sources proposed."
-        )
-
-        # Store digest entry
-        entry = Entry(
-            content=digest_content,
-            entry_type=EntryType.SESSION,
-            source=EntrySource.MANUAL,
-            author="distillery-maintenance",
-            tags=["system/digest", "system/weekly", "system/maintenance"],
-            metadata={
-                "period_start": period_start,
-                "period_end": period_end,
-            },
-        )
-        entry_id = await store.store(entry)
-
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Webhook maintenance: maintenance cycle failed")
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+    # 3. Classify-batch — classify pending inbox entries.
+    classify_response = await _run_classify_batch(state)
+    classify_body = _extract(classify_response)
+    classify_result: dict[str, Any] = classify_body.get("data", classify_body) if classify_body.get("ok") else {
+        "ok": False, "error": classify_body.get("error", "classify-batch failed")
+    }
 
     logger.info(
-        "Webhook maintenance: completed — stale=%d interests=%d suggestions=%d digest=%s",
-        stale_count,
-        len(top_interests),
-        len(suggested_sources),
-        entry_id,
+        "Webhook maintenance: completed — poll_ok=%s rescore_ok=%s classify_ok=%s",
+        poll_body.get("ok"),
+        rescore_body.get("ok"),
+        classify_body.get("ok"),
     )
     return JSONResponse(
         {
             "ok": True,
             "data": {
-                "metrics": metrics_data,
-                "quality": quality_data,
-                "stale_count": stale_count,
-                "top_interests": top_interests,
-                "suggested_sources": suggested_sources,
-                "digest_entry_id": entry_id,
+                "poll": poll_result,
+                "rescore": rescore_result,
+                "classify_batch": classify_result,
             },
         }
     )
