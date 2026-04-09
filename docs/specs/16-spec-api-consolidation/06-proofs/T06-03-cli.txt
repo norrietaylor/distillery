@@ -1,0 +1,9 @@
+Type: cli
+Command: ruff check src/distillery/mcp/tools/crud.py src/distillery/mcp/server.py && mypy --strict src/distillery/mcp/tools/crud.py src/distillery/mcp/server.py
+Expected: No lint errors, no type errors
+Timestamp: 2026-04-09T00:00:00Z
+
+ruff: All checks passed!
+mypy: Success: no issues found in 2 source files
+
+Status: PASS
