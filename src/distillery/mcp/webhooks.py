@@ -290,18 +290,25 @@ def _parse_mcp_response(result: Any) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-async def _handle_poll(request: Request, state: dict[str, Any]) -> JSONResponse:
-    """Handler for ``POST /poll``.
+async def _run_poll(
+    state: dict[str, Any],
+    source_url: str | None = None,
+) -> JSONResponse:
+    """Core poll logic shared by ``/poll`` and ``/hooks/poll`` routes.
 
     Instantiates :class:`~distillery.feeds.poller.FeedPoller` using the
-    initialised store, config, and embedding provider from *state*, runs a
-    full poll cycle, and returns aggregate statistics.
+    initialised store and config from *state*, runs a poll cycle (optionally
+    restricted to *source_url*), and returns aggregate statistics.
+
+    The interest profile needed for relevance scoring is computed internally
+    by :class:`~distillery.feeds.poller.FeedPoller` — it does not depend on
+    the separate ``distillery_interests`` MCP tool.
 
     Args:
-        request: The incoming Starlette request (unused beyond signature
-            compatibility with the dispatcher).
         state: The populated shared-state dict containing ``"store"``,
             ``"config"``, and ``"embedding_provider"`` keys.
+        source_url: When provided, only this source is polled; ``None`` polls
+            all configured sources.
 
     Returns:
         JSON response with ``{"ok": true, "data": {"sources_polled": N,
@@ -313,10 +320,10 @@ async def _handle_poll(request: Request, state: dict[str, Any]) -> JSONResponse:
     store = state["store"]
     config = state["config"]
 
-    logger.info("Webhook poll: starting poll cycle")
+    logger.info("Webhook poll: starting poll cycle (source_url=%r)", source_url)
     try:
         poller = FeedPoller(store=store, config=config)
-        summary = await poller.poll()
+        summary = await poller.poll(source_url=source_url)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Webhook poll: poll cycle failed")
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
@@ -346,49 +353,55 @@ async def _handle_poll(request: Request, state: dict[str, Any]) -> JSONResponse:
     )
 
 
-async def _handle_rescore(request: Request, state: dict[str, Any]) -> JSONResponse:
-    """Handler for ``POST /rescore``.
+async def _handle_poll(request: Request, state: dict[str, Any]) -> JSONResponse:
+    """Handler for ``POST /poll``.
 
-    Accepts an optional JSON body ``{"limit": N}`` (default 200) and
-    re-scores up to *N* existing feed entries against the current store.
+    Delegates to :func:`_run_poll`.  The optional ``source_url`` parameter
+    may be supplied as a query string parameter (``?source_url=<url>``) or
+    via a JSON request body (``{"source_url": "<url>"}``).
 
     Args:
-        request: The incoming Starlette request.  The body is read and
-            parsed for the optional ``limit`` parameter.
+        request: The incoming Starlette request.
+        state: The populated shared-state dict.
+
+    Returns:
+        A :class:`~starlette.responses.JSONResponse` from :func:`_run_poll`.
+    """
+    qs_source_url: str | None = request.query_params.get("source_url")
+    source_url: str | None = qs_source_url if isinstance(qs_source_url, str) else None
+    if source_url is None:
+        body = await request.body()
+        if body:
+            try:
+                payload = json.loads(body)
+                if isinstance(payload, dict):
+                    val = payload.get("source_url")
+                    if isinstance(val, str):
+                        source_url = val
+            except (json.JSONDecodeError, ValueError):
+                pass
+    return await _run_poll(state, source_url=source_url)
+
+
+async def _run_rescore(
+    state: dict[str, Any],
+    limit: int = 200,
+) -> JSONResponse:
+    """Core rescore logic shared by ``/rescore`` and ``/hooks/rescore`` routes.
+
+    Re-scores up to *limit* existing feed entries against the current store.
+
+    Args:
         state: The populated shared-state dict containing ``"store"`` and
             ``"config"`` keys.
+        limit: Maximum number of entries to rescore (default 200).
 
     Returns:
         JSON response with ``{"ok": true, "data": {"rescored": N,
         "upgraded": N, "downgraded": N}}``, or an error response with
-        status 400 (malformed body) or 500 (internal error).
+        status 500 on failure.
     """
     from distillery.feeds.poller import FeedPoller
-
-    # Parse optional body for limit parameter.
-    limit = 200
-    body = await request.body()
-    if body:
-        try:
-            payload = json.loads(body)
-        except (json.JSONDecodeError, ValueError) as exc:
-            return JSONResponse(
-                {"ok": False, "error": f"malformed JSON body: {exc}"},
-                status_code=400,
-            )
-        if not isinstance(payload, dict):
-            return JSONResponse(
-                {"ok": False, "error": "request body must be a JSON object"},
-                status_code=400,
-            )
-        if "limit" in payload:
-            raw_limit = payload["limit"]
-            if not isinstance(raw_limit, int) or isinstance(raw_limit, bool):
-                return JSONResponse(
-                    {"ok": False, "error": "limit must be an integer"},
-                    status_code=400,
-                )
-            limit = raw_limit
 
     store = state["store"]
     config = state["config"]
@@ -417,6 +430,60 @@ async def _handle_rescore(request: Request, state: dict[str, Any]) -> JSONRespon
             },
         }
     )
+
+
+async def _handle_rescore(request: Request, state: dict[str, Any]) -> JSONResponse:
+    """Handler for ``POST /rescore``.
+
+    Delegates to :func:`_run_rescore`.  The optional ``limit`` parameter may
+    be supplied as a query string parameter (``?limit=<N>``) or via a JSON
+    request body (``{"limit": N}``).  Query string takes precedence.
+
+    Args:
+        request: The incoming Starlette request.
+        state: The populated shared-state dict containing ``"store"`` and
+            ``"config"`` keys.
+
+    Returns:
+        A :class:`~starlette.responses.JSONResponse` from :func:`_run_rescore`,
+        or an error response with status 400 for a malformed body/parameter.
+    """
+    # Query string takes precedence over body.
+    qs_limit: str | None = request.query_params.get("limit")
+    if isinstance(qs_limit, str):
+        try:
+            limit = int(qs_limit)
+        except (ValueError, TypeError):
+            return JSONResponse(
+                {"ok": False, "error": "limit query parameter must be an integer"},
+                status_code=400,
+            )
+    else:
+        limit = 200
+        body = await request.body()
+        if body:
+            try:
+                payload = json.loads(body)
+            except (json.JSONDecodeError, ValueError) as exc:
+                return JSONResponse(
+                    {"ok": False, "error": f"malformed JSON body: {exc}"},
+                    status_code=400,
+                )
+            if not isinstance(payload, dict):
+                return JSONResponse(
+                    {"ok": False, "error": "request body must be a JSON object"},
+                    status_code=400,
+                )
+            if "limit" in payload:
+                raw_limit = payload["limit"]
+                if not isinstance(raw_limit, int) or isinstance(raw_limit, bool):
+                    return JSONResponse(
+                        {"ok": False, "error": "limit must be an integer"},
+                        status_code=400,
+                    )
+                limit = raw_limit
+
+    return await _run_rescore(state, limit=limit)
 
 
 async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONResponse:
@@ -666,10 +733,30 @@ def create_webhook_app(
         """Route handler for ``POST /maintenance``."""
         return await _authenticated_endpoint(request, "maintenance")
 
+    async def hooks_poll_route(request: Request) -> JSONResponse:
+        """Route handler for ``POST /hooks/poll``.
+
+        Canonical path for the poll webhook; shares cooldown with ``/poll``.
+        Accepts an optional ``source_url`` query parameter to poll a single
+        source (e.g. ``POST /hooks/poll?source_url=https://example.com/feed``).
+        """
+        return await _authenticated_endpoint(request, "poll")
+
+    async def hooks_rescore_route(request: Request) -> JSONResponse:
+        """Route handler for ``POST /hooks/rescore``.
+
+        Canonical path for the rescore webhook; shares cooldown with ``/rescore``.
+        Accepts an optional ``limit`` query parameter controlling how many
+        entries are rescored (e.g. ``POST /hooks/rescore?limit=50``).
+        """
+        return await _authenticated_endpoint(request, "rescore")
+
     routes: list[Route] = [
         Route("/poll", poll_route, methods=["POST"]),
         Route("/rescore", rescore_route, methods=["POST"]),
         Route("/maintenance", maintenance_route, methods=["POST"]),
+        Route("/hooks/poll", hooks_poll_route, methods=["POST"]),
+        Route("/hooks/rescore", hooks_rescore_route, methods=["POST"]),
     ]
 
     # Apply rate limiting with tighter webhook-specific limits via
