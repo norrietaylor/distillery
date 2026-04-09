@@ -200,7 +200,11 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         try:
             yield dict(_shared)
         finally:
-            pass
+            _store = _shared.get("store")
+            if _store is not None and hasattr(_store, "close"):
+                logger.info("Shutting down — closing DuckDB (WAL checkpoint) …")
+                await _store.close()
+                logger.info("DuckDB closed cleanly")
 
     server = FastMCP("distillery", lifespan=lifespan, auth=auth)
     server._distillery_shared = _shared  # type: ignore[attr-defined]
