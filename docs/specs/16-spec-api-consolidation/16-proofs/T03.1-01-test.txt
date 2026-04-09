@@ -1,0 +1,30 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.7, pytest-9.0.2, pluggy-1.6.0 -- /usr/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/norrie.guest/code/distillery/.worktrees/feature-api-consolidation
+configfile: pyproject.toml
+plugins: httpx-0.36.0, asyncio-1.3.0, anyio-4.13.0, cov-7.1.0, typeguard-4.4.2
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 19 items
+
+tests/test_classification/test_heuristic.py::TestCosineSimilarity::test_identical_vectors_return_one PASSED [  5%]
+tests/test_classification/test_heuristic.py::TestCosineSimilarity::test_orthogonal_vectors_return_zero PASSED [ 10%]
+tests/test_classification/test_heuristic.py::TestCosineSimilarity::test_opposite_vectors_return_negative_one PASSED [ 15%]
+tests/test_classification/test_heuristic.py::TestCosineSimilarity::test_zero_vector_returns_zero PASSED [ 21%]
+tests/test_classification/test_heuristic.py::TestComputeCentroids::test_computes_centroid_for_type_with_enough_entries PASSED [ 26%]
+tests/test_classification/test_heuristic.py::TestComputeCentroids::test_skips_type_with_insufficient_entries PASSED [ 31%]
+tests/test_classification/test_heuristic.py::TestComputeCentroids::test_inbox_type_excluded_from_centroids PASSED [ 36%]
+tests/test_classification/test_heuristic.py::TestComputeCentroids::test_centroid_is_normalised PASSED [ 42%]
+tests/test_classification/test_heuristic.py::TestComputeCentroids::test_no_active_entries_returns_empty PASSED [ 47%]
+tests/test_classification/test_heuristic.py::TestComputeCentroids::test_multiple_types_produce_multiple_centroids PASSED [ 52%]
+tests/test_classification/test_heuristic.py::TestClassifyEntry::test_best_match_above_threshold PASSED [ 57%]
+tests/test_classification/test_heuristic.py::TestClassifyEntry::test_no_match_above_threshold PASSED [ 63%]
+tests/test_classification/test_heuristic.py::TestClassifyEntry::test_exact_match_returns_similarity_one PASSED [ 68%]
+tests/test_classification/test_heuristic.py::TestClassifyEntry::test_selects_best_among_multiple PASSED [ 73%]
+tests/test_classification/test_heuristic.py::TestClassifyIntegration::test_classifies_entry_matching_centroid PASSED [ 78%]
+tests/test_classification/test_heuristic.py::TestClassifyIntegration::test_pending_review_when_no_centroid_match PASSED [ 84%]
+tests/test_classification/test_heuristic.py::TestClassifyIntegration::test_pending_review_when_no_centroids_available PASSED [ 89%]
+tests/test_classification/test_heuristic.py::TestClassifyIntegration::test_insufficient_data_sends_to_review PASSED [ 94%]
+tests/test_classification/test_heuristic.py::TestClassifyIntegration::test_result_is_classification_result PASSED [100%]
+
+============================== 19 passed in 1.11s ==============================
