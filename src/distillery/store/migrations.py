@@ -319,6 +319,17 @@ def add_verification(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
     logger.info("Migration 10: verification column added")
 
 
+_ADD_SESSION_ID_COLUMN = """
+ALTER TABLE entries ADD COLUMN IF NOT EXISTS session_id VARCHAR;
+"""
+
+
+def add_session_id(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
+    """Migration 11: Add ``session_id`` column to ``entries``."""
+    conn.execute(_ADD_SESSION_ID_COLUMN)
+    logger.info("Migration 11: session_id column added")
+
+
 # ---------------------------------------------------------------------------
 # Migration registry
 # ---------------------------------------------------------------------------
@@ -334,6 +345,7 @@ MIGRATIONS: dict[int, MigrationFunc] = {
     8: create_entry_relations,
     9: add_expires_at,
     10: add_verification,
+    11: add_session_id,
 }
 """Ordered mapping of schema version to migration function.
 
