@@ -6,9 +6,8 @@ import pytest
 
 from distillery.models import Entry, EntrySource, EntryType
 
-pytestmark = pytest.mark.unit
 
-
+@pytest.mark.unit
 class TestEntrySourceExtension:
     """Test that new source values are properly defined and accessible."""
 
@@ -42,6 +41,7 @@ class TestEntrySourceExtension:
             EntrySource("made-up-source")
 
 
+@pytest.mark.unit
 class TestEntryWithNewSources:
     """Test Entry creation and serialization with new source values."""
 
@@ -118,6 +118,7 @@ class TestEntryWithNewSources:
         assert restored == original
 
 
+@pytest.mark.unit
 class TestExistingSourcesBackwardCompatibility:
     """Verify that existing source values continue to work unchanged."""
 

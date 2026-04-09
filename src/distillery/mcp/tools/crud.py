@@ -161,6 +161,10 @@ async def _handle_store(
     if metadata_err:
         return error_response("INVALID_PARAMS", metadata_err)
 
+    session_id_err = validate_type(arguments, "session_id", str, "string")
+    if session_id_err:
+        return error_response("INVALID_PARAMS", session_id_err)
+
     from distillery.config import DefaultsConfig
 
     _defaults = cfg.defaults if cfg is not None else DefaultsConfig()
@@ -554,6 +558,10 @@ async def _handle_update(
     metadata_err = validate_type(updates, "metadata", dict, "object")
     if metadata_err:
         return error_response("INVALID_PARAMS", metadata_err)
+
+    session_id_err = validate_type(updates, "session_id", str, "string")
+    if session_id_err:
+        return error_response("INVALID_PARAMS", session_id_err)
 
     # --- persist ------------------------------------------------------------
     try:

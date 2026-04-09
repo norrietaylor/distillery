@@ -124,9 +124,8 @@ class TestSessionIdAggregateFilter:
         total = result["total_entries"]
         assert total == 2
 
-        group_names = {g["value"] for g in result["groups"]}
-        assert "idea" in group_names or "inbox" in group_names
-        assert "reference" not in group_names
+        grouped = {g["value"]: g["count"] for g in result["groups"]}
+        assert grouped == {"idea": 1, "inbox": 1}
 
 
 # ---------------------------------------------------------------------------
