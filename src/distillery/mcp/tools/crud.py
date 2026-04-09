@@ -808,6 +808,21 @@ async def _handle_correct(
         return error_response("INVALID_PARAMS", tags_err)
     tags = list(arguments["tags"]) if "tags" in arguments else list(original.tags)
 
+    # --- reserved prefix enforcement (match distillery_store guard) ---------
+    if cfg is not None and cfg.tags.reserved_prefixes:
+        for tag in tags:
+            if not isinstance(tag, str):
+                return error_response(
+                    "INVALID_PARAMS", f"Each tag must be a string, got: {type(tag).__name__}"
+                )
+            top = tag.split("/")[0]
+            if top in cfg.tags.reserved_prefixes:
+                return error_response(
+                    "RESERVED_PREFIX",
+                    f"Tag {tag!r} uses reserved prefix {top!r}. "
+                    "Only internal sources may use this namespace.",
+                )
+
     metadata_err = validate_type(arguments, "metadata", dict, "object")
     if metadata_err:
         return error_response("INVALID_PARAMS", metadata_err)
