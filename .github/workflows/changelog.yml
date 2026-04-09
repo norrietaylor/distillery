@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   changelog:
@@ -34,7 +35,11 @@ jobs:
       - name: Generate changelog
         run: git-cliff --output CHANGELOG.md
 
-      - name: Commit changelog
+      - name: Create changelog PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.event.release.tag_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -44,5 +49,12 @@ jobs:
             echo "No changelog changes to commit"
             exit 0
           fi
-          git commit -m "docs: update changelog for ${{ github.event.release.tag_name }}"
-          git push origin HEAD:${{ github.event.repository.default_branch }}
+          BRANCH="docs/changelog-${TAG_NAME}"
+          git checkout -b "$BRANCH"
+          git commit -m "docs: update changelog for ${TAG_NAME}"
+          git push origin "$BRANCH"
+          gh pr create \
+            --title "docs: update changelog for ${TAG_NAME}" \
+            --body "Auto-generated changelog update from release ${TAG_NAME}." \
+            --base "$DEFAULT_BRANCH" \
+            --head "$BRANCH"
