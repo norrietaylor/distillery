@@ -118,6 +118,132 @@ tests:
       - type: python
         value: "file://scripts/promptfoo_grader.py:get_assert_watch_add"
 
+  # =========================================================================
+  # Features since v0.2.1
+  # =========================================================================
+
+  # ---- corrections chain: store then correct --------------------------------
+  - description: "correct supersedes an entry via distillery_correct"
+    vars:
+      prompt: >-
+        First, store an entry with distillery_store: content="DuckDB uses B-tree indexes",
+        entry_type="decision", author="eval", project="distillery".
+        Then correct it with distillery_correct using the entry ID you just got,
+        with content="DuckDB uses HNSW indexes for vector similarity, not B-tree".
+        Report both entry IDs.
+    assert:
+      - type: python
+        value: "file://scripts/promptfoo_grader.py:get_assert_correct_chain"
+
+  # ---- relations: add and get -----------------------------------------------
+  - description: "relations tool adds and retrieves typed relations"
+    vars:
+      prompt: >-
+        Store two entries with distillery_store:
+        1) content="Use pytest-asyncio in auto mode", entry_type="decision", author="eval", project="distillery"
+        2) content="Auto mode removes need for @pytest.mark.asyncio decorator", entry_type="insight", author="eval", project="distillery"
+        Then use distillery_relations action="add" to create a "related" relation
+        from entry 1 to entry 2. Finally, use distillery_relations action="get"
+        on entry 1 to verify the relation exists. Report the relation.
+    assert:
+      - type: python
+        value: "file://scripts/promptfoo_grader.py:get_assert_relations_add_get"
+
+  # ---- store with verification field ----------------------------------------
+  - description: "store accepts verification field"
+    vars:
+      prompt: >-
+        Use distillery_store to create an entry with content="HNSW index requires
+        VSS extension", entry_type="decision", author="eval", project="distillery",
+        verification="verified". Confirm the entry was stored.
+    assert:
+      - type: python
+        value: "file://scripts/promptfoo_grader.py:get_assert_store_verification"
+
+  # ---- store with expires_at field ------------------------------------------
+  - description: "store accepts expires_at field"
+    vars:
+      prompt: >-
+        Use distillery_store to create an entry with content="API key rotates quarterly",
+        entry_type="decision", author="eval", project="distillery",
+        expires_at="2026-07-01T00:00:00Z". Confirm the entry was stored.
+    assert:
+      - type: python
+        value: "file://scripts/promptfoo_grader.py:get_assert_store_expires"
+
+  # ---- store with source field ----------------------------------------------
+  - description: "store accepts source field"
+    vars:
+      prompt: >-
+        Use distillery_store to create an entry with content="Extracted from project README",
+        entry_type="insight", author="eval", project="distillery",
+        source="documentation". Confirm the entry was stored.
+    assert:
+      - type: python
+        value: "file://scripts/promptfoo_grader.py:get_assert_store_source"
+
+  # ---- store with session_id field ------------------------------------------
+  - description: "store accepts session_id field"
+    vars:
+      prompt: >-
+        Use distillery_store to create an entry with content="Session grouping test",
+        entry_type="insight", author="eval", project="distillery",
+        session_id="eval-session-001". Confirm the entry was stored.
+    assert:
+      - type: python
+        value: "file://scripts/promptfoo_grader.py:get_assert_store_session_id"
+
+  # ---- update verification status -------------------------------------------
+  - description: "update changes verification status on existing entry"
+    vars:
+      prompt: >-
+        First, store an entry with distillery_store: content="Hypothesis: embeddings
+        improve recall", entry_type="insight", author="eval", project="distillery".
+        Then use distillery_update on the returned ID to set verification="verified".
+        Report the update result.
+    assert:
+      - type: python
+        value: "file://scripts/promptfoo_grader.py:get_assert_update_verification"
+
+  # ---- list with verification filter ----------------------------------------
+  - description: "list filters by verification status"
+    vars:
+      prompt: >-
+        First, store two entries with distillery_store (author="eval", project="distillery"):
+        1) content="Verified fact", verification="verified"
+        2) content="Unverified hypothesis", verification="unverified"
+        Then call distillery_list with verification="verified" and project="distillery".
+        Report how many entries are returned.
+    assert:
+      - type: python
+        value: "file://scripts/promptfoo_grader.py:get_assert_list_verification_filter"
+
+  # ---- list with source filter ----------------------------------------------
+  - description: "list filters by source"
+    vars:
+      prompt: >-
+        First, store an entry with distillery_store: content="From the docs",
+        entry_type="insight", author="eval", project="distillery", source="documentation".
+        Then call distillery_list with source="documentation" and project="distillery".
+        Report the entries returned.
+    assert:
+      - type: python
+        value: "file://scripts/promptfoo_grader.py:get_assert_list_source_filter"
+
+  # ---- briefing: knowledge dashboard ----------------------------------------
+  - description: "briefing produces a project knowledge dashboard"
+    vars:
+      prompt: >-
+        First, store 3 entries with distillery_store (author="eval", project="distillery"):
+        1) content="We use DuckDB for storage"
+        2) content="Embeddings use Jina v3"
+        3) content="MCP server runs on stdio"
+        Then give me a briefing for project "distillery". Use distillery_metrics
+        and distillery_list to build a summary of the knowledge base state.
+    assert:
+      - type: python
+        value: "file://scripts/promptfoo_grader.py:get_assert_briefing"
+
 # ---------------------------------------------------------------------------
 # Output settings
 # ---------------------------------------------------------------------------
