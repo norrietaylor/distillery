@@ -802,11 +802,11 @@ async def _handle_correct(
 
     author = arguments.get("author", original.author)
     project = arguments.get("project", original.project)
-    tags = list(arguments["tags"]) if "tags" in arguments else list(original.tags)
 
     tags_err = validate_type(arguments, "tags", list, "list of strings")
     if tags_err:
         return error_response("INVALID_PARAMS", tags_err)
+    tags = list(arguments["tags"]) if "tags" in arguments else list(original.tags)
 
     metadata_err = validate_type(arguments, "metadata", dict, "object")
     if metadata_err:
@@ -828,6 +828,30 @@ async def _handle_correct(
         )
     except Exception as exc:  # noqa: BLE001
         return error_response("INVALID_PARAMS", f"Failed to construct correction entry: {exc}")
+
+    # --- db size / embedding budget checks (match distillery_store gates) ----
+    if cfg is not None and cfg.rate_limit.max_db_size_mb > 0:
+        db_path = _normalize_db_path(cfg.storage.database_path)
+        if db_path != ":memory:" and not _is_remote_db_path(db_path):
+            try:
+                size_mb = Path(db_path).stat().st_size / (1024 * 1024)
+                if size_mb >= cfg.rate_limit.max_db_size_mb:
+                    return error_response(
+                        "DB_SIZE_EXCEEDED",
+                        f"Database size ({size_mb:.1f} MB) exceeds limit "
+                        f"({cfg.rate_limit.max_db_size_mb} MB). "
+                        "Delete old entries or increase rate_limit.max_db_size_mb.",
+                    )
+            except OSError:
+                pass  # can't stat, skip check
+
+    if cfg is not None:
+        from distillery.mcp.budget import EmbeddingBudgetError, record_and_check
+
+        try:
+            record_and_check(store.connection, cfg.rate_limit.embedding_budget_daily, count=1)
+        except EmbeddingBudgetError as exc:
+            return error_response("BUDGET_EXCEEDED", str(exc))
 
     # --- persist new entry --------------------------------------------------
     try:
