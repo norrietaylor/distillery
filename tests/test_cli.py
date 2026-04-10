@@ -976,3 +976,86 @@ class TestRetagCommand:
         with pytest.raises(SystemExit) as exc:
             main(["retag", "--config", str(cfg_path), "--dry-run"])
         assert exc.value.code == 0
+
+
+# ---------------------------------------------------------------------------
+# maintenance classify subcommand
+# ---------------------------------------------------------------------------
+
+
+class TestMaintenanceClassifyCommand:
+    def test_maintenance_classify_empty_inbox(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Empty inbox exits with 0 and shows 0 classified/pending_review/errors."""
+        cfg_path = write_config(tmp_path, ":memory:")
+        with pytest.raises(SystemExit) as exc:
+            main(["maintenance", "classify", "--config", str(cfg_path)])
+        assert exc.value.code == 0
+        captured = capsys.readouterr()
+        assert "classified" in captured.out.lower()
+        assert "pending_review" in captured.out.lower()
+
+    def test_maintenance_classify_json_format(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """JSON output format is correctly parsed."""
+        cfg_path = write_config(tmp_path, ":memory:")
+        with pytest.raises(SystemExit) as exc:
+            main(["maintenance", "classify", "--config", str(cfg_path), "--format", "json"])
+        assert exc.value.code == 0
+        captured = capsys.readouterr()
+        data = json.loads(captured.out)
+        assert "classified" in data
+        assert "pending_review" in data
+        assert "errors" in data
+        assert "by_type" in data
+
+    def test_maintenance_classify_missing_config(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Missing config file returns exit code 1."""
+        missing = str(tmp_path / "no_such.yaml")
+        with pytest.raises(SystemExit) as exc:
+            main(["maintenance", "classify", "--config", missing])
+        assert exc.value.code == 1
+
+    def test_maintenance_classify_with_type_option(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """--type option is accepted."""
+        cfg_path = write_config(tmp_path, ":memory:")
+        with pytest.raises(SystemExit) as exc:
+            main(["maintenance", "classify", "--config", str(cfg_path), "--type", "session"])
+        assert exc.value.code == 0
+
+    def test_maintenance_classify_with_mode_option(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """--mode option is accepted."""
+        cfg_path = write_config(tmp_path, ":memory:")
+        with pytest.raises(SystemExit) as exc:
+            main(["maintenance", "classify", "--config", str(cfg_path), "--mode", "heuristic"])
+        assert exc.value.code == 0
+
+    def test_maintenance_classify_help(
+        self,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """--help displays usage information."""
+        with pytest.raises(SystemExit) as exc:
+            main(["maintenance", "classify", "--help"])
+        assert exc.value.code == 0
+        captured = capsys.readouterr()
+        assert "usage" in captured.out.lower()
+        assert "--type" in captured.out
+        assert "--mode" in captured.out
