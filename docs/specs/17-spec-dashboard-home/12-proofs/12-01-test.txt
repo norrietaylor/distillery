@@ -1,0 +1,37 @@
+Type: test
+Command: cd dashboard && npm test -- --run ExpiringSoon
+Expected: display, action buttons, empty state tests pass
+Timestamp: 2026-04-09T17:18:28Z
+
+--- OUTPUT ---
+
+> distillery-dashboard@0.1.0 test
+> vitest run --run ExpiringSoon
+
+
+ RUN  v3.2.4 /home/norrie.guest/code/distillery/.worktrees/feature-dashboard-home/dashboard
+
+ ✓ src/components/ExpiringSoon.test.ts (16 tests) 150ms
+   ✓ ExpiringSoon > empty state > shows empty state when no entries are expiring within 14 days
+   ✓ ExpiringSoon > empty state > shows empty state with helpful hint text
+   ✓ ExpiringSoon > display > shows section heading
+   ✓ ExpiringSoon > display > renders expiring entries within 14 days
+   ✓ ExpiringSoon > display > shows days remaining for each entry
+   ✓ ExpiringSoon > display > shows expiry date for each entry
+   ✓ ExpiringSoon > display > sorts entries by days remaining ascending
+   ✓ ExpiringSoon > display > handles entries array nested under 'entries' key
+   ✓ ExpiringSoon > display > shows loading skeleton during fetch
+   ✓ ExpiringSoon > error state > shows error message when list call fails
+   ✓ ExpiringSoon > error state > shows error when bridge throws
+   ✓ ExpiringSoon > action buttons > renders Archive and Extend buttons for each entry
+   ✓ ExpiringSoon > action buttons > calls distillery_update with status archived on archive click
+   ✓ ExpiringSoon > action buttons > calls distillery_update with expires_at +30 days on extend click
+   ✓ ExpiringSoon > action buttons > refreshes the list after a successful action
+   ✓ ExpiringSoon > action buttons > shows error message when archive action fails
+
+ Test Files  1 passed (1)
+      Tests  16 passed (16)
+   Start at  17:18:28
+   Duration  1.21s (transform 309ms, setup 0ms, collect 586ms, tests 150ms, environment 303ms, prepare 42ms)
+
+Status: PASS
