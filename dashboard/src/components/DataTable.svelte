@@ -33,8 +33,6 @@
     onRowClick?: (row: T) => void;
     /** Optional slot-like render via snippet — id of currently expanded row. */
     expandedRowId?: string | null;
-    /** Callback to render expanded row content — receives the expanded row. */
-    renderExpanded?: (row: T) => ReturnType<import("svelte").Snippet>;
   }
 
   let {
@@ -75,7 +73,7 @@
     return String(a).localeCompare(String(b));
   }
 
-  let sorted = $derived((): T[] => {
+  let sorted = $derived.by((): T[] => {
     if (!sortKey) return [...rows];
     const key = sortKey;
     const dir = sortDir;
@@ -87,8 +85,8 @@
 
   let totalItems = $derived(rows.length);
 
-  let paginated = $derived((): T[] => {
-    const s = sorted();
+  let paginated = $derived.by((): T[] => {
+    const s = sorted;
     const start = (currentPage - 1) * pageSize;
     return s.slice(start, start + pageSize);
   });
@@ -133,7 +131,7 @@
         </tr>
       </thead>
       <tbody>
-        {#each paginated() as row (getRowId(row))}
+        {#each paginated as row (getRowId(row))}
           {@const rowId = getRowId(row)}
           {@const isExpanded = expandedRowId === rowId}
           <tr
@@ -164,7 +162,7 @@
             {/each}
           </tr>
         {/each}
-        {#if paginated().length === 0}
+        {#if paginated.length === 0}
           <tr>
             <td colspan={columns.length} class="datatable-empty">
               No entries found.

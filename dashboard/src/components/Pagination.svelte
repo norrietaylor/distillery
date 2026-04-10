@@ -18,20 +18,21 @@
   }: Props = $props();
 
   let totalPages = $derived(Math.max(1, Math.ceil(totalItems / pageSize)));
-  let hasPrev = $derived(currentPage > 1);
-  let hasNext = $derived(currentPage < totalPages);
+  let safePage = $derived(Math.min(Math.max(currentPage, 1), totalPages || 1));
+  let hasPrev = $derived(safePage > 1);
+  let hasNext = $derived(safePage < totalPages);
 
   /** Range label e.g. "21–40 of 45" */
-  let rangeLabel = $derived(() => {
-    const start = (currentPage - 1) * pageSize + 1;
-    const end = Math.min(currentPage * pageSize, totalItems);
+  let rangeLabel = $derived.by(() => {
+    const start = (safePage - 1) * pageSize + 1;
+    const end = Math.min(safePage * pageSize, totalItems);
     if (totalItems === 0) return "0 results";
     return `${start}–${end} of ${totalItems}`;
   });
 </script>
 
 <div class="pagination" role="navigation" aria-label="Pagination">
-  <span class="pagination-range">{rangeLabel()}</span>
+  <span class="pagination-range">{rangeLabel}</span>
 
   <div class="pagination-controls">
     <button

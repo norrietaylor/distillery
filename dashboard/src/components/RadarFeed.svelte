@@ -141,7 +141,7 @@
   });
 
   /** Client-side filter against all text fields. */
-  let filteredEntries = $derived((): FeedEntry[] => {
+  let filteredEntries = $derived.by((): FeedEntry[] => {
     const q = filterText.trim().toLowerCase();
     if (!q) return entries;
     return entries.filter((e) => {
@@ -212,9 +212,9 @@
     }
   }
 
-  let expandedEntry = $derived((): FeedEntry | null => {
+  let expandedEntry = $derived.by((): FeedEntry | null => {
     if (!expandedId) return null;
-    return filteredEntries().find((e) => e.id === expandedId) ?? null;
+    return filteredEntries.find((e) => e.id === expandedId) ?? null;
   });
 </script>
 
@@ -243,7 +243,7 @@
 
     <DataTable
       columns={buildColumns(scoreCell)}
-      rows={filteredEntries()}
+      rows={filteredEntries}
       defaultSortKey="score"
       defaultSortDir="desc"
       pageSize={20}
@@ -252,8 +252,8 @@
       expandedRowId={expandedId}
     />
 
-    {#if expandedEntry()}
-      {@const entry = expandedEntry()!}
+    {#if expandedEntry}
+      {@const entry = expandedEntry}
       <div class="detail-panel" aria-label="Entry detail">
         <div class="detail-header">
           <span class="detail-source">{entry.source || "Unknown source"}</span>
