@@ -1,0 +1,35 @@
+Type: test
+Command: cd dashboard && npx vitest run src/components/RecentCorrections.test.ts
+Expected: All tests pass (17 tests)
+Timestamp: 2026-04-09T17:17:01Z
+
+Output:
+ RUN  v3.2.4 /home/norrie.guest/code/distillery/.worktrees/feature-dashboard-home/dashboard
+
+ ✓ src/components/RecentCorrections.test.ts (17 tests) 149ms
+
+ Test Files  1 passed (1)
+      Tests  17 passed (17)
+   Start at  17:17:01
+   Duration  1.22s
+
+Test breakdown:
+  ✓ loading state > shows loading skeleton while fetching
+  ✓ empty state > shows helpful message when no session entries exist
+  ✓ empty state > shows helpful message when entries have no corrects relations
+  ✓ correction display > displays correction cards for entries with corrects relations
+  ✓ correction display > renders section heading
+  ✓ correction display > skips entries that have no corrects relations
+  ✓ error state > shows error message when list tool returns error
+  ✓ error state > shows error message when list tool throws
+  ✓ error state > continues loading other entries if one relations lookup fails
+  ✓ project scoping > passes project filter to list tool call
+  ✓ project scoping > omits project filter when no project selected
+  ✓ date filtering > passes date_from 7 days ago to list call
+  ✓ CorrectionCard expand/collapse > correction card is collapsed by default
+  ✓ CorrectionCard expand/collapse > correction card expands when clicked
+  ✓ CorrectionCard expand/collapse > correction card shows original and corrected content side by side
+  ✓ CorrectionCard expand/collapse > correction card collapses when clicked again
+  ✓ plain text response parsing > handles plain text list response with pipe-separated format
+
+Status: PASS
