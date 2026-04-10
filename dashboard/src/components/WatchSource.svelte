@@ -3,9 +3,11 @@
 
   interface Props {
     bridge: McpBridge | null;
+    /** Called after a source is successfully added. */
+    onSourceAdded?: () => void;
   }
 
-  let { bridge }: Props = $props();
+  let { bridge, onSourceAdded }: Props = $props();
 
   type SourceType = "rss" | "github";
 
@@ -75,6 +77,7 @@
       } else {
         successMessage = `Source added: ${url.trim()}`;
         resetForm();
+        onSourceAdded?.();
       }
     } catch (err) {
       const raw = err instanceof Error ? err.message : String(err);
