@@ -1,16 +1,85 @@
 <script lang="ts">
-  import { currentUser, triggerRefresh, isLoading } from "$lib/stores";
+  import { currentUser, triggerRefresh, isLoading, activeTab, userRole, inboxBadgeCount, reviewBadgeCount } from "$lib/stores";
+  import type { DashboardTab, UserRole } from "$lib/stores";
 
   interface Props {
     title?: string;
   }
 
   let { title = "Distillery Dashboard" }: Props = $props();
+
+  interface TabDef {
+    id: DashboardTab;
+    label: string;
+    /** Minimum role required. null = any authenticated user. */
+    minRole: UserRole | null;
+  }
+
+  const tabs: TabDef[] = [
+    { id: "home", label: "Home", minRole: null },
+    { id: "explore", label: "Explore", minRole: null },
+    { id: "capture", label: "Capture", minRole: null },
+    { id: "manage", label: "Manage", minRole: "curator" },
+  ];
+
+  /** Role hierarchy for access checks. */
+  const roleRank: Record<UserRole, number> = {
+    developer: 0,
+    curator: 1,
+    admin: 2,
+  };
+
+  function canAccessTab(tab: TabDef): boolean {
+    if (!tab.minRole) return true;
+    const role = $userRole;
+    if (!role) return false;
+    return roleRank[role] >= roleRank[tab.minRole];
+  }
+
+  function manageBadgeCount(): number | null {
+    const inbox = $inboxBadgeCount;
+    const review = $reviewBadgeCount;
+    if (inbox === null && review === null) return null;
+    return (inbox ?? 0) + (review ?? 0);
+  }
+
+  function getBadge(tabId: DashboardTab): number | null {
+    if (tabId === "manage") return manageBadgeCount();
+    return null;
+  }
+
+  function selectTab(tab: TabDef): void {
+    if (canAccessTab(tab)) {
+      activeTab.set(tab.id);
+    }
+  }
 </script>
 
 <nav class="navbar">
   <div class="navbar-left">
     <span class="navbar-title">{title}</span>
+    <div class="tab-list" role="tablist" aria-label="Dashboard sections">
+      {#each tabs as tab (tab.id)}
+        {@const accessible = canAccessTab(tab)}
+        {@const badge = getBadge(tab.id)}
+        <button
+          role="tab"
+          class="tab-button"
+          class:tab-button--active={$activeTab === tab.id}
+          class:tab-button--disabled={!accessible}
+          aria-selected={$activeTab === tab.id}
+          aria-disabled={!accessible}
+          disabled={!accessible}
+          onclick={() => selectTab(tab)}
+          data-tab={tab.id}
+        >
+          {tab.label}
+          {#if badge !== null && badge > 0}
+            <span class="tab-badge" aria-label="{badge} items">{badge}</span>
+          {/if}
+        </button>
+      {/each}
+    </div>
   </div>
   <div class="navbar-right">
     {#if $currentUser}
@@ -63,6 +132,58 @@
     font-size: 1.1rem;
     font-weight: 600;
     letter-spacing: -0.01em;
+  }
+
+  .tab-list {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+
+  .tab-button {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.35rem 0.65rem;
+    font-size: 0.85rem;
+    font-weight: 500;
+    background: transparent;
+    color: var(--nav-fg-muted, #a6adc8);
+    border: 1px solid transparent;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+
+  .tab-button:hover:not(:disabled) {
+    background: var(--btn-bg, #313244);
+    color: var(--nav-fg, #cdd6f4);
+  }
+
+  .tab-button--active {
+    background: var(--btn-bg, #313244);
+    color: var(--nav-fg, #cdd6f4);
+    border-color: var(--border, #45475a);
+  }
+
+  .tab-button--disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .tab-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.1rem;
+    height: 1.1rem;
+    padding: 0 0.3rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    background: var(--accent, #cba6f7);
+    color: var(--bg, #1e1e2e);
+    border-radius: 999px;
+    line-height: 1;
   }
 
   .navbar-right {
