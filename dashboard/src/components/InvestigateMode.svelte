@@ -132,6 +132,7 @@
   /** Request counters to detect stale in-flight phase searches. */
   let activePhase1Request = 0;
   let activePhase4Request = 0;
+  let activePivotRequest = 0;
 
   /** Highest phase that has been completed (0 = none). */
   let completedPhase = $state(0);
@@ -324,6 +325,9 @@
   // ---------------------------------------------------------------------------
 
   function handlePivot(result: InvestigateResult) {
+    // Invalidate any in-flight async graph pivot hydration — a synchronous
+    // pivot on a Phase 1 result takes precedence and must not be overwritten.
+    activePivotRequest++;
     seenEntryIds = new Set([...seenEntryIds, result.id]);
     investigationPath = [
       ...investigationPath,
@@ -347,6 +351,9 @@
 
   function handleBreadcrumbClick(index: number) {
     if (index >= investigationPath.length - 1) return; // already here
+    // Invalidate any in-flight async pivot hydration — the breadcrumb jump
+    // defines the new "current" state and must not be overwritten.
+    activePivotRequest++;
     investigationPath = investigationPath.slice(0, index + 1);
     currentPhase = 1;
     completedPhase = 0;
@@ -361,6 +368,7 @@
   // ---------------------------------------------------------------------------
 
   function handlePhaseClick(phaseNumber: number) {
+    const previousPhase = currentPhase;
     if (
       phaseNumber <= completedPhase ||
       phaseNumber === currentPhase ||
@@ -368,6 +376,12 @@
       phaseNumber === currentPhase + 1
     ) {
       currentPhase = phaseNumber;
+      // If the user manually navigates to Phase 4, kick off the gap-fill
+      // search (Phase 3's onResults handler normally does this, but a direct
+      // click would otherwise land on an empty state).
+      if (phaseNumber === 4 && previousPhase !== 4) {
+        void runPhase4GapFill();
+      }
     }
   }
 
@@ -508,10 +522,14 @@
               handlePivot(found);
             } else {
               // Navigate to an entry not in phase1 results: hydrate via distillery_get
+              const pivotRequestId = ++activePivotRequest;
               void (async () => {
                 if (!bridge?.isConnected) return;
                 try {
                   const result = await bridge.callTool("distillery_get", { entry_id: id });
+                  // Drop stale responses: if the user pivoted again or the
+                  // breadcrumb changed, ignore this fetch.
+                  if (pivotRequestId !== activePivotRequest) return;
                   if (result.isError) return;
                   const raw: unknown = JSON.parse(result.text);
                   const obj = (Array.isArray(raw) ? raw[0] : raw) as Record<string, unknown> | undefined;
