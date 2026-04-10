@@ -1,0 +1,9 @@
+Type: cli
+Command: ruff check src/distillery/mcp/resources.py
+Expected: pass
+Timestamp: 2026-04-09T00:00:00Z
+
+--- OUTPUT ---
+All checks passed!
+
+Status: PASS

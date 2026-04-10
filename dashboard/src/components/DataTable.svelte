@@ -1,4 +1,5 @@
 <script lang="ts" generics="T extends Record<string, unknown>">
+  import type { Snippet } from "svelte";
   import Pagination from "./Pagination.svelte";
 
   /** Column definition for a DataTable. */
@@ -11,6 +12,8 @@
     sortable?: boolean;
     /** Optional custom cell renderer. Returns an HTML string or plain text. */
     renderText?: (row: R) => string;
+    /** Optional snippet-based cell renderer. Receives the row object. */
+    renderSnippet?: Snippet<[R]>;
   }
 
   interface Props {
@@ -48,6 +51,11 @@
   let sortKey = $state<string | null>(defaultSortKey ?? null);
   let sortDir = $state<"asc" | "desc">(defaultSortDir);
   let currentPage = $state(1);
+
+  $effect(() => {
+    rows;
+    currentPage = 1;
+  });
 
   function toggleSort(key: string) {
     if (sortKey === key) {
