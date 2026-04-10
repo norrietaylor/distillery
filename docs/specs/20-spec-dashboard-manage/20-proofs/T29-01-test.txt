@@ -1,0 +1,16 @@
+Type: test
+Command: cd dashboard && npx vitest run ReviewQueue.test.ts
+Expected: pass
+Timestamp: 2026-04-10T08:58:31Z
+
+Output:
+ RUN  v3.2.4 /home/norrie.guest/code/distillery/.worktrees/feature-dashboard-manage/dashboard
+
+ ✓ src/components/ReviewQueue.test.ts (40 tests) 222ms
+
+ Test Files  1 passed (1)
+      Tests  40 passed (40)
+   Start at  08:58:31
+   Duration  992ms (transform 300ms, setup 0ms, collect 458ms, tests 222ms, environment 163ms, prepare 34ms)
+
+Status: PASS

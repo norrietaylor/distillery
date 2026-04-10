@@ -3,11 +3,17 @@
   import NavBar from "./components/NavBar.svelte";
   import ProjectSelector from "./components/ProjectSelector.svelte";
   import LoadingSkeleton from "./components/LoadingSkeleton.svelte";
+  import ManageTab from "./components/ManageTab.svelte";
   import { McpBridge } from "$lib/mcp-bridge";
   import {
     currentUser,
+    userRole,
+    activeTab,
     refreshIntervalMs,
+    selectedProject,
     triggerRefresh,
+    inboxBadgeCount,
+    reviewBadgeCount,
   } from "$lib/stores";
   import BriefingStats from "./components/BriefingStats.svelte";
   import ExpiringSoon from "./components/ExpiringSoon.svelte";
@@ -42,6 +48,7 @@
       const result = await bridge.callTool("distillery_status");
       if (!result.isError && result.text) {
         const loginMatch = result.text.match(/user[:\s]+([^\s,\n]+)/i);
+        const roleMatch = result.text.match(/^role[:\s]+([^\s,\n]+)/im);
         if (loginMatch) {
           const login = loginMatch[1] ?? "user";
           const identity: UserIdentity = {
@@ -49,14 +56,59 @@
             displayName: login,
           };
           currentUser.set(identity);
-          return;
         }
+        // Set user role from status response
+        if (roleMatch) {
+          const rawRole = roleMatch[1]?.toLowerCase() ?? "";
+          if (rawRole === "admin" || rawRole === "curator" || rawRole === "developer") {
+            userRole.set(rawRole);
+          } else {
+            // Default to least-privileged role on unknown/unparseable value
+            userRole.set("developer");
+          }
+        } else {
+          userRole.set("developer");
+        }
+        return;
       }
     } catch {
       // Identity resolution is best-effort — not fatal
     }
     // Fallback: set a placeholder identity so the nav bar renders
     currentUser.set({ login: "user", displayName: "Authenticated User" });
+    userRole.set("developer");
+  }
+
+  /** Fetch lightweight badge counts for the Manage tab. */
+  async function refreshBadgeCounts() {
+    try {
+      const project = $selectedProject;
+      const inboxArgs: Record<string, unknown> = { entry_type: "inbox", output: "stats" };
+      const reviewArgs: Record<string, unknown> = { status: "pending_review", output: "stats" };
+      if (project !== null) {
+        inboxArgs.project = project;
+        reviewArgs.project = project;
+      }
+      const [inboxRes, reviewRes] = await Promise.all([
+        bridge.callTool("distillery_list", inboxArgs),
+        bridge.callTool("distillery_list", reviewArgs),
+      ]);
+
+      const parseCount = (text: string): number => {
+        const labelMatch = text.match(/(?:count|total)[:\s]+(\d+)/i);
+        if (labelMatch) return parseInt(labelMatch[1]!, 10);
+        const bareMatch = text.match(/^\s*(\d+)\s*$/m);
+        if (bareMatch) return parseInt(bareMatch[1]!, 10);
+        const firstNum = text.match(/\d+/);
+        if (firstNum) return parseInt(firstNum[0]!, 10);
+        return 0;
+      };
+
+      inboxBadgeCount.set(inboxRes.isError ? 0 : parseCount(inboxRes.text));
+      reviewBadgeCount.set(reviewRes.isError ? 0 : parseCount(reviewRes.text));
+    } catch {
+      // Badge counts are non-critical — fail silently
+    }
   }
 
   function startAutoRefresh(intervalMs: number) {
@@ -64,6 +116,7 @@
     if (intervalMs > 0) {
       autoRefreshHandle = setInterval(() => {
         triggerRefresh();
+        refreshBadgeCounts();
       }, intervalMs);
     }
   }
@@ -91,6 +144,7 @@
       startAutoRefresh($refreshIntervalMs);
       // Trigger initial data load
       triggerRefresh();
+      refreshBadgeCounts();
     });
   });
 
@@ -116,13 +170,23 @@
         <strong>Connection error:</strong>
         {connectError}
       </div>
-    {:else}
+    {:else if $activeTab === "home"}
       <section id="home" class="home-section">
         <BriefingStats {bridge} />
         <RecentCorrections {bridge} />
         <ExpiringSoon {bridge} />
         <RadarFeed {bridge} />
       </section>
+    {:else if $activeTab === "explore"}
+      <section id="explore" class="placeholder-section">
+        <p class="placeholder-text">Explore tab — coming soon.</p>
+      </section>
+    {:else if $activeTab === "capture"}
+      <section id="capture" class="placeholder-section">
+        <p class="placeholder-text">Capture tab — coming soon.</p>
+      </section>
+    {:else if $activeTab === "manage"}
+      <ManageTab {bridge} />
     {/if}
   </main>
 </div>
@@ -168,6 +232,13 @@
     display: flex;
     flex-direction: column;
     gap: 1.5rem;
+  }
+
+  .placeholder-section {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 3rem 1rem;
   }
 
   .placeholder-text {

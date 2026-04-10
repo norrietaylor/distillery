@@ -78,7 +78,7 @@ describe("BriefingStats", () => {
 
       await waitFor(() => {
         const totalCalls = mockCallTool.mock.calls.filter(
-          ([name]: [string]) => name === "distillery_list",
+          (call: unknown[]) => call[0] === "distillery_list",
         );
         // Should have 5 calls for the 5 metrics
         expect(totalCalls.length).toBeGreaterThanOrEqual(1);

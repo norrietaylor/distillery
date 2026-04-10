@@ -1,0 +1,17 @@
+Type: test
+Command: cd dashboard && npx vitest run ReviewQueue.test.ts InboxTriage.test.ts
+Expected: all tests pass
+Timestamp: 2026-04-10T13:26:56Z
+
+--- Output ---
+ RUN  v3.2.4 /home/norrie.guest/code/distillery/.worktrees/feature-dashboard-manage/dashboard
+
+ ✓ src/components/InboxTriage.test.ts (22 tests) 224ms
+ ✓ src/components/ReviewQueue.test.ts (40 tests) 279ms
+
+ Test Files  2 passed (2)
+      Tests  62 passed (62)
+   Start at  13:26:56
+   Duration  1.15s (transform 500ms, setup 0ms, collect 1.06s, tests 502ms, environment 388ms, prepare 80ms)
+
+Status: PASS

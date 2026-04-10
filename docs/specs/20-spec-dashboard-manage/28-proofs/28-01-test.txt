@@ -1,0 +1,16 @@
+Type: test
+Command: cd dashboard && npx vitest run ManageTab.test.ts
+Expected: pass
+Timestamp: 2026-04-10T08:54:51Z
+
+--- Output ---
+ RUN  v3.2.4 /home/norrie.guest/code/distillery/.worktrees/feature-dashboard-manage/dashboard
+
+ ✓ src/components/ManageTab.test.ts (17 tests) 113ms
+
+ Test Files  1 passed (1)
+      Tests  17 passed (17)
+   Start at  08:54:51
+   Duration  982ms (transform 377ms, setup 0ms, collect 564ms, tests 113ms, environment 164ms, prepare 32ms)
+
+Status: PASS

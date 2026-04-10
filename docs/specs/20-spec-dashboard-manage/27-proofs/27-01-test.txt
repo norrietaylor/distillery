@@ -1,0 +1,25 @@
+Type: test
+Command: cd dashboard && npx vitest run
+Expected: pass
+Timestamp: 2026-04-10T08:58:36Z
+
+--- Output ---
+ RUN  v3.2.4 /home/norrie.guest/code/distillery/.worktrees/feature-dashboard-manage/dashboard
+
+ ✓ src/components/HealthOverview.test.ts (31 tests) 254ms
+ ✓ src/components/InboxTriage.test.ts (22 tests) 277ms
+ ✓ src/components/RadarFeed.test.ts (26 tests) 370ms
+ ✓ src/components/SourceHealth.test.ts (33 tests) 234ms
+ ✓ src/components/ManageTab.test.ts (17 tests) 184ms
+ ✓ src/components/ReviewQueue.test.ts (40 tests) 329ms
+ ✓ src/components/RecentCorrections.test.ts (17 tests) 164ms
+ ✓ src/components/ExpiringSoon.test.ts (16 tests) 157ms
+ ✓ src/components/BriefingStats.test.ts (27 tests) 141ms
+ ✓ src/lib/mcp-bridge.test.ts (31 tests) 8ms
+
+ Test Files  10 passed (10)
+      Tests  260 passed (260)
+   Start at  08:58:36
+   Duration  3.22s (transform 942ms, setup 0ms, collect 3.09s, tests 2.12s, environment 2.25s, prepare 402ms)
+
+Status: PASS
