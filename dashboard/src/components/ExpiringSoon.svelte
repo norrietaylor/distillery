@@ -85,9 +85,11 @@
     return [];
   }
 
-  /** Derive a display title from entry metadata, bookmark, or content preview. */
+  /** Derive a display title from entry fields, metadata, bookmark, or content preview. */
   function deriveTitle(e: { id: string; title?: string; content?: string; body?: string; metadata?: { title?: string }; bookmark?: { title?: string } }): string {
-    // Try metadata title first
+    // Try top-level title first
+    if (e.title) return e.title;
+    // Try metadata title
     if (e.metadata?.title) return e.metadata.title;
     // Try bookmark title
     if (e.bookmark?.title) return e.bookmark.title;
