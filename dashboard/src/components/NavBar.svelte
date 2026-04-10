@@ -1,16 +1,38 @@
 <script lang="ts">
-  import { currentUser, triggerRefresh, isLoading } from "$lib/stores";
+  import { currentUser, triggerRefresh, isLoading, activeTab, type TabType } from "$lib/stores";
 
   interface Props {
     title?: string;
   }
 
   let { title = "Distillery Dashboard" }: Props = $props();
+
+  const tabs: Array<{ id: TabType; label: string }> = [
+    { id: "home", label: "Home" },
+    { id: "explore", label: "Explore" },
+  ];
+
+  function selectTab(tab: TabType) {
+    activeTab.set(tab);
+  }
 </script>
 
 <nav class="navbar">
   <div class="navbar-left">
     <span class="navbar-title">{title}</span>
+    <div class="navbar-tabs">
+      {#each tabs as tab (tab.id)}
+        <button
+          class="tab-button"
+          class:active={$activeTab === tab.id}
+          onclick={() => selectTab(tab.id)}
+          aria-label={`Switch to ${tab.label} tab`}
+          aria-current={$activeTab === tab.id ? "page" : undefined}
+        >
+          {tab.label}
+        </button>
+      {/each}
+    </div>
   </div>
   <div class="navbar-right">
     {#if $currentUser}
@@ -56,13 +78,41 @@
   .navbar-left {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    gap: 1.5rem;
   }
 
   .navbar-title {
     font-size: 1.1rem;
     font-weight: 600;
     letter-spacing: -0.01em;
+    white-space: nowrap;
+  }
+
+  .navbar-tabs {
+    display: flex;
+    align-items: center;
+    gap: 0;
+  }
+
+  .tab-button {
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    background: transparent;
+    color: var(--nav-fg-muted, #a6adc8);
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+  }
+
+  .tab-button:hover {
+    color: var(--nav-fg, #cdd6f4);
+  }
+
+  .tab-button.active {
+    color: var(--nav-fg, #cdd6f4);
+    border-bottom-color: var(--accent, #89b4fa);
   }
 
   .navbar-right {
