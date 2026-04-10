@@ -397,7 +397,9 @@ class TestMCPStoreConflictDetection:
         assert "entry_id" in conflict
         assert "content_preview" in conflict
         assert "similarity_score" in conflict
-        assert "conflict_reasoning" in conflict
+        assert "conflict_prompt" in conflict
+        # conflict_reasoning must NOT be present (it leaked the system prompt — #200)
+        assert "conflict_reasoning" not in conflict
 
     async def test_store_no_conflicts_when_no_similar(
         self,
