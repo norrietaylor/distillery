@@ -182,6 +182,9 @@ class HeuristicClassifier:
                 # Inbox entries are unclassified -- skip.
                 continue
 
+            # Cap at 1000 most recent entries per type. For typical KBs (<10k
+            # entries) this covers all entries; for larger corpora the centroid
+            # is biased toward recent content, which is acceptable for v1.
             result = await store.list_entries(
                 filters={"entry_type": entry_type.value, "status": "active"},
                 limit=1000,

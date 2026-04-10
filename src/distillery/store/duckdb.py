@@ -1319,6 +1319,7 @@ class DuckDBStore:
                 group_by=group_by,
                 filters=filters,
                 limit=limit,
+                stale_days=stale_days,
             )
 
         # ----- stats mode -----
@@ -1454,6 +1455,8 @@ class DuckDBStore:
         group_by: str,
         filters: dict[str, Any] | None,
         limit: int,
+        *,
+        stale_days: int | None = None,
     ) -> dict[str, Any]:
         """Return entry counts grouped by *group_by*, sorted by count descending.
 
@@ -1465,6 +1468,8 @@ class DuckDBStore:
                 the logical name (validated by the MCP layer against an allowlist).
             filters: Optional metadata constraints (see ``_build_filter_clauses``).
             limit: Maximum number of groups to return.
+            stale_days: When set, restricts to entries whose last access
+                (``COALESCE(accessed_at, updated_at)``) is older than N days.
 
         Returns:
             Dict with ``"groups"`` (limited list of ``{"value": ..., "count": ...}``
@@ -1476,6 +1481,12 @@ class DuckDBStore:
         def _sync() -> dict[str, Any]:
             conn = self.connection
             where_clauses, params = self._build_filter_clauses(filters)
+            if stale_days is not None:
+                where_clauses.append(
+                    "COALESCE(accessed_at, updated_at)"
+                    " < NOW() - INTERVAL (CAST(? AS INT)) DAYS"
+                )
+                params.append(stale_days)
             where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
             # Single CTE query: window functions compute true totals over the
