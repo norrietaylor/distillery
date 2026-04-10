@@ -101,12 +101,14 @@ describe("InvestigateMode", () => {
       expect(phase1Btn.getAttribute("aria-current")).toBe("step");
     });
 
-    it("disables phases 2-4 when not completed", () => {
+    it("allows advancing to the next phase but disables later phases", () => {
       render(InvestigateMode, { props: { ...defaultProps, bridge: null } });
       const phase2 = screen.getByRole("button", { name: "Phase 2: Relation Graph" }) as HTMLButtonElement;
       const phase3 = screen.getByRole("button", { name: "Phase 3: Tag Neighborhood" }) as HTMLButtonElement;
       const phase4 = screen.getByRole("button", { name: "Phase 4: Gap Analysis" }) as HTMLButtonElement;
-      expect(phase2.disabled).toBe(true);
+      // Phase 2 is currentPhase + 1, so it should be clickable (look-ahead).
+      expect(phase2.disabled).toBe(false);
+      // Phase 3 and Phase 4 remain out of reach until Phase 2 is activated.
       expect(phase3.disabled).toBe(true);
       expect(phase4.disabled).toBe(true);
     });
