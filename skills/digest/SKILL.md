@@ -80,7 +80,6 @@ Stop here if no entries exist.
 distillery_list(
     group_by="author",
     date_from=<date_from>,
-    output_mode="stats",
     # project=<name>  # only if --project specified
 )
 ```
@@ -91,7 +90,6 @@ distillery_list(
 distillery_list(
     group_by="entry_type",
     date_from=<date_from>,
-    output_mode="stats",
     # project=<name>  # only if --project specified
 )
 ```

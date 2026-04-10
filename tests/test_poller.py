@@ -76,6 +76,7 @@ def _make_store(
     store.find_similar.return_value = find_similar_results or []
     store.list_entries.return_value = []  # default: no external_id matches
     store.store.return_value = "new-entry-id"
+    store.get_tag_vocabulary.return_value = {}  # default: empty vocabulary
     _sources = feed_sources or []
 
     async def _list_feed_sources() -> list[dict[str, object]]:

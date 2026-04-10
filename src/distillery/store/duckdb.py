@@ -24,7 +24,7 @@ import re
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, overload
 
 import duckdb
 
@@ -1259,6 +1259,30 @@ class DuckDBStore:
             return results
 
         return await asyncio.to_thread(_sync)
+
+    @overload
+    async def list_entries(
+        self,
+        filters: dict[str, Any] | None,
+        limit: int,
+        offset: int,
+        *,
+        stale_days: int | None = ...,
+        group_by: None = ...,
+        output: None = ...,
+    ) -> list[Entry]: ...
+
+    @overload
+    async def list_entries(
+        self,
+        filters: dict[str, Any] | None,
+        limit: int,
+        offset: int,
+        *,
+        stale_days: int | None = ...,
+        group_by: str | None = ...,
+        output: str | None = ...,
+    ) -> list[Entry] | dict[str, Any]: ...
 
     async def list_entries(
         self,

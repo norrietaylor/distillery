@@ -46,7 +46,7 @@ Use tag-driven semantic search to surface the most relevant feed entries, not ju
 
 **3a. Get interest profile from curated entries:**
 
-Call `distillery_list(group_by="tags", output_mode="stats")` to get the top tags across curated (non-feed) entries. Filter out feed-type tags and take the top 5 by count. Convert tag paths to natural language by taking the leaf segment and replacing hyphens with spaces (e.g., `domain/authentication` → query `"authentication"`).
+Call `distillery_list(group_by="tags")` to get the top tags across curated (non-feed) entries. Filter out feed-type tags and take the top 5 by count. Convert tag paths to natural language by taking the leaf segment and replacing hyphens with spaces (e.g., `domain/authentication` → query `"authentication"`).
 
 **3b. Search by interests (primary path):**
 
