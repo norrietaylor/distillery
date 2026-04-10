@@ -18,6 +18,7 @@
 
   import type { McpBridge } from "$lib/mcp-bridge";
   import { selectedProject, refreshTick, currentUser } from "$lib/stores";
+  import { ENTRY_TYPES } from "$lib/entry-types";
   import LoadingSkeleton from "./LoadingSkeleton.svelte";
 
   interface Props {
@@ -39,16 +40,6 @@
     [key: string]: unknown;
   }
 
-  /** All entry types available for reclassification. */
-  const ENTRY_TYPES = [
-    "note",
-    "session",
-    "reference",
-    "snippet",
-    "bookmark",
-    "feed",
-    "task",
-  ] as const;
 
   let entries = $state<ReviewEntry[]>([]);
   let loading = $state(false);

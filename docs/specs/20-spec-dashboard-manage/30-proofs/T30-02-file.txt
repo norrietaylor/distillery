@@ -1,0 +1,43 @@
+Type: file
+Check: dashboard/src/lib/entry-types.ts exists with correct entry types aligned to EntryType enum in models.py
+Expected: file contains exactly: session, bookmark, minutes, meeting, reference, idea, person, project, digest, github, feed (excludes inbox)
+Timestamp: 2026-04-10T13:27:00Z
+
+--- File contents: dashboard/src/lib/entry-types.ts ---
+export const ENTRY_TYPES = [
+  "session",
+  "bookmark",
+  "minutes",
+  "meeting",
+  "reference",
+  "idea",
+  "person",
+  "project",
+  "digest",
+  "github",
+  "feed",
+] as const;
+
+export type EntryType = (typeof ENTRY_TYPES)[number];
+
+--- Import in ReviewQueue.svelte ---
+import { ENTRY_TYPES } from "$lib/entry-types";
+(local ENTRY_TYPES const removed — was: ["note", "session", "reference", "snippet", "bookmark", "feed", "task"])
+
+--- Import in InboxTriage.svelte ---
+import { ENTRY_TYPES } from "$lib/entry-types";
+(local ENTRY_TYPES const removed — was: ["session", "insight", "bookmark", "decision", "correction", "feed", "reference", "procedure"])
+
+--- Verification: invalid types removed ---
+note: NOT present (was in ReviewQueue, not in data model)
+snippet: NOT present (was in ReviewQueue, not in data model)
+task: NOT present (was in ReviewQueue, not in data model)
+insight: NOT present (was in InboxTriage, not in data model)
+decision: NOT present (was in InboxTriage, not in data model)
+correction: NOT present (was in InboxTriage, not in data model)
+procedure: NOT present (was in InboxTriage, not in data model)
+
+--- Verification: valid types present ---
+All 11 types from EntryType enum (excluding inbox): session, bookmark, minutes, meeting, reference, idea, person, project, digest, github, feed
+
+Status: PASS

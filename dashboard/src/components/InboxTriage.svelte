@@ -9,6 +9,7 @@
 
   import { selectedProject, refreshTick, currentUser, activeTab } from "$lib/stores";
   import type { McpBridge } from "$lib/mcp-bridge";
+  import { ENTRY_TYPES } from "$lib/entry-types";
   import LoadingSkeleton from "./LoadingSkeleton.svelte";
 
   interface Props {
@@ -17,17 +18,6 @@
 
   let { bridge }: Props = $props();
 
-  /** Entry types available for classification (excludes "inbox"). */
-  const ENTRY_TYPES = [
-    "session",
-    "insight",
-    "bookmark",
-    "decision",
-    "correction",
-    "feed",
-    "reference",
-    "procedure",
-  ] as const;
 
   /** A single inbox entry as returned by the list tool. */
   interface InboxEntry {
