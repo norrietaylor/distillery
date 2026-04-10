@@ -166,6 +166,15 @@ class InterestExtractor:
                 if entry.entry_type == "feed":
                     continue
 
+                # Exclude github entries from tag accumulation.
+                # Bulk gh-sync imports flood the tag table with structural
+                # tags (source/github, gh/issue, gh/pr) that carry no topical
+                # signal and degrade the interest profile.  Repo references
+                # are still captured so tracked_repos remains useful.
+                if entry.entry_type == "github":
+                    self._extract_repos(entry.entry_type, entry.metadata, repo_counts)
+                    continue
+
                 # Apply hard age cutoff
                 created = entry.created_at
                 if created.tzinfo is None:

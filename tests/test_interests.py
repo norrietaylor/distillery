@@ -417,6 +417,117 @@ class TestInterestExtractorExtract:
         profile = await ext.extract()
         assert profile.entry_count == 1
 
+    async def test_github_entries_excluded_from_tag_profile(self) -> None:
+        """GitHub entries must not contribute structural tags to the interest profile.
+
+        Bulk gh-sync imports produce high-volume entries tagged source/github,
+        gh/issue, and gh/pr.  These carry no topical signal and would otherwise
+        dominate the interest profile, breaking semantic feed search.
+        """
+        entries = [
+            _make_entry(entry_type="session", tags=["domain/auth"]),
+            _make_entry(
+                entry_type="github",
+                tags=["source/github", "gh/issue"],
+                metadata={"repo": "owner/repo", "ref_type": "issue", "ref_number": 1},
+            ),
+            _make_entry(
+                entry_type="github",
+                tags=["source/github", "gh/pr"],
+                metadata={"repo": "owner/repo", "ref_type": "pr", "ref_number": 2},
+            ),
+            _make_entry(
+                entry_type="github",
+                tags=["source/github", "gh/issue"],
+                metadata={"repo": "owner/repo", "ref_type": "issue", "ref_number": 3},
+            ),
+        ]
+        store = _make_store(entries)
+        ext = InterestExtractor(store=store)
+        profile = await ext.extract()
+        tag_names = [t for t, _ in profile.top_tags]
+        # Topical session tag should appear
+        assert "domain/auth" in tag_names
+        # Structural github tags must NOT appear
+        assert "source/github" not in tag_names
+        assert "gh/issue" not in tag_names
+        assert "gh/pr" not in tag_names
+
+    async def test_github_entries_still_populate_tracked_repos(self) -> None:
+        """Even though github entry tags are excluded, repo metadata should be captured."""
+        entries = [
+            _make_entry(
+                entry_type="github",
+                tags=["source/github", "gh/pr"],
+                metadata={"repo": "tiangolo/fastapi", "ref_type": "pr", "ref_number": 1},
+            ),
+        ]
+        store = _make_store(entries)
+        ext = InterestExtractor(store=store)
+        profile = await ext.extract()
+        assert "tiangolo/fastapi" in profile.tracked_repos
+
+    async def test_github_entries_excluded_from_entry_count(self) -> None:
+        """entry_count should not include github entries (they are excluded from tags)."""
+        entries = [
+            _make_entry(entry_type="session", tags=["topic"]),
+            _make_entry(
+                entry_type="github",
+                tags=["source/github", "gh/issue"],
+                metadata={"repo": "owner/repo", "ref_type": "issue", "ref_number": 1},
+            ),
+            _make_entry(
+                entry_type="github",
+                tags=["source/github", "gh/pr"],
+                metadata={"repo": "owner/repo", "ref_type": "pr", "ref_number": 2},
+            ),
+        ]
+        store = _make_store(entries)
+        ext = InterestExtractor(store=store)
+        profile = await ext.extract()
+        assert profile.entry_count == 1
+
+    async def test_github_bulk_import_does_not_dominate_tags(self) -> None:
+        """Simulates the gh-sync bulk import scenario from the bug report.
+
+        131 github entries (76 issues + 55 PRs) should not push topical tags
+        out of the top_n results.
+        """
+        topical_entries = [
+            _make_entry(entry_type="session", tags=["python", "async", "fastapi"]),
+            _make_entry(entry_type="session", tags=["python", "testing"]),
+            _make_entry(entry_type="inbox", tags=["machine-learning", "python"]),
+        ]
+        # Simulate 76 issues
+        issue_entries = [
+            _make_entry(
+                entry_type="github",
+                tags=["source/github", "gh/issue"],
+                metadata={"repo": "owner/bigproject", "ref_type": "issue", "ref_number": i},
+            )
+            for i in range(76)
+        ]
+        # Simulate 55 PRs
+        pr_entries = [
+            _make_entry(
+                entry_type="github",
+                tags=["source/github", "gh/pr"],
+                metadata={"repo": "owner/bigproject", "ref_type": "pr", "ref_number": i},
+            )
+            for i in range(55)
+        ]
+        entries = topical_entries + issue_entries + pr_entries
+        store = _make_store(entries)
+        ext = InterestExtractor(store=store, top_n=5)
+        profile = await ext.extract()
+        tag_names = [t for t, _ in profile.top_tags]
+        # Topical tags should dominate
+        assert "python" in tag_names
+        # Structural github tags must not appear
+        assert "source/github" not in tag_names
+        assert "gh/issue" not in tag_names
+        assert "gh/pr" not in tag_names
+
 
 # ---------------------------------------------------------------------------
 # _handle_interests
