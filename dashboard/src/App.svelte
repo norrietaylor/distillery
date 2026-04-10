@@ -11,6 +11,10 @@
     triggerRefresh,
     refreshTick,
   } from "$lib/stores";
+  import BriefingStats from "./components/BriefingStats.svelte";
+  import ExpiringSoon from "./components/ExpiringSoon.svelte";
+  import RecentCorrections from "./components/RecentCorrections.svelte";
+  import RadarFeed from "./components/RadarFeed.svelte";
   import type { UserIdentity } from "$lib/stores";
 
   const bridge = new McpBridge({ appName: "Distillery Dashboard", appVersion: "0.1.0" });
@@ -125,9 +129,10 @@
       </div>
     {:else}
       <section id="home" class="home-section">
-        <p class="placeholder-text">
-          Dashboard home — knowledge base data will appear here.
-        </p>
+        <BriefingStats {bridge} />
+        <RecentCorrections {bridge} />
+        <ExpiringSoon {bridge} />
+        <RadarFeed {bridge} />
       </section>
     {/if}
   </main>
