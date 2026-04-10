@@ -47,13 +47,21 @@
     return null;
   }
 
-  function canAccess(): boolean {
+  function roleState(): "loading" | "denied" | "allowed" {
     const role = $userRole;
-    return role === "curator" || role === "admin";
+    if (role === null) return "loading";
+    if (role === "developer") return "denied";
+    return "allowed";
   }
 </script>
 
-{#if !canAccess()}
+{#if roleState() === "loading"}
+  <div class="loading-state" aria-busy="true" aria-label="Loading">
+    <div class="loading-skeleton loading-skeleton--wide"></div>
+    <div class="loading-skeleton loading-skeleton--medium"></div>
+    <div class="loading-skeleton loading-skeleton--narrow"></div>
+  </div>
+{:else if roleState() === "denied"}
   <div class="access-denied" role="alert" aria-live="polite">
     <div class="access-denied__icon" aria-hidden="true">&#x1F512;</div>
     <h2 class="access-denied__title">Access Restricted</h2>
@@ -221,6 +229,29 @@
 
   .sub-panel {
     padding: 1rem 0;
+  }
+
+  .loading-state {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 2rem;
+  }
+
+  .loading-skeleton {
+    height: 1rem;
+    border-radius: 4px;
+    background: var(--surface1, #313244);
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+
+  .loading-skeleton--wide { width: 100%; }
+  .loading-skeleton--medium { width: 66%; }
+  .loading-skeleton--narrow { width: 40%; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
   }
 
 </style>

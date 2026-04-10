@@ -31,11 +31,12 @@ describe("ManageTab", () => {
       expect(screen.getByText(/Access Restricted/i)).toBeTruthy();
     });
 
-    it("shows access denied when userRole is null", () => {
+    it("shows loading skeleton when userRole is null", () => {
       userRole.set(null);
       const bridge = makeMockBridge();
       render(ManageTab, { props: { bridge } });
-      expect(screen.getByRole("alert")).toBeTruthy();
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(screen.getByLabelText("Loading")).toBeTruthy();
     });
 
     it("shows manage tab content for curator role", () => {
