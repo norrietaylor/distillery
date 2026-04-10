@@ -10,6 +10,7 @@
     userRole,
     activeTab,
     refreshIntervalMs,
+    selectedProject,
     triggerRefresh,
     inboxBadgeCount,
     reviewBadgeCount,
@@ -81,9 +82,16 @@
   /** Fetch lightweight badge counts for the Manage tab. */
   async function refreshBadgeCounts() {
     try {
+      const project = $selectedProject;
+      const inboxArgs: Record<string, unknown> = { entry_type: "inbox", output: "stats" };
+      const reviewArgs: Record<string, unknown> = { status: "pending_review", output: "stats" };
+      if (project !== null) {
+        inboxArgs.project = project;
+        reviewArgs.project = project;
+      }
       const [inboxRes, reviewRes] = await Promise.all([
-        bridge.callTool("distillery_list", { entry_type: "inbox", output: "stats" }),
-        bridge.callTool("distillery_list", { status: "pending_review", output: "stats" }),
+        bridge.callTool("distillery_list", inboxArgs),
+        bridge.callTool("distillery_list", reviewArgs),
       ]);
 
       const parseCount = (text: string): number => {
@@ -108,6 +116,7 @@
     if (intervalMs > 0) {
       autoRefreshHandle = setInterval(() => {
         triggerRefresh();
+        refreshBadgeCounts();
       }, intervalMs);
     }
   }
