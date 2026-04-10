@@ -277,6 +277,7 @@ async def test_classify_batch_llm_mode_queues_as_pending_review(
     mock_store.list_entries = AsyncMock(return_value=[entry_a, entry_b])
     mock_store.get_metadata = AsyncMock(return_value=None)
     mock_store.set_metadata = AsyncMock()
+    mock_store.update = AsyncMock()
     shared["store"] = mock_store
 
     app = create_webhook_app(shared, _make_config())
@@ -291,6 +292,10 @@ async def test_classify_batch_llm_mode_queues_as_pending_review(
     assert data["pending_review"] == 2
     assert data["errors"] == 0
     assert data["by_type"] == {}
+    # LLM mode sets each entry to pending_review in the store.
+    assert mock_store.update.call_count == 2
+    for call_args in mock_store.update.call_args_list:
+        assert call_args[0][1] == {"status": "pending_review"}
 
 
 # ---------------------------------------------------------------------------

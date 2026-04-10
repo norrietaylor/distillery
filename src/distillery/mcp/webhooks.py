@@ -350,7 +350,10 @@ async def _handle_poll(request: Request, state: dict[str, Any]) -> JSONResponse:
                     if isinstance(val, str):
                         source_url = val
             except (json.JSONDecodeError, ValueError):
-                pass
+                return JSONResponse(
+                    {"ok": False, "error": "Invalid JSON in request body"},
+                    status_code=400,
+                )
     return await _run_poll(state, source_url=source_url)
 
 
@@ -639,12 +642,13 @@ async def _run_classify_batch(
             # LLM mode: use ClassificationEngine.
             # The ClassificationEngine formats prompts and parses LLM responses,
             # but does not itself call an LLM.  In a headless webhook context
-            # there is no LLM client, so we record each entry as pending_review
+            # there is no LLM client, so we set each entry to pending_review
             # to signal that it requires a /classify skill invocation.
             engine = ClassificationEngine(config.classification)
             for entry in entries:
                 try:
                     _ = engine.build_prompt(entry.content)  # validates content
+                    await store.update(entry.id, {"status": "pending_review"})
                     pending_review_count += 1
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(
