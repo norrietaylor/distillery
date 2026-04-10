@@ -11,9 +11,11 @@
     bridge?: McpBridge | null;
     /** Search query to execute against distillery_recall. */
     query?: string;
+    /** Optional callback when a row is clicked — receives the entry id. */
+    onRowClick?: (entryId: string) => void;
   }
 
-  let { bridge = null, query = "" }: Props = $props();
+  let { bridge = null, query = "", onRowClick }: Props = $props();
 
   /** A single search result as returned by the recall tool. */
   interface SearchResult {
@@ -176,6 +178,7 @@
 
   function handleRowClick(row: SearchResult) {
     expandedId = expandedId === row.id ? null : row.id;
+    onRowClick?.(row.id);
   }
 
   let expandedResult = $derived.by((): SearchResult | null => {

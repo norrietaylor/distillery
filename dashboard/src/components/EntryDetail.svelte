@@ -88,6 +88,21 @@
   let entry = $state<EntryData | null>(null);
   let relations = $state<Relation[]>([]);
 
+  // Action UI state
+  let editMode = $state(false);
+  let editContent = $state("");
+  let editSubmitting = $state(false);
+  let editError = $state<string | null>(null);
+
+  let correctMode = $state(false);
+  let correctionText = $state("");
+  let correctSubmitting = $state(false);
+  let correctError = $state<string | null>(null);
+
+  let archiveConfirm = $state(false);
+  let archiveSubmitting = $state(false);
+  let archiveError = $state<string | null>(null);
+
   /**
    * Breadcrumb trail for navigating between related entries.
    * Each item holds the id and a display title of a visited entry.
@@ -357,6 +372,117 @@
     internalNavTarget = crumb.id;
     onNavigate(crumb.id);
   }
+
+  // ---------------------------------------------------------------------------
+  // Action handlers
+  // ---------------------------------------------------------------------------
+
+  function startEdit(): void {
+    if (!entry) return;
+    editContent = entry.content;
+    editError = null;
+    editMode = true;
+    correctMode = false;
+    archiveConfirm = false;
+  }
+
+  function cancelEdit(): void {
+    editMode = false;
+    editError = null;
+  }
+
+  async function submitEdit(): Promise<void> {
+    if (!bridge || !entry) return;
+    editSubmitting = true;
+    editError = null;
+    try {
+      const result = await bridge.callTool("distillery_update", {
+        entry_id: entry.id,
+        content: editContent,
+      });
+      if (result.isError) {
+        editError = result.text || "Failed to save changes";
+        return;
+      }
+      // Update local state optimistically.
+      entry = { ...entry, content: editContent };
+      editMode = false;
+    } catch (err) {
+      editError = err instanceof Error ? err.message : "Failed to save changes";
+    } finally {
+      editSubmitting = false;
+    }
+  }
+
+  function startCorrect(): void {
+    correctionText = "";
+    correctError = null;
+    correctMode = true;
+    editMode = false;
+    archiveConfirm = false;
+  }
+
+  function cancelCorrect(): void {
+    correctMode = false;
+    correctError = null;
+  }
+
+  async function submitCorrect(): Promise<void> {
+    if (!bridge || !entry) return;
+    correctSubmitting = true;
+    correctError = null;
+    try {
+      const result = await bridge.callTool("distillery_correct", {
+        entry_id: entry.id,
+        correction: correctionText,
+      });
+      if (result.isError) {
+        correctError = result.text || "Failed to submit correction";
+        return;
+      }
+      correctMode = false;
+      correctionText = "";
+    } catch (err) {
+      correctError = err instanceof Error ? err.message : "Failed to submit correction";
+    } finally {
+      correctSubmitting = false;
+    }
+  }
+
+  function startArchive(): void {
+    archiveError = null;
+    archiveConfirm = true;
+    editMode = false;
+    correctMode = false;
+  }
+
+  function cancelArchive(): void {
+    archiveConfirm = false;
+    archiveError = null;
+  }
+
+  async function confirmArchive(): Promise<void> {
+    if (!bridge || !entry) return;
+    archiveSubmitting = true;
+    archiveError = null;
+    try {
+      const result = await bridge.callTool("distillery_update", {
+        entry_id: entry.id,
+        status: "archived",
+      });
+      if (result.isError) {
+        archiveError = result.text || "Failed to archive entry";
+        return;
+      }
+      // Update local state so status badge reflects archive.
+      entry = { ...entry, status: "archived" };
+      archiveConfirm = false;
+    } catch (err) {
+      archiveError = err instanceof Error ? err.message : "Failed to archive entry";
+    } finally {
+      archiveSubmitting = false;
+    }
+  }
 </script>
 
 <div class="entry-detail" aria-label="Entry detail panel">
@@ -398,16 +524,137 @@
           {badgeLabel(entry.status)}
         </span>
 
-        {#if onInvestigate}
+        <div class="action-group" aria-label="Entry actions">
+          {#if onInvestigate}
+            <button
+              class="action-btn"
+              onclick={() => onInvestigate?.(entry!.id)}
+              aria-label="Investigate entry"
+            >
+              Investigate
+            </button>
+          {/if}
           <button
             class="action-btn"
-            onclick={() => onInvestigate?.(entry!.id)}
-            aria-label="Investigate entry"
+            onclick={startEdit}
+            aria-label="Edit entry"
+            disabled={editMode}
           >
-            Investigate
+            Edit
           </button>
-        {/if}
+          <button
+            class="action-btn"
+            onclick={startCorrect}
+            aria-label="Correct entry"
+            disabled={correctMode}
+          >
+            Correct
+          </button>
+          <button
+            class="action-btn action-btn--danger"
+            onclick={startArchive}
+            aria-label="Archive entry"
+            disabled={archiveConfirm}
+          >
+            Archive
+          </button>
+        </div>
       </div>
+
+      <!-- Edit form -->
+      {#if editMode}
+        <div class="action-form" aria-label="Edit entry form">
+          <textarea
+            class="action-textarea"
+            bind:value={editContent}
+            aria-label="Edit content"
+            rows={6}
+          ></textarea>
+          {#if editError}
+            <p class="action-error" role="alert">{editError}</p>
+          {/if}
+          <div class="action-form-btns">
+            <button
+              class="action-btn action-btn--primary"
+              onclick={submitEdit}
+              disabled={editSubmitting}
+              aria-label="Save edit"
+            >
+              {editSubmitting ? "Saving…" : "Save"}
+            </button>
+            <button
+              class="action-btn"
+              onclick={cancelEdit}
+              disabled={editSubmitting}
+              aria-label="Cancel edit"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      {/if}
+
+      <!-- Correction form -->
+      {#if correctMode}
+        <div class="action-form" aria-label="Correct entry form">
+          <textarea
+            class="action-textarea"
+            bind:value={correctionText}
+            placeholder="Describe the correction…"
+            aria-label="Correction text"
+            rows={4}
+          ></textarea>
+          {#if correctError}
+            <p class="action-error" role="alert">{correctError}</p>
+          {/if}
+          <div class="action-form-btns">
+            <button
+              class="action-btn action-btn--primary"
+              onclick={submitCorrect}
+              disabled={correctSubmitting || !correctionText.trim()}
+              aria-label="Submit correction"
+            >
+              {correctSubmitting ? "Submitting…" : "Submit"}
+            </button>
+            <button
+              class="action-btn"
+              onclick={cancelCorrect}
+              disabled={correctSubmitting}
+              aria-label="Cancel correction"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      {/if}
+
+      <!-- Archive confirmation dialog -->
+      {#if archiveConfirm}
+        <div class="action-form action-form--warning" aria-label="Archive confirmation">
+          <p class="action-confirm-msg">Archive this entry? This marks it as archived.</p>
+          {#if archiveError}
+            <p class="action-error" role="alert">{archiveError}</p>
+          {/if}
+          <div class="action-form-btns">
+            <button
+              class="action-btn action-btn--danger"
+              onclick={confirmArchive}
+              disabled={archiveSubmitting}
+              aria-label="Confirm archive"
+            >
+              {archiveSubmitting ? "Archiving…" : "Confirm"}
+            </button>
+            <button
+              class="action-btn"
+              onclick={cancelArchive}
+              disabled={archiveSubmitting}
+              aria-label="Cancel archive"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      {/if}
 
       <!-- Metadata grid -->
       <dl class="meta-grid">
@@ -588,9 +835,16 @@
     border: 1px solid color-mix(in srgb, var(--fg-muted, #a6adc8) 30%, transparent);
   }
 
+  /* Action button group */
+  .action-group {
+    display: flex;
+    gap: 0.35rem;
+    margin-left: auto;
+    flex-wrap: wrap;
+  }
+
   /* Action buttons */
   .action-btn {
-    margin-left: auto;
     padding: 0.25rem 0.65rem;
     font-size: 0.75rem;
     font-weight: 500;
@@ -602,8 +856,79 @@
     transition: background 0.15s;
   }
 
-  .action-btn:hover {
+  .action-btn:hover:not(:disabled) {
     background: color-mix(in srgb, var(--accent, #89b4fa) 30%, transparent);
+  }
+
+  .action-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .action-btn--primary {
+    background: color-mix(in srgb, var(--accent, #89b4fa) 25%, transparent);
+  }
+
+  .action-btn--danger {
+    color: var(--error, #f38ba8);
+    border-color: color-mix(in srgb, var(--error, #f38ba8) 40%, transparent);
+    background: color-mix(in srgb, var(--error, #f38ba8) 10%, transparent);
+  }
+
+  .action-btn--danger:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--error, #f38ba8) 20%, transparent);
+  }
+
+  /* Action forms (edit / correct / archive confirmation) */
+  .action-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.75rem;
+    background: color-mix(in srgb, var(--surface1, #313244) 40%, transparent);
+    border: 1px solid var(--border, #45475a);
+    border-radius: 6px;
+  }
+
+  .action-form--warning {
+    border-color: color-mix(in srgb, var(--error, #f38ba8) 40%, transparent);
+    background: color-mix(in srgb, var(--error, #f38ba8) 5%, transparent);
+  }
+
+  .action-textarea {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.5rem 0.65rem;
+    font-family: ui-monospace, monospace;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    background: var(--input-bg, #1e1e2e);
+    color: var(--fg, #cdd6f4);
+    border: 1px solid var(--border, #45475a);
+    border-radius: 4px;
+    resize: vertical;
+  }
+
+  .action-textarea:focus {
+    outline: 2px solid var(--accent, #89b4fa);
+    outline-offset: 1px;
+  }
+
+  .action-form-btns {
+    display: flex;
+    gap: 0.35rem;
+  }
+
+  .action-error {
+    font-size: 0.8rem;
+    color: var(--error, #f38ba8);
+    margin: 0;
+  }
+
+  .action-confirm-msg {
+    font-size: 0.85rem;
+    color: var(--fg, #cdd6f4);
+    margin: 0;
   }
 
   /* Metadata definition list */

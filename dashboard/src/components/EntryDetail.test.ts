@@ -502,6 +502,285 @@ describe("EntryDetail", () => {
     });
   });
 
+  describe("edit action", () => {
+    it("shows Edit button when entry is loaded", async () => {
+      const bridge = makeMockBridge({});
+      render(EntryDetail, { props: { bridge, entryId: "entry-abc-123" } });
+
+      await waitFor(() => {
+        expect(screen.getByLabelText("Edit entry")).toBeTruthy();
+      });
+    });
+
+    it("shows edit form when Edit button is clicked", async () => {
+      const bridge = makeMockBridge({});
+      render(EntryDetail, { props: { bridge, entryId: "entry-abc-123" } });
+
+      await waitFor(() => screen.getByLabelText("Edit entry"));
+      fireEvent.click(screen.getByLabelText("Edit entry"));
+
+      await waitFor(() => {
+        expect(screen.getByLabelText("Edit entry form")).toBeTruthy();
+        expect(screen.getByLabelText("Edit content")).toBeTruthy();
+      });
+    });
+
+    it("pre-populates edit textarea with current content", async () => {
+      const bridge = makeMockBridge({
+        entryText: makeEntry({ content: "Original content here." }),
+      });
+      render(EntryDetail, { props: { bridge, entryId: "entry-abc-123" } });
+
+      await waitFor(() => screen.getByLabelText("Edit entry"));
+      fireEvent.click(screen.getByLabelText("Edit entry"));
+
+      await waitFor(() => {
+        const textarea = screen.getByLabelText("Edit content") as HTMLTextAreaElement;
+        expect(textarea.value).toBe("Original content here.");
+      });
+    });
+
+    it("calls distillery_update with entry_id and content on save", async () => {
+      const callTool = vi.fn().mockImplementation((name: string) => {
+        if (name === "distillery_get") return Promise.resolve(makeResult(makeEntry()));
+        if (name === "distillery_relations") return Promise.resolve(makeResult("[]"));
+        if (name === "distillery_update") return Promise.resolve(makeResult("{}"));
+        return Promise.resolve(makeResult(""));
+      });
+      const bridge = { isConnected: true, callTool } as unknown as McpBridge;
+
+      render(EntryDetail, { props: { bridge, entryId: "entry-abc-123" } });
+
+      await waitFor(() => screen.getByLabelText("Edit entry"));
+      fireEvent.click(screen.getByLabelText("Edit entry"));
+
+      await waitFor(() => screen.getByLabelText("Edit content"));
+      fireEvent.input(screen.getByLabelText("Edit content"), { target: { value: "Updated content." } });
+      fireEvent.click(screen.getByLabelText("Save edit"));
+
+      await waitFor(() => {
+        expect(callTool).toHaveBeenCalledWith("distillery_update", {
+          entry_id: "entry-abc-123",
+          content: "Updated content.",
+        });
+      });
+    });
+
+    it("closes edit form on cancel", async () => {
+      const bridge = makeMockBridge({});
+      render(EntryDetail, { props: { bridge, entryId: "entry-abc-123" } });
+
+      await waitFor(() => screen.getByLabelText("Edit entry"));
+      fireEvent.click(screen.getByLabelText("Edit entry"));
+
+      await waitFor(() => screen.getByLabelText("Edit entry form"));
+      fireEvent.click(screen.getByLabelText("Cancel edit"));
+
+      await waitFor(() => {
+        expect(screen.queryByLabelText("Edit entry form")).toBeNull();
+      });
+    });
+
+    it("shows error when distillery_update returns isError during edit", async () => {
+      const callTool = vi.fn().mockImplementation((name: string) => {
+        if (name === "distillery_get") return Promise.resolve(makeResult(makeEntry()));
+        if (name === "distillery_relations") return Promise.resolve(makeResult("[]"));
+        if (name === "distillery_update") return Promise.resolve(makeResult("Update failed", true));
+        return Promise.resolve(makeResult(""));
+      });
+      const bridge = { isConnected: true, callTool } as unknown as McpBridge;
+
+      render(EntryDetail, { props: { bridge, entryId: "entry-abc-123" } });
+
+      await waitFor(() => screen.getByLabelText("Edit entry"));
+      fireEvent.click(screen.getByLabelText("Edit entry"));
+      await waitFor(() => screen.getByLabelText("Save edit"));
+      fireEvent.click(screen.getByLabelText("Save edit"));
+
+      await waitFor(() => {
+        expect(screen.getByText(/Update failed/)).toBeTruthy();
+      });
+    });
+  });
+
+  describe("correct action", () => {
+    it("shows Correct button when entry is loaded", async () => {
+      const bridge = makeMockBridge({});
+      render(EntryDetail, { props: { bridge, entryId: "entry-abc-123" } });
+
+      await waitFor(() => {
+        expect(screen.getByLabelText("Correct entry")).toBeTruthy();
+      });
+    });
+
+    it("shows correction form when Correct button is clicked", async () => {
+      const bridge = makeMockBridge({});
+      render(EntryDetail, { props: { bridge, entryId: "entry-abc-123" } });
+
+      await waitFor(() => screen.getByLabelText("Correct entry"));
+      fireEvent.click(screen.getByLabelText("Correct entry"));
+
+      await waitFor(() => {
+        expect(screen.getByLabelText("Correct entry form")).toBeTruthy();
+        expect(screen.getByLabelText("Correction text")).toBeTruthy();
+      });
+    });
+
+    it("calls distillery_correct with entry_id and correction on submit", async () => {
+      const callTool = vi.fn().mockImplementation((name: string) => {
+        if (name === "distillery_get") return Promise.resolve(makeResult(makeEntry()));
+        if (name === "distillery_relations") return Promise.resolve(makeResult("[]"));
+        if (name === "distillery_correct") return Promise.resolve(makeResult("{}"));
+        return Promise.resolve(makeResult(""));
+      });
+      const bridge = { isConnected: true, callTool } as unknown as McpBridge;
+
+      render(EntryDetail, { props: { bridge, entryId: "entry-abc-123" } });
+
+      await waitFor(() => screen.getByLabelText("Correct entry"));
+      fireEvent.click(screen.getByLabelText("Correct entry"));
+
+      await waitFor(() => screen.getByLabelText("Correction text"));
+      fireEvent.input(screen.getByLabelText("Correction text"), {
+        target: { value: "This fact is incorrect." },
+      });
+      fireEvent.click(screen.getByLabelText("Submit correction"));
+
+      await waitFor(() => {
+        expect(callTool).toHaveBeenCalledWith("distillery_correct", {
+          entry_id: "entry-abc-123",
+          correction: "This fact is incorrect.",
+        });
+      });
+    });
+
+    it("closes correction form on cancel", async () => {
+      const bridge = makeMockBridge({});
+      render(EntryDetail, { props: { bridge, entryId: "entry-abc-123" } });
+
+      await waitFor(() => screen.getByLabelText("Correct entry"));
+      fireEvent.click(screen.getByLabelText("Correct entry"));
+
+      await waitFor(() => screen.getByLabelText("Correct entry form"));
+      fireEvent.click(screen.getByLabelText("Cancel correction"));
+
+      await waitFor(() => {
+        expect(screen.queryByLabelText("Correct entry form")).toBeNull();
+      });
+    });
+
+    it("shows error when distillery_correct returns isError", async () => {
+      const callTool = vi.fn().mockImplementation((name: string) => {
+        if (name === "distillery_get") return Promise.resolve(makeResult(makeEntry()));
+        if (name === "distillery_relations") return Promise.resolve(makeResult("[]"));
+        if (name === "distillery_correct") return Promise.resolve(makeResult("Correction failed", true));
+        return Promise.resolve(makeResult(""));
+      });
+      const bridge = { isConnected: true, callTool } as unknown as McpBridge;
+
+      render(EntryDetail, { props: { bridge, entryId: "entry-abc-123" } });
+
+      await waitFor(() => screen.getByLabelText("Correct entry"));
+      fireEvent.click(screen.getByLabelText("Correct entry"));
+
+      await waitFor(() => screen.getByLabelText("Correction text"));
+      fireEvent.input(screen.getByLabelText("Correction text"), {
+        target: { value: "Some correction." },
+      });
+      fireEvent.click(screen.getByLabelText("Submit correction"));
+
+      await waitFor(() => {
+        expect(screen.getByText(/Correction failed/)).toBeTruthy();
+      });
+    });
+  });
+
+  describe("archive action", () => {
+    it("shows Archive button when entry is loaded", async () => {
+      const bridge = makeMockBridge({});
+      render(EntryDetail, { props: { bridge, entryId: "entry-abc-123" } });
+
+      await waitFor(() => {
+        expect(screen.getByLabelText("Archive entry")).toBeTruthy();
+      });
+    });
+
+    it("shows archive confirmation dialog when Archive is clicked", async () => {
+      const bridge = makeMockBridge({});
+      render(EntryDetail, { props: { bridge, entryId: "entry-abc-123" } });
+
+      await waitFor(() => screen.getByLabelText("Archive entry"));
+      fireEvent.click(screen.getByLabelText("Archive entry"));
+
+      await waitFor(() => {
+        expect(screen.getByLabelText("Archive confirmation")).toBeTruthy();
+        expect(screen.getByLabelText("Confirm archive")).toBeTruthy();
+      });
+    });
+
+    it("calls distillery_update with status=archived on confirm", async () => {
+      const callTool = vi.fn().mockImplementation((name: string) => {
+        if (name === "distillery_get") return Promise.resolve(makeResult(makeEntry()));
+        if (name === "distillery_relations") return Promise.resolve(makeResult("[]"));
+        if (name === "distillery_update") return Promise.resolve(makeResult("{}"));
+        return Promise.resolve(makeResult(""));
+      });
+      const bridge = { isConnected: true, callTool } as unknown as McpBridge;
+
+      render(EntryDetail, { props: { bridge, entryId: "entry-abc-123" } });
+
+      await waitFor(() => screen.getByLabelText("Archive entry"));
+      fireEvent.click(screen.getByLabelText("Archive entry"));
+
+      await waitFor(() => screen.getByLabelText("Confirm archive"));
+      fireEvent.click(screen.getByLabelText("Confirm archive"));
+
+      await waitFor(() => {
+        expect(callTool).toHaveBeenCalledWith("distillery_update", {
+          entry_id: "entry-abc-123",
+          status: "archived",
+        });
+      });
+    });
+
+    it("dismisses archive confirmation on cancel", async () => {
+      const bridge = makeMockBridge({});
+      render(EntryDetail, { props: { bridge, entryId: "entry-abc-123" } });
+
+      await waitFor(() => screen.getByLabelText("Archive entry"));
+      fireEvent.click(screen.getByLabelText("Archive entry"));
+
+      await waitFor(() => screen.getByLabelText("Archive confirmation"));
+      fireEvent.click(screen.getByLabelText("Cancel archive"));
+
+      await waitFor(() => {
+        expect(screen.queryByLabelText("Archive confirmation")).toBeNull();
+      });
+    });
+
+    it("shows error when distillery_update returns isError during archive", async () => {
+      const callTool = vi.fn().mockImplementation((name: string) => {
+        if (name === "distillery_get") return Promise.resolve(makeResult(makeEntry()));
+        if (name === "distillery_relations") return Promise.resolve(makeResult("[]"));
+        if (name === "distillery_update") return Promise.resolve(makeResult("Archive failed", true));
+        return Promise.resolve(makeResult(""));
+      });
+      const bridge = { isConnected: true, callTool } as unknown as McpBridge;
+
+      render(EntryDetail, { props: { bridge, entryId: "entry-abc-123" } });
+
+      await waitFor(() => screen.getByLabelText("Archive entry"));
+      fireEvent.click(screen.getByLabelText("Archive entry"));
+
+      await waitFor(() => screen.getByLabelText("Confirm archive"));
+      fireEvent.click(screen.getByLabelText("Confirm archive"));
+
+      await waitFor(() => {
+        expect(screen.getByText(/Archive failed/)).toBeTruthy();
+      });
+    });
+  });
+
   describe("relation grouping by direction", () => {
     it("groups outgoing relations under an Outgoing heading", async () => {
       // from_id === current entry id => OUTGOING
