@@ -68,6 +68,14 @@ _ALLOWED_KEYS: dict[tuple[str, str], dict[str, Any]] = {
         "type": float,
         "range": (0.0, 1.0),
     },
+    ("classification", "mode"): {
+        "type": str,
+        "constraint": lambda _cfg, val: (
+            f"classification.mode must be 'llm' or 'heuristic', got {val!r}"
+            if val not in ("llm", "heuristic")
+            else None
+        ),
+    },
 }
 
 

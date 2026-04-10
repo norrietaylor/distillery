@@ -1890,30 +1890,6 @@ class TestWebhookRecordAudit:
         assert raw is not None
 
 
-class TestWebhookParseMcpResponse:
-    """Cover _parse_mcp_response (webhooks.py lines 283-285)."""
-
-    def test_parse_mcp_response_valid(self) -> None:
-        from mcp import types
-
-        from distillery.mcp.webhooks import _parse_mcp_response
-
-        content = [types.TextContent(type="text", text='{"key": "value"}')]
-        result = _parse_mcp_response(content)
-        assert result == {"key": "value"}
-
-    def test_parse_mcp_response_bad_data(self) -> None:
-        from distillery.mcp.webhooks import _parse_mcp_response
-
-        result = _parse_mcp_response([])
-        assert result == {}
-
-    def test_parse_mcp_response_none(self) -> None:
-        from distillery.mcp.webhooks import _parse_mcp_response
-
-        result = _parse_mcp_response(None)
-        assert result == {}
-
 
 # ===========================================================================
 # Auth CIMDFetcher patch behavior (auth.py lines 118-152, 167-185)

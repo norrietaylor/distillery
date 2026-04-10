@@ -6,7 +6,6 @@ allowed-tools:
   - "mcp__*__distillery_resolve_review"
   - "mcp__*__distillery_get"
   - "mcp__*__distillery_list"
-  - "mcp__*__distillery_metrics"
 effort: medium
 ---
 
