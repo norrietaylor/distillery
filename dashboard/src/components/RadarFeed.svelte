@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Snippet } from "svelte";
   import { selectedProject, refreshTick, currentUser } from "$lib/stores";
   import type { McpBridge } from "$lib/mcp-bridge";
   import LoadingSkeleton from "./LoadingSkeleton.svelte";
@@ -152,38 +153,40 @@
     });
   });
 
-  /** Column definitions for the DataTable. */
-  const columns: Column<FeedEntry>[] = [
-    {
-      key: "content",
-      label: "Title",
-      sortable: false,
-      renderText: (row) => contentPreview(row.content),
-    },
-    {
-      key: "source",
-      label: "Source",
-      sortable: false,
-    },
-    {
-      key: "score",
-      label: "Score",
-      sortable: true,
-      renderText: (row) => row.score.toFixed(2),
-    },
-    {
-      key: "created_at",
-      label: "Published Date",
-      sortable: true,
-      renderText: (row) => formatDate(row.created_at),
-    },
-    {
-      key: "tags",
-      label: "Tags",
-      sortable: false,
-      renderText: (row) => row.tags.join(", "),
-    },
-  ];
+  /** Build column definitions, injecting the score snippet when provided. */
+  function buildColumns(scoreSnippet?: Snippet<[FeedEntry]>): Column<FeedEntry>[] {
+    return [
+      {
+        key: "content",
+        label: "Title",
+        sortable: false,
+        renderText: (row) => contentPreview(row.content),
+      },
+      {
+        key: "source",
+        label: "Source",
+        sortable: false,
+      },
+      {
+        key: "score",
+        label: "Score",
+        sortable: true,
+        renderSnippet: scoreSnippet,
+      },
+      {
+        key: "created_at",
+        label: "Published Date",
+        sortable: true,
+        renderText: (row) => formatDate(row.created_at),
+      },
+      {
+        key: "tags",
+        label: "Tags",
+        sortable: false,
+        renderText: (row) => row.tags.join(", "),
+      },
+    ];
+  }
 
   function handleRowClick(row: FeedEntry) {
     expandedId = expandedId === row.id ? null : row.id;
@@ -234,8 +237,12 @@
       <strong>Error:</strong> {loadError}
     </div>
   {:else}
+    {#snippet scoreCell(row: FeedEntry)}
+      <ScoreBadge score={row.score} />
+    {/snippet}
+
     <DataTable
-      {columns}
+      columns={buildColumns(scoreCell)}
       rows={filteredEntries()}
       defaultSortKey="score"
       defaultSortDir="desc"

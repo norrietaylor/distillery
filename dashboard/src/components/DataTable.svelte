@@ -153,7 +153,9 @@
           >
             {#each columns as col (col.key)}
               <td class="datatable-td">
-                {#if col.renderText}
+                {#if col.renderSnippet}
+                  {@render col.renderSnippet(row)}
+                {:else if col.renderText}
                   {col.renderText(row)}
                 {:else}
                   {row[col.key] ?? ""}
