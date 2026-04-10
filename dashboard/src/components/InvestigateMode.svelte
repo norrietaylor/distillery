@@ -16,6 +16,8 @@
   import { selectedProject } from "$lib/stores";
   import LoadingSkeleton from "./LoadingSkeleton.svelte";
   import ScoreBadge from "./ScoreBadge.svelte";
+  import TagNeighborhood from "./TagNeighborhood.svelte";
+  import RelationGraph from "./RelationGraph.svelte";
 
   // ---------------------------------------------------------------------------
   // Types
@@ -126,6 +128,12 @@
 
   /** Highest phase that has been completed (0 = none). */
   let completedPhase = $state(0);
+
+  /** Phase 3: collect seed tags from Phase 1 results for TagNeighborhood. */
+  let phase3SeedTags = $derived.by((): string[] => {
+    const allTags = phase1Results.flatMap((r) => r.tags);
+    return Array.from(new Set(allTags));
+  });
 
   // ---------------------------------------------------------------------------
   // Helpers
@@ -392,8 +400,51 @@
           </ul>
         {/if}
       </section>
+    {:else if currentPhase === 2}
+      <!-- Phase 2: Relation Graph -->
+      <section class="phase-section" aria-label="Phase 2: Relation Graph">
+        <RelationGraph
+          {bridge}
+          seedEntryId={investigationPath[investigationPath.length - 1]?.id ?? seedEntryId}
+          phase1ResultIds={phase1Results.map((r) => r.id)}
+          onNavigate={(id) => {
+            const found = phase1Results.find((r) => r.id === id);
+            if (found) {
+              handlePivot(found);
+            } else {
+              // Navigate to an entry not in phase1 results: treat as pivot with id
+              seenEntryIds = new Set([...seenEntryIds, id]);
+              investigationPath = [
+                ...investigationPath,
+                { id, title: id, query: id },
+              ];
+              currentPhase = 1;
+              completedPhase = 0;
+              phase1Results = [];
+            }
+          }}
+          onPin={(entry) => onPin?.(entry)}
+        />
+      </section>
+    {:else if currentPhase === 3}
+      <!-- Phase 3: Tag Neighborhood -->
+      <section class="phase-section" aria-label="Phase 3: Tag Neighborhood">
+        <TagNeighborhood
+          {bridge}
+          seedTags={phase3SeedTags}
+          project={$selectedProject}
+          investigationTopic={buildQuery(seedContent)}
+          onResults={(results) => {
+            // Surface Phase 3 results to parent if needed
+            for (const r of results) {
+              void r;
+            }
+          }}
+          onPin={(entry) => handlePin(entry as InvestigateResult)}
+        />
+      </section>
     {:else}
-      <!-- Phases 2-4 placeholders for future tasks -->
+      <!-- Phase 4: placeholder for future task -->
       <section class="phase-section" aria-label="Phase {currentPhase}">
         <p class="empty-state">Phase {currentPhase} coming soon.</p>
       </section>
