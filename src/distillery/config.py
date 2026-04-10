@@ -135,6 +135,9 @@ class ClassificationConfig:
         conflict_threshold: Similarity score at or above which two entries in
             different projects are flagged as potential conflicts. Default
             ``0.60``.
+        mode: Classification mode — ``"llm"`` for LLM-based classification
+            or ``"heuristic"`` for embedding centroid-based classification.
+            Default ``"llm"``.
     """
 
     confidence_threshold: float = 0.6
@@ -145,6 +148,7 @@ class ClassificationConfig:
     feedback_window_minutes: int = 5
     stale_days: int = 30
     conflict_threshold: float = 0.60
+    mode: str = "llm"
 
 
 @dataclass
@@ -563,6 +567,13 @@ def _parse_classification(raw: dict[str, Any]) -> ClassificationConfig:
         raw, "conflict_threshold", 0.60, "classification.conflict_threshold"
     )
 
+    mode_raw = raw.get("mode", "llm")
+    mode = str(mode_raw)
+    if mode not in ("llm", "heuristic"):
+        raise ValueError(
+            f"classification.mode must be 'llm' or 'heuristic', got: {mode!r}"
+        )
+
     return ClassificationConfig(
         confidence_threshold=threshold,
         dedup_skip_threshold=skip,
@@ -572,6 +583,7 @@ def _parse_classification(raw: dict[str, Any]) -> ClassificationConfig:
         feedback_window_minutes=feedback_window_minutes,
         stale_days=stale_days,
         conflict_threshold=conflict_threshold,
+        mode=mode,
     )
 
 

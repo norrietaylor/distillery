@@ -2,7 +2,9 @@
 name: setup
 description: "Onboarding wizard — verify MCP connectivity, detect transport, and configure scheduled tasks"
 allowed-tools:
-  - "mcp__*__distillery_metrics"
+  - "mcp__*__distillery_list"
+  - "mcp__*__distillery_watch"
+  - "mcp__*__distillery_configure"
   - "CronCreate"
   - "RemoteTrigger"
   - "Bash(test:*)"
@@ -43,7 +45,7 @@ Use `ToolSearch` to check whether any `distillery` MCP tools are available. Also
 
 **1b. Attempt connection:**
 
-Call `distillery_metrics(scope="summary")` to confirm the Distillery MCP server is running and authenticated.
+Call `distillery_list(limit=1)` to confirm the Distillery MCP server is running and authenticated.
 
 **1c. Determine state and respond:**
 
@@ -51,21 +53,19 @@ Evaluate the result based on what was found in 1a and 1b:
 
 ---
 
-**State: Connected** — `distillery_metrics(scope="summary")` returned successfully.
+**State: Connected** — `distillery_list(limit=1)` returned successfully.
 
-Display using the actual fields from `distillery_metrics(scope="summary")`:
-
+Call `distillery_configure(action="get")` to retrieve configuration details, then display:
 
 ```text
 MCP server connected.
-  Entries:  <total_entries>
-  Model:    <embedding_model>
-  DB Size:  <database_size_bytes / 1048576> MB
+  Entries:  <total_count from distillery_list>
+  Config:   <embedding_model from configure response>
 ```
 
 Proceed to Step 2.
 
-**State: Needs Authentication** — Server entry found but `distillery_metrics(scope="summary")` is unavailable or fails (including auth-related failures). See `references/transport-detection.md` for display instructions. Skip to Step 6 with `MCP Server: needs authentication`.
+**State: Needs Authentication** — Server entry found but `distillery_list(limit=1)` is unavailable or fails (including auth-related failures). See `references/transport-detection.md` for display instructions. Skip to Step 6 with `MCP Server: needs authentication`.
 
 ---
 
@@ -144,12 +144,14 @@ Enable scheduled tasks? This includes:
 (yes / no)
 ```
 
+Determine the webhook base URL from the transport detected in Step 2 (e.g., `https://distillery-mcp.fly.dev` for hosted, `http://localhost:8000` for local HTTP). Append `/hooks/poll` to form the poll webhook URL.
+
 If yes, create the cron job:
 
 ```python
 CronCreate(
   cron="<random off-peak minute> * * * *",
-  prompt="Use distillery_poll to poll all configured feed sources. Report a one-line summary of items fetched and stored.",
+  prompt="POST to <webhook-base-url>/hooks/poll to trigger feed polling. Report a one-line summary of the response.",
   recurring=True,
   durable=True
 )
@@ -179,7 +181,7 @@ Check `CronList` for an existing rescore job. If none exists, create one:
 ```python
 CronCreate(
   cron="<random minute> 6 * * *",
-  prompt="Use distillery_rescore(limit=200) to re-score feed entries against the current knowledge base. Report: rescored, upgraded, downgraded, archived counts.",
+  prompt="POST to <webhook-base-url>/hooks/rescore?limit=200 to re-score feed entries against the current knowledge base. Report the response summary including rescored, upgraded, downgraded, and archived counts.",
   recurring=True,
   durable=True
 )
@@ -203,13 +205,11 @@ Check `CronList` for an existing maintenance job. If none exists, create one:
 CronCreate(
   cron="<random minute> 7 * * 1",
   prompt="""Run weekly Distillery maintenance:
-1. Call distillery_metrics(scope="summary", period_days=7) — note entry growth, search volume, storage usage.
-2. Call distillery_metrics(scope="search_quality") — note positive feedback rate and avg result count.
-3. Call distillery_stale(days=30, limit=10) — note count and oldest entries.
-4. Call distillery_interests(recency_days=30, top_n=10) — note top tags and domains.
-5. Call distillery_interests(suggest_sources=True, max_suggestions=3) — note any new recommendations.
-6. Store a digest: distillery_store(content=<one-paragraph summary of findings>, entry_type="session", author="distillery-maintenance", tags=["digest", "weekly", "maintenance"], metadata={"period_start": "<7 days ago ISO>", "period_end": "<today ISO>"}).
-Report: entry counts, search quality trend, stale entry count, top interests, suggested sources.""",
+1. POST to <webhook-base-url>/hooks/classify-batch?mode=heuristic to classify pending inbox entries.
+2. Call distillery_list(stale_days=30, limit=10, output_mode="summary") — note count and oldest entries.
+3. Call distillery_list(group_by="tags") — note top tags and domains.
+4. Store a digest: distillery_store(content=<one-paragraph summary of findings>, entry_type="digest", author="distillery-maintenance", tags=["digest", "weekly", "maintenance"], metadata={"period_start": "<7 days ago ISO>", "period_end": "<today ISO>"}).
+Report: stale entry count, top tags, classify-batch response summary.""",
   recurring=True,
   durable=True
 )
@@ -380,6 +380,7 @@ The setup wizard uses a sequential, conversational format. Each step prints its 
 - Pick an off-peak cron minute (not :00 or :30) for all schedules; use different random minutes for each job
 - If the user has no feed sources, skip feed poll and rescore but still offer weekly maintenance
 - This skill is idempotent — running it multiple times should not create duplicates
-- Use actual field names from `distillery_metrics(scope="summary")` response (`total_entries`, `embedding_model`, `database_size_bytes`)
+- Use `distillery_list(limit=1)` for the MCP health check; use `distillery_configure(action="get")` for configuration details
+- Webhook URLs follow the pattern `<transport-base-url>/hooks/{poll,rescore,classify-batch}` — derive base URL from transport detected in Step 2
 - The weekly maintenance job stores its output as a digest entry — this creates a longitudinal record of KB health
 - Ask the user once about enabling scheduled tasks; their answer applies to all three tiers (poll, rescore, maintenance)

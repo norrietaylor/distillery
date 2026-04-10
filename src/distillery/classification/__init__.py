@@ -4,12 +4,14 @@ This package provides:
 
 - :class:`~distillery.classification.engine.ClassificationEngine` -- formats
   LLM prompts and parses structured JSON classification responses.
+- :class:`~distillery.classification.heuristic.HeuristicClassifier` -- classifies
+  entries using embedding centroid similarity (no LLM required).
 - :class:`~distillery.classification.dedup.DeduplicationChecker` -- uses
   ``DistilleryStore.find_similar()`` to detect near-duplicate content.
 - :class:`~distillery.classification.conflict.ConflictChecker` -- uses
   ``DistilleryStore.find_similar()`` and LLM responses to detect contradictions.
 - :class:`~distillery.classification.models.ClassificationResult` -- result
-  dataclass returned by :class:`ClassificationEngine`.
+  dataclass returned by :class:`ClassificationEngine` and :class:`HeuristicClassifier`.
 - :class:`~distillery.classification.models.DeduplicationResult` -- result
   dataclass returned by :class:`DeduplicationChecker`.
 - :class:`~distillery.classification.models.DeduplicationAction` -- enum of
@@ -44,6 +46,7 @@ from __future__ import annotations
 from .conflict import ConflictChecker, ConflictEntry, ConflictResult
 from .dedup import DeduplicationChecker
 from .engine import ClassificationEngine
+from .heuristic import HeuristicClassifier
 from .models import ClassificationResult, DeduplicationAction, DeduplicationResult
 
 __all__ = [
@@ -55,4 +58,5 @@ __all__ = [
     "DeduplicationAction",
     "DeduplicationChecker",
     "DeduplicationResult",
+    "HeuristicClassifier",
 ]

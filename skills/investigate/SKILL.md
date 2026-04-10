@@ -5,9 +5,7 @@ allowed-tools:
   - "mcp__*__distillery_search"
   - "mcp__*__distillery_get"
   - "mcp__*__distillery_relations"
-  - "mcp__*__distillery_tag_tree"
   - "mcp__*__distillery_list"
-  - "mcp__*__distillery_metrics"
 context: fork
 effort: high
 ---
@@ -122,10 +120,10 @@ If no relations exist for any seed entry, note this in the Phase 2 report and co
 Extract all tags from entries currently in the result set. Identify unique namespace prefixes (e.g., tags like `domain/authentication`, `domain/oauth` → prefix `domain`). For each relevant namespace, call:
 
 ```python
-distillery_tag_tree(prefix="<namespace>")
+distillery_list(group_by="tags")
 ```
 
-Traverse returned tree children, rank leaf tags by `count` field. Convert top-ranked leaf segments to search queries (replace hyphens with spaces: `domain/oauth` → `"oauth"`). Run up to 3 `distillery_search` calls from these ranked tag-derived queries:
+From the returned tag groups, rank tags by count. Filter to those matching the namespace prefixes extracted from the result set. Convert top-ranked tag segments to search queries (replace hyphens with spaces: `domain/oauth` → `"oauth"`). Run up to 3 `distillery_search` calls from these ranked tag-derived queries:
 
 ```python
 distillery_search(query="<tag-derived query>", limit=10, project="<project if specified>")
