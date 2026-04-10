@@ -17,6 +17,7 @@
   import InboxTriage from "./InboxTriage.svelte";
   import ReviewQueue from "./ReviewQueue.svelte";
   import HealthOverview from "./HealthOverview.svelte";
+  import SourceHealth from "./SourceHealth.svelte";
 
   interface Props {
     bridge: McpBridge;
@@ -120,7 +121,7 @@
           class="sub-panel"
           data-panel="sources"
         >
-          <p class="placeholder-text">Source health — coming in T05.</p>
+          <SourceHealth {bridge} />
         </div>
       {/if}
     </div>
@@ -222,8 +223,4 @@
     padding: 1rem 0;
   }
 
-  .placeholder-text {
-    color: var(--fg-muted, #a6adc8);
-    font-size: 0.9rem;
-  }
 </style>
