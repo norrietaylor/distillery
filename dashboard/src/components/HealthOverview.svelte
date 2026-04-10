@@ -36,6 +36,9 @@
   let loadingMetrics = $state(false);
   let errorMetrics = $state<string | null>(null);
 
+  // ── Stale-request guard ──────────────────────────────────────────────────
+  let _loadToken = 0;
+
   // ── Chart state ──────────────────────────────────────────────────────────
 
   interface GroupItem {
@@ -59,15 +62,19 @@
    * Same color for a given type across pie chart, bar chart, and elsewhere.
    */
   const TYPE_COLORS: Record<string, string> = {
-    insight: "#cba6f7",     // purple/accent
     session: "#89b4fa",     // blue
     bookmark: "#94e2d5",    // teal
-    reference: "#a6e3a1",   // green
-    correction: "#f38ba8",  // red
-    note: "#fab387",        // peach
-    inbox: "#f9e2af",       // yellow
-    decision: "#89dceb",    // sky
-    task: "#74c7ec",        // sapphire
+    minutes: "#a6e3a1",     // green
+    meeting: "#fab387",     // peach
+    reference: "#f9e2af",   // yellow
+    idea: "#cba6f7",        // purple
+    person: "#f38ba8",      // red
+    project: "#89dceb",     // sky
+    digest: "#74c7ec",      // sapphire
+    github: "#b4befe",      // lavender
+    feed: "#eba0ac",        // flamingo
+    // Legacy key retained for backward-compat with existing data
+    insight: "#cba6f7",     // purple/accent
   };
 
   const STATUS_COLORS: Record<string, string> = {
@@ -143,9 +150,9 @@
 
   // ── Fetch functions ──────────────────────────────────────────────────────
 
-  /** Fetch summary metrics. */
-  async function fetchMetrics(project: string | null) {
-    if (!bridge) return;
+  /** Fetch summary metrics. Returns true if all four status counts were parsed. */
+  async function fetchMetrics(project: string | null): Promise<boolean> {
+    if (!bridge) return false;
     loadingMetrics = true;
     errorMetrics = null;
     try {
@@ -155,7 +162,8 @@
       if (result.isError) {
         errorMetrics = "Failed to load metrics";
         totalEntries = null;
-        return;
+        storageBytes = null;
+        return false;
       }
       totalEntries = parseCount(result.text);
       storageBytes = parseStorageBytes(result.text);
@@ -169,9 +177,18 @@
       if (archivedMatch) archivedCount = parseInt(archivedMatch[1]!, 10);
       const inboxMatch = result.text.match(/inbox[:\s]+(\d+)/i);
       if (inboxMatch) inboxCount = parseInt(inboxMatch[1]!, 10);
+
+      return (
+        activeMatch !== null &&
+        pendingMatch !== null &&
+        archivedMatch !== null &&
+        inboxMatch !== null
+      );
     } catch (err) {
       errorMetrics = err instanceof Error ? err.message : "Failed to load metrics";
       totalEntries = null;
+      storageBytes = null;
+      return false;
     } finally {
       loadingMetrics = false;
     }
@@ -266,14 +283,26 @@
     }
   }
 
-  /** Refresh all health data. */
+  /** Refresh all health data. Uses a request token to discard stale results. */
   async function loadAll(project: string | null) {
-    await Promise.all([
+    const token = ++_loadToken;
+
+    const [statusCountsParsed] = await Promise.all([
       fetchMetrics(project),
-      fetchStatusCounts(project),
       fetchTypeChart(project),
       fetchStatusChart(project),
     ]);
+
+    // Guard: if a newer loadAll() has started, discard these results.
+    if (token !== _loadToken) return;
+
+    // Only call fetchStatusCounts as a fallback when fetchMetrics didn't
+    // include all four status breakdowns.
+    if (!statusCountsParsed) {
+      await fetchStatusCounts(project);
+      // Guard again after the fallback fetch.
+      if (token !== _loadToken) return;
+    }
   }
 
   // ── Storage formatting ───────────────────────────────────────────────────
