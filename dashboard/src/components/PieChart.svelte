@@ -39,7 +39,7 @@
   const innerR = $derived(r * innerRadiusFraction);
 
   /** Compute cumulative pie slices. */
-  const slices = $derived(() => {
+  const slices = $derived.by(() => {
     const total = data.reduce((sum, d) => sum + d.value, 0);
     if (total === 0) return [];
 
@@ -113,7 +113,7 @@
     </div>
   {:else}
     <svg {width} {height} aria-hidden="true">
-      {#each slices() as slice (slice.label)}
+      {#each slices as slice (slice.label)}
         <path
           d={arcPath(slice.startAngle, slice.endAngle, r, innerR, cx, cy)}
           fill={slice.color}
