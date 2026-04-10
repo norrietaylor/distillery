@@ -14,6 +14,9 @@
 
   import type { McpBridge } from "$lib/mcp-bridge";
   import { userRole, inboxBadgeCount, reviewBadgeCount } from "$lib/stores";
+  import InboxTriage from "./InboxTriage.svelte";
+  import ReviewQueue from "./ReviewQueue.svelte";
+  import HealthOverview from "./HealthOverview.svelte";
 
   interface Props {
     bridge: McpBridge;
@@ -90,7 +93,7 @@
           class="sub-panel"
           data-panel="inbox"
         >
-          <p class="placeholder-text">Inbox triage — coming in T02.</p>
+          <InboxTriage {bridge} />
         </div>
       {:else if activeSubTab === "review"}
         <div
@@ -99,7 +102,7 @@
           class="sub-panel"
           data-panel="review"
         >
-          <p class="placeholder-text">Review queue — coming in T03.</p>
+          <ReviewQueue {bridge} />
         </div>
       {:else if activeSubTab === "health"}
         <div
@@ -108,7 +111,7 @@
           class="sub-panel"
           data-panel="health"
         >
-          <p class="placeholder-text">Health overview — coming in T04.</p>
+          <HealthOverview {bridge} />
         </div>
       {:else if activeSubTab === "sources"}
         <div
