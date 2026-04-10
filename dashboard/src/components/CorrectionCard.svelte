@@ -27,15 +27,13 @@
   }
 
   function formatDate(isoString: string): string {
-    try {
-      return new Date(isoString).toLocaleDateString(undefined, {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      });
-    } catch {
-      return isoString;
-    }
+    const date = new Date(isoString);
+    if (Number.isNaN(date.getTime())) return isoString;
+    return date.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
   }
 </script>
 
@@ -46,7 +44,7 @@
   tabindex="0"
   aria-expanded={expanded}
   onclick={toggle}
-  onkeydown={(e) => (e.key === "Enter" || e.key === " ") && toggle()}
+  onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } }}
 >
   <div class="correction-card__header">
     <span class="correction-card__icon" aria-hidden="true"

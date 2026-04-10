@@ -68,13 +68,13 @@
   function normalizeEntry(obj: Record<string, unknown>): FeedEntry {
     const raw = obj as Partial<FeedEntry>;
     return {
+      ...obj,
       id: String(raw.id ?? crypto.randomUUID()),
       content: String(raw.content ?? ""),
       source: String(raw.source ?? ""),
       score: typeof raw.score === "number" ? raw.score : 0,
       created_at: String(raw.created_at ?? raw.published_at ?? ""),
       tags: Array.isArray(raw.tags) ? (raw.tags as string[]) : [],
-      ...obj,
     };
   }
 
