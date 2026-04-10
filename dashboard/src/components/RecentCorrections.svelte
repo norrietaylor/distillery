@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import { selectedProject, refreshTick } from "$lib/stores";
   import LoadingSkeleton from "./LoadingSkeleton.svelte";
   import CorrectionCard from "./CorrectionCard.svelte";
@@ -40,12 +39,12 @@
       // Fetch recent session entries
       const listArgs: Record<string, unknown> = {
         entry_type: "session",
-        limit: 20,
+        limit: 10,
         date_from: dateFrom,
       };
       if (project) listArgs["project"] = project;
 
-      const listResult = await bridge.callTool("list", listArgs);
+      const listResult = await bridge.callTool("distillery_list", listArgs);
 
       if (listResult.isError) {
         throw new Error(listResult.text || "Failed to fetch session entries");
@@ -65,7 +64,7 @@
 
       for (const entry of entryIds) {
         try {
-          const relResult = await bridge.callTool("relations", {
+          const relResult = await bridge.callTool("distillery_relations", {
             action: "get",
             entry_id: entry.id,
             relation_type: "corrects",
@@ -80,7 +79,7 @@
           const originalId = relatedIds[0];
           let originalContent = "";
           try {
-            const getResult = await bridge.callTool("get", { id: originalId });
+            const getResult = await bridge.callTool("distillery_get", { entry_id: originalId });
             if (!getResult.isError && getResult.text) {
               originalContent = extractContent(getResult.text);
             }
@@ -218,9 +217,6 @@
     void loadCorrections();
   });
 
-  onMount(() => {
-    void loadCorrections();
-  });
 </script>
 
 <section class="recent-corrections" aria-labelledby="recent-corrections-heading">

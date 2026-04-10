@@ -79,7 +79,7 @@ describe("RecentCorrections", () => {
 
   describe("empty state", () => {
     it("shows helpful message when no session entries exist", async () => {
-      const bridge = makeMockBridge({ list: ok("[]") });
+      const bridge = makeMockBridge({ distillery_list: ok("[]") });
       render(RecentCorrections, { props: { bridge } });
 
       await waitFor(() => {
@@ -89,8 +89,8 @@ describe("RecentCorrections", () => {
 
     it("shows helpful message when entries have no corrects relations", async () => {
       const bridge = makeMockBridge({
-        list: listResponse([{ id: "entry-1", content: "some session" }]),
-        relations: ok("[]"), // No relations
+        distillery_list: listResponse([{ id: "entry-1", content: "some session" }]),
+        distillery_relations: ok("[]"), // No relations
       });
 
       render(RecentCorrections, { props: { bridge } });
@@ -104,12 +104,12 @@ describe("RecentCorrections", () => {
   describe("correction display", () => {
     it("displays correction cards for entries with corrects relations", async () => {
       const bridge = makeMockBridge({
-        list: listResponse([
+        distillery_list: listResponse([
           { id: "session-1", content: "The correct answer is 42", created_at: "2026-04-01T10:00:00Z" },
           { id: "session-2", content: "Another correction here", created_at: "2026-04-02T10:00:00Z" },
         ]),
-        relations: relationsResponse(["orig-1"]),
-        get: getEntryResponse("The original wrong answer was 41"),
+        distillery_relations: relationsResponse(["orig-1"]),
+        distillery_get: getEntryResponse("The original wrong answer was 41"),
       });
 
       render(RecentCorrections, { props: { bridge } });
@@ -121,7 +121,7 @@ describe("RecentCorrections", () => {
     });
 
     it("renders section heading", async () => {
-      const bridge = makeMockBridge({ list: ok("[]") });
+      const bridge = makeMockBridge({ distillery_list: ok("[]") });
       render(RecentCorrections, { props: { bridge } });
 
       expect(screen.getByText("Recent Corrections")).toBeTruthy();
@@ -132,19 +132,19 @@ describe("RecentCorrections", () => {
       let callCount = 0;
       const bridge = {
         callTool: vi.fn(async (name: string, args?: Record<string, unknown>) => {
-          if (name === "list") {
+          if (name === "distillery_list") {
             return listResponse([
               { id: "entry-1", content: "Has correction", created_at: "2026-04-01T10:00:00Z" },
               { id: "entry-2", content: "No correction", created_at: "2026-04-02T10:00:00Z" },
             ]);
           }
-          if (name === "relations") {
+          if (name === "distillery_relations") {
             callCount++;
             // First entry has a relation, second does not
             if (args?.entry_id === "entry-1") return relationsResponse(["orig-1"]);
             return ok("[]");
           }
-          if (name === "get") {
+          if (name === "distillery_get") {
             return getEntryResponse("Original content");
           }
           return ok("");
@@ -164,7 +164,7 @@ describe("RecentCorrections", () => {
   describe("error state", () => {
     it("shows error message when list tool returns error", async () => {
       const bridge = makeMockBridge({
-        list: err("Database connection failed"),
+        distillery_list: err("Database connection failed"),
       });
 
       render(RecentCorrections, { props: { bridge } });
@@ -191,17 +191,17 @@ describe("RecentCorrections", () => {
     it("continues loading other entries if one relations lookup fails", async () => {
       const bridge = {
         callTool: vi.fn(async (name: string, args?: Record<string, unknown>) => {
-          if (name === "list") {
+          if (name === "distillery_list") {
             return listResponse([
               { id: "entry-1", content: "First correction", created_at: "2026-04-01T10:00:00Z" },
               { id: "entry-2", content: "Second correction", created_at: "2026-04-02T10:00:00Z" },
             ]);
           }
-          if (name === "relations") {
+          if (name === "distillery_relations") {
             if (args?.entry_id === "entry-1") throw new Error("Lookup failed");
             return relationsResponse(["orig-2"]);
           }
-          if (name === "get") return getEntryResponse("Original for entry-2");
+          if (name === "distillery_get") return getEntryResponse("Original for entry-2");
           return ok("");
         }),
       } as unknown as McpBridge;
@@ -220,12 +220,12 @@ describe("RecentCorrections", () => {
     it("passes project filter to list tool call", async () => {
       selectedProject.set("alpha");
 
-      const bridge = makeMockBridge({ list: ok("[]") });
+      const bridge = makeMockBridge({ distillery_list: ok("[]") });
       render(RecentCorrections, { props: { bridge } });
 
       await waitFor(() => {
         expect(bridge.callTool).toHaveBeenCalledWith(
-          "list",
+          "distillery_list",
           expect.objectContaining({ project: "alpha" }),
         );
       });
@@ -234,11 +234,11 @@ describe("RecentCorrections", () => {
     it("omits project filter when no project selected", async () => {
       selectedProject.set(null);
 
-      const bridge = makeMockBridge({ list: ok("[]") });
+      const bridge = makeMockBridge({ distillery_list: ok("[]") });
       render(RecentCorrections, { props: { bridge } });
 
       await waitFor(() => {
-        const call = vi.mocked(bridge.callTool).mock.calls.find((c) => c[0] === "list");
+        const call = vi.mocked(bridge.callTool).mock.calls.find((c) => c[0] === "distillery_list");
         expect(call).toBeDefined();
         const args = call![1] as Record<string, unknown>;
         expect(args.project).toBeUndefined();
@@ -248,11 +248,11 @@ describe("RecentCorrections", () => {
 
   describe("date filtering", () => {
     it("passes date_from 7 days ago to list call", async () => {
-      const bridge = makeMockBridge({ list: ok("[]") });
+      const bridge = makeMockBridge({ distillery_list: ok("[]") });
       render(RecentCorrections, { props: { bridge } });
 
       await waitFor(() => {
-        const call = vi.mocked(bridge.callTool).mock.calls.find((c) => c[0] === "list");
+        const call = vi.mocked(bridge.callTool).mock.calls.find((c) => c[0] === "distillery_list");
         expect(call).toBeDefined();
         const args = call![1] as Record<string, unknown>;
         expect(args.date_from).toBeDefined();
@@ -268,11 +268,11 @@ describe("RecentCorrections", () => {
   describe("CorrectionCard expand/collapse", () => {
     async function renderWithOneCorrection() {
       const bridge = makeMockBridge({
-        list: listResponse([
+        distillery_list: listResponse([
           { id: "s1", content: "The corrected fact", created_at: "2026-04-01T10:00:00Z" },
         ]),
-        relations: relationsResponse(["orig-1"]),
-        get: getEntryResponse("The original wrong fact"),
+        distillery_relations: relationsResponse(["orig-1"]),
+        distillery_get: getEntryResponse("The original wrong fact"),
       });
 
       render(RecentCorrections, { props: { bridge } });
@@ -337,8 +337,8 @@ describe("RecentCorrections", () => {
       );
 
       const bridge = makeMockBridge({
-        list: plainTextResponse,
-        relations: ok("[]"),
+        distillery_list: plainTextResponse,
+        distillery_relations: ok("[]"),
       });
 
       render(RecentCorrections, { props: { bridge } });
