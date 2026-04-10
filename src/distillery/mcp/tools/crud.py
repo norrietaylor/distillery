@@ -332,7 +332,7 @@ async def _handle_store(
                         "entry_id": result.entry.id,
                         "content_preview": preview,
                         "similarity_score": round(result.score, 4),
-                        "conflict_reasoning": prompt,
+                        "conflict_prompt": prompt,
                     }
                 )
             if conflicts:
