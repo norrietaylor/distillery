@@ -20,10 +20,14 @@ on:
   pull_request:
     types: [closed]
 
+# Default permissions are minimal. Each job opts in to what it needs.
+# The deploy job — which checks out PR head code and builds it — is
+# the only one that needs package-write, and it is additionally gated
+# behind the `staging-deploy` GitHub Environment so a repo reviewer
+# must click Approve before the untrusted Dockerfile is built. This
+# closes the CodeQL `actions/untrusted-checkout-toctou` window.
 permissions:
   contents: read
-  packages: write
-  pull-requests: write
 
 env:
   REGISTRY: ghcr.io
@@ -31,10 +35,17 @@ env:
 
 jobs:
   # ──────────────────────────────────────────────────────────────────
-  # Job 1: /deploy-staging — build PR head, push to GHCR, dispatch deploy
+  # Job 1a: Resolve the PR head SHA on a trusted, unprivileged runner.
+  #
+  # This job intentionally has no write scopes and does NOT check out
+  # any PR code. It only resolves the current head SHA and exposes it
+  # as a job output. The downstream `build` job consumes that immutable
+  # output — so between the author_association check here and the
+  # checkout there, the SHA cannot change. This closes the
+  # `actions/untrusted-checkout-toctou` hole.
   # ──────────────────────────────────────────────────────────────────
-  deploy:
-    name: Build and dispatch staging deploy
+  resolve:
+    name: Resolve PR head SHA
     if: >
       github.event_name == 'issue_comment' &&
       github.event.issue.pull_request != null &&
@@ -45,6 +56,14 @@ jobs:
         github.event.comment.author_association == 'COLLABORATOR'
       )
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    outputs:
+      pr_number: ${{ steps.pr.outputs.pr_number }}
+      head_sha: ${{ steps.pr.outputs.head_sha }}
+      short_sha: ${{ steps.pr.outputs.short_sha }}
+      image_tag: ${{ steps.pr.outputs.image_tag }}
     steps:
       - name: React to trigger comment
         env:
@@ -74,10 +93,40 @@ jobs:
             echo "image_tag=${IMAGE_TAG}"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Checkout PR head SHA
+      - name: Announce pending approval
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          gh pr comment "${{ steps.pr.outputs.pr_number }}" \
+            --repo "${{ github.repository }}" \
+            --body "⏳ Staging deploy pending review — resolved head SHA \`${{ steps.pr.outputs.head_sha }}\`. A repo collaborator must approve the \`staging-deploy\` environment before the image is built: ${RUN_URL}"
+
+  # ──────────────────────────────────────────────────────────────────
+  # Job 1b: Build and push the staging image.
+  #
+  # Requires environment approval — configure `staging-deploy` in
+  # Settings → Environments with required reviewers = repo collaborators
+  # before merging this workflow. The approver sees the resolved head
+  # SHA (as a link in the resolve job's output) before approving.
+  # ──────────────────────────────────────────────────────────────────
+  build:
+    name: Build and dispatch staging deploy
+    needs: resolve
+    runs-on: ubuntu-latest
+    environment:
+      name: staging-deploy
+      url: https://distillery-mcp-dev.fly.dev
+    permissions:
+      contents: read
+      packages: write
+      pull-requests: write
+    steps:
+      - name: Checkout resolved SHA
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
-          ref: ${{ steps.pr.outputs.head_sha }}
+          ref: ${{ needs.resolve.outputs.head_sha }}
+          persist-credentials: false
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
@@ -96,12 +145,12 @@ jobs:
           file: Dockerfile
           push: true
           tags: |
-            ${{ env.IMAGE_NAME }}:${{ steps.pr.outputs.image_tag }}
+            ${{ env.IMAGE_NAME }}:${{ needs.resolve.outputs.image_tag }}
             ${{ env.IMAGE_NAME }}:staging
           cache-from: type=gha,scope=staging
           cache-to: type=gha,scope=staging,mode=max
           build-args: |
-            BUILD_SHA=${{ steps.pr.outputs.head_sha }}
+            BUILD_SHA=${{ needs.resolve.outputs.head_sha }}
 
       - name: Dispatch staging deploy to distill_ops
         env:
@@ -111,9 +160,9 @@ jobs:
             --method POST \
             repos/norrietaylor/distill_ops/dispatches \
             -f "event_type=staging-deploy" \
-            --field "client_payload[image_tag]=${{ steps.pr.outputs.image_tag }}" \
-            --field "client_payload[pr_number]=${{ steps.pr.outputs.pr_number }}" \
-            --field "client_payload[head_sha]=${{ steps.pr.outputs.head_sha }}" \
+            --field "client_payload[image_tag]=${{ needs.resolve.outputs.image_tag }}" \
+            --field "client_payload[pr_number]=${{ needs.resolve.outputs.pr_number }}" \
+            --field "client_payload[head_sha]=${{ needs.resolve.outputs.head_sha }}" \
             --field "client_payload[repo]=${{ github.repository }}"
 
       - name: Comment dispatch confirmation
@@ -121,9 +170,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          gh pr comment "${{ steps.pr.outputs.pr_number }}" \
+          gh pr comment "${{ needs.resolve.outputs.pr_number }}" \
             --repo "${{ github.repository }}" \
-            --body "🚀 Staging deploy dispatched — image \`${{ steps.pr.outputs.image_tag }}\` pushed. Build log: ${RUN_URL}. Fly deploy is handled in [distill_ops staging-deploy](https://github.com/norrietaylor/distill_ops/actions/workflows/staging-deploy.yml); it will comment back with the URL when the app is up."
+            --body "🚀 Staging deploy dispatched — image \`${{ needs.resolve.outputs.image_tag }}\` pushed. Build log: ${RUN_URL}. Fly deploy is handled in [distill_ops staging-deploy](https://github.com/norrietaylor/distill_ops/actions/workflows/staging-deploy.yml); it will comment back with the URL when the app is up."
 
   # ──────────────────────────────────────────────────────────────────
   # Job 2: /teardown-staging via comment
@@ -140,6 +189,9 @@ jobs:
         github.event.comment.author_association == 'COLLABORATOR'
       )
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - name: React to trigger comment
         env:
@@ -169,6 +221,8 @@ jobs:
     name: Dispatch staging teardown (PR closed)
     if: github.event_name == 'pull_request' && github.event.action == 'closed'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Dispatch staging teardown to distill_ops
         env:
