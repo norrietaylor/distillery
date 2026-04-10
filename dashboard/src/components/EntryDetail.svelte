@@ -254,6 +254,21 @@
     return result;
   }
 
+  /** Reset all action form state when the selected entry changes. */
+  function resetActionState(): void {
+    editMode = false;
+    editContent = "";
+    editSubmitting = false;
+    editError = null;
+    correctMode = false;
+    correctionText = "";
+    correctSubmitting = false;
+    correctError = null;
+    archiveConfirm = false;
+    archiveSubmitting = false;
+    archiveError = null;
+  }
+
   /** Derive a short human-readable title from an entry (first 60 chars of content). */
   function entryTitle(e: EntryData | null): string {
     if (!e) return "Entry";
@@ -279,6 +294,7 @@
   function badgeClass(status: string): string {
     if (status === "verified") return "badge badge--verified";
     if (status === "testing") return "badge badge--testing";
+    if (status === "archived") return "badge badge--archived";
     return "badge badge--unverified";
   }
 
@@ -286,6 +302,7 @@
   function badgeLabel(status: string): string {
     if (status === "verified") return "Verified";
     if (status === "testing") return "Testing";
+    if (status === "archived") return "Archived";
     return "Unverified";
   }
 
@@ -339,6 +356,7 @@
   $effect(() => {
     const id = entryId;
     if (id) {
+      resetActionState();
       // If this id change wasn't triggered by our own navigation, it's an
       // external update (e.g. parent selecting a search result) — reset the
       // breadcrumb trail so we start fresh.
@@ -348,6 +366,7 @@
       internalNavTarget = null;
       void fetchEntry(id);
     } else {
+      resetActionState();
       entry = null;
       relations = [];
       loadError = null;
@@ -872,6 +891,12 @@
     background: color-mix(in srgb, var(--fg-muted, #a6adc8) 15%, transparent);
     color: var(--fg-muted, #a6adc8);
     border: 1px solid color-mix(in srgb, var(--fg-muted, #a6adc8) 30%, transparent);
+  }
+
+  .badge--archived {
+    background: color-mix(in srgb, var(--fg-muted, #585b70) 20%, transparent);
+    color: var(--fg-subtle, #6c7086);
+    border: 1px solid color-mix(in srgb, var(--fg-muted, #585b70) 35%, transparent);
   }
 
   /* Action button group */

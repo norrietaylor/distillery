@@ -91,6 +91,9 @@
   /** Error encountered during initial fetch. */
   let error = $state<string | null>(null);
 
+  /** Monotonic version counter to detect stale graph fetches. */
+  let graphVersion = 0;
+
   /**
    * First-degree related entries grouped by relation_type.
    * Map<relationType, GraphNode[]>
@@ -173,6 +176,7 @@
       error = "Not connected to MCP server";
       return;
     }
+    const version = graphVersion;
     loading = true;
     error = null;
 
@@ -187,6 +191,8 @@
           bridge!.callTool("distillery_relations", { action: "get", entry_id: id }),
         ),
       );
+
+      if (version !== graphVersion) return;
 
       // Check if all fetches failed — surface a single error rather than silent empty
       const allFailed = results.every(
@@ -229,10 +235,13 @@
         }
       }
     } catch (err) {
+      if (version !== graphVersion) return;
       error = err instanceof Error ? err.message : "Failed to load relations";
     } finally {
-      loading = false;
-      relatedByType = newRelatedByType;
+      if (version === graphVersion) {
+        loading = false;
+        relatedByType = newRelatedByType;
+      }
     }
   }
 
@@ -242,6 +251,7 @@
     const fetchKey = `${seedEntryId}::${phase1ResultIds.join("|")}`;
     if (fetchKey !== lastFetchKey) {
       lastFetchKey = fetchKey;
+      graphVersion++;
       relatedByType = new Map();
       secondDegree = new Map();
       void fetchAllRelations();
