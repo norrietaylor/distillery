@@ -20,7 +20,7 @@ Ask the user:
 Enable scheduled tasks? This includes:
   • Feed polling — every hour
   • Feed rescoring — daily (re-evaluates relevance after new knowledge)
-  • KB maintenance — weekly (metrics, quality, stale entries, source suggestions)
+  • KB maintenance — weekly (poll, rescore, classify inbox)
 (yes / no)
 ```
 
@@ -29,7 +29,7 @@ If yes, create the cron job:
 ```python
 CronCreate(
   cron="<random off-peak minute> * * * *",
-  prompt="Use distillery_poll to poll all configured feed sources. Report a one-line summary of items fetched and stored.",
+  prompt="POST /hooks/poll to poll all configured feed sources. Report a one-line summary of items fetched and stored.",
   recurring=True,
   durable=True
 )
@@ -59,7 +59,7 @@ Check `CronList` for an existing rescore job. If none exists, create one:
 ```python
 CronCreate(
   cron="<random minute> 6 * * *",
-  prompt="Use distillery_rescore(limit=200) to re-score feed entries against the current knowledge base. Report: rescored, upgraded, downgraded, archived counts.",
+  prompt="POST /hooks/rescore?limit=200 to re-score feed entries against the current knowledge base. Report: rescored, upgraded, downgraded, archived counts.",
   recurring=True,
   durable=True
 )
@@ -73,7 +73,7 @@ Daily rescore enabled: 06:<minute> UTC (cron job <job_id>)
 
 ## 4c. Weekly — Knowledge Base Maintenance
 
-A weekly maintenance pass collects metrics, checks search quality, identifies stale entries, and refreshes source suggestions. Results are stored as a digest entry for longitudinal tracking.
+A weekly maintenance pass runs the full pipeline: poll feeds, rescore entries, and classify inbox items. This is handled by a single `/api/maintenance` webhook call.
 
 Skip this step if the user declined scheduled tasks.
 
@@ -82,14 +82,7 @@ Check `CronList` for an existing maintenance job. If none exists, create one:
 ```python
 CronCreate(
   cron="<random minute> 7 * * 1",
-  prompt="""Run weekly Distillery maintenance:
-1. Call distillery_metrics(scope="summary", period_days=7) — note entry growth, search volume, storage usage.
-2. Call distillery_metrics(scope="search_quality") — note positive feedback rate and avg result count.
-3. Call distillery_stale(days=30, limit=10) — note count and oldest entries.
-4. Call distillery_interests(recency_days=30, top_n=10) — note top tags and domains.
-5. Call distillery_interests(suggest_sources=True, max_suggestions=3) — note any new recommendations.
-6. Store a digest: distillery_store(content=<one-paragraph summary of findings>, entry_type="session", author="distillery-maintenance", tags=["digest", "weekly", "maintenance"], metadata={"period_start": "<7 days ago ISO>", "period_end": "<today ISO>"}).
-Report: entry counts, search quality trend, stale entry count, top interests, suggested sources.""",
+  prompt="POST /api/maintenance to run weekly Distillery maintenance (poll → rescore → classify-batch). Report the combined results: items polled, rescored, and classified.",
   recurring=True,
   durable=True
 )
@@ -99,6 +92,5 @@ Display:
 
 ```text
 Weekly maintenance enabled: Mondays at 07:<minute> UTC (cron job <job_id>)
-  Collects: metrics, search quality, stale entries, interests, source suggestions
-  Stores: weekly digest entry for tracking trends
+  Runs: poll → rescore → classify-batch pipeline
 ```

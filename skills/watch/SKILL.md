@@ -3,7 +3,6 @@ name: watch
 description: "Add, remove, or list monitored feed sources (RSS and GitHub)"
 allowed-tools:
   - "mcp__*__distillery_watch"
-  - "mcp__*__distillery_metrics"
   - "CronCreate"
   - "CronList"
   - "CronDelete"
@@ -70,10 +69,12 @@ After a successful `add`, ensure automatic polling is configured. Never create d
 
 **4b. Local schedule (CronCreate):**
 
-Check `CronList` for any job whose prompt contains `distillery_poll`. If found, skip to Step 5.
+Check `CronList` for any job whose prompt contains `/hooks/poll`. If found, skip to Step 5.
+
+Determine the webhook base URL from `.mcp.json` (same logic as Step 4a transport detection). Append `/hooks/poll` to form the poll webhook URL.
 
 ```text
-CronCreate(cron="23 * * * *", prompt="Use distillery_poll to poll all configured feed sources. Report a one-line summary of items fetched and stored.", recurring=true, durable=true)
+CronCreate(cron="23 * * * *", prompt="POST to <webhook-base-url>/hooks/poll to trigger feed polling. Report a one-line summary of the response.", recurring=true, durable=true)
 ```
 Pick an off-peak minute (not :00 or :30). Durable jobs survive restarts but auto-expire after 7 days.
 

@@ -1,9 +1,13 @@
-"""MCP server for Distillery — 20 tools over stdio or HTTP.
+"""MCP server for Distillery — 12 tools over stdio or HTTP.
 
 Handlers live in ``src/distillery/mcp/tools/`` (crud, search, classify, quality,
 analytics, feeds, configure, meta). This module owns: FastMCP app creation,
 lifespan, shared-state init, tool registration wrappers, and middleware
 composition.
+
+Analytics tools (stale, aggregate, tag_tree, metrics, interests, type_schemas)
+and feed-management tools (poll, rescore) have been moved to REST webhook
+endpoints or MCP resources — they are no longer registered as MCP tools.
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ from fastmcp import Context, FastMCP  # noqa: F401
 from mcp import types
 
 from distillery.config import DistilleryConfig, load_config
+from distillery.mcp.resources import register_dashboard_resource
 from distillery.mcp.tools._common import (
     _get_authenticated_user,
     error_response,
@@ -69,6 +74,7 @@ _UNSET: Any = object()
 # Explicit re-exports for mypy --strict (no_implicit_reexport).
 __all__ = [
     "create_server",
+    "register_dashboard_resource",
     "error_response",
     "success_response",
     "_get_authenticated_user",
@@ -434,6 +440,9 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         tag_prefix: str | None = None,
         output_mode: str = "full",
         content_max_length: int | None = None,
+        stale_days: int | None = None,
+        group_by: str | None = None,
+        output: str | None = None,
     ) -> list[types.TextContent]:
         """List knowledge entries with optional filters and pagination (newest first).
 
@@ -442,6 +451,11 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         session_id: filter by session identifier.
         output_mode: "full" (default), "summary", "ids",
         or "review" (filters to pending_review and enriches with confidence/classification_reasoning).
+        stale_days: restrict to entries not accessed in the last N days (>= 1).
+        group_by: return grouped counts instead of entries; one of entry_type, status, author,
+        project, source, tags. Mutually exclusive with output="stats".
+        output: "stats" returns aggregate statistics (entries_by_type, entries_by_status,
+        total_entries, storage_bytes). Mutually exclusive with group_by.
         """
         c = _lc(ctx)
         args: dict[str, Any] = dict(
@@ -461,42 +475,12 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 date_to=date_to,
                 tag_prefix=tag_prefix,
                 content_max_length=content_max_length,
+                stale_days=stale_days,
+                group_by=group_by,
+                output=output,
             ),
         )
         return await _handle_list(store=c["store"], arguments=args)
-
-    @server.tool
-    async def distillery_aggregate(  # noqa: PLR0913
-        ctx: Context,
-        group_by: str,
-        entry_type: str | None = None,
-        status: str | None = None,
-        source: str | None = None,
-        session_id: str | None = None,
-        date_from: str | None = None,
-        date_to: str | None = None,
-        tag_prefix: str | None = None,
-        limit: int = 50,
-    ) -> list[types.TextContent]:
-        """Aggregate entry counts grouped by a field (entry_type, status, author, project, source, etc.).
-
-        source and session_id filter the entries before aggregation.
-        """
-        c = _lc(ctx)
-        args: dict[str, Any] = dict(
-            group_by=group_by,
-            limit=limit,
-            **_omit_none(
-                entry_type=entry_type,
-                status=status,
-                source=source,
-                session_id=session_id,
-                date_from=date_from,
-                date_to=date_to,
-                tag_prefix=tag_prefix,
-            ),
-        )
-        return await _handle_aggregate(store=c["store"], arguments=args)
 
     @server.tool
     async def distillery_search(  # noqa: PLR0913
@@ -622,67 +606,6 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         return result
 
     @server.tool
-    async def distillery_metrics(
-        ctx: Context,
-        scope: str = "full",
-        period_days: int = 30,
-        entry_type: str | None = None,
-        date_from: str | None = None,
-        user: str | None = None,
-    ) -> list[types.TextContent]:
-        """Return usage metrics and statistics for the knowledge store.
-
-        scope controls the payload returned:
-          "full" (default): complete metrics — entries, activity, search, quality, staleness, storage.
-          "summary": entry counts by type/status, database size, embedding model info.
-          "search_quality": search totals, feedback rates, quality breakdown (entry_type optional).
-          "audit": login history, user activity, and recent operations.
-            Accepts optional date_from (ISO 8601 string) and user (string) filters.
-            Incompatible with entry_type.
-        period_days >= 1 (used for "full" scope only).
-        """
-        c = _lc(ctx)
-        args: dict[str, Any] = dict(
-            scope=scope,
-            period_days=period_days,
-            **_omit_none(entry_type=entry_type, date_from=date_from, user=user),
-        )
-        return await _handle_metrics(
-            store=c["store"],
-            config=c["config"],
-            embedding_provider=c["embedding_provider"],
-            arguments=args,
-        )
-
-    @server.tool
-    async def distillery_stale(
-        ctx: Context,
-        days: int | None = None,
-        limit: int = 20,
-        entry_type: str | None = None,
-    ) -> list[types.TextContent]:
-        """Return stale entries based on last-access time. days defaults to config stale_days."""
-        c = _lc(ctx)
-        return await _handle_stale(
-            store=c["store"],
-            config=c["config"],
-            arguments=dict(limit=limit, **_omit_none(days=days, entry_type=entry_type)),
-        )
-
-    @server.tool
-    async def distillery_tag_tree(
-        ctx: Context, prefix: str | None = None
-    ) -> list[types.TextContent]:
-        """Return a nested tag hierarchy with entry counts. prefix filters by namespace."""
-        c = _lc(ctx)
-        return await _handle_tag_tree(store=c["store"], arguments={"prefix": prefix})
-
-    @server.tool
-    async def distillery_type_schemas(ctx: Context) -> list[types.TextContent]:  # noqa: ARG001
-        """Return the metadata schemas for all structured entry types."""
-        return await _handle_type_schemas()
-
-    @server.tool
     async def distillery_watch(  # noqa: PLR0913
         ctx: Context,
         action: str,
@@ -709,49 +632,6 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                     trust_weight=trust_weight,
                 ),
             ),
-        )
-
-    @server.tool
-    async def distillery_interests(  # noqa: PLR0913
-        ctx: Context,
-        recency_days: int = 90,
-        top_n: int = 20,
-        suggest_sources: bool = False,
-        max_suggestions: int = 5,
-    ) -> list[types.TextContent]:
-        """Extract an interest profile (top tags, bookmark domains, tracked repos) from the knowledge base.
-
-        When suggest_sources=True, also returns heuristic feed source suggestions
-        derived from tracked repos and bookmark domains (up to max_suggestions).
-        """
-        c = _lc(ctx)
-        return await _handle_interests(
-            store=c["store"],
-            config=c["config"],
-            arguments={
-                "recency_days": recency_days,
-                "top_n": top_n,
-                "suggest_sources": suggest_sources,
-                "max_suggestions": max_suggestions,
-            },
-        )
-
-    @server.tool
-    async def distillery_poll(
-        ctx: Context, source_url: str | None = None
-    ) -> list[types.TextContent]:
-        """Poll configured feed sources and store relevant items. source_url polls one; None polls all."""
-        c = _lc(ctx)
-        return await _handle_poll(
-            store=c["store"], config=c["config"], arguments=_omit_none(source_url=source_url)
-        )
-
-    @server.tool
-    async def distillery_rescore(ctx: Context, limit: int = 100) -> list[types.TextContent]:
-        """Re-score existing feed entries against the current knowledge base."""
-        c = _lc(ctx)
-        return await _handle_rescore(
-            store=c["store"], config=c["config"], arguments={"limit": limit}
         )
 
     @server.tool
@@ -807,6 +687,21 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             config=c["config"],
             arguments={"section": section, "key": key, "value": value},
         )
+
+    @server.resource("distillery://schemas/entry-types")
+    async def entry_type_schemas() -> str:
+        """Return the metadata schemas for all structured entry types as a JSON resource.
+
+        Replaces the former ``distillery_type_schemas`` tool.  Clients read this
+        resource to discover the required/optional metadata fields and constraints
+        for each entry type (session, bookmark, minutes, meeting, reference, idea,
+        inbox, plus any structured types with richer schemas).
+        """
+        result = await _handle_type_schemas()
+        return result[0].text if result else "{}"
+
+    # Register ui:// resources (MCP Apps dashboard).
+    register_dashboard_resource(server)
 
     return server
 
