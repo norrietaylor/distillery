@@ -1583,12 +1583,14 @@ def _cmd_maintenance_classify(
         # Call the webhook handler directly (not via HTTP).
         response = await _run_classify_batch(state, entry_type=entry_type, mode=mode)
 
-        # Extract the JSON data from the response.
-        if hasattr(response, "body"):
-            import json as json_module
+        # Extract the JSON data from the JSONResponse.
+        import json as json_module
 
-            return json_module.loads(response.body.decode("utf-8"))
-        return response
+        body = response.body
+        raw: dict[str, Any] = json_module.loads(
+            body.decode("utf-8") if isinstance(body, bytes) else str(body)
+        )
+        return raw
 
     try:
         result = asyncio.run(_run())

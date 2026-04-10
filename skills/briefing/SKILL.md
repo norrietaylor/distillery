@@ -102,7 +102,7 @@ If `--team` was passed, set `team_mode = true` and skip the author count check.
 Otherwise, call:
 
 ```python
-distillery_list(group_by="author", project=<project>, output_mode="stats")
+distillery_list(group_by="author", project=<project>)
 ```
 
 If the response contains more than one author group, set `team_mode = true`. If the call fails, set `team_mode = false` and continue (non-fatal).
@@ -338,7 +338,7 @@ Generated: 2026-04-08 09:15 UTC
 - Corrections section uses `distillery_relations(action="get", relation_type="corrects")` — failure is non-fatal
 - Stale knowledge failure is non-fatal — omit the section and continue
 - Unresolved failure is non-fatal — omit the section and continue
-- Team mode is activated by `--team` flag or auto-detected: `distillery_list(group_by="author", output_mode="stats")` returning >1 author group
+- Team mode is activated by `--team` flag or auto-detected: `distillery_list(group_by="author")` returning >1 author group
 - Header shows `(solo)` or `(team)` based on detected mode
 - Team sections (6, 7, 8) are additive — solo sections are always rendered unchanged
 - Team activity groups entries by author from the past 7 days only — entries older than 7 days are excluded

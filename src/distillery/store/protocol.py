@@ -8,7 +8,7 @@ so any class implementing the required async methods is a valid backend.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, overload, runtime_checkable
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -161,6 +161,30 @@ class DistilleryStore(Protocol):
             sorted by descending score.
         """
         ...
+
+    @overload
+    async def list_entries(
+        self,
+        filters: dict[str, Any] | None,
+        limit: int,
+        offset: int,
+        *,
+        stale_days: int | None = ...,
+        group_by: None = ...,
+        output: None = ...,
+    ) -> list[Entry]: ...
+
+    @overload
+    async def list_entries(
+        self,
+        filters: dict[str, Any] | None,
+        limit: int,
+        offset: int,
+        *,
+        stale_days: int | None = ...,
+        group_by: str | None = ...,
+        output: str | None = ...,
+    ) -> list[Entry] | dict[str, Any]: ...
 
     async def list_entries(
         self,
