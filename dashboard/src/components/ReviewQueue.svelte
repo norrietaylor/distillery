@@ -17,7 +17,7 @@
    */
 
   import type { McpBridge } from "$lib/mcp-bridge";
-  import { selectedProject, currentUser } from "$lib/stores";
+  import { selectedProject, refreshTick, currentUser } from "$lib/stores";
   import LoadingSkeleton from "./LoadingSkeleton.svelte";
 
   interface Props {
@@ -181,7 +181,10 @@
     }
   }
 
+  // Reload on each refresh tick and project change
   $effect(() => {
+    const _tick = $refreshTick;
+    const _project = $selectedProject;
     void loadEntries();
   });
 
