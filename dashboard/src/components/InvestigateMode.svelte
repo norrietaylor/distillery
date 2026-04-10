@@ -167,10 +167,19 @@
     if (!text.trim()) return [];
     try {
       const parsed: unknown = JSON.parse(text);
-      if (Array.isArray(parsed)) return parsed.map(normalizeResult);
-      if (parsed && typeof parsed === "object") {
-        return [normalizeResult(parsed as Record<string, unknown>)];
+      // Handle distillery_search response: { results: [{ score, entry }], count }
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const wrapped = parsed as Record<string, unknown>;
+        if (Array.isArray(wrapped.results)) {
+          return wrapped.results.map((r: unknown) => {
+            const row = r as { score?: number; entry?: Record<string, unknown> };
+            const entry = row.entry ?? (r as Record<string, unknown>);
+            return normalizeResult({ ...entry, score: row.score ?? entry.score });
+          });
+        }
+        return [normalizeResult(wrapped)];
       }
+      if (Array.isArray(parsed)) return parsed.map(normalizeResult);
     } catch {
       // fall through to line-by-line
     }
@@ -246,26 +255,24 @@
     }
   });
 
-  // Phase 2 auto-advance: when Phase 2 becomes active, mark it complete and
-  // advance to Phase 3 (RelationGraph loads its own data independently).
-  $effect(() => {
-    if (currentPhase === 2 && completedPhase < 2) {
-      completedPhase = Math.max(completedPhase, 2);
-      currentPhase = 3;
-    }
-  });
-
   // ---------------------------------------------------------------------------
   // Phase 4: Gap Analysis
   // ---------------------------------------------------------------------------
 
-  /** Synthesize a gap-fill query from seed content + top tags from Phase 3. */
+  /** The current pivot query derived from the last breadcrumb entry. */
+  const currentQuery = $derived(
+    investigationPath.length > 0
+      ? (investigationPath[investigationPath.length - 1]?.query ?? buildQuery(seedContent))
+      : buildQuery(seedContent),
+  );
+
+  /** Synthesize a gap-fill query from current pivot + top tags from Phase 3. */
   function synthesizeGapQuery(): string {
-    const seedLine = seedContent.split("\n")[0] ?? seedContent;
+    const pivotLine = currentQuery.split("\n")[0] ?? currentQuery;
     const topTags = (phase3DiscoveredTags.length > 0 ? phase3DiscoveredTags : phase3SeedTags)
       .slice(0, 3)
       .join(" ");
-    return topTags ? `${seedLine} ${topTags}` : seedLine;
+    return topTags ? `${pivotLine} ${topTags}` : pivotLine;
   }
 
   async function runPhase4GapFill() {
@@ -340,7 +347,7 @@
   // ---------------------------------------------------------------------------
 
   function handlePhaseClick(phaseNumber: number) {
-    if (phaseNumber <= completedPhase || phaseNumber === currentPhase) {
+    if (phaseNumber <= completedPhase || phaseNumber === currentPhase || phaseNumber === completedPhase + 1) {
       currentPhase = phaseNumber;
     }
   }
@@ -378,7 +385,7 @@
       {#each PHASES as phase (phase.number)}
         {@const isActive = phase.number === currentPhase}
         {@const isCompleted = phase.number <= completedPhase}
-        {@const isClickable = isCompleted || isActive}
+        {@const isClickable = isCompleted || isActive || phase.number === completedPhase + 1}
         <li class="phase-item" class:phase-item--active={isActive} class:phase-item--completed={isCompleted}>
           <button
             class="phase-btn"

@@ -162,18 +162,24 @@ describe("RelationGraph", () => {
     });
 
     it("calls onPin when seed pin button is clicked", async () => {
-      const bridge = makeMockBridge(async () =>
-        makeResult(makeRelationsResponse("any", [])),
-      );
+      const bridge = makeMockBridge(async (name, args) => {
+        if (name === "distillery_get") {
+          const id = (args as Record<string, unknown>)["entry_id"] as string;
+          return makeResult(JSON.stringify({ id, content: "Seed entry content", entry_type: "knowledge" }));
+        }
+        return makeResult(makeRelationsResponse("any", []));
+      });
       render(RelationGraph, { props: { ...defaultProps, bridge } });
       await waitFor(() => {
         expect(screen.getByRole("button", { name: "Pin seed entry" })).toBeTruthy();
       });
 
       fireEvent.click(screen.getByRole("button", { name: "Pin seed entry" }));
-      expect(onPin).toHaveBeenCalledWith(
-        expect.objectContaining({ id: "seed-001" }),
-      );
+      await waitFor(() => {
+        expect(onPin).toHaveBeenCalledWith(
+          expect.objectContaining({ id: "seed-001" }),
+        );
+      });
     });
   });
 
@@ -354,8 +360,11 @@ describe("RelationGraph", () => {
     });
 
     it("calls onPin when pin button clicked for related entry", async () => {
-      const bridge = makeMockBridge(async (_name, args) => {
+      const bridge = makeMockBridge(async (name, args) => {
         const entryId = (args as Record<string, unknown>)["entry_id"] as string;
+        if (name === "distillery_get") {
+          return makeResult(JSON.stringify({ id: entryId, content: "Entry content for " + entryId, entry_type: "knowledge" }));
+        }
         if (entryId === "seed-001") {
           return makeResult(
             makeRelationsResponse("seed-001", [
@@ -371,9 +380,11 @@ describe("RelationGraph", () => {
         expect(screen.getByRole("button", { name: /Pin entry pin-target/ })).toBeTruthy();
       });
       fireEvent.click(screen.getByRole("button", { name: /Pin entry pin-target/ }));
-      expect(onPin).toHaveBeenCalledWith(
-        expect.objectContaining({ id: "pin-target" }),
-      );
+      await waitFor(() => {
+        expect(onPin).toHaveBeenCalledWith(
+          expect.objectContaining({ id: "pin-target" }),
+        );
+      });
     });
   });
 

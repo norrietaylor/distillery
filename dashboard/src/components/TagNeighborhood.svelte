@@ -270,6 +270,8 @@
   // Click a tag cluster → scoped search
   // ---------------------------------------------------------------------------
 
+  let activeTagRequest = 0;
+
   async function handleTagClick(tag: string) {
     if (expandedTag === tag) {
       // Toggle closed
@@ -283,6 +285,7 @@
       return;
     }
 
+    const requestId = ++activeTagRequest;
     expandedTag = tag;
     tagResults = [];
     tagResultsLoading = true;
@@ -297,6 +300,7 @@
       if (project) args["project"] = project;
 
       const result = await bridge.callTool("distillery_search", args);
+      if (requestId !== activeTagRequest) return;
       if (result.isError) {
         tagResultsError = result.text || "Search failed";
         tagResults = [];
@@ -307,10 +311,13 @@
       tagResults = results;
       onResults?.(results);
     } catch (err) {
+      if (requestId !== activeTagRequest) return;
       tagResultsError = err instanceof Error ? err.message : "Search failed";
       tagResults = [];
     } finally {
-      tagResultsLoading = false;
+      if (requestId === activeTagRequest) {
+        tagResultsLoading = false;
+      }
     }
   }
 

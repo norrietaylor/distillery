@@ -119,6 +119,9 @@
    */
   let internalNavTarget: string | null = null;
 
+  /** Monotonically increasing counter to detect stale fetch results. */
+  let fetchVersion = 0;
+
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
@@ -297,6 +300,7 @@
       return;
     }
 
+    const version = ++fetchVersion;
     loading = true;
     loadError = null;
     entry = null;
@@ -307,6 +311,9 @@
         bridge.callTool("distillery_get", { entry_id: id }),
         bridge.callTool("distillery_relations", { action: "get", entry_id: id }),
       ]);
+
+      // Discard results if a newer fetch has started
+      if (version !== fetchVersion) return;
 
       if (entryResult.isError) {
         loadError = entryResult.text || "Failed to load entry";
@@ -319,9 +326,12 @@
         relations = parseRelations(relationsResult.text);
       }
     } catch (err) {
+      if (version !== fetchVersion) return;
       loadError = err instanceof Error ? err.message : "Failed to load entry";
     } finally {
-      loading = false;
+      if (version === fetchVersion) {
+        loading = false;
+      }
     }
   }
 

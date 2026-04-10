@@ -128,12 +128,6 @@
     }
   }
 
-  function handleKeydown(event: KeyboardEvent) {
-    if (event.key === "Enter") {
-      void runSearch();
-    }
-  }
-
   function handleSubmit(event: SubmitEvent) {
     event.preventDefault();
     void runSearch();
@@ -149,7 +143,6 @@
       type="search"
       placeholder="Search entries..."
       bind:value={query}
-      onkeydown={handleKeydown}
       aria-label="Search query"
       disabled={loading}
     />
