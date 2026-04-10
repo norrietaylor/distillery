@@ -129,6 +129,10 @@
   let phase1Loading = $state(false);
   let phase1Error = $state<string | null>(null);
 
+  /** Request counters to detect stale in-flight phase searches. */
+  let activePhase1Request = 0;
+  let activePhase4Request = 0;
+
   /** Highest phase that has been completed (0 = none). */
   let completedPhase = $state(0);
 
@@ -222,6 +226,7 @@
       phase1Error = "Not connected to MCP server";
       return;
     }
+    const requestId = ++activePhase1Request;
     phase1Loading = true;
     phase1Error = null;
     try {
@@ -229,6 +234,7 @@
       const project = $selectedProject;
       if (project) args["project"] = project;
       const result = await bridge.callTool("distillery_recall", args);
+      if (requestId !== activePhase1Request) return;
       if (result.isError) {
         phase1Error = result.text || "Search failed";
         phase1Results = [];
@@ -239,10 +245,13 @@
       phase1Results = all.filter((r) => !seenEntryIds.has(r.id));
       completedPhase = Math.max(completedPhase, 1);
     } catch (err) {
+      if (requestId !== activePhase1Request) return;
       phase1Error = err instanceof Error ? err.message : "Search failed";
       phase1Results = [];
     } finally {
-      phase1Loading = false;
+      if (requestId === activePhase1Request) {
+        phase1Loading = false;
+      }
     }
   }
 
@@ -280,6 +289,7 @@
       phase4Error = "Not connected to MCP server";
       return;
     }
+    const requestId = ++activePhase4Request;
     phase4Loading = true;
     phase4Error = null;
     try {
@@ -288,6 +298,7 @@
       const project = $selectedProject;
       if (project) args["project"] = project;
       const result = await bridge.callTool("distillery_search", args);
+      if (requestId !== activePhase4Request) return;
       if (result.isError) {
         phase4Error = result.text || "Gap analysis failed";
         phase4Results = [];
@@ -298,10 +309,13 @@
       phase4Results = all.filter((r) => !seenEntryIds.has(r.id));
       completedPhase = Math.max(completedPhase, 4);
     } catch (err) {
+      if (requestId !== activePhase4Request) return;
       phase4Error = err instanceof Error ? err.message : "Gap analysis failed";
       phase4Results = [];
     } finally {
-      phase4Loading = false;
+      if (requestId === activePhase4Request) {
+        phase4Loading = false;
+      }
     }
   }
 
@@ -488,15 +502,31 @@
             if (found) {
               handlePivot(found);
             } else {
-              // Navigate to an entry not in phase1 results: treat as pivot with id
-              seenEntryIds = new Set([...seenEntryIds, id]);
-              investigationPath = [
-                ...investigationPath,
-                { id, title: id, query: id },
-              ];
-              currentPhase = 1;
-              completedPhase = 0;
-              phase1Results = [];
+              // Navigate to an entry not in phase1 results: hydrate via distillery_get
+              void (async () => {
+                if (!bridge?.isConnected) return;
+                try {
+                  const result = await bridge.callTool("distillery_get", { entry_id: id });
+                  if (result.isError) return;
+                  const raw: unknown = JSON.parse(result.text);
+                  const obj = (Array.isArray(raw) ? raw[0] : raw) as Record<string, unknown> | undefined;
+                  if (!obj) return;
+                  const content = String(obj["content"] ?? "");
+                  const firstLine = content.split("\n")[0] ?? content;
+                  const title = firstLine.length > 60 ? firstLine.slice(0, 57) + "…" : firstLine || id;
+                  const query = buildQuery(content);
+                  seenEntryIds = new Set([...seenEntryIds, id]);
+                  investigationPath = [
+                    ...investigationPath,
+                    { id, title, query },
+                  ];
+                  currentPhase = 1;
+                  completedPhase = 0;
+                  phase1Results = [];
+                } catch {
+                  // If fetch fails, skip pivoting rather than storing raw id as query
+                }
+              })();
             }
           }}
           onPin={(entry) => onPin?.(entry)}
