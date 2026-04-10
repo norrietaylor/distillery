@@ -1,0 +1,64 @@
+Type: test
+Test Suite: BriefingStats Component Tests
+Command: npm test -- BriefingStats.test.ts --run
+Expected: All tests passing
+Timestamp: 2026-04-09T17:48:05Z
+
+=== TEST OUTPUT ===
+
+> distillery-dashboard@0.1.0 test
+> vitest run BriefingStats.test.ts --run
+
+ RUN  v3.2.4 /home/norrie.guest/code/distillery/.worktrees/feature-dashboard-home/dashboard
+
+ ✓ src/components/BriefingStats.test.ts (27 tests) 79ms
+
+ Test Files  1 passed (1)
+      Tests  27 passed (27)
+   Start at  17:48:05
+   Duration  845ms (transform 243ms, setup 0ms, collect 467ms, tests 79ms, environment 158ms, prepare 30ms)
+
+=== COVERAGE ===
+
+The test suite includes 27 comprehensive tests covering:
+
+1. Rendering (3 tests)
+   - Loading skeleton display
+   - 5 metric cards display
+   - Card layout verification
+
+2. Data Loading (9 tests)
+   - Total entries loading
+   - Stale entries loading
+   - Pending review loading
+   - Inbox loading
+   - Metric value parsing (count, total, bare numbers, verbose responses)
+
+3. Expiring Entries Calculation (3 tests)
+   - Counts entries within 14 days
+   - Excludes entries beyond 14 days
+   - Excludes past expiry dates
+
+4. Color Coding (4 tests)
+   - Danger variant for pending review > 10
+   - No danger variant for pending review <= 10
+   - Warning variant for stale > 50
+   - No warning variant for stale <= 50
+
+5. Error States (3 tests)
+   - Total entries load failure
+   - Stale entries load exception
+   - Partial failure with other metrics succeeding
+
+6. Project Filtering (2 tests)
+   - Project filter passed to all calls
+   - No project filter when none selected
+
+7. Refresh Triggers (1 test)
+   - Metrics reload on refresh tick change
+
+8. No Bridge Scenarios (2 tests)
+   - Renders without crashing
+   - Shows all cards without bridge
+
+Status: PASS
