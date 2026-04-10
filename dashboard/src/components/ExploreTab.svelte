@@ -265,7 +265,7 @@
         </div>
 
         <div class="results-panel">
-          <ResultsList {bridge} query={currentQuery} onRowClick={handleEntrySelect} />
+          <ResultsList {bridge} query={currentQuery} project={$selectedProject} onRowClick={handleEntrySelect} />
         </div>
       {/if}
     </div>

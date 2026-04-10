@@ -76,13 +76,26 @@ export interface PinnedEntry {
 
 const WORKING_SET_KEY = "distillery.workingSet";
 
+/** Type guard: returns true if value has all required PinnedEntry string fields. */
+function isPinnedEntry(value: unknown): value is PinnedEntry {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.id === "string" &&
+    typeof v.title === "string" &&
+    typeof v.type === "string" &&
+    typeof v.content === "string" &&
+    typeof v.pinnedAt === "string"
+  );
+}
+
 /** Load persisted working set from sessionStorage, or return empty array. */
 function loadFromSession(): PinnedEntry[] {
   try {
     const raw = sessionStorage.getItem(WORKING_SET_KEY);
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as PinnedEntry[]) : [];
+    return Array.isArray(parsed) ? parsed.filter(isPinnedEntry) : [];
   } catch {
     return [];
   }

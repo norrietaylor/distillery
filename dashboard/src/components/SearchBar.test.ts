@@ -94,7 +94,7 @@ describe("SearchBar", () => {
       });
     });
 
-    it("calls distillery_recall when Enter key is pressed in the input", async () => {
+    it("calls distillery_recall when form is submitted (Enter key / submit button)", async () => {
       const mockCallTool = vi.fn().mockResolvedValue(makeResult("[]"));
       const bridge = { isConnected: true, callTool: mockCallTool } as unknown as McpBridge;
 
@@ -102,7 +102,7 @@ describe("SearchBar", () => {
 
       const input = screen.getByPlaceholderText("Search entries...");
       fireEvent.input(input, { target: { value: "knowledge query" } });
-      fireEvent.keyDown(input, { key: "Enter" });
+      fireEvent.submit(input.closest("form")!);
 
       await waitFor(() => {
         expect(mockCallTool).toHaveBeenCalledWith(
@@ -133,7 +133,7 @@ describe("SearchBar", () => {
 
       const input = screen.getByPlaceholderText("Search entries...");
       fireEvent.input(input, { target: { value: "   " } });
-      fireEvent.keyDown(input, { key: "Enter" });
+      fireEvent.submit(input.closest("form")!);
 
       await new Promise((r) => setTimeout(r, 20));
       expect(mockCallTool).not.toHaveBeenCalled();
@@ -147,7 +147,7 @@ describe("SearchBar", () => {
 
       const input = screen.getByPlaceholderText("Search entries...");
       fireEvent.input(input, { target: { value: "typescript" } });
-      fireEvent.keyDown(input, { key: "Enter" });
+      fireEvent.submit(input.closest("form")!);
 
       await waitFor(() => {
         expect(mockCallTool).toHaveBeenCalledWith(
@@ -170,7 +170,7 @@ describe("SearchBar", () => {
 
       const input = screen.getByPlaceholderText("Search entries...");
       fireEvent.input(input, { target: { value: "test query" } });
-      fireEvent.keyDown(input, { key: "Enter" });
+      fireEvent.submit(input.closest("form")!);
 
       await waitFor(() => {
         expect(screen.getByRole("status", { name: "Searching" })).toBeTruthy();
@@ -191,7 +191,7 @@ describe("SearchBar", () => {
 
       const input = screen.getByPlaceholderText("Search entries...");
       fireEvent.input(input, { target: { value: "test query" } });
-      fireEvent.keyDown(input, { key: "Enter" });
+      fireEvent.submit(input.closest("form")!);
 
       await waitFor(() => {
         const btn = screen.getByRole("button", { name: "Run search" });
@@ -212,7 +212,7 @@ describe("SearchBar", () => {
 
       const input = screen.getByPlaceholderText("Search entries...");
       fireEvent.input(input, { target: { value: "test query" } });
-      fireEvent.keyDown(input, { key: "Enter" });
+      fireEvent.submit(input.closest("form")!);
 
       await waitFor(() => {
         const el = screen.getByPlaceholderText("Search entries...");
@@ -229,7 +229,7 @@ describe("SearchBar", () => {
 
       const input = screen.getByPlaceholderText("Search entries...");
       fireEvent.input(input, { target: { value: "test query" } });
-      fireEvent.keyDown(input, { key: "Enter" });
+      fireEvent.submit(input.closest("form")!);
 
       await waitFor(() => {
         expect(screen.queryByRole("status", { name: "Searching" })).toBeNull();
@@ -250,7 +250,7 @@ describe("SearchBar", () => {
 
       const input = screen.getByPlaceholderText("Search entries...");
       fireEvent.input(input, { target: { value: "svelte" } });
-      fireEvent.keyDown(input, { key: "Enter" });
+      fireEvent.submit(input.closest("form")!);
 
       await waitFor(() => {
         expect(screen.getByRole("list", { name: "Search results" })).toBeTruthy();
@@ -270,7 +270,7 @@ describe("SearchBar", () => {
 
       const input = screen.getByPlaceholderText("Search entries...");
       fireEvent.input(input, { target: { value: "array" } });
-      fireEvent.keyDown(input, { key: "Enter" });
+      fireEvent.submit(input.closest("form")!);
 
       await waitFor(() => {
         expect(screen.getByText(/Array result alpha/)).toBeTruthy();
@@ -287,7 +287,7 @@ describe("SearchBar", () => {
 
       const input = screen.getByPlaceholderText("Search entries...");
       fireEvent.input(input, { target: { value: "sample" } });
-      fireEvent.keyDown(input, { key: "Enter" });
+      fireEvent.submit(input.closest("form")!);
 
       await waitFor(() => {
         expect(screen.getByText("bookmark")).toBeTruthy();
@@ -303,7 +303,7 @@ describe("SearchBar", () => {
 
       const input = screen.getByPlaceholderText("Search entries...");
       fireEvent.input(input, { target: { value: "source" } });
-      fireEvent.keyDown(input, { key: "Enter" });
+      fireEvent.submit(input.closest("form")!);
 
       await waitFor(() => {
         expect(screen.getByText("rss.example.com")).toBeTruthy();
@@ -319,7 +319,7 @@ describe("SearchBar", () => {
 
       const input = screen.getByPlaceholderText("Search entries...");
       fireEvent.input(input, { target: { value: "score" } });
-      fireEvent.keyDown(input, { key: "Enter" });
+      fireEvent.submit(input.closest("form")!);
 
       await waitFor(() => {
         // 0.75 → "75%"
@@ -336,7 +336,7 @@ describe("SearchBar", () => {
 
       const input = screen.getByPlaceholderText("Search entries...");
       fireEvent.input(input, { target: { value: "tagged" } });
-      fireEvent.keyDown(input, { key: "Enter" });
+      fireEvent.submit(input.closest("form")!);
 
       await waitFor(() => {
         expect(screen.getByText("svelte")).toBeTruthy();
@@ -354,7 +354,7 @@ describe("SearchBar", () => {
 
       const input = screen.getByPlaceholderText("Search entries...");
       fireEvent.input(input, { target: { value: "long" } });
-      fireEvent.keyDown(input, { key: "Enter" });
+      fireEvent.submit(input.closest("form")!);
 
       await waitFor(() => {
         // Should show first 120 chars + ellipsis, not the full 130
@@ -374,7 +374,7 @@ describe("SearchBar", () => {
 
       const input = screen.getByPlaceholderText("Search entries...");
       fireEvent.input(input, { target: { value: "query" } });
-      fireEvent.keyDown(input, { key: "Enter" });
+      fireEvent.submit(input.closest("form")!);
 
       await waitFor(() => {
         expect(screen.getByRole("alert")).toBeTruthy();
@@ -391,7 +391,7 @@ describe("SearchBar", () => {
 
       const input = screen.getByPlaceholderText("Search entries...");
       fireEvent.input(input, { target: { value: "query" } });
-      fireEvent.keyDown(input, { key: "Enter" });
+      fireEvent.submit(input.closest("form")!);
 
       await waitFor(() => {
         expect(screen.getByRole("alert")).toBeTruthy();
@@ -412,13 +412,13 @@ describe("SearchBar", () => {
 
       const input = screen.getByPlaceholderText("Search entries...");
       fireEvent.input(input, { target: { value: "first" } });
-      fireEvent.keyDown(input, { key: "Enter" });
+      fireEvent.submit(input.closest("form")!);
 
       await waitFor(() => screen.getByRole("alert"));
 
       // Second search — should clear error
       fireEvent.input(input, { target: { value: "second" } });
-      fireEvent.keyDown(input, { key: "Enter" });
+      fireEvent.submit(input.closest("form")!);
 
       await waitFor(() => {
         expect(screen.queryByRole("alert")).toBeNull();
@@ -435,7 +435,7 @@ describe("SearchBar", () => {
 
       const input = screen.getByPlaceholderText("Search entries...");
       fireEvent.input(input, { target: { value: "obscure query" } });
-      fireEvent.keyDown(input, { key: "Enter" });
+      fireEvent.submit(input.closest("form")!);
 
       await waitFor(() => {
         expect(screen.getByText(/No results found/)).toBeTruthy();
@@ -455,7 +455,7 @@ describe("SearchBar", () => {
 
       const input = screen.getByPlaceholderText("Search entries...");
       fireEvent.input(input, { target: { value: "nothing" } });
-      fireEvent.keyDown(input, { key: "Enter" });
+      fireEvent.submit(input.closest("form")!);
 
       await waitFor(() => {
         expect(screen.getByText(/No results found/)).toBeTruthy();
@@ -474,7 +474,7 @@ describe("SearchBar", () => {
 
       const input = screen.getByPlaceholderText("Search entries...");
       fireEvent.input(input, { target: { value: "svelte" } });
-      fireEvent.keyDown(input, { key: "Enter" });
+      fireEvent.submit(input.closest("form")!);
 
       await waitFor(() => {
         expect(mockCallTool).toHaveBeenCalledWith(
@@ -494,7 +494,7 @@ describe("SearchBar", () => {
 
       const input = screen.getByPlaceholderText("Search entries...");
       fireEvent.input(input, { target: { value: "svelte" } });
-      fireEvent.keyDown(input, { key: "Enter" });
+      fireEvent.submit(input.closest("form")!);
 
       await waitFor(() => {
         const [, args] = mockCallTool.mock.calls[0] as [string, Record<string, unknown>];
@@ -516,7 +516,7 @@ describe("SearchBar", () => {
 
       const input = screen.getByPlaceholderText("Search entries...");
       fireEvent.input(input, { target: { value: "test" } });
-      fireEvent.keyDown(input, { key: "Enter" });
+      fireEvent.submit(input.closest("form")!);
 
       // No crash; just confirm no error state appears
       await new Promise((r) => setTimeout(r, 20));

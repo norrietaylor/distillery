@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/svelte";
 import TagNeighborhood from "./TagNeighborhood.svelte";
 import type { McpBridge, ToolCallTextResult } from "$lib/mcp-bridge";
@@ -63,6 +63,10 @@ beforeEach(() => {
   vi.stubGlobal("console", { ...console, warn: vi.fn(), error: vi.fn() });
   defaultProps.onResults = vi.fn();
   defaultProps.onPin = vi.fn();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe("TagNeighborhood", () => {

@@ -12,11 +12,13 @@
     bridge?: McpBridge | null;
     /** Search query to execute against distillery_recall. */
     query?: string;
+    /** Optional project scope for filtering results. */
+    project?: string | null;
     /** Optional callback when a row is clicked — receives the entry id. */
     onRowClick?: (entryId: string) => void;
   }
 
-  let { bridge = null, query = "", onRowClick }: Props = $props();
+  let { bridge = null, query = "", project = null, onRowClick }: Props = $props();
 
   /** Toggle pin state for a result row. */
   function togglePin(row: SearchResult, event: MouseEvent): void {
@@ -118,15 +120,23 @@
     }
   }
 
+  let activeSearchId = 0;
+
   async function search(q: string) {
     if (!bridge?.isConnected || !q.trim()) {
+      loadError = null;
+      loading = false;
       results = [];
       return;
     }
+    const searchId = ++activeSearchId;
     loading = true;
     loadError = null;
     try {
-      const result = await bridge.callTool("distillery_recall", { query: q.trim(), limit: 50 });
+      const args: Record<string, unknown> = { query: q.trim(), limit: 50 };
+      if (project) args["project"] = project;
+      const result = await bridge.callTool("distillery_recall", args);
+      if (searchId !== activeSearchId) return;
       if (result.isError) {
         loadError = result.text || "Search failed";
         results = [];
@@ -134,10 +144,13 @@
       }
       results = parseResults(result.text);
     } catch (err) {
+      if (searchId !== activeSearchId) return;
       loadError = err instanceof Error ? err.message : "Search failed";
       results = [];
     } finally {
-      loading = false;
+      if (searchId === activeSearchId) {
+        loading = false;
+      }
     }
   }
 

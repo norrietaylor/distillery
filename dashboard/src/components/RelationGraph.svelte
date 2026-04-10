@@ -189,13 +189,20 @@
       );
 
       // Check if all fetches failed — surface a single error rather than silent empty
-      const allFailed = results.every((r) => r.status === "rejected");
+      const allFailed = results.every(
+        (r) => r.status === "rejected" || (r.status === "fulfilled" && r.value.isError),
+      );
       if (allFailed && results.length > 0) {
-        const firstRejection = results[0] as PromiseRejectedResult;
-        error =
-          firstRejection.reason instanceof Error
-            ? firstRejection.reason.message
-            : "Failed to load relations";
+        const firstRejection = results.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined;
+        if (firstRejection) {
+          error =
+            firstRejection.reason instanceof Error
+              ? firstRejection.reason.message
+              : "Failed to load relations";
+        } else {
+          const firstFulfilled = results[0] as PromiseFulfilledResult<{ isError: boolean; text: string }>;
+          error = firstFulfilled.value.text || "Failed to load relations";
+        }
       }
 
       for (let i = 0; i < results.length; i++) {
@@ -229,11 +236,12 @@
     }
   }
 
-  // Kick off on mount (reactively on seedEntryId change)
-  let lastSeedId = "";
+  // Kick off on mount (reactively on seedEntryId or phase1ResultIds change)
+  let lastFetchKey = "";
   $effect(() => {
-    if (seedEntryId !== lastSeedId) {
-      lastSeedId = seedEntryId;
+    const fetchKey = `${seedEntryId}::${phase1ResultIds.join("|")}`;
+    if (fetchKey !== lastFetchKey) {
+      lastFetchKey = fetchKey;
       relatedByType = new Map();
       secondDegree = new Map();
       void fetchAllRelations();
@@ -335,8 +343,27 @@
   // Pin helper
   // ---------------------------------------------------------------------------
 
-  function handlePin(id: string, label: string) {
-    onPin?.({ id, title: label, type: "entry", content: label });
+  async function handlePin(id: string, label: string) {
+    if (!bridge?.isConnected) {
+      onPin?.({ id, title: label, type: "entry", content: "" });
+      return;
+    }
+    try {
+      const result = await bridge.callTool("distillery_get", { entry_id: id });
+      if (result.isError || !result.text.trim()) {
+        // Fetch failed — skip pinning
+        return;
+      }
+      const parsed: unknown = JSON.parse(result.text);
+      const obj = (Array.isArray(parsed) ? parsed[0] : parsed) as Record<string, unknown> | undefined;
+      if (!obj) return;
+      const content = String(obj.content ?? "");
+      const type = String(obj.entry_type ?? obj.type ?? "entry");
+      const title = content.split("\n")[0]?.slice(0, 80) || label;
+      onPin?.({ id, title, type, content });
+    } catch {
+      // Parse or network error — skip pinning
+    }
   }
 </script>
 
