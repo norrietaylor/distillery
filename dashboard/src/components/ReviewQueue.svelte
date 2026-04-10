@@ -179,8 +179,20 @@
     void loadEntries();
   });
 
-  /** Reviewer identity from OAuth context. */
-  let reviewer = $derived($currentUser?.login ?? "user");
+  /** Reviewer identity from OAuth context. Null when unauthenticated — actions are gated on this. */
+  let reviewer = $derived($currentUser?.login ?? null);
+
+  /** Global toast for success feedback (prevents race with row removal). */
+  let globalToast = $state<string | null>(null);
+  let globalToastTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function showToast(message: string) {
+    if (globalToastTimer) clearTimeout(globalToastTimer);
+    globalToast = message;
+    globalToastTimer = setTimeout(() => {
+      globalToast = null;
+    }, 4000);
+  }
 
   /** Remove a row from entries after a successful action. */
   function removeEntry(id: string) {
@@ -189,7 +201,7 @@
   }
 
   async function handleApprove(entry: ReviewEntry) {
-    if (!bridge?.isConnected) return;
+    if (!bridge?.isConnected || !reviewer) return;
     actionStatus = { ...actionStatus, [entry.id]: "loading" };
     try {
       const result = await bridge.callTool("distillery_resolve_review", {
@@ -202,7 +214,7 @@
         toastMsg = { ...toastMsg, [entry.id]: result.text || "Approve failed" };
       } else {
         actionStatus = { ...actionStatus, [entry.id]: "success" };
-        toastMsg = { ...toastMsg, [entry.id]: "Approved" };
+        showToast("Approved");
         removeEntry(entry.id);
       }
     } catch (err) {
@@ -216,7 +228,9 @@
 
   function handleReclassifyOpen(entry: ReviewEntry) {
     reclassifyId = entry.id;
-    reclassifyType = entry.entry_type || ENTRY_TYPES[0] || "";
+    reclassifyType = ENTRY_TYPES.includes(entry.entry_type as (typeof ENTRY_TYPES)[number])
+      ? entry.entry_type
+      : (ENTRY_TYPES[0] ?? "");
     expandedId = null; // close expansion when reclassify opens
   }
 
@@ -226,7 +240,7 @@
   }
 
   async function handleReclassifySubmit(entry: ReviewEntry) {
-    if (!bridge?.isConnected) return;
+    if (!bridge?.isConnected || !reviewer) return;
     actionStatus = { ...actionStatus, [entry.id]: "loading" };
     try {
       const result = await bridge.callTool("distillery_resolve_review", {
@@ -240,7 +254,7 @@
         toastMsg = { ...toastMsg, [entry.id]: result.text || "Reclassify failed" };
       } else {
         actionStatus = { ...actionStatus, [entry.id]: "success" };
-        toastMsg = { ...toastMsg, [entry.id]: `Reclassified as ${reclassifyType}` };
+        showToast(`Reclassified as ${reclassifyType}`);
         reclassifyId = null;
         removeEntry(entry.id);
       }
@@ -262,7 +276,7 @@
   }
 
   async function handleArchive(entry: ReviewEntry) {
-    if (!bridge?.isConnected) return;
+    if (!bridge?.isConnected || !reviewer) return;
     archiveConfirmId = null;
     actionStatus = { ...actionStatus, [entry.id]: "loading" };
     try {
@@ -276,7 +290,7 @@
         toastMsg = { ...toastMsg, [entry.id]: result.text || "Archive failed" };
       } else {
         actionStatus = { ...actionStatus, [entry.id]: "success" };
-        toastMsg = { ...toastMsg, [entry.id]: "Archived" };
+        showToast("Archived");
         removeEntry(entry.id);
       }
     } catch (err) {
@@ -305,6 +319,7 @@
   }
 
   function toggleSelect(id: string) {
+    if (actionStatus[id] === "loading") return;
     const next = new Set(selectedIds);
     if (next.has(id)) {
       next.delete(id);
@@ -315,9 +330,9 @@
   }
 
   async function handleBatchApprove() {
-    if (!bridge?.isConnected || selectedIds.size === 0) return;
+    if (!bridge?.isConnected || !reviewer || selectedIds.size === 0) return;
     const ids = [...selectedIds];
-    const entriesToApprove = entries.filter((e) => ids.includes(e.id));
+    const entriesToApprove = entries.filter((e) => ids.includes(e.id) && actionStatus[e.id] !== "loading");
     batchProcessing = true;
     batchProgress = { current: 0, total: entriesToApprove.length };
     batchErrors = [];
@@ -354,6 +369,10 @@
   <div class="section-header">
     <h2 id="review-queue-heading" class="section-title">Review Queue</h2>
   </div>
+
+  {#if globalToast}
+    <div class="global-toast" role="status" aria-live="polite">{globalToast}</div>
+  {/if}
 
   {#if loading}
     <LoadingSkeleton rows={5} label="Loading review queue..." />
@@ -445,6 +464,7 @@
                     type="checkbox"
                     aria-label="Select entry {entry.id}"
                     checked={selectedIds.has(entry.id)}
+                    disabled={status === "loading"}
                     onchange={() => toggleSelect(entry.id)}
                   />
                 </td>
@@ -612,6 +632,15 @@
     display: flex;
     flex-direction: column;
     gap: 1rem;
+  }
+
+  .global-toast {
+    padding: 0.6rem 1rem;
+    background: color-mix(in srgb, var(--success, #a6e3a1) 15%, transparent);
+    border: 1px solid var(--success, #a6e3a1);
+    border-radius: 6px;
+    color: var(--success, #a6e3a1);
+    font-size: 0.85rem;
   }
 
   .section-header {

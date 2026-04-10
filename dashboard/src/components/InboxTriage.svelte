@@ -7,6 +7,7 @@
    * Supports batch classification with progress indicator.
    */
 
+  import { onDestroy } from "svelte";
   import { selectedProject, refreshTick, currentUser, activeTab } from "$lib/stores";
   import type { McpBridge } from "$lib/mcp-bridge";
   import { ENTRY_TYPES } from "$lib/entry-types";
@@ -58,6 +59,10 @@
   // Archive confirmation
   let archiveConfirmId = $state<string | null>(null);
   let archiveLoading = $state(false);
+
+  onDestroy(() => {
+    if (toastTimeout) clearTimeout(toastTimeout);
+  });
 
   function showToast(message: string) {
     if (toastTimeout) clearTimeout(toastTimeout);
