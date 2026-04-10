@@ -14,9 +14,8 @@
    *   - Stale > 50          → warning (yellow)
    */
 
-  import { onMount } from "svelte";
   import MetricCard from "./MetricCard.svelte";
-  import { McpBridge } from "$lib/mcp-bridge";
+  import type { McpBridge } from "$lib/mcp-bridge";
   import { selectedProject, refreshTick } from "$lib/stores";
 
   interface Props {
@@ -117,19 +116,37 @@
         expiringSoon = null;
         return;
       }
-      // Count entries with expires_at within 14 days
-      // Response text contains entries; look for expires_at fields
       const now = Date.now();
       const fourteenDays = 14 * 24 * 60 * 60 * 1000;
       const cutoff = now + fourteenDays;
-      let count = 0;
-      // Match ISO dates following "expires_at" label
-      const expiryMatches = result.text.matchAll(/expires_at[:\s]+(\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}[^\s,\n]*)/gi);
-      for (const match of expiryMatches) {
-        const expiryDate = new Date(match[1]!);
-        if (!isNaN(expiryDate.getTime()) && expiryDate.getTime() > now && expiryDate.getTime() <= cutoff) {
-          count++;
+
+      // Try JSON-first parsing (same approach as ExpiringSoon.svelte)
+      let count: number | null = null;
+      try {
+        const data = JSON.parse(result.text) as unknown;
+        const entries: Array<{ expires_at?: string }> = Array.isArray(data)
+          ? (data as Array<{ expires_at?: string }>)
+          : Array.isArray((data as { entries?: unknown }).entries)
+            ? ((data as { entries: Array<{ expires_at?: string }> }).entries)
+            : [];
+        count = entries.filter((e) => {
+          if (!e.expires_at) return false;
+          const t = new Date(e.expires_at).getTime();
+          return !isNaN(t) && t > now && t <= cutoff;
+        }).length;
+      } catch {
+        // Fall back to regex matching on response text
+        let regexCount = 0;
+        const expiryMatches = result.text.matchAll(
+          /expires_at[:\s]+(\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}[^\s,\n]*)/gi,
+        );
+        for (const match of expiryMatches) {
+          const t = new Date(match[1]!).getTime();
+          if (!isNaN(t) && t > now && t <= cutoff) {
+            regexCount++;
+          }
         }
+        count = regexCount;
       }
       expiringSoon = count;
     } catch (err) {

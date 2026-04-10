@@ -6,10 +6,8 @@
   import { McpBridge } from "$lib/mcp-bridge";
   import {
     currentUser,
-    isLoading,
     refreshIntervalMs,
     triggerRefresh,
-    refreshTick,
   } from "$lib/stores";
   import BriefingStats from "./components/BriefingStats.svelte";
   import ExpiringSoon from "./components/ExpiringSoon.svelte";
@@ -22,6 +20,7 @@
   let initializing = $state(true);
   let connectError = $state<string | null>(null);
   let autoRefreshHandle: ReturnType<typeof setInterval> | null = null;
+  let mounted = false;
 
   async function initBridge() {
     try {
@@ -85,28 +84,18 @@
     return () => stopAutoRefresh();
   });
 
-  // Track loading state based on refresh ticks
-  $effect(() => {
-    const _tick = $refreshTick;
-    if (!initializing && _tick > 0) {
-      isLoading.set(true);
-      // Reset loading indicator after a short window —
-      // individual data sections manage their own loading states.
-      setTimeout(() => isLoading.set(false), 500);
-    }
-  });
-
   onMount(() => {
+    mounted = true;
     initBridge().then(() => {
-      if (!connectError) {
-        startAutoRefresh($refreshIntervalMs);
-        // Trigger initial data load
-        triggerRefresh();
-      }
+      if (!mounted || connectError) return;
+      startAutoRefresh($refreshIntervalMs);
+      // Trigger initial data load
+      triggerRefresh();
     });
   });
 
   onDestroy(async () => {
+    mounted = false;
     stopAutoRefresh();
     await bridge.disconnect();
   });
