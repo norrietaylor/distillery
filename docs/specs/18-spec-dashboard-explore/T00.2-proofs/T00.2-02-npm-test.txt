@@ -1,0 +1,34 @@
+Type: cli
+Command: npm test
+Expected: All tests pass (117 passed)
+Timestamp: 2026-04-09T20:15:30Z
+
+Output:
+
+> distillery-dashboard@0.1.0 test
+> vitest run
+
+
+ RUN  v3.2.4 /home/norrie.guest/code/distillery/.worktrees/feature-dashboard-explore/dashboard
+
+8:11:17 PM [vite-plugin-svelte] src/components/DataTable.svelte:49:38 This reference only captures the initial value of `defaultSortKey`. Did you mean to reference it inside a derived instead?
+https://svelte.dev/e/state_referenced_locally
+8:11:17 PM [vite-plugin-svelte] src/components/DataTable.svelte:50:39 This reference only captures the initial value of `defaultSortDir`. Did you mean to reference it inside a closure instead?
+https://svelte.dev/e/state_referenced_locally
+8:11:17 PM [vite-plugin-svelte] src/components/DataTable.svelte:112:12 Redundant role 'row'
+https://svelte.dev/e/a11y_no_redundant_roles
+8:11:17 PM [vite-plugin-svelte] src/components/DataTable.svelte:138:12 Redundant role 'row'
+https://svelte.dev/e/a11y_no_redundant_roles
+ ✓ src/components/BriefingStats.test.ts (27 tests) 123ms
+ ✓ src/components/RecentCorrections.test.ts (17 tests) 167ms
+ ✓ src/components/RadarFeed.test.ts (26 tests) 422ms
+ ✓ src/lib/mcp-bridge.test.ts (31 tests) 9ms
+ ✓ src/components/ExpiringSoon.test.ts (16 tests) 118ms
+
+ Test Files  5 passed (5)
+      Tests  117 passed (117)
+   Start at  20:11:16
+   Duration  1.76s (transform 570ms, setup 0ms, collect 1.94s, tests 838ms, environment 1.19s, prepare 205ms)
+
+
+Status: PASS
