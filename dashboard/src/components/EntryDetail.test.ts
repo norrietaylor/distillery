@@ -55,6 +55,21 @@ function makeRelation(overrides: Record<string, unknown> = {}): Record<string, u
   };
 }
 
+/** Build a relation using the canonical from_id/to_id shape. */
+function makeCanonicalRelation(opts: {
+  id?: string;
+  from_id: string;
+  to_id: string;
+  relation_type?: string;
+}): Record<string, unknown> {
+  return {
+    id: opts.id ?? "rel-1",
+    from_id: opts.from_id,
+    to_id: opts.to_id,
+    relation_type: opts.relation_type ?? "references",
+  };
+}
+
 /**
  * Build a mock McpBridge that responds to distillery_get and
  * distillery_relations with the provided text/error values.
@@ -484,6 +499,204 @@ describe("EntryDetail", () => {
       fireEvent.click(screen.getByLabelText("Investigate entry"));
 
       expect(onInvestigate).toHaveBeenCalledWith("entry-abc-123");
+    });
+  });
+
+  describe("relation grouping by direction", () => {
+    it("groups outgoing relations under an Outgoing heading", async () => {
+      // from_id === current entry id => OUTGOING
+      const relData = JSON.stringify([
+        makeCanonicalRelation({ from_id: "entry-abc-123", to_id: "entry-target-999", relation_type: "corrects" }),
+      ]);
+      const bridge = makeMockBridge({ relationsText: relData });
+
+      render(EntryDetail, { props: { bridge, entryId: "entry-abc-123", onNavigate: vi.fn() } });
+
+      await waitFor(() => {
+        expect(screen.getByLabelText("Outgoing relations")).toBeTruthy();
+      });
+    });
+
+    it("groups incoming relations under an Incoming heading", async () => {
+      // to_id === current entry id => INCOMING
+      const relData = JSON.stringify([
+        makeCanonicalRelation({ from_id: "entry-source-777", to_id: "entry-abc-123", relation_type: "citation" }),
+      ]);
+      const bridge = makeMockBridge({ relationsText: relData });
+
+      render(EntryDetail, { props: { bridge, entryId: "entry-abc-123", onNavigate: vi.fn() } });
+
+      await waitFor(() => {
+        expect(screen.getByLabelText("Incoming relations")).toBeTruthy();
+      });
+    });
+
+    it("renders separate direction groups when both outgoing and incoming exist", async () => {
+      const relData = JSON.stringify([
+        makeCanonicalRelation({ id: "r1", from_id: "entry-abc-123", to_id: "entry-out-1", relation_type: "link" }),
+        makeCanonicalRelation({ id: "r2", from_id: "entry-in-1", to_id: "entry-abc-123", relation_type: "citation" }),
+      ]);
+      const bridge = makeMockBridge({ relationsText: relData });
+
+      render(EntryDetail, { props: { bridge, entryId: "entry-abc-123", onNavigate: vi.fn() } });
+
+      await waitFor(() => {
+        expect(screen.getByLabelText("Outgoing relations")).toBeTruthy();
+        expect(screen.getByLabelText("Incoming relations")).toBeTruthy();
+      });
+    });
+
+    it("groups relations of the same type together within a direction", async () => {
+      const relData = JSON.stringify([
+        makeCanonicalRelation({ id: "r1", from_id: "entry-abc-123", to_id: "entry-out-1", relation_type: "corrects" }),
+        makeCanonicalRelation({ id: "r2", from_id: "entry-abc-123", to_id: "entry-out-2", relation_type: "corrects" }),
+      ]);
+      const bridge = makeMockBridge({ relationsText: relData });
+
+      render(EntryDetail, { props: { bridge, entryId: "entry-abc-123", onNavigate: vi.fn() } });
+
+      await waitFor(() => {
+        // Both targets should appear as links.
+        expect(screen.getByLabelText("View related entry entry-out-1")).toBeTruthy();
+        expect(screen.getByLabelText("View related entry entry-out-2")).toBeTruthy();
+        // Only one type label for "corrects".
+        const labels = screen.getAllByText("corrects");
+        expect(labels.length).toBe(1);
+      });
+    });
+
+    it("shows the relation type as a sub-label within the group", async () => {
+      const relData = JSON.stringify([
+        makeCanonicalRelation({ from_id: "entry-abc-123", to_id: "entry-out-1", relation_type: "supersedes" }),
+      ]);
+      const bridge = makeMockBridge({ relationsText: relData });
+
+      render(EntryDetail, { props: { bridge, entryId: "entry-abc-123", onNavigate: vi.fn() } });
+
+      await waitFor(() => {
+        expect(screen.getByText("supersedes")).toBeTruthy();
+      });
+    });
+  });
+
+  describe("breadcrumb navigation", () => {
+    it("shows no breadcrumb when first loading an entry", async () => {
+      const bridge = makeMockBridge({});
+      render(EntryDetail, { props: { bridge, entryId: "entry-abc-123" } });
+
+      await waitFor(() => screen.queryByText("This is the full entry content."));
+      expect(screen.queryByLabelText("Entry navigation breadcrumbs")).toBeNull();
+    });
+
+    it("shows breadcrumb after navigating to a related entry", async () => {
+      const relData = JSON.stringify([
+        makeCanonicalRelation({ from_id: "entry-abc-123", to_id: "entry-out-999", relation_type: "link" }),
+      ]);
+
+      let entryId = "entry-abc-123";
+      const onNavigate = vi.fn((id: string) => { entryId = id; });
+
+      // Bridge that returns correct data for both entry IDs.
+      const bridge = makeMockBridge({
+        relationsText: relData,
+        entryText: makeEntry({ id: "entry-abc-123", content: "Parent entry content" }),
+      });
+
+      const { rerender } = render(EntryDetail, {
+        props: { bridge, entryId: "entry-abc-123", onNavigate },
+      });
+
+      // Wait for initial entry to load, then click the relation link.
+      await waitFor(() => screen.getByLabelText("View related entry entry-out-999"));
+      fireEvent.click(screen.getByLabelText("View related entry entry-out-999"));
+      expect(onNavigate).toHaveBeenCalledWith("entry-out-999");
+
+      // Simulate parent updating entryId to the navigated-to entry.
+      const childBridge = makeMockBridge({
+        relationsText: "[]",
+        entryText: makeEntry({ id: "entry-out-999", content: "Child entry content" }),
+      });
+      rerender({ bridge: childBridge, entryId: "entry-out-999", onNavigate });
+
+      await waitFor(() => {
+        expect(screen.getByLabelText("Entry navigation breadcrumbs")).toBeTruthy();
+      });
+    });
+
+    it("calls onNavigate with the breadcrumb entry id when breadcrumb is clicked", async () => {
+      const relData = JSON.stringify([
+        makeCanonicalRelation({ from_id: "entry-abc-123", to_id: "entry-out-999", relation_type: "link" }),
+      ]);
+      const onNavigate = vi.fn();
+
+      const bridge = makeMockBridge({
+        relationsText: relData,
+        entryText: makeEntry({ id: "entry-abc-123" }),
+      });
+
+      const { rerender } = render(EntryDetail, {
+        props: { bridge, entryId: "entry-abc-123", onNavigate },
+      });
+
+      // Navigate forward to child entry.
+      await waitFor(() => screen.getByLabelText("View related entry entry-out-999"));
+      fireEvent.click(screen.getByLabelText("View related entry entry-out-999"));
+
+      // Simulate parent updating entryId.
+      const childBridge = makeMockBridge({
+        relationsText: "[]",
+        entryText: makeEntry({ id: "entry-out-999", content: "Child entry" }),
+      });
+      rerender({ bridge: childBridge, entryId: "entry-out-999", onNavigate });
+
+      await waitFor(() => screen.getByLabelText("Entry navigation breadcrumbs"));
+
+      // Click the breadcrumb to go back.
+      const crumbBtn = screen.getByLabelText(/Navigate back to/);
+      fireEvent.click(crumbBtn);
+
+      expect(onNavigate).toHaveBeenLastCalledWith("entry-abc-123");
+    });
+
+    it("resets breadcrumb when parent sets entryId externally", async () => {
+      const relData = JSON.stringify([
+        makeCanonicalRelation({ from_id: "entry-abc-123", to_id: "entry-out-999", relation_type: "link" }),
+      ]);
+      const onNavigate = vi.fn();
+
+      const bridge = makeMockBridge({
+        relationsText: relData,
+        entryText: makeEntry({ id: "entry-abc-123" }),
+      });
+
+      const { rerender } = render(EntryDetail, {
+        props: { bridge, entryId: "entry-abc-123", onNavigate },
+      });
+
+      // Navigate forward to push a breadcrumb.
+      await waitFor(() => screen.getByLabelText("View related entry entry-out-999"));
+      fireEvent.click(screen.getByLabelText("View related entry entry-out-999"));
+
+      // Simulate parent updating entryId.
+      const childBridge = makeMockBridge({
+        relationsText: "[]",
+        entryText: makeEntry({ id: "entry-out-999", content: "Child entry" }),
+      });
+      rerender({ bridge: childBridge, entryId: "entry-out-999", onNavigate });
+
+      await waitFor(() => screen.getByLabelText("Entry navigation breadcrumbs"));
+
+      // Now parent externally changes entryId to a completely different entry
+      // (not via breadcrumb or relation click — simulates a search result selection).
+      const externalBridge = makeMockBridge({
+        relationsText: "[]",
+        entryText: makeEntry({ id: "entry-external-111", content: "External entry" }),
+      });
+      rerender({ bridge: externalBridge, entryId: "entry-external-111", onNavigate });
+
+      await waitFor(() => {
+        expect(screen.queryByLabelText("Entry navigation breadcrumbs")).toBeNull();
+      });
     });
   });
 });

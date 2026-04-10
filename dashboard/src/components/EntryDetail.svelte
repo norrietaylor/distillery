@@ -32,9 +32,31 @@
 
   interface Relation {
     id: string;
-    related_id: string;
+    from_id: string;
+    to_id: string;
     relation_type: string;
     [key: string]: unknown;
+  }
+
+  /** A single breadcrumb entry in the navigation trail. */
+  interface BreadcrumbItem {
+    id: string;
+    title: string;
+  }
+
+  /** A relation with computed direction relative to the current entry. */
+  interface GroupedRelation {
+    id: string;
+    related_id: string;
+    relation_type: string;
+    direction: "OUTGOING" | "INCOMING";
+  }
+
+  /** Relations grouped by direction, then by type. */
+  interface RelationGroup {
+    direction: "OUTGOING" | "INCOMING";
+    /** Map from relation_type to list of related entry IDs */
+    byType: Map<string, GroupedRelation[]>;
   }
 
   // ---------------------------------------------------------------------------
@@ -65,6 +87,21 @@
   let loadError = $state<string | null>(null);
   let entry = $state<EntryData | null>(null);
   let relations = $state<Relation[]>([]);
+
+  /**
+   * Breadcrumb trail for navigating between related entries.
+   * Each item holds the id and a display title of a visited entry.
+   * The current entry is NOT included — only ancestors.
+   */
+  let breadcrumbs = $state<BreadcrumbItem[]>([]);
+
+  /**
+   * Flag set to the id we are internally navigating to, so the $effect
+   * that watches entryId can distinguish our own navigations from external
+   * changes driven by the parent.  External changes reset the breadcrumb.
+   * This is a plain variable (not $state) to avoid re-triggering the effect.
+   */
+  let internalNavTarget: string | null = null;
 
   // ---------------------------------------------------------------------------
   // Helpers
@@ -120,13 +157,25 @@
     };
   }
 
-  /** Parse relations from JSON text. */
+  /** Parse relations from JSON text.
+   *
+   * The MCP response wraps relations inside a top-level object:
+   *   { entry_id, direction, relations: [...], count }
+   * We accept either that wrapper or a bare array (test helpers use the bare form).
+   */
   function parseRelations(text: string): Relation[] {
     if (!text.trim()) return [];
     try {
       const parsed: unknown = JSON.parse(text);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        // Unwrap { relations: [...] } wrapper from MCP response.
+        const wrapped = parsed as Record<string, unknown>;
+        if (Array.isArray(wrapped.relations)) {
+          return wrapped.relations.map((r) => normalizeRelation(r as Record<string, unknown>));
+        }
+      }
       if (Array.isArray(parsed)) {
-        return parsed.map((r) => r as Relation);
+        return parsed.map((r) => normalizeRelation(r as Record<string, unknown>));
       }
     } catch {
       // fall through to line-by-line
@@ -138,13 +187,59 @@
       try {
         const obj: unknown = JSON.parse(trimmed);
         if (obj && typeof obj === "object") {
-          list.push(obj as Relation);
+          list.push(normalizeRelation(obj as Record<string, unknown>));
         }
       } catch {
         // skip
       }
     }
     return list;
+  }
+
+  function normalizeRelation(obj: Record<string, unknown>): Relation {
+    const raw = obj as Partial<Relation> & { related_id?: string };
+    // Support both legacy { related_id } shape (tests) and canonical { from_id, to_id }.
+    const from_id = String(raw.from_id ?? raw.related_id ?? "");
+    const to_id = String(raw.to_id ?? raw.related_id ?? "");
+    return {
+      ...obj,
+      id: String(raw.id ?? ""),
+      from_id,
+      to_id,
+      relation_type: String(raw.relation_type ?? ""),
+    };
+  }
+
+  /**
+   * Compute direction-grouped relations for the current entry.
+   * Returns at most two groups: OUTGOING then INCOMING.
+   * Within each group, relations are further sub-grouped by relation_type.
+   */
+  function groupRelations(rels: Relation[], currentId: string): RelationGroup[] {
+    const outgoing: RelationGroup = { direction: "OUTGOING", byType: new Map() };
+    const incoming: RelationGroup = { direction: "INCOMING", byType: new Map() };
+
+    for (const rel of rels) {
+      const isOutgoing = rel.from_id === currentId || (rel.from_id === "" && rel.to_id !== currentId);
+      const direction: "OUTGOING" | "INCOMING" = isOutgoing ? "OUTGOING" : "INCOMING";
+      const related_id = isOutgoing ? rel.to_id : rel.from_id;
+      const group = direction === "OUTGOING" ? outgoing : incoming;
+      const typed = group.byType.get(rel.relation_type) ?? [];
+      typed.push({ id: rel.id, related_id, relation_type: rel.relation_type, direction });
+      group.byType.set(rel.relation_type, typed);
+    }
+
+    const result: RelationGroup[] = [];
+    if (outgoing.byType.size > 0) result.push(outgoing);
+    if (incoming.byType.size > 0) result.push(incoming);
+    return result;
+  }
+
+  /** Derive a short human-readable title from an entry (first 60 chars of content). */
+  function entryTitle(e: EntryData | null): string {
+    if (!e) return "Entry";
+    const raw = e.content.trim().replace(/\n.*/s, ""); // first line only
+    return raw.length > 60 ? raw.slice(0, 57) + "…" : raw || e.id;
   }
 
   /** Format an ISO date string to a human-readable date. */
@@ -218,14 +313,50 @@
   $effect(() => {
     const id = entryId;
     if (id) {
+      // If this id change wasn't triggered by our own navigation, it's an
+      // external update (e.g. parent selecting a search result) — reset the
+      // breadcrumb trail so we start fresh.
+      if (internalNavTarget !== id) {
+        breadcrumbs = [];
+      }
+      internalNavTarget = null;
       void fetchEntry(id);
     } else {
       entry = null;
       relations = [];
       loadError = null;
       loading = false;
+      breadcrumbs = [];
+      internalNavTarget = null;
     }
   });
+
+  /** Grouped relations derived from current entry and relations list. */
+  const relationGroups = $derived(
+    entry ? groupRelations(relations, entry.id) : []
+  );
+
+  // ---------------------------------------------------------------------------
+  // Navigation helpers
+  // ---------------------------------------------------------------------------
+
+  /** Navigate to a related entry, pushing the current entry onto the breadcrumb. */
+  function navigateToRelated(relatedId: string): void {
+    if (!onNavigate || !entry) return;
+    // Push current entry to breadcrumb trail before navigating away.
+    breadcrumbs = [...breadcrumbs, { id: entry.id, title: entryTitle(entry) }];
+    internalNavTarget = relatedId;
+    onNavigate(relatedId);
+  }
+
+  /** Navigate back to a breadcrumb entry, truncating the trail at that point. */
+  function navigateToBreadcrumb(crumb: BreadcrumbItem, index: number): void {
+    if (!onNavigate) return;
+    // Keep only the crumbs that came before this one.
+    breadcrumbs = breadcrumbs.slice(0, index);
+    internalNavTarget = crumb.id;
+    onNavigate(crumb.id);
+  }
 </script>
 
 <div class="entry-detail" aria-label="Entry detail panel">
@@ -241,6 +372,25 @@
     </div>
   {:else if entry}
     <div class="entry-content">
+      <!-- Breadcrumb navigation trail -->
+      {#if breadcrumbs.length > 0}
+        <nav class="breadcrumb-nav" aria-label="Entry navigation breadcrumbs">
+          {#each breadcrumbs as crumb, index (crumb.id)}
+            <button
+              class="breadcrumb-item"
+              onclick={() => navigateToBreadcrumb(crumb, index)}
+              aria-label="Navigate back to {crumb.title}"
+            >
+              {crumb.title}
+            </button>
+            <span class="breadcrumb-sep" aria-hidden="true">/</span>
+          {/each}
+          <span class="breadcrumb-current" aria-current="page">
+            {entryTitle(entry)}
+          </span>
+        </nav>
+      {/if}
+
       <!-- Header row: type badge + verification badge + actions -->
       <div class="entry-header">
         <span class="type-badge">{entry.entry_type || "entry"}</span>
@@ -310,28 +460,37 @@
         <pre class="content-pre">{entry.content}</pre>
       </div>
 
-      <!-- Relations -->
-      {#if relations.length > 0}
+      <!-- Relations: grouped by direction then by type -->
+      {#if relationGroups.length > 0}
         <div class="relations-section">
           <h3 class="relations-title">Relations</h3>
-          <ul class="relations-list">
-            {#each relations as rel (rel.id ?? rel.related_id)}
-              <li class="relation-item">
-                <span class="relation-type">{rel.relation_type}</span>
-                {#if onNavigate && rel.related_id}
-                  <button
-                    class="relation-link"
-                    onclick={() => onNavigate?.(rel.related_id)}
-                    aria-label="View related entry {rel.related_id}"
-                  >
-                    {rel.related_id}
-                  </button>
-                {:else}
-                  <span class="relation-id">{rel.related_id}</span>
-                {/if}
-              </li>
-            {/each}
-          </ul>
+          {#each relationGroups as group (group.direction)}
+            <div class="relations-direction-group" aria-label="{group.direction === 'OUTGOING' ? 'Outgoing' : 'Incoming'} relations">
+              <span class="direction-label">{group.direction === "OUTGOING" ? "Outgoing" : "Incoming"}</span>
+              {#each [...group.byType.entries()] as [relType, rels] (relType)}
+                <div class="relation-type-group">
+                  <span class="relation-type-label">{relType}</span>
+                  <ul class="relations-list">
+                    {#each rels as rel (rel.id || rel.related_id)}
+                      <li class="relation-item">
+                        {#if rel.related_id}
+                          <button
+                            class="relation-link"
+                            onclick={() => navigateToRelated(rel.related_id)}
+                            aria-label="View related entry {rel.related_id}"
+                          >
+                            {rel.related_id}
+                          </button>
+                        {:else}
+                          <span class="relation-id">—</span>
+                        {/if}
+                      </li>
+                    {/each}
+                  </ul>
+                </div>
+              {/each}
+            </div>
+          {/each}
         </div>
       {/if}
     </div>
@@ -525,6 +684,51 @@
     margin: 0;
   }
 
+  /* Breadcrumb navigation */
+  .breadcrumb-nav {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    padding: 0.4rem 0.6rem;
+    background: color-mix(in srgb, var(--surface1, #313244) 60%, transparent);
+    border-radius: 4px;
+    font-size: 0.75rem;
+  }
+
+  .breadcrumb-item {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--accent, #89b4fa);
+    font-size: 0.75rem;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .breadcrumb-item:hover {
+    color: var(--fg, #cdd6f4);
+  }
+
+  .breadcrumb-sep {
+    color: var(--fg-muted, #a6adc8);
+    user-select: none;
+  }
+
+  .breadcrumb-current {
+    color: var(--fg, #cdd6f4);
+    font-weight: 500;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   /* Relations */
   .relations-section {
     border-top: 1px solid var(--border, #45475a);
@@ -540,13 +744,45 @@
     letter-spacing: 0.05em;
   }
 
+  .relations-direction-group {
+    margin-bottom: 0.75rem;
+  }
+
+  .direction-label {
+    display: block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--fg-muted, #a6adc8);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 0.35rem;
+  }
+
+  .relation-type-group {
+    margin-left: 0.75rem;
+    margin-bottom: 0.35rem;
+  }
+
+  .relation-type-label {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--fg-muted, #a6adc8);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 0.2rem;
+    padding: 0.05rem 0.3rem;
+    background: color-mix(in srgb, var(--fg-muted, #a6adc8) 10%, transparent);
+    border-radius: 3px;
+  }
+
   .relations-list {
     list-style: none;
-    margin: 0;
+    margin: 0.2rem 0 0 0.5rem;
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 0.35rem;
+    gap: 0.25rem;
   }
 
   .relation-item {
@@ -554,15 +790,6 @@
     align-items: baseline;
     gap: 0.5rem;
     font-size: 0.8rem;
-  }
-
-  .relation-type {
-    font-size: 0.7rem;
-    font-weight: 500;
-    color: var(--fg-muted, #a6adc8);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    white-space: nowrap;
   }
 
   .relation-link {
