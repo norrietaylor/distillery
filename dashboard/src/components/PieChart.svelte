@@ -113,16 +113,24 @@
     </div>
   {:else}
     <svg {width} {height} aria-hidden="true">
-      {#each slices as slice (slice.label)}
-        <path
-          d={arcPath(slice.startAngle, slice.endAngle, r, innerR, cx, cy)}
-          fill={slice.color}
-          stroke="var(--card-bg, #181825)"
-          stroke-width="1"
-          role="presentation"
-          aria-label="{slice.label}: {slice.value}"
-        />
-      {/each}
+      {#if slices.length === 1}
+        <!-- Single slice covering 100%: SVG arc degenerates, render circles instead -->
+        <circle cx={cx} cy={cy} r={r} fill={slices[0].color} role="presentation" aria-label="{slices[0].label}: {slices[0].value}" />
+        {#if innerR > 0}
+          <circle cx={cx} cy={cy} r={innerR} fill="var(--card-bg, #181825)" role="presentation" />
+        {/if}
+      {:else}
+        {#each slices as slice (slice.label)}
+          <path
+            d={arcPath(slice.startAngle, slice.endAngle, r, innerR, cx, cy)}
+            fill={slice.color}
+            stroke="var(--card-bg, #181825)"
+            stroke-width="1"
+            role="presentation"
+            aria-label="{slice.label}: {slice.value}"
+          />
+        {/each}
+      {/if}
     </svg>
     <ul class="legend" aria-label="Legend">
       {#each data as item (item.label)}

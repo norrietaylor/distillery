@@ -234,6 +234,24 @@ describe("SourceHealth", () => {
         expect(badge?.textContent?.trim()).toBe("Never polled");
       });
     });
+
+    it("shows Red (Error) when error_count > 0 and last_poll_at is null", async () => {
+      // A source that has never been polled but has recorded errors should
+      // surface as Error (red), not Never polled (gray).
+      const line = sourceLine({
+        url: "https://error-never.com/feed",
+        last_poll_at: null,
+        error_count: 2,
+      });
+      const bridge = makeMockBridge(async () => makeResult(line));
+      render(SourceHealth, { props: { bridge } });
+
+      await waitFor(() => {
+        const badge = document.querySelector('[data-status="error"]');
+        expect(badge).toBeTruthy();
+        expect(badge?.textContent?.trim()).toBe("Error");
+      });
+    });
   });
 
   describe("relative time display", () => {

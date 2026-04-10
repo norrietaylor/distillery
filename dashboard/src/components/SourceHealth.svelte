@@ -151,8 +151,8 @@
    * - Red:    errors present, or older than 3x interval
    */
   function deriveStatus(source: FeedSource): SourceStatus {
-    if (!source.last_poll_at) return "never";
     if (source.error_count > 0) return "error";
+    if (!source.last_poll_at) return "never";
     const intervalMs = source.poll_interval_minutes * 60 * 1000;
     const lastPoll = new Date(source.last_poll_at).getTime();
     const ageMs = Date.now() - lastPoll;
