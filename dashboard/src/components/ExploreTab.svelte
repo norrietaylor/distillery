@@ -15,10 +15,11 @@
    */
 
   import type { McpBridge } from "$lib/mcp-bridge";
-  import { selectedProject, refreshTick } from "$lib/stores";
+  import { selectedProject, refreshTick, pinEntry } from "$lib/stores";
   import SearchBar from "./SearchBar.svelte";
   import ResultsList from "./ResultsList.svelte";
   import EntryDetail from "./EntryDetail.svelte";
+  import InvestigateMode from "./InvestigateMode.svelte";
 
   interface Props {
     bridge?: McpBridge | null;
@@ -38,8 +39,11 @@
   /** Whether the detail panel is visible (used for responsive slide-over). */
   let detailPanelOpen = $state(false);
 
-  /** Whether the user has triggered investigate mode (placeholder for T03). */
+  /** Whether the user has triggered investigate mode. */
   let investigateMode = $state(false);
+
+  /** Seed entry data for investigation mode. */
+  let investigateSeed = $state<{ id: string; title: string; content: string } | null>(null);
 
   /** Draft query the user is typing (bound to the input). */
   let draftQuery = $state("");
@@ -104,9 +108,28 @@
     submitSearch();
   }
 
-  function handleInvestigate(_entryId: string) {
-    // Placeholder for T03: set investigate mode flag.
+  function handleInvestigate(entryId: string) {
+    investigateSeed = {
+      id: entryId,
+      title: currentQuery || "Entry " + entryId.slice(0, 8),
+      content: currentQuery || entryId,
+    };
     investigateMode = true;
+  }
+
+  function exitInvestigateMode() {
+    investigateMode = false;
+    investigateSeed = null;
+  }
+
+  function handleInvestigatePin(entry: { id: string; title: string; type: string; content: string }) {
+    pinEntry({
+      id: entry.id,
+      title: entry.title,
+      type: entry.type,
+      content: entry.content,
+      pinnedAt: new Date().toISOString(),
+    });
   }
 
   function closeDetailPanel() {
@@ -116,55 +139,66 @@
 
 <section id="explore" class="explore-section" aria-label="Explore knowledge base">
   <div class="explore-grid">
-    <!-- Left panel: search input + results -->
+    <!-- Left panel: search input + results OR investigation mode -->
     <div class="left-panel">
-      <div class="search-panel" aria-labelledby="explore-search-heading">
-        <h2 id="explore-search-heading" class="panel-title">Search Knowledge Base</h2>
+      {#if investigateMode && investigateSeed}
+        <InvestigateMode
+          {bridge}
+          seedEntryId={investigateSeed.id}
+          seedTitle={investigateSeed.title}
+          seedContent={investigateSeed.content}
+          onExit={exitInvestigateMode}
+          onPin={handleInvestigatePin}
+        />
+      {:else}
+        <div class="search-panel" aria-labelledby="explore-search-heading">
+          <h2 id="explore-search-heading" class="panel-title">Search Knowledge Base</h2>
 
-        <form
-          class="search-form"
-          onsubmit={handleFormSubmit}
-          role="search"
-          aria-label="Explore search"
-        >
-          <input
-            class="search-input"
-            type="search"
-            placeholder="Search entries…"
-            bind:value={draftQuery}
-            onkeydown={handleKeydown}
-            aria-label="Search query"
-          />
-          <button
-            class="search-btn"
-            type="submit"
-            disabled={!draftQuery.trim()}
-            aria-label="Submit search"
+          <form
+            class="search-form"
+            onsubmit={handleFormSubmit}
+            role="search"
+            aria-label="Explore search"
           >
-            Search
-          </button>
-          {#if isSearchMode}
+            <input
+              class="search-input"
+              type="search"
+              placeholder="Search entries…"
+              bind:value={draftQuery}
+              onkeydown={handleKeydown}
+              aria-label="Search query"
+            />
             <button
-              class="clear-btn"
-              type="button"
-              onclick={clearSearch}
-              aria-label="Clear search"
+              class="search-btn"
+              type="submit"
+              disabled={!draftQuery.trim()}
+              aria-label="Submit search"
             >
-              Clear
+              Search
             </button>
+            {#if isSearchMode}
+              <button
+                class="clear-btn"
+                type="button"
+                onclick={clearSearch}
+                aria-label="Clear search"
+              >
+                Clear
+              </button>
+            {/if}
+          </form>
+
+          {#if $selectedProject}
+            <p class="project-filter-note" aria-live="polite">
+              Filtering by project: <strong>{$selectedProject}</strong>
+            </p>
           {/if}
-        </form>
+        </div>
 
-        {#if $selectedProject}
-          <p class="project-filter-note" aria-live="polite">
-            Filtering by project: <strong>{$selectedProject}</strong>
-          </p>
-        {/if}
-      </div>
-
-      <div class="results-panel">
-        <ResultsList {bridge} query={currentQuery} onRowClick={handleEntrySelect} />
-      </div>
+        <div class="results-panel">
+          <ResultsList {bridge} query={currentQuery} onRowClick={handleEntrySelect} />
+        </div>
+      {/if}
     </div>
 
     <!-- Right panel: entry detail -->
@@ -192,11 +226,6 @@
         onNavigate={handleEntrySelect}
       />
 
-      {#if investigateMode}
-        <div class="investigate-banner" aria-live="polite">
-          Investigate mode active (coming in T03).
-        </div>
-      {/if}
     </aside>
   </div>
 </section>
@@ -382,15 +411,4 @@
     border-color: var(--fg-muted, #a6adc8);
   }
 
-  /* Investigate mode banner */
-  .investigate-banner {
-    margin-top: 1rem;
-    padding: 0.5rem 0.75rem;
-    font-size: 0.8rem;
-    color: var(--warning, #f9e2af);
-    background: color-mix(in srgb, var(--warning, #f9e2af) 10%, transparent);
-    border: 1px solid color-mix(in srgb, var(--warning, #f9e2af) 30%, transparent);
-    border-radius: 4px;
-    font-style: italic;
-  }
 </style>
