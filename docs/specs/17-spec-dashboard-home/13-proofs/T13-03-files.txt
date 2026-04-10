@@ -1,0 +1,12 @@
+Type: file
+Command: ls dashboard/src/components/RadarFeed.svelte dashboard/src/components/DataTable.svelte dashboard/src/components/ScoreBadge.svelte dashboard/src/components/Pagination.svelte dashboard/src/components/RadarFeed.test.ts
+Expected: All 5 component/test files exist
+Timestamp: 2026-04-10T00:49:54Z
+Status: PASS
+
+---
+-rw-rw-r-- 1 norrie norrie  6667 Apr  9 17:30 /home/norrie.guest/code/distillery/.worktrees/feature-dashboard-home/dashboard/src/components/DataTable.svelte
+-rw-rw-r-- 1 norrie norrie  2503 Apr  9 17:13 /home/norrie.guest/code/distillery/.worktrees/feature-dashboard-home/dashboard/src/components/Pagination.svelte
+-rw-rw-r-- 1 norrie norrie 12819 Apr  9 17:16 /home/norrie.guest/code/distillery/.worktrees/feature-dashboard-home/dashboard/src/components/RadarFeed.svelte
+-rw-rw-r-- 1 norrie norrie 17413 Apr  9 17:49 /home/norrie.guest/code/distillery/.worktrees/feature-dashboard-home/dashboard/src/components/RadarFeed.test.ts
+-rw-rw-r-- 1 norrie norrie  1398 Apr  9 17:13 /home/norrie.guest/code/distillery/.worktrees/feature-dashboard-home/dashboard/src/components/ScoreBadge.svelte

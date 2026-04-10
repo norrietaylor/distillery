@@ -1,0 +1,49 @@
+Type: test
+Command: npm test -- --reporter=verbose src/components/RadarFeed.test.ts
+Expected: All 26 tests pass for RadarFeed.test.ts
+Timestamp: 2026-04-10T00:49:41Z
+Status: PASS
+
+---
+
+> distillery-dashboard@0.1.0 test
+> vitest run --reporter=verbose src/components/RadarFeed.test.ts
+
+
+ RUN  v3.2.4 /home/norrie.guest/code/distillery/.worktrees/feature-dashboard-home/dashboard
+
+https://svelte.dev/e/state_referenced_locally
+https://svelte.dev/e/state_referenced_locally
+https://svelte.dev/e/a11y_no_redundant_roles
+https://svelte.dev/e/a11y_no_redundant_roles
+ ✓ src/components/RadarFeed.test.ts > RadarFeed > rendering > shows loading skeleton while fetching 41ms
+ ✓ src/components/RadarFeed.test.ts > RadarFeed > rendering > shows the section heading 5ms
+ ✓ src/components/RadarFeed.test.ts > RadarFeed > rendering > shows filter input 3ms
+ ✓ src/components/RadarFeed.test.ts > RadarFeed > rendering > renders table rows for each feed entry 15ms
+ ✓ src/components/RadarFeed.test.ts > RadarFeed > rendering > shows all required column headers 6ms
+ ✓ src/components/RadarFeed.test.ts > RadarFeed > rendering > shows empty state when no entries found 3ms
+ ✓ src/components/RadarFeed.test.ts > RadarFeed > rendering > shows error banner on tool failure 4ms
+ ✓ src/components/RadarFeed.test.ts > RadarFeed > rendering > shows error banner on thrown exception 3ms
+ ✓ src/components/RadarFeed.test.ts > RadarFeed > sorting > sorts by score descending by default (highest score first) 8ms
+ ✓ src/components/RadarFeed.test.ts > RadarFeed > sorting > allows sorting by Published Date column 11ms
+ ✓ src/components/RadarFeed.test.ts > RadarFeed > filtering > filters entries by content when user types in the filter input 7ms
+ ✓ src/components/RadarFeed.test.ts > RadarFeed > filtering > filters entries by source 4ms
+ ✓ src/components/RadarFeed.test.ts > RadarFeed > filtering > shows all entries when filter is cleared 5ms
+ ✓ src/components/RadarFeed.test.ts > RadarFeed > row expand detail panel > expands a detail panel when a row is clicked 9ms
+ ✓ src/components/RadarFeed.test.ts > RadarFeed > row expand detail panel > collapses the detail panel when the same row is clicked again 6ms
+ ✓ src/components/RadarFeed.test.ts > RadarFeed > row expand detail panel > shows close button in detail panel 8ms
+ ✓ src/components/RadarFeed.test.ts > RadarFeed > bookmark action > calls distillery_store when Bookmark button is clicked 6ms
+ ✓ src/components/RadarFeed.test.ts > RadarFeed > bookmark action > shows success confirmation after successful bookmark 6ms
+ ✓ src/components/RadarFeed.test.ts > RadarFeed > bookmark action > shows error state after failed bookmark 6ms
+ ✓ src/components/RadarFeed.test.ts > RadarFeed > pagination > does not show pagination controls for 20 or fewer entries 8ms
+ ✓ src/components/RadarFeed.test.ts > RadarFeed > pagination > shows pagination controls for more than 20 entries 11ms
+ ✓ src/components/RadarFeed.test.ts > RadarFeed > pagination > displays only 20 rows on the first page when 25 entries exist 16ms
+ ✓ src/components/RadarFeed.test.ts > RadarFeed > pagination > navigates to the next page when Next is clicked 10ms
+ ✓ src/components/RadarFeed.test.ts > RadarFeed > score badge colors > renders score values in the table cells 8ms
+ ✓ src/components/RadarFeed.test.ts > RadarFeed > no bridge > renders without crashing when bridge is null 1ms
+ ✓ src/components/RadarFeed.test.ts > RadarFeed > no bridge > shows section heading even without bridge 1ms
+
+ Test Files  1 passed (1)
+      Tests  26 passed (26)
+   Start at  17:49:36
+   Duration  961ms (transform 285ms, setup 0ms, collect 451ms, tests 212ms, environment 159ms, prepare 30ms)
