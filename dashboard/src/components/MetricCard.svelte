@@ -26,9 +26,11 @@
     loading = false,
     error = null,
   }: Props = $props();
+
+  const ariaValue = $derived(loading ? "loading" : error ? "error" : String(value ?? 0));
 </script>
 
-<div class="metric-card metric-card--{variant}" aria-label="{label}: {value ?? 'loading'}">
+<div class="metric-card metric-card--{variant}" aria-label="{label}: {ariaValue}">
   <div class="metric-label">{label}</div>
 
   {#if loading}

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { selectedProject, refreshTick } from "$lib/stores";
-  import { McpBridge } from "$lib/mcp-bridge";
+  import type { McpBridge } from "$lib/mcp-bridge";
 
   interface Props {
     bridge?: McpBridge | null;
