@@ -82,7 +82,7 @@ describe("WatchSource", () => {
     it("renders info note below Import full history checkbox", () => {
       const bridge = makeMockBridge(async () => makeResult(""));
       render(WatchSource, { props: { bridge } });
-      expect(screen.getByText(/Full history items land in Inbox/)).toBeTruthy();
+      expect(screen.getByText(/Full history will be backfilled/)).toBeTruthy();
     });
 
     it("renders Add Source submit button", () => {

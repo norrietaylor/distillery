@@ -180,7 +180,7 @@
         />
         Import full history
       </label>
-      <p class="info-note">Full history items land in Inbox for triage. Uses bulk insert.</p>
+      <p class="info-note">Full history will be backfilled on the next poll cycle. Items land in Inbox for triage.</p>
     </div>
 
     <button

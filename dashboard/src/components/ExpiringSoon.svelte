@@ -73,12 +73,29 @@
   ): Array<{ id: string; title?: string; content?: string; body?: string; metadata?: { title?: string }; bookmark?: { title?: string }; expires_at: string }> {
     try {
       const data = JSON.parse(text);
-      if (Array.isArray(data)) {
-        return data;
-      }
-      if (data && Array.isArray(data.entries)) {
-        return data.entries;
-      }
+      const raw: unknown[] = Array.isArray(data)
+        ? data
+        : data && typeof data === "object" && Array.isArray((data as { entries?: unknown[] }).entries)
+          ? (data as { entries: unknown[] }).entries
+          : [];
+
+      return raw.filter(
+        (
+          e,
+        ): e is {
+          id: string;
+          expires_at: string;
+          title?: string;
+          content?: string;
+          body?: string;
+          metadata?: { title?: string };
+          bookmark?: { title?: string };
+        } =>
+          !!e &&
+          typeof e === "object" &&
+          typeof (e as { id?: unknown }).id === "string" &&
+          typeof (e as { expires_at?: unknown }).expires_at === "string",
+      );
     } catch {
       // Non-JSON response — return empty
     }
@@ -87,12 +104,15 @@
 
   /** Derive a display title from entry fields, metadata, bookmark, or content preview. */
   function deriveTitle(e: { id: string; title?: string; content?: string; body?: string; metadata?: { title?: string }; bookmark?: { title?: string } }): string {
-    // Try top-level title first
-    if (e.title) return e.title;
-    // Try metadata title
-    if (e.metadata?.title) return e.metadata.title;
-    // Try bookmark title
-    if (e.bookmark?.title) return e.bookmark.title;
+    // Try top-level title first (trimmed)
+    const top = e.title?.trim();
+    if (top) return top;
+    // Try metadata title (trimmed)
+    const meta = e.metadata?.title?.trim();
+    if (meta) return meta;
+    // Try bookmark title (trimmed)
+    const bookmark = e.bookmark?.title?.trim();
+    if (bookmark) return bookmark;
     // Generate short preview from content or body
     const textContent = e.content || e.body || '';
     if (textContent) {
