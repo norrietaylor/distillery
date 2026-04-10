@@ -3,11 +3,13 @@
   import NavBar from "./components/NavBar.svelte";
   import ProjectSelector from "./components/ProjectSelector.svelte";
   import LoadingSkeleton from "./components/LoadingSkeleton.svelte";
+  import CaptureTab from "./components/CaptureTab.svelte";
   import { McpBridge } from "$lib/mcp-bridge";
   import {
     currentUser,
     refreshIntervalMs,
     triggerRefresh,
+    activeTab,
   } from "$lib/stores";
   import BriefingStats from "./components/BriefingStats.svelte";
   import ExpiringSoon from "./components/ExpiringSoon.svelte";
@@ -116,13 +118,17 @@
         <strong>Connection error:</strong>
         {connectError}
       </div>
-    {:else}
-      <section id="home" class="home-section">
+    {:else if $activeTab === "home"}
+      <div id="home-panel" class="home-section" role="tabpanel" aria-labelledby="home-tab">
         <BriefingStats {bridge} />
         <RecentCorrections {bridge} />
         <ExpiringSoon {bridge} />
         <RadarFeed {bridge} />
-      </section>
+      </div>
+    {:else if $activeTab === "capture"}
+      <div id="capture-panel" class="capture-section" role="tabpanel" aria-labelledby="capture-tab">
+        <CaptureTab {bridge} />
+      </div>
     {/if}
   </main>
 </div>
@@ -170,9 +176,10 @@
     gap: 1.5rem;
   }
 
-  .placeholder-text {
-    color: var(--fg-muted, #a6adc8);
-    font-size: 0.9rem;
+  .capture-section {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
   }
 
   .error-banner {

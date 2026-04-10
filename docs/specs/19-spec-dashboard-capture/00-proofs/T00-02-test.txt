@@ -1,0 +1,25 @@
+PROOF ARTIFACT: test
+Command: cd dashboard && npm test
+Expected: All existing tests pass
+Timestamp: 2026-04-09T20:12:58Z
+---
+> distillery-dashboard@0.1.0 test
+> vitest run --run
+
+ RUN  v3.2.4 /home/norrie.guest/code/distillery/.worktrees/feature-dashboard-capture/dashboard
+
+[vite-plugin-svelte] pre-existing warnings from DataTable.svelte (scaffold)
+
+ PASS  src/components/BriefingStats.test.ts (27 tests) 146ms
+ PASS  src/components/RecentCorrections.test.ts (17 tests) 172ms
+ PASS  src/components/RadarFeed.test.ts (26 tests) 363ms
+ PASS  src/lib/mcp-bridge.test.ts (31 tests) 9ms
+ PASS  src/components/ExpiringSoon.test.ts (16 tests) 119ms
+
+ Test Files  5 passed (5)
+      Tests  117 passed (117)
+   Start at  20:12:58
+   Duration  1.78s
+
+Status: PASS
+Notes: All 117 tests across 5 test files pass. No regressions from merge or tab routing additions.
