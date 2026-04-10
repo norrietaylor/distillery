@@ -27,7 +27,7 @@
   }
 
   let urlValid = $derived(isValidUrl(url));
-  let canSubmit = $derived(urlValid && !loading);
+  let canSubmit = $derived(urlValid && !loading && bridge != null);
 
   /** Format trust weight to exactly one decimal place to avoid floating point artifacts. */
   function formatTrustWeight(value: number): string {
@@ -51,7 +51,11 @@
 
   async function handleSubmit(e: Event) {
     e.preventDefault();
-    if (!canSubmit || !bridge) return;
+    if (!canSubmit) return;
+    if (!bridge) {
+      errorMessage = "MCP bridge not available";
+      return;
+    }
 
     loading = true;
     successMessage = null;

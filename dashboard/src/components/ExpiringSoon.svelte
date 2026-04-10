@@ -55,7 +55,7 @@
           );
           return {
             id: e.id,
-            title: e.title || e.id,
+            title: deriveTitle(e),
             expires_at: e.expires_at,
             daysRemaining,
           };
@@ -70,19 +70,35 @@
 
   function parseEntries(
     text: string,
-  ): Array<{ id: string; title: string; expires_at: string }> {
+  ): Array<{ id: string; title?: string; content?: string; body?: string; metadata?: { title?: string }; bookmark?: { title?: string }; expires_at: string }> {
     try {
       const data = JSON.parse(text);
       if (Array.isArray(data)) {
-        return data as Array<{ id: string; title: string; expires_at: string }>;
+        return data;
       }
       if (data && Array.isArray(data.entries)) {
-        return data.entries as Array<{ id: string; title: string; expires_at: string }>;
+        return data.entries;
       }
     } catch {
       // Non-JSON response — return empty
     }
     return [];
+  }
+
+  /** Derive a display title from entry metadata, bookmark, or content preview. */
+  function deriveTitle(e: { id: string; title?: string; content?: string; body?: string; metadata?: { title?: string }; bookmark?: { title?: string } }): string {
+    // Try metadata title first
+    if (e.metadata?.title) return e.metadata.title;
+    // Try bookmark title
+    if (e.bookmark?.title) return e.bookmark.title;
+    // Generate short preview from content or body
+    const textContent = e.content || e.body || '';
+    if (textContent) {
+      const preview = textContent.trim().substring(0, 60);
+      if (preview) return preview + (textContent.length > 60 ? '...' : '');
+    }
+    // Fall back to ID
+    return e.id;
   }
 
   // Re-fetch on refresh tick or project change

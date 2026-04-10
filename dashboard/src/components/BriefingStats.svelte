@@ -45,28 +45,48 @@
   let errorPending = $state<string | null>(null);
   let errorInbox = $state<string | null>(null);
 
-  /** Parse a stat count from tool response text. Expects "N" or "total: N" or "count: N" format. */
+  // Request sequencing to handle race conditions
+  let requestCounter = 0;
+  let latestRequestId = 0;
+
+  /** Parse a stat count from tool response text. Expects explicit stat keys or labeled counts. */
   function parseCount(text: string): number {
+    // First, try parsing as JSON and look for explicit stat keys
+    try {
+      const data = JSON.parse(text) as unknown;
+      if (typeof data === 'object' && data !== null) {
+        const obj = data as Record<string, unknown>;
+        // Try explicit stat keys first
+        if (typeof obj.total_entries === 'number') return obj.total_entries;
+        if (typeof obj.total === 'number') return obj.total;
+        if (typeof obj.total_stale === 'number') return obj.total_stale;
+        if (typeof obj.total_pending === 'number') return obj.total_pending;
+        if (typeof obj.total_inbox === 'number') return obj.total_inbox;
+      }
+    } catch {
+      // Not JSON or invalid, continue to text parsing
+    }
+
     // Try "count: N" or "total: N"
     const labelMatch = text.match(/(?:count|total)[:\s]+(\d+)/i);
     if (labelMatch) return parseInt(labelMatch[1]!, 10);
     // Try a bare number on its own line
     const bareMatch = text.match(/^\s*(\d+)\s*$/m);
     if (bareMatch) return parseInt(bareMatch[1]!, 10);
-    // Try the first number in the response
-    const firstNum = text.match(/\d+/);
-    if (firstNum) return parseInt(firstNum[0]!, 10);
     return 0;
   }
 
   /** Fetch total entries count. */
   async function fetchTotal(project: string | null) {
+    const requestId = requestCounter;
     loadingTotal = true;
     errorTotal = null;
     try {
       const args: Record<string, unknown> = { output: "stats" };
       if (project) args.project = project;
       const result = await bridge.callTool("distillery_list", args);
+      // Only commit if this is still the latest request
+      if (requestId !== latestRequestId) return;
       if (result.isError) {
         errorTotal = "Failed to load total entries";
         totalEntries = null;
@@ -74,21 +94,27 @@
         totalEntries = parseCount(result.text);
       }
     } catch (err) {
+      if (requestId !== latestRequestId) return;
       errorTotal = err instanceof Error ? err.message : "Failed to load total entries";
       totalEntries = null;
     } finally {
-      loadingTotal = false;
+      if (requestId === latestRequestId) {
+        loadingTotal = false;
+      }
     }
   }
 
   /** Fetch stale entries count (30 days). */
   async function fetchStale(project: string | null) {
+    const requestId = requestCounter;
     loadingStale = true;
     errorStale = null;
     try {
       const args: Record<string, unknown> = { stale_days: 30, output: "stats" };
       if (project) args.project = project;
       const result = await bridge.callTool("distillery_list", args);
+      // Only commit if this is still the latest request
+      if (requestId !== latestRequestId) return;
       if (result.isError) {
         errorStale = "Failed to load stale count";
         staleCount = null;
@@ -96,15 +122,19 @@
         staleCount = parseCount(result.text);
       }
     } catch (err) {
+      if (requestId !== latestRequestId) return;
       errorStale = err instanceof Error ? err.message : "Failed to load stale count";
       staleCount = null;
     } finally {
-      loadingStale = false;
+      if (requestId === latestRequestId) {
+        loadingStale = false;
+      }
     }
   }
 
   /** Fetch entries expiring within the next 14 days. */
   async function fetchExpiring(project: string | null) {
+    const requestId = requestCounter;
     loadingExpiring = true;
     errorExpiring = null;
     try {
@@ -112,6 +142,7 @@
       if (project) args.project = project;
       const result = await bridge.callTool("distillery_list", args);
       if (result.isError) {
+        if (requestId !== latestRequestId) return;
         errorExpiring = "Failed to load expiring count";
         expiringSoon = null;
         return;
@@ -148,23 +179,31 @@
         }
         count = regexCount;
       }
+      // Only commit if this is still the latest request
+      if (requestId !== latestRequestId) return;
       expiringSoon = count;
     } catch (err) {
+      if (requestId !== latestRequestId) return;
       errorExpiring = err instanceof Error ? err.message : "Failed to load expiring count";
       expiringSoon = null;
     } finally {
-      loadingExpiring = false;
+      if (requestId === latestRequestId) {
+        loadingExpiring = false;
+      }
     }
   }
 
   /** Fetch pending review count. */
   async function fetchPending(project: string | null) {
+    const requestId = requestCounter;
     loadingPending = true;
     errorPending = null;
     try {
       const args: Record<string, unknown> = { status: "pending_review", output: "stats" };
       if (project) args.project = project;
       const result = await bridge.callTool("distillery_list", args);
+      // Only commit if this is still the latest request
+      if (requestId !== latestRequestId) return;
       if (result.isError) {
         errorPending = "Failed to load pending review count";
         pendingReview = null;
@@ -172,21 +211,27 @@
         pendingReview = parseCount(result.text);
       }
     } catch (err) {
+      if (requestId !== latestRequestId) return;
       errorPending = err instanceof Error ? err.message : "Failed to load pending review count";
       pendingReview = null;
     } finally {
-      loadingPending = false;
+      if (requestId === latestRequestId) {
+        loadingPending = false;
+      }
     }
   }
 
   /** Fetch inbox count. */
   async function fetchInbox(project: string | null) {
+    const requestId = requestCounter;
     loadingInbox = true;
     errorInbox = null;
     try {
       const args: Record<string, unknown> = { entry_type: "inbox", output: "stats" };
       if (project) args.project = project;
       const result = await bridge.callTool("distillery_list", args);
+      // Only commit if this is still the latest request
+      if (requestId !== latestRequestId) return;
       if (result.isError) {
         errorInbox = "Failed to load inbox count";
         inboxCount = null;
@@ -194,15 +239,22 @@
         inboxCount = parseCount(result.text);
       }
     } catch (err) {
+      if (requestId !== latestRequestId) return;
       errorInbox = err instanceof Error ? err.message : "Failed to load inbox count";
       inboxCount = null;
     } finally {
-      loadingInbox = false;
+      if (requestId === latestRequestId) {
+        loadingInbox = false;
+      }
     }
   }
 
   /** Load all metrics in parallel. */
   async function loadAll(project: string | null) {
+    // Increment and capture request ID to handle race conditions
+    requestCounter += 1;
+    const thisRequestId = requestCounter;
+
     await Promise.all([
       fetchTotal(project),
       fetchStale(project),
@@ -210,6 +262,9 @@
       fetchPending(project),
       fetchInbox(project),
     ]);
+
+    // Only commit if this is still the latest request
+    latestRequestId = thisRequestId;
   }
 
   // Derive color coding variants

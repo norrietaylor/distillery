@@ -6,6 +6,7 @@ allowed-tools:
   - "mcp__*__distillery_watch"
   - "mcp__*__distillery_configure"
   - "CronCreate"
+  - "CronList"
   - "RemoteTrigger"
   - "Bash(test:*)"
   - "Bash(cat:*)"
@@ -206,7 +207,7 @@ CronCreate(
   cron="<random minute> 7 * * 1",
   prompt="""Run weekly Distillery maintenance:
 1. POST to <webhook-base-url>/hooks/classify-batch?mode=heuristic to classify pending inbox entries.
-2. Call distillery_list(stale_days=30, limit=10, output_mode="summary") — note count and oldest entries.
+2. Call distillery_list(stale_days=30, limit=10, output="summary") — note count and oldest entries.
 3. Call distillery_list(group_by="tags") — note top tags and domains.
 4. Store a digest: distillery_store(content=<one-paragraph summary of findings>, entry_type="digest", author="distillery-maintenance", tags=["digest", "weekly", "maintenance"], metadata={"period_start": "<7 days ago ISO>", "period_end": "<today ISO>"}).
 Report: stale entry count, top tags, classify-batch response summary.""",

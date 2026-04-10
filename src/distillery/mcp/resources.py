@@ -56,6 +56,13 @@ def _build_inline_html(dist_dir: Path) -> str:
     html = index_path.read_text(encoding="utf-8")
     assets_dir = dist_dir / "assets"
 
+    # Check if HTML contains /assets/ references but assets_dir doesn't exist
+    if "/assets/" in html and not assets_dir.exists():
+        raise RuntimeError(
+            f"Dashboard HTML contains /assets/ references but {assets_dir} does not exist. "
+            "Run 'make dashboard' to build the Svelte app."
+        )
+
     # Inline CSS: replace <link rel="stylesheet" ... href="/assets/X.css">
     if assets_dir.exists():
         for css_file in sorted(assets_dir.glob("*.css")):
@@ -78,6 +85,13 @@ def _build_inline_html(dist_dir: Path) -> str:
                 pattern = rf'<script[^>]*src="/assets/{re.escape(js_name)}"[^>]*>\s*</script>'
                 replacement = f'<script type="module">{safe_js}</script>'
                 html = re.sub(pattern, replacement, html, flags=re.IGNORECASE)
+
+    # After processing, check if any unresolved /assets/ references remain
+    if "/assets/" in html:
+        raise RuntimeError(
+            "Dashboard HTML still contains unresolved /assets/ references after inlining. "
+            f"Check that all referenced assets exist in {assets_dir}."
+        )
 
     return html
 
