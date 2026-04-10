@@ -361,7 +361,12 @@
   // ---------------------------------------------------------------------------
 
   function handlePhaseClick(phaseNumber: number) {
-    if (phaseNumber <= completedPhase || phaseNumber === currentPhase || phaseNumber === completedPhase + 1) {
+    if (
+      phaseNumber <= completedPhase ||
+      phaseNumber === currentPhase ||
+      phaseNumber === completedPhase + 1 ||
+      phaseNumber === currentPhase + 1
+    ) {
       currentPhase = phaseNumber;
     }
   }
@@ -399,7 +404,7 @@
       {#each PHASES as phase (phase.number)}
         {@const isActive = phase.number === currentPhase}
         {@const isCompleted = phase.number <= completedPhase}
-        {@const isClickable = isCompleted || isActive || phase.number === completedPhase + 1}
+        {@const isClickable = isCompleted || isActive || phase.number === completedPhase + 1 || phase.number === currentPhase + 1}
         <li class="phase-item" class:phase-item--active={isActive} class:phase-item--completed={isCompleted}>
           <button
             class="phase-btn"
@@ -523,6 +528,9 @@
                   currentPhase = 1;
                   completedPhase = 0;
                   phase1Results = [];
+                  phase4Results = [];
+                  phase4Error = null;
+                  phase3DiscoveredTags = [];
                 } catch {
                   // If fetch fails, skip pivoting rather than storing raw id as query
                 }
