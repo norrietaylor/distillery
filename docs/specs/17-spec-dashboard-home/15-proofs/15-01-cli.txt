@@ -1,9 +1,0 @@
-Type: cli
-Command: mypy --strict src/distillery/mcp/resources.py
-Expected: pass
-Timestamp: 2026-04-09T00:00:00Z
-
---- OUTPUT ---
-Success: no issues found in 1 source file
-
-Status: PASS
