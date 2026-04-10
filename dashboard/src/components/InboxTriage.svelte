@@ -196,11 +196,17 @@
         showToast(`Classification failed: ${result.text}`);
         return;
       }
-      // Determine status from confidence
-      const status = classifyForm.confidence >= 0.6 ? "active" : "pending_review";
-      showToast(
-        `Classified as ${classifyForm.entryType} (${status})`
-      );
+      // Parse status from the tool response JSON; fall back to type-only message
+      let statusSuffix = "";
+      try {
+        const parsed: unknown = JSON.parse(result.text);
+        if (parsed && typeof parsed === "object" && "status" in parsed) {
+          statusSuffix = ` (${String((parsed as Record<string, unknown>)["status"])})`;
+        }
+      } catch {
+        // result.text is not JSON — omit status from toast
+      }
+      showToast(`Classified as ${classifyForm.entryType}${statusSuffix}`);
       // Remove classified entry from the table
       entries = entries.filter((e) => e.id !== classifyForm!.entryId);
       selectedIds.delete(classifyForm.entryId);
@@ -216,7 +222,10 @@
   // --- Investigate action ---
 
   function handleInvestigate(_entryId: string) {
-    // Navigate to Explore tab
+    // TODO: The Explore tab does not exist yet. When it is implemented, wire
+    // entryId into a shared store (e.g. investigateEntryId) so the tab can
+    // pre-load context for the selected entry. For now we switch to the tab
+    // so the UI at least navigates somewhere intentional.
     activeTab.set("explore");
   }
 

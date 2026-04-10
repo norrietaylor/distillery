@@ -249,7 +249,9 @@ describe("InboxTriage", () => {
 
       await waitFor(() => {
         expect(screen.getByRole("status")).toBeTruthy();
-        expect(screen.getByText(/Classified as session \(active\)/)).toBeTruthy();
+        // Toast shows type; status suffix is included only when the tool
+        // response is JSON containing a "status" field.
+        expect(screen.getByText(/Classified as session/)).toBeTruthy();
       });
     });
   });
