@@ -18,6 +18,7 @@
   import { selectedProject, refreshTick } from "$lib/stores";
   import SearchBar from "./SearchBar.svelte";
   import ResultsList from "./ResultsList.svelte";
+  import EntryDetail from "./EntryDetail.svelte";
 
   interface Props {
     bridge?: McpBridge | null;
@@ -33,6 +34,12 @@
 
   /** ID of the entry selected from the results table. */
   let selectedEntryId = $state<string | null>(null);
+
+  /** Whether the detail panel is visible (used for responsive slide-over). */
+  let detailPanelOpen = $state(false);
+
+  /** Whether the user has triggered investigate mode (placeholder for T03). */
+  let investigateMode = $state(false);
 
   /** Draft query the user is typing (bound to the input). */
   let draftQuery = $state("");
@@ -83,6 +90,27 @@
     currentQuery = "";
     isSearchMode = false;
     selectedEntryId = null;
+    detailPanelOpen = false;
+  }
+
+  function handleEntrySelect(entryId: string) {
+    selectedEntryId = entryId;
+    detailPanelOpen = true;
+  }
+
+  function handleTagClick(tag: string) {
+    // Add tag as a search filter by prepending "tag:" to the query.
+    draftQuery = `tag:${tag}`;
+    submitSearch();
+  }
+
+  function handleInvestigate(_entryId: string) {
+    // Placeholder for T03: set investigate mode flag.
+    investigateMode = true;
+  }
+
+  function closeDetailPanel() {
+    detailPanelOpen = false;
   }
 </script>
 
@@ -135,25 +163,38 @@
       </div>
 
       <div class="results-panel">
-        <ResultsList {bridge} query={currentQuery} />
+        <ResultsList {bridge} query={currentQuery} onRowClick={handleEntrySelect} />
       </div>
     </div>
 
-    <!-- Right panel: entry detail or placeholder -->
-    <aside class="right-panel" aria-label="Entry detail">
-      {#if selectedEntryId}
-        <div class="detail-placeholder">
-          <p class="detail-hint">Entry <code>{selectedEntryId}</code> selected.</p>
-          <p class="detail-hint-sub">Detail view coming soon.</p>
-        </div>
-      {:else if isSearchMode}
-        <div class="detail-placeholder">
-          <p class="detail-hint">Select an entry from the results to view details.</p>
-        </div>
-      {:else}
-        <div class="detail-placeholder">
-          <h3 class="detail-placeholder-title">Entry Detail</h3>
-          <p class="detail-hint">Run a search to explore the knowledge base.</p>
+    <!-- Right panel: entry detail -->
+    <aside
+      class="right-panel"
+      class:right-panel--open={detailPanelOpen}
+      aria-label="Entry detail"
+    >
+      <!-- Slide-over close button (visible only on narrow viewports) -->
+      {#if detailPanelOpen}
+        <button
+          class="panel-close-btn"
+          onclick={closeDetailPanel}
+          aria-label="Close detail panel"
+        >
+          &times;
+        </button>
+      {/if}
+
+      <EntryDetail
+        {bridge}
+        entryId={selectedEntryId}
+        onTagClick={handleTagClick}
+        onInvestigate={handleInvestigate}
+        onNavigate={handleEntrySelect}
+      />
+
+      {#if investigateMode}
+        <div class="investigate-banner" aria-live="polite">
+          Investigate mode active (coming in T03).
         </div>
       {/if}
     </aside>
@@ -168,18 +209,39 @@
   /* Two-panel responsive grid */
   .explore-grid {
     display: grid;
-    grid-template-columns: 1fr 320px;
+    grid-template-columns: 1fr 360px;
     gap: 1.25rem;
     align-items: start;
+    position: relative;
   }
 
-  @media (max-width: 768px) {
+  /* At < 1024px, right panel becomes a slide-over overlay */
+  @media (max-width: 1023px) {
     .explore-grid {
       grid-template-columns: 1fr;
     }
 
     .right-panel {
-      order: -1;
+      position: fixed;
+      top: 0;
+      right: 0;
+      height: 100%;
+      width: min(400px, 90vw);
+      z-index: 200;
+      overflow-y: auto;
+      transform: translateX(100%);
+      transition: transform 0.25s ease;
+      box-shadow: -4px 0 24px rgba(0, 0, 0, 0.4);
+    }
+
+    .right-panel--open {
+      transform: translateX(0);
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .panel-close-btn {
+      display: none;
     }
   }
 
@@ -299,42 +361,36 @@
     min-height: 200px;
   }
 
-  .detail-placeholder {
+  /* Slide-over close button */
+  .panel-close-btn {
     display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
     align-items: center;
     justify-content: center;
-    min-height: 160px;
-    text-align: center;
+    width: 2rem;
+    height: 2rem;
+    background: none;
+    border: 1px solid var(--border, #45475a);
+    border-radius: 4px;
+    color: var(--fg-muted, #a6adc8);
+    font-size: 1.25rem;
+    cursor: pointer;
+    margin-bottom: 0.75rem;
   }
 
-  .detail-placeholder-title {
-    font-size: 0.95rem;
-    font-weight: 600;
+  .panel-close-btn:hover {
     color: var(--fg, #cdd6f4);
-    margin: 0 0 0.25rem;
+    border-color: var(--fg-muted, #a6adc8);
   }
 
-  .detail-hint {
-    color: var(--fg-muted, #a6adc8);
-    font-size: 0.875rem;
-    margin: 0;
-  }
-
-  .detail-hint code {
-    font-family: ui-monospace, monospace;
+  /* Investigate mode banner */
+  .investigate-banner {
+    margin-top: 1rem;
+    padding: 0.5rem 0.75rem;
     font-size: 0.8rem;
-    background: color-mix(in srgb, var(--accent, #89b4fa) 10%, transparent);
-    color: var(--accent, #89b4fa);
-    padding: 0.1rem 0.35rem;
-    border-radius: 3px;
-  }
-
-  .detail-hint-sub {
-    color: var(--fg-muted, #a6adc8);
-    font-size: 0.8rem;
+    color: var(--warning, #f9e2af);
+    background: color-mix(in srgb, var(--warning, #f9e2af) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--warning, #f9e2af) 30%, transparent);
+    border-radius: 4px;
     font-style: italic;
-    margin: 0;
   }
 </style>
