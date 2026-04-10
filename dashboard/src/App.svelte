@@ -47,7 +47,7 @@
       const result = await bridge.callTool("distillery_status");
       if (!result.isError && result.text) {
         const loginMatch = result.text.match(/user[:\s]+([^\s,\n]+)/i);
-        const roleMatch = result.text.match(/role[:\s]+([^\s,\n]+)/i);
+        const roleMatch = result.text.match(/^role[:\s]+([^\s,\n]+)/im);
         if (loginMatch) {
           const login = loginMatch[1] ?? "user";
           const identity: UserIdentity = {
@@ -62,11 +62,11 @@
           if (rawRole === "admin" || rawRole === "curator" || rawRole === "developer") {
             userRole.set(rawRole);
           } else {
-            // Default to curator so Manage tab is accessible
-            userRole.set("curator");
+            // Default to least-privileged role on unknown/unparseable value
+            userRole.set("developer");
           }
         } else {
-          userRole.set("curator");
+          userRole.set("developer");
         }
         return;
       }
@@ -75,7 +75,7 @@
     }
     // Fallback: set a placeholder identity so the nav bar renders
     currentUser.set({ login: "user", displayName: "Authenticated User" });
-    userRole.set("curator");
+    userRole.set("developer");
   }
 
   /** Fetch lightweight badge counts for the Manage tab. */
