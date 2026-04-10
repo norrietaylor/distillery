@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import LoadingSkeleton from "./LoadingSkeleton.svelte";
   import ExpiryCard from "./ExpiryCard.svelte";
   import type { McpBridge } from "$lib/mcp-bridge";
@@ -92,11 +91,7 @@
     const _project = $selectedProject;
     void _tick;
     void _project;
-    loadExpiring();
-  });
-
-  onMount(() => {
-    loadExpiring();
+    void loadExpiring();
   });
 </script>
 

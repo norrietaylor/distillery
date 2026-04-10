@@ -102,12 +102,25 @@ export class McpBridge {
   }
 
   private async _doConnect(transport?: PostMessageTransport): Promise<void> {
+    const t = transport ?? new PostMessageTransport(window.parent, window.parent);
+
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        reject(
+          new McpBridgeError(`connect() timed out after ${this.timeoutMs}ms`),
+        );
+      }, this.timeoutMs);
+    });
+
     try {
-      const t = transport ?? new PostMessageTransport(window.parent, window.parent);
-      await this.app.connect(t);
+      await Promise.race([this.app.connect(t), timeoutPromise]);
       this.connected = true;
     } catch (error) {
+      if (error instanceof McpBridgeError) throw error;
       throw new McpBridgeError("Failed to connect to MCP host", { cause: error });
+    } finally {
+      clearTimeout(timeoutHandle);
     }
   }
 
