@@ -1,5 +1,7 @@
 <script lang="ts">
   import type { McpBridge } from "$lib/mcp-bridge";
+  import BookmarkCapture from "./BookmarkCapture.svelte";
+  import WatchSource from "./WatchSource.svelte";
 
   interface Props {
     bridge: McpBridge;
@@ -10,16 +12,12 @@
 
 <div class="capture-tab">
   <div class="capture-cards">
-    <!-- Bookmark capture card (Unit 1) — populated by BookmarkCapture component -->
-    <div class="capture-card capture-card--placeholder">
-      <h2 class="card-title">Bookmark</h2>
-      <p class="card-placeholder">Bookmark capture form coming soon.</p>
-    </div>
+    <!-- Bookmark capture card (Unit 1) -->
+    <BookmarkCapture {bridge} />
 
-    <!-- Watch source card (Unit 2) — populated by WatchSource component -->
-    <div class="capture-card capture-card--placeholder">
-      <h2 class="card-title">Watch Source</h2>
-      <p class="card-placeholder">Watch source form coming soon.</p>
+    <!-- Watch source card (Unit 2) -->
+    <div class="capture-card">
+      <WatchSource {bridge} />
     </div>
   </div>
 

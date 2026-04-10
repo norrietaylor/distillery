@@ -1,0 +1,30 @@
+Type: test
+Command: cd dashboard && npx vitest run src/components/WatchSource.test.ts
+Expected: All tests pass covering form submission, URL validation, slider, checkbox, duplicate error, loading state
+Timestamp: 2026-04-09T22:30:49Z
+
+Output:
+ RUN  v3.2.4 /home/norrie.guest/code/distillery/.worktrees/feature-dashboard-capture/dashboard
+
+ ✓ src/components/WatchSource.test.ts (33 tests) 180ms
+
+ Test Files  1 passed (1)
+      Tests  33 passed (33)
+   Start at  22:30:49
+   Duration  886ms (transform 239ms, setup 0ms, collect 399ms, tests 180ms, environment 164ms, prepare 33ms)
+
+Tests covered:
+  - form rendering: card heading, URL input, source type selector (rss/github), label input, trust weight slider (range 0-1, step 0.1), import history checkbox, info note, submit button
+  - URL validation: disabled for empty/non-http(s)/plain text, enabled for http/https
+  - trust weight slider: displays one decimal place at 0.0, 0.5, 0.7, 1.0
+  - sync-history checkbox: unchecked by default, togglable
+  - form submission: calls distillery_watch with action=add, correct url/source_type, trust_weight rounded, sync_history flag
+  - success toast: displays source URL after successful add
+  - form clears after successful add
+  - loading state: button disabled and shows "Adding…" while in-flight
+  - duplicate URL error: shows "already being watched" for duplicate/already error text
+  - generic error: shows tool error message
+  - thrown error with duplicate keyword: shows "already being watched"
+  - no bridge: renders without crash, shows heading
+
+Status: PASS
