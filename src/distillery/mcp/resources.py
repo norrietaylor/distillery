@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from pathlib import Path
 
 from fastmcp import FastMCP
@@ -63,10 +64,9 @@ def _build_inline_html(dist_dir: Path) -> str:
             link_tag_fragment = css_file.name
             if link_tag_fragment in html:
                 # Find the full <link> tag and replace it
-                import re
-
+                safe_css = css_content.replace("</style>", "<\\/style>")
                 pattern = rf'<link\s+rel="stylesheet"\s+crossorigin\s+href="/assets/{re.escape(css_file.name)}"\s*/?>'
-                replacement = f"<style>{css_content}</style>"
+                replacement = f"<style>{safe_css}</style>"
                 html = re.sub(pattern, replacement, html)
 
         # Inline JS: replace <script type="module" ... src="/assets/X.js">
@@ -74,10 +74,9 @@ def _build_inline_html(dist_dir: Path) -> str:
             js_content = js_file.read_text(encoding="utf-8")
             js_name = js_file.name
             if js_name in html:
-                import re
-
+                safe_js = js_content.replace("</script>", "<\\/script>")
                 pattern = rf'<script\s+type="module"\s+crossorigin\s+src="/assets/{re.escape(js_name)}"\s*>\s*</script>'
-                replacement = f"<script type=\"module\">{js_content}</script>"
+                replacement = f'<script type="module">{safe_js}</script>'
                 html = re.sub(pattern, replacement, html)
 
     return html
@@ -99,7 +98,6 @@ def register_dashboard_resource(server: FastMCP) -> None:
         name="distillery_dashboard",
         title="Distillery Dashboard",
         description="Interactive knowledge-base dashboard with briefing stats, radar feed, and entry management.",
-        mime_type="text/html",
         app=True,
     )
     def dashboard_resource() -> str:
