@@ -65,9 +65,9 @@ def _build_inline_html(dist_dir: Path) -> str:
             if link_tag_fragment in html:
                 # Find the full <link> tag and replace it
                 safe_css = css_content.replace("</style>", "<\\/style>")
-                pattern = rf'<link\s+rel="stylesheet"\s+crossorigin\s+href="/assets/{re.escape(css_file.name)}"\s*/?>'
+                pattern = rf'<link[^>]*href="/assets/{re.escape(css_file.name)}"[^>]*/?\s*>'
                 replacement = f"<style>{safe_css}</style>"
-                html = re.sub(pattern, replacement, html)
+                html = re.sub(pattern, replacement, html, flags=re.IGNORECASE)
 
         # Inline JS: replace <script type="module" ... src="/assets/X.js">
         for js_file in sorted(assets_dir.glob("*.js")):
@@ -75,9 +75,9 @@ def _build_inline_html(dist_dir: Path) -> str:
             js_name = js_file.name
             if js_name in html:
                 safe_js = js_content.replace("</script>", "<\\/script>")
-                pattern = rf'<script\s+type="module"\s+crossorigin\s+src="/assets/{re.escape(js_name)}"\s*>\s*</script>'
+                pattern = rf'<script[^>]*src="/assets/{re.escape(js_name)}"[^>]*>\s*</script>'
                 replacement = f'<script type="module">{safe_js}</script>'
-                html = re.sub(pattern, replacement, html)
+                html = re.sub(pattern, replacement, html, flags=re.IGNORECASE)
 
     return html
 

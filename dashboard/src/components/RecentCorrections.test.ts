@@ -5,9 +5,6 @@ import RecentCorrections from "./RecentCorrections.svelte";
 import { selectedProject, refreshTick } from "$lib/stores";
 import type { McpBridge, ToolCallTextResult } from "$lib/mcp-bridge";
 
-// Install @testing-library/user-event if not present — test uses userEvent
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-
 /**
  * Build a mock McpBridge that returns configurable responses per tool name.
  */
