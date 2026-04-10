@@ -1,0 +1,20 @@
+Type: cli
+Command: cd dashboard && npm run build
+Expected: Build succeeds
+Timestamp: 2026-04-09T20:04:36Z
+
+Output:
+> distillery-dashboard@0.1.0 build
+> vite build
+
+vite v6.4.2 building for production...
+transforming...
+✓ 276 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.40 kB │ gzip:  0.27 kB
+dist/assets/index-b9x1Kpug.css   15.97 kB │ gzip:  3.07 kB
+dist/assets/index-BGCjKu7v.js   196.32 kB │ gzip: 59.15 kB
+✓ built in 771ms
+
+Status: PASS

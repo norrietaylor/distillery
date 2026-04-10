@@ -1,0 +1,23 @@
+Type: cli
+Command: cd dashboard && npm test
+Expected: All tests pass
+Timestamp: 2026-04-09T20:04:39Z
+
+Output:
+> distillery-dashboard@0.1.0 test
+> vitest run
+
+RUN  v3.2.4 /home/norrie.guest/code/distillery/.worktrees/feature-dashboard-explore/dashboard
+
+✓ src/components/BriefingStats.test.ts (27 tests) 146ms
+✓ src/components/RecentCorrections.test.ts (17 tests) 174ms
+✓ src/components/RadarFeed.test.ts (26 tests) 353ms
+✓ src/lib/mcp-bridge.test.ts (31 tests) 9ms
+✓ src/components/ExpiringSoon.test.ts (16 tests) 113ms
+
+Test Files  5 passed (5)
+     Tests  117 passed (117)
+  Start at  20:04:38
+  Duration  1.82s (transform 488ms, setup 0ms, collect 1.89s, tests 794ms, environment 1.19s, prepare 214ms)
+
+Status: PASS
