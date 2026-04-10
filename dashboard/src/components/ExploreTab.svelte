@@ -15,11 +15,12 @@
    */
 
   import type { McpBridge } from "$lib/mcp-bridge";
-  import { selectedProject, refreshTick, pinEntry } from "$lib/stores";
+  import { selectedProject, refreshTick, pinEntry, workingSet, unpinEntry, clearWorkingSet, reorderEntries } from "$lib/stores";
   import SearchBar from "./SearchBar.svelte";
   import ResultsList from "./ResultsList.svelte";
   import EntryDetail from "./EntryDetail.svelte";
   import InvestigateMode from "./InvestigateMode.svelte";
+  import WorkingSet from "./WorkingSet.svelte";
 
   interface Props {
     bridge?: McpBridge | null;
@@ -135,6 +136,74 @@
   function closeDetailPanel() {
     detailPanelOpen = false;
   }
+
+  // ---------------------------------------------------------------------------
+  // Export helpers
+  // ---------------------------------------------------------------------------
+
+  /** Generate a markdown string from the current working set. */
+  function generateMarkdown(): string {
+    const entries = $workingSet;
+    if (entries.length === 0) return "";
+
+    const lines: string[] = [];
+    lines.push("# Working Set Export\n");
+    lines.push(`_Exported ${new Date().toISOString()}_\n`);
+
+    for (const entry of entries) {
+      lines.push(`## ${entry.title}`);
+      lines.push(`**Type:** ${entry.type}`);
+      lines.push("");
+      lines.push(entry.content);
+      lines.push("");
+      lines.push("---\n");
+    }
+
+    return lines.join("\n");
+  }
+
+  async function handleExport(): Promise<void> {
+    const md = generateMarkdown();
+    if (!md) return;
+
+    // Show a simple modal-like options via the export sub-state.
+    exportMarkdown = md;
+    exportOpen = true;
+  }
+
+  async function copyToClipboard(): Promise<void> {
+    if (!exportMarkdown) return;
+    try {
+      await navigator.clipboard.writeText(exportMarkdown);
+      exportCopied = true;
+      setTimeout(() => { exportCopied = false; }, 2000);
+    } catch {
+      // fallback: do nothing — clipboard API may be unavailable in some contexts
+    }
+  }
+
+  function downloadMarkdown(): void {
+    if (!exportMarkdown) return;
+    const blob = new Blob([exportMarkdown], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "working-set.md";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function closeExport(): void {
+    exportOpen = false;
+    exportMarkdown = "";
+  }
+
+  /** Whether the export dialog is open. */
+  let exportOpen = $state(false);
+  /** Generated markdown for the current export. */
+  let exportMarkdown = $state("");
+  /** Whether the clipboard copy succeeded recently. */
+  let exportCopied = $state(false);
 </script>
 
 <section id="explore" class="explore-section" aria-label="Explore knowledge base">
@@ -228,6 +297,38 @@
 
     </aside>
   </div>
+
+  <!-- Working Set panel — spans full width below both panels -->
+  <WorkingSet
+    entries={$workingSet}
+    onRemove={unpinEntry}
+    onReorder={reorderEntries}
+    onExport={handleExport}
+    onClear={clearWorkingSet}
+  />
+
+  <!-- Export dialog -->
+  {#if exportOpen}
+    <div class="export-overlay" role="dialog" aria-modal="true" aria-label="Export working set">
+      <div class="export-dialog">
+        <div class="export-header">
+          <h3 class="export-title">Export Working Set</h3>
+          <button class="export-close-btn" onclick={closeExport} aria-label="Close export dialog">
+            &times;
+          </button>
+        </div>
+        <pre class="export-preview">{exportMarkdown}</pre>
+        <div class="export-actions">
+          <button class="export-action-btn" onclick={copyToClipboard} aria-label="Copy to clipboard">
+            {exportCopied ? "Copied!" : "Copy to Clipboard"}
+          </button>
+          <button class="export-action-btn" onclick={downloadMarkdown} aria-label="Download as markdown">
+            Download .md
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
 </section>
 
 <style>
@@ -409,6 +510,95 @@
   .panel-close-btn:hover {
     color: var(--fg, #cdd6f4);
     border-color: var(--fg-muted, #a6adc8);
+  }
+
+  /* Export dialog overlay */
+  .export-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 300;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+  }
+
+  .export-dialog {
+    background: var(--bg-surface, #1e1e2e);
+    border: 1px solid var(--border, #45475a);
+    border-radius: 8px;
+    width: min(700px, 90vw);
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .export-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border, #45475a);
+  }
+
+  .export-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--fg, #cdd6f4);
+    margin: 0;
+  }
+
+  .export-close-btn {
+    background: none;
+    border: none;
+    color: var(--fg-muted, #a6adc8);
+    font-size: 1.25rem;
+    cursor: pointer;
+    padding: 0 0.25rem;
+    line-height: 1;
+  }
+
+  .export-close-btn:hover {
+    color: var(--fg, #cdd6f4);
+  }
+
+  .export-preview {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1rem;
+    font-family: ui-monospace, monospace;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    color: var(--fg, #cdd6f4);
+    white-space: pre-wrap;
+    word-break: break-word;
+    background: var(--code-bg, #11111b);
+    margin: 0;
+  }
+
+  .export-actions {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    border-top: 1px solid var(--border, #45475a);
+    justify-content: flex-end;
+  }
+
+  .export-action-btn {
+    padding: 0.4rem 0.9rem;
+    font-size: 0.875rem;
+    background: color-mix(in srgb, var(--accent, #89b4fa) 15%, transparent);
+    color: var(--accent, #89b4fa);
+    border: 1px solid color-mix(in srgb, var(--accent, #89b4fa) 40%, transparent);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .export-action-btn:hover {
+    background: color-mix(in srgb, var(--accent, #89b4fa) 30%, transparent);
   }
 
 </style>

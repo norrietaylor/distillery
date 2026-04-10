@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import type { McpBridge } from "$lib/mcp-bridge";
+  import { workingSet, pinEntry, unpinEntry, isEntryPinned } from "$lib/stores";
   import LoadingSkeleton from "./LoadingSkeleton.svelte";
   import ScoreBadge from "./ScoreBadge.svelte";
   import DataTable from "./DataTable.svelte";
@@ -16,6 +17,22 @@
   }
 
   let { bridge = null, query = "", onRowClick }: Props = $props();
+
+  /** Toggle pin state for a result row. */
+  function togglePin(row: SearchResult, event: MouseEvent): void {
+    event.stopPropagation();
+    if (isEntryPinned(row.id, $workingSet)) {
+      unpinEntry(row.id);
+    } else {
+      pinEntry({
+        id: row.id,
+        title: row.content.split("\n")[0]?.slice(0, 60) || row.id,
+        type: row.entry_type || "entry",
+        content: row.content,
+        pinnedAt: new Date().toISOString(),
+      });
+    }
+  }
 
   /** A single search result as returned by the recall tool. */
   interface SearchResult {
@@ -142,7 +159,7 @@
   });
 
   /** Build column definitions. */
-  function buildColumns(scoreSnippet?: Snippet<[SearchResult]>): Column<SearchResult>[] {
+  function buildColumns(scoreSnippet?: Snippet<[SearchResult]>, pinSnippet?: Snippet<[SearchResult]>): Column<SearchResult>[] {
     return [
       {
         key: "content",
@@ -172,6 +189,12 @@
         label: "Date",
         sortable: true,
         renderText: (row) => formatDate(row.created_at),
+      },
+      {
+        key: "id",
+        label: "",
+        sortable: false,
+        renderSnippet: pinSnippet,
       },
     ];
   }
@@ -216,8 +239,19 @@
       <ScoreBadge score={row.score} />
     {/snippet}
 
+    {#snippet pinCell(row: SearchResult)}
+      <button
+        class="pin-btn"
+        class:pin-btn--active={isEntryPinned(row.id, $workingSet)}
+        onclick={(e) => togglePin(row, e)}
+        aria-label={isEntryPinned(row.id, $workingSet) ? `Unpin ${row.content.split("\n")[0]?.slice(0, 40) || row.id}` : `Pin ${row.content.split("\n")[0]?.slice(0, 40) || row.id}`}
+      >
+        {isEntryPinned(row.id, $workingSet) ? "Unpin" : "Pin"}
+      </button>
+    {/snippet}
+
     <DataTable
-      columns={buildColumns(scoreCell)}
+      columns={buildColumns(scoreCell, pinCell)}
       rows={filteredResults}
       defaultSortKey="score"
       defaultSortDir="desc"
@@ -237,6 +271,14 @@
           {/if}
           <ScoreBadge score={entry.score} />
           <span class="detail-date">{formatDate(entry.created_at)}</span>
+          <button
+            class="pin-btn"
+            class:pin-btn--active={isEntryPinned(entry.id, $workingSet)}
+            onclick={(e) => togglePin(entry, e)}
+            aria-label={isEntryPinned(entry.id, $workingSet) ? "Unpin entry" : "Pin entry"}
+          >
+            {isEntryPinned(entry.id, $workingSet) ? "Unpin" : "Pin"}
+          </button>
           <button
             class="close-btn"
             onclick={() => { expandedId = null; }}
@@ -404,5 +446,36 @@
     word-break: break-word;
     color: var(--fg, #cdd6f4);
     margin: 0;
+  }
+
+  /* Pin button */
+  .pin-btn {
+    padding: 0.15rem 0.45rem;
+    font-size: 0.75rem;
+    border-radius: 4px;
+    border: 1px solid var(--border, #45475a);
+    background: none;
+    color: var(--fg-muted, #a6adc8);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.1s, color 0.1s, border-color 0.1s;
+  }
+
+  .pin-btn:hover {
+    background: color-mix(in srgb, var(--accent, #89b4fa) 15%, transparent);
+    color: var(--accent, #89b4fa);
+    border-color: color-mix(in srgb, var(--accent, #89b4fa) 40%, transparent);
+  }
+
+  .pin-btn--active {
+    background: color-mix(in srgb, var(--accent, #89b4fa) 15%, transparent);
+    color: var(--accent, #89b4fa);
+    border-color: color-mix(in srgb, var(--accent, #89b4fa) 40%, transparent);
+  }
+
+  .pin-btn--active:hover {
+    background: color-mix(in srgb, var(--error, #f38ba8) 15%, transparent);
+    color: var(--error, #f38ba8);
+    border-color: color-mix(in srgb, var(--error, #f38ba8) 40%, transparent);
   }
 </style>

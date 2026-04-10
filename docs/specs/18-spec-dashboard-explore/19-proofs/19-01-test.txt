@@ -1,0 +1,24 @@
+Type: test
+Command: cd dashboard && npx vitest run src/components/WorkingSet.test.ts
+Expected: Export tests pass
+Timestamp: 2026-04-10T08:43:10Z
+
+--- OUTPUT ---
+
+ RUN  v3.2.4 /home/norrie.guest/code/distillery/.worktrees/feature-dashboard-explore/dashboard
+
+ ✓ src/components/WorkingSet.test.ts (44 tests) 128ms
+
+ Test Files  1 passed (1)
+      Tests  44 passed (44)
+   Start at  08:43:10
+   Duration  862ms (transform 248ms, setup 0ms, collect 411ms, tests 128ms, environment 171ms, prepare 31ms)
+
+--- RESULT ---
+Status: PASS
+
+New export tests added to WorkingSet.test.ts (44 total, 4 new):
+  - export button is not visible when panel is empty
+  - export button is not visible when panel is collapsed
+  - export button has correct aria-label
+  - onExport is not called when no entries are present

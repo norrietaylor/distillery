@@ -1,7 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/svelte";
+import { get } from "svelte/store";
 import ResultsList from "./ResultsList.svelte";
 import type { McpBridge, ToolCallTextResult } from "$lib/mcp-bridge";
+import { workingSet, clearWorkingSet } from "$lib/stores";
 
 /** Build a minimal mock ToolCallTextResult. */
 function makeResult(text: string, isError = false): ToolCallTextResult {
@@ -36,9 +38,27 @@ function makeMockBridge(
   } as unknown as McpBridge;
 }
 
+// sessionStorage mock for workingSet persistence
+const sessionStorageMock = (() => {
+  let store: Record<string, string> = {};
+  return {
+    getItem: (key: string) => store[key] ?? null,
+    setItem: (key: string, value: string) => { store[key] = value; },
+    removeItem: (key: string) => { delete store[key]; },
+    clear: () => { store = {}; },
+  };
+})();
+
 // Suppress Svelte warnings in test output
 beforeEach(() => {
   vi.stubGlobal("console", { ...console, warn: vi.fn(), error: vi.fn() });
+  vi.stubGlobal("sessionStorage", sessionStorageMock);
+  sessionStorageMock.clear();
+  clearWorkingSet();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe("ResultsList", () => {
@@ -509,6 +529,73 @@ describe("ResultsList", () => {
 
       await waitFor(() => {
         expect(screen.getByText(/Valid result entry here/)).toBeTruthy();
+      });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Pin buttons
+  // ---------------------------------------------------------------------------
+
+  describe("pin buttons", () => {
+    it("renders a Pin button for each result row", async () => {
+      const lines = [
+        resultLine({ id: "pin-row-1", content: "Pinnable result one" }),
+        resultLine({ id: "pin-row-2", content: "Pinnable result two" }),
+      ].join("\n");
+
+      const bridge = makeMockBridge(async () => makeResult(lines));
+      render(ResultsList, { props: { bridge, query: "pinnable" } });
+
+      await waitFor(() => screen.getByText(/Pinnable result one/));
+
+      const pinBtns = screen.getAllByRole("button", { name: /^Pin / });
+      expect(pinBtns.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it("pins an entry when Pin button is clicked", async () => {
+      const line = resultLine({ id: "row-pin-test", content: "Row pin test content" });
+      const bridge = makeMockBridge(async () => makeResult(line));
+      render(ResultsList, { props: { bridge, query: "row pin" } });
+
+      await waitFor(() => screen.getByText(/Row pin test content/));
+
+      const pinBtn = screen.getByRole("button", { name: /^Pin Row pin test/ });
+      fireEvent.click(pinBtn);
+
+      await waitFor(() => {
+        const ws = get(workingSet);
+        expect(ws.some((e) => e.id === "row-pin-test")).toBe(true);
+      });
+    });
+
+    it("shows Unpin button after pinning", async () => {
+      const line = resultLine({ id: "row-unpin-test", content: "Row unpin test content" });
+      const bridge = makeMockBridge(async () => makeResult(line));
+      render(ResultsList, { props: { bridge, query: "row unpin" } });
+
+      await waitFor(() => screen.getByText(/Row unpin test content/));
+
+      const pinBtn = screen.getByRole("button", { name: /^Pin Row unpin test/ });
+      fireEvent.click(pinBtn);
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: /^Unpin Row unpin test/ })).toBeTruthy();
+      });
+    });
+
+    it("shows a pin button in the expanded detail panel", async () => {
+      const line = resultLine({ id: "detail-pin-test", content: "Detail panel pin content" });
+      const bridge = makeMockBridge(async () => makeResult(line));
+      render(ResultsList, { props: { bridge, query: "detail pin" } });
+
+      await waitFor(() => screen.getByText(/Detail panel pin content/));
+
+      const dataRow = screen.getAllByRole("row")[1]!;
+      fireEvent.click(dataRow);
+
+      await waitFor(() => {
+        expect(screen.getByLabelText("Pin entry")).toBeTruthy();
       });
     });
   });
