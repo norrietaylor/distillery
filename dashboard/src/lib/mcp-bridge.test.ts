@@ -95,6 +95,31 @@ describe("McpBridge", () => {
       await bridge.connect();
       expect(bridge.isConnected).toBe(true);
     });
+
+    it("rejects with McpBridgeError when connect() times out", async () => {
+      vi.useFakeTimers();
+
+      // Make app.connect() hang indefinitely
+      vi.mocked(bridge.appInstance.connect).mockImplementationOnce(
+        () => new Promise<void>(() => {}),
+      );
+
+      const timeoutBridge = new McpBridge({ timeoutMs: 1000 });
+      // Replace the app instance's connect with the hanging mock
+      vi.mocked(timeoutBridge.appInstance.connect).mockImplementationOnce(
+        () => new Promise<void>(() => {}),
+      );
+
+      const connectPromise = timeoutBridge.connect();
+      vi.advanceTimersByTime(1001);
+      const error = await connectPromise.catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(McpBridgeError);
+      expect((error as McpBridgeError).message).toContain("timed out");
+      expect(timeoutBridge.isConnected).toBe(false);
+
+      vi.useRealTimers();
+    });
   });
 
   describe("callTool", () => {
