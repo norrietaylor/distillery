@@ -8,6 +8,7 @@
    */
 
   import type { McpBridge } from "$lib/mcp-bridge";
+  import { workingSet, pinEntry, unpinEntry, isEntryPinned } from "$lib/stores";
   import LoadingSkeleton from "./LoadingSkeleton.svelte";
 
   // ---------------------------------------------------------------------------
@@ -483,6 +484,26 @@
       archiveSubmitting = false;
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Pin / unpin helpers
+  // ---------------------------------------------------------------------------
+
+  /** Toggle the pin state of the currently displayed entry. */
+  function togglePin(): void {
+    if (!entry) return;
+    if (isEntryPinned(entry.id, $workingSet)) {
+      unpinEntry(entry.id);
+    } else {
+      pinEntry({
+        id: entry.id,
+        title: entryTitle(entry),
+        type: entry.entry_type || "entry",
+        content: entry.content,
+        pinnedAt: new Date().toISOString(),
+      });
+    }
+  }
 </script>
 
 <div class="entry-detail" aria-label="Entry detail panel">
@@ -534,6 +555,14 @@
               Investigate
             </button>
           {/if}
+          <button
+            class="action-btn"
+            class:action-btn--active={isEntryPinned(entry.id, $workingSet)}
+            onclick={togglePin}
+            aria-label={isEntryPinned(entry.id, $workingSet) ? "Unpin entry" : "Pin entry"}
+          >
+            {isEntryPinned(entry.id, $workingSet) ? "Unpin" : "Pin"}
+          </button>
           <button
             class="action-btn"
             onclick={startEdit}
@@ -867,6 +896,11 @@
 
   .action-btn--primary {
     background: color-mix(in srgb, var(--accent, #89b4fa) 25%, transparent);
+  }
+
+  .action-btn--active {
+    background: color-mix(in srgb, var(--accent, #89b4fa) 25%, transparent);
+    font-weight: 600;
   }
 
   .action-btn--danger {

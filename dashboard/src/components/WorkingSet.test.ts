@@ -409,6 +409,36 @@ describe("WorkingSet component", () => {
       fireEvent.click(screen.getByRole("button", { name: "Export working set" }));
       expect(onExport).toHaveBeenCalledOnce();
     });
+
+    it("export button is not visible when panel is empty", () => {
+      renderWS([]);
+      // No entries => panel is collapsed => no export button visible.
+      expect(screen.queryByRole("button", { name: "Export working set" })).toBeNull();
+    });
+
+    it("export button is not visible when panel is collapsed", () => {
+      const entries = [makeEntry({ title: "Collapsible Entry" })];
+      renderWS(entries);
+      // Panel auto-expands; click toggle to collapse.
+      const toggleBtn = screen.getByRole("button", { name: /Working Set \(1\)/i });
+      fireEvent.click(toggleBtn);
+      // After collapse, export button should be gone.
+      expect(screen.queryByRole("button", { name: "Export working set" })).toBeNull();
+    });
+
+    it("export button has correct aria-label", () => {
+      renderWS([makeEntry()]);
+      const btn = screen.getByRole("button", { name: "Export working set" });
+      expect(btn.getAttribute("aria-label")).toBe("Export working set");
+    });
+
+    it("onExport is not called when no entries are present", () => {
+      // With no entries the export button should not be rendered at all.
+      const onExport = vi.fn();
+      renderWS([], { onExport });
+      expect(screen.queryByRole("button", { name: "Export working set" })).toBeNull();
+      expect(onExport).not.toHaveBeenCalled();
+    });
   });
 
   describe("drag-and-drop", () => {

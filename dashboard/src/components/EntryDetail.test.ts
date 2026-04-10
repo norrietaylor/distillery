@@ -1,7 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/svelte";
+import { get } from "svelte/store";
 import EntryDetail from "./EntryDetail.svelte";
 import type { McpBridge, ToolCallTextResult } from "$lib/mcp-bridge";
+import { workingSet, clearWorkingSet } from "$lib/stores";
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -108,8 +110,26 @@ function makeMockBridge(opts: {
   } as unknown as McpBridge;
 }
 
+// sessionStorage mock for workingSet persistence
+const sessionStorageMock = (() => {
+  let store: Record<string, string> = {};
+  return {
+    getItem: (key: string) => store[key] ?? null,
+    setItem: (key: string, value: string) => { store[key] = value; },
+    removeItem: (key: string) => { delete store[key]; },
+    clear: () => { store = {}; },
+  };
+})();
+
 beforeEach(() => {
   vi.stubGlobal("console", { ...console, warn: vi.fn(), error: vi.fn() });
+  vi.stubGlobal("sessionStorage", sessionStorageMock);
+  sessionStorageMock.clear();
+  clearWorkingSet();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 // ---------------------------------------------------------------------------
@@ -975,6 +995,60 @@ describe("EntryDetail", () => {
 
       await waitFor(() => {
         expect(screen.queryByLabelText("Entry navigation breadcrumbs")).toBeNull();
+      });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Pin / unpin integration
+  // ---------------------------------------------------------------------------
+
+  describe("pin button", () => {
+    it("shows a Pin button in the action group when entry is loaded", async () => {
+      const bridge = makeMockBridge({ entryText: makeEntry({ id: "pin-test-1" }) });
+      render(EntryDetail, { props: { bridge, entryId: "pin-test-1" } });
+
+      await waitFor(() => screen.getByLabelText("Pin entry"));
+      expect(screen.getByLabelText("Pin entry")).toBeTruthy();
+    });
+
+    it("pins the entry when Pin button is clicked", async () => {
+      const bridge = makeMockBridge({ entryText: makeEntry({ id: "pin-test-2" }) });
+      render(EntryDetail, { props: { bridge, entryId: "pin-test-2" } });
+
+      await waitFor(() => screen.getByLabelText("Pin entry"));
+      fireEvent.click(screen.getByLabelText("Pin entry"));
+
+      await waitFor(() => {
+        const ws = get(workingSet);
+        expect(ws.some((e) => e.id === "pin-test-2")).toBe(true);
+      });
+    });
+
+    it("shows Unpin button after entry is pinned", async () => {
+      const bridge = makeMockBridge({ entryText: makeEntry({ id: "pin-test-3" }) });
+      render(EntryDetail, { props: { bridge, entryId: "pin-test-3" } });
+
+      await waitFor(() => screen.getByLabelText("Pin entry"));
+      fireEvent.click(screen.getByLabelText("Pin entry"));
+
+      await waitFor(() => screen.getByLabelText("Unpin entry"));
+      expect(screen.getByLabelText("Unpin entry")).toBeTruthy();
+    });
+
+    it("unpins the entry when Unpin button is clicked", async () => {
+      const bridge = makeMockBridge({ entryText: makeEntry({ id: "pin-test-4" }) });
+      render(EntryDetail, { props: { bridge, entryId: "pin-test-4" } });
+
+      await waitFor(() => screen.getByLabelText("Pin entry"));
+      fireEvent.click(screen.getByLabelText("Pin entry"));
+
+      await waitFor(() => screen.getByLabelText("Unpin entry"));
+      fireEvent.click(screen.getByLabelText("Unpin entry"));
+
+      await waitFor(() => {
+        const ws = get(workingSet);
+        expect(ws.some((e) => e.id === "pin-test-4")).toBe(false);
       });
     });
   });
