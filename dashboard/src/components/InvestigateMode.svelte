@@ -118,6 +118,9 @@
       completedPhase = 0;
       phase1Results = [];
       phase1Error = null;
+      phase4Results = [];
+      phase4Error = null;
+      phase3DiscoveredTags = [];
     }
   });
 
@@ -134,6 +137,14 @@
     const allTags = phase1Results.flatMap((r) => r.tags);
     return Array.from(new Set(allTags));
   });
+
+  /** Phase 4 gap-fill results. */
+  let phase4Results = $state<InvestigateResult[]>([]);
+  let phase4Loading = $state(false);
+  let phase4Error = $state<string | null>(null);
+
+  /** Tags discovered in Phase 3 (set via callback from TagNeighborhood). */
+  let phase3DiscoveredTags = $state<string[]>([]);
 
   // ---------------------------------------------------------------------------
   // Helpers
@@ -226,7 +237,7 @@
     }
   }
 
-  // Kick off Phase 1 on mount
+  // Kick off Phase 1 on mount / on pivot
   $effect(() => {
     const path = investigationPath;
     if (path.length > 0 && currentPhase === 1) {
@@ -234,6 +245,58 @@
       void runPhase1Search(currentEntry.query);
     }
   });
+
+  // Phase 2 auto-advance: when Phase 2 becomes active, mark it complete and
+  // advance to Phase 3 (RelationGraph loads its own data independently).
+  $effect(() => {
+    if (currentPhase === 2 && completedPhase < 2) {
+      completedPhase = Math.max(completedPhase, 2);
+      currentPhase = 3;
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Phase 4: Gap Analysis
+  // ---------------------------------------------------------------------------
+
+  /** Synthesize a gap-fill query from seed content + top tags from Phase 3. */
+  function synthesizeGapQuery(): string {
+    const seedLine = seedContent.split("\n")[0] ?? seedContent;
+    const topTags = (phase3DiscoveredTags.length > 0 ? phase3DiscoveredTags : phase3SeedTags)
+      .slice(0, 3)
+      .join(" ");
+    return topTags ? `${seedLine} ${topTags}` : seedLine;
+  }
+
+  async function runPhase4GapFill() {
+    if (!bridge?.isConnected) {
+      phase4Error = "Not connected to MCP server";
+      return;
+    }
+    phase4Loading = true;
+    phase4Error = null;
+    try {
+      const query = synthesizeGapQuery();
+      const args: Record<string, unknown> = { query: query.trim(), limit: 5 };
+      const project = $selectedProject;
+      if (project) args["project"] = project;
+      const result = await bridge.callTool("distillery_search", args);
+      if (result.isError) {
+        phase4Error = result.text || "Gap analysis failed";
+        phase4Results = [];
+        return;
+      }
+      const all = parseResults(result.text);
+      // Filter out entries already seen in this investigation
+      phase4Results = all.filter((r) => !seenEntryIds.has(r.id));
+      completedPhase = Math.max(completedPhase, 4);
+    } catch (err) {
+      phase4Error = err instanceof Error ? err.message : "Gap analysis failed";
+      phase4Results = [];
+    } finally {
+      phase4Loading = false;
+    }
+  }
 
   // ---------------------------------------------------------------------------
   // Pivot: click a result card to use it as new seed
@@ -252,6 +315,9 @@
     currentPhase = 1;
     completedPhase = 0;
     phase1Results = [];
+    phase4Results = [];
+    phase4Error = null;
+    phase3DiscoveredTags = [];
   }
 
   // ---------------------------------------------------------------------------
@@ -264,6 +330,9 @@
     currentPhase = 1;
     completedPhase = 0;
     phase1Results = [];
+    phase4Results = [];
+    phase4Error = null;
+    phase3DiscoveredTags = [];
   }
 
   // ---------------------------------------------------------------------------
@@ -435,18 +504,66 @@
           project={$selectedProject}
           investigationTopic={buildQuery(seedContent)}
           onResults={(results) => {
-            // Surface Phase 3 results to parent if needed
-            for (const r of results) {
-              void r;
+            // Capture discovered tags from Phase 3 for Phase 4 synthesis
+            if (results.length > 0) {
+              const allTags = results.flatMap((r) => r.tags);
+              phase3DiscoveredTags = Array.from(new Set(allTags));
+              completedPhase = Math.max(completedPhase, 3);
+              // Auto-advance to Phase 4 and run gap-fill
+              currentPhase = 4;
+              void runPhase4GapFill();
             }
           }}
           onPin={(entry) => handlePin(entry as InvestigateResult)}
         />
       </section>
-    {:else}
-      <!-- Phase 4: placeholder for future task -->
-      <section class="phase-section" aria-label="Phase {currentPhase}">
-        <p class="empty-state">Phase {currentPhase} coming soon.</p>
+    {:else if currentPhase === 4}
+      <!-- Phase 4: Gap Analysis -->
+      <section class="phase-section" aria-label="Phase 4: Gap Analysis">
+        <h3 class="phase-section-title">You might also want to look at:</h3>
+
+        {#if phase4Loading}
+          <LoadingSkeleton rows={3} label="Running gap analysis..." />
+        {:else if phase4Error}
+          <div class="error-banner" role="alert">
+            <strong>Error:</strong> {phase4Error}
+          </div>
+        {:else if phase4Results.length === 0}
+          <p class="empty-state">No additional entries found.</p>
+        {:else}
+          <ul class="result-cards" aria-label="Gap analysis results">
+            {#each phase4Results as result (result.id)}
+              <li class="result-card">
+                <button
+                  class="card-body"
+                  onclick={() => handlePivot(result)}
+                  aria-label="Pivot to: {contentPreview(result.content)}"
+                >
+                  <div class="card-header">
+                    <span class="card-type">{result.entry_type || "entry"}</span>
+                    <ScoreBadge score={result.score} />
+                  </div>
+                  <p class="card-preview">{contentPreview(result.content)}</p>
+                  {#if result.tags.length > 0}
+                    <div class="card-tags">
+                      {#each result.tags as tag (tag)}
+                        <span class="card-tag">{tag}</span>
+                      {/each}
+                    </div>
+                  {/if}
+                </button>
+                <button
+                  class="pin-btn"
+                  onclick={() => handlePin(result)}
+                  aria-label="Pin entry"
+                  title="Pin to working set"
+                >
+                  Pin
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
       </section>
     {/if}
   </div>
