@@ -76,7 +76,7 @@ def _build_inline_html(dist_dir: Path) -> str:
                 safe_css = css_content.replace("</style>", "<\\/style>")
                 pattern = rf'<link[^>]*href="/assets/{re.escape(css_file.name)}"[^>]*/?\s*>'
                 replacement = f"<style>{safe_css}</style>"
-                html = re.sub(pattern, lambda _m, r=replacement: r, html, flags=re.IGNORECASE)
+                html = re.sub(pattern, lambda _m: replacement, html, flags=re.IGNORECASE)
 
         # Inline JS: replace <script type="module" ... src="/assets/X.js">
         for js_file in sorted(assets_dir.glob("*.js")):
@@ -86,7 +86,7 @@ def _build_inline_html(dist_dir: Path) -> str:
                 safe_js = js_content.replace("</script>", "<\\/script>")
                 pattern = rf'<script[^>]*src="/assets/{re.escape(js_name)}"[^>]*>\s*</script>'
                 replacement = f'<script type="module">{safe_js}</script>'
-                html = re.sub(pattern, lambda _m, r=replacement: r, html, flags=re.IGNORECASE)
+                html = re.sub(pattern, lambda _m: replacement, html, flags=re.IGNORECASE)
 
     return html
 
