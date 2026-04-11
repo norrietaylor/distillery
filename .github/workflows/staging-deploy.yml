@@ -46,10 +46,15 @@ jobs:
   # ──────────────────────────────────────────────────────────────────
   resolve:
     name: Resolve PR head SHA
+    # startsWith (NOT contains) is load-bearing: any bot comment whose
+    # body mentions the command string in prose (e.g. the staging
+    # success comment's help text "Comment /deploy-staging ...") will
+    # otherwise self-trigger this workflow via the issue_comment event
+    # on that same comment. Commands must begin at column 0.
     if: >
       github.event_name == 'issue_comment' &&
       github.event.issue.pull_request != null &&
-      contains(github.event.comment.body, '/deploy-staging') &&
+      startsWith(github.event.comment.body, '/deploy-staging') &&
       (
         github.event.comment.author_association == 'OWNER' ||
         github.event.comment.author_association == 'MEMBER' ||
@@ -192,10 +197,17 @@ jobs:
   # ──────────────────────────────────────────────────────────────────
   teardown_comment:
     name: Dispatch staging teardown (comment)
+    # startsWith (NOT contains) — see the `resolve` job above. The
+    # distill_ops staging-deploy success comment intentionally no
+    # longer contains the literal "/teardown-staging" in its help
+    # text, but defence in depth: a prefix check means *only* a
+    # bare-command comment starting with "/teardown-staging" fires
+    # the teardown. Any prose that mentions the command in-line does
+    # nothing.
     if: >
       github.event_name == 'issue_comment' &&
       github.event.issue.pull_request != null &&
-      contains(github.event.comment.body, '/teardown-staging') &&
+      startsWith(github.event.comment.body, '/teardown-staging') &&
       (
         github.event.comment.author_association == 'OWNER' ||
         github.event.comment.author_association == 'MEMBER' ||
