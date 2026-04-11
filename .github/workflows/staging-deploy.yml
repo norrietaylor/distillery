@@ -122,12 +122,12 @@ jobs:
       packages: write
       pull-requests: write
     steps:
-      - name: Checkout resolved SHA
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          ref: ${{ needs.resolve.outputs.head_sha }}
-          persist-credentials: false
-
+      # No actions/checkout step — buildx pulls the pinned SHA as a
+      # remote Git context directly into the build daemon, which keeps
+      # untrusted PR code out of the runner workspace and satisfies
+      # CodeQL's `actions/untrusted-checkout` rule. The SHA is the
+      # immutable output of the unprivileged `resolve` job, so it
+      # cannot be mutated between resolution and build.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
 
@@ -141,7 +141,8 @@ jobs:
       - name: Build and push staging image
         uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7
         with:
-          context: .
+          # Remote Git context pinned to the resolved SHA.
+          context: https://github.com/${{ github.repository }}.git#${{ needs.resolve.outputs.head_sha }}
           file: Dockerfile
           push: true
           tags: |
