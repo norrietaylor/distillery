@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 from fastmcp import FastMCP
@@ -31,6 +32,13 @@ def _find_dist_dir() -> Path:
     if override:
         return Path(override)
     return _DEFAULT_DIST_DIR
+
+
+def _literal_replacer(text: str) -> Callable[[re.Match[str]], str]:
+    """Return a callable for ``re.sub`` that always returns *text* literally."""
+    def _repl(_match: re.Match[str]) -> str:
+        return text
+    return _repl
 
 
 def _build_inline_html(dist_dir: Path) -> str:
@@ -76,7 +84,9 @@ def _build_inline_html(dist_dir: Path) -> str:
                 safe_css = css_content.replace("</style>", "<\\/style>")
                 pattern = rf'<link[^>]*href="/assets/{re.escape(css_file.name)}"[^>]*/?\s*>'
                 replacement = f"<style>{safe_css}</style>"
-                html = re.sub(pattern, lambda _m: replacement, html, flags=re.IGNORECASE)
+                html = re.sub(
+                    pattern, _literal_replacer(replacement), html, flags=re.IGNORECASE
+                )
 
         # Inline JS: replace <script type="module" ... src="/assets/X.js">
         for js_file in sorted(assets_dir.glob("*.js")):
@@ -86,7 +96,9 @@ def _build_inline_html(dist_dir: Path) -> str:
                 safe_js = js_content.replace("</script>", "<\\/script>")
                 pattern = rf'<script[^>]*src="/assets/{re.escape(js_name)}"[^>]*>\s*</script>'
                 replacement = f'<script type="module">{safe_js}</script>'
-                html = re.sub(pattern, lambda _m: replacement, html, flags=re.IGNORECASE)
+                html = re.sub(
+                    pattern, _literal_replacer(replacement), html, flags=re.IGNORECASE
+                )
 
     return html
 
