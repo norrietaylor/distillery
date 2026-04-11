@@ -1,6 +1,6 @@
 """Tests for the Distillery MCP server (T04.4 / T02.3).
 
-Tests cover the 12 registered MCP tools via direct handler calls with a mock
+Tests cover the 13 registered MCP tools via direct handler calls with a mock
 store and deterministic embedding provider:
 
   store -> search -> get -> update -> find_similar -> list -> status
@@ -9,7 +9,7 @@ The test harness exercises the server handlers directly without requiring a
 running stdio transport.  All handlers are async functions that accept a
 store object and an arguments dict -- this is the natural unit-test seam.
 
-Also exercises the ``create_server`` factory to confirm all 12 tools are
+Also exercises the ``create_server`` factory to confirm all 13 tools are
 registered and the lifespan context initialises state correctly.
 
 Tools removed from MCP surface (now webhooks or internal handlers):
@@ -681,6 +681,7 @@ class TestCreateServer:
             "distillery_watch",
             "distillery_configure",
             "distillery_relations",
+            "distillery_dashboard",
         }
         assert expected == tool_names, (
             f"Tool mismatch — extra: {tool_names - expected}, missing: {expected - tool_names}"
@@ -755,14 +756,14 @@ class TestRemovedTools:
             )
 
     async def test_removed_tools_count_unchanged(self) -> None:
-        """Exactly 12 tools must be registered — no removed tool has crept back."""
+        """Exactly 13 tools must be registered — no removed tool has crept back."""
         config = DistilleryConfig(
             storage=StorageConfig(database_path=":memory:"),
             embedding=EmbeddingConfig(provider="", model="stub", dimensions=4),
         )
         server = create_server(config)
         tools = await server.list_tools()
-        assert len(tools) == 12, (
-            f"Expected 12 registered tools, got {len(tools)}: "
+        assert len(tools) == 13, (
+            f"Expected 13 registered tools, got {len(tools)}: "
             f"{sorted(t.name for t in tools)}"
         )
