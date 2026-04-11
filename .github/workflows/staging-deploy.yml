@@ -1,0 +1,243 @@
+name: Staging Deploy (on comment)
+
+# Build the PR head SHA as a staging image and dispatch the Fly.io
+# staging deploy in norrietaylor/distill_ops. Lifecycle is driven by PR
+# comments:
+#   /deploy-staging    — build image, dispatch staging-deploy
+#   /teardown-staging  — dispatch staging-teardown
+# Closing the PR also dispatches staging-teardown.
+#
+# Staging is a singleton. A second /deploy-staging on a different PR
+# replaces the current deployment.
+#
+# Supply-chain scanning (Grype/cosign/SBOM) runs on the PR itself via
+# supply-chain.yml; we intentionally skip it here to keep the dev loop
+# fast.
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request:
+    types: [closed]
+
+# Default permissions are minimal. Each job opts in to what it needs.
+# The deploy job — which checks out PR head code and builds it — is
+# the only one that needs package-write, and it is additionally gated
+# behind the `staging-deploy` GitHub Environment so a repo reviewer
+# must click Approve before the untrusted Dockerfile is built. This
+# closes the CodeQL `actions/untrusted-checkout-toctou` window.
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/norrietaylor/distillery
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────
+  # Job 1a: Resolve the PR head SHA on a trusted, unprivileged runner.
+  #
+  # This job intentionally has no write scopes and does NOT check out
+  # any PR code. It only resolves the current head SHA and exposes it
+  # as a job output. The downstream `build` job consumes that immutable
+  # output — so between the author_association check here and the
+  # checkout there, the SHA cannot change. This closes the
+  # `actions/untrusted-checkout-toctou` hole.
+  # ──────────────────────────────────────────────────────────────────
+  resolve:
+    name: Resolve PR head SHA
+    if: >
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request != null &&
+      contains(github.event.comment.body, '/deploy-staging') &&
+      (
+        github.event.comment.author_association == 'OWNER' ||
+        github.event.comment.author_association == 'MEMBER' ||
+        github.event.comment.author_association == 'COLLABORATOR'
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    outputs:
+      pr_number: ${{ steps.pr.outputs.pr_number }}
+      head_sha: ${{ steps.pr.outputs.head_sha }}
+      short_sha: ${{ steps.pr.outputs.short_sha }}
+      image_tag: ${{ steps.pr.outputs.image_tag }}
+    steps:
+      - name: React to trigger comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api \
+            --method POST \
+            "repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions" \
+            -f content=eyes
+
+      - name: Resolve PR head SHA
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER="${{ github.event.issue.number }}"
+          HEAD_SHA=$(gh pr view "${PR_NUMBER}" \
+            --repo "${{ github.repository }}" \
+            --json headRefOid \
+            --jq .headRefOid)
+          SHORT_SHA="${HEAD_SHA:0:7}"
+          IMAGE_TAG="pr-${PR_NUMBER}-sha-${SHORT_SHA}"
+          {
+            echo "pr_number=${PR_NUMBER}"
+            echo "head_sha=${HEAD_SHA}"
+            echo "short_sha=${SHORT_SHA}"
+            echo "image_tag=${IMAGE_TAG}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Announce pending approval
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          gh pr comment "${{ steps.pr.outputs.pr_number }}" \
+            --repo "${{ github.repository }}" \
+            --body "⏳ Staging deploy pending review — resolved head SHA \`${{ steps.pr.outputs.head_sha }}\`. A repo collaborator must approve the \`staging-deploy\` environment before the image is built: ${RUN_URL}"
+
+  # ──────────────────────────────────────────────────────────────────
+  # Job 1b: Build and push the staging image.
+  #
+  # Requires environment approval — configure `staging-deploy` in
+  # Settings → Environments with required reviewers = repo collaborators
+  # before merging this workflow. The approver sees the resolved head
+  # SHA (as a link in the resolve job's output) before approving.
+  # ──────────────────────────────────────────────────────────────────
+  build:
+    name: Build and dispatch staging deploy
+    needs: resolve
+    runs-on: ubuntu-latest
+    environment:
+      name: staging-deploy
+      url: https://distillery-mcp-dev.fly.dev
+    permissions:
+      contents: read
+      packages: write
+      pull-requests: write
+    steps:
+      # No actions/checkout step — buildx pulls the pinned SHA as a
+      # remote Git context directly into the build daemon, which keeps
+      # untrusted PR code out of the runner workspace and satisfies
+      # CodeQL's `actions/untrusted-checkout` rule. The SHA is the
+      # immutable output of the unprivileged `resolve` job, so it
+      # cannot be mutated between resolution and build.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push staging image
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7
+        with:
+          # Remote Git context pinned to the resolved SHA.
+          context: https://github.com/${{ github.repository }}.git#${{ needs.resolve.outputs.head_sha }}
+          file: Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ needs.resolve.outputs.image_tag }}
+            ${{ env.IMAGE_NAME }}:staging
+          # Cache is scoped per-PR so each branch maintains its own
+          # layer cache. This prevents a Dockerfile change in one PR
+          # from poisoning cached layers used by other PRs' staging
+          # builds. GH Actions cache eviction handles cleanup as PRs
+          # go stale.
+          cache-from: type=gha,scope=staging-pr-${{ needs.resolve.outputs.pr_number }}
+          cache-to: type=gha,scope=staging-pr-${{ needs.resolve.outputs.pr_number }},mode=max
+          build-args: |
+            BUILD_SHA=${{ needs.resolve.outputs.head_sha }}
+
+      - name: Dispatch staging deploy to distill_ops
+        env:
+          GH_TOKEN: ${{ secrets.DISTILL_OPS_DEPLOY_TOKEN }}
+        run: |
+          gh api \
+            --method POST \
+            repos/norrietaylor/distill_ops/dispatches \
+            -f "event_type=staging-deploy" \
+            --field "client_payload[image_tag]=${{ needs.resolve.outputs.image_tag }}" \
+            --field "client_payload[pr_number]=${{ needs.resolve.outputs.pr_number }}" \
+            --field "client_payload[head_sha]=${{ needs.resolve.outputs.head_sha }}" \
+            --field "client_payload[repo]=${{ github.repository }}"
+
+      - name: Comment dispatch confirmation
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          gh pr comment "${{ needs.resolve.outputs.pr_number }}" \
+            --repo "${{ github.repository }}" \
+            --body "🚀 Staging deploy dispatched — image \`${{ needs.resolve.outputs.image_tag }}\` pushed. Build log: ${RUN_URL}. Fly deploy is handled in [distill_ops staging-deploy](https://github.com/norrietaylor/distill_ops/actions/workflows/staging-deploy.yml); it will comment back with the URL when the app is up."
+
+  # ──────────────────────────────────────────────────────────────────
+  # Job 2: /teardown-staging via comment
+  # ──────────────────────────────────────────────────────────────────
+  teardown_comment:
+    name: Dispatch staging teardown (comment)
+    if: >
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request != null &&
+      contains(github.event.comment.body, '/teardown-staging') &&
+      (
+        github.event.comment.author_association == 'OWNER' ||
+        github.event.comment.author_association == 'MEMBER' ||
+        github.event.comment.author_association == 'COLLABORATOR'
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: React to trigger comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api \
+            --method POST \
+            "repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions" \
+            -f content=eyes
+
+      - name: Dispatch staging teardown to distill_ops
+        env:
+          GH_TOKEN: ${{ secrets.DISTILL_OPS_DEPLOY_TOKEN }}
+        run: |
+          gh api \
+            --method POST \
+            repos/norrietaylor/distill_ops/dispatches \
+            -f "event_type=staging-teardown" \
+            --field "client_payload[pr_number]=${{ github.event.issue.number }}" \
+            --field "client_payload[repo]=${{ github.repository }}" \
+            --field "client_payload[reason]=comment"
+
+  # ──────────────────────────────────────────────────────────────────
+  # Job 3: Teardown on PR close (any close — merged or not)
+  # ──────────────────────────────────────────────────────────────────
+  teardown_on_close:
+    name: Dispatch staging teardown (PR closed)
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Dispatch staging teardown to distill_ops
+        env:
+          GH_TOKEN: ${{ secrets.DISTILL_OPS_DEPLOY_TOKEN }}
+        run: |
+          gh api \
+            --method POST \
+            repos/norrietaylor/distill_ops/dispatches \
+            -f "event_type=staging-teardown" \
+            --field "client_payload[pr_number]=${{ github.event.pull_request.number }}" \
+            --field "client_payload[repo]=${{ github.repository }}" \
+            --field "client_payload[reason]=pr-closed"
