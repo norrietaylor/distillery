@@ -57,6 +57,25 @@ COPY . .
 RUN rm -rf /app/dashboard/dist
 COPY --from=dashboard-builder /build/dist/ /app/dashboard/dist/
 
+# Point the dashboard resource loader at the in-container path.
+#
+# src/distillery/mcp/resources.py::_DEFAULT_DIST_DIR walks
+# Path(__file__).resolve().parents[3] / "dashboard" / "dist" to find
+# the Svelte build output. In a source checkout that resolves to
+# <repo>/dashboard/dist; in an installed package (like this image,
+# where uv pip install drops the code into /usr/lib/python3.13/
+# site-packages/distillery/...) it resolves to
+# /usr/lib/python3.13/dashboard/dist, which doesn't exist — and the
+# resource handler silently falls back to a stub HTML page.
+#
+# _find_dist_dir() checks DISTILLERY_DASHBOARD_DIR first, so setting
+# the env var here bypasses the broken ancestor walk without
+# requiring a code change in resources.py. The underlying packaging
+# bug in resources.py should be fixed separately (ideally by
+# bundling dashboard/dist/ as Python package data so importlib.
+# resources can find it without filesystem walking).
+ENV DISTILLERY_DASHBOARD_DIR=/app/dashboard/dist
+
 # Install the package (production only, no dev deps)
 RUN uv pip install --system --no-cache .
 
