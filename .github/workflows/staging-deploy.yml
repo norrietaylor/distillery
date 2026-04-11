@@ -105,7 +105,13 @@ jobs:
           RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           gh pr comment "${{ steps.pr.outputs.pr_number }}" \
             --repo "${{ github.repository }}" \
-            --body "⏳ Staging deploy pending review — resolved head SHA \`${{ steps.pr.outputs.head_sha }}\`. A repo collaborator must approve the \`staging-deploy\` environment before the image is built: ${RUN_URL}"
+            --body "⏳ Staging deploy pending review — resolved head SHA \`${{ steps.pr.outputs.head_sha }}\`. A repo collaborator must approve the \`staging-deploy\` environment before the image is built: ${RUN_URL}
+
+          Once deployed, staging will be reachable at:
+          - Web / claude.ai: \`https://distillery-mcp-dev.fly.dev/mcp\`
+          - Health check: \`https://distillery-mcp-dev.fly.dev/.well-known/oauth-authorization-server\`
+
+          (note the \`/mcp\` path — the bare hostname returns 404)"
 
   # ──────────────────────────────────────────────────────────────────
   # Job 1b: Build and push the staging image.
@@ -190,7 +196,13 @@ jobs:
           RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           gh pr comment "${{ needs.resolve.outputs.pr_number }}" \
             --repo "${{ github.repository }}" \
-            --body "🚀 Staging deploy dispatched — image \`${{ needs.resolve.outputs.image_tag }}\` pushed. Build log: ${RUN_URL}. Fly deploy is handled in [distill_ops staging-deploy](https://github.com/norrietaylor/distill_ops/actions/workflows/staging-deploy.yml); it will comment back with the URL when the app is up."
+            --body "🚀 Staging deploy dispatched — image \`${{ needs.resolve.outputs.image_tag }}\` pushed. Build log: ${RUN_URL}. Fly deploy is handled in [distill_ops staging-deploy](https://github.com/norrietaylor/distill_ops/actions/workflows/staging-deploy.yml); it will comment back when the app is healthy.
+
+          **Staging endpoint** (once healthy):
+          - MCP URL: \`https://distillery-mcp-dev.fly.dev/mcp\`  ← use this to connect from Claude Code / claude.ai
+          - Health check: https://distillery-mcp-dev.fly.dev/.well-known/oauth-authorization-server
+
+          The \`/mcp\` path suffix is required — the bare hostname returns 404."
 
   # ──────────────────────────────────────────────────────────────────
   # Job 2: /teardown-staging via comment
