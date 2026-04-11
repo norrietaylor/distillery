@@ -1115,7 +1115,30 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         )
 
     @server.tool(
-        meta={"ui": {"resourceUri": "ui://distillery/dashboard"}},
+        # MCP Apps UI wire format is intentionally dual-keyed here:
+        #
+        # * ``ui.resourceUri`` — the nested form FastMCP 3.2.x produces
+        #   natively (see ``fastmcp/apps/app.py`` and
+        #   ``fastmcp/apps/config.py::app_config_to_meta_dict``).
+        # * ``ui/resourceUri`` — the flat, slash-delimited key that is
+        #   the canonical wire format per the MCP Apps extension spec
+        #   (``@modelcontextprotocol/ext-apps``). Its TypeScript
+        #   ``McpUiToolMeta`` docstring explicitly says "This is
+        #   converted to ``_meta['ui/resourceUri']``", and the server
+        #   helper ``registerAppTool`` writes both forms for
+        #   compatibility — see
+        #   ``dashboard/node_modules/@modelcontextprotocol/ext-apps/
+        #   dist/src/server/index.js`` (``var M = "ui/resourceUri"``).
+        #
+        # Claude's mobile MCP Apps host reads the flat canonical key
+        # and fails with "Failed to load the MCP app / Unable to
+        # connect to server" when only the nested form is present, so
+        # we emit both. Drop the flat key once FastMCP grows native
+        # support for writing it (track upstream).
+        meta={
+            "ui": {"resourceUri": "ui://distillery/dashboard"},
+            "ui/resourceUri": "ui://distillery/dashboard",
+        },
         annotations={"readOnlyHint": True},
     )
     async def distillery_dashboard(ctx: Context) -> list[types.TextContent]:
