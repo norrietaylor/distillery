@@ -1114,6 +1114,22 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             started_at=started_at,
         )
 
+    @server.tool(
+        meta={"ui": {"resourceUri": "ui://distillery/dashboard"}},
+        annotations={"readOnlyHint": True},
+    )
+    async def distillery_dashboard(ctx: Context) -> list[types.TextContent]:
+        """Open the interactive Distillery dashboard.
+
+        Returns summary statistics (entry counts by type and status, total entries,
+        storage size) and renders the dashboard UI in an MCP Apps-capable client.
+        """
+        c = _lc(ctx)
+        return await _handle_list(
+            store=c["store"],
+            arguments={"output": "stats", "limit": 0},
+        )
+
     @server.resource("distillery://schemas/entry-types")
     async def entry_type_schemas() -> str:
         """Return the metadata schemas for all structured entry types as a JSON resource.
