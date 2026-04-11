@@ -162,14 +162,21 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.DISTILL_OPS_DEPLOY_TOKEN }}
         run: |
-          gh api \
-            --method POST \
-            repos/norrietaylor/distill_ops/dispatches \
-            -f "event_type=staging-deploy" \
-            --field "client_payload[image_tag]=${{ needs.resolve.outputs.image_tag }}" \
-            --field "client_payload[pr_number]=${{ needs.resolve.outputs.pr_number }}" \
-            --field "client_payload[head_sha]=${{ needs.resolve.outputs.head_sha }}" \
-            --field "client_payload[repo]=${{ github.repository }}"
+          # `gh workflow run` triggers a workflow_dispatch event on the
+          # target workflow. This requires only actions:write on the
+          # target repo (same scope supply-chain.yml already uses to
+          # trigger prod fly-deploy.yml). We previously used
+          # `gh api .../dispatches` which fires a repository_dispatch
+          # event and needs contents:write — a scope the existing
+          # DISTILL_OPS_DEPLOY_TOKEN PAT doesn't carry. Switching to
+          # gh workflow run lets us reuse the existing token without
+          # broadening its permissions.
+          gh workflow run staging-deploy.yml \
+            --repo norrietaylor/distill_ops \
+            --ref main \
+            -f "image_tag=${{ needs.resolve.outputs.image_tag }}" \
+            -f "pr_number=${{ needs.resolve.outputs.pr_number }}" \
+            -f "head_sha=${{ needs.resolve.outputs.head_sha }}"
 
       - name: Comment dispatch confirmation
         env:
@@ -212,13 +219,18 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.DISTILL_OPS_DEPLOY_TOKEN }}
         run: |
-          gh api \
-            --method POST \
-            repos/norrietaylor/distill_ops/dispatches \
-            -f "event_type=staging-teardown" \
-            --field "client_payload[pr_number]=${{ github.event.issue.number }}" \
-            --field "client_payload[repo]=${{ github.repository }}" \
-            --field "client_payload[reason]=comment"
+          # See the deploy job above for why we use `gh workflow run`
+          # instead of `gh api .../dispatches`.
+          # Note: the distill_ops staging-teardown workflow_dispatch
+          # input surface is (pr_number,) only — reason and repo fall
+          # through to their defaults ('manual' and
+          # norrietaylor/distillery). Minor fidelity loss vs. the old
+          # repository_dispatch path: the PR comment will say
+          # "reason: manual" instead of "reason: comment" / "pr-closed".
+          gh workflow run staging-teardown.yml \
+            --repo norrietaylor/distill_ops \
+            --ref main \
+            -f "pr_number=${{ github.event.issue.number }}"
 
   # ──────────────────────────────────────────────────────────────────
   # Job 3: Teardown on PR close (any close — merged or not)
@@ -234,10 +246,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.DISTILL_OPS_DEPLOY_TOKEN }}
         run: |
-          gh api \
-            --method POST \
-            repos/norrietaylor/distill_ops/dispatches \
-            -f "event_type=staging-teardown" \
-            --field "client_payload[pr_number]=${{ github.event.pull_request.number }}" \
-            --field "client_payload[repo]=${{ github.repository }}" \
-            --field "client_payload[reason]=pr-closed"
+          gh workflow run staging-teardown.yml \
+            --repo norrietaylor/distill_ops \
+            --ref main \
+            -f "pr_number=${{ github.event.pull_request.number }}"
