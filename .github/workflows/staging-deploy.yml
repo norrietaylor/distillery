@@ -10,12 +10,12 @@ name: Staging Deploy (on comment)
 # practice, and rejecting the underscore form silently skips every job
 # with no feedback, which is worse than accepting both.
 #
-# Teardown is triggered by an explicit /teardown-staging comment only.
-# We deliberately do NOT tear down on PR close any more — closing an
-# unrelated PR (e.g. auto-merge of a separate branch) used to nuke an
-# active staging slot on this PR, which was surprising and
-# destructive. Explicit teardown is good enough; idle cleanup lives in
-# distill_ops' scheduler-staging cron.
+# Teardown is triggered by an explicit /teardown-staging (or
+# /teardown_staging) comment only. We deliberately do NOT tear down
+# on PR close any more — closing an unrelated PR (e.g. auto-merge of
+# a separate branch) used to nuke an active staging slot on this PR,
+# which was surprising and destructive. Explicit teardown is good
+# enough; idle cleanup lives in distill_ops' scheduler-staging cron.
 #
 # Staging is a singleton. A second /deploy-staging on a different PR
 # replaces the current deployment.
