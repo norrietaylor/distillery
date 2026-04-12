@@ -20,8 +20,24 @@ export const activeTab = writable<TabType>("home");
 /** Incrementing counter that triggers a data refresh when incremented. */
 export const refreshCounter = writable<number>(0);
 
-/** Auto-refresh interval in milliseconds. Default 60s. */
-export const refreshIntervalMs = writable<number>(60_000);
+/**
+ * Auto-refresh interval in milliseconds. Default 300 s (5 minutes).
+ *
+ * The Home tab's idle traffic adds up quickly — BriefingStats alone
+ * fires several `distillery_list` calls per tick, RecentCorrections
+ * fans out O(N) in per-entry `distillery_relations` and
+ * `distillery_get` calls, and RadarFeed / ProjectSelector / identity
+ * each add one more. A 60 s tick blew past the 60 req/min HTTP rate
+ * limit on staging (see
+ * src/distillery/mcp/middleware.py::RateLimitMiddleware and
+ * src/distillery/config.py::HttpRateLimitConfig defaults).
+ *
+ * 300 s gives staging ~5× more headroom while still feeling fresh.
+ * Consumers that want a tighter refresh for a specific view can
+ * override this store locally, and manual refresh / project change
+ * / tab switch still trigger an immediate re-fetch regardless.
+ */
+export const refreshIntervalMs = writable<number>(300_000);
 
 /** User identity from MCP Apps OAuth context. */
 export interface UserIdentity {

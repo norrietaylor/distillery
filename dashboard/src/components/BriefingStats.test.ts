@@ -21,13 +21,21 @@ function makeResult(text: string, isError = false): ToolCallTextResult {
  *     {"entries_by_type": {...}, "entries_by_status": {...},
  *      "total_entries": N, "storage_bytes": N}
  *
- * BriefingStats' ``parseStatsTotal`` reads ``total_entries`` directly, so the
- * test mocks must emit the real envelope rather than a bare number.
+ * BriefingStats reads ``total_entries`` directly (no regex), plus
+ * ``entries_by_status.pending_review`` and ``entries_by_type.inbox``
+ * from the same payload, so the test mocks must emit the real
+ * envelope shape.
  */
-function statsPayload(totalEntries: number): string {
+function statsPayload(
+  totalEntries: number,
+  extras: {
+    entries_by_type?: Record<string, number>;
+    entries_by_status?: Record<string, number>;
+  } = {},
+): string {
   return JSON.stringify({
-    entries_by_type: {},
-    entries_by_status: {},
+    entries_by_type: extras.entries_by_type ?? {},
+    entries_by_status: extras.entries_by_status ?? {},
     total_entries: totalEntries,
     storage_bytes: 0,
   });
@@ -125,37 +133,75 @@ describe("BriefingStats", () => {
       });
     });
 
-    it("loads pending review entries by calling distillery_list with status=pending_review and output=stats", async () => {
-      const mockCallTool = vi.fn().mockResolvedValue(makeResult(statsPayload(7)));
+    it("derives pending review from entries_by_status in the primary stats call", async () => {
+      // Pending review is no longer fetched with a separate
+      // {status: "pending_review", output: "stats"} call — it's now
+      // read from the primary stats payload's entries_by_status.
+      // This was the 60 req/min rate-limit fix: fewer round-trips.
+      const payload = statsPayload(50, {
+        entries_by_status: { active: 43, pending_review: 7 },
+      });
+      const mockCallTool = vi
+        .fn()
+        .mockResolvedValueOnce(makeResult(payload)) // primary
+        .mockResolvedValue(makeResult(statsPayload(0))); // stale, expiring
       const bridge = { isConnected: true, callTool: mockCallTool } as unknown as McpBridge;
 
       render(BriefingStats, { props: { bridge } });
 
       await waitFor(() => {
-        const pendingCalls = mockCallTool.mock.calls.filter(([name, args]) => {
-          const a = args as Record<string, unknown>;
-          return (
-            name === "distillery_list" && a.status === "pending_review" && a.output === "stats"
-          );
-        });
-        expect(pendingCalls.length).toBeGreaterThan(0);
+        expect(screen.getByLabelText(/Pending Review: 7/)).toBeTruthy();
       });
+
+      // Confirm there is NOT a separate status=pending_review call.
+      const pendingSpecificCalls = mockCallTool.mock.calls.filter(([name, args]) => {
+        const a = args as Record<string, unknown>;
+        return name === "distillery_list" && a.status === "pending_review";
+      });
+      expect(pendingSpecificCalls.length).toBe(0);
     });
 
-    it("loads inbox entries by calling distillery_list with entry_type=inbox and output=stats", async () => {
-      const mockCallTool = vi.fn().mockResolvedValue(makeResult(statsPayload(3)));
+    it("derives inbox from entries_by_type in the primary stats call", async () => {
+      // Mirror of the pending_review test above — inbox count is
+      // entries_by_type.inbox on the same primary stats payload, no
+      // separate {entry_type: "inbox"} call.
+      const payload = statsPayload(50, {
+        entries_by_type: { session: 40, bookmark: 7, inbox: 3 },
+      });
+      const mockCallTool = vi
+        .fn()
+        .mockResolvedValueOnce(makeResult(payload)) // primary
+        .mockResolvedValue(makeResult(statsPayload(0))); // stale, expiring
       const bridge = { isConnected: true, callTool: mockCallTool } as unknown as McpBridge;
 
       render(BriefingStats, { props: { bridge } });
 
       await waitFor(() => {
-        const inboxCalls = mockCallTool.mock.calls.filter(([name, args]) => {
-          const a = args as Record<string, unknown>;
-          return (
-            name === "distillery_list" && a.entry_type === "inbox" && a.output === "stats"
-          );
-        });
-        expect(inboxCalls.length).toBeGreaterThan(0);
+        expect(screen.getByLabelText(/Inbox: 3/)).toBeTruthy();
+      });
+
+      const inboxSpecificCalls = mockCallTool.mock.calls.filter(([name, args]) => {
+        const a = args as Record<string, unknown>;
+        return name === "distillery_list" && a.entry_type === "inbox";
+      });
+      expect(inboxSpecificCalls.length).toBe(0);
+    });
+
+    it("issues exactly three distillery_list calls per refresh (primary + stale + expiring)", async () => {
+      // Regression guard for the 5 → 3 call collapse. Running the
+      // home tab used to fire 5 calls per refresh tick, which pushed
+      // the dashboard past the 60 req/min HTTP rate limit on staging.
+      // If this test starts counting more than 3 calls, someone
+      // re-introduced a per-card fetch that could've been derived
+      // from the primary stats payload instead.
+      const mockCallTool = vi.fn().mockResolvedValue(makeResult(statsPayload(0)));
+      const bridge = { isConnected: true, callTool: mockCallTool } as unknown as McpBridge;
+
+      render(BriefingStats, { props: { bridge } });
+
+      await waitFor(() => {
+        const listCalls = mockCallTool.mock.calls.filter(([name]) => name === "distillery_list");
+        expect(listCalls.length).toBe(3);
       });
     });
 
@@ -197,17 +243,27 @@ describe("BriefingStats", () => {
       });
     });
 
-    it("falls back to 0 on malformed (non-JSON) stats payloads", async () => {
+    it("marks total/pending/inbox cards as errored when the primary stats payload is malformed", async () => {
+      // A malformed (non-JSON) primary stats response now surfaces
+      // as an explicit error on all three cards (total, pending,
+      // inbox) rather than silently degrading to 0 — silently
+      // masking a broken server response was how the regex-parser
+      // bug went unnoticed for so long. Stale has its own call and
+      // is unaffected.
       const mockCallTool = vi
         .fn()
-        .mockResolvedValueOnce(makeResult("not a valid json stats payload")) // total
-        .mockResolvedValue(makeResult(statsPayload(0))); // everything else
+        .mockResolvedValueOnce(makeResult("not a valid json stats payload")) // primary
+        .mockResolvedValue(makeResult(statsPayload(42))); // stale, expiring
       const bridge = { isConnected: true, callTool: mockCallTool } as unknown as McpBridge;
 
-      render(BriefingStats, { props: { bridge } });
+      const { container } = render(BriefingStats, { props: { bridge } });
 
       await waitFor(() => {
-        expect(screen.getByLabelText(/Total Entries: 0/)).toBeTruthy();
+        // Stale should still render (separate call, valid payload).
+        expect(screen.getByLabelText(/Stale \(30d\): 42/)).toBeTruthy();
+        // The three primary-stats cards should be in error state.
+        const totalCard = container.querySelector('[aria-label="Total Entries: error"]');
+        expect(totalCard).toBeTruthy();
       });
     });
   });
@@ -295,13 +351,17 @@ describe("BriefingStats", () => {
 
   describe("color coding", () => {
     it("applies danger variant when pending review > 10", async () => {
+      // Pending review is now read from the primary stats payload's
+      // entries_by_status, not from a separate call — emit a payload
+      // with entries_by_status.pending_review = 15 on the primary
+      // (first) call and the danger variant should light up.
+      const primary = statsPayload(5, {
+        entries_by_status: { pending_review: 15 },
+      });
       const mockCallTool = vi
         .fn()
-        .mockResolvedValueOnce(makeResult(statsPayload(5))) // total
-        .mockResolvedValueOnce(makeResult(statsPayload(0))) // stale
-        .mockResolvedValueOnce(makeResult(statsPayload(0))) // expiring
-        .mockResolvedValueOnce(makeResult(statsPayload(15))) // pending (> 10, should be danger)
-        .mockResolvedValueOnce(makeResult(statsPayload(0))); // inbox
+        .mockResolvedValueOnce(makeResult(primary)) // primary
+        .mockResolvedValue(makeResult(statsPayload(0))); // stale, expiring
       const bridge = { isConnected: true, callTool: mockCallTool } as unknown as McpBridge;
 
       const { container } = render(BriefingStats, { props: { bridge } });
@@ -409,24 +469,33 @@ describe("BriefingStats", () => {
       });
     });
 
-    it("handles one failed metric without breaking other metrics", async () => {
+    it("handles a failing stale fetch without breaking the primary stats cards", async () => {
+      // With the 5 → 3 call collapse, total/pending/inbox all come
+      // from the *same* primary-stats call — they can't fail
+      // independently of each other. The remaining independent
+      // failure mode is a failing stale fetch while the primary
+      // stats call succeeds: the three primary cards should still
+      // render and only the stale card should show an error.
+      const primary = statsPayload(50, {
+        entries_by_status: { pending_review: 8 },
+        entries_by_type: { inbox: 2 },
+      });
       const mockCallTool = vi
         .fn()
-        .mockResolvedValueOnce(makeResult(statsPayload(50))) // total
-        .mockResolvedValueOnce(makeResult("Error", true)) // stale — error
-        .mockResolvedValueOnce(makeResult(statsPayload(3))) // expiring (returns a list with count 3)
-        .mockResolvedValueOnce(makeResult(statsPayload(8))) // pending
-        .mockResolvedValueOnce(makeResult(statsPayload(2))); // inbox
+        .mockResolvedValueOnce(makeResult(primary)) // primary — succeeds
+        .mockResolvedValueOnce(makeResult("Stale failed", true)) // stale — error
+        .mockResolvedValue(makeResult(statsPayload(0))); // expiring
 
       const bridge = { isConnected: true, callTool: mockCallTool } as unknown as McpBridge;
 
       render(BriefingStats, { props: { bridge } });
 
       await waitFor(() => {
-        // Other metrics should load successfully
         expect(screen.getByLabelText(/Total Entries: 50/)).toBeTruthy();
         expect(screen.getByLabelText(/Pending Review: 8/)).toBeTruthy();
         expect(screen.getByLabelText(/Inbox: 2/)).toBeTruthy();
+        // Stale is in error state.
+        expect(screen.getByLabelText(/Stale \(30d\): error/)).toBeTruthy();
       });
     });
   });
