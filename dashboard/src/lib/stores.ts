@@ -23,16 +23,18 @@ export const refreshCounter = writable<number>(0);
 /**
  * Auto-refresh interval in milliseconds. Default 300 s (5 minutes).
  *
- * The Home tab's idle traffic adds up quickly — BriefingStats alone
- * fires several `distillery_list` calls per tick, RecentCorrections
- * fans out O(N) in per-entry `distillery_relations` and
- * `distillery_get` calls, and RadarFeed / ProjectSelector / identity
- * each add one more. A 60 s tick blew past the 60 req/min HTTP rate
- * limit on staging (see
- * src/distillery/mcp/middleware.py::RateLimitMiddleware and
- * src/distillery/config.py::HttpRateLimitConfig defaults).
+ * The Home tab fires one `distillery_list` call per card per refresh
+ * tick (BriefingStats → 3, RecentEntries → 1, ExpiringSoon → 1,
+ * RadarFeed → 1, ProjectSelector → 1 — eight total, plus any one-off
+ * calls from App.svelte identity resolution). A 60 s tick plus the
+ * now-removed RecentCorrections component's 1 + 2N relations/get
+ * fan-out used to blow past the 60 req/min HTTP rate limit on
+ * staging (see src/distillery/mcp/middleware.py::RateLimitMiddleware
+ * and src/distillery/config.py::HttpRateLimitConfig defaults — now
+ * 300 req/min, but a conservative refresh interval is still the
+ * right default so the ceiling is harder to hit).
  *
- * 300 s gives staging ~5× more headroom while still feeling fresh.
+ * 300 s gives staging plenty of headroom while still feeling fresh.
  * Consumers that want a tighter refresh for a specific view can
  * override this store locally, and manual refresh / project change
  * / tab switch still trigger an immediate re-fetch regardless.

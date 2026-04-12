@@ -271,6 +271,20 @@ class ServerAuthConfig:
 class HttpRateLimitConfig:
     """HTTP transport rate limiting configuration.
 
+    The per-minute default is sized for an interactive MCP Apps
+    dashboard as a single authenticated client, not for fully-
+    untrusted public traffic.  A single Distillery Dashboard session
+    fires one call per card per refresh tick (BriefingStats, Radar
+    Feed, Recent Entries, Expiring Soon, Project Selector), plus
+    bursts on search / investigate / explore interactions — 60
+    req/min is comfortably exceeded under normal browsing.  300
+    req/min gives enough headroom for a couple of concurrent
+    dashboard sessions plus the underlying MCP tool calls without
+    leaving the server unbounded, and the per-hour ceiling still
+    acts as a cumulative backstop.  Operators running Distillery
+    behind a shared IP or a multi-user deployment should lower this
+    via config.
+
     Attributes:
         requests_per_minute: Maximum requests per IP per minute.
         requests_per_hour: Maximum requests per IP per hour.
@@ -284,8 +298,8 @@ class HttpRateLimitConfig:
             being starved by the shared per-IP bucket.
     """
 
-    requests_per_minute: int = 60
-    requests_per_hour: int = 600
+    requests_per_minute: int = 300
+    requests_per_hour: int = 3000
     max_body_bytes: int = 1_048_576  # 1 MB
     trust_proxy: bool = False
     loopback_exempt: bool = True
@@ -786,7 +800,7 @@ def _parse_http_rate_limit(rl_raw: dict[str, Any]) -> HttpRateLimitConfig:
         )
 
     requests_per_minute = _parse_strict_int(
-        rl_raw.get("requests_per_minute", 60),
+        rl_raw.get("requests_per_minute", 300),
         "server.http_rate_limit.requests_per_minute",
     )
     if requests_per_minute <= 0:
@@ -795,7 +809,7 @@ def _parse_http_rate_limit(rl_raw: dict[str, Any]) -> HttpRateLimitConfig:
         )
 
     requests_per_hour = _parse_strict_int(
-        rl_raw.get("requests_per_hour", 600),
+        rl_raw.get("requests_per_hour", 3000),
         "server.http_rate_limit.requests_per_hour",
     )
     if requests_per_hour <= 0:
