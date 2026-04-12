@@ -9,7 +9,13 @@ name: Staging Deploy (on comment)
 # accepted as equivalent aliases — both get typed interchangeably in
 # practice, and rejecting the underscore form silently skips every job
 # with no feedback, which is worse than accepting both.
-# Closing the PR also dispatches staging-teardown.
+#
+# Teardown is triggered by an explicit /teardown-staging (or
+# /teardown_staging) comment only. We deliberately do NOT tear down
+# on PR close any more — closing an unrelated PR (e.g. auto-merge of
+# a separate branch) used to nuke an active staging slot on this PR,
+# which was surprising and destructive. Explicit teardown is good
+# enough; idle cleanup lives in distill_ops' scheduler-staging cron.
 #
 # Staging is a singleton. A second /deploy-staging on a different PR
 # replaces the current deployment.
@@ -21,8 +27,6 @@ name: Staging Deploy (on comment)
 on:
   issue_comment:
     types: [created]
-  pull_request:
-    types: [closed]
 
 # Default permissions are minimal. Each job opts in to what it needs.
 # The deploy job — which checks out PR head code and builds it — is
@@ -273,22 +277,3 @@ jobs:
             --repo norrietaylor/distill_ops \
             --ref main \
             -f "pr_number=${{ github.event.issue.number }}"
-
-  # ──────────────────────────────────────────────────────────────────
-  # Job 3: Teardown on PR close (any close — merged or not)
-  # ──────────────────────────────────────────────────────────────────
-  teardown_on_close:
-    name: Dispatch staging teardown (PR closed)
-    if: github.event_name == 'pull_request' && github.event.action == 'closed'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Dispatch staging teardown to distill_ops
-        env:
-          GH_TOKEN: ${{ secrets.DISTILL_OPS_DEPLOY_TOKEN }}
-        run: |
-          gh workflow run staging-teardown.yml \
-            --repo norrietaylor/distill_ops \
-            --ref main \
-            -f "pr_number=${{ github.event.pull_request.number }}"
