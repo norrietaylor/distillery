@@ -1,0 +1,49 @@
+Type: test
+Command: cd dashboard && npx vitest run src/components/RelationGraph.test.ts
+Expected: All tests pass
+Timestamp: 2026-04-09T23:05:50Z
+
+Output:
+ RUN  v3.2.4 /home/norrie.guest/code/distillery/.worktrees/feature-dashboard-explore/dashboard
+
+ ✓ src/components/RelationGraph.test.ts (32 tests) 217ms
+
+   ✓ RelationGraph > rendering without bridge > renders without crashing when bridge is null
+   ✓ RelationGraph > rendering without bridge > shows error when bridge is null
+   ✓ RelationGraph > rendering without bridge > renders the section with aria-label
+   ✓ RelationGraph > loading state > shows loading spinner while fetching relations
+   ✓ RelationGraph > SEED section > renders SEED badge
+   ✓ RelationGraph > SEED section > renders seed entry node with navigate button
+   ✓ RelationGraph > SEED section > calls onNavigate with seedEntryId when seed node clicked
+   ✓ RelationGraph > SEED section > renders Pin button for seed entry
+   ✓ RelationGraph > SEED section > calls onPin when seed pin button is clicked
+   ✓ RelationGraph > relation grouping > shows RELATED badge when relations exist
+   ✓ RelationGraph > relation grouping > groups relations by type: citation appears as group label
+   ✓ RelationGraph > relation grouping > groups multiple relation types separately
+   ✓ RelationGraph > relation grouping > deduplicates entries that appear in multiple phase1 result relations
+   ✓ RelationGraph > relation grouping > excludes seed and phase1 IDs from related entries
+   ✓ RelationGraph > relation grouping > shows empty state when no relations found
+   ✓ RelationGraph > relation grouping > renders navigate button for each related entry
+   ✓ RelationGraph > relation grouping > calls onNavigate with related entry id when clicked
+   ✓ RelationGraph > relation grouping > calls onPin when pin button clicked for related entry
+   ✓ RelationGraph > 2nd-degree expand/collapse > shows expand toggle button for each degree-1 entry
+   ✓ RelationGraph > 2nd-degree expand/collapse > 2nd-degree section is collapsed by default
+   ✓ RelationGraph > 2nd-degree expand/collapse > expands second-degree section when expand button is clicked
+   ✓ RelationGraph > 2nd-degree expand/collapse > collapses second-degree section on second click
+   ✓ RelationGraph > 2nd-degree expand/collapse > lazy-loads second-degree relations on first expand
+   ✓ RelationGraph > 2nd-degree expand/collapse > does not re-fetch on subsequent expand/collapse cycles
+   ✓ RelationGraph > 2nd-degree expand/collapse > displays second-degree nodes after expansion
+   ✓ RelationGraph > 2nd-degree expand/collapse > second-degree nodes have navigation buttons
+   ✓ RelationGraph > 2nd-degree expand/collapse > calls onNavigate when second-degree node is clicked
+   ✓ RelationGraph > 2nd-degree expand/collapse > caps traversal at 2 degrees (does not fetch degree-3)
+   ✓ RelationGraph > 2nd-degree expand/collapse > shows empty state when no second-degree relations exist
+   ✓ RelationGraph > error handling > shows error banner when initial fetch throws
+   ✓ RelationGraph > error handling > shows inline error when second-degree fetch fails
+   ✓ RelationGraph > incoming relations > handles incoming relations (to_id === seedEntryId)
+
+ Test Files  1 passed (1)
+      Tests  32 passed (32)
+   Start at  23:05:50
+   Duration  1.01s (transform 299ms, setup 0ms, collect 469ms, tests 217ms, environment 182ms, prepare 33ms)
+
+Status: PASS

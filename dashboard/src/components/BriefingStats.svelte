@@ -45,43 +45,113 @@
   let errorPending = $state<string | null>(null);
   let errorInbox = $state<string | null>(null);
 
-  /** Parse a stat count from tool response text. Expects "N" or "total: N" or "count: N" format. */
-  function parseCount(text: string): number {
-    // Try "count: N" or "total: N"
-    const labelMatch = text.match(/(?:count|total)[:\s]+(\d+)/i);
-    if (labelMatch) return parseInt(labelMatch[1]!, 10);
-    // Try a bare number on its own line
-    const bareMatch = text.match(/^\s*(\d+)\s*$/m);
-    if (bareMatch) return parseInt(bareMatch[1]!, 10);
-    // Try the first number in the response
-    const firstNum = text.match(/\d+/);
-    if (firstNum) return parseInt(firstNum[0]!, 10);
-    return 0;
+  /**
+   * Shape of the ``distillery_list {output: "stats"}`` response.
+   *
+   * The server returns::
+   *
+   *     {"entries_by_type":   {"session": 12, "bookmark": 5, "inbox": 3, ...},
+   *      "entries_by_status": {"active": 42, "pending_review": 7, ...},
+   *      "total_entries":     N,
+   *      "storage_bytes":     N}
+   *
+   * All three cards that this component previously fetched in separate
+   * `distillery_list` calls — total, pending review, inbox — are
+   * fully determined by a single stats payload. We collapse them into
+   * one call both to halve the network round-trips and to stay under
+   * the 60 req/min HTTP rate limit during auto-refresh.
+   */
+  interface StatsPayload {
+    entries_by_type?: Record<string, number>;
+    entries_by_status?: Record<string, number>;
+    total_entries?: number;
+    storage_bytes?: number;
   }
 
-  /** Fetch total entries count. */
-  async function fetchTotal(project: string | null) {
+  function parseStats(text: string): StatsPayload | null {
+    try {
+      const parsed = JSON.parse(text) as StatsPayload;
+      if (parsed && typeof parsed === "object") {
+        return parsed;
+      }
+    } catch {
+      // Non-JSON response — treat as empty so each card can show 0 / 0 / 0
+      // rather than propagating the parse error to every consumer.
+    }
+    return null;
+  }
+
+  /**
+   * Fetch total/pending/inbox counts in a single ``distillery_list
+   * {output: "stats"}`` call and populate all three state variables.
+   *
+   * This used to be three separate fetches (`fetchTotal`, `fetchPending`,
+   * `fetchInbox`) — but `entries_by_status.pending_review` and
+   * `entries_by_type.inbox` are already in the same stats payload as
+   * `total_entries`, so asking the server three times is wasteful and
+   * historically pushed us past the 60 req/min rate limit during
+   * auto-refresh. Any error from the single call marks all three
+   * cards as errored; a successful call with missing sub-keys
+   * populates each card with 0 rather than null so the UI stays
+   * numeric.
+   */
+  async function fetchPrimaryStats(project: string | null) {
     loadingTotal = true;
+    loadingPending = true;
+    loadingInbox = true;
     errorTotal = null;
+    errorPending = null;
+    errorInbox = null;
     try {
       const args: Record<string, unknown> = { output: "stats" };
       if (project) args.project = project;
       const result = await bridge.callTool("distillery_list", args);
       if (result.isError) {
-        errorTotal = "Failed to load total entries";
+        const msg = "Failed to load entry stats";
+        errorTotal = msg;
+        errorPending = msg;
+        errorInbox = msg;
         totalEntries = null;
-      } else {
-        totalEntries = parseCount(result.text);
+        pendingReview = null;
+        inboxCount = null;
+        return;
       }
+      const stats = parseStats(result.text);
+      if (stats === null) {
+        const msg = "Malformed stats response";
+        errorTotal = msg;
+        errorPending = msg;
+        errorInbox = msg;
+        totalEntries = null;
+        pendingReview = null;
+        inboxCount = null;
+        return;
+      }
+      totalEntries = typeof stats.total_entries === "number" ? stats.total_entries : 0;
+      pendingReview = stats.entries_by_status?.pending_review ?? 0;
+      inboxCount = stats.entries_by_type?.inbox ?? 0;
     } catch (err) {
-      errorTotal = err instanceof Error ? err.message : "Failed to load total entries";
+      const msg = err instanceof Error ? err.message : "Failed to load entry stats";
+      errorTotal = msg;
+      errorPending = msg;
+      errorInbox = msg;
       totalEntries = null;
+      pendingReview = null;
+      inboxCount = null;
     } finally {
       loadingTotal = false;
+      loadingPending = false;
+      loadingInbox = false;
     }
   }
 
-  /** Fetch stale entries count (30 days). */
+  /**
+   * Fetch stale entries count (30 days).
+   *
+   * This needs its own call because ``stale_days`` is a SQL WHERE
+   * predicate that constrains which entries the stats aggregation
+   * sees — it can't be derived from the primary stats payload.
+   */
   async function fetchStale(project: string | null) {
     loadingStale = true;
     errorStale = null;
@@ -93,7 +163,10 @@
         errorStale = "Failed to load stale count";
         staleCount = null;
       } else {
-        staleCount = parseCount(result.text);
+        const stats = parseStats(result.text);
+        staleCount = stats !== null && typeof stats.total_entries === "number"
+          ? stats.total_entries
+          : 0;
       }
     } catch (err) {
       errorStale = err instanceof Error ? err.message : "Failed to load stale count";
@@ -157,58 +230,20 @@
     }
   }
 
-  /** Fetch pending review count. */
-  async function fetchPending(project: string | null) {
-    loadingPending = true;
-    errorPending = null;
-    try {
-      const args: Record<string, unknown> = { status: "pending_review", output: "stats" };
-      if (project) args.project = project;
-      const result = await bridge.callTool("distillery_list", args);
-      if (result.isError) {
-        errorPending = "Failed to load pending review count";
-        pendingReview = null;
-      } else {
-        pendingReview = parseCount(result.text);
-      }
-    } catch (err) {
-      errorPending = err instanceof Error ? err.message : "Failed to load pending review count";
-      pendingReview = null;
-    } finally {
-      loadingPending = false;
-    }
-  }
-
-  /** Fetch inbox count. */
-  async function fetchInbox(project: string | null) {
-    loadingInbox = true;
-    errorInbox = null;
-    try {
-      const args: Record<string, unknown> = { entry_type: "inbox", output: "stats" };
-      if (project) args.project = project;
-      const result = await bridge.callTool("distillery_list", args);
-      if (result.isError) {
-        errorInbox = "Failed to load inbox count";
-        inboxCount = null;
-      } else {
-        inboxCount = parseCount(result.text);
-      }
-    } catch (err) {
-      errorInbox = err instanceof Error ? err.message : "Failed to load inbox count";
-      inboxCount = null;
-    } finally {
-      loadingInbox = false;
-    }
-  }
-
-  /** Load all metrics in parallel. */
+  /**
+   * Load all metrics in parallel.
+   *
+   * Three tool calls instead of the original five: one primary stats
+   * call that feeds total/pending/inbox, plus separate calls for
+   * stale (which needs the ``stale_days`` filter) and expiring
+   * (which fetches actual entries to inspect ``expires_at`` locally,
+   * since there's no server-side ``expires_before`` filter yet).
+   */
   async function loadAll(project: string | null) {
     await Promise.all([
-      fetchTotal(project),
+      fetchPrimaryStats(project),
       fetchStale(project),
       fetchExpiring(project),
-      fetchPending(project),
-      fetchInbox(project),
     ]);
   }
 

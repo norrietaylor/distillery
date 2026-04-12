@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 from fastmcp import FastMCP
@@ -31,6 +32,15 @@ def _find_dist_dir() -> Path:
     if override:
         return Path(override)
     return _DEFAULT_DIST_DIR
+
+
+def _literal_replacer(text: str) -> Callable[[re.Match[str]], str]:
+    """Return a callable for ``re.sub`` that always returns *text* literally."""
+
+    def _repl(_match: re.Match[str]) -> str:
+        return text
+
+    return _repl
 
 
 def _build_inline_html(dist_dir: Path) -> str:
@@ -57,6 +67,15 @@ def _build_inline_html(dist_dir: Path) -> str:
     assets_dir = dist_dir / "assets"
 
     # Inline CSS: replace <link rel="stylesheet" ... href="/assets/X.css">
+    #
+    # Note: the replacement argument to re.sub() is parsed for regex
+    # escape sequences (\1, \g<name>, etc.), and unrecognised
+    # backslash-letter sequences — including \u — raise
+    # `re.PatternError: bad escape \u`. CSS and JS bundles routinely
+    # contain Unicode escape sequences like `content: "\u2605"`, so
+    # passing raw bundle text as a replacement string is unsafe.
+    # Using a lambda as the replacement avoids escape parsing
+    # entirely — the function's return value is substituted literally.
     if assets_dir.exists():
         for css_file in sorted(assets_dir.glob("*.css")):
             css_content = css_file.read_text(encoding="utf-8")
@@ -67,7 +86,7 @@ def _build_inline_html(dist_dir: Path) -> str:
                 safe_css = css_content.replace("</style>", "<\\/style>")
                 pattern = rf'<link[^>]*href="/assets/{re.escape(css_file.name)}"[^>]*/?\s*>'
                 replacement = f"<style>{safe_css}</style>"
-                html = re.sub(pattern, replacement, html, flags=re.IGNORECASE)
+                html = re.sub(pattern, _literal_replacer(replacement), html, flags=re.IGNORECASE)
 
         # Inline JS: replace <script type="module" ... src="/assets/X.js">
         for js_file in sorted(assets_dir.glob("*.js")):
@@ -77,7 +96,7 @@ def _build_inline_html(dist_dir: Path) -> str:
                 safe_js = js_content.replace("</script>", "<\\/script>")
                 pattern = rf'<script[^>]*src="/assets/{re.escape(js_name)}"[^>]*>\s*</script>'
                 replacement = f'<script type="module">{safe_js}</script>'
-                html = re.sub(pattern, replacement, html, flags=re.IGNORECASE)
+                html = re.sub(pattern, _literal_replacer(replacement), html, flags=re.IGNORECASE)
 
     return html
 
@@ -98,7 +117,36 @@ def register_dashboard_resource(server: FastMCP) -> None:
         name="distillery_dashboard",
         title="Distillery Dashboard",
         description="Interactive knowledge-base dashboard with briefing stats, radar feed, and entry management.",
-        app=True,
+        # MCP Apps UI resource marker.
+        #
+        # We intentionally pass an empty dict as ``_meta.ui`` instead of
+        # ``app=True``. FastMCP's ``app=True`` sugar emits
+        # ``_meta.ui = True`` (a JSON boolean), but the MCP Apps
+        # extension spec defines ``_meta.ui`` on a resource as an
+        # ``McpUiResourceMeta`` *object* (see
+        # ``dashboard/node_modules/@modelcontextprotocol/ext-apps/dist/
+        # src/generated/schema.json::McpUiResourceMeta`` — ``"type":
+        # "object"``, ``"additionalProperties": false``, all fields
+        # optional). Hosts that Zod-validate the wire response reject a
+        # boolean here with::
+        #
+        #     [{"expected":"object","code":"invalid_type","path":[],
+        #       "message":"Invalid input"}]
+        #
+        # which manifests as a "Failed to load the MCP app / Unable to
+        # reach {server}" banner even though the tool call itself
+        # returns normally — the resource read fires before the iframe
+        # mounts. An empty object is a valid ``McpUiResourceMeta`` and
+        # still signals "this is an MCP App resource" to hosts that key
+        # off the presence of ``_meta.ui``. The ``text/html;profile=
+        # mcp-app`` mime type is still auto-applied by FastMCP's
+        # ``resolve_ui_mime_type`` because the URI starts with
+        # ``ui://``, so we don't lose the mime signal either.
+        #
+        # Drop the explicit ``meta`` once FastMCP ships a release where
+        # ``app=True`` on resources emits ``{}`` instead of ``True`` —
+        # track upstream.
+        meta={"ui": {}},
     )
     def dashboard_resource() -> str:
         """Serve the Distillery dashboard as a self-contained HTML page."""

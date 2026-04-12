@@ -513,6 +513,7 @@ class TestCallToolDispatcher:
             "distillery_watch",
             "distillery_configure",
             "distillery_relations",
+            "distillery_dashboard",
         }
         assert expected == tool_names, (
             f"Tool mismatch — extra: {tool_names - expected}, missing: {expected - tool_names}"
