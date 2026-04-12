@@ -12,7 +12,7 @@
   } from "$lib/stores";
   import BriefingStats from "./components/BriefingStats.svelte";
   import ExpiringSoon from "./components/ExpiringSoon.svelte";
-  import RecentCorrections from "./components/RecentCorrections.svelte";
+  import RecentEntries from "./components/RecentEntries.svelte";
   import RadarFeed from "./components/RadarFeed.svelte";
   import ExploreTab from "./components/ExploreTab.svelte";
   import type { UserIdentity } from "$lib/stores";
@@ -121,7 +121,7 @@
     {:else if $activeTab === "home"}
       <section id="home" class="home-section">
         <BriefingStats {bridge} />
-        <RecentCorrections {bridge} />
+        <RecentEntries {bridge} />
         <ExpiringSoon {bridge} />
         <RadarFeed {bridge} />
       </section>

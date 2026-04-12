@@ -269,6 +269,20 @@ class ServerAuthConfig:
 class HttpRateLimitConfig:
     """HTTP transport rate limiting configuration.
 
+    The per-minute default is sized for an interactive MCP Apps
+    dashboard as a single authenticated client, not for fully-
+    untrusted public traffic.  A single Distillery Dashboard session
+    fires one call per card per refresh tick (BriefingStats, Radar
+    Feed, Recent Entries, Expiring Soon, Project Selector), plus
+    bursts on search / investigate / explore interactions — 60
+    req/min is comfortably exceeded under normal browsing.  300
+    req/min gives enough headroom for a couple of concurrent
+    dashboard sessions plus the underlying MCP tool calls without
+    leaving the server unbounded, and the per-hour ceiling still
+    acts as a cumulative backstop.  Operators running Distillery
+    behind a shared IP or a multi-user deployment should lower this
+    via config.
+
     Attributes:
         requests_per_minute: Maximum requests per IP per minute.
         requests_per_hour: Maximum requests per IP per hour.
@@ -278,8 +292,8 @@ class HttpRateLimitConfig:
             nginx, Cloudflare).
     """
 
-    requests_per_minute: int = 60
-    requests_per_hour: int = 600
+    requests_per_minute: int = 300
+    requests_per_hour: int = 3000
     max_body_bytes: int = 1_048_576  # 1 MB
     trust_proxy: bool = False
 
@@ -570,9 +584,7 @@ def _parse_classification(raw: dict[str, Any]) -> ClassificationConfig:
     mode_raw = raw.get("mode", "llm")
     mode = str(mode_raw)
     if mode not in ("llm", "heuristic"):
-        raise ValueError(
-            f"classification.mode must be 'llm' or 'heuristic', got: {mode!r}"
-        )
+        raise ValueError(f"classification.mode must be 'llm' or 'heuristic', got: {mode!r}")
 
     return ClassificationConfig(
         confidence_threshold=threshold,
@@ -810,8 +822,11 @@ def _parse_server(raw: dict[str, Any]) -> ServerConfig:
             membership_cache_ttl_seconds=membership_cache_ttl_seconds,
         ),
         http_rate_limit=HttpRateLimitConfig(
-            requests_per_minute=int(rl_raw.get("requests_per_minute", 60)),
-            requests_per_hour=int(rl_raw.get("requests_per_hour", 600)),
+            # Fallbacks must match the HttpRateLimitConfig dataclass
+            # defaults above — see the docstring there for the
+            # rationale behind the 300/3000 sizing.
+            requests_per_minute=int(rl_raw.get("requests_per_minute", 300)),
+            requests_per_hour=int(rl_raw.get("requests_per_hour", 3000)),
             max_body_bytes=int(rl_raw.get("max_body_bytes", 1_048_576)),
             trust_proxy=bool(rl_raw.get("trust_proxy", False)),
         ),
