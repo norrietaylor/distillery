@@ -87,14 +87,14 @@ describe("ResultsList", () => {
       resolveCall(makeResult(""));
     });
 
-    it("calls distillery_recall with the query", async () => {
+    it("calls distillery_search with the query", async () => {
       const mockCallTool = vi.fn().mockResolvedValue(makeResult(""));
       const bridge = { isConnected: true, callTool: mockCallTool } as unknown as McpBridge;
 
       render(ResultsList, { props: { bridge, query: "machine learning" } });
 
       await waitFor(() => {
-        expect(mockCallTool).toHaveBeenCalledWith("distillery_recall", expect.objectContaining({
+        expect(mockCallTool).toHaveBeenCalledWith("distillery_search", expect.objectContaining({
           query: "machine learning",
         }));
       });

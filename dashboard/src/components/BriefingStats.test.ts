@@ -13,6 +13,26 @@ function makeResult(text: string, isError = false): ToolCallTextResult {
   };
 }
 
+/**
+ * Build a ``distillery_list`` ``output=stats`` JSON payload.
+ *
+ * The real server returns::
+ *
+ *     {"entries_by_type": {...}, "entries_by_status": {...},
+ *      "total_entries": N, "storage_bytes": N}
+ *
+ * BriefingStats' ``parseStatsTotal`` reads ``total_entries`` directly, so the
+ * test mocks must emit the real envelope rather than a bare number.
+ */
+function statsPayload(totalEntries: number): string {
+  return JSON.stringify({
+    entries_by_type: {},
+    entries_by_status: {},
+    total_entries: totalEntries,
+    storage_bytes: 0,
+  });
+}
+
 function makeMockBridge(
   callToolImpl: (name: string, args?: Record<string, unknown>) => Promise<ToolCallTextResult>,
 ): McpBridge {
@@ -40,11 +60,11 @@ describe("BriefingStats", () => {
       expect(screen.queryByLabelText(/Total Entries/)).toBeTruthy();
 
       // resolve to avoid dangling promise
-      resolveCall(makeResult("42"));
+      resolveCall(makeResult(statsPayload(42)));
     });
 
     it("shows 5 metric cards: Total, Stale, Expiring, Pending Review, Inbox", async () => {
-      const bridge = makeMockBridge(async () => makeResult("10"));
+      const bridge = makeMockBridge(async () => makeResult(statsPayload(10)));
       render(BriefingStats, { props: { bridge } });
 
       await waitFor(() => {
@@ -57,7 +77,7 @@ describe("BriefingStats", () => {
     });
 
     it("displays 5 cards in a row layout", async () => {
-      const bridge = makeMockBridge(async () => makeResult("5"));
+      const bridge = makeMockBridge(async () => makeResult(statsPayload(5)));
       const { container } = render(BriefingStats, { props: { bridge } });
 
       await waitFor(() => {
@@ -71,7 +91,7 @@ describe("BriefingStats", () => {
 
   describe("data loading", () => {
     it("loads total entries by calling distillery_list with output=stats", async () => {
-      const mockCallTool = vi.fn().mockResolvedValue(makeResult("42"));
+      const mockCallTool = vi.fn().mockResolvedValue(makeResult(statsPayload(42)));
       const bridge = { isConnected: true, callTool: mockCallTool } as unknown as McpBridge;
 
       render(BriefingStats, { props: { bridge } });
@@ -91,7 +111,7 @@ describe("BriefingStats", () => {
     });
 
     it("loads stale entries by calling distillery_list with stale_days=30 and output=stats", async () => {
-      const mockCallTool = vi.fn().mockResolvedValue(makeResult("15"));
+      const mockCallTool = vi.fn().mockResolvedValue(makeResult(statsPayload(15)));
       const bridge = { isConnected: true, callTool: mockCallTool } as unknown as McpBridge;
 
       render(BriefingStats, { props: { bridge } });
@@ -106,7 +126,7 @@ describe("BriefingStats", () => {
     });
 
     it("loads pending review entries by calling distillery_list with status=pending_review and output=stats", async () => {
-      const mockCallTool = vi.fn().mockResolvedValue(makeResult("7"));
+      const mockCallTool = vi.fn().mockResolvedValue(makeResult(statsPayload(7)));
       const bridge = { isConnected: true, callTool: mockCallTool } as unknown as McpBridge;
 
       render(BriefingStats, { props: { bridge } });
@@ -123,7 +143,7 @@ describe("BriefingStats", () => {
     });
 
     it("loads inbox entries by calling distillery_list with entry_type=inbox and output=stats", async () => {
-      const mockCallTool = vi.fn().mockResolvedValue(makeResult("3"));
+      const mockCallTool = vi.fn().mockResolvedValue(makeResult(statsPayload(3)));
       const bridge = { isConnected: true, callTool: mockCallTool } as unknown as McpBridge;
 
       render(BriefingStats, { props: { bridge } });
@@ -140,7 +160,7 @@ describe("BriefingStats", () => {
     });
 
     it("displays parsed metric values after successful load", async () => {
-      const bridge = makeMockBridge(async () => makeResult("42"));
+      const bridge = makeMockBridge(async () => makeResult(statsPayload(42)));
       render(BriefingStats, { props: { bridge } });
 
       await waitFor(() => {
@@ -149,14 +169,25 @@ describe("BriefingStats", () => {
       });
     });
 
-    it("parses 'count: N' format responses", async () => {
+    it("reads total_entries from the distillery_list stats payload", async () => {
+      // The real server returns
+      //   {"entries_by_type": {"session": 12}, "entries_by_status": {...},
+      //    "total_entries": 99, "storage_bytes": 12345}
+      // An earlier version of BriefingStats regex-scraped the first number
+      // it found and returned 12 here instead of 99, because
+      // `total_entries":99` does not match `/(?:count|total)[:\s]+(\d+)/`
+      // (the `_entries":` glue is neither whitespace nor colon). This test
+      // guards against that regression.
+      const payload = JSON.stringify({
+        entries_by_type: { session: 12, bookmark: 5 },
+        entries_by_status: { active: 99 },
+        total_entries: 99,
+        storage_bytes: 54321,
+      });
       const mockCallTool = vi
         .fn()
-        .mockResolvedValueOnce(makeResult("count: 99")) // total
-        .mockResolvedValueOnce(makeResult("0")) // stale
-        .mockResolvedValueOnce(makeResult("0")) // expiring
-        .mockResolvedValueOnce(makeResult("0")) // pending
-        .mockResolvedValueOnce(makeResult("0")); // inbox
+        .mockResolvedValueOnce(makeResult(payload)) // total
+        .mockResolvedValue(makeResult(statsPayload(0))); // everything else
       const bridge = { isConnected: true, callTool: mockCallTool } as unknown as McpBridge;
 
       render(BriefingStats, { props: { bridge } });
@@ -166,54 +197,17 @@ describe("BriefingStats", () => {
       });
     });
 
-    it("parses 'total: N' format responses", async () => {
+    it("falls back to 0 on malformed (non-JSON) stats payloads", async () => {
       const mockCallTool = vi
         .fn()
-        .mockResolvedValueOnce(makeResult("total: 123")) // total
-        .mockResolvedValueOnce(makeResult("0")) // stale
-        .mockResolvedValueOnce(makeResult("0")) // expiring
-        .mockResolvedValueOnce(makeResult("0")) // pending
-        .mockResolvedValueOnce(makeResult("0")); // inbox
+        .mockResolvedValueOnce(makeResult("not a valid json stats payload")) // total
+        .mockResolvedValue(makeResult(statsPayload(0))); // everything else
       const bridge = { isConnected: true, callTool: mockCallTool } as unknown as McpBridge;
 
       render(BriefingStats, { props: { bridge } });
 
       await waitFor(() => {
-        expect(screen.getByLabelText(/Total Entries: 123/)).toBeTruthy();
-      });
-    });
-
-    it("parses bare number responses", async () => {
-      const mockCallTool = vi
-        .fn()
-        .mockResolvedValueOnce(makeResult("  88  ")) // total
-        .mockResolvedValueOnce(makeResult("0")) // stale
-        .mockResolvedValueOnce(makeResult("0")) // expiring
-        .mockResolvedValueOnce(makeResult("0")) // pending
-        .mockResolvedValueOnce(makeResult("0")); // inbox
-      const bridge = { isConnected: true, callTool: mockCallTool } as unknown as McpBridge;
-
-      render(BriefingStats, { props: { bridge } });
-
-      await waitFor(() => {
-        expect(screen.getByLabelText(/Total Entries: 88/)).toBeTruthy();
-      });
-    });
-
-    it("extracts first number from verbose responses", async () => {
-      const mockCallTool = vi
-        .fn()
-        .mockResolvedValueOnce(makeResult("Found 27 matching entries across 3 projects")) // total
-        .mockResolvedValueOnce(makeResult("0")) // stale
-        .mockResolvedValueOnce(makeResult("0")) // expiring
-        .mockResolvedValueOnce(makeResult("0")) // pending
-        .mockResolvedValueOnce(makeResult("0")); // inbox
-      const bridge = { isConnected: true, callTool: mockCallTool } as unknown as McpBridge;
-
-      render(BriefingStats, { props: { bridge } });
-
-      await waitFor(() => {
-        expect(screen.getByLabelText(/Total Entries: 27/)).toBeTruthy();
+        expect(screen.getByLabelText(/Total Entries: 0/)).toBeTruthy();
       });
     });
   });
@@ -237,7 +231,7 @@ describe("BriefingStats", () => {
           // This is the expiring check
           return makeResult(response);
         }
-        return makeResult("0");
+        return makeResult(statsPayload(0));
       });
       render(BriefingStats, { props: { bridge } });
 
@@ -255,14 +249,14 @@ describe("BriefingStats", () => {
 
       const mockCallTool = vi
         .fn()
-        .mockResolvedValueOnce(makeResult("5")) // total
-        .mockResolvedValueOnce(makeResult("3")) // stale
+        .mockResolvedValueOnce(makeResult(statsPayload(5))) // total
+        .mockResolvedValueOnce(makeResult(statsPayload(3))) // stale
         .mockImplementationOnce(async (name, args) => {
           // expiring check
           return makeResult(response);
         })
-        .mockResolvedValueOnce(makeResult("2")) // pending
-        .mockResolvedValueOnce(makeResult("1")); // inbox
+        .mockResolvedValueOnce(makeResult(statsPayload(2))) // pending
+        .mockResolvedValueOnce(makeResult(statsPayload(1))); // inbox
 
       const bridge = { isConnected: true, callTool: mockCallTool } as unknown as McpBridge;
       render(BriefingStats, { props: { bridge } });
@@ -281,14 +275,14 @@ describe("BriefingStats", () => {
 
       const mockCallTool = vi
         .fn()
-        .mockResolvedValueOnce(makeResult("5")) // total
-        .mockResolvedValueOnce(makeResult("3")) // stale
+        .mockResolvedValueOnce(makeResult(statsPayload(5))) // total
+        .mockResolvedValueOnce(makeResult(statsPayload(3))) // stale
         .mockImplementationOnce(async (name, args) => {
           // expiring check
           return makeResult(response);
         })
-        .mockResolvedValueOnce(makeResult("2")) // pending
-        .mockResolvedValueOnce(makeResult("1")); // inbox
+        .mockResolvedValueOnce(makeResult(statsPayload(2))) // pending
+        .mockResolvedValueOnce(makeResult(statsPayload(1))); // inbox
 
       const bridge = { isConnected: true, callTool: mockCallTool } as unknown as McpBridge;
       render(BriefingStats, { props: { bridge } });
@@ -303,11 +297,11 @@ describe("BriefingStats", () => {
     it("applies danger variant when pending review > 10", async () => {
       const mockCallTool = vi
         .fn()
-        .mockResolvedValueOnce(makeResult("5")) // total
-        .mockResolvedValueOnce(makeResult("0")) // stale
-        .mockResolvedValueOnce(makeResult("0")) // expiring
-        .mockResolvedValueOnce(makeResult("15")) // pending (> 10, should be danger)
-        .mockResolvedValueOnce(makeResult("0")); // inbox
+        .mockResolvedValueOnce(makeResult(statsPayload(5))) // total
+        .mockResolvedValueOnce(makeResult(statsPayload(0))) // stale
+        .mockResolvedValueOnce(makeResult(statsPayload(0))) // expiring
+        .mockResolvedValueOnce(makeResult(statsPayload(15))) // pending (> 10, should be danger)
+        .mockResolvedValueOnce(makeResult(statsPayload(0))); // inbox
       const bridge = { isConnected: true, callTool: mockCallTool } as unknown as McpBridge;
 
       const { container } = render(BriefingStats, { props: { bridge } });
@@ -322,11 +316,11 @@ describe("BriefingStats", () => {
     it("does not apply danger variant when pending review <= 10", async () => {
       const mockCallTool = vi
         .fn()
-        .mockResolvedValueOnce(makeResult("5")) // total
-        .mockResolvedValueOnce(makeResult("5")) // stale
-        .mockResolvedValueOnce(makeResult("0")) // expiring
-        .mockResolvedValueOnce(makeResult("5")) // pending (<= 10, should not be danger)
-        .mockResolvedValueOnce(makeResult("2")); // inbox
+        .mockResolvedValueOnce(makeResult(statsPayload(5))) // total
+        .mockResolvedValueOnce(makeResult(statsPayload(5))) // stale
+        .mockResolvedValueOnce(makeResult(statsPayload(0))) // expiring
+        .mockResolvedValueOnce(makeResult(statsPayload(5))) // pending (<= 10, should not be danger)
+        .mockResolvedValueOnce(makeResult(statsPayload(2))); // inbox
       const bridge = { isConnected: true, callTool: mockCallTool } as unknown as McpBridge;
 
       const { container } = render(BriefingStats, { props: { bridge } });
@@ -345,11 +339,11 @@ describe("BriefingStats", () => {
     it("applies warning variant when stale > 50", async () => {
       const mockCallTool = vi
         .fn()
-        .mockResolvedValueOnce(makeResult("5")) // total
-        .mockResolvedValueOnce(makeResult("60")) // stale (> 50, should be warning)
-        .mockResolvedValueOnce(makeResult("0")) // expiring
-        .mockResolvedValueOnce(makeResult("5")) // pending
-        .mockResolvedValueOnce(makeResult("0")); // inbox
+        .mockResolvedValueOnce(makeResult(statsPayload(5))) // total
+        .mockResolvedValueOnce(makeResult(statsPayload(60))) // stale (> 50, should be warning)
+        .mockResolvedValueOnce(makeResult(statsPayload(0))) // expiring
+        .mockResolvedValueOnce(makeResult(statsPayload(5))) // pending
+        .mockResolvedValueOnce(makeResult(statsPayload(0))); // inbox
       const bridge = { isConnected: true, callTool: mockCallTool } as unknown as McpBridge;
 
       const { container } = render(BriefingStats, { props: { bridge } });
@@ -364,11 +358,11 @@ describe("BriefingStats", () => {
     it("does not apply warning variant when stale <= 50", async () => {
       const mockCallTool = vi
         .fn()
-        .mockResolvedValueOnce(makeResult("5")) // total
-        .mockResolvedValueOnce(makeResult("30")) // stale (<= 50, should not be warning)
-        .mockResolvedValueOnce(makeResult("0")) // expiring
-        .mockResolvedValueOnce(makeResult("5")) // pending
-        .mockResolvedValueOnce(makeResult("2")); // inbox
+        .mockResolvedValueOnce(makeResult(statsPayload(5))) // total
+        .mockResolvedValueOnce(makeResult(statsPayload(30))) // stale (<= 50, should not be warning)
+        .mockResolvedValueOnce(makeResult(statsPayload(0))) // expiring
+        .mockResolvedValueOnce(makeResult(statsPayload(5))) // pending
+        .mockResolvedValueOnce(makeResult(statsPayload(2))); // inbox
       const bridge = { isConnected: true, callTool: mockCallTool } as unknown as McpBridge;
 
       const { container } = render(BriefingStats, { props: { bridge } });
@@ -390,7 +384,7 @@ describe("BriefingStats", () => {
       const mockCallTool = vi
         .fn()
         .mockResolvedValueOnce(makeResult("Tool error", true))
-        .mockResolvedValue(makeResult("0"));
+        .mockResolvedValue(makeResult(statsPayload(0)));
       const bridge = { isConnected: true, callTool: mockCallTool } as unknown as McpBridge;
 
       render(BriefingStats, { props: { bridge } });
@@ -403,9 +397,9 @@ describe("BriefingStats", () => {
     it("shows error message when stale load throws exception", async () => {
       const mockCallTool = vi
         .fn()
-        .mockResolvedValueOnce(makeResult("42"))
+        .mockResolvedValueOnce(makeResult(statsPayload(42)))
         .mockRejectedValueOnce(new Error("Network failure"))
-        .mockResolvedValue(makeResult("0"));
+        .mockResolvedValue(makeResult(statsPayload(0)));
       const bridge = { isConnected: true, callTool: mockCallTool } as unknown as McpBridge;
 
       render(BriefingStats, { props: { bridge } });
@@ -418,11 +412,11 @@ describe("BriefingStats", () => {
     it("handles one failed metric without breaking other metrics", async () => {
       const mockCallTool = vi
         .fn()
-        .mockResolvedValueOnce(makeResult("50")) // total
+        .mockResolvedValueOnce(makeResult(statsPayload(50))) // total
         .mockResolvedValueOnce(makeResult("Error", true)) // stale — error
-        .mockResolvedValueOnce(makeResult("3")) // expiring (returns a list with count 3)
-        .mockResolvedValueOnce(makeResult("8")) // pending
-        .mockResolvedValueOnce(makeResult("2")); // inbox
+        .mockResolvedValueOnce(makeResult(statsPayload(3))) // expiring (returns a list with count 3)
+        .mockResolvedValueOnce(makeResult(statsPayload(8))) // pending
+        .mockResolvedValueOnce(makeResult(statsPayload(2))); // inbox
 
       const bridge = { isConnected: true, callTool: mockCallTool } as unknown as McpBridge;
 
@@ -439,7 +433,7 @@ describe("BriefingStats", () => {
 
   describe("refresh on project change", () => {
     it("passes project filter to all list calls when project is selected", async () => {
-      const mockCallTool = vi.fn().mockResolvedValue(makeResult("10"));
+      const mockCallTool = vi.fn().mockResolvedValue(makeResult(statsPayload(10)));
       const bridge = { isConnected: true, callTool: mockCallTool } as unknown as McpBridge;
 
       render(BriefingStats, { props: { bridge } });
@@ -462,7 +456,7 @@ describe("BriefingStats", () => {
     });
 
     it("omits project filter when no project is selected", async () => {
-      const mockCallTool = vi.fn().mockResolvedValue(makeResult("10"));
+      const mockCallTool = vi.fn().mockResolvedValue(makeResult(statsPayload(10)));
       const bridge = { isConnected: true, callTool: mockCallTool } as unknown as McpBridge;
 
       selectedProject.set(null);
@@ -483,7 +477,7 @@ describe("BriefingStats", () => {
   describe("refresh on manual trigger", () => {
     it("reloads all metrics when refreshTick changes", async () => {
       const { refreshCounter } = await import("$lib/stores");
-      const mockCallTool = vi.fn().mockResolvedValue(makeResult("42"));
+      const mockCallTool = vi.fn().mockResolvedValue(makeResult(statsPayload(42)));
       const bridge = { isConnected: true, callTool: mockCallTool } as unknown as McpBridge;
 
       render(BriefingStats, { props: { bridge } });

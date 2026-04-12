@@ -10,7 +10,7 @@
   interface Props {
     /** The MCP bridge instance for tool calls. */
     bridge?: McpBridge | null;
-    /** Search query to execute against distillery_recall. */
+    /** Search query to execute against distillery_search. */
     query?: string;
     /** Optional project scope for filtering results. */
     project?: string | null;
@@ -54,17 +54,26 @@
   let filterText = $state("");
   let expandedId = $state<string | null>(null);
 
-  /** Parse a line of text output into SearchResult objects. */
+  /** Parse the text response from distillery_search into SearchResult objects. */
   function parseResults(text: string): SearchResult[] {
     if (!text.trim()) return [];
-    // Try JSON array first, then newline-delimited JSON.
     try {
       const parsed: unknown = JSON.parse(text);
-      if (Array.isArray(parsed)) {
-        return parsed.map(normalizeResult);
+      // distillery_search returns {results: [{score, entry}], count}
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const wrapped = parsed as Record<string, unknown>;
+        if (Array.isArray(wrapped.results)) {
+          return wrapped.results.map((r: unknown) => {
+            const row = r as { score?: number; entry?: Record<string, unknown> };
+            const entry = row.entry ?? (r as Record<string, unknown>);
+            return normalizeResult({ ...entry, score: row.score ?? entry.score });
+          });
+        }
+        // fallback: bare entry object (older response shape)
+        return [normalizeResult(wrapped)];
       }
-      if (parsed && typeof parsed === "object") {
-        return [normalizeResult(parsed as Record<string, unknown>)];
+      if (Array.isArray(parsed)) {
+        return parsed.map((e) => normalizeResult(e as Record<string, unknown>));
       }
     } catch {
       // fall through to line-by-line
@@ -135,7 +144,7 @@
     try {
       const args: Record<string, unknown> = { query: q.trim(), limit: 50 };
       if (project) args["project"] = project;
-      const result = await bridge.callTool("distillery_recall", args);
+      const result = await bridge.callTool("distillery_search", args);
       if (searchId !== activeSearchId) return;
       if (result.isError) {
         loadError = result.text || "Search failed";

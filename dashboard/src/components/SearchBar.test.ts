@@ -76,7 +76,7 @@ describe("SearchBar", () => {
   });
 
   describe("search submission", () => {
-    it("calls distillery_recall with the entered query when Search is clicked", async () => {
+    it("calls distillery_search with the entered query when Search is clicked", async () => {
       const mockCallTool = vi.fn().mockResolvedValue(makeResult("[]"));
       const bridge = { isConnected: true, callTool: mockCallTool } as unknown as McpBridge;
 
@@ -88,13 +88,13 @@ describe("SearchBar", () => {
 
       await waitFor(() => {
         expect(mockCallTool).toHaveBeenCalledWith(
-          "distillery_recall",
+          "distillery_search",
           expect.objectContaining({ query: "svelte components" }),
         );
       });
     });
 
-    it("calls distillery_recall when form is submitted (Enter key / submit button)", async () => {
+    it("calls distillery_search when form is submitted (Enter key / submit button)", async () => {
       const mockCallTool = vi.fn().mockResolvedValue(makeResult("[]"));
       const bridge = { isConnected: true, callTool: mockCallTool } as unknown as McpBridge;
 
@@ -106,13 +106,13 @@ describe("SearchBar", () => {
 
       await waitFor(() => {
         expect(mockCallTool).toHaveBeenCalledWith(
-          "distillery_recall",
+          "distillery_search",
           expect.objectContaining({ query: "knowledge query" }),
         );
       });
     });
 
-    it("does not call distillery_recall when query is empty", async () => {
+    it("does not call distillery_search when query is empty", async () => {
       const mockCallTool = vi.fn().mockResolvedValue(makeResult("[]"));
       const bridge = { isConnected: true, callTool: mockCallTool } as unknown as McpBridge;
 
@@ -125,7 +125,7 @@ describe("SearchBar", () => {
       expect(mockCallTool).not.toHaveBeenCalled();
     });
 
-    it("does not call distillery_recall when query is only whitespace", async () => {
+    it("does not call distillery_search when query is only whitespace", async () => {
       const mockCallTool = vi.fn().mockResolvedValue(makeResult("[]"));
       const bridge = { isConnected: true, callTool: mockCallTool } as unknown as McpBridge;
 
@@ -151,7 +151,7 @@ describe("SearchBar", () => {
 
       await waitFor(() => {
         expect(mockCallTool).toHaveBeenCalledWith(
-          "distillery_recall",
+          "distillery_search",
           expect.objectContaining({ limit: 20 }),
         );
       });
@@ -478,7 +478,7 @@ describe("SearchBar", () => {
 
       await waitFor(() => {
         expect(mockCallTool).toHaveBeenCalledWith(
-          "distillery_recall",
+          "distillery_search",
           expect.objectContaining({ project: "my-project" }),
         );
       });

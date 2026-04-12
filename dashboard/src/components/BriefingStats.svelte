@@ -45,17 +45,30 @@
   let errorPending = $state<string | null>(null);
   let errorInbox = $state<string | null>(null);
 
-  /** Parse a stat count from tool response text. Expects "N" or "total: N" or "count: N" format. */
-  function parseCount(text: string): number {
-    // Try "count: N" or "total: N"
-    const labelMatch = text.match(/(?:count|total)[:\s]+(\d+)/i);
-    if (labelMatch) return parseInt(labelMatch[1]!, 10);
-    // Try a bare number on its own line
-    const bareMatch = text.match(/^\s*(\d+)\s*$/m);
-    if (bareMatch) return parseInt(bareMatch[1]!, 10);
-    // Try the first number in the response
-    const firstNum = text.match(/\d+/);
-    if (firstNum) return parseInt(firstNum[0]!, 10);
+  /**
+   * Parse the ``total_entries`` field from a ``distillery_list`` stats payload.
+   *
+   * The server returns JSON of the form::
+   *
+   *     {"entries_by_type": {...}, "entries_by_status": {...},
+   *      "total_entries": N, "storage_bytes": N}
+   *
+   * We pull ``total_entries`` directly rather than regex-scraping the text —
+   * an earlier version of this component used ``/(?:count|total)[:\s]+(\d+)/``
+   * which failed to match ``total_entries":N`` (the ``_entries":`` glue is not
+   * whitespace or colon) and silently fell back to "first number in the
+   * response", returning whichever entry type happened to serialize first
+   * instead of the actual total.
+   */
+  function parseStatsTotal(text: string): number {
+    try {
+      const parsed = JSON.parse(text) as { total_entries?: unknown };
+      if (typeof parsed.total_entries === "number") {
+        return parsed.total_entries;
+      }
+    } catch {
+      // Non-JSON response — return 0 so the card shows "0" instead of NaN.
+    }
     return 0;
   }
 
@@ -71,7 +84,7 @@
         errorTotal = "Failed to load total entries";
         totalEntries = null;
       } else {
-        totalEntries = parseCount(result.text);
+        totalEntries = parseStatsTotal(result.text);
       }
     } catch (err) {
       errorTotal = err instanceof Error ? err.message : "Failed to load total entries";
@@ -93,7 +106,7 @@
         errorStale = "Failed to load stale count";
         staleCount = null;
       } else {
-        staleCount = parseCount(result.text);
+        staleCount = parseStatsTotal(result.text);
       }
     } catch (err) {
       errorStale = err instanceof Error ? err.message : "Failed to load stale count";
@@ -169,7 +182,7 @@
         errorPending = "Failed to load pending review count";
         pendingReview = null;
       } else {
-        pendingReview = parseCount(result.text);
+        pendingReview = parseStatsTotal(result.text);
       }
     } catch (err) {
       errorPending = err instanceof Error ? err.message : "Failed to load pending review count";
@@ -191,7 +204,7 @@
         errorInbox = "Failed to load inbox count";
         inboxCount = null;
       } else {
-        inboxCount = parseCount(result.text);
+        inboxCount = parseStatsTotal(result.text);
       }
     } catch (err) {
       errorInbox = err instanceof Error ? err.message : "Failed to load inbox count";
