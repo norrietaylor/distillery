@@ -37,7 +37,7 @@
   <div class="pagination-controls">
     <button
       class="pagination-btn"
-      onclick={() => onPageChange(currentPage - 1)}
+      onclick={() => onPageChange(safePage - 1)}
       disabled={!hasPrev}
       aria-label="Previous page"
     >
@@ -45,12 +45,12 @@
     </button>
 
     <span class="pagination-page" aria-current="page">
-      {currentPage} / {totalPages}
+      {safePage} / {totalPages}
     </span>
 
     <button
       class="pagination-btn"
-      onclick={() => onPageChange(currentPage + 1)}
+      onclick={() => onPageChange(safePage + 1)}
       disabled={!hasNext}
       aria-label="Next page"
     >

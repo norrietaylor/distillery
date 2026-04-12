@@ -1571,26 +1571,29 @@ def _cmd_maintenance_classify(
             recency_window_days=cfg.defaults.recency_window_days,
             recency_min_weight=cfg.defaults.recency_min_weight,
         )
-        await store.initialize()
+        try:
+            await store.initialize()
 
-        # Build the shared state dict that _run_classify_batch expects.
-        state = {
-            "store": store,
-            "config": cfg,
-            "embedding_provider": embedding_provider,
-        }
+            # Build the shared state dict that _run_classify_batch expects.
+            state = {
+                "store": store,
+                "config": cfg,
+                "embedding_provider": embedding_provider,
+            }
 
-        # Call the webhook handler directly (not via HTTP).
-        response = await _run_classify_batch(state, entry_type=entry_type, mode=mode)
+            # Call the webhook handler directly (not via HTTP).
+            response = await _run_classify_batch(state, entry_type=entry_type, mode=mode)
 
-        # Extract the JSON data from the JSONResponse.
-        import json as json_module
+            # Extract the JSON data from the JSONResponse.
+            import json as json_module
 
-        body = response.body
-        raw: dict[str, Any] = json_module.loads(
-            body.decode("utf-8") if isinstance(body, bytes) else str(body)
-        )
-        return raw
+            body = response.body
+            raw: dict[str, Any] = json_module.loads(
+                body.decode("utf-8") if isinstance(body, bytes) else str(body)
+            )
+            return raw
+        finally:
+            await store.close()
 
     try:
         result = asyncio.run(_run())

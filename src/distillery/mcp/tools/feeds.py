@@ -136,6 +136,19 @@ async def _handle_watch(
                 f"trust_weight must be between 0.0 and 1.0, got: {trust_weight}",
             )
 
+        # sync_history is accepted for UI compatibility but not yet honored:
+        # full-history import is performed on the next regular poll cycle.
+        # Dashboard forms pass this flag; we log it and echo it back so the
+        # UI → API contract is explicit, and callers know what to expect.
+        sync_history_raw = arguments.get("sync_history", False)
+        sync_history = bool(sync_history_raw)
+        if sync_history:
+            logger.info(
+                "distillery_watch add: sync_history=True requested for %s; "
+                "full history will be backfilled on the next poll cycle",
+                url,
+            )
+
         try:
             added = await store.add_feed_source(
                 url=url,
@@ -158,6 +171,7 @@ async def _handle_watch(
             {
                 "added": added,
                 "sources": db_sources,
+                "sync_history": sync_history,
             }
         )
 

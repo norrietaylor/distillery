@@ -572,7 +572,7 @@ async def _run_classify_batch(
         or ``{"ok": false, "error": "<message>"}`` with status 500 on failure.
     """
     from distillery.classification import ClassificationEngine, HeuristicClassifier
-    from distillery.models import EntryStatus
+    from distillery.models import Entry, EntryStatus
 
     store = state["store"]
     config = state["config"]
@@ -596,7 +596,10 @@ async def _run_classify_batch(
             limit=500,
             offset=0,
         )
-        entries = result if isinstance(result, list) else []
+        # list_entries with no group_by/output returns list[Entry]
+        entries: list[Entry] = (
+            result if isinstance(result, list) else []
+        )
 
         classified_count = 0
         pending_review_count = 0

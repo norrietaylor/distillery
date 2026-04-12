@@ -24,7 +24,7 @@ import re
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, overload
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 import duckdb
 
@@ -1280,9 +1280,21 @@ class DuckDBStore:
         offset: int,
         *,
         stale_days: int | None = ...,
-        group_by: str | None = ...,
-        output: str | None = ...,
-    ) -> list[Entry] | dict[str, Any]: ...
+        group_by: str,
+        output: None = ...,
+    ) -> dict[str, Any]: ...
+
+    @overload
+    async def list_entries(
+        self,
+        filters: dict[str, Any] | None,
+        limit: int,
+        offset: int,
+        *,
+        stale_days: int | None = ...,
+        group_by: None = ...,
+        output: Literal["stats"],
+    ) -> dict[str, Any]: ...
 
     async def list_entries(
         self,

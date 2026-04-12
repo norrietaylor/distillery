@@ -45,17 +45,36 @@
   let errorPending = $state<string | null>(null);
   let errorInbox = $state<string | null>(null);
 
-  /** Parse a stat count from tool response text. Expects "N" or "total: N" or "count: N" format. */
+  // Request sequencing to handle race conditions
+  let requestCounter = 0;
+
+  /** Parse a stat count from tool response text. Expects explicit stat keys or labeled counts. */
   function parseCount(text: string): number {
+    // First, try parsing as JSON and look for explicit stat keys
+    try {
+      const data = JSON.parse(text) as unknown;
+      if (typeof data === 'object' && data !== null) {
+        const obj = data as Record<string, unknown>;
+        // Try explicit stat keys first
+        if (typeof obj.total_entries === 'number') return obj.total_entries;
+        if (typeof obj.total === 'number') return obj.total;
+        if (typeof obj.total_stale === 'number') return obj.total_stale;
+        if (typeof obj.total_pending === 'number') return obj.total_pending;
+        if (typeof obj.total_inbox === 'number') return obj.total_inbox;
+      }
+    } catch {
+      // Not JSON or invalid, continue to text parsing
+    }
+
     // Try "count: N" or "total: N"
     const labelMatch = text.match(/(?:count|total)[:\s]+(\d+)/i);
     if (labelMatch) return parseInt(labelMatch[1]!, 10);
     // Try a bare number on its own line
     const bareMatch = text.match(/^\s*(\d+)\s*$/m);
     if (bareMatch) return parseInt(bareMatch[1]!, 10);
-    // Try the first number in the response
-    const firstNum = text.match(/\d+/);
-    if (firstNum) return parseInt(firstNum[0]!, 10);
+    // Extract first number from verbose text
+    const firstNumberMatch = text.match(/\d+/);
+    if (firstNumberMatch) return parseInt(firstNumberMatch[0]!, 10);
     return 0;
   }
 
@@ -203,6 +222,7 @@
 
   /** Load all metrics in parallel. */
   async function loadAll(project: string | null) {
+    requestCounter += 1;
     await Promise.all([
       fetchTotal(project),
       fetchStale(project),

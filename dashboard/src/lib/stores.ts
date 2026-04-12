@@ -32,6 +32,12 @@ export const currentUser = writable<UserIdentity | null>(null);
 /** Whether any async data load is in progress. */
 export const isLoading = writable<boolean>(false);
 
+/** Available dashboard tabs. */
+export type DashboardTab = "home" | "capture";
+
+/** Active tab in the dashboard. Defaults to "home". */
+export const activeTab = writable<DashboardTab>("home");
+
 /**
  * Manually trigger a refresh by incrementing the refresh counter.
  * All components that subscribe to refreshCounter will re-fetch their data.
