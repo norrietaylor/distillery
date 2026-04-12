@@ -146,14 +146,14 @@ describe("InvestigateMode", () => {
       resolveCall(makeResult("[]"));
     });
 
-    it("calls distillery_recall with seed content as query", async () => {
+    it("calls distillery_search with seed content as query", async () => {
       const bridge = makeMockBridge(async () => makeResult("[]"));
 
       render(InvestigateMode, { props: { ...defaultProps, bridge } });
 
       await waitFor(() => {
         expect(bridge.callTool).toHaveBeenCalledWith(
-          "distillery_recall",
+          "distillery_search",
           expect.objectContaining({
             query: "This is the seed entry content for investigation",
             limit: 10,

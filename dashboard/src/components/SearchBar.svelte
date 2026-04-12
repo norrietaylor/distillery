@@ -3,7 +3,7 @@
    * SearchBar — semantic search input for the Explore tab.
    *
    * Allows the user to run a free-text semantic search against the knowledge
-   * base via the distillery_recall MCP tool.  Results are rendered in a simple
+   * base via the distillery_search MCP tool.  Results are rendered in a simple
    * list with source, type, and relevance score.
    *
    * Behaviour:
@@ -22,7 +22,7 @@
 
   let { bridge = null }: Props = $props();
 
-  /** A single search result as returned by distillery_recall. */
+  /** A single search result as returned by distillery_search. */
   interface SearchResult {
     id: string;
     content: string;
@@ -40,17 +40,26 @@
   /** Whether a search has been attempted at least once. */
   let hasSearched = $state(false);
 
-  /** Parse the text response from distillery_recall into SearchResult objects. */
+  /** Parse the text response from distillery_search into SearchResult objects. */
   function parseResults(text: string): SearchResult[] {
     if (!text.trim()) return [];
-    // Try JSON array first, then single object, then newline-delimited JSON.
     try {
       const parsed: unknown = JSON.parse(text);
-      if (Array.isArray(parsed)) {
-        return parsed.map(normalizeResult);
+      // distillery_search returns {results: [{score, entry}], count}
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const wrapped = parsed as Record<string, unknown>;
+        if (Array.isArray(wrapped.results)) {
+          return wrapped.results.map((r: unknown) => {
+            const row = r as { score?: number; entry?: Record<string, unknown> };
+            const entry = row.entry ?? (r as Record<string, unknown>);
+            return normalizeResult({ ...entry, score: row.score ?? entry.score });
+          });
+        }
+        // fallback: bare entry object (older response shape)
+        return [normalizeResult(wrapped)];
       }
-      if (parsed && typeof parsed === "object") {
-        return [normalizeResult(parsed as Record<string, unknown>)];
+      if (Array.isArray(parsed)) {
+        return parsed.map((e) => normalizeResult(e as Record<string, unknown>));
       }
     } catch {
       // fall through to line-by-line
@@ -113,7 +122,7 @@
       if ($selectedProject) {
         args["project"] = $selectedProject;
       }
-      const result = await bridge.callTool("distillery_recall", args);
+      const result = await bridge.callTool("distillery_search", args);
       if (result.isError) {
         searchError = result.text || "Search failed";
         results = [];

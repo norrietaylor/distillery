@@ -234,7 +234,7 @@
       const args: Record<string, unknown> = { query: query.trim(), limit: 10 };
       const project = $selectedProject;
       if (project) args["project"] = project;
-      const result = await bridge.callTool("distillery_recall", args);
+      const result = await bridge.callTool("distillery_search", args);
       if (requestId !== activePhase1Request) return;
       if (result.isError) {
         phase1Error = result.text || "Search failed";
