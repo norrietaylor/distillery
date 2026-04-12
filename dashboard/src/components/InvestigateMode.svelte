@@ -256,8 +256,16 @@
     }
   }
 
-  // Kick off Phase 1 on mount / on pivot
+  // Kick off Phase 1 on mount / on pivot.
+  // NOTE: the `void $selectedProject;` read is load-bearing — it registers the
+  // project store as a dependency of this effect. runPhase1Search() reads
+  // $selectedProject via closure *before* the first await, which in theory
+  // Svelte 5's reactivity tracker should follow through function calls, but
+  // in practice is a brittle edge case. Without this explicit read, switching
+  // the ProjectSelector (e.g. back to "All projects") would not retrigger the
+  // Phase 1 search. Do not "clean up" this seemingly-unused read.
   $effect(() => {
+    void $selectedProject;
     const path = investigationPath;
     if (path.length > 0 && currentPhase === 1) {
       const currentEntry = path[path.length - 1];

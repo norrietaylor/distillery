@@ -163,8 +163,17 @@
     }
   }
 
-  // Re-run search when query prop changes
+  // Re-run search when query or project prop changes.
+  // NOTE: the `void query; void project;` reads are load-bearing — they register
+  // both props as dependencies of this effect. Svelte 5's reactivity tracker only
+  // reliably picks up synchronous prop reads in the effect body itself; `project`
+  // is read inside search() via closure *before* the first await, which in theory
+  // should be tracked but in practice is a brittle edge case. Explicit reads here
+  // ensure switching the ProjectSelector (e.g. back to "All projects") retriggers
+  // the search. Do not "clean up" these seemingly-unused reads.
   $effect(() => {
+    void query;
+    void project;
     void search(query);
   });
 
