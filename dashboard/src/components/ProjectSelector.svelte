@@ -17,26 +17,45 @@
     loadingProjects = true;
     loadError = null;
     try {
+      // distillery_list with group_by returns
+      //   {"groups": [{"value": "project-a", "count": 12}, ...],
+      //    "total_groups": N, "total_entries": N}
+      // We intentionally do NOT pass output="stats" — the server rejects
+      // the combination with INVALID_PARAMS because output="stats" and
+      // group_by are mutually exclusive (see
+      // src/distillery/mcp/tools/crud.py::_handle_list). Earlier this
+      // component sent both and silently swallowed the server's rejection
+      // under an empty project dropdown.
       const result = await bridge.callTool("distillery_list", {
-        output: "stats",
         group_by: "project",
       });
       if (result.isError) {
         loadError = "Failed to load projects";
         return;
       }
-      // Parse the text response: each line may be "project_name: N entries"
-      // Accept any non-empty token before the colon as a project name.
-      const lines = result.text.split("\n");
+      // Parse the JSON payload: extract each group's value as a project
+      // name, skip null/empty. An earlier version of this component
+      // text-parsed "project_name: N entries" lines, which never matched
+      // the real JSON response at all — the dropdown was effectively a
+      // no-op regardless of whether the server call succeeded.
       const parsed: string[] = [];
-      for (const line of lines) {
-        const match = line.match(/^([^:]+):\s*\d+/);
-        if (match && match[1]) {
-          const name = match[1].trim();
-          if (name && name !== "null" && name !== "undefined") {
-            parsed.push(name);
+      try {
+        const data = JSON.parse(result.text) as {
+          groups?: Array<{ value?: unknown; count?: unknown }>;
+        };
+        if (Array.isArray(data.groups)) {
+          for (const g of data.groups) {
+            if (g.value == null) continue;
+            const name = String(g.value).trim();
+            if (name && name !== "null" && name !== "undefined") {
+              parsed.push(name);
+            }
           }
         }
+      } catch {
+        // Non-JSON response — leave the project list empty so the
+        // dropdown degrades to "All projects" only instead of showing
+        // garbage.
       }
       projects = parsed;
     } catch (err) {

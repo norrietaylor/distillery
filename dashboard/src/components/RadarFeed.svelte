@@ -32,18 +32,22 @@
   let expandedId = $state<string | null>(null);
   let bookmarkStatus = $state<Record<string, "idle" | "loading" | "success" | "error">>({});
 
-  /** Parse a line of text output into a FeedEntry object. */
+  /** Parse a ``distillery_list`` text response into FeedEntry objects. */
   function parseEntries(text: string): FeedEntry[] {
     if (!text.trim()) return [];
-    // The MCP list tool returns one JSON object per line, or a JSON array.
-    // Try JSON array first, then newline-delimited JSON.
     try {
       const parsed: unknown = JSON.parse(text);
-      if (Array.isArray(parsed)) {
-        return parsed.map(normalizeEntry);
+      // distillery_list returns {entries: [...], count, total_count, ...}
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const wrapped = parsed as Record<string, unknown>;
+        if (Array.isArray(wrapped.entries)) {
+          return (wrapped.entries as Array<Record<string, unknown>>).map(normalizeEntry);
+        }
+        // fallback: bare entry object (older response shape)
+        return [normalizeEntry(wrapped)];
       }
-      if (parsed && typeof parsed === "object") {
-        return [normalizeEntry(parsed as Record<string, unknown>)];
+      if (Array.isArray(parsed)) {
+        return parsed.map((e) => normalizeEntry(e as Record<string, unknown>));
       }
     } catch {
       // fall through to line-by-line
