@@ -5,6 +5,10 @@ name: Staging Deploy (on comment)
 # comments:
 #   /deploy-staging    — build image, dispatch staging-deploy
 #   /teardown-staging  — dispatch staging-teardown
+# The underscore spellings /deploy_staging and /teardown_staging are
+# accepted as equivalent aliases — both get typed interchangeably in
+# practice, and rejecting the underscore form silently skips every job
+# with no feedback, which is worse than accepting both.
 # Closing the PR also dispatches staging-teardown.
 #
 # Staging is a singleton. A second /deploy-staging on a different PR
@@ -51,10 +55,19 @@ jobs:
     # success comment's help text "Comment /deploy-staging ...") will
     # otherwise self-trigger this workflow via the issue_comment event
     # on that same comment. Commands must begin at column 0.
+    #
+    # Both /deploy-staging and /deploy_staging are accepted — the two
+    # spellings get typed interchangeably in practice, and rejecting
+    # the underscore form silently (it just evaluates `if:` to false
+    # and skips every job with no feedback) is worse than accepting
+    # both. Self-trigger protection is unchanged: still startsWith.
     if: >
       github.event_name == 'issue_comment' &&
       github.event.issue.pull_request != null &&
-      startsWith(github.event.comment.body, '/deploy-staging') &&
+      (
+        startsWith(github.event.comment.body, '/deploy-staging') ||
+        startsWith(github.event.comment.body, '/deploy_staging')
+      ) &&
       (
         github.event.comment.author_association == 'OWNER' ||
         github.event.comment.author_association == 'MEMBER' ||
@@ -215,11 +228,16 @@ jobs:
     # text, but defence in depth: a prefix check means *only* a
     # bare-command comment starting with "/teardown-staging" fires
     # the teardown. Any prose that mentions the command in-line does
-    # nothing.
+    # nothing. Both /teardown-staging and /teardown_staging are
+    # accepted, mirroring the resolve job's /deploy-{staging spelling}
+    # leniency.
     if: >
       github.event_name == 'issue_comment' &&
       github.event.issue.pull_request != null &&
-      startsWith(github.event.comment.body, '/teardown-staging') &&
+      (
+        startsWith(github.event.comment.body, '/teardown-staging') ||
+        startsWith(github.event.comment.body, '/teardown_staging')
+      ) &&
       (
         github.event.comment.author_association == 'OWNER' ||
         github.event.comment.author_association == 'MEMBER' ||
