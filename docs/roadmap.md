@@ -90,21 +90,58 @@
 
 ## Planned
 
-### New Skills
-- [ ] `/whois` — evidence-backed expertise map
-- [ ] `/process` — batch classify + digest + stale detection pipeline
+### P0 — API Hardening
 
-### Infrastructure
-- [ ] Access control — team/private visibility flag (#149)
-- [ ] PreCompact auto-extraction — capture knowledge before context compression
+Work targets `staging/api-hardening` branch. Sequenced — foundation fixes unblock bulk ingest.
+
+**Phase A: Foundation fixes**
+
+- [ ] Re-land API consolidation (20→12 tools) and conflict prompt leak fix onto `staging/api-hardening` from `main`
+- [ ] [#232](https://github.com/norrietaylor/distillery/issues/232) — `distillery_store` tool description enum omits `github` entry type
+- [ ] [#238](https://github.com/norrietaylor/distillery/issues/238) — Add `output_mode: "summary"` to skip dedup/conflict checks
+- [ ] [#241](https://github.com/norrietaylor/distillery/issues/241) — label→tag sanitiser fails on underscored labels
+- [ ] [#240](https://github.com/norrietaylor/distillery/issues/240) — `/gh-sync` passes invalid `output_mode="metadata"`
+
+**Phase B: API surface + infrastructure**
+
+- [ ] [#245](https://github.com/norrietaylor/distillery/issues/245) — Harden MCP interface: tool descriptions, error codes, validation, docs
+- [ ] [#244](https://github.com/norrietaylor/distillery/issues/244) — Bulk ingest pipeline (`store_batch`, `watch --sync-history`, gh-sync elimination)
+- [ ] [#112](https://github.com/norrietaylor/distillery/issues/112) — Security Review Follow-Up
+
+### P0 — Quality & Bugfixing
+
+PRs go directly to `main`.
+
+- [ ] [#230](https://github.com/norrietaylor/distillery/issues/230) — DuckDB WAL corruption on unclean shutdown
+- [ ] [#236](https://github.com/norrietaylor/distillery/issues/236) — RateLimitMiddleware defaults starve local-client bursts
+- [ ] [#221](https://github.com/norrietaylor/distillery/issues/221) — FeedPoller poll cycle exceeds 5 minutes
+- [ ] [#169](https://github.com/norrietaylor/distillery/issues/169) — `distillery retag` produces no output
+- [ ] [#235](https://github.com/norrietaylor/distillery/issues/235) — Plugin auto-registers hosted demo MCP
+
+### P0 — Memory Benchmarking
+
+- [ ] [#233](https://github.com/norrietaylor/distillery/issues/233) — LongMemEval retrieval benchmark
+
+### P1 — Near-term Features
+
+- [ ] [#199](https://github.com/norrietaylor/distillery/issues/199) — `distillery_extract` for PreCompact summarisation
+- [ ] [#237](https://github.com/norrietaylor/distillery/issues/237) — Retrieval-hygiene conventions docs
+- [ ] [#212](https://github.com/norrietaylor/distillery/issues/212) — Slim down container image
+- [ ] [#163](https://github.com/norrietaylor/distillery/issues/163) — Relevance-sorted feed queries for /radar
+- [ ] [#152](https://github.com/norrietaylor/distillery/issues/152) — `/whois` skill
+- [ ] [#151](https://github.com/norrietaylor/distillery/issues/151) — `/process` skill
+- [ ] [#149](https://github.com/norrietaylor/distillery/issues/149) — Access control (visibility flag)
 
 ---
 
 ## Deferred
 
+- [ ] [#147](https://github.com/norrietaylor/distillery/issues/147), [#142](https://github.com/norrietaylor/distillery/issues/142), [#141](https://github.com/norrietaylor/distillery/issues/141), [#140](https://github.com/norrietaylor/distillery/issues/140), [#138](https://github.com/norrietaylor/distillery/issues/138), [#158](https://github.com/norrietaylor/distillery/issues/158) — Graph analysis arc (NetworkX, hidden connections, epiphany generation)
+- [ ] [#167](https://github.com/norrietaylor/distillery/issues/167) — Slack conversation adapter
+- [ ] [#101](https://github.com/norrietaylor/distillery/issues/101) — Browser extension
+- [ ] [#93](https://github.com/norrietaylor/distillery/issues/93) — Public knowledge spaces for OSS projects
+- [ ] [#81](https://github.com/norrietaylor/distillery/issues/81) — Tauri desktop frontend
 - [ ] LangGraph evaluation for complex skill orchestration
-- [ ] CODE pipeline formalization for team workflows
-- [ ] Web UI or REST API
 - [ ] Multi-team support and cross-team knowledge sharing
 - [ ] Re-embedding migration tooling
 
