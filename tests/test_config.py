@@ -76,6 +76,15 @@ class TestDefaultConfig:
         cfg = load_config()
         assert cfg.classification.confidence_threshold == pytest.approx(0.6)
 
+    def test_classification_mode_defaults_to_llm(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """classification.mode defaults to 'llm' when not specified."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        cfg = load_config()
+        assert cfg.classification.mode == "llm"
+
     def test_dedup_threshold_defaults(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
@@ -156,6 +165,26 @@ class TestYAMLLoading:
         p = write_yaml(tmp_path, self.FULL_YAML)
         cfg = load_config(str(p))
         assert cfg.classification.confidence_threshold == pytest.approx(0.75)
+
+    def test_loads_classification_mode_llm(self, tmp_path: Path) -> None:
+        """Explicitly setting classification.mode to 'llm' is accepted."""
+        yaml_content = """\
+            classification:
+              mode: llm
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.classification.mode == "llm"
+
+    def test_loads_classification_mode_heuristic(self, tmp_path: Path) -> None:
+        """Setting classification.mode to 'heuristic' is accepted."""
+        yaml_content = """\
+            classification:
+              mode: heuristic
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.classification.mode == "heuristic"
 
     def test_loads_dedup_thresholds(self, tmp_path: Path) -> None:
         p = write_yaml(tmp_path, self.FULL_YAML)
@@ -366,6 +395,16 @@ class TestValidationErrors:
         """
         p = write_yaml(tmp_path, yaml_content)
         with pytest.raises(ValueError):
+            load_config(str(p))
+
+    def test_invalid_classification_mode_raises_value_error(self, tmp_path: Path) -> None:
+        """classification.mode must be 'llm' or 'heuristic'; other values raise ValueError."""
+        yaml_content = """\
+            classification:
+              mode: random
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="classification.mode"):
             load_config(str(p))
 
     def test_explicit_missing_path_raises_file_not_found(self, tmp_path: Path) -> None:
