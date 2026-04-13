@@ -1079,12 +1079,12 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         distillery_tag_tree (to explore tag structure)
         """
         c = _lc(ctx)
-        args: dict[str, Any] = dict(
-            recency_days=recency_days,
-            top_n=top_n,
-            suggest_sources=suggest_sources,
-            max_suggestions=max_suggestions,
-        )
+        args: dict[str, Any] = {
+            "recency_days": recency_days,
+            "top_n": top_n,
+            "suggest_sources": suggest_sources,
+            "max_suggestions": max_suggestions,
+        }
         return await _handle_interests(store=c["store"], config=c["config"], arguments=args)
 
     @server.resource("distillery://schemas/entry-types")
