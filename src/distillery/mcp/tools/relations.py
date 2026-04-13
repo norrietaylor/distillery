@@ -25,6 +25,17 @@ logger = logging.getLogger(__name__)
 
 _VALID_DIRECTIONS = {"outgoing", "incoming", "both"}
 
+_VALID_RELATION_TYPES = {
+    "link",
+    "corrects",
+    "supersedes",
+    "related",
+    "blocks",
+    "depends_on",
+    "citation",
+    "duplicate",
+}
+
 
 async def _handle_relations(
     store: Any,
@@ -80,6 +91,12 @@ async def _handle_relations(
         relation_type = relation_type_raw.strip()
         if not relation_type:
             return error_response("INVALID_PARAMS", "relation_type must be a non-empty string")
+        if relation_type not in _VALID_RELATION_TYPES:
+            return error_response(
+                "INVALID_PARAMS",
+                f"Invalid relation_type {relation_type!r}. "
+                f"Must be one of: {', '.join(sorted(_VALID_RELATION_TYPES))}.",
+            )
 
         try:
             relation_id = await store.add_relation(from_id, to_id, relation_type)
