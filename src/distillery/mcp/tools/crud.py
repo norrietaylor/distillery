@@ -146,6 +146,12 @@ async def _handle_store(
     if err:
         return error_response("INVALID_PARAMS", err)
 
+    output_mode = arguments.get("output_mode") or "full"
+    if output_mode not in ("full", "summary"):
+        return error_response(
+            "INVALID_PARAMS", "Field 'output_mode' must be 'full' or 'summary'."
+        )
+
     entry_type_str = arguments["entry_type"]
     if entry_type_str not in _VALID_ENTRY_TYPES:
         return error_response(
@@ -216,9 +222,11 @@ async def _handle_store(
                 pass  # can't stat, skip check
 
     # --- embedding budget check (store + dedup + conflict = 3 embeds) ------
+    # summary mode skips dedup/conflict, so only 1 embed needed.
+    embed_count = 1 if output_mode == "summary" else 3
     if cfg is not None:
         try:
-            record_and_check(store.connection, cfg.rate_limit.embedding_budget_daily, count=3)
+            record_and_check(store.connection, cfg.rate_limit.embedding_budget_daily, count=embed_count)
         except EmbeddingBudgetError as exc:
             return error_response("BUDGET_EXCEEDED", str(exc))
 
@@ -278,6 +286,10 @@ async def _handle_store(
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error storing entry")
         return error_response("STORE_ERROR", f"Failed to store entry: {exc}")
+
+    # --- summary mode: skip dedup/conflict, return early --------------------
+    if output_mode == "summary":
+        return success_response({"entry_id": entry_id})
 
     # --- deduplication check ------------------------------------------------
     warnings: list[dict[str, Any]] = []

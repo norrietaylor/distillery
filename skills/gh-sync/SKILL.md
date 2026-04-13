@@ -81,7 +81,7 @@ Before processing, retrieve the list of already-synced entries for this reposito
 distillery_list(
     entry_type="github",
     limit=500,
-    output_mode="metadata",
+    output_mode="summary",
     # scope to the target repo
 )
 ```
@@ -225,7 +225,7 @@ Synced 8 issues, 4 PRs from norrietaylor/distillery. 5 new, 7 updated. 6 cross-r
 - Use `entry_type="github"` for all synced entries
 - `metadata.external_id` format: `{owner}/{repo}#issue-{number}` or `{owner}/{repo}#pr-{number}`
 - Required metadata fields: `repo`, `ref_type`, `ref_number`, `title`, `url`, `state`
-- Labels are converted to tags: lowercase, hyphens replacing spaces, invalid characters stripped
+- Labels are normalised to tags: lowercase, spaces and underscores become hyphens, consecutive hyphens collapsed, non-conforming labels dropped
 - Entry content: `# {title}\n\n{body}\n\n**{commenter}**: {comment}` (top 10 comments max)
 - Cross-reference relation creation is non-fatal — continue on failure, report in summary
 - Self-references (an issue referencing its own number) are skipped

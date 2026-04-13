@@ -281,15 +281,19 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         dedup_limit: int | None = None,
         verification: str | None = None,
         expires_at: str | None = _UNSET,
+        output_mode: str | None = None,
     ) -> list[types.TextContent]:
         """Store a new knowledge entry and return its ID with dedup/conflict information.
 
         entry_type must be one of: session, bookmark, minutes, meeting, reference,
-        idea, inbox. source: claude-code (default), manual, import, inference,
+        idea, inbox, github, person, project, digest, feed.
+        source: claude-code (default), manual, import, inference,
         documentation, or external. session_id: opaque session identifier for grouping.
         dedup_threshold (0–1) controls near-duplicate warnings.
         verification: unverified, testing, or verified (default: unverified).
         expires_at accepts ISO 8601 datetime; entries past expiry appear in stale results.
+        output_mode: "full" (default) or "summary". Use "summary" for bulk imports
+        to skip dedup/conflict checks and return only {"entry_id": "..."}.
         """
         c = _lc(ctx)
         user = _get_authenticated_user()
@@ -306,6 +310,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 dedup_threshold=dedup_threshold,
                 dedup_limit=dedup_limit,
                 verification=verification,
+                output_mode=output_mode,
             ),
         )
         if expires_at is not _UNSET:
