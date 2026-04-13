@@ -150,7 +150,7 @@ async def _handle_tag_tree(
         tree = _build_tree_from_vocab(vocab, prefix)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error in distillery_tag_tree")
-        return error_response("TAG_TREE_ERROR", f"Failed to build tag tree: {exc}")
+        return error_response("INTERNAL", f"Failed to build tag tree: {exc}")
 
     return success_response({"tree": tree, "prefix": prefix})
 
@@ -246,7 +246,7 @@ async def _handle_metrics(
             return success_response(result)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Error gathering quality metrics")
-            return error_response("METRICS_ERROR", f"Failed to gather quality metrics: {exc}")
+            return error_response("INTERNAL", f"Failed to gather quality metrics: {exc}")
 
     # --- scope=audit -----------------------------------------------------------
     if scope == "audit":
@@ -276,7 +276,7 @@ async def _handle_metrics(
             return success_response(result_audit)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Error gathering audit metrics")
-            return error_response("METRICS_ERROR", f"Failed to gather audit metrics: {exc}")
+            return error_response("INTERNAL", f"Failed to gather audit metrics: {exc}")
 
     # --- scope=summary delegates to _sync_gather_summary --------------------
     if scope == "summary":
@@ -287,7 +287,7 @@ async def _handle_metrics(
             return success_response(result_summary)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Error gathering summary metrics")
-            return error_response("METRICS_ERROR", f"Failed to gather summary: {exc}")
+            return error_response("INTERNAL", f"Failed to gather summary: {exc}")
 
     # --- scope=full (default) -----------------------------------------------
     # --- validate period_days -----------------------------------------------
@@ -306,7 +306,7 @@ async def _handle_metrics(
         return success_response(metrics)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error gathering metrics")
-        return error_response("METRICS_ERROR", f"Failed to gather metrics: {exc}")
+        return error_response("INTERNAL", f"Failed to gather metrics: {exc}")
 
 
 def _sync_gather_summary(
@@ -966,7 +966,7 @@ async def _handle_stale(
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error gathering stale entries")
-        return error_response("STALE_ERROR", f"Failed to gather stale entries: {exc}")
+        return error_response("INTERNAL", f"Failed to gather stale entries: {exc}")
 
 
 def _sync_gather_stale(
@@ -1173,12 +1173,12 @@ async def _handle_interests(
         recency_days = int(recency_days_raw)
     except (TypeError, ValueError):
         return error_response(
-            "INVALID_FIELD",
+            "INVALID_PARAMS",
             f"recency_days must be an integer, got: {recency_days_raw!r}",
         )
     if recency_days <= 0:
         return error_response(
-            "INVALID_FIELD",
+            "INVALID_PARAMS",
             f"recency_days must be a positive integer, got: {recency_days}",
         )
 
@@ -1187,19 +1187,19 @@ async def _handle_interests(
         top_n = int(top_n_raw)
     except (TypeError, ValueError):
         return error_response(
-            "INVALID_FIELD",
+            "INVALID_PARAMS",
             f"top_n must be an integer, got: {top_n_raw!r}",
         )
     if top_n <= 0:
         return error_response(
-            "INVALID_FIELD",
+            "INVALID_PARAMS",
             f"top_n must be a positive integer, got: {top_n}",
         )
 
     suggest_sources_raw = arguments.get("suggest_sources", False)
     if not isinstance(suggest_sources_raw, bool):
         return error_response(
-            "INVALID_FIELD",
+            "INVALID_PARAMS",
             f"suggest_sources must be a boolean, got: {suggest_sources_raw!r}",
         )
     suggest_sources: bool = suggest_sources_raw
@@ -1209,12 +1209,12 @@ async def _handle_interests(
         max_suggestions = int(max_suggestions_raw)
     except (TypeError, ValueError):
         return error_response(
-            "INVALID_FIELD",
+            "INVALID_PARAMS",
             f"max_suggestions must be an integer, got: {max_suggestions_raw!r}",
         )
     if max_suggestions <= 0:
         return error_response(
-            "INVALID_FIELD",
+            "INVALID_PARAMS",
             f"max_suggestions must be a positive integer, got: {max_suggestions}",
         )
 
@@ -1227,7 +1227,7 @@ async def _handle_interests(
         profile = await extractor.extract()
     except Exception as exc:  # noqa: BLE001
         logger.exception("distillery_interests: extraction failed")
-        return error_response("EXTRACTION_ERROR", f"Interest extraction failed: {exc}")
+        return error_response("INTERNAL", f"Interest extraction failed: {exc}")
 
     payload: dict[str, Any] = {
         "top_tags": [[tag, weight] for tag, weight in profile.top_tags],

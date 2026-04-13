@@ -45,14 +45,14 @@ async def _handle_relations(
     action_raw = arguments.get("action")
     if action_raw is None or not isinstance(action_raw, str):
         return error_response(
-            "INVALID_ACTION",
+            "INVALID_PARAMS",
             f"action must be a non-null string, got: {action_raw!r}",
         )
     action = action_raw.strip().lower()
 
     if action not in ("add", "get", "remove"):
         return error_response(
-            "INVALID_ACTION",
+            "INVALID_PARAMS",
             f"action must be one of 'add', 'get', 'remove'; got: {action!r}",
         )
 
@@ -62,24 +62,24 @@ async def _handle_relations(
     if action == "add":
         from_id_raw = arguments.get("from_id")
         if from_id_raw is None or not isinstance(from_id_raw, str):
-            return error_response("MISSING_FIELD", "from_id is required for action='add'")
+            return error_response("INVALID_PARAMS", "from_id is required for action='add'")
         from_id = from_id_raw.strip()
         if not from_id:
-            return error_response("MISSING_FIELD", "from_id must be a non-empty string")
+            return error_response("INVALID_PARAMS", "from_id must be a non-empty string")
 
         to_id_raw = arguments.get("to_id")
         if to_id_raw is None or not isinstance(to_id_raw, str):
-            return error_response("MISSING_FIELD", "to_id is required for action='add'")
+            return error_response("INVALID_PARAMS", "to_id is required for action='add'")
         to_id = to_id_raw.strip()
         if not to_id:
-            return error_response("MISSING_FIELD", "to_id must be a non-empty string")
+            return error_response("INVALID_PARAMS", "to_id must be a non-empty string")
 
         relation_type_raw = arguments.get("relation_type")
         if relation_type_raw is None or not isinstance(relation_type_raw, str):
-            return error_response("MISSING_FIELD", "relation_type is required for action='add'")
+            return error_response("INVALID_PARAMS", "relation_type is required for action='add'")
         relation_type = relation_type_raw.strip()
         if not relation_type:
-            return error_response("MISSING_FIELD", "relation_type must be a non-empty string")
+            return error_response("INVALID_PARAMS", "relation_type must be a non-empty string")
 
         try:
             relation_id = await store.add_relation(from_id, to_id, relation_type)
@@ -90,7 +90,7 @@ async def _handle_relations(
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception("distillery_relations add: unexpected error")
-            return error_response("RELATIONS_ERROR", f"Failed to add relation: {exc}")
+            return error_response("INTERNAL", f"Failed to add relation: {exc}")
 
         return success_response(
             {
@@ -107,21 +107,21 @@ async def _handle_relations(
     if action == "get":
         entry_id_raw = arguments.get("entry_id")
         if entry_id_raw is None or not isinstance(entry_id_raw, str):
-            return error_response("MISSING_FIELD", "entry_id is required for action='get'")
+            return error_response("INVALID_PARAMS", "entry_id is required for action='get'")
         entry_id = entry_id_raw.strip()
         if not entry_id:
-            return error_response("MISSING_FIELD", "entry_id must be a non-empty string")
+            return error_response("INVALID_PARAMS", "entry_id must be a non-empty string")
 
         direction_raw = arguments.get("direction", "both")
         if not isinstance(direction_raw, str):
             return error_response(
-                "INVALID_FIELD",
+                "INVALID_PARAMS",
                 f"direction must be a string, got: {type(direction_raw).__name__}",
             )
         direction = direction_raw.strip().lower()
         if direction not in _VALID_DIRECTIONS:
             return error_response(
-                "INVALID_FIELD",
+                "INVALID_PARAMS",
                 f"direction must be one of {sorted(_VALID_DIRECTIONS)}, got: {direction!r}",
             )
 
@@ -130,7 +130,7 @@ async def _handle_relations(
         if get_relation_type_raw is not None:
             if not isinstance(get_relation_type_raw, str):
                 return error_response(
-                    "INVALID_FIELD",
+                    "INVALID_PARAMS",
                     f"relation_type must be a string, got: {type(get_relation_type_raw).__name__}",
                 )
             get_relation_type = get_relation_type_raw.strip() or None
@@ -141,7 +141,7 @@ async def _handle_relations(
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception("distillery_relations get: unexpected error")
-            return error_response("RELATIONS_ERROR", f"Failed to get relations: {exc}")
+            return error_response("INTERNAL", f"Failed to get relations: {exc}")
 
         return success_response(
             {
@@ -158,16 +158,16 @@ async def _handle_relations(
     # ------------------------------------------------------------------
     relation_id_raw = arguments.get("relation_id")
     if relation_id_raw is None or not isinstance(relation_id_raw, str):
-        return error_response("MISSING_FIELD", "relation_id is required for action='remove'")
+        return error_response("INVALID_PARAMS", "relation_id is required for action='remove'")
     relation_id = relation_id_raw.strip()
     if not relation_id:
-        return error_response("MISSING_FIELD", "relation_id must be a non-empty string")
+        return error_response("INVALID_PARAMS", "relation_id must be a non-empty string")
 
     try:
         removed = await store.remove_relation(relation_id)
     except Exception as exc:  # noqa: BLE001
         logger.exception("distillery_relations remove: unexpected error")
-        return error_response("RELATIONS_ERROR", f"Failed to remove relation: {exc}")
+        return error_response("INTERNAL", f"Failed to remove relation: {exc}")
 
     return success_response(
         {

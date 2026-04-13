@@ -133,7 +133,7 @@ async def test_correct_archived_entry(store: DuckDBStore, original_entry: str) -
     )
     data = parse_mcp_response(result)
     assert data["error"] is True
-    assert data["code"] == "INVALID_STATE"
+    assert data["code"] == "INVALID_PARAMS"
     assert "archived" in data["message"].lower()
 
 

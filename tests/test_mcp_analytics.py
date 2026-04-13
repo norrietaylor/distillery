@@ -514,7 +514,7 @@ class TestInterests:
         response = await _handle_interests(store, config, {"recency_days": "bad"})
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "INVALID_FIELD"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_interests_negative_recency_days(
         self, store: DuckDBStore, config: DistilleryConfig
@@ -522,7 +522,7 @@ class TestInterests:
         response = await _handle_interests(store, config, {"recency_days": -1})
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "INVALID_FIELD"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_interests_invalid_top_n(
         self, store: DuckDBStore, config: DistilleryConfig
@@ -530,13 +530,13 @@ class TestInterests:
         response = await _handle_interests(store, config, {"top_n": "bad"})
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "INVALID_FIELD"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_interests_zero_top_n(self, store: DuckDBStore, config: DistilleryConfig) -> None:
         response = await _handle_interests(store, config, {"top_n": 0})
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "INVALID_FIELD"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_interests_extraction_error(
         self, store: DuckDBStore, config: DistilleryConfig
@@ -549,7 +549,7 @@ class TestInterests:
             data = parse_mcp_response(response)
 
         assert data["error"] is True
-        assert data["code"] == "EXTRACTION_ERROR"
+        assert data["code"] == "INTERNAL"
 
     @staticmethod
     def _make_mock_profile():

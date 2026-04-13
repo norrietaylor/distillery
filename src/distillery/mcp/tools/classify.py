@@ -88,7 +88,7 @@ async def _handle_classify(
         entry = await store.get(entry_id)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error fetching entry id=%s for classify", entry_id)
-        return error_response("STORE_ERROR", f"Failed to retrieve entry: {exc}")
+        return error_response("INTERNAL", f"Failed to retrieve entry: {exc}")
 
     if entry is None:
         return error_response(
@@ -151,7 +151,7 @@ async def _handle_classify(
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error updating entry id=%s during classify", entry_id)
-        return error_response("STORE_ERROR", f"Failed to update entry: {exc}")
+        return error_response("INTERNAL", f"Failed to update entry: {exc}")
 
     return success_response(updated_entry.to_dict())
 
@@ -205,7 +205,7 @@ async def _handle_resolve_review(
         entry = await store.get(entry_id)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error fetching entry id=%s for resolve_review", entry_id)
-        return error_response("STORE_ERROR", f"Failed to retrieve entry: {exc}")
+        return error_response("INTERNAL", f"Failed to retrieve entry: {exc}")
 
     if entry is None:
         return error_response(
@@ -266,7 +266,7 @@ async def _handle_resolve_review(
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error updating entry id=%s during resolve_review", entry_id)
-        return error_response("STORE_ERROR", f"Failed to update entry: {exc}")
+        return error_response("INTERNAL", f"Failed to update entry: {exc}")
 
     return success_response(updated_entry.to_dict())
 

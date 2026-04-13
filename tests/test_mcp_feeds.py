@@ -154,7 +154,7 @@ class TestHandleWatchList:
         result = await _handle_watch(store=store, arguments={"action": "list"})
         data = parse(result)
         assert data["error"] is True
-        assert data["code"] == "WATCH_ERROR"
+        assert data["code"] == "INTERNAL"
 
 
 # ---------------------------------------------------------------------------
@@ -235,7 +235,7 @@ class TestHandleWatchAdd:
         )
         data = parse(result)
         assert data["error"] is True
-        assert data["code"] == "MISSING_FIELD"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_add_missing_source_type_returns_missing_field(self) -> None:
         store = FakeSourceStore()
@@ -245,7 +245,7 @@ class TestHandleWatchAdd:
         )
         data = parse(result)
         assert data["error"] is True
-        assert data["code"] == "MISSING_FIELD"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_add_invalid_source_type_returns_error(self) -> None:
         store = FakeSourceStore()
@@ -259,7 +259,7 @@ class TestHandleWatchAdd:
         )
         data = parse(result)
         assert data["error"] is True
-        assert data["code"] == "INVALID_SOURCE_TYPE"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_add_invalid_poll_interval_zero_returns_error(self) -> None:
         store = FakeSourceStore()
@@ -303,7 +303,7 @@ class TestHandleWatchAdd:
         )
         data = parse(result)
         assert data["error"] is True
-        assert data["code"] == "DUPLICATE_SOURCE"
+        assert data["code"] == "CONFLICT"
 
     async def test_add_response_includes_updated_sources_list(self) -> None:
         store = FakeSourceStore()
@@ -349,7 +349,7 @@ class TestHandleWatchRemove:
         result = await _handle_watch(store=store, arguments={"action": "remove"})
         data = parse(result)
         assert data["error"] is True
-        assert data["code"] == "MISSING_FIELD"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_remove_only_removes_matching_source(self) -> None:
         store = FakeSourceStore()
@@ -386,7 +386,7 @@ class TestHandleWatchInvalidAction:
         result = await _handle_watch(store=store, arguments={"action": "purge"})
         data = parse(result)
         assert data["error"] is True
-        assert data["code"] == "INVALID_ACTION"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_missing_action_returns_error(self) -> None:
         store = FakeSourceStore()
@@ -505,7 +505,7 @@ class TestHandlePoll:
 
         data = parse(result)
         assert data["error"] is True
-        assert data["code"] == "POLL_ERROR"
+        assert data["code"] == "INTERNAL"
         assert "network failure" in data["message"]
 
     async def test_poll_result_has_iso_polled_at(self) -> None:
@@ -706,7 +706,7 @@ class TestHandleSuggestSources:
 
         data = parse(result)
         assert data["error"] is True
-        assert data["code"] == "EXTRACTION_ERROR"
+        assert data["code"] == "INTERNAL"
 
     async def test_suggest_sources_response_shape(self) -> None:
         """Response always contains suggestions, suggestion_context, watched_sources, entry_count."""
