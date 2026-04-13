@@ -236,6 +236,8 @@ class RateLimitConfig:
     embedding_budget_daily: int = 500
     max_db_size_mb: int = 900
     warn_db_size_pct: int = 80
+    search_logging_enabled: bool = True
+    search_log_retention_days: int = 90
 
 
 @dataclass
@@ -282,6 +284,7 @@ class HttpRateLimitConfig:
     requests_per_hour: int = 600
     max_body_bytes: int = 1_048_576  # 1 MB
     trust_proxy: bool = False
+    cors_allowed_origins: list[str] = field(default_factory=list)
 
 
 @dataclass

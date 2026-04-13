@@ -70,7 +70,7 @@ class OrgRestrictedGitHubProvider(GitHubProvider):
             return None
 
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with httpx.AsyncClient(timeout=10, verify=True) as client:
                 resp = await client.get(
                     "https://api.github.com/user",
                     headers={

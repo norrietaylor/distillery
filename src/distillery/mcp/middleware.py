@@ -467,17 +467,19 @@ def apply_http_middleware(
     trust_proxy: bool = False,
     org_checker: OrgMembershipChecker | None = None,
     audit_callback: AuditCallback | None = None,
+    cors_allowed_origins: list[str] | None = None,
 ) -> ASGIApp:
-    """Wrap *app* with rate-limit, body-size, request-ID, and org-membership middleware.
+    """Wrap *app* with CORS, rate-limit, body-size, request-ID, and org-membership middleware.
 
     Middleware is applied in outermost-to-innermost order:
     1. :class:`RequestIDMiddleware` (outermost — echoes ``X-Request-ID`` on
        *all* responses, including 429/403/413 rejections)
-    2. :class:`RateLimitMiddleware` (counts every request so denied requests
+    2. :class:`CORSMiddleware` (handles preflight and CORS headers)
+    3. :class:`RateLimitMiddleware` (counts every request so denied requests
        still consume quota)
-    3. :class:`OrgMembershipMiddleware` (when *org_checker* is provided and
+    4. :class:`OrgMembershipMiddleware` (when *org_checker* is provided and
        enabled — blocks non-members before body is read)
-    4. :class:`BodySizeLimitMiddleware` (innermost — rejects oversized bodies)
+    5. :class:`BodySizeLimitMiddleware` (innermost — rejects oversized bodies)
 
     Args:
         app: The ASGI application to wrap.
@@ -491,10 +493,14 @@ def apply_http_middleware(
         audit_callback: Optional async callback for writing audit log entries
             when org membership checks deny access.  Signature:
             ``(user_id, operation, entry_id, action, outcome) -> Awaitable[None]``.
+        cors_allowed_origins: List of allowed CORS origins.  When empty or
+            ``None``, no origins are permitted (restrictive default).
 
     Returns:
         A new ASGI app with all requested middleware layers applied.
     """
+    from starlette.middleware.cors import CORSMiddleware
+
     app = BodySizeLimitMiddleware(app, max_bytes=max_body_bytes)
     if org_checker is not None and org_checker.enabled:
         app = OrgMembershipMiddleware(app, org_checker, audit_callback=audit_callback)
@@ -503,6 +509,14 @@ def apply_http_middleware(
         requests_per_minute=requests_per_minute,
         requests_per_hour=requests_per_hour,
         trust_proxy=trust_proxy,
+    )
+    origins = cors_allowed_origins or []
+    app = CORSMiddleware(
+        app=app,
+        allow_origins=origins,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+        allow_credentials=True,
     )
     app = RequestIDMiddleware(app)
     return app

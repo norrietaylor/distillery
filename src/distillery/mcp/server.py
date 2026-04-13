@@ -569,6 +569,10 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         confidence (0–1) determines the updated entry status.
         """
         c = _lc(ctx)
+        user = _get_authenticated_user()
+        err = await _own(c, user, entry_id, "distillery_classify")
+        if err:
+            return err
         args: dict[str, Any] = dict(
             entry_id=entry_id,
             entry_type=entry_type,
