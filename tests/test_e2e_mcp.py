@@ -498,8 +498,7 @@ class TestCallToolDispatcher:
         tools = await server.list_tools()
         tool_names = {t.name for t in tools}
 
-        # 8 tools removed: aggregate, metrics, stale, tag_tree, type_schemas,
-        # interests, poll, rescore — moved to webhooks or MCP resources.
+        # 3 tools removed: type_schemas (MCP resource), poll, rescore (webhooks).
         expected = {
             "distillery_store",
             "distillery_get",
@@ -513,6 +512,11 @@ class TestCallToolDispatcher:
             "distillery_watch",
             "distillery_configure",
             "distillery_relations",
+            "distillery_aggregate",
+            "distillery_metrics",
+            "distillery_stale",
+            "distillery_tag_tree",
+            "distillery_interests",
         }
         assert expected == tool_names, (
             f"Tool mismatch — extra: {tool_names - expected}, missing: {expected - tool_names}"

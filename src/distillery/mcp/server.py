@@ -1,13 +1,12 @@
-"""MCP server for Distillery — 12 tools over stdio or HTTP.
+"""MCP server for Distillery — 17 tools over stdio or HTTP.
 
 Handlers live in ``src/distillery/mcp/tools/`` (crud, search, classify, quality,
 analytics, feeds, configure, meta). This module owns: FastMCP app creation,
 lifespan, shared-state init, tool registration wrappers, and middleware
 composition.
 
-Analytics tools (stale, aggregate, tag_tree, metrics, interests, type_schemas)
-and feed-management tools (poll, rescore) have been moved to REST webhook
-endpoints or MCP resources — they are no longer registered as MCP tools.
+Feed-management tools (poll, rescore) have been moved to REST webhook
+endpoints. Type schemas are exposed as an MCP resource.
 """
 
 from __future__ import annotations
@@ -897,6 +896,196 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             config=c["config"],
             arguments={"section": section, "key": key, "value": value},
         )
+
+    @server.tool
+    async def distillery_aggregate(
+        ctx: Context,
+        group_by: str,
+        limit: int = 50,
+        entry_type: str | None = None,
+        author: str | None = None,
+        project: str | None = None,
+        status: str | None = None,
+        source: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> list[types.TextContent]:
+        """Count entries grouped by a field, without fetching full payloads.
+
+        USE WHEN: getting a quick overview of how entries are distributed
+        across types, statuses, authors, projects, or sources.
+
+        PARAMS:
+          - group_by (str, required): Field to group by.
+            Valid: [entry_type, status, author, project, source,
+            metadata.source_url, metadata.source_type].
+          - limit (int, optional, default=50): Max groups to return (1-500).
+          - entry_type (str, optional): Filter by type.
+          - author (str, optional): Filter by author.
+          - project (str, optional): Filter by project.
+          - status (str, optional): Filter by status.
+          - source (str, optional): Filter by origin.
+          - date_from (str, optional): ISO 8601 lower bound.
+          - date_to (str, optional): ISO 8601 upper bound.
+
+        RETURNS (success): { group_by: str, groups: dict, total_entries: int, total_groups: int }
+        RETURNS (error): { error: true, code: "INVALID_PARAMS" | "INTERNAL", message: "..." }
+
+        RELATED: distillery_list (for entry-level browsing),
+        distillery_metrics (for comprehensive system metrics)
+        """
+        c = _lc(ctx)
+        args: dict[str, Any] = dict(
+            group_by=group_by,
+            limit=limit,
+            **_omit_none(
+                entry_type=entry_type,
+                author=author,
+                project=project,
+                status=status,
+                source=source,
+                date_from=date_from,
+                date_to=date_to,
+            ),
+        )
+        return await _handle_aggregate(store=c["store"], arguments=args)
+
+    @server.tool
+    async def distillery_metrics(
+        ctx: Context,
+        scope: str = "full",
+        period_days: int = 30,
+        entry_type: str | None = None,
+        date_from: str | None = None,
+        user: str | None = None,
+    ) -> list[types.TextContent]:
+        """Aggregate usage, quality, and audit metrics from the Distillery instance.
+
+        USE WHEN: reviewing system health, search quality, staleness, or
+        audit trails. Supports scoped views for different use cases.
+
+        PARAMS:
+          - scope (str, optional, default="full"): Metrics view.
+            Valid: [summary, full, search_quality, audit].
+          - period_days (int, optional, default=30): Lookback window in days (>= 1, full scope only).
+          - entry_type (str, optional): Filter by type (search_quality scope only).
+          - date_from (str, optional): ISO 8601 lower bound (audit scope only).
+          - user (str, optional): Filter by user (audit scope only).
+
+        RETURNS (success): varies by scope — summary: counts + storage;
+          full: entries + activity + search + quality + staleness + storage;
+          search_quality: totals + feedback rates; audit: logins + operations.
+        RETURNS (error): { error: true, code: "INVALID_PARAMS" | "INTERNAL", message: "..." }
+
+        RELATED: distillery_aggregate (for count-by-group breakdowns),
+        distillery_stale (for detailed stale entry listing)
+        """
+        c = _lc(ctx)
+        args: dict[str, Any] = dict(
+            scope=scope,
+            period_days=period_days,
+            **_omit_none(
+                entry_type=entry_type,
+                date_from=date_from,
+                user=user,
+            ),
+        )
+        return await _handle_metrics(
+            store=c["store"],
+            config=c["config"],
+            embedding_provider=c["embedding_provider"],
+            arguments=args,
+        )
+
+    @server.tool
+    async def distillery_stale(
+        ctx: Context,
+        days: int | None = None,
+        limit: int = 20,
+        entry_type: str | None = None,
+    ) -> list[types.TextContent]:
+        """List entries not accessed within a staleness window, plus expired entries.
+
+        USE WHEN: identifying knowledge that may need refreshing, archiving,
+        or reviewing due to age or expiration.
+
+        PARAMS:
+          - days (int, optional, default=config.defaults.stale_days): Staleness
+            threshold in days (>= 1).
+          - limit (int, optional, default=20): Max entries to return.
+          - entry_type (str, optional): Filter by type.
+
+        RETURNS (success): { days_threshold: int, stale_count: int, expired_count: int,
+          entries: [{ id: str, content_preview: str, reason: "stale" | "expired", ... }] }
+        RETURNS (error): { error: true, code: "INVALID_PARAMS" | "INTERNAL", message: "..." }
+
+        RELATED: distillery_metrics (for staleness aggregates),
+        distillery_list (with stale_days filter)
+        """
+        c = _lc(ctx)
+        args: dict[str, Any] = dict(
+            limit=limit,
+            **_omit_none(days=days, entry_type=entry_type),
+        )
+        return await _handle_stale(store=c["store"], config=c["config"], arguments=args)
+
+    @server.tool
+    async def distillery_tag_tree(
+        ctx: Context,
+        prefix: str | None = None,
+    ) -> list[types.TextContent]:
+        """Build a nested tag hierarchy from active entries.
+
+        USE WHEN: exploring the tag namespace structure, understanding how
+        entries are categorised, or discovering tag conventions.
+
+        PARAMS:
+          - prefix (str, optional): Root the tree at this tag prefix (e.g. "topic").
+
+        RETURNS (success): { tree: { count: int, children: { ... } }, prefix: str | null }
+        RETURNS (error): { error: true, code: "INTERNAL", message: "..." }
+
+        RELATED: distillery_list (with tag_prefix filter),
+        distillery_aggregate (for flat tag counts)
+        """
+        c = _lc(ctx)
+        return await _handle_tag_tree(store=c["store"], arguments={"prefix": prefix})
+
+    @server.tool
+    async def distillery_interests(  # noqa: PLR0913
+        ctx: Context,
+        recency_days: int = 90,
+        top_n: int = 20,
+        suggest_sources: bool = False,
+        max_suggestions: int = 5,
+    ) -> list[types.TextContent]:
+        """Build an interest profile from stored entries, optionally suggesting feed sources.
+
+        USE WHEN: understanding what topics and repositories are tracked, or
+        discovering new feed sources to watch based on existing knowledge.
+
+        PARAMS:
+          - recency_days (int, optional, default=90): How far back to look for entries.
+          - top_n (int, optional, default=20): Max top tags to include in the profile.
+          - suggest_sources (bool, optional, default=false): When true, includes
+            heuristic feed source suggestions based on the profile.
+          - max_suggestions (int, optional, default=5): Max suggestions to return.
+
+        RETURNS (success): { top_tags: list, bookmark_domains: list, tracked_repos: list,
+          expertise_areas: list, entry_count: int, suggestions?: list }
+        RETURNS (error): { error: true, code: "INVALID_PARAMS" | "INTERNAL", message: "..." }
+
+        RELATED: distillery_watch (to act on suggested sources),
+        distillery_tag_tree (to explore tag structure)
+        """
+        c = _lc(ctx)
+        args: dict[str, Any] = dict(
+            recency_days=recency_days,
+            top_n=top_n,
+            suggest_sources=suggest_sources,
+            max_suggestions=max_suggestions,
+        )
+        return await _handle_interests(store=c["store"], config=c["config"], arguments=args)
 
     @server.resource("distillery://schemas/entry-types")
     async def entry_type_schemas() -> str:
