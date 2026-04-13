@@ -1069,3 +1069,94 @@ class TestWebhookConfigParsing:
         p = write_yaml(tmp_path, yaml_content)
         with pytest.raises(ValueError, match="server.webhooks must be a YAML mapping"):
             load_config(str(p))
+
+
+# ---------------------------------------------------------------------------
+# ClassificationConfig.mode (added in API consolidation PR)
+# ---------------------------------------------------------------------------
+
+
+class TestClassificationMode:
+    """Tests for the classification.mode configuration field."""
+
+    def test_default_mode_is_llm(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """When mode is not specified, the default is 'llm'."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("DISTILLERY_CONFIG", raising=False)
+        cfg = load_config()
+        assert cfg.classification.mode == "llm"
+
+    def test_mode_llm_explicit(self, tmp_path: Path) -> None:
+        """classification.mode: llm is accepted."""
+        yaml_content = """\
+            classification:
+              mode: llm
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.classification.mode == "llm"
+
+    def test_mode_heuristic_explicit(self, tmp_path: Path) -> None:
+        """classification.mode: heuristic is accepted."""
+        yaml_content = """\
+            classification:
+              mode: heuristic
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.classification.mode == "heuristic"
+
+    def test_mode_invalid_raises_value_error(self, tmp_path: Path) -> None:
+        """An unrecognised mode value raises ValueError."""
+        yaml_content = """\
+            classification:
+              mode: neural
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="classification.mode"):
+            load_config(str(p))
+
+    def test_mode_random_string_raises(self, tmp_path: Path) -> None:
+        """Any string other than 'llm' or 'heuristic' raises ValueError."""
+        yaml_content = """\
+            classification:
+              mode: auto
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError):
+            load_config(str(p))
+
+    def test_mode_empty_string_raises(self, tmp_path: Path) -> None:
+        """An empty string for mode is not a valid value."""
+        yaml_content = """\
+            classification:
+              mode: ""
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError):
+            load_config(str(p))
+
+    def test_mode_coexists_with_other_classification_fields(self, tmp_path: Path) -> None:
+        """mode can be set alongside other classification fields without conflict."""
+        yaml_content = """\
+            classification:
+              confidence_threshold: 0.8
+              mode: heuristic
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.classification.mode == "heuristic"
+        assert cfg.classification.confidence_threshold == pytest.approx(0.8)
+
+    def test_mode_does_not_affect_other_fields(self, tmp_path: Path) -> None:
+        """Setting mode does not alter the defaults for other classification fields."""
+        yaml_content = """\
+            classification:
+              mode: heuristic
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        # Other fields keep their defaults.
+        assert cfg.classification.confidence_threshold == pytest.approx(0.6)
+        assert cfg.classification.dedup_skip_threshold == pytest.approx(0.95)
+        assert cfg.classification.stale_days == 30

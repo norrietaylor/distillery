@@ -691,6 +691,121 @@ class TestApplyHttpMiddleware:
         assert cap.status == 200
         assert cap.headers.get("x-request-id") == "trace-abc123"
 
+    async def test_cors_allowed_origins_none_no_cors_header(self) -> None:
+        """When cors_allowed_origins is None, CORS headers are not added for cross-origin requests."""
+        app = apply_http_middleware(
+            _dummy_app,
+            cors_allowed_origins=None,
+            requests_per_minute=1000,
+        )
+        cap = _ResponseCapture()
+        scope = _make_scope(
+            headers=[(b"origin", b"https://example.com")],
+        )
+        await app(scope, _noop_receive, cap)
+        assert cap.status == 200
+        # No CORS origin header should be added when no origins are allowed.
+        assert "access-control-allow-origin" not in cap.headers
+
+    async def test_cors_allowed_origins_empty_list_no_cors_header(self) -> None:
+        """When cors_allowed_origins is an empty list, CORS headers are not added."""
+        app = apply_http_middleware(
+            _dummy_app,
+            cors_allowed_origins=[],
+            requests_per_minute=1000,
+        )
+        cap = _ResponseCapture()
+        scope = _make_scope(
+            headers=[(b"origin", b"https://example.com")],
+        )
+        await app(scope, _noop_receive, cap)
+        assert cap.status == 200
+        assert "access-control-allow-origin" not in cap.headers
+
+    async def test_cors_allowed_origins_single_origin_adds_header(self) -> None:
+        """When an allowed origin makes a request, the CORS origin header is returned."""
+        app = apply_http_middleware(
+            _dummy_app,
+            cors_allowed_origins=["https://app.example.com"],
+            requests_per_minute=1000,
+        )
+        cap = _ResponseCapture()
+        scope = _make_scope(
+            headers=[(b"origin", b"https://app.example.com")],
+        )
+        await app(scope, _noop_receive, cap)
+        assert cap.status == 200
+        assert cap.headers.get("access-control-allow-origin") == "https://app.example.com"
+
+    async def test_cors_preflight_returns_200_for_allowed_origin(self) -> None:
+        """OPTIONS preflight request from an allowed origin returns 200 with CORS headers."""
+        app = apply_http_middleware(
+            _dummy_app,
+            cors_allowed_origins=["https://app.example.com"],
+            requests_per_minute=1000,
+        )
+        cap = _ResponseCapture()
+        scope = _make_scope(
+            path="/mcp",
+            headers=[
+                (b"origin", b"https://app.example.com"),
+                (b"access-control-request-method", b"POST"),
+                (b"access-control-request-headers", b"Authorization,Content-Type"),
+            ],
+        )
+        # Simulate an OPTIONS request by using a modified scope.
+        scope["method"] = "OPTIONS"
+        await app(scope, _noop_receive, cap)
+        # CORSMiddleware responds to preflights with 200.
+        assert cap.status == 200
+        assert "access-control-allow-origin" in cap.headers
+
+    async def test_cors_multiple_allowed_origins(self) -> None:
+        """When multiple origins are allowed, each matching origin gets the CORS header."""
+        allowed = ["https://app.example.com", "https://other.example.org"]
+        app = apply_http_middleware(
+            _dummy_app,
+            cors_allowed_origins=allowed,
+            requests_per_minute=1000,
+        )
+
+        for origin in allowed:
+            cap = _ResponseCapture()
+            scope = _make_scope(headers=[(b"origin", origin.encode())])
+            await app(scope, _noop_receive, cap)
+            assert cap.status == 200
+            assert cap.headers.get("access-control-allow-origin") == origin, (
+                f"Expected CORS header for origin {origin!r}"
+            )
+
+    async def test_cors_disallowed_origin_no_cors_header(self) -> None:
+        """Requests from an origin not in the allowed list do not get CORS headers."""
+        app = apply_http_middleware(
+            _dummy_app,
+            cors_allowed_origins=["https://app.example.com"],
+            requests_per_minute=1000,
+        )
+        cap = _ResponseCapture()
+        scope = _make_scope(
+            headers=[(b"origin", b"https://evil.example.net")],
+        )
+        await app(scope, _noop_receive, cap)
+        assert cap.status == 200
+        # The disallowed origin should not get Access-Control-Allow-Origin.
+        assert cap.headers.get("access-control-allow-origin") != "https://evil.example.net"
+
+    async def test_cors_no_origin_header_still_200(self) -> None:
+        """Requests without an Origin header (same-origin) work normally."""
+        app = apply_http_middleware(
+            _dummy_app,
+            cors_allowed_origins=["https://app.example.com"],
+            requests_per_minute=1000,
+        )
+        cap = _ResponseCapture()
+        scope = _make_scope()  # no Origin header
+        await app(scope, _noop_receive, cap)
+        assert cap.status == 200
+
 
 # ===================================================================
 # TestRequestIDMiddleware
