@@ -146,7 +146,8 @@ async def _handle_store(
     if err:
         return error_response("INVALID_PARAMS", err)
 
-    output_mode = arguments.get("output_mode") or "full"
+    output_mode_raw = arguments.get("output_mode")
+    output_mode = output_mode_raw if output_mode_raw is not None else "full"
     if output_mode not in ("full", "summary"):
         return error_response(
             "INVALID_PARAMS", "Field 'output_mode' must be 'full' or 'summary'."
@@ -724,6 +725,7 @@ async def _handle_list(
                 limit=limit,
                 offset=offset,
                 group_by=group_by,
+                stale_days=stale_days,
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception("Error in distillery_list (group_by mode)")
