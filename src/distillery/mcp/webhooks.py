@@ -572,7 +572,8 @@ async def _run_classify_batch(
         or ``{"ok": false, "error": "<message>"}`` with status 500 on failure.
     """
     from distillery.classification import ClassificationEngine, HeuristicClassifier
-    from distillery.models import EntryStatus
+    from distillery.classification.models import ClassificationResult
+    from distillery.models import EntryStatus, EntryType
 
     store = state["store"]
     config = state["config"]
@@ -613,11 +614,48 @@ async def _run_classify_batch(
                     },
                     status_code=500,
                 )
+            # Precompute centroids once for the entire batch (#261).
+            centroids = await classifier.compute_centroids(store, embedding_provider)
             for entry in entries:
                 try:
-                    classification = await classifier.classify(
-                        entry, store, embedding_provider
-                    )
+                    if not centroids:
+                        classification = ClassificationResult(
+                            entry_type=EntryType.INBOX,
+                            confidence=0.0,
+                            status=EntryStatus.PENDING_REVIEW,
+                            reasoning="No entry types have sufficient data for heuristic classification.",
+                            suggested_tags=[],
+                            suggested_project=None,
+                        )
+                    else:
+                        entry_embedding = embedding_provider.embed(entry.content)
+                        best_type, best_sim = classifier.classify_entry(
+                            entry_embedding, centroids
+                        )
+                        if best_type is not None:
+                            classification = ClassificationResult(
+                                entry_type=EntryType(best_type),
+                                confidence=best_sim,
+                                status=EntryStatus.ACTIVE,
+                                reasoning=(
+                                    f"Heuristic: best centroid match {best_type!r} "
+                                    f"(similarity {best_sim:.3f})."
+                                ),
+                                suggested_tags=[],
+                                suggested_project=None,
+                            )
+                        else:
+                            classification = ClassificationResult(
+                                entry_type=EntryType.INBOX,
+                                confidence=best_sim,
+                                status=EntryStatus.PENDING_REVIEW,
+                                reasoning=(
+                                    f"Heuristic: no centroid exceeded threshold; "
+                                    f"best similarity {best_sim:.3f}."
+                                ),
+                                suggested_tags=[],
+                                suggested_project=None,
+                            )
                     await store.update(
                         entry.id,
                         {

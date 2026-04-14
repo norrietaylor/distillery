@@ -27,7 +27,7 @@ Feature: Remove Absorbed Tools and Move Poll/Rescore to Webhooks
     And feed sources are configured in the store
     When a POST request is sent to /hooks/poll with the bearer token
     Then the response status is 200
-    And the response body contains poll results with per-source breakdown
+    And the response body contains aggregate poll results (sources_polled, items_fetched, items_stored, errors)
 
   Scenario: Poll webhook accepts optional source_url parameter
     Given the MCP server is running in HTTP mode with a valid bearer token

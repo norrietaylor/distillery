@@ -28,7 +28,7 @@ Distillery v0.3 exposes 20 MCP tools, several of which overlap in functionality 
 **Functional Requirements:**
 
 - The system shall add a `stale_days` parameter (int, optional) to the `list` tool that filters to entries not accessed in N+ days, using `COALESCE(accessed_at, updated_at)` as the access timestamp
-- The system shall add a `group_by` parameter (str, optional, one of: `entry_type`, `status`, `author`, `project`, `source`, `tags`) that switches the return format from an entry list to `{groups: [{key: str, count: int}], total_entries: int, total_groups: int}`
+- The system shall add a `group_by` parameter (str, optional, one of: `entry_type`, `status`, `author`, `project`, `source`, `tags`) that switches the return format from an entry list to `{groups: [{value: str, count: int}], total_entries: int, total_groups: int}`
 - The system shall support `group_by="tags"` combined with `tag_prefix` to replicate `tag_tree` functionality (hierarchical tag browsing)
 - The system shall add an `output` parameter (str, optional, value: `"stats"`) that returns `{entries_by_type: dict, entries_by_status: dict, total_entries: int, storage_bytes: int}` — replicating `metrics` tool output
 - The system shall validate that `group_by` and `output="stats"` are mutually exclusive (return validation error if both provided)
@@ -39,7 +39,7 @@ Distillery v0.3 exposes 20 MCP tools, several of which overlap in functionality 
 
 - Test: `tests/test_mcp_tools/test_list_extensions.py` passes — covers `stale_days` filtering, all `group_by` variants, `output="stats"`, mutual exclusivity validation, and composition with existing filters
 - CLI: `list(stale_days=30)` returns entries not accessed in 30+ days
-- CLI: `list(group_by="entry_type")` returns `{groups: [{key: "session", count: 12}, ...]}` format
+- CLI: `list(group_by="entry_type")` returns `{groups: [{value: "session", count: 12}, ...]}` format
 - CLI: `list(group_by="tags", tag_prefix="topic/")` returns tag counts under the `topic/` namespace
 - CLI: `list(output="stats")` returns entry counts by type/status and storage size
 

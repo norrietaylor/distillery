@@ -55,12 +55,11 @@ Evaluate the result based on what was found in 1a and 1b:
 
 **State: Connected** — `distillery_list(limit=1)` returned successfully.
 
-Call `distillery_configure(action="get")` to retrieve configuration details, then display:
+Display:
 
 ```text
 MCP server connected.
   Entries:  <total_count from distillery_list>
-  Config:   <embedding_model from configure response>
 ```
 
 Proceed to Step 2.
