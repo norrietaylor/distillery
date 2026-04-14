@@ -45,6 +45,7 @@ from distillery.mcp.tools.crud import (
     _handle_get,
     _handle_list,
     _handle_store,
+    _handle_store_batch,
     _handle_update,
     _normalize_db_path,  # re-exported for webhooks.py backward compat
 )
@@ -338,6 +339,46 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         )
         rd = json.loads(result[0].text) if result else {}
         await _audit(c, user, "distillery_store", rd.get("entry_id", ""), "store", result)
+        return result
+
+    @server.tool
+    async def distillery_store_batch(
+        ctx: Context,
+        entries: list[dict[str, Any]],
+        project: str | None = None,
+    ) -> list[types.TextContent]:
+        """Batch-store multiple knowledge entries in one call (no dedup/conflict checks).
+
+        USE WHEN: bulk-importing entries (e.g. GitHub history sync, migration,
+        backfill) where per-entry dedup is unnecessary and throughput matters.
+
+        PARAMS:
+          - entries (list[dict], required): List of entry dicts. Each must have:
+              - content (str, required): The knowledge content.
+              - author (str, required): Who authored this entry.
+              - entry_type (str, optional, default="inbox"): Entry classification.
+                Valid: [session, bookmark, minutes, meeting, reference, idea,
+                inbox, github, person, project, digest, feed].
+              - tags (list[str], optional): Tags for categorisation.
+              - metadata (dict, optional): Arbitrary key-value metadata.
+              - source (str, optional, default="claude-code"): Origin of the entry.
+              - project (str, optional): Per-entry project override.
+          - project (str, optional): Default project applied to entries lacking one.
+
+        RETURNS (success): { entry_ids: list[str], count: int }
+        RETURNS (error): { error: true, code: "INVALID_PARAMS" | "BUDGET_EXCEEDED" | "INTERNAL", message: "..." }
+
+        RELATED: distillery_store (single entry with dedup/conflict checks),
+        distillery_watch (add feed sources with optional history sync)
+        """
+        c = _lc(ctx)
+        user = _get_authenticated_user()
+        args: dict[str, Any] = {"entries": entries}
+        if project is not None:
+            args["project"] = project
+        result = await _handle_store_batch(
+            store=c["store"], arguments=args, cfg=c["config"], created_by=user
+        )
         return result
 
     @server.tool

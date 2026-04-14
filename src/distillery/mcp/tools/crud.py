@@ -380,6 +380,106 @@ async def _handle_store(
 
 
 # ---------------------------------------------------------------------------
+# _handle_store_batch
+# ---------------------------------------------------------------------------
+
+
+async def _handle_store_batch(
+    store: Any,
+    arguments: dict[str, Any],
+    cfg: DistilleryConfig | None = None,
+    created_by: str = "",
+) -> list[types.TextContent]:
+    """Batch-store multiple entries without dedup or conflict checks.
+
+    Args:
+        store: An initialised storage backend.
+        arguments: Parsed tool arguments dict.  Required key: ``entries``
+            (list of dicts, each with ``content`` and ``author``).
+            Optional key: ``project`` (applied to all entries lacking one).
+        cfg: Optional config for embedding budget checks.
+        created_by: Ownership identifier (from auth layer).
+
+    Returns:
+        A structured MCP success or error response.
+    """
+    from distillery.mcp.budget import EmbeddingBudgetError, record_and_check
+    from distillery.models import Entry, EntrySource, EntryType
+
+    entries_raw = arguments.get("entries")
+    if not isinstance(entries_raw, list):
+        return error_response("INVALID_PARAMS", "Field 'entries' must be a list of dicts.")
+
+    project_default = arguments.get("project")
+
+    # --- validate each entry dict -------------------------------------------
+    built: list[Entry] = []
+    for idx, item in enumerate(entries_raw):
+        if not isinstance(item, dict):
+            return error_response(
+                "INVALID_PARAMS", f"entries[{idx}] must be a dict, got {type(item).__name__}."
+            )
+        if "content" not in item:
+            return error_response("INVALID_PARAMS", f"entries[{idx}] is missing required 'content'.")
+        if "author" not in item:
+            return error_response("INVALID_PARAMS", f"entries[{idx}] is missing required 'author'.")
+
+        entry_type_str = item.get("entry_type", "inbox")
+        if entry_type_str not in _VALID_ENTRY_TYPES:
+            return error_response(
+                "INVALID_PARAMS",
+                f"entries[{idx}] has invalid entry_type {entry_type_str!r}. "
+                f"Must be one of: {', '.join(sorted(_VALID_ENTRY_TYPES))}.",
+            )
+
+        source_str = str(item.get("source", EntrySource.CLAUDE_CODE.value))
+        if source_str not in _VALID_SOURCES:
+            return error_response(
+                "INVALID_PARAMS",
+                f"entries[{idx}] has invalid source {source_str!r}. "
+                f"Must be one of: {', '.join(sorted(_VALID_SOURCES))}.",
+            )
+
+        try:
+            entry = Entry(
+                content=item["content"],
+                entry_type=EntryType(entry_type_str),
+                source=EntrySource(source_str),
+                author=item["author"],
+                project=item.get("project", project_default),
+                tags=list(item.get("tags") or []),
+                metadata=dict(item.get("metadata") or {}),
+                created_by=created_by,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return error_response(
+                "INVALID_PARAMS", f"entries[{idx}]: failed to construct entry: {exc}"
+            )
+        built.append(entry)
+
+    if not built:
+        return success_response({"entry_ids": [], "count": 0})
+
+    # --- embedding budget check (1 embed per entry, no dedup) ---------------
+    if cfg is not None:
+        try:
+            record_and_check(
+                store.connection, cfg.rate_limit.embedding_budget_daily, count=len(built)
+            )
+        except EmbeddingBudgetError as exc:
+            return error_response("BUDGET_EXCEEDED", str(exc))
+
+    # --- persist ------------------------------------------------------------
+    try:
+        entry_ids = await store.store_batch(built)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error in store_batch")
+        return error_response("INTERNAL", f"Failed to batch-store entries: {exc}")
+
+    return success_response({"entry_ids": entry_ids, "count": len(entry_ids)})
+
+
+# ---------------------------------------------------------------------------
 # _handle_get
 # ---------------------------------------------------------------------------
 
@@ -1002,6 +1102,7 @@ async def _handle_correct(
 
 __all__ = [
     "_handle_store",
+    "_handle_store_batch",
     "_handle_get",
     "_handle_update",
     "_handle_correct",
