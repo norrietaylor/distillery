@@ -325,7 +325,7 @@ class InterestExtractor:
                 # Match owner/repo slug (no slashes elsewhere)
                 if re.match(r"^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$", source_url.strip()):
                     repo_counts[source_url.strip()] += 1
-                elif "github.com" in source_url:
+                elif re.search(r"(?:^|://)(?:www\.)?github\.com/", source_url):
                     # Extract owner/repo from https://github.com/owner/repo/...
                     match = re.search(r"github\.com/([a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+)", source_url)
                     if match:

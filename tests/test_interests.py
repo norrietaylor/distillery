@@ -298,7 +298,7 @@ class TestInterestExtractorExtract:
         store = _make_store(entries)
         ext = InterestExtractor(store=store)
         profile = await ext.extract()
-        assert "github.com" in profile.bookmark_domains
+        assert any(d == "github.com" for d in profile.bookmark_domains)
 
     async def test_github_entry_adds_repo(self) -> None:
         entries = [
@@ -385,7 +385,7 @@ class TestInterestExtractorExtract:
         )
         ext = InterestExtractor(store=store)
         profile = await ext.extract()
-        assert "myfeed.com" in profile.suggestion_context
+        assert "https://myfeed.com/rss" in profile.watched_sources
 
     async def test_feed_entries_excluded_from_tag_profile(self) -> None:
         """Feed entries should not contribute to the interest profile tags."""
