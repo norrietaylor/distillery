@@ -64,7 +64,7 @@ class OpenAIEmbeddingProvider:
         self._model = model
         self._dimensions = dimensions
         self._api_key = resolved_key
-        self._client = httpx.Client(timeout=30.0)
+        self._client = httpx.Client(timeout=30.0, verify=True)
 
     # ------------------------------------------------------------------
     # EmbeddingProvider protocol implementation

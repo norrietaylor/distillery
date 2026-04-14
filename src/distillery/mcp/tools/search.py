@@ -87,7 +87,8 @@ async def _handle_search(
     results = [{"score": round(sr.score, 6), "entry": sr.entry.to_dict()} for sr in search_results]
 
     # Log the search event to search_log for later implicit-feedback correlation.
-    if search_results:
+    search_logging = cfg is None or cfg.rate_limit.search_logging_enabled
+    if search_results and search_logging:
         result_entry_ids = [sr.entry.id for sr in search_results]
         result_scores = [sr.score for sr in search_results]
         try:

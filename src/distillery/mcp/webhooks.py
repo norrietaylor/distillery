@@ -525,6 +525,32 @@ async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONRe
         "ok": False, "error": classify_body.get("error", "classify-batch failed")
     }
 
+    # 4. Search log retention — prune old search_log rows.
+    retention_result: dict[str, Any] = {"ok": True, "deleted": 0}
+    config = state.get("config")
+    if config is not None and config.rate_limit.search_log_retention_days > 0:
+        store = state["store"]
+        retention_days = config.rate_limit.search_log_retention_days
+        try:
+            import asyncio
+
+            def _prune() -> int:
+                conn = store.connection
+                result = conn.execute(
+                    "DELETE FROM search_log WHERE timestamp < "
+                    "current_timestamp - INTERVAL ? DAY RETURNING id",
+                    [retention_days],
+                ).fetchall()
+                return len(result)
+
+            deleted = await asyncio.to_thread(_prune)
+            retention_result = {"ok": True, "deleted": deleted}
+            if deleted:
+                logger.info("Maintenance: pruned %d search_log rows older than %d days", deleted, retention_days)
+        except Exception as exc:  # noqa: BLE001
+            retention_result = {"ok": False, "error": f"search_log retention failed: {exc}"}
+            logger.warning("Maintenance: search_log retention failed: %s", exc)
+
     logger.info(
         "Webhook maintenance: completed — poll_ok=%s rescore_ok=%s classify_ok=%s",
         poll_body.get("ok"),
@@ -538,6 +564,7 @@ async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONRe
                 "poll": poll_result,
                 "rescore": rescore_result,
                 "classify_batch": classify_result,
+                "search_log_retention": retention_result,
             },
         }
     )
