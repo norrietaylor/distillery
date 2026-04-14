@@ -161,6 +161,9 @@ async def _handle_watch(
         }
 
         # --- optional history sync for GitHub sources ----------------------
+        # Note: sync_history bypasses MCP-level budget checks by design (same
+        # as poll webhooks).  The GitHubSyncAdapter caps at 1000 items and
+        # uses store.store() per entry which respects store-level constraints.
         sync_history = arguments.get("sync_history", False)
         if sync_history and source_type == "github":
             try:

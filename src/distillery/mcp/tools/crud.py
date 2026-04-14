@@ -460,6 +460,22 @@ async def _handle_store_batch(
     if not built:
         return success_response({"entry_ids": [], "count": 0})
 
+    # --- db size check (same guard as _handle_store) -------------------------
+    if cfg is not None and cfg.rate_limit.max_db_size_mb > 0:
+        db_path = _normalize_db_path(cfg.storage.database_path)
+        if db_path != ":memory:" and not _is_remote_db_path(db_path):
+            try:
+                size_mb = Path(db_path).stat().st_size / (1024 * 1024)
+                if size_mb >= cfg.rate_limit.max_db_size_mb:
+                    return error_response(
+                        "BUDGET_EXCEEDED",
+                        f"Database size ({size_mb:.1f} MB) exceeds limit "
+                        f"({cfg.rate_limit.max_db_size_mb} MB). "
+                        "Delete old entries or increase rate_limit.max_db_size_mb.",
+                    )
+            except OSError:
+                pass  # can't stat, skip check
+
     # --- embedding budget check (1 embed per entry, no dedup) ---------------
     if cfg is not None:
         try:

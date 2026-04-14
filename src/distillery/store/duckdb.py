@@ -650,6 +650,11 @@ class DuckDBStore:
 
         # Batch embed all contents in one call.
         embeddings = self._embedding_provider.embed_batch([e.content for e in entries])
+        if len(embeddings) != len(entries):
+            raise RuntimeError(
+                f"embed_batch returned {len(embeddings)} vectors for "
+                f"{len(entries)} entries — aborting to avoid partial inserts."
+            )
 
         sql = (
             "INSERT INTO entries "
