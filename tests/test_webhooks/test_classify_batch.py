@@ -163,8 +163,6 @@ async def test_classify_batch_heuristic_mode_classifies(
 ) -> None:
     """POST /hooks/classify-batch?mode=heuristic classifies pending entries
     using HeuristicClassifier and updates store."""
-    from distillery.classification.models import ClassificationResult
-
     monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
 
     # Build a mock embedding provider.
@@ -179,20 +177,6 @@ async def test_classify_batch_heuristic_mode_classifies(
     # Two pending entries.
     entry_a = _make_entry("Explored auth module, tried OAuth2 flow")
     entry_b = _make_entry("Bookmarked https://example.com/article")
-
-    # Stub HeuristicClassifier.classify to return deterministic results.
-    active_result = ClassificationResult(
-        entry_type=EntryType.SESSION,
-        confidence=0.82,
-        status=EntryStatus.ACTIVE,
-        reasoning="test",
-    )
-    review_result = ClassificationResult(
-        entry_type=EntryType.INBOX,
-        confidence=0.3,
-        status=EntryStatus.PENDING_REVIEW,
-        reasoning="low confidence",
-    )
 
     # Mock classifier: compute_centroids returns a centroid dict,
     # classify_entry returns deterministic results per entry.
@@ -327,15 +311,6 @@ async def test_classify_batch_heuristic_error_counting(
 
     entry_a = _make_entry("Content A")
     entry_b = _make_entry("Content B")
-
-    from distillery.classification.models import ClassificationResult
-
-    ok_result = ClassificationResult(
-        entry_type=EntryType.REFERENCE,
-        confidence=0.75,
-        status=EntryStatus.ACTIVE,
-        reasoning="test",
-    )
 
     mock_classifier = MagicMock()
     mock_classifier.compute_centroids = AsyncMock(
