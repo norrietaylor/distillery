@@ -501,6 +501,7 @@ class TestCallToolDispatcher:
         # 3 tools removed: type_schemas (MCP resource), poll, rescore (webhooks).
         expected = {
             "distillery_store",
+            "distillery_store_batch",
             "distillery_get",
             "distillery_update",
             "distillery_correct",

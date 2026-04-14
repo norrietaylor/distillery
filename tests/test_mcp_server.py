@@ -670,6 +670,7 @@ class TestCreateServer:
         # 5 analytics tools re-registered: aggregate, metrics, stale, tag_tree, interests.
         expected = {
             "distillery_store",
+            "distillery_store_batch",
             "distillery_get",
             "distillery_update",
             "distillery_correct",
@@ -750,14 +751,14 @@ class TestRemovedTools:
             )
 
     async def test_removed_tools_count_unchanged(self) -> None:
-        """Exactly 17 tools must be registered — no removed tool has crept back."""
+        """Exactly 18 tools must be registered — no removed tool has crept back."""
         config = DistilleryConfig(
             storage=StorageConfig(database_path=":memory:"),
             embedding=EmbeddingConfig(provider="", model="stub", dimensions=4),
         )
         server = create_server(config)
         tools = await server.list_tools()
-        assert len(tools) == 17, (
-            f"Expected 17 registered tools, got {len(tools)}: "
+        assert len(tools) == 18, (
+            f"Expected 18 registered tools, got {len(tools)}: "
             f"{sorted(t.name for t in tools)}"
         )

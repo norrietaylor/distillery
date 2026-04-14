@@ -13,6 +13,7 @@ with ``suggest_sources=True``.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from typing import Any
 
@@ -154,12 +155,36 @@ async def _handle_watch(
             logger.exception("distillery_watch: failed to add feed source")
             return error_response("INTERNAL", f"Failed to add feed source: {exc}")
 
-        return success_response(
-            {
-                "added": added,
-                "sources": db_sources,
-            }
-        )
+        response_data: dict[str, Any] = {
+            "added": added,
+            "sources": db_sources,
+        }
+
+        # --- optional history sync for GitHub sources ----------------------
+        # Note: sync_history bypasses MCP-level budget checks by design (same
+        # as poll webhooks).  The GitHubSyncAdapter caps at 1000 items and
+        # uses store.store() per entry which respects store-level constraints.
+        sync_history = arguments.get("sync_history", False)
+        if sync_history and source_type == "github":
+            try:
+                from distillery.feeds.github_sync import GitHubSyncAdapter
+
+                adapter = GitHubSyncAdapter(
+                    store=store,
+                    url=url,
+                    token=os.environ.get("GITHUB_TOKEN"),
+                )
+                sync_result = await adapter.sync()
+                response_data["sync"] = {
+                    "created": sync_result.created,
+                    "updated": sync_result.updated,
+                    "relations": sync_result.relations_created,
+                }
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("distillery_watch: sync_history failed for %s", url)
+                response_data["sync_error"] = str(exc)
+
+        return success_response(response_data)
 
     # action == "remove"
     url = str(arguments.get("url", "")).strip()
