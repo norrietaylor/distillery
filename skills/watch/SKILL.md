@@ -70,14 +70,16 @@ After a successful `add`, ensure automatic polling is configured. Never create d
 
 **4b. Local schedule (CronCreate):**
 
-Check `CronList` for any job whose prompt contains `distillery_poll`. If found, skip to Step 5.
+Check `CronList` for any job whose prompt contains `/api/hooks/poll` or `distillery_poll`. If found, skip to Step 5.
+
+When creating the webhook URL for polling, use `<webhook-base-url>/api/hooks/poll` format.
 
 ```text
-CronCreate(cron="23 * * * *", prompt="Use distillery_poll to poll all configured feed sources. Report a one-line summary of items fetched and stored.", recurring=true, durable=true)
+CronCreate(cron="23 * * * *", prompt="Use distillery_poll to poll all configured feed sources via /api/hooks/poll. Report a one-line summary of items fetched and stored.", recurring=true, durable=true)
 ```
 Pick an off-peak minute (not :00 or :30). Durable jobs survive restarts but auto-expire after 7 days.
 
-**4c. Cleanup on `remove`:** After a successful `remove`, if no sources remain, delete/pause the auto-poll schedule via `CronDelete` (local only). Display: "Auto-poll paused: no feed sources remaining."
+**4c. Cleanup on `remove`:** After a successful `remove`, if no sources remain, delete/pause the auto-poll schedule via `CronDelete` (local only). Check for jobs containing `/api/hooks/poll` in the prompt and remove them. Display: "Auto-poll paused: no feed sources remaining."
 
 ### Step 5: Confirm
 
