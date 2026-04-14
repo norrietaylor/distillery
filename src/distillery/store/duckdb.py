@@ -22,9 +22,9 @@ import logging
 import os
 import re
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, overload
 
 import duckdb
@@ -666,7 +666,7 @@ class DuckDBStore:
 
         conn.begin()
         try:
-            for entry, embedding in zip(entries, embeddings):
+            for entry, embedding in zip(entries, embeddings, strict=True):
                 params = [
                     entry.id,
                     entry.content,

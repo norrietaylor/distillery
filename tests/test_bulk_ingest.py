@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
-from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -12,7 +10,6 @@ import pytest
 from distillery.mcp.tools.crud import _handle_store_batch
 from distillery.mcp.tools.feeds import _handle_watch
 from tests.conftest import parse_mcp_response
-
 
 # ---------------------------------------------------------------------------
 # _handle_store_batch tests
