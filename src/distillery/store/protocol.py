@@ -7,6 +7,7 @@ so any class implementing the required async methods is a valid backend.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, overload, runtime_checkable
 
@@ -56,6 +57,22 @@ class DistilleryStore(Protocol):
 
         Returns:
             The string representation of the stored entry's UUID.
+        """
+        ...
+
+    async def store_batch(self, entries: Sequence[Entry]) -> list[str]:
+        """Batch-store entries and return their IDs.
+
+        Embeds all entry contents in a single batch call and inserts all
+        entries in one transaction.  No deduplication or conflict checks
+        are performed — this method is designed for bulk ingestion.
+
+        Args:
+            entries: Sequence of ``Entry`` instances to persist.
+
+        Returns:
+            List of UUID strings for the stored entries, in the same
+            order as the input sequence.
         """
         ...
 

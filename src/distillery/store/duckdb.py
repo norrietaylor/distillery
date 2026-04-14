@@ -24,6 +24,7 @@ import re
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, overload
 
 import duckdb
@@ -636,6 +637,71 @@ class DuckDBStore:
             The UUID string of the stored entry.
         """
         return await asyncio.to_thread(self._sync_store, entry)
+
+    def _sync_store_batch(self, entries: Sequence[Entry]) -> list[str]:
+        """Synchronous batch-store implementation; called via asyncio.to_thread."""
+        if not entries:
+            return []
+
+        for entry in entries:
+            validate_metadata(entry.entry_type.value, entry.metadata)
+
+        conn = self.connection
+
+        # Batch embed all contents in one call.
+        embeddings = self._embedding_provider.embed_batch([e.content for e in entries])
+
+        sql = (
+            "INSERT INTO entries "
+            "(id, content, entry_type, source, author, project, tags, status, "
+            " verification, metadata, created_at, updated_at, version, embedding, "
+            " created_by, last_modified_by, expires_at, session_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        )
+
+        conn.begin()
+        try:
+            for entry, embedding in zip(entries, embeddings):
+                params = [
+                    entry.id,
+                    entry.content,
+                    entry.entry_type.value,
+                    entry.source.value,
+                    entry.author,
+                    entry.project,
+                    list(entry.tags),
+                    entry.status.value,
+                    entry.verification.value,
+                    json.dumps(entry.metadata),
+                    entry.created_at,
+                    entry.updated_at,
+                    entry.version,
+                    embedding,
+                    entry.created_by,
+                    entry.last_modified_by,
+                    entry.expires_at,
+                    entry.session_id,
+                ]
+                conn.execute(sql, params)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+        self._rebuild_fts_index(conn)
+        logger.debug("Batch-stored %d entries", len(entries))
+        return [e.id for e in entries]
+
+    async def store_batch(self, entries: Sequence[Entry]) -> list[str]:
+        """Batch-store entries and return their IDs.
+
+        Embeds all contents in a single batch call and inserts all entries
+        in one transaction.  No dedup or conflict checks are performed.
+
+        Returns:
+            List of UUID strings for the stored entries.
+        """
+        return await asyncio.to_thread(self._sync_store_batch, entries)
 
     def _sync_get(self, entry_id: str) -> Entry | None:
         """
