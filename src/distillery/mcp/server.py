@@ -1,13 +1,12 @@
-"""MCP server for Distillery — 12 tools over stdio or HTTP.
+"""MCP server for Distillery — 17 tools over stdio or HTTP.
 
 Handlers live in ``src/distillery/mcp/tools/`` (crud, search, classify, quality,
 analytics, feeds, configure, meta). This module owns: FastMCP app creation,
 lifespan, shared-state init, tool registration wrappers, and middleware
 composition.
 
-Analytics tools (stale, aggregate, tag_tree, metrics, interests, type_schemas)
-and feed-management tools (poll, rescore) have been moved to REST webhook
-endpoints or MCP resources — they are no longer registered as MCP tools.
+Feed-management tools (poll, rescore) have been moved to REST webhook
+endpoints. Type schemas are exposed as an MCP resource.
 """
 
 from __future__ import annotations
@@ -238,7 +237,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             existing = await lc["store"].get(eid)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Ownership pre-check failed for entry %s", eid)
-            return error_response("STORE_ERROR", f"Failed to read entry: {exc}")
+            return error_response("INTERNAL", f"Failed to read entry: {exc}")
         if existing is None:
             await lc["store"].write_audit_log(user, op, eid, op, "not_found")
             return error_response("NOT_FOUND", f"No entry found with id={eid!r}.")
@@ -285,15 +284,34 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
     ) -> list[types.TextContent]:
         """Store a new knowledge entry and return its ID with dedup/conflict information.
 
-        entry_type must be one of: session, bookmark, minutes, meeting, reference,
-        idea, inbox, github, person, project, digest, feed.
-        source: claude-code (default), manual, import, inference,
-        documentation, or external. session_id: opaque session identifier for grouping.
-        dedup_threshold (0–1) controls near-duplicate warnings.
-        verification: unverified, testing, or verified (default: unverified).
-        expires_at accepts ISO 8601 datetime; entries past expiry appear in stale results.
-        output_mode: "full" (default) or "summary". Use "summary" for bulk imports
-        to skip dedup/conflict checks and return only {"entry_id": "..."}.
+        USE WHEN: capturing a new piece of knowledge (session notes, bookmarks,
+        meeting minutes, ideas, etc.) into the Distillery store.
+
+        PARAMS:
+          - content (str, required): The knowledge content to store.
+          - entry_type (str, required): Entry classification. Valid: [session, bookmark,
+            minutes, meeting, reference, idea, inbox, github, person, project, digest, feed].
+          - author (str, required): Who authored this entry.
+          - project (str, optional): Project scope for the entry.
+          - tags (list[str], optional): Tags for categorisation; supports namespaced tags (e.g. "topic/ai").
+          - metadata (dict, optional): Arbitrary key-value metadata.
+          - source (str, optional, default="claude-code"): Origin of the entry.
+            Valid: [claude-code, manual, import, inference, documentation, external].
+          - session_id (str, optional): Opaque session identifier for grouping related entries.
+          - dedup_threshold (float, optional, default=config): Cosine similarity threshold (0-1)
+            for near-duplicate warnings.
+          - dedup_limit (int, optional, default=config): Max duplicates to report.
+          - verification (str, optional, default="unverified"): Verification status.
+            Valid: [unverified, testing, verified].
+          - expires_at (str, optional): ISO 8601 datetime; entries past expiry appear in stale results.
+          - output_mode (str, optional, default="full"): Response verbosity.
+            Valid: [full, summary]. Use "summary" for bulk imports to skip dedup/conflict checks.
+
+        RETURNS (success): { entry_id: str, warnings?: list, conflict_candidates?: list }
+        RETURNS (error): { error: true, code: "INVALID_PARAMS" | "BUDGET_EXCEEDED" | "INTERNAL", message: "..." }
+
+        RELATED: distillery_find_similar (for pre-store dedup checks),
+        distillery_correct (to supersede an existing entry)
         """
         c = _lc(ctx)
         user = _get_authenticated_user()
@@ -324,7 +342,20 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
 
     @server.tool
     async def distillery_get(ctx: Context, entry_id: str) -> list[types.TextContent]:
-        """Retrieve a knowledge entry by ID; returns NOT_FOUND error if missing."""
+        """Retrieve a single knowledge entry by its unique ID.
+
+        USE WHEN: fetching the full content and metadata of a specific entry
+        (e.g. after finding its ID via search or list).
+
+        PARAMS:
+          - entry_id (str, required): UUID of the entry to retrieve.
+
+        RETURNS (success): { id: str, content: str, entry_type: str, ... }
+        RETURNS (error): { error: true, code: "NOT_FOUND" | "INTERNAL", message: "..." }
+
+        RELATED: distillery_search (to find entries by content),
+        distillery_list (to browse entries by filters)
+        """
         c = _lc(ctx)
         return await _handle_get(
             store=c["store"], arguments={"entry_id": entry_id}, config=c["config"]
@@ -347,11 +378,28 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
     ) -> list[types.TextContent]:
         """Update one or more fields on an existing knowledge entry.
 
-        At least one field must be provided. status: active, pending_review, or
-        archived. entry_type: session, bookmark, minutes, meeting, reference,
-        idea, or inbox. verification: unverified, testing, or verified.
-        session_id: opaque session identifier for grouping.
-        expires_at accepts ISO 8601 datetime; pass null to clear.
+        USE WHEN: modifying an entry's content, type, tags, status, or other
+        mutable fields. At least one updatable field must be provided.
+
+        PARAMS:
+          - entry_id (str, required): UUID of the entry to update.
+          - content (str, optional): Replacement content.
+          - entry_type (str, optional): New type. Valid: [session, bookmark, minutes,
+            meeting, reference, idea, inbox, github, person, project, digest, feed].
+          - author (str, optional): New author.
+          - project (str, optional): New project scope.
+          - tags (list[str], optional): Replacement tag list.
+          - status (str, optional): New status. Valid: [active, pending_review, archived].
+          - verification (str, optional): New verification. Valid: [unverified, testing, verified].
+          - metadata (dict, optional): Replacement metadata dict.
+          - session_id (str, optional): Session identifier for grouping.
+          - expires_at (str, optional): ISO 8601 datetime; pass null to clear.
+
+        RETURNS (success): { id: str, content: str, entry_type: str, ... } (full updated entry)
+        RETURNS (error): { error: true, code: "NOT_FOUND" | "INVALID_PARAMS" | "FORBIDDEN" | "INTERNAL", message: "..." }
+
+        RELATED: distillery_correct (to supersede rather than edit),
+        distillery_get (to read before updating)
         """
         c = _lc(ctx)
         user = _get_authenticated_user()
@@ -391,9 +439,25 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
     ) -> list[types.TextContent]:
         """Store a correction that supersedes an existing entry.
 
-        The original entry is archived and a 'corrects' relation is created
-        linking the new entry to the original. Fields (entry_type, author,
-        project, tags) are inherited from the original when not provided.
+        USE WHEN: an existing entry contains wrong information and you want to
+        replace it with corrected content while preserving the audit trail.
+
+        PARAMS:
+          - wrong_entry_id (str, required): UUID of the entry being corrected.
+          - content (str, required): The corrected content.
+          - entry_type (str, optional): Override type; inherited from original if omitted.
+            Valid: [session, bookmark, minutes, meeting, reference, idea, inbox,
+            github, person, project, digest, feed].
+          - author (str, optional): Override author; inherited from original if omitted.
+          - project (str, optional): Override project; inherited from original if omitted.
+          - tags (list[str], optional): Override tags; inherited from original if omitted.
+          - metadata (dict, optional): Additional metadata for the correction entry.
+
+        RETURNS (success): { correction_entry_id: str, archived_entry_id: str }
+        RETURNS (error): { error: true, code: "NOT_FOUND" | "INVALID_PARAMS" | "FORBIDDEN" | "INTERNAL", message: "..." }
+
+        RELATED: distillery_update (for non-breaking edits),
+        distillery_relations (to view the 'corrects' relation)
         """
         c = _lc(ctx)
         user = _get_authenticated_user()
@@ -449,16 +513,41 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
     ) -> list[types.TextContent]:
         """List knowledge entries with optional filters and pagination (newest first).
 
-        date_from/date_to accept ISO 8601. verification: unverified, testing, or verified.
-        source: filter by entry source (claude-code, manual, import, inference, documentation, external).
-        session_id: filter by session identifier.
-        output_mode: "full" (default), "summary", "ids",
-        or "review" (filters to pending_review and enriches with confidence/classification_reasoning).
-        stale_days: restrict to entries not accessed in the last N days (>= 1).
-        group_by: return grouped counts instead of entries; one of entry_type, status, author,
-        project, source, tags. Mutually exclusive with output="stats".
-        output: "stats" returns aggregate statistics (entries_by_type, entries_by_status,
-        total_entries, storage_bytes). Mutually exclusive with group_by.
+        USE WHEN: browsing or filtering entries without a semantic query.
+        Use distillery_search instead when you have a natural-language question.
+
+        PARAMS:
+          - entry_type (str, optional): Filter by type. Valid: [session, bookmark, minutes,
+            meeting, reference, idea, inbox, github, person, project, digest, feed].
+          - author (str, optional): Filter by author.
+          - project (str, optional): Filter by project scope.
+          - tags (list[str], optional): Filter by tags (AND match).
+          - status (str, optional): Filter by status. Valid: [active, pending_review, archived].
+          - verification (str, optional): Filter by verification. Valid: [unverified, testing, verified].
+          - source (str, optional): Filter by origin. Valid: [claude-code, manual, import,
+            inference, documentation, external].
+          - session_id (str, optional): Filter by session identifier.
+          - date_from (str, optional): ISO 8601 lower bound on created_at.
+          - date_to (str, optional): ISO 8601 upper bound on created_at.
+          - limit (int, optional, default=20): Max entries to return (1-500).
+          - offset (int, optional, default=0): Pagination offset.
+          - tag_prefix (str, optional): Filter tags by namespace prefix.
+          - output_mode (str, optional, default="full"): Response shape.
+            Valid: [full, summary, ids, review]. "review" filters to pending_review
+            and enriches with confidence/classification_reasoning.
+          - content_max_length (int, optional): Truncate content to N chars (full mode only).
+          - stale_days (int, optional): Restrict to entries not accessed in N days (>= 1).
+          - group_by (str, optional): Return grouped counts instead of entries.
+            Valid: [entry_type, status, author, project, source, tags].
+            Mutually exclusive with output="stats".
+          - output (str, optional): Set to "stats" for aggregate statistics.
+            Mutually exclusive with group_by.
+
+        RETURNS (success): { entries: list, count: int, total_count: int, limit: int, offset: int }
+        RETURNS (error): { error: true, code: "INVALID_PARAMS" | "INTERNAL", message: "..." }
+
+        RELATED: distillery_search (for semantic search),
+        distillery_aggregate (for count-by-group analytics)
         """
         c = _lc(ctx)
         args: dict[str, Any] = dict(
@@ -501,10 +590,30 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         limit: int = 10,
         tag_prefix: str | None = None,
     ) -> list[types.TextContent]:
-        """Search the knowledge store using semantic similarity (cosine, ranked descending).
+        """Search knowledge entries using semantic similarity (cosine distance, ranked descending).
 
-        limit 1–200. date_from/date_to accept ISO 8601. tag_prefix filters by namespace.
-        source: filter by entry source. session_id: filter by session identifier.
+        USE WHEN: finding entries that match a natural-language question or topic.
+        Each result includes a similarity score (0-1, higher is more relevant).
+
+        PARAMS:
+          - query (str, required): Natural-language search query.
+          - entry_type (str, optional): Filter by type.
+          - author (str, optional): Filter by author.
+          - project (str, optional): Filter by project scope.
+          - tags (list[str], optional): Filter by tags (AND match).
+          - status (str, optional): Filter by status.
+          - source (str, optional): Filter by origin.
+          - session_id (str, optional): Filter by session identifier.
+          - date_from (str, optional): ISO 8601 lower bound.
+          - date_to (str, optional): ISO 8601 upper bound.
+          - limit (int, optional, default=10): Max results (1-200).
+          - tag_prefix (str, optional): Filter tags by namespace prefix.
+
+        RETURNS (success): { results: [{ score: float, entry: {...} }], count: int }
+        RETURNS (error): { error: true, code: "INVALID_PARAMS" | "BUDGET_EXCEEDED" | "INTERNAL", message: "..." }
+
+        RELATED: distillery_list (for filter-based browsing without semantic ranking),
+        distillery_find_similar (to compare against arbitrary text)
         """
         c = _lc(ctx)
         args: dict[str, Any] = dict(
@@ -535,12 +644,29 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         conflict_check: bool = False,
         llm_responses: list[dict[str, Any]] | None = None,
     ) -> list[types.TextContent]:
-        """Find stored entries similar to the given text. threshold: cosine cutoff (0-1). limit 1-200.
+        """Find stored entries similar to the given text (cosine similarity).
 
-        Optional modes (progressive disclosure):
-          dedup_action: when true, includes dedup check with action (create/skip/merge/link).
-          conflict_check: when true, includes conflict candidates with LLM prompts.
-          llm_responses: with conflict_check=true, evaluates [{entry_id, is_conflict, reasoning}].
+        USE WHEN: checking for duplicates or conflicts before storing, or finding
+        entries related to arbitrary text. Supports progressive disclosure modes.
+
+        PARAMS:
+          - content (str, required): Text to compare against stored entries.
+          - threshold (float, optional, default=0.8): Cosine similarity cutoff (0-1).
+          - limit (int, optional, default=10): Max results (1-200).
+          - dedup_action (bool, optional, default=false): When true, includes dedup
+            check with recommended action (create/skip/merge/link).
+          - conflict_check (bool, optional, default=false): When true, includes
+            conflict candidates with LLM evaluation prompts.
+          - llm_responses (list[dict], optional): With conflict_check=true, evaluates
+            LLM conflict verdicts. Each item: { entry_id: str, is_conflict: bool, reasoning: str }.
+
+        RETURNS (success): { results: [{ score: float, entry: {...} }], count: int, threshold: float,
+          dedup?: { action: str, similar_entries: list },
+          conflict_candidates?: list, conflict_evaluation?: dict }
+        RETURNS (error): { error: true, code: "INVALID_PARAMS" | "BUDGET_EXCEEDED" | "INTERNAL", message: "..." }
+
+        RELATED: distillery_store (stores with automatic dedup/conflict checks),
+        distillery_search (for natural-language queries)
         """
         c = _lc(ctx)
         args: dict[str, Any] = dict(
@@ -565,8 +691,24 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
     ) -> list[types.TextContent]:
         """Apply a pre-computed classification to an existing entry.
 
-        entry_type: session, bookmark, minutes, meeting, reference, idea, or inbox.
-        confidence (0–1) determines the updated entry status.
+        USE WHEN: you have determined an entry's type and confidence via LLM
+        or heuristic analysis and want to persist the classification result.
+
+        PARAMS:
+          - entry_id (str, required): UUID of the entry to classify.
+          - entry_type (str, required): Assigned type. Valid: [session, bookmark, minutes,
+            meeting, reference, idea, inbox, github, person, project, digest, feed].
+          - confidence (float, required): Classification confidence (0-1). Entries below
+            the configured threshold (default 0.6) go to pending_review.
+          - reasoning (str, optional): Explanation of the classification decision.
+          - suggested_tags (list[str], optional): Tags to merge onto the entry.
+          - suggested_project (str, optional): Project to assign if entry has none.
+
+        RETURNS (success): { id: str, entry_type: str, status: str, ... } (full updated entry)
+        RETURNS (error): { error: true, code: "NOT_FOUND" | "INVALID_PARAMS" | "INTERNAL", message: "..." }
+
+        RELATED: distillery_resolve_review (to act on pending_review entries),
+        distillery_list (with output_mode="review" to see the review queue)
         """
         c = _lc(ctx)
         args: dict[str, Any] = dict(
@@ -589,9 +731,24 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         new_entry_type: str | None = None,
         reviewer: str | None = None,
     ) -> list[types.TextContent]:
-        """Resolve a pending-review entry: action is "approve", "reclassify", or "archive".
+        """Resolve a pending-review entry by approving, reclassifying, or archiving it.
 
-        new_entry_type required when action is "reclassify".
+        USE WHEN: acting on entries in the review queue (entries with
+        status=pending_review from low-confidence classifications).
+
+        PARAMS:
+          - entry_id (str, required): UUID of the pending-review entry.
+          - action (str, required): Resolution action. Valid: [approve, reclassify, archive].
+          - new_entry_type (str, optional): Required when action="reclassify".
+            Valid: [session, bookmark, minutes, meeting, reference, idea, inbox,
+            github, person, project, digest, feed].
+          - reviewer (str, optional): Reviewer identity for audit metadata.
+
+        RETURNS (success): { id: str, status: str, ... } (full updated entry)
+        RETURNS (error): { error: true, code: "NOT_FOUND" | "INVALID_PARAMS" | "FORBIDDEN" | "INTERNAL", message: "..." }
+
+        RELATED: distillery_classify (to classify entries),
+        distillery_list (with output_mode="review" to see the queue)
         """
         c = _lc(ctx)
         user = _get_authenticated_user()
@@ -618,9 +775,26 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         poll_interval_minutes: int | None = None,
         trust_weight: float | None = None,
     ) -> list[types.TextContent]:
-        """Manage monitored feed sources: action is "list", "add", or "remove".
+        """Manage monitored feed sources for ambient intelligence.
 
-        add requires url and source_type (rss or github). remove requires url.
+        USE WHEN: listing, adding, or removing RSS/GitHub feed sources
+        that Distillery polls for new content.
+
+        PARAMS:
+          - action (str, required): Operation to perform. Valid: [list, add, remove].
+          - url (str, required for add/remove): Feed URL or GitHub owner/repo slug.
+          - source_type (str, required for add): Feed type. Valid: [rss, github].
+          - label (str, optional): Human-readable label for the source.
+          - poll_interval_minutes (int, optional, default=60): Polling frequency in minutes.
+          - trust_weight (float, optional, default=1.0): Source trust weight (0-1).
+
+        RETURNS (success): { sources: list, count: int } (list) or
+          { added: dict, sources: list } (add) or
+          { removed_url: str, removed: bool, sources: list } (remove)
+        RETURNS (error): { error: true, code: "INVALID_PARAMS" | "CONFLICT" | "INTERNAL", message: "..." }
+
+        RELATED: distillery_interests (to discover sources to watch),
+        distillery_configure (to adjust feed thresholds)
         """
         c = _lc(ctx)
         return await _handle_watch(
@@ -648,11 +822,29 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         direction: str = "both",
         relation_id: str | None = None,
     ) -> list[types.TextContent]:
-        """Manage typed relations between knowledge entries: action is "add", "get", or "remove".
+        """Manage typed relations between knowledge entries.
 
-        add requires from_id, to_id, and relation_type (e.g. "link", "blocks", "related").
-        get requires entry_id; accepts optional relation_type and direction ("outgoing", "incoming", "both").
-        remove requires relation_id.
+        USE WHEN: linking entries together (e.g. marking one as blocking another,
+        citing a reference, or flagging duplicates).
+
+        PARAMS:
+          - action (str, required): Operation. Valid: [add, get, remove].
+          - from_id (str, required for add): Source entry UUID.
+          - to_id (str, required for add): Target entry UUID.
+          - relation_type (str, required for add, optional for get): Relation type.
+            Valid: [link, corrects, supersedes, related, blocks, depends_on, citation, duplicate].
+          - entry_id (str, required for get): Entry UUID to query relations for.
+          - direction (str, optional for get, default="both"): Filter direction.
+            Valid: [outgoing, incoming, both].
+          - relation_id (str, required for remove): UUID of the relation to delete.
+
+        RETURNS (success): { relation_id: str, from_id: str, to_id: str, relation_type: str } (add) or
+          { entry_id: str, relations: list, count: int } (get) or
+          { relation_id: str, removed: bool } (remove)
+        RETURNS (error): { error: true, code: "NOT_FOUND" | "INVALID_PARAMS" | "INTERNAL", message: "..." }
+
+        RELATED: distillery_correct (creates 'corrects' relations automatically),
+        distillery_find_similar (to discover related entries)
         """
         c = _lc(ctx)
         return await _handle_relations(
@@ -679,17 +871,221 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
     ) -> list[types.TextContent]:
         """Update a runtime configuration value and persist it to distillery.yaml.
 
-        Accepts an allowlisted (section, key) pair and validates ranges and
-        cross-field constraints before applying.  Returns previous and new values.
+        USE WHEN: adjusting thresholds, classification settings, or feed
+        parameters at runtime without editing the config file directly.
 
-        section examples: "feeds.thresholds", "defaults", "classification".
-        key examples: "alert", "digest", "dedup_threshold", "confidence_threshold".
+        PARAMS:
+          - section (str, required): Config section path (dotted notation).
+            Valid: [feeds.thresholds, defaults, classification].
+          - key (str, required): Config key within the section.
+            Valid keys by section: feeds.thresholds: [alert, digest];
+            defaults: [dedup_threshold, dedup_limit, stale_days];
+            classification: [confidence_threshold, mode].
+          - value (str | int | float, required): New value. Must satisfy type and
+            range constraints for the given key.
+
+        RETURNS (success): { changed: bool, section: str, key: str, previous_value: any,
+          new_value: any, disk_written: bool, message: str }
+        RETURNS (error): { error: true, code: "INVALID_PARAMS" | "INTERNAL", message: "..." }
+
+        RELATED: distillery_watch (to manage feed sources),
+        distillery_metrics (to review current system state)
         """
         c = _lc(ctx)
         return await _handle_configure(
             config=c["config"],
             arguments={"section": section, "key": key, "value": value},
         )
+
+    @server.tool
+    async def distillery_aggregate(
+        ctx: Context,
+        group_by: str,
+        limit: int = 50,
+        entry_type: str | None = None,
+        author: str | None = None,
+        project: str | None = None,
+        status: str | None = None,
+        source: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> list[types.TextContent]:
+        """Count entries grouped by a field, without fetching full payloads.
+
+        USE WHEN: getting a quick overview of how entries are distributed
+        across types, statuses, authors, projects, or sources.
+
+        PARAMS:
+          - group_by (str, required): Field to group by.
+            Valid: [entry_type, status, author, project, source,
+            metadata.source_url, metadata.source_type].
+          - limit (int, optional, default=50): Max groups to return (1-500).
+          - entry_type (str, optional): Filter by type.
+          - author (str, optional): Filter by author.
+          - project (str, optional): Filter by project.
+          - status (str, optional): Filter by status.
+          - source (str, optional): Filter by origin.
+          - date_from (str, optional): ISO 8601 lower bound.
+          - date_to (str, optional): ISO 8601 upper bound.
+
+        RETURNS (success): { group_by: str, groups: dict, total_entries: int, total_groups: int }
+        RETURNS (error): { error: true, code: "INVALID_PARAMS" | "INTERNAL", message: "..." }
+
+        RELATED: distillery_list (for entry-level browsing),
+        distillery_metrics (for comprehensive system metrics)
+        """
+        c = _lc(ctx)
+        args: dict[str, Any] = dict(
+            group_by=group_by,
+            limit=limit,
+            **_omit_none(
+                entry_type=entry_type,
+                author=author,
+                project=project,
+                status=status,
+                source=source,
+                date_from=date_from,
+                date_to=date_to,
+            ),
+        )
+        return await _handle_aggregate(store=c["store"], arguments=args)
+
+    @server.tool
+    async def distillery_metrics(
+        ctx: Context,
+        scope: str = "full",
+        period_days: int = 30,
+        entry_type: str | None = None,
+        date_from: str | None = None,
+        user: str | None = None,
+    ) -> list[types.TextContent]:
+        """Aggregate usage, quality, and audit metrics from the Distillery instance.
+
+        USE WHEN: reviewing system health, search quality, staleness, or
+        audit trails. Supports scoped views for different use cases.
+
+        PARAMS:
+          - scope (str, optional, default="full"): Metrics view.
+            Valid: [summary, full, search_quality, audit].
+          - period_days (int, optional, default=30): Lookback window in days (>= 1, full scope only).
+          - entry_type (str, optional): Filter by type (search_quality scope only).
+          - date_from (str, optional): ISO 8601 lower bound (audit scope only).
+          - user (str, optional): Filter by user (audit scope only).
+
+        RETURNS (success): varies by scope — summary: counts + storage;
+          full: entries + activity + search + quality + staleness + storage;
+          search_quality: totals + feedback rates; audit: logins + operations.
+        RETURNS (error): { error: true, code: "INVALID_PARAMS" | "INTERNAL", message: "..." }
+
+        RELATED: distillery_aggregate (for count-by-group breakdowns),
+        distillery_stale (for detailed stale entry listing)
+        """
+        c = _lc(ctx)
+        args: dict[str, Any] = dict(
+            scope=scope,
+            period_days=period_days,
+            **_omit_none(
+                entry_type=entry_type,
+                date_from=date_from,
+                user=user,
+            ),
+        )
+        return await _handle_metrics(
+            store=c["store"],
+            config=c["config"],
+            embedding_provider=c["embedding_provider"],
+            arguments=args,
+        )
+
+    @server.tool
+    async def distillery_stale(
+        ctx: Context,
+        days: int | None = None,
+        limit: int = 20,
+        entry_type: str | None = None,
+    ) -> list[types.TextContent]:
+        """List entries not accessed within a staleness window, plus expired entries.
+
+        USE WHEN: identifying knowledge that may need refreshing, archiving,
+        or reviewing due to age or expiration.
+
+        PARAMS:
+          - days (int, optional, default=config.defaults.stale_days): Staleness
+            threshold in days (>= 1).
+          - limit (int, optional, default=20): Max entries to return.
+          - entry_type (str, optional): Filter by type.
+
+        RETURNS (success): { days_threshold: int, stale_count: int, expired_count: int,
+          entries: [{ id: str, content_preview: str, reason: "stale" | "expired", ... }] }
+        RETURNS (error): { error: true, code: "INVALID_PARAMS" | "INTERNAL", message: "..." }
+
+        RELATED: distillery_metrics (for staleness aggregates),
+        distillery_list (with stale_days filter)
+        """
+        c = _lc(ctx)
+        args: dict[str, Any] = dict(
+            limit=limit,
+            **_omit_none(days=days, entry_type=entry_type),
+        )
+        return await _handle_stale(store=c["store"], config=c["config"], arguments=args)
+
+    @server.tool
+    async def distillery_tag_tree(
+        ctx: Context,
+        prefix: str | None = None,
+    ) -> list[types.TextContent]:
+        """Build a nested tag hierarchy from active entries.
+
+        USE WHEN: exploring the tag namespace structure, understanding how
+        entries are categorised, or discovering tag conventions.
+
+        PARAMS:
+          - prefix (str, optional): Root the tree at this tag prefix (e.g. "topic").
+
+        RETURNS (success): { tree: { count: int, children: { ... } }, prefix: str | null }
+        RETURNS (error): { error: true, code: "INTERNAL", message: "..." }
+
+        RELATED: distillery_list (with tag_prefix filter),
+        distillery_aggregate (for flat tag counts)
+        """
+        c = _lc(ctx)
+        return await _handle_tag_tree(store=c["store"], arguments={"prefix": prefix})
+
+    @server.tool
+    async def distillery_interests(  # noqa: PLR0913
+        ctx: Context,
+        recency_days: int = 90,
+        top_n: int = 20,
+        suggest_sources: bool = False,
+        max_suggestions: int = 5,
+    ) -> list[types.TextContent]:
+        """Build an interest profile from stored entries, optionally suggesting feed sources.
+
+        USE WHEN: understanding what topics and repositories are tracked, or
+        discovering new feed sources to watch based on existing knowledge.
+
+        PARAMS:
+          - recency_days (int, optional, default=90): How far back to look for entries.
+          - top_n (int, optional, default=20): Max top tags to include in the profile.
+          - suggest_sources (bool, optional, default=false): When true, includes
+            heuristic feed source suggestions based on the profile.
+          - max_suggestions (int, optional, default=5): Max suggestions to return.
+
+        RETURNS (success): { top_tags: list, bookmark_domains: list, tracked_repos: list,
+          expertise_areas: list, entry_count: int, suggestions?: list }
+        RETURNS (error): { error: true, code: "INVALID_PARAMS" | "INTERNAL", message: "..." }
+
+        RELATED: distillery_watch (to act on suggested sources),
+        distillery_tag_tree (to explore tag structure)
+        """
+        c = _lc(ctx)
+        args: dict[str, Any] = {
+            "recency_days": recency_days,
+            "top_n": top_n,
+            "suggest_sources": suggest_sources,
+            "max_suggestions": max_suggestions,
+        }
+        return await _handle_interests(store=c["store"], config=c["config"], arguments=args)
 
     @server.resource("distillery://schemas/entry-types")
     async def entry_type_schemas() -> str:

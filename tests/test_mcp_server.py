@@ -1,6 +1,6 @@
 """Tests for the Distillery MCP server (T04.4 / T02.3).
 
-Tests cover the 12 registered MCP tools via direct handler calls with a mock
+Tests cover the 17 registered MCP tools via direct handler calls with a mock
 store and deterministic embedding provider:
 
   store -> search -> get -> update -> find_similar -> list -> status
@@ -9,7 +9,7 @@ The test harness exercises the server handlers directly without requiring a
 running stdio transport.  All handlers are async functions that accept a
 store object and an arguments dict -- this is the natural unit-test seam.
 
-Also exercises the ``create_server`` factory to confirm all 12 tools are
+Also exercises the ``create_server`` factory to confirm all 17 tools are
 registered and the lifespan context initialises state correctly.
 
 Tools removed from MCP surface (now webhooks or internal handlers):
@@ -666,8 +666,8 @@ class TestCreateServer:
         tools = await server.list_tools()
         tool_names = {t.name for t in tools}
 
-        # 8 tools removed: aggregate, metrics, stale, tag_tree, type_schemas,
-        # interests, poll, rescore — moved to webhooks or MCP resources.
+        # 3 tools removed: type_schemas (MCP resource), poll, rescore (webhooks).
+        # 5 analytics tools re-registered: aggregate, metrics, stale, tag_tree, interests.
         expected = {
             "distillery_store",
             "distillery_get",
@@ -681,6 +681,11 @@ class TestCreateServer:
             "distillery_watch",
             "distillery_configure",
             "distillery_relations",
+            "distillery_aggregate",
+            "distillery_metrics",
+            "distillery_stale",
+            "distillery_tag_tree",
+            "distillery_interests",
         }
         assert expected == tool_names, (
             f"Tool mismatch — extra: {tool_names - expected}, missing: {expected - tool_names}"
@@ -717,30 +722,20 @@ class TestCreateServer:
 
 
 class TestRemovedTools:
-    """Verify that the 8 tools removed from the MCP surface are not registered.
+    """Verify that tools moved to webhooks/resources are not registered as MCP tools.
 
-    These tools were removed in T02.2: stale, aggregate, tag_tree, metrics,
-    interests, type_schemas were absorbed into list extensions, webhooks, or
-    the distillery://schemas/entry-types MCP resource; poll and rescore were
-    moved to /api/poll and /api/rescore webhook endpoints.
-
-    Calling a removed tool name through the registered tool set must not
-    succeed — the tool simply does not exist in the server's tool registry.
+    type_schemas was moved to the distillery://schemas/entry-types MCP resource;
+    poll and rescore were moved to /api/poll and /api/rescore webhook endpoints.
     """
 
     _REMOVED_TOOL_NAMES = [
-        "distillery_stale",
-        "distillery_aggregate",
-        "distillery_tag_tree",
-        "distillery_metrics",
-        "distillery_interests",
         "distillery_type_schemas",
         "distillery_poll",
         "distillery_rescore",
     ]
 
     async def test_removed_tools_not_registered(self) -> None:
-        """None of the 8 removed tools should appear in list_tools()."""
+        """None of the removed tools should appear in list_tools()."""
         config = DistilleryConfig(
             storage=StorageConfig(database_path=":memory:"),
             embedding=EmbeddingConfig(provider="", model="stub", dimensions=4),
@@ -755,14 +750,14 @@ class TestRemovedTools:
             )
 
     async def test_removed_tools_count_unchanged(self) -> None:
-        """Exactly 12 tools must be registered — no removed tool has crept back."""
+        """Exactly 17 tools must be registered — no removed tool has crept back."""
         config = DistilleryConfig(
             storage=StorageConfig(database_path=":memory:"),
             embedding=EmbeddingConfig(provider="", model="stub", dimensions=4),
         )
         server = create_server(config)
         tools = await server.list_tools()
-        assert len(tools) == 12, (
-            f"Expected 12 registered tools, got {len(tools)}: "
+        assert len(tools) == 17, (
+            f"Expected 17 registered tools, got {len(tools)}: "
             f"{sorted(t.name for t in tools)}"
         )

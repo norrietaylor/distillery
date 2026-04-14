@@ -102,6 +102,9 @@ def success_response(data: dict[str, Any]) -> list[types.TextContent]:
 def validate_required(arguments: dict[str, Any], *fields: str) -> str | None:
     """Return an error message if any required field is missing from *arguments*.
 
+    A field is considered missing if it is absent, ``None``, or (for strings)
+    empty.  Values such as ``0`` and ``False`` are **not** treated as missing.
+
     Args:
         arguments: The tool argument dict.
         *fields: Field names that must be present and non-empty.
@@ -110,7 +113,12 @@ def validate_required(arguments: dict[str, Any], *fields: str) -> str | None:
         An error message string if validation fails, or ``None`` if all fields
         are present.
     """
-    missing = [f for f in fields if not arguments.get(f)]
+    missing = [
+        f
+        for f in fields
+        if arguments.get(f) is None
+        or (isinstance(arguments.get(f), str) and not arguments.get(f))
+    ]
     if missing:
         return f"Missing required fields: {', '.join(missing)}"
     return None
@@ -134,3 +142,49 @@ def validate_type(
     if value is not None and not isinstance(value, expected_type):
         return f"Field '{field}' must be a {label}"
     return None
+
+
+def validate_enum(
+    arguments: dict[str, Any], field: str, valid_values: set[str], label: str = ""
+) -> str | None:
+    """Return an error message if *field* is not one of *valid_values*.
+
+    Args:
+        arguments: The tool argument dict.
+        field: Key to check.
+        valid_values: Allowed string values.
+        label: Human-readable description for the error message
+            (defaults to *field* when empty).
+
+    Returns:
+        An error message string or ``None``.
+    """
+    val = arguments.get(field)
+    if val is not None and val not in valid_values:
+        desc = label or field
+        return f"Invalid {desc} {val!r}. Must be one of: {', '.join(sorted(valid_values))}."
+    return None
+
+
+def validate_positive_int(
+    arguments: dict[str, Any], field: str, default: int | None = None
+) -> int | tuple[str, str]:
+    """Validate and return a positive integer from *arguments*.
+
+    Args:
+        arguments: The tool argument dict.
+        field: Key to check.
+        default: Default value if *field* is absent.
+
+    Returns:
+        On success: the validated positive integer.
+        On failure: a ``(code, message)`` tuple suitable for ``error_response()``.
+    """
+    from distillery.mcp.tools._errors import ToolErrorCode
+
+    raw = arguments.get(field, default)
+    if raw is None:
+        return (ToolErrorCode.INVALID_PARAMS.value, f"Field '{field}' is required.")
+    if not isinstance(raw, int) or raw < 1:
+        return (ToolErrorCode.INVALID_PARAMS.value, f"Field '{field}' must be a positive integer.")
+    return raw

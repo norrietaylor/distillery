@@ -201,7 +201,7 @@ async def _handle_store(
                 top = tag.split("/")[0]
                 if top in cfg.tags.reserved_prefixes:
                     return error_response(
-                        "RESERVED_PREFIX",
+                        "INVALID_PARAMS",
                         f"Tag {tag!r} uses reserved prefix {top!r}. "
                         "Only internal sources may use this namespace.",
                     )
@@ -214,7 +214,7 @@ async def _handle_store(
                 size_mb = Path(db_path).stat().st_size / (1024 * 1024)
                 if size_mb >= cfg.rate_limit.max_db_size_mb:
                     return error_response(
-                        "DB_SIZE_EXCEEDED",
+                        "BUDGET_EXCEEDED",
                         f"Database size ({size_mb:.1f} MB) exceeds limit "
                         f"({cfg.rate_limit.max_db_size_mb} MB). "
                         "Delete old entries or increase rate_limit.max_db_size_mb.",
@@ -286,7 +286,7 @@ async def _handle_store(
         entry_id = await store.store(entry)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error storing entry")
-        return error_response("STORE_ERROR", f"Failed to store entry: {exc}")
+        return error_response("INTERNAL", f"Failed to store entry: {exc}")
 
     # --- summary mode: skip dedup/conflict, return early --------------------
     if output_mode == "summary":
@@ -416,7 +416,7 @@ async def _handle_get(
         entry = await store.get(entry_id)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error fetching entry id=%s", entry_id)
-        return error_response("STORE_ERROR", f"Failed to retrieve entry: {exc}")
+        return error_response("INTERNAL", f"Failed to retrieve entry: {exc}")
 
     if entry is None:
         return error_response(
@@ -590,7 +590,7 @@ async def _handle_update(
         return error_response("INVALID_PARAMS", str(exc))
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error updating entry id=%s", entry_id)
-        return error_response("STORE_ERROR", f"Failed to update entry: {exc}")
+        return error_response("INTERNAL", f"Failed to update entry: {exc}")
 
     return success_response(updated_entry.to_dict())
 
@@ -729,7 +729,7 @@ async def _handle_list(
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception("Error in distillery_list (group_by mode)")
-            return error_response("LIST_ERROR", f"list_entries failed: {exc}")
+            return error_response("INTERNAL", f"list_entries failed: {exc}")
         return success_response(result)
 
     # --- stats mode ----------------------------------------------------------
@@ -744,7 +744,7 @@ async def _handle_list(
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception("Error in distillery_list (stats mode)")
-            return error_response("LIST_ERROR", f"list_entries failed: {exc}")
+            return error_response("INTERNAL", f"list_entries failed: {exc}")
         return success_response(result)
 
     # --- default list mode ---------------------------------------------------
@@ -757,7 +757,7 @@ async def _handle_list(
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error in distillery_list")
-        return error_response("LIST_ERROR", f"list_entries failed: {exc}")
+        return error_response("INTERNAL", f"list_entries failed: {exc}")
 
     try:
         total_count = await store.count_entries(filters=filters)
@@ -892,7 +892,7 @@ async def _handle_correct(
         original = await store.get(wrong_entry_id)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error fetching entry id=%s for correction", wrong_entry_id)
-        return error_response("STORE_ERROR", f"Failed to retrieve original entry: {exc}")
+        return error_response("INTERNAL", f"Failed to retrieve original entry: {exc}")
 
     if original is None:
         return error_response(
@@ -903,7 +903,7 @@ async def _handle_correct(
 
     if original.status == EntryStatus.ARCHIVED:
         return error_response(
-            "INVALID_STATE",
+            "INVALID_PARAMS",
             "Cannot correct an archived entry.",
             details={"wrong_entry_id": wrong_entry_id, "status": original.status.value},
         )
@@ -935,7 +935,7 @@ async def _handle_correct(
             top = tag.split("/")[0]
             if top in cfg.tags.reserved_prefixes:
                 return error_response(
-                    "RESERVED_PREFIX",
+                    "INVALID_PARAMS",
                     f"Tag {tag!r} uses reserved prefix {top!r}. "
                     "Only internal sources may use this namespace.",
                 )
@@ -969,7 +969,7 @@ async def _handle_correct(
                 size_mb = Path(db_path).stat().st_size / (1024 * 1024)
                 if size_mb >= cfg.rate_limit.max_db_size_mb:
                     return error_response(
-                        "DB_SIZE_EXCEEDED",
+                        "BUDGET_EXCEEDED",
                         f"Database size ({size_mb:.1f} MB) exceeds limit "
                         f"({cfg.rate_limit.max_db_size_mb} MB). "
                         "Delete old entries or increase rate_limit.max_db_size_mb.",
@@ -990,7 +990,7 @@ async def _handle_correct(
         new_entry_id = await store.apply_correction(new_entry, wrong_entry_id)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error applying correction for entry id=%s", wrong_entry_id)
-        return error_response("STORE_ERROR", f"Failed to apply correction: {exc}")
+        return error_response("INTERNAL", f"Failed to apply correction: {exc}")
 
     return success_response(
         {

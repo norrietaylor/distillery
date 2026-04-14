@@ -553,7 +553,7 @@ class TestHandleSuggestSources:
         )
         data = json.loads(result[0].text)
         assert data.get("error") is True
-        assert data["code"] == "INVALID_FIELD"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_watched_sources_excluded_from_suggestions(self) -> None:
         from distillery.mcp.server import _handle_interests
