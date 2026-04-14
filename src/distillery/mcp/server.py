@@ -815,6 +815,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         label: str | None = None,
         poll_interval_minutes: int | None = None,
         trust_weight: float | None = None,
+        sync_history: bool = False,
     ) -> list[types.TextContent]:
         """Manage monitored feed sources for ambient intelligence.
 
@@ -828,20 +829,25 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
           - label (str, optional): Human-readable label for the source.
           - poll_interval_minutes (int, optional, default=60): Polling frequency in minutes.
           - trust_weight (float, optional, default=1.0): Source trust weight (0-1).
+          - sync_history (bool, optional, default=false): When true and source_type is
+            "github", immediately syncs existing issues/PRs into the knowledge base
+            after adding the source.
 
         RETURNS (success): { sources: list, count: int } (list) or
-          { added: dict, sources: list } (add) or
+          { added: dict, sources: list, sync?: { created: int, updated: int, relations: int } } (add) or
           { removed_url: str, removed: bool, sources: list } (remove)
         RETURNS (error): { error: true, code: "INVALID_PARAMS" | "CONFLICT" | "INTERNAL", message: "..." }
 
         RELATED: distillery_interests (to discover sources to watch),
-        distillery_configure (to adjust feed thresholds)
+        distillery_configure (to adjust feed thresholds),
+        distillery_store_batch (for bulk entry ingestion)
         """
         c = _lc(ctx)
         return await _handle_watch(
             store=c["store"],
             arguments=dict(
                 action=action,
+                sync_history=sync_history,
                 **_omit_none(
                     url=url,
                     source_type=source_type,
