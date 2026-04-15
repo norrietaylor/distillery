@@ -330,16 +330,16 @@ class InterestExtractor:
                     try:
                         parsed = urlparse(source_url)
                         hostname = parsed.hostname
-                        if hostname and (
-                            hostname == "github.com"
-                            or hostname == "www.github.com"
-                            or hostname.endswith(".github.com")
-                        ):
-                            # Extract owner/repo from path
+                        if hostname in {"github.com", "www.github.com"}:
                             path_parts = [p for p in parsed.path.split("/") if p]
                             if len(path_parts) >= 2:
                                 owner_repo = f"{path_parts[0]}/{path_parts[1]}"
-                                # Validate format
+                                if re.match(r"^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$", owner_repo):
+                                    repo_counts[owner_repo] += 1
+                        elif hostname == "api.github.com":
+                            path_parts = [p for p in parsed.path.split("/") if p]
+                            if len(path_parts) >= 3 and path_parts[0] == "repos":
+                                owner_repo = f"{path_parts[1]}/{path_parts[2]}"
                                 if re.match(r"^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$", owner_repo):
                                     repo_counts[owner_repo] += 1
                     except Exception:  # noqa: BLE001
