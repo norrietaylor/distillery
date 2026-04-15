@@ -67,14 +67,15 @@ After a successful `add`, ensure automatic polling is configured. Never create d
 - URL contains `localhost`, `127.0.0.1`, or transport is `stdio` → **local** → use `CronCreate`
 - Remote host (e.g., `distillery-mcp.fly.dev`) → **deployed** → scheduling is handled by the GitHub Actions workflow at `.github/workflows/scheduler.yml`. Display: "Auto-poll managed by GitHub Actions (hourly at :23 UTC)." and skip to Step 5.
 
-**4b. Local schedule (CronCreate):**
+**4b. Local schedule check:**
 
 Check `CronList` for any job whose prompt contains `distillery_watch` or `distillery_list`. If found, skip to Step 5.
 
-```python
-CronCreate(cron="<off-peak minute> * * * *", prompt="Call distillery_watch(action='list') to check configured feed sources, then call distillery_list(entry_type='feed', limit=5) to verify recent feed activity. Report a one-line summary: source count and latest feed entry age.", recurring=true, durable=true)
+If no scheduled task exists, display:
+
+```text
+No auto-poll schedule found. Run /setup to configure scheduled tasks.
 ```
-Pick an off-peak minute (not :00 or :30). Durable jobs survive restarts but auto-expire after 7 days.
 
 **4c. Cleanup on `remove`:** After a successful `remove`, if no sources remain, delete/pause the auto-poll schedule via `CronDelete` (local only). Display: "Auto-poll paused: no feed sources remaining."
 
