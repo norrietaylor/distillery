@@ -692,8 +692,10 @@ async def _run_classify_batch(
                         {
                             "entry_type": classification.entry_type.value,
                             "status": classification.status.value,
-                            "confidence": classification.confidence,
-                            "reasoning": classification.reasoning,
+                            "metadata": {
+                                "classification_confidence": classification.confidence,
+                                "classification_reasoning": classification.reasoning,
+                            },
                         },
                     )
                     if classification.status == EntryStatus.ACTIVE:
@@ -732,8 +734,10 @@ async def _run_classify_batch(
                             {
                                 "entry_type": classification.entry_type.value,
                                 "status": classification.status.value,
-                                "confidence": classification.confidence,
-                                "reasoning": classification.reasoning,
+                                "metadata": {
+                                    "classification_confidence": classification.confidence,
+                                    "classification_reasoning": classification.reasoning,
+                                },
                             },
                         )
 

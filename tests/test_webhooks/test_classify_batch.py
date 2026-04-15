@@ -267,8 +267,8 @@ async def test_classify_batch_llm_mode_queues_as_pending_review(
     # Create real entries in the store
     entry_a = _make_entry("Session content A")
     entry_b = _make_entry("Meeting notes B")
-    await store.add(entry_a)
-    await store.add(entry_b)
+    await store.store(entry_a)
+    await store.store(entry_b)
 
     # Mock LLM client that returns classification results with different confidences
     mock_llm_client = MagicMock()
