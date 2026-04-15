@@ -216,6 +216,33 @@ class TestExtractRepos:
         self._ext()._extract_repos("session", {"repo": "owner/repo"}, counts)
         assert len(counts) == 0
 
+    def test_deceptive_github_urls_not_counted(self) -> None:
+        """Negative regression: URLs that look like GitHub but aren't should not be counted."""
+        from collections import Counter
+
+        ext = self._ext()
+        deceptive_urls = [
+            "https://notgithub.com/org/repo",
+            "https://example.com/redirect?url=https://github.com/org/repo",
+            "https://evil.com/https://github.com/org/repo",
+        ]
+        for url in deceptive_urls:
+            counts: Counter[str] = Counter()
+            ext._extract_repos("feed", {"source_url": url}, counts)
+            assert len(counts) == 0, f"Deceptive URL should not produce repo count: {url}"
+
+    def test_api_github_url_extracts_repo(self) -> None:
+        """API URLs should correctly extract owner/repo, skipping the /repos/ prefix."""
+        from collections import Counter
+
+        counts: Counter[str] = Counter()
+        self._ext()._extract_repos(
+            "feed",
+            {"source_url": "https://api.github.com/repos/octocat/hello-world"},
+            counts,
+        )
+        assert counts["octocat/hello-world"] == 1
+
 
 # ---------------------------------------------------------------------------
 # InterestExtractor._normalise_top_n
