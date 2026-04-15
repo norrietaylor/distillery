@@ -325,11 +325,25 @@ class InterestExtractor:
                 # Match owner/repo slug (no slashes elsewhere)
                 if re.match(r"^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$", source_url.strip()):
                     repo_counts[source_url.strip()] += 1
-                elif re.search(r"(?:^|://)(?:www\.)?github\.com/", source_url):
-                    # Extract owner/repo from https://github.com/owner/repo/...
-                    match = re.search(r"github\.com/([a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+)", source_url)
-                    if match:
-                        repo_counts[match.group(1)] += 1
+                else:
+                    # Parse URL to check if it's a GitHub URL
+                    try:
+                        parsed = urlparse(source_url)
+                        hostname = parsed.hostname
+                        if hostname and (
+                            hostname == "github.com"
+                            or hostname == "www.github.com"
+                            or hostname.endswith(".github.com")
+                        ):
+                            # Extract owner/repo from path
+                            path_parts = [p for p in parsed.path.split("/") if p]
+                            if len(path_parts) >= 2:
+                                owner_repo = f"{path_parts[0]}/{path_parts[1]}"
+                                # Validate format
+                                if re.match(r"^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$", owner_repo):
+                                    repo_counts[owner_repo] += 1
+                    except Exception:  # noqa: BLE001
+                        pass
 
     @staticmethod
     def _normalise_top_n(scores: defaultdict[str, float], top_n: int) -> list[tuple[str, float]]:
