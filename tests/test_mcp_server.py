@@ -27,7 +27,6 @@ from distillery.mcp.server import (
     _handle_find_similar,
     _handle_get,
     _handle_list,
-    _handle_metrics,
     _handle_search,
     _handle_store,
     _handle_update,
@@ -35,6 +34,7 @@ from distillery.mcp.server import (
     error_response,
     success_response,
 )
+from distillery.mcp.tools.analytics import _handle_metrics
 from distillery.models import EntryType
 from distillery.store.duckdb import DuckDBStore
 from tests.conftest import DeterministicEmbeddingProvider, make_entry, parse_mcp_response
@@ -666,7 +666,7 @@ class TestCreateServer:
         tools = await server.list_tools()
         tool_names = {t.name for t in tools}
 
-        # 18-tool API: 12 core + 5 re-registered analytics + store_batch
+        # 13-tool consolidated API (12 from #196 + store_batch from #244)
         expected = {
             "distillery_store",
             "distillery_store_batch",
@@ -676,13 +676,8 @@ class TestCreateServer:
             "distillery_search",
             "distillery_find_similar",
             "distillery_list",
-            "distillery_aggregate",
             "distillery_classify",
             "distillery_resolve_review",
-            "distillery_metrics",
-            "distillery_stale",
-            "distillery_tag_tree",
-            "distillery_interests",
             "distillery_watch",
             "distillery_configure",
             "distillery_relations",
@@ -757,7 +752,7 @@ class TestRemovedTools:
         )
         server = create_server(config)
         tools = await server.list_tools()
-        assert len(tools) == 18, (
-            f"Expected 18 registered tools, got {len(tools)}: "
+        assert len(tools) == 13, (
+            f"Expected 13 registered tools, got {len(tools)}: "
             f"{sorted(t.name for t in tools)}"
         )

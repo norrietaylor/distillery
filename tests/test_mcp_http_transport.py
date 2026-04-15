@@ -32,8 +32,7 @@ MCP_HEADERS = {
     "Accept": "application/json, text/event-stream",
 }
 
-# All 17 tools that the Distillery MCP server exposes.
-# 3 tools removed: type_schemas (MCP resource), poll, rescore (webhooks).
+# 13-tool consolidated API (12 from #196 + store_batch from #244).
 EXPECTED_TOOLS = {
     "distillery_store",
     "distillery_store_batch",
@@ -48,11 +47,6 @@ EXPECTED_TOOLS = {
     "distillery_watch",
     "distillery_configure",
     "distillery_relations",
-    "distillery_aggregate",
-    "distillery_metrics",
-    "distillery_stale",
-    "distillery_tag_tree",
-    "distillery_interests",
 }
 
 
@@ -165,7 +159,7 @@ class TestAllToolsAccessibleOverHttp:
             assert "result" in data, f"Expected result in: {data}"
             tools = data["result"]["tools"]
             tool_names = {t["name"] for t in tools}
-            assert len(tool_names) == 18, f"Expected 18 tools, got {len(tool_names)}: {tool_names}"
+            assert len(tool_names) == 13, f"Expected 13 tools, got {len(tool_names)}: {tool_names}"
             assert tool_names == EXPECTED_TOOLS, (
                 f"Tool mismatch.\nExpected: {EXPECTED_TOOLS}\nGot: {tool_names}"
             )
