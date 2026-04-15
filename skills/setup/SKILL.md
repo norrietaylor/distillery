@@ -139,7 +139,7 @@ Ask the user once about enabling scheduled tasks — their answer applies to all
 ```text
 Enable scheduled tasks? This includes:
   • Feed polling — every hour
-  • Feed rescoring — daily (re-evaluates relevance after new knowledge)
+  • Stale entry check — daily (re-evaluates relevance after new knowledge)
   • KB maintenance — weekly (stale entry check, digest)
 (yes / no)
 ```

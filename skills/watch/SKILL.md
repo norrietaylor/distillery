@@ -69,7 +69,10 @@ After a successful `add`, ensure automatic polling is configured. Never create d
 
 **4b. Local schedule check:**
 
-Check `CronList` for any job whose prompt contains `distillery_watch` or `distillery_list`. If found, skip to Step 5.
+Check `CronList` for a poll job whose prompt includes both:
+- `distillery_watch(action='list')`
+- `distillery_list(entry_type='feed'`
+If found, skip to Step 5.
 
 If no scheduled task exists, display:
 
