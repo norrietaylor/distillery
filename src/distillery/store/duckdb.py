@@ -26,6 +26,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, overload
+from urllib.parse import urlparse
 
 import duckdb
 
@@ -451,17 +452,24 @@ class DuckDBStore:
         except duckdb.Error as exc:
             exc_msg = str(exc)
             if "fts_main_entries" in exc_msg or "WAL" in exc_msg:
-                wal_path = Path(self._db_path + ".wal")
-                if wal_path.exists():
-                    logger.warning(
-                        "Database WAL appears corrupt (FTS-related): %s. "
-                        "Deleting WAL file %s and retrying — "
-                        "uncommitted data may be lost.",
-                        exc,
-                        wal_path,
-                    )
-                    wal_path.unlink()
-                    conn = self._open_connection()
+                # Only attempt WAL recovery for local file paths.
+                # Skip in-memory databases, S3, MotherDuck, and other URI schemes.
+                parsed = urlparse(self._db_path)
+                is_local_file = self._db_path != ":memory:" and parsed.scheme in ("", "file")
+                if is_local_file:
+                    wal_path = Path(self._db_path + ".wal")
+                    if wal_path.exists():
+                        logger.warning(
+                            "Database WAL appears corrupt (FTS-related): %s. "
+                            "Deleting WAL file %s and retrying — "
+                            "uncommitted data may be lost.",
+                            exc,
+                            wal_path,
+                        )
+                        wal_path.unlink()
+                        conn = self._open_connection()
+                    else:
+                        raise
                 else:
                     raise
             else:

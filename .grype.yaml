@@ -73,8 +73,15 @@ ignore:
   # --- Python 3.13 CVE ---
   # Reviewed: 2026-04-15
 
+  - vulnerability: CVE-2026-6100
+    reason: "CPython 3.13.13 — CVSS Critical; use-after-free in lzma.LZMADecompressor, bz2.BZ2Decompressor, gzip.GzipFile when MemoryError occurs and instance is reused. Not exploitable in our deployment: Distillery does not use lzma/bz2/gzip decompression in any code path — data is stored in DuckDB and API payloads are JSON. No upstream fix available. Reviewed: 2026-04-15"
+
   - vulnerability: CVE-2026-4786
-    reason: "CPython 3.13.13-r0 (High) — no fix available in Wolfi/Alpine. Needs review for exploitability in Distillery context. Suppressed pending upstream fix."
+    reason: "CPython 3.13.13 — CVSS High; incomplete mitigation of CVE-2026-4519 in webbrowser.open() allowing command injection via %action in URLs. Not exploitable in our deployment: Distillery is a headless MCP server — webbrowser module is never imported or used. No upstream fix available. Reviewed: 2026-04-15"
+
+  - vulnerability: CVE-2026-31790
+    reason: "openssl 3.6.1 (libcrypto3/libssl3, Wolfi base image) — CVSS High; affects TLS certificate verification. Not exploitable in our deployment: Distillery MCP server validates upstream TLS connections to Jina/OpenAI embedding APIs using system CA bundles; no user-supplied certificates are processed. The vulnerability requires a maliciously crafted certificate chain which our server never encounters in normal operation. No fix available in Wolfi yet. Reviewed: 2026-04-10"
+
 
 # Fail on critical and high severity vulnerabilities.
 # This is also enforced in the CI workflow via --severity-cutoff=high,
