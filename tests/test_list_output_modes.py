@@ -12,7 +12,8 @@ from __future__ import annotations
 
 import pytest
 
-from distillery.mcp.server import _handle_aggregate, _handle_list
+from distillery.mcp.server import _handle_list
+from distillery.mcp.tools.search import _handle_aggregate
 from distillery.models import EntrySource, EntryType
 from tests.conftest import make_entry, parse_mcp_response
 
