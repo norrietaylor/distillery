@@ -504,22 +504,31 @@ async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONRe
             return {"ok": False, "error": "failed to parse sub-operation response"}
         return body
 
+    # Acquire per-endpoint locks so that concurrent POST /hooks/poll (etc.)
+    # cannot mutate the store at the same time as maintenance sub-operations.
+    poll_lock = _endpoint_locks.setdefault("poll", asyncio.Lock())
+    rescore_lock = _endpoint_locks.setdefault("rescore", asyncio.Lock())
+    classify_lock = _endpoint_locks.setdefault("classify-batch", asyncio.Lock())
+
     # 1. Poll — fetch new feed items.
-    poll_response = await _run_poll(state)
+    async with poll_lock:
+        poll_response = await _run_poll(state)
     poll_body = _extract(poll_response)
     poll_result: dict[str, Any] = poll_body.get("data", poll_body) if poll_body.get("ok") else {
         "ok": False, "error": poll_body.get("error", "poll failed")
     }
 
     # 2. Rescore — re-score existing entries (default limit 200).
-    rescore_response = await _run_rescore(state)
+    async with rescore_lock:
+        rescore_response = await _run_rescore(state)
     rescore_body = _extract(rescore_response)
     rescore_result: dict[str, Any] = rescore_body.get("data", rescore_body) if rescore_body.get("ok") else {
         "ok": False, "error": rescore_body.get("error", "rescore failed")
     }
 
     # 3. Classify-batch — classify pending inbox entries.
-    classify_response = await _run_classify_batch(state)
+    async with classify_lock:
+        classify_response = await _run_classify_batch(state)
     classify_body = _extract(classify_response)
     classify_result: dict[str, Any] = classify_body.get("data", classify_body) if classify_body.get("ok") else {
         "ok": False, "error": classify_body.get("error", "classify-batch failed")
@@ -532,8 +541,6 @@ async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONRe
         store = state["store"]
         retention_days = config.rate_limit.search_log_retention_days
         try:
-            import asyncio
-
             def _prune() -> int:
                 conn = store.connection
                 result = conn.execute(
@@ -683,11 +690,17 @@ async def _run_classify_batch(
                                 suggested_tags=[],
                                 suggested_project=None,
                             )
+                    updated_metadata = {
+                        **(entry.metadata or {}),
+                        "confidence": classification.confidence,
+                        "classification_reasoning": classification.reasoning,
+                    }
                     await store.update(
                         entry.id,
                         {
                             "entry_type": classification.entry_type.value,
                             "status": classification.status.value,
+                            "metadata": updated_metadata,
                         },
                     )
                     if classification.status == EntryStatus.ACTIVE:

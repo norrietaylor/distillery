@@ -1412,9 +1412,12 @@ class DuckDBStore:
                 (ignored in group_by / stats modes).
             stale_days: Restrict to entries whose last access
                 (``COALESCE(accessed_at, updated_at)``) is older than N days.
+                Must be non-negative if provided.
             group_by: Return grouped counts instead of entries.
             output: ``"stats"`` for aggregate statistics.
         """
+        if stale_days is not None and stale_days < 0:
+            raise ValueError(f"stale_days must be non-negative, got: {stale_days}")
         # ----- group_by mode: delegate to aggregate_entries -----
         if group_by is not None:
             return await self.aggregate_entries(

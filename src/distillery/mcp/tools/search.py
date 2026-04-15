@@ -82,7 +82,7 @@ async def _handle_search(
         search_results = await store.search(query=query, filters=filters, limit=limit)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error in distillery_search")
-        return error_response("INTERNAL", f"Search failed: {exc}")
+        return error_response("INTERNAL", "Search failed")
 
     results = [{"score": round(sr.score, 6), "entry": sr.entry.to_dict()} for sr in search_results]
 
@@ -188,7 +188,7 @@ async def _handle_find_similar(
         search_results = await store.find_similar(content=content, threshold=threshold, limit=limit)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error in distillery_find_similar")
-        return error_response("INTERNAL", f"find_similar failed: {exc}")
+        return error_response("INTERNAL", "find_similar failed")
 
     results = [{"score": round(sr.score, 6), "entry": sr.entry.to_dict()} for sr in search_results]
     payload: dict[str, Any] = {
@@ -211,7 +211,7 @@ async def _handle_find_similar(
             payload["dedup"] = dedup_result
         except Exception as exc:  # noqa: BLE001
             logger.exception("Error running dedup check in find_similar")
-            return error_response("INTERNAL", f"Deduplication check failed: {exc}")
+            return error_response("INTERNAL", "Deduplication check failed")
 
     # --- conflict_check mode -------------------------------------------------
     if conflict_check:
@@ -256,7 +256,7 @@ async def _handle_find_similar(
                 payload["conflict_evaluation"] = eval_result
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Error running conflict evaluation in find_similar")
-                return error_response("INTERNAL", f"Conflict evaluation failed: {exc}")
+                return error_response("INTERNAL", "Conflict evaluation failed")
         else:
             # --- first pass: discover conflict candidates ---
             try:
@@ -278,7 +278,7 @@ async def _handle_find_similar(
                 payload["conflict_message"] = discovery_result.get("message", "")
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Error running conflict discovery in find_similar")
-                return error_response("INTERNAL", f"Conflict check failed: {exc}")
+                return error_response("INTERNAL", "Conflict check failed")
 
     return success_response(payload)
 
@@ -341,7 +341,7 @@ async def _handle_aggregate(
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error in distillery_aggregate")
-        return error_response("INTERNAL", f"aggregate_entries failed: {exc}")
+        return error_response("INTERNAL", "aggregate_entries failed")
 
     return success_response(
         {

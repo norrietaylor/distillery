@@ -29,7 +29,7 @@ If yes, create the cron job:
 ```python
 CronCreate(
   cron="<random off-peak minute> * * * *",
-  prompt="POST /hooks/poll to poll all configured feed sources. Report a one-line summary of items fetched and stored.",
+  prompt="Call distillery_watch(action='list') to check configured feed sources and report their status. Then call distillery_list(limit=5, output_mode='summary') to check for recent additions. Report a one-line summary of feed source count and recent entry count.",
   recurring=True,
   durable=True
 )
@@ -59,7 +59,7 @@ Check `CronList` for an existing rescore job. If none exists, create one:
 ```python
 CronCreate(
   cron="<random minute> 6 * * *",
-  prompt="POST /hooks/rescore?limit=200 to re-score feed entries against the current knowledge base. Report: rescored, upgraded, downgraded, archived counts.",
+  prompt="Call distillery_list(limit=10, output_mode='summary') and distillery_list(group_by='entry_type') to assess knowledge base freshness. Report entry counts by type and flag any staleness concerns.",
   recurring=True,
   durable=True
 )
@@ -73,7 +73,7 @@ Daily rescore enabled: 06:<minute> UTC (cron job <job_id>)
 
 ## 4c. Weekly — Knowledge Base Maintenance
 
-A weekly maintenance pass runs the full pipeline: poll feeds, rescore entries, and classify inbox items. This is handled by a single `/api/maintenance` webhook call.
+A weekly maintenance pass classifies pending entries, checks for stale knowledge, and stores a digest summary. All operations use MCP tools.
 
 Skip this step if the user declined scheduled tasks.
 
@@ -82,7 +82,12 @@ Check `CronList` for an existing maintenance job. If none exists, create one:
 ```python
 CronCreate(
   cron="<random minute> 7 * * 1",
-  prompt="POST /api/maintenance to run weekly Distillery maintenance (poll → rescore → classify-batch). Report the combined results: items polled, rescored, and classified.",
+  prompt="""Run weekly Distillery maintenance:
+1. Call distillery_list(status="pending_review", limit=20, output_mode="summary") to find entries needing classification. For each pending entry, call distillery_classify to triage it.
+2. Call distillery_list(stale_days=30, limit=10, output_mode="summary") — note count and oldest entries.
+3. Call distillery_list(group_by="tags") — note top tags and domains.
+4. Store a digest: distillery_store(content=<one-paragraph summary of findings>, entry_type="digest", author="distillery-maintenance", tags=["digest", "weekly", "maintenance"], metadata={"period_start": "<7 days ago ISO>", "period_end": "<today ISO>"}).
+Report: stale entry count, top tags, classify summary.""",
   recurring=True,
   durable=True
 )
@@ -92,5 +97,5 @@ Display:
 
 ```text
 Weekly maintenance enabled: Mondays at 07:<minute> UTC (cron job <job_id>)
-  Runs: poll → rescore → classify-batch pipeline
+  Runs: classify inbox → stale check → tag summary → digest
 ```

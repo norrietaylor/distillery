@@ -74,7 +74,7 @@ async def _handle_watch(
             db_sources = await store.list_feed_sources()
         except Exception as exc:  # noqa: BLE001
             logger.exception("distillery_watch: failed to list feed sources")
-            return error_response("INTERNAL", f"Failed to list feed sources: {exc}")
+            return error_response("INTERNAL", "Failed to list feed sources")
         return success_response(
             {
                 "sources": db_sources,
@@ -153,7 +153,7 @@ async def _handle_watch(
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception("distillery_watch: failed to add feed source")
-            return error_response("INTERNAL", f"Failed to add feed source: {exc}")
+            return error_response("INTERNAL", "Failed to add feed source")
 
         response_data: dict[str, Any] = {
             "added": added,
@@ -196,7 +196,7 @@ async def _handle_watch(
         db_sources = await store.list_feed_sources()
     except Exception as exc:  # noqa: BLE001
         logger.exception("distillery_watch: failed to remove feed source")
-        return error_response("INTERNAL", f"Failed to remove feed source: {exc}")
+        return error_response("INTERNAL", "Failed to remove feed source")
     return success_response(
         {
             "removed_url": url,
@@ -263,7 +263,7 @@ async def _handle_poll(
         summary = await poller.poll(source_url=source_url)
     except Exception as exc:  # noqa: BLE001
         logger.exception("distillery_poll: unexpected error during poll cycle")
-        return error_response("INTERNAL", f"Poll cycle failed: {exc}")
+        return error_response("INTERNAL", "Poll cycle failed")
 
     return success_response(
         {
@@ -320,7 +320,7 @@ async def _handle_rescore(
         return success_response(stats)
     except Exception as exc:  # noqa: BLE001
         logger.exception("distillery_rescore: unexpected error")
-        return error_response("INTERNAL", f"Rescore failed: {exc}")
+        return error_response("INTERNAL", "Rescore failed")
 
 
 # ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@ allowed-tools:
   - "mcp__*__distillery_list"
   - "mcp__*__distillery_watch"
   - "mcp__*__distillery_configure"
+  - "CronList"
   - "CronCreate"
   - "RemoteTrigger"
   - "Bash(test:*)"
@@ -143,14 +144,12 @@ Enable scheduled tasks? This includes:
 (yes / no)
 ```
 
-Determine the webhook base URL from the transport detected in Step 2 (e.g., `https://distillery-mcp.fly.dev` for hosted, `http://localhost:8000` for local HTTP). Append `/hooks/poll` to form the poll webhook URL.
-
 If yes, create the cron job:
 
 ```python
 CronCreate(
   cron="<random off-peak minute> * * * *",
-  prompt="POST to <webhook-base-url>/hooks/poll to trigger feed polling. Report a one-line summary of the response.",
+  prompt="Call distillery_watch(action='list') to check configured feed sources and report their status. Then call distillery_list(limit=5, output_mode='summary') to check for recent additions. Report a one-line summary of feed source count and recent entry count.",
   recurring=True,
   durable=True
 )
@@ -180,7 +179,7 @@ Check `CronList` for an existing rescore job. If none exists, create one:
 ```python
 CronCreate(
   cron="<random minute> 6 * * *",
-  prompt="POST to <webhook-base-url>/hooks/rescore?limit=200 to re-score feed entries against the current knowledge base. Report the response summary including rescored, upgraded, downgraded, and archived counts.",
+  prompt="Call distillery_list(limit=10, output_mode='summary') and distillery_list(group_by='entry_type') to assess knowledge base freshness. Report entry counts by type and flag any staleness concerns.",
   recurring=True,
   durable=True
 )
@@ -204,11 +203,11 @@ Check `CronList` for an existing maintenance job. If none exists, create one:
 CronCreate(
   cron="<random minute> 7 * * 1",
   prompt="""Run weekly Distillery maintenance:
-1. POST to <webhook-base-url>/hooks/classify-batch?mode=heuristic to classify pending inbox entries.
+1. Call distillery_list(status="pending_review", limit=20, output_mode="summary") to find entries needing classification. For each pending entry, call distillery_classify to triage it.
 2. Call distillery_list(stale_days=30, limit=10, output_mode="summary") — note count and oldest entries.
 3. Call distillery_list(group_by="tags") — note top tags and domains.
 4. Store a digest: distillery_store(content=<one-paragraph summary of findings>, entry_type="digest", author="distillery-maintenance", tags=["digest", "weekly", "maintenance"], metadata={"period_start": "<7 days ago ISO>", "period_end": "<today ISO>"}).
-Report: stale entry count, top tags, classify-batch response summary.""",
+Report: stale entry count, top tags, classify summary.""",
   recurring=True,
   durable=True
 )
@@ -380,6 +379,6 @@ The setup wizard uses a sequential, conversational format. Each step prints its 
 - If the user has no feed sources, skip feed poll and rescore but still offer weekly maintenance
 - This skill is idempotent — running it multiple times should not create duplicates
 - Use `distillery_list(limit=1)` for the MCP health check; use `distillery_configure(action="get")` for configuration details
-- Webhook URLs follow the pattern `<transport-base-url>/hooks/{poll,rescore,classify-batch}` — derive base URL from transport detected in Step 2
+- Scheduled task prompts must use MCP tools only — never POST to webhook endpoints
 - The weekly maintenance job stores its output as a digest entry — this creates a longitudinal record of KB health
 - Ask the user once about enabling scheduled tasks; their answer applies to all three tiers (poll, rescore, maintenance)

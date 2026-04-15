@@ -1633,7 +1633,7 @@ def _cmd_maintenance_classify(
             for type_name, count in by_type.items():
                 print(f"    {type_name}: {count}")
 
-    return 0
+    return 0 if errors == 0 else 1
 
 
 # ---------------------------------------------------------------------------

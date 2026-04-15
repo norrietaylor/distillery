@@ -1,6 +1,6 @@
 """Tests for the Distillery MCP server (T04.4 / T02.3).
 
-Tests cover the 17 registered MCP tools via direct handler calls with a mock
+Tests cover the 18 registered MCP tools via direct handler calls with a mock
 store and deterministic embedding provider:
 
   store -> search -> get -> update -> find_similar -> list -> status
@@ -9,13 +9,16 @@ The test harness exercises the server handlers directly without requiring a
 running stdio transport.  All handlers are async functions that accept a
 store object and an arguments dict -- this is the natural unit-test seam.
 
-Also exercises the ``create_server`` factory to confirm all 17 tools are
+Also exercises the ``create_server`` factory to confirm all 18 tools are
 registered and the lifespan context initialises state correctly.
 
 Tools removed from MCP surface (now webhooks or internal handlers):
-  distillery_stale, distillery_aggregate, distillery_tag_tree,
-  distillery_metrics, distillery_interests, distillery_type_schemas,
-  distillery_poll, distillery_rescore
+  distillery_type_schemas (now an MCP resource),
+  distillery_poll, distillery_rescore (now webhook endpoints).
+
+Analytics tools retained as individual MCP tools:
+  distillery_aggregate, distillery_metrics, distillery_stale,
+  distillery_tag_tree, distillery_interests.
 """
 
 from __future__ import annotations

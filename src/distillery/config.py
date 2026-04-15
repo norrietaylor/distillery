@@ -740,6 +740,11 @@ def _parse_rate_limit(raw: dict[str, Any]) -> RateLimitConfig:
     if not isinstance(raw, dict):
         raise ValueError(f"rate_limit must be a YAML mapping, got: {type(raw).__name__}")
 
+    search_logging_raw = raw.get("search_logging_enabled")
+    search_logging_enabled = True
+    if search_logging_raw is not None:
+        search_logging_enabled = bool(search_logging_raw)
+
     return RateLimitConfig(
         embedding_budget_daily=_parse_strict_int(
             raw.get("embedding_budget_daily", 500),
@@ -752,6 +757,11 @@ def _parse_rate_limit(raw: dict[str, Any]) -> RateLimitConfig:
         warn_db_size_pct=_parse_strict_int(
             raw.get("warn_db_size_pct", 80),
             "rate_limit.warn_db_size_pct",
+        ),
+        search_logging_enabled=search_logging_enabled,
+        search_log_retention_days=_parse_strict_int(
+            raw.get("search_log_retention_days", 90),
+            "rate_limit.search_log_retention_days",
         ),
     )
 
@@ -817,6 +827,11 @@ def _parse_server(raw: dict[str, Any]) -> ServerConfig:
             requests_per_hour=int(rl_raw.get("requests_per_hour", 600)),
             max_body_bytes=int(rl_raw.get("max_body_bytes", 1_048_576)),
             trust_proxy=bool(rl_raw.get("trust_proxy", False)),
+            cors_allowed_origins=[
+                str(o).strip()
+                for o in (rl_raw.get("cors_allowed_origins") or [])
+                if str(o).strip()
+            ],
         ),
         webhooks=WebhookConfig(
             enabled=bool(webhooks_raw.get("enabled", True)),
