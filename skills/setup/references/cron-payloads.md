@@ -2,7 +2,9 @@
 
 Reference payloads for the three tiers of scheduled tasks configured in Step 4 of `/setup`.
 
-## 4a. Hourly — Feed Polling
+All prompts use MCP tool calls — local/stdio transport has no HTTP server, so webhook endpoints are unreachable. CronCreate prompts execute in Claude Code context which has direct MCP access.
+
+## 4a. Hourly — Feed Status Check
 
 Check `CronList` for any existing poll job before creating — do not create duplicates.
 
@@ -19,8 +21,8 @@ Ask the user:
 ```text
 Enable scheduled tasks? This includes:
   • Feed polling — every hour
-  • Feed rescoring — daily (re-evaluates relevance after new knowledge)
-  • KB maintenance — weekly (poll, rescore, classify inbox)
+  • Stale entry check — daily
+  • KB maintenance — weekly (stats, stale entries, digest)
 (yes / no)
 ```
 
@@ -29,7 +31,7 @@ If yes, create the cron job:
 ```python
 CronCreate(
   cron="<random off-peak minute> * * * *",
-  prompt="POST /hooks/poll to poll all configured feed sources. Report a one-line summary of items fetched and stored.",
+  prompt="Call distillery_watch(action='list') to check configured feed sources, then call distillery_list(entry_type='feed', limit=5) to verify recent feed activity. Report a one-line summary: source count and latest feed entry age.",
   recurring=True,
   durable=True
 )
@@ -48,18 +50,16 @@ Auto-poll: skipped (no feed sources configured)
   Add sources with /watch add <url> — auto-poll will be set up automatically.
 ```
 
-## 4b. Daily — Feed Rescoring
-
-After new knowledge entries are added, previously-scored feed items may have stale relevance scores. A daily rescore pass re-evaluates them against the current interest profile.
+## 4b. Daily — Stale Entry Check
 
 Skip this step if the user declined scheduled tasks or if no feed sources are configured.
 
-Check `CronList` for an existing rescore job. If none exists, create one:
+Check `CronList` for an existing daily job. If none exists, create one:
 
 ```python
 CronCreate(
   cron="<random minute> 6 * * *",
-  prompt="POST /hooks/rescore?limit=200 to re-score feed entries against the current knowledge base. Report: rescored, upgraded, downgraded, archived counts.",
+  prompt="Call distillery_list(stale_days=30, limit=10) to find entries not accessed in 30+ days. Report: count of stale entries and the oldest one's title/age.",
   recurring=True,
   durable=True
 )
@@ -68,12 +68,10 @@ CronCreate(
 Display:
 
 ```text
-Daily rescore enabled: 06:<minute> UTC (cron job <job_id>)
+Daily stale check enabled: 06:<minute> UTC (cron job <job_id>)
 ```
 
 ## 4c. Weekly — Knowledge Base Maintenance
-
-A weekly maintenance pass runs the full pipeline: poll feeds, rescore entries, and classify inbox items. This is handled by a single `/api/maintenance` webhook call.
 
 Skip this step if the user declined scheduled tasks.
 
@@ -82,7 +80,12 @@ Check `CronList` for an existing maintenance job. If none exists, create one:
 ```python
 CronCreate(
   cron="<random minute> 7 * * 1",
-  prompt="POST /api/maintenance to run weekly Distillery maintenance (poll → rescore → classify-batch). Report the combined results: items polled, rescored, and classified.",
+  prompt="""Run weekly Distillery maintenance:
+1. Call distillery_list(output='stats') for entry counts by type/status and storage size.
+2. Call distillery_list(stale_days=30, limit=10) for stale entry count.
+3. Call distillery_list(entry_type='feed', limit=5) for recent feed activity.
+4. Store a digest: distillery_store(content=<one-paragraph summary of findings>, entry_type='session', author='distillery-maintenance', tags=['digest', 'weekly', 'maintenance']).
+Report: entry counts, stale entry count, feed activity, storage size.""",
   recurring=True,
   durable=True
 )
@@ -92,5 +95,6 @@ Display:
 
 ```text
 Weekly maintenance enabled: Mondays at 07:<minute> UTC (cron job <job_id>)
-  Runs: poll → rescore → classify-batch pipeline
+  Checks: entry stats, stale entries, feed activity
+  Stores: weekly digest entry for tracking trends
 ```
