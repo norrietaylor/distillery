@@ -93,7 +93,7 @@ async def populated_store(store: Any) -> Any:  # type: ignore[return]
     """Store with diverse entries for group_by and stats tests.
 
     Entry counts:
-        entry_type: inbox=3, session=1, note=1
+        entry_type: inbox=3, session=1, idea=1
         author:     alice=3, bob=2
         project:    proj-a=3, proj-b=2
         source:     manual=4, claude_code=1
