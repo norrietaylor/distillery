@@ -1415,6 +1415,10 @@ class DuckDBStore:
             group_by: Return grouped counts instead of entries.
             output: ``"stats"`` for aggregate statistics.
         """
+        # ----- validate stale_days -----
+        if stale_days is not None and stale_days < 0:
+            raise ValueError("stale_days must be non-negative")
+
         # ----- group_by mode: delegate to aggregate_entries -----
         if group_by is not None:
             return await self.aggregate_entries(
@@ -1471,6 +1475,8 @@ class DuckDBStore:
         Returns a dict with ``entries_by_type``, ``entries_by_status``,
         ``total_entries``, and ``storage_bytes``.
         """
+        if stale_days is not None and stale_days < 0:
+            raise ValueError("stale_days must be non-negative")
 
         def _sync() -> dict[str, Any]:
             conn = self.connection
@@ -1507,30 +1513,35 @@ class DuckDBStore:
             ).fetchall()
             entries_by_status = {str(row[0]): int(row[1]) for row in status_rows}
 
-            # Storage bytes via PRAGMA database_size
-            try:
-                size_row = conn.execute("PRAGMA database_size").fetchone()
-                # PRAGMA database_size returns columns including database_size
-                # which is a human-readable string.  For in-memory DBs the
-                # bytes column (index 4) gives the raw value.
-                if size_row:
-                    # DuckDB returns (database_name, database_size, block_size,
-                    # total_blocks, used_blocks, free_blocks, wal_size, ...)
-                    # total_blocks * block_size gives total allocated bytes.
-                    block_size = int(size_row[2]) if size_row[2] else 0
-                    total_blocks = int(size_row[3]) if size_row[3] else 0
-                    storage_bytes = block_size * total_blocks
-                else:
+            # Storage bytes: only include when no filters/staleness are applied,
+            # otherwise omit (would not reflect the scoped result set).
+            storage_bytes: int | None = None
+            if not where_sql:
+                try:
+                    size_row = conn.execute("PRAGMA database_size").fetchone()
+                    # PRAGMA database_size returns columns including database_size
+                    # which is a human-readable string.  For in-memory DBs the
+                    # bytes column (index 4) gives the raw value.
+                    if size_row:
+                        # DuckDB returns (database_name, database_size, block_size,
+                        # total_blocks, used_blocks, free_blocks, wal_size, ...)
+                        # total_blocks * block_size gives total allocated bytes.
+                        block_size = int(size_row[2]) if size_row[2] else 0
+                        total_blocks = int(size_row[3]) if size_row[3] else 0
+                        storage_bytes = block_size * total_blocks
+                    else:
+                        storage_bytes = 0
+                except Exception:  # noqa: BLE001
                     storage_bytes = 0
-            except Exception:  # noqa: BLE001
-                storage_bytes = 0
 
-            return {
+            result = {
                 "entries_by_type": entries_by_type,
                 "entries_by_status": entries_by_status,
                 "total_entries": total_entries,
-                "storage_bytes": storage_bytes,
             }
+            if storage_bytes is not None:
+                result["storage_bytes"] = storage_bytes
+            return result
 
         return await asyncio.to_thread(_sync)
 
@@ -1578,6 +1589,8 @@ class DuckDBStore:
             dicts), ``"total_groups"`` (int), and ``"total_entries"`` (int).  The
             totals reflect the full result set before ``limit`` is applied.
         """
+        if stale_days is not None and stale_days < 0:
+            raise ValueError("stale_days must be non-negative")
         group_expr = _AGGREGATE_EXPR_MAP[group_by]
 
         def _sync() -> dict[str, Any]:

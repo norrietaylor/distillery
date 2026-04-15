@@ -440,6 +440,44 @@ async def _handle_store_batch(
                 f"Must be one of: {', '.join(sorted(_VALID_SOURCES))}.",
             )
 
+        # --- normalize tags (mirror _handle_store logic) ---
+        tags_raw = item.get("tags")
+        if tags_raw is None:
+            tags_normalized = []
+        elif isinstance(tags_raw, str):
+            tags_normalized = [tags_raw]
+        elif isinstance(tags_raw, list):
+            tags_normalized = tags_raw
+        else:
+            return error_response(
+                "INVALID_PARAMS",
+                f"entries[{idx}] has invalid tags: must be a list or string, got {type(tags_raw).__name__}.",
+            )
+
+        # Validate each tag is a non-empty string
+        final_tags: list[str] = []
+        for tag in tags_normalized:
+            if not isinstance(tag, str):
+                return error_response(
+                    "INVALID_PARAMS",
+                    f"entries[{idx}]: each tag must be a string, got {type(tag).__name__}.",
+                )
+            tag_stripped = tag.strip()
+            if tag_stripped:
+                final_tags.append(tag_stripped)
+
+        # --- reserved prefix enforcement (mirror _handle_store logic) ---
+        _reserved_allowed_sources: set[str] = {EntrySource.IMPORT.value}
+        if cfg is not None and cfg.tags.reserved_prefixes and source_str not in _reserved_allowed_sources:
+            for tag in final_tags:
+                top = tag.split("/")[0]
+                if top in cfg.tags.reserved_prefixes:
+                    return error_response(
+                        "INVALID_PARAMS",
+                        f"entries[{idx}]: tag {tag!r} uses reserved prefix {top!r}. "
+                        "Only internal sources may use this namespace.",
+                    )
+
         try:
             entry = Entry(
                 content=item["content"],
@@ -447,7 +485,7 @@ async def _handle_store_batch(
                 source=EntrySource(source_str),
                 author=item["author"],
                 project=item.get("project", project_default),
-                tags=list(item.get("tags") or []),
+                tags=final_tags,
                 metadata=dict(item.get("metadata") or {}),
                 created_by=created_by,
             )
@@ -716,7 +754,7 @@ async def _handle_update(
 # ---------------------------------------------------------------------------
 
 _VALID_OUTPUT_MODES = frozenset({"full", "summary", "ids", "review"})
-_VALID_GROUP_BY_VALUES = frozenset({"entry_type", "status", "author", "project", "source", "tags"})
+_VALID_GROUP_BY_VALUES = frozenset({"entry_type", "status", "author", "project", "source"})
 
 
 def _entry_to_summary_dict(entry: Any) -> dict[str, Any]:

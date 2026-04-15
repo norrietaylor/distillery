@@ -185,6 +185,6 @@ def validate_positive_int(
     raw = arguments.get(field, default)
     if raw is None:
         return (ToolErrorCode.INVALID_PARAMS.value, f"Field '{field}' is required.")
-    if not isinstance(raw, int) or raw < 1:
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw < 1:
         return (ToolErrorCode.INVALID_PARAMS.value, f"Field '{field}' must be a positive integer.")
-    return raw
+    return int(raw)

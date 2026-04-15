@@ -504,22 +504,28 @@ async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONRe
             return {"ok": False, "error": "failed to parse sub-operation response"}
         return body
 
-    # 1. Poll — fetch new feed items.
-    poll_response = await _run_poll(state)
+    # 1. Poll — fetch new feed items (acquire poll lock to serialize with direct /hooks/poll calls).
+    poll_lock = _endpoint_locks.setdefault("poll", asyncio.Lock())
+    async with poll_lock:
+        poll_response = await _run_poll(state)
     poll_body = _extract(poll_response)
     poll_result: dict[str, Any] = poll_body.get("data", poll_body) if poll_body.get("ok") else {
         "ok": False, "error": poll_body.get("error", "poll failed")
     }
 
-    # 2. Rescore — re-score existing entries (default limit 200).
-    rescore_response = await _run_rescore(state)
+    # 2. Rescore — re-score existing entries (acquire rescore lock to serialize).
+    rescore_lock = _endpoint_locks.setdefault("rescore", asyncio.Lock())
+    async with rescore_lock:
+        rescore_response = await _run_rescore(state)
     rescore_body = _extract(rescore_response)
     rescore_result: dict[str, Any] = rescore_body.get("data", rescore_body) if rescore_body.get("ok") else {
         "ok": False, "error": rescore_body.get("error", "rescore failed")
     }
 
-    # 3. Classify-batch — classify pending inbox entries.
-    classify_response = await _run_classify_batch(state)
+    # 3. Classify-batch — classify pending inbox entries (acquire classify-batch lock to serialize).
+    classify_lock = _endpoint_locks.setdefault("classify-batch", asyncio.Lock())
+    async with classify_lock:
+        classify_response = await _run_classify_batch(state)
     classify_body = _extract(classify_response)
     classify_result: dict[str, Any] = classify_body.get("data", classify_body) if classify_body.get("ok") else {
         "ok": False, "error": classify_body.get("error", "classify-batch failed")
@@ -532,8 +538,6 @@ async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONRe
         store = state["store"]
         retention_days = config.rate_limit.search_log_retention_days
         try:
-            import asyncio
-
             def _prune() -> int:
                 conn = store.connection
                 result = conn.execute(
@@ -688,6 +692,8 @@ async def _run_classify_batch(
                         {
                             "entry_type": classification.entry_type.value,
                             "status": classification.status.value,
+                            "confidence": classification.confidence,
+                            "reasoning": classification.reasoning,
                         },
                     )
                     if classification.status == EntryStatus.ACTIVE:
@@ -706,15 +712,42 @@ async def _run_classify_batch(
         else:
             # LLM mode: use ClassificationEngine.
             # The ClassificationEngine formats prompts and parses LLM responses,
-            # but does not itself call an LLM.  In a headless webhook context
-            # there is no LLM client, so we set each entry to pending_review
-            # to signal that it requires a /classify skill invocation.
+            # but does not itself call an LLM.  If an llm_client is available in
+            # state, we use it to classify entries; otherwise, we set each entry
+            # to pending_review to signal that it requires a /classify skill invocation.
             engine = ClassificationEngine(config.classification)
+            llm_client = state.get("llm_client")
+
             for entry in entries:
                 try:
-                    _ = engine.build_prompt(entry.content)  # validates content
-                    await store.update(entry.id, {"status": "pending_review"})
-                    pending_review_count += 1
+                    prompt = engine.build_prompt(entry.content)
+
+                    if llm_client is not None:
+                        # Call the LLM client and parse the response
+                        llm_response = await llm_client.classify(prompt)
+                        classification = engine.parse_response(llm_response)
+
+                        await store.update(
+                            entry.id,
+                            {
+                                "entry_type": classification.entry_type.value,
+                                "status": classification.status.value,
+                                "confidence": classification.confidence,
+                                "reasoning": classification.reasoning,
+                            },
+                        )
+
+                        if classification.status == EntryStatus.ACTIVE:
+                            classified_count += 1
+                            type_key = classification.entry_type.value
+                            by_type[type_key] = by_type.get(type_key, 0) + 1
+                        else:
+                            pending_review_count += 1
+                    else:
+                        # No LLM client available - queue for manual classification
+                        await store.update(entry.id, {"status": "pending_review"})
+                        pending_review_count += 1
+
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(
                         "Webhook classify-batch: llm classification failed for %s: %s",

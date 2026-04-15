@@ -753,6 +753,11 @@ def _parse_rate_limit(raw: dict[str, Any]) -> RateLimitConfig:
             raw.get("warn_db_size_pct", 80),
             "rate_limit.warn_db_size_pct",
         ),
+        search_logging_enabled=bool(raw.get("search_logging_enabled", True)),
+        search_log_retention_days=_parse_strict_int(
+            raw.get("search_log_retention_days", 90),
+            "rate_limit.search_log_retention_days",
+        ),
     )
 
 
@@ -804,6 +809,11 @@ def _parse_server(raw: dict[str, Any]) -> ServerConfig:
         ttl_raw, "server.auth.membership_cache_ttl_seconds"
     )
 
+    cors_origins_raw = rl_raw.get("cors_allowed_origins", []) or []
+    if not isinstance(cors_origins_raw, list):
+        raise ValueError("server.http_rate_limit.cors_allowed_origins must be a YAML list")
+    cors_allowed_origins = [str(o).strip() for o in cors_origins_raw if str(o).strip()]
+
     return ServerConfig(
         auth=ServerAuthConfig(
             provider=str(auth_raw.get("provider", "none")),
@@ -817,6 +827,7 @@ def _parse_server(raw: dict[str, Any]) -> ServerConfig:
             requests_per_hour=int(rl_raw.get("requests_per_hour", 600)),
             max_body_bytes=int(rl_raw.get("max_body_bytes", 1_048_576)),
             trust_proxy=bool(rl_raw.get("trust_proxy", False)),
+            cors_allowed_origins=cors_allowed_origins,
         ),
         webhooks=WebhookConfig(
             enabled=bool(webhooks_raw.get("enabled", True)),

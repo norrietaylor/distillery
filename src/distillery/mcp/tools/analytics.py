@@ -148,9 +148,9 @@ async def _handle_tag_tree(
         # Fetch tag vocabulary using the store's method
         vocab = await store.get_tag_vocabulary(prefix=prefix)
         tree = _build_tree_from_vocab(vocab, prefix)
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         logger.exception("Error in distillery_tag_tree")
-        return error_response("INTERNAL", f"Failed to build tag tree: {exc}")
+        return error_response("INTERNAL", "Failed to build tag tree")
 
     return success_response({"tree": tree, "prefix": prefix})
 
@@ -244,9 +244,9 @@ async def _handle_metrics(
         try:
             result = await asyncio.to_thread(_sync_gather_quality, store, entry_type_filter)
             return success_response(result)
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             logger.exception("Error gathering quality metrics")
-            return error_response("INTERNAL", f"Failed to gather quality metrics: {exc}")
+            return error_response("INTERNAL", "Failed to gather quality metrics")
 
     # --- scope=audit -----------------------------------------------------------
     if scope == "audit":
@@ -274,9 +274,9 @@ async def _handle_metrics(
         try:
             result_audit = await _gather_audit(store, date_from=date_from, user=audit_user)
             return success_response(result_audit)
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             logger.exception("Error gathering audit metrics")
-            return error_response("INTERNAL", f"Failed to gather audit metrics: {exc}")
+            return error_response("INTERNAL", "Failed to gather audit metrics")
 
     # --- scope=summary delegates to _sync_gather_summary --------------------
     if scope == "summary":
@@ -285,9 +285,9 @@ async def _handle_metrics(
                 _sync_gather_summary, store, config, embedding_provider
             )
             return success_response(result_summary)
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             logger.exception("Error gathering summary metrics")
-            return error_response("INTERNAL", f"Failed to gather summary: {exc}")
+            return error_response("INTERNAL", "Failed to gather summary")
 
     # --- scope=full (default) -----------------------------------------------
     # --- validate period_days -----------------------------------------------
@@ -304,9 +304,9 @@ async def _handle_metrics(
             _sync_gather_metrics, store, config, embedding_provider, period_days
         )
         return success_response(metrics)
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         logger.exception("Error gathering metrics")
-        return error_response("INTERNAL", f"Failed to gather metrics: {exc}")
+        return error_response("INTERNAL", "Failed to gather metrics")
 
 
 def _sync_gather_summary(
@@ -964,9 +964,9 @@ async def _handle_stale(
                 "entries": merged,
             }
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         logger.exception("Error gathering stale entries")
-        return error_response("INTERNAL", f"Failed to gather stale entries: {exc}")
+        return error_response("INTERNAL", "Failed to gather stale entries")
 
 
 def _sync_gather_stale(
@@ -1225,9 +1225,9 @@ async def _handle_interests(
     )
     try:
         profile = await extractor.extract()
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         logger.exception("distillery_interests: extraction failed")
-        return error_response("INTERNAL", f"Interest extraction failed: {exc}")
+        return error_response("INTERNAL", "Interest extraction failed")
 
     payload: dict[str, Any] = {
         "top_tags": [[tag, weight] for tag, weight in profile.top_tags],

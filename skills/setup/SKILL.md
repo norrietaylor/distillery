@@ -5,6 +5,7 @@ allowed-tools:
   - "mcp__*__distillery_list"
   - "mcp__*__distillery_watch"
   - "mcp__*__distillery_configure"
+  - "CronList"
   - "CronCreate"
   - "RemoteTrigger"
   - "Bash(test:*)"
@@ -150,7 +151,7 @@ If yes, create the cron job:
 ```python
 CronCreate(
   cron="<random off-peak minute> * * * *",
-  prompt="POST to <webhook-base-url>/hooks/poll to trigger feed polling. Report a one-line summary of the response.",
+  prompt="POST to <webhook-base-url>/hooks/poll with header Authorization: Bearer <webhook-secret> to trigger feed polling. Report a one-line summary of the response.",
   recurring=True,
   durable=True
 )
@@ -180,7 +181,7 @@ Check `CronList` for an existing rescore job. If none exists, create one:
 ```python
 CronCreate(
   cron="<random minute> 6 * * *",
-  prompt="POST to <webhook-base-url>/hooks/rescore?limit=200 to re-score feed entries against the current knowledge base. Report the response summary including rescored, upgraded, downgraded, and archived counts.",
+  prompt="POST to <webhook-base-url>/hooks/rescore?limit=200 with header Authorization: Bearer <webhook-secret> to re-score feed entries against the current knowledge base. Report the response summary including rescored, upgraded, downgraded, and archived counts.",
   recurring=True,
   durable=True
 )
@@ -204,11 +205,9 @@ Check `CronList` for an existing maintenance job. If none exists, create one:
 CronCreate(
   cron="<random minute> 7 * * 1",
   prompt="""Run weekly Distillery maintenance:
-1. POST to <webhook-base-url>/hooks/classify-batch?mode=heuristic to classify pending inbox entries.
-2. Call distillery_list(stale_days=30, limit=10, output_mode="summary") — note count and oldest entries.
-3. Call distillery_list(group_by="tags") — note top tags and domains.
-4. Store a digest: distillery_store(content=<one-paragraph summary of findings>, entry_type="digest", author="distillery-maintenance", tags=["digest", "weekly", "maintenance"], metadata={"period_start": "<7 days ago ISO>", "period_end": "<today ISO>"}).
-Report: stale entry count, top tags, classify-batch response summary.""",
+1. POST to <webhook-base-url>/api/maintenance with header Authorization: Bearer <webhook-secret> to run the full maintenance cycle (poll, rescore, classify-batch, search log retention).
+2. Extract from the response: stale entry counts, top tags/domains, and the summary/digest of maintenance operations.
+Report: a one-paragraph summary of poll, rescore, classify-batch results and any notable findings from the maintenance response.""",
   recurring=True,
   durable=True
 )

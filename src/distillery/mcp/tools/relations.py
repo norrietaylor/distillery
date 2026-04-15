@@ -34,6 +34,8 @@ _VALID_RELATION_TYPES = {
     "depends_on",
     "citation",
     "duplicate",
+    "merge_source",
+    "sync_source",
 }
 
 

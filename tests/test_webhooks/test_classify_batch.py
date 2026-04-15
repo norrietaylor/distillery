@@ -260,20 +260,26 @@ async def test_classify_batch_heuristic_requires_embedding_provider(
 async def test_classify_batch_llm_mode_queues_as_pending_review(
     store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """POST /hooks/classify-batch?mode=llm marks entries as pending_review
-    (no LLM client available in headless webhook context)."""
+    """POST /hooks/classify-batch?mode=llm uses an LLM client if available,
+    and classifies entries according to LLM-returned confidences."""
     monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
-    shared = _make_shared_state(store)
 
+    # Create real entries in the store
     entry_a = _make_entry("Session content A")
-    entry_b = _make_entry("Session content B")
+    entry_b = _make_entry("Meeting notes B")
+    await store.add(entry_a)
+    await store.add(entry_b)
 
-    mock_store = MagicMock()
-    mock_store.list_entries = AsyncMock(return_value=[entry_a, entry_b])
-    mock_store.get_metadata = AsyncMock(return_value=None)
-    mock_store.set_metadata = AsyncMock()
-    mock_store.update = AsyncMock()
-    shared["store"] = mock_store
+    # Mock LLM client that returns classification results with different confidences
+    mock_llm_client = MagicMock()
+    # Entry A: high confidence -> should be classified as ACTIVE
+    mock_llm_client.classify = AsyncMock(side_effect=[
+        '{"entry_type": "session", "confidence": 0.85, "reasoning": "High confidence session", "suggested_tags": [], "suggested_project": null}',
+        '{"entry_type": "minutes", "confidence": 0.55, "reasoning": "Low confidence meeting", "suggested_tags": [], "suggested_project": null}'
+    ])
+
+    shared = _make_shared_state(store)
+    shared["llm_client"] = mock_llm_client
 
     app = create_webhook_app(shared, _make_config())
     client = TestClient(app, raise_server_exceptions=False)
@@ -283,14 +289,16 @@ async def test_classify_batch_llm_mode_queues_as_pending_review(
     body = resp.json()
     assert body["ok"] is True
     data = body["data"]
-    assert data["classified"] == 0
-    assert data["pending_review"] == 2
+
+    # Entry A: confidence 0.85 >= threshold (0.6) -> classified
+    # Entry B: confidence 0.55 < threshold (0.6) -> pending_review
+    assert data["classified"] == 1
+    assert data["pending_review"] == 1
     assert data["errors"] == 0
-    assert data["by_type"] == {}
-    # LLM mode sets each entry to pending_review in the store.
-    assert mock_store.update.call_count == 2
-    for call_args in mock_store.update.call_args_list:
-        assert call_args[0][1] == {"status": "pending_review"}
+    assert data["by_type"]["session"] == 1
+
+    # Verify LLM was called twice
+    assert mock_llm_client.classify.call_count == 2
 
 
 # ---------------------------------------------------------------------------
