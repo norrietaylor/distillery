@@ -69,12 +69,10 @@ After a successful `add`, ensure automatic polling is configured. Never create d
 
 **4b. Local schedule (CronCreate):**
 
-Check `CronList` for any job whose prompt contains `/api/hooks/poll`. If found, skip to Step 5.
+Check `CronList` for any job whose prompt contains `distillery_watch` or `distillery_list`. If found, skip to Step 5.
 
-Determine the webhook base URL from `.mcp.json` (same logic as Step 4a transport detection). Append `/api/hooks/poll` to form the poll webhook URL.
-
-```text
-CronCreate(cron="23 * * * *", prompt="POST to <webhook-base-url>/api/hooks/poll to trigger feed polling. Report a one-line summary of the response.", recurring=true, durable=true)
+```python
+CronCreate(cron="<off-peak minute> * * * *", prompt="Call distillery_watch(action='list') to check configured feed sources, then call distillery_list(entry_type='feed', limit=5) to verify recent feed activity. Report a one-line summary: source count and latest feed entry age.", recurring=true, durable=true)
 ```
 Pick an off-peak minute (not :00 or :30). Durable jobs survive restarts but auto-expire after 7 days.
 
