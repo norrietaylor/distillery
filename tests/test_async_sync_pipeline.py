@@ -165,11 +165,20 @@ class TestRunSyncJobAsync:
 
     @pytest.mark.unit
     async def test_successful_sync(self) -> None:
+        from datetime import UTC, datetime
+
         tracker = SyncJobTracker()
         job = tracker.create_job(source_url="test/repo", source_type="github")
 
-        async def mock_sync() -> dict[str, Any]:
-            return {"created": 3, "updated": 1, "relations_created": 2, "pages_processed": 1}
+        async def mock_sync() -> SyncResult:
+            return SyncResult(
+                repo="test/repo",
+                created=3,
+                updated=1,
+                relations_created=2,
+                sync_timestamp=datetime.now(tz=UTC),
+                pages_processed=1,
+            )
 
         await run_sync_job_async(job, tracker, mock_sync())
         assert job.status == SyncJobStatus.COMPLETED
@@ -182,12 +191,13 @@ class TestRunSyncJobAsync:
         tracker = SyncJobTracker()
         job = tracker.create_job(source_url="test/repo", source_type="github")
 
-        async def failing_sync() -> dict[str, Any]:
+        async def failing_sync() -> SyncResult:
             raise RuntimeError("API down")
 
         await run_sync_job_async(job, tracker, failing_sync())
         assert job.status == SyncJobStatus.FAILED
-        assert "API down" in (job.error_message or "")
+        # Error message is sanitized (does not leak exception detail).
+        assert job.error_message == "Sync job failed"
 
 
 # ---------------------------------------------------------------------------
