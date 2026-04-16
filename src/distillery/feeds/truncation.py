@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 # English text averages ~4 chars/token, so 30 000 chars ≈ 7 500 tokens.
 MAX_CONTENT_CHARS = 30_000
 
+_TRUNCATED_SUFFIX = " [truncated]"
+
 
 def truncate_content(text: str, max_chars: int = MAX_CONTENT_CHARS) -> str:
     """Truncate *text* to at most *max_chars* characters.
@@ -43,4 +45,8 @@ def truncate_content(text: str, max_chars: int = MAX_CONTENT_CHARS) -> str:
         len(text),
         max_chars,
     )
-    return text[:max_chars] + " [truncated]"
+    suffix = _TRUNCATED_SUFFIX
+    if max_chars <= len(suffix):
+        return suffix[:max_chars]
+    cutoff = max_chars - len(suffix)
+    return text[:cutoff] + suffix

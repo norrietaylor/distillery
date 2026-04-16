@@ -15,7 +15,11 @@ import pytest
 
 from distillery.feeds.models import FeedItem
 from distillery.feeds.poller import _item_text
-from distillery.feeds.truncation import MAX_CONTENT_CHARS, truncate_content
+from distillery.feeds.truncation import (
+    _TRUNCATED_SUFFIX,
+    MAX_CONTENT_CHARS,
+    truncate_content,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -37,17 +41,26 @@ class TestTruncateContent:
     def test_over_limit_truncated(self) -> None:
         text = "a" * (MAX_CONTENT_CHARS + 500)
         result = truncate_content(text)
-        assert len(result) == MAX_CONTENT_CHARS + len(" [truncated]")
-        assert result.endswith(" [truncated]")
-        assert result[:MAX_CONTENT_CHARS] == "a" * MAX_CONTENT_CHARS
+        assert len(result) == MAX_CONTENT_CHARS
+        assert result.endswith(_TRUNCATED_SUFFIX)
+        cutoff = MAX_CONTENT_CHARS - len(_TRUNCATED_SUFFIX)
+        assert result[:cutoff] == "a" * cutoff
 
     def test_empty_text_unchanged(self) -> None:
         assert truncate_content("") == ""
 
     def test_custom_max_chars(self) -> None:
-        text = "abcdefghij"  # 10 chars
+        text = "a" * 30  # 30 chars, will be truncated to 20
+        result = truncate_content(text, max_chars=20)
+        assert len(result) == 20
+        assert result.endswith(_TRUNCATED_SUFFIX)
+
+    def test_custom_max_chars_very_small(self) -> None:
+        """When max_chars is smaller than the suffix, return truncated suffix."""
+        text = "abcdefghij"
         result = truncate_content(text, max_chars=5)
-        assert result == "abcde [truncated]"
+        assert len(result) == 5
+        assert result == _TRUNCATED_SUFFIX[:5]
 
     def test_custom_max_chars_no_truncation(self) -> None:
         text = "abc"
@@ -82,9 +95,9 @@ class TestItemTextTruncation:
             content=long_content,
         )
         result = _item_text(item)
-        assert result.endswith(" [truncated]")
-        # Title + newline + truncated content
-        assert len(result) <= MAX_CONTENT_CHARS + len(" [truncated]") + len("Title\n")
+        assert result.endswith(_TRUNCATED_SUFFIX)
+        # Title + newline + truncated content (which itself is <= MAX_CONTENT_CHARS)
+        assert len(result) <= MAX_CONTENT_CHARS + len("Title\n")
 
     def test_truncation_can_be_disabled(self) -> None:
         long_content = "x" * (MAX_CONTENT_CHARS + 1000)
