@@ -238,6 +238,10 @@ class TestPluginMCPServers:
         manifest = load_plugin_manifest()
         server = manifest["mcpServers"]["distillery"]
         assert server["url"] == "${user_config.distillery_mcp_url}"
+        assert (
+            manifest["userConfig"]["distillery_mcp_url"]["default"]
+            == "https://distillery-mcp.fly.dev/mcp"
+        )
 
     def test_distillery_server_no_unsupported_fields(self) -> None:
         """The distillery server must not contain fields unsupported by the plugin schema."""
