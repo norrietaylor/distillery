@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 from distillery.feeds.scorer import RelevanceScorer
+from distillery.feeds.truncation import truncate_content
 
 if TYPE_CHECKING:
     from distillery.config import DistilleryConfig, FeedSourceConfig
@@ -91,14 +92,18 @@ class PollerSummary:
     finished_at: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
 
 
-def _item_text(item: FeedItem) -> str:
+def _item_text(item: FeedItem, *, apply_truncation: bool = True) -> str:
     """Build a single text string from a feed item for embedding.
 
     Concatenates title and content with a newline separator, falling back to
-    whichever field is available.
+    whichever field is available.  When *apply_truncation* is ``True``
+    (the default) the result is pre-truncated to stay within the Jina
+    embedding model's token limit.
 
     Args:
         item: The feed item to convert.
+        apply_truncation: Whether to truncate the result to
+            :data:`~distillery.feeds.truncation.MAX_CONTENT_CHARS`.
 
     Returns:
         A non-empty text string, or an empty string if both fields are absent.
@@ -108,7 +113,10 @@ def _item_text(item: FeedItem) -> str:
         parts.append(item.title)
     if item.content:
         parts.append(item.content)
-    return "\n".join(parts)
+    text = "\n".join(parts)
+    if apply_truncation:
+        text = truncate_content(text)
+    return text
 
 
 def _build_adapter(source: FeedSourceConfig) -> Any:
