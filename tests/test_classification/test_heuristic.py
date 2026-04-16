@@ -221,9 +221,9 @@ class TestClassifyEntry:
         """When multiple centroids exceed threshold, the highest wins."""
         v = _normalise([1.0, 0.5, 0.0, 0.0])
         centroids = {
-            "session": _normalise([1.0, 0.4, 0.0, 0.0]),    # very close
-            "bookmark": _normalise([1.0, 0.0, 0.0, 0.0]),   # close but less
-            "idea": _normalise([0.0, 0.0, 1.0, 0.0]),       # far
+            "session": _normalise([1.0, 0.4, 0.0, 0.0]),  # very close
+            "bookmark": _normalise([1.0, 0.0, 0.0, 0.0]),  # close but less
+            "idea": _normalise([0.0, 0.0, 1.0, 0.0]),  # far
         }
 
         classifier = HeuristicClassifier()
@@ -274,9 +274,7 @@ class TestClassifyIntegration:
         )
 
         classifier = HeuristicClassifier()
-        result = await classifier.classify(
-            inbox_entry, store, deterministic_embedding_provider
-        )
+        result = await classifier.classify(inbox_entry, store, deterministic_embedding_provider)
 
         assert result.entry_type == EntryType.SESSION
         assert result.status == EntryStatus.ACTIVE
@@ -291,9 +289,7 @@ class TestClassifyIntegration:
         # Session cluster in one direction.
         for i in range(MIN_ENTRIES_PER_TYPE):
             content = f"session content {i}"
-            deterministic_embedding_provider.register(
-                content, _normalise([1.0, 0.0, 0.0, 0.0])
-            )
+            deterministic_embedding_provider.register(content, _normalise([1.0, 0.0, 0.0, 0.0]))
             entry = make_entry(
                 content=content,
                 entry_type=EntryType.SESSION,
@@ -303,18 +299,14 @@ class TestClassifyIntegration:
 
         # Inbox entry in an orthogonal direction.
         inbox_content = "completely unrelated content"
-        deterministic_embedding_provider.register(
-            inbox_content, _normalise([0.0, 0.0, 0.0, 1.0])
-        )
+        deterministic_embedding_provider.register(inbox_content, _normalise([0.0, 0.0, 0.0, 1.0]))
         inbox_entry = make_entry(
             content=inbox_content,
             entry_type=EntryType.INBOX,
         )
 
         classifier = HeuristicClassifier()
-        result = await classifier.classify(
-            inbox_entry, store, deterministic_embedding_provider
-        )
+        result = await classifier.classify(inbox_entry, store, deterministic_embedding_provider)
 
         assert result.entry_type == EntryType.INBOX
         assert result.status == EntryStatus.PENDING_REVIEW
@@ -332,9 +324,7 @@ class TestClassifyIntegration:
         )
 
         classifier = HeuristicClassifier()
-        result = await classifier.classify(
-            inbox_entry, store, deterministic_embedding_provider
-        )
+        result = await classifier.classify(inbox_entry, store, deterministic_embedding_provider)
 
         assert result.entry_type == EntryType.INBOX
         assert result.status == EntryStatus.PENDING_REVIEW
@@ -349,9 +339,7 @@ class TestClassifyIntegration:
         # Only 2 session entries -- insufficient.
         for i in range(MIN_ENTRIES_PER_TYPE - 1):
             content = f"session item {i}"
-            deterministic_embedding_provider.register(
-                content, _normalise([1.0, 0.0, 0.0, 0.0])
-            )
+            deterministic_embedding_provider.register(content, _normalise([1.0, 0.0, 0.0, 0.0]))
             entry = make_entry(
                 content=content,
                 entry_type=EntryType.SESSION,
@@ -360,18 +348,14 @@ class TestClassifyIntegration:
             await store.store(entry)
 
         inbox_content = "similar to session"
-        deterministic_embedding_provider.register(
-            inbox_content, _normalise([1.0, 0.0, 0.0, 0.0])
-        )
+        deterministic_embedding_provider.register(inbox_content, _normalise([1.0, 0.0, 0.0, 0.0]))
         inbox_entry = make_entry(
             content=inbox_content,
             entry_type=EntryType.INBOX,
         )
 
         classifier = HeuristicClassifier()
-        result = await classifier.classify(
-            inbox_entry, store, deterministic_embedding_provider
-        )
+        result = await classifier.classify(inbox_entry, store, deterministic_embedding_provider)
 
         assert result.status == EntryStatus.PENDING_REVIEW
 
@@ -386,8 +370,6 @@ class TestClassifyIntegration:
         inbox_entry = make_entry(content="anything", entry_type=EntryType.INBOX)
 
         classifier = HeuristicClassifier()
-        result = await classifier.classify(
-            inbox_entry, store, deterministic_embedding_provider
-        )
+        result = await classifier.classify(inbox_entry, store, deterministic_embedding_provider)
 
         assert isinstance(result, ClassificationResult)

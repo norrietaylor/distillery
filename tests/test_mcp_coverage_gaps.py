@@ -1890,7 +1890,6 @@ class TestWebhookRecordAudit:
         assert raw is not None
 
 
-
 # ===========================================================================
 # Auth CIMDFetcher patch behavior (auth.py lines 118-152, 167-185)
 # ===========================================================================
