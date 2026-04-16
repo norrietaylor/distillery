@@ -80,13 +80,22 @@ class TestRequiredParams:
         assert "key" in data["message"]
 
     @pytest.mark.asyncio
-    async def test_missing_value(self) -> None:
+    async def test_missing_section_for_read(self) -> None:
         cfg = make_config()
-        result = await _handle_configure(cfg, {"section": "feeds.thresholds", "key": "alert"})
+        result = await _handle_configure(cfg, {"key": "alert"})
         data = parse(result)
         assert data["error"] is True
         assert data["code"] == "INVALID_PARAMS"
-        assert "value" in data["message"]
+        assert "section" in data["message"]
+
+    @pytest.mark.asyncio
+    async def test_missing_key_for_read(self) -> None:
+        cfg = make_config()
+        result = await _handle_configure(cfg, {"section": "feeds.thresholds"})
+        data = parse(result)
+        assert data["error"] is True
+        assert data["code"] == "INVALID_PARAMS"
+        assert "key" in data["message"]
 
 
 # ---------------------------------------------------------------------------
@@ -411,3 +420,79 @@ class TestValueCoercion:
         assert data["changed"] is True
         assert data["new_value"] == 5
         assert cfg.defaults.dedup_limit == 5
+
+
+# ---------------------------------------------------------------------------
+# Read-only mode (value omitted)
+# ---------------------------------------------------------------------------
+
+
+class TestReadOnlyMode:
+    """When value is omitted (None), return the current config value."""
+
+    @pytest.mark.asyncio
+    async def test_read_alert_threshold(self) -> None:
+        cfg = make_config(alert=0.9, digest=0.5)
+        result = await _handle_configure(cfg, {"section": "feeds.thresholds", "key": "alert"})
+        data = parse(result)
+        assert data.get("error") is None or data.get("error") is False
+        assert data["section"] == "feeds.thresholds"
+        assert data["key"] == "alert"
+        assert data["value"] == 0.9
+        assert "0.9" in data["message"]
+
+    @pytest.mark.asyncio
+    async def test_read_digest_threshold(self) -> None:
+        cfg = make_config(alert=0.85, digest=0.65)
+        result = await _handle_configure(cfg, {"section": "feeds.thresholds", "key": "digest"})
+        data = parse(result)
+        assert data["value"] == 0.65
+
+    @pytest.mark.asyncio
+    async def test_read_dedup_threshold(self) -> None:
+        cfg = make_config(dedup_threshold=0.88)
+        result = await _handle_configure(cfg, {"section": "defaults", "key": "dedup_threshold"})
+        data = parse(result)
+        assert data["value"] == 0.88
+
+    @pytest.mark.asyncio
+    async def test_read_confidence_threshold(self) -> None:
+        cfg = make_config(confidence_threshold=0.7)
+        result = await _handle_configure(
+            cfg, {"section": "classification", "key": "confidence_threshold"}
+        )
+        data = parse(result)
+        assert data["value"] == 0.7
+
+    @pytest.mark.asyncio
+    async def test_read_unknown_key_rejected(self) -> None:
+        cfg = make_config()
+        result = await _handle_configure(cfg, {"section": "feeds.thresholds", "key": "nonexistent"})
+        data = parse(result)
+        assert data["error"] is True
+        assert data["code"] == "INVALID_PARAMS"
+        assert "not a recognised" in data["message"]
+
+    @pytest.mark.asyncio
+    async def test_read_unknown_section_rejected(self) -> None:
+        cfg = make_config()
+        result = await _handle_configure(cfg, {"section": "bogus", "key": "whatever"})
+        data = parse(result)
+        assert data["error"] is True
+        assert data["code"] == "INVALID_PARAMS"
+
+    @pytest.mark.asyncio
+    async def test_read_does_not_mutate_config(self) -> None:
+        cfg = make_config(alert=0.85)
+        await _handle_configure(cfg, {"section": "feeds.thresholds", "key": "alert"})
+        assert cfg.feeds.thresholds.alert == 0.85
+
+    @pytest.mark.asyncio
+    async def test_read_with_explicit_none_value(self) -> None:
+        cfg = make_config(alert=0.85)
+        result = await _handle_configure(
+            cfg, {"section": "feeds.thresholds", "key": "alert", "value": None}
+        )
+        data = parse(result)
+        assert data.get("error") is None or data.get("error") is False
+        assert data["value"] == 0.85

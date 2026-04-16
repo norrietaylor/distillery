@@ -908,12 +908,12 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         ctx: Context,
         section: str,
         key: str,
-        value: str | int | float,
+        value: str | int | float | None = None,
     ) -> list[types.TextContent]:
-        """Update a runtime configuration value and persist it to distillery.yaml.
+        """Read or update a runtime configuration value.
 
-        USE WHEN: adjusting thresholds, classification settings, or feed
-        parameters at runtime without editing the config file directly.
+        USE WHEN: reading current thresholds/settings, or adjusting them
+        at runtime without editing the config file directly.
 
         PARAMS:
           - section (str, required): Config section path (dotted notation).
@@ -922,10 +922,12 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             Valid keys by section: feeds.thresholds: [alert, digest];
             defaults: [dedup_threshold, dedup_limit, stale_days];
             classification: [confidence_threshold, mode].
-          - value (str | int | float, required): New value. Must satisfy type and
-            range constraints for the given key.
+          - value (str | int | float | None, optional): New value. Omit to read
+            the current value. When provided, must satisfy type and range
+            constraints for the given key.
 
-        RETURNS (success): { changed: bool, section: str, key: str, previous_value: any,
+        RETURNS (read): { section: str, key: str, value: any, message: str }
+        RETURNS (write): { changed: bool, section: str, key: str, previous_value: any,
           new_value: any, disk_written: bool, message: str }
         RETURNS (error): { error: true, code: "INVALID_PARAMS" | "INTERNAL", message: "..." }
 
