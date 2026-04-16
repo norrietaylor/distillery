@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Scheduling via Claude Code routines** — `/setup` and `/watch` skills now configure Claude Code routines instead of CronCreate jobs or GitHub Actions webhook scheduling. Three routines replace the previous approach: hourly feed poll, daily stale check, weekly maintenance (#272)
+
+### Deprecated
+
+- **Webhook scheduling endpoints** — `/hooks/poll`, `/hooks/rescore`, and `/hooks/classify-batch` are deprecated in favour of Claude Code routines. The `/api/maintenance` endpoint is retained for orchestrated operations. Deprecated endpoints log warnings on use. (#272)
+
 ---
 
 ## [v0.2.1] - 2026-04-07

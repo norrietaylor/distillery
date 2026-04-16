@@ -146,7 +146,7 @@ Distillery is built as a 4-layer system where skills (SKILL.md files) drive all 
 |-------|-------------|-----------|
 | **Skills** | 14 SKILL.md files — portable, version-controlled slash commands. Not Python code. | `skills/*/SKILL.md` |
 | **MCP Server** | Tools exposed over stdio (local) or streamable-HTTP (team). Built on FastMCP 2.x/3.x with `@server.tool` decorators. | `src/distillery/mcp/server.py` |
-| **Webhook API** | REST endpoints (`/api/poll`, `/api/rescore`, `/api/maintenance`) for automated scheduling. Bearer token auth, per-endpoint cooldowns persisted to DuckDB. Mounted alongside MCP in HTTP mode. | `src/distillery/mcp/webhooks.py` |
+| **Webhook API** | REST endpoints (`/api/maintenance`) for orchestrated operations. Individual scheduling endpoints (`/hooks/poll`, `/hooks/rescore`, `/hooks/classify-batch`) are deprecated in favour of Claude Code routines. Bearer token auth, per-endpoint cooldowns persisted to DuckDB. Mounted alongside MCP in HTTP mode. | `src/distillery/mcp/webhooks.py` |
 | **Auth** | MCP: GitHub OAuth with org-restricted access. Webhooks: bearer token via `DISTILLERY_WEBHOOK_SECRET`. Middleware handles logging, rate limiting, security headers, budget tracking. | `src/distillery/mcp/auth.py`, `middleware.py`, `budget.py` |
 | **Core Protocols** | Typed `Protocol` interfaces (structural subtyping, not ABCs). All storage operations are async. Includes `query_audit_log` for audit data access. | `src/distillery/store/protocol.py`, `embedding/protocol.py` |
 | **Feeds** | GitHub events and RSS/Atom polling. Authenticated via `GITHUB_TOKEN` for private repos. Auto-tagging (source + topic tags from KB vocabulary). Relevance scoring via embeddings. Interest extraction for source suggestions. | `src/distillery/feeds/` |
@@ -260,7 +260,7 @@ The ambient intelligence system monitors external sources and scores relevance:
 4. **Relevance scoring** — embedding-based cosine similarity against user interest profile, with interest boost (up to +0.15) and per-source trust weighting
 5. **Interest extraction** — mines existing entries for tags, domains, repos, expertise
 6. **Digest generation** — `/radar` uses interest-driven semantic search to surface the most relevant feed entries (falls back to newest-first listing when interests are unavailable)
-7. **Automated scheduling** — webhook endpoints (`/api/poll`, `/api/rescore`, `/api/maintenance`) called by GitHub Actions cron workflow (`.github/workflows/scheduler.yml`). Bearer token auth, per-endpoint cooldowns, and audit records in DuckDB metadata.
+7. **Automated scheduling** — Claude Code routines handle hourly feed polling, daily stale checks, and weekly maintenance. The `/api/maintenance` webhook endpoint remains available for orchestrated operations. Individual `/hooks/*` scheduling endpoints are deprecated (see #272).
 
 ## Search Architecture
 
@@ -274,15 +274,31 @@ The ambient intelligence system monitors external sources and scores relevance:
 
 `distillery_find_similar` uses pure cosine similarity (no hybrid) — dedup thresholds depend on calibrated absolute scores.
 
-## Webhook Endpoints
+## Scheduling
+
+Distillery uses **Claude Code routines** for all scheduled tasks:
+
+| Routine | Frequency | Purpose |
+|---------|-----------|---------|
+| `distillery-feed-poll` | Hourly | Poll all feed sources |
+| `distillery-stale-check` | Daily | Find entries needing refresh or archival |
+| `distillery-weekly-maintenance` | Weekly | Stats, stale entries, feed activity, digest |
+
+Routines run automatically in the background when Claude Code is active. Configure them via `/setup`.
+
+## Webhook Endpoints (Partially Deprecated)
 
 REST endpoints mounted at `/api/*` alongside the MCP server in HTTP mode. Enabled when both `DISTILLERY_WEBHOOK_SECRET` is set and the runtime flag `config.server.webhooks.enabled` is true.
 
-| Endpoint | Operation | Cooldown | Schedule |
-|----------|-----------|----------|----------|
-| `POST /api/poll` | Poll all feed sources | 5 min | Hourly (:23) |
-| `POST /api/rescore` | Re-score feed entries | 1 hour | Daily (06:17 UTC) |
-| `POST /api/maintenance` | Metrics + quality + stale + interests + suggestions + digest | 6 hours | Weekly (Mon 07:41 UTC) |
+| Endpoint | Operation | Cooldown | Status |
+|----------|-----------|----------|--------|
+| `POST /api/poll` | Poll all feed sources | 5 min | **Deprecated** — use routines |
+| `POST /api/rescore` | Re-score feed entries | 1 hour | **Deprecated** — use routines |
+| `POST /hooks/classify-batch` | Batch classification | 5 min | **Deprecated** — use routines |
+| `POST /api/maintenance` | Orchestrated maintenance (poll + rescore + classify + retention) | 6 hours | Active |
+
+!!! warning "Deprecation Notice"
+    The `/hooks/poll`, `/hooks/rescore`, and `/hooks/classify-batch` endpoints are deprecated. Scheduling should use Claude Code routines instead. The `/api/maintenance` endpoint is retained for orchestrated maintenance operations. See [issue #272](https://github.com/norrietaylor/distillery/issues/272) for migration details.
 
 **Auth:** `Authorization: Bearer <DISTILLERY_WEBHOOK_SECRET>` with `hmac.compare_digest`.
 

@@ -1,5 +1,11 @@
 """Webhook REST endpoints for scheduled Distillery operations.
 
+.. deprecated::
+    The ``/hooks/poll``, ``/hooks/rescore``, and ``/hooks/classify-batch``
+    endpoints are deprecated in favour of Claude Code routines for scheduling.
+    The ``/api/maintenance`` endpoint is retained for orchestrated maintenance.
+    See issue #272 for migration details.
+
 Provides a Starlette sub-application with POST endpoints for ``/poll``,
 ``/rescore``, and ``/maintenance``.  Authentication is handled via a
 bearer token verified with constant-time comparison.  Per-endpoint
@@ -509,27 +515,33 @@ async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONRe
     async with poll_lock:
         poll_response = await _run_poll(state)
     poll_body = _extract(poll_response)
-    poll_result: dict[str, Any] = poll_body.get("data", poll_body) if poll_body.get("ok") else {
-        "ok": False, "error": poll_body.get("error", "poll failed")
-    }
+    poll_result: dict[str, Any] = (
+        poll_body.get("data", poll_body)
+        if poll_body.get("ok")
+        else {"ok": False, "error": poll_body.get("error", "poll failed")}
+    )
 
     # 2. Rescore — re-score existing entries (acquire rescore lock to serialize).
     rescore_lock = _endpoint_locks.setdefault("rescore", asyncio.Lock())
     async with rescore_lock:
         rescore_response = await _run_rescore(state)
     rescore_body = _extract(rescore_response)
-    rescore_result: dict[str, Any] = rescore_body.get("data", rescore_body) if rescore_body.get("ok") else {
-        "ok": False, "error": rescore_body.get("error", "rescore failed")
-    }
+    rescore_result: dict[str, Any] = (
+        rescore_body.get("data", rescore_body)
+        if rescore_body.get("ok")
+        else {"ok": False, "error": rescore_body.get("error", "rescore failed")}
+    )
 
     # 3. Classify-batch — classify pending inbox entries (acquire classify-batch lock to serialize).
     classify_lock = _endpoint_locks.setdefault("classify-batch", asyncio.Lock())
     async with classify_lock:
         classify_response = await _run_classify_batch(state)
     classify_body = _extract(classify_response)
-    classify_result: dict[str, Any] = classify_body.get("data", classify_body) if classify_body.get("ok") else {
-        "ok": False, "error": classify_body.get("error", "classify-batch failed")
-    }
+    classify_result: dict[str, Any] = (
+        classify_body.get("data", classify_body)
+        if classify_body.get("ok")
+        else {"ok": False, "error": classify_body.get("error", "classify-batch failed")}
+    )
 
     # 4. Search log retention — prune old search_log rows.
     retention_result: dict[str, Any] = {"ok": True, "deleted": 0}
@@ -538,6 +550,7 @@ async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONRe
         store = state["store"]
         retention_days = config.rate_limit.search_log_retention_days
         try:
+
             def _prune() -> int:
                 conn = store.connection
                 result = conn.execute(
@@ -550,7 +563,11 @@ async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONRe
             deleted = await asyncio.to_thread(_prune)
             retention_result = {"ok": True, "deleted": deleted}
             if deleted:
-                logger.info("Maintenance: pruned %d search_log rows older than %d days", deleted, retention_days)
+                logger.info(
+                    "Maintenance: pruned %d search_log rows older than %d days",
+                    deleted,
+                    retention_days,
+                )
         except Exception as exc:  # noqa: BLE001
             retention_result = {"ok": False, "error": f"search_log retention failed: {exc}"}
             logger.warning("Maintenance: search_log retention failed: %s", exc)
@@ -660,9 +677,7 @@ async def _run_classify_batch(
                         )
                     else:
                         entry_embedding = embedding_provider.embed(entry.content)
-                        best_type, best_sim = classifier.classify_entry(
-                            entry_embedding, centroids
-                        )
+                        best_type, best_sim = classifier.classify_entry(entry_embedding, centroids)
                         if best_type is not None:
                             classification = ClassificationResult(
                                 entry_type=EntryType(best_type),
@@ -783,9 +798,7 @@ async def _run_classify_batch(
     )
 
 
-async def _handle_classify_batch(
-    request: Request, state: dict[str, Any]
-) -> JSONResponse:
+async def _handle_classify_batch(request: Request, state: dict[str, Any]) -> JSONResponse:
     """Handler for ``POST /hooks/classify-batch``.
 
     Delegates to :func:`_run_classify_batch`.  Accepts optional query
@@ -929,23 +942,41 @@ def create_webhook_app(
     async def hooks_poll_route(request: Request) -> JSONResponse:
         """Route handler for ``POST /hooks/poll``.
 
+        .. deprecated::
+            This endpoint is deprecated. Use Claude Code routines for
+            scheduled feed polling instead. See issue #272.
+
         Canonical path for the poll webhook; shares cooldown with ``/poll``.
         Accepts an optional ``source_url`` query parameter to poll a single
         source (e.g. ``POST /hooks/poll?source_url=https://example.com/feed``).
         """
+        logger.warning(
+            "Webhook /hooks/poll is deprecated — migrate to Claude Code routines (see #272)"
+        )
         return await _authenticated_endpoint(request, "poll")
 
     async def hooks_rescore_route(request: Request) -> JSONResponse:
         """Route handler for ``POST /hooks/rescore``.
 
+        .. deprecated::
+            This endpoint is deprecated. Use Claude Code routines for
+            scheduled feed rescoring instead. See issue #272.
+
         Canonical path for the rescore webhook; shares cooldown with ``/rescore``.
         Accepts an optional ``limit`` query parameter controlling how many
         entries are rescored (e.g. ``POST /hooks/rescore?limit=50``).
         """
+        logger.warning(
+            "Webhook /hooks/rescore is deprecated — migrate to Claude Code routines (see #272)"
+        )
         return await _authenticated_endpoint(request, "rescore")
 
     async def hooks_classify_batch_route(request: Request) -> JSONResponse:
         """Route handler for ``POST /hooks/classify-batch``.
+
+        .. deprecated::
+            This endpoint is deprecated. Use Claude Code routines for
+            scheduled batch classification instead. See issue #272.
 
         Classify pending entries in batch using LLM or heuristic mode.
         Accepts optional query parameters:
@@ -953,6 +984,9 @@ def create_webhook_app(
         - ``entry_type`` (default ``"inbox"``): filter entries by type.
         - ``mode``: ``"llm"`` or ``"heuristic"`` (defaults to config value).
         """
+        logger.warning(
+            "Webhook /hooks/classify-batch is deprecated — migrate to Claude Code routines (see #272)"
+        )
         return await _authenticated_endpoint(request, "classify-batch")
 
     routes: list[Route] = [

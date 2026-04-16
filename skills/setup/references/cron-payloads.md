@@ -1,4 +1,8 @@
-# Cron Payloads — Distillery Scheduled Tasks
+# Cron Payloads — Distillery Scheduled Tasks (DEPRECATED)
+
+> **DEPRECATED:** CronCreate-based scheduling is deprecated in favour of Claude Code routines.
+> See `routine-payloads.md` for the replacement. This file is retained for reference during
+> migration. Existing CronCreate jobs continue to work but should be replaced with routines.
 
 Reference payloads for the three tiers of scheduled tasks configured in Step 4 of `/setup`.
 
