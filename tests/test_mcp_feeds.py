@@ -376,6 +376,198 @@ class TestHandleWatchRemove:
 
 
 # ---------------------------------------------------------------------------
+# _handle_watch — remove with purge
+# ---------------------------------------------------------------------------
+
+
+class FakeEntry:
+    """Minimal entry stub for purge tests."""
+
+    def __init__(self, entry_id: str, source_url: str, status: str = "active") -> None:
+        self.id = entry_id
+        self.source_url = source_url
+        self.status = status
+        self.metadata: dict[str, Any] = {"source_url": source_url}
+
+
+class FakePurgeStore(FakeSourceStore):
+    """Extends FakeSourceStore with list_entries and update for purge tests."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._entries: list[FakeEntry] = []
+
+    def seed_entry(self, entry_id: str, source_url: str, status: str = "active") -> None:
+        self._entries.append(FakeEntry(entry_id, source_url, status))
+
+    async def list_entries(
+        self,
+        filters: dict[str, Any] | None,
+        limit: int,
+        offset: int,
+        **kwargs: Any,
+    ) -> list[FakeEntry]:
+        if not filters:
+            return []
+        results = []
+        for e in self._entries:
+            match = True
+            if (
+                "metadata.source_url" in filters
+                and e.metadata["source_url"] != filters["metadata.source_url"]
+            ):
+                match = False
+            if "status" in filters and e.status != filters["status"]:
+                match = False
+            if match:
+                results.append(e)
+        return results[:limit]
+
+    async def update(self, entry_id: str, updates: dict[str, Any]) -> FakeEntry:
+        for e in self._entries:
+            if e.id == entry_id:
+                for k, v in updates.items():
+                    setattr(e, k, v)
+                return e
+        raise KeyError(f"No entry with id {entry_id}")
+
+
+class TestHandleWatchRemovePurge:
+    async def test_remove_with_purge_false_does_not_archive(self) -> None:
+        """Default purge=false should not include purged_entries in response."""
+        store = FakePurgeStore()
+        await store.add_feed_source(url="https://example.com/rss", source_type="rss")
+        store.seed_entry("e1", "https://example.com/rss")
+        result = await _handle_watch(
+            store=store,
+            arguments={"action": "remove", "url": "https://example.com/rss"},
+        )
+        data = parse(result)
+        assert data["removed"] is True
+        assert "purged_entries" not in data
+        # Entry should still be active
+        assert store._entries[0].status == "active"
+
+    async def test_remove_with_purge_true_archives_entries(self) -> None:
+        """purge=true should archive matching entries and report count."""
+        store = FakePurgeStore()
+        await store.add_feed_source(url="https://example.com/rss", source_type="rss")
+        store.seed_entry("e1", "https://example.com/rss")
+        store.seed_entry("e2", "https://example.com/rss")
+        result = await _handle_watch(
+            store=store,
+            arguments={
+                "action": "remove",
+                "url": "https://example.com/rss",
+                "purge": True,
+            },
+        )
+        data = parse(result)
+        assert data["removed"] is True
+        assert data["purged_entries"] == 2
+        # All matching entries should now be archived
+        for e in store._entries:
+            if e.source_url == "https://example.com/rss":
+                assert e.status == "archived"
+
+    async def test_remove_purge_only_archives_matching_source(self) -> None:
+        """purge should only archive entries from the removed source URL."""
+        store = FakePurgeStore()
+        await store.add_feed_source(url="https://example.com/rss", source_type="rss")
+        await store.add_feed_source(url="https://other.com/rss", source_type="rss")
+        store.seed_entry("e1", "https://example.com/rss")
+        store.seed_entry("e2", "https://other.com/rss")
+        result = await _handle_watch(
+            store=store,
+            arguments={
+                "action": "remove",
+                "url": "https://example.com/rss",
+                "purge": True,
+            },
+        )
+        data = parse(result)
+        assert data["purged_entries"] == 1
+        # Only the matching entry should be archived
+        assert store._entries[0].status == "archived"
+        assert store._entries[1].status == "active"
+
+    async def test_remove_purge_skips_already_archived(self) -> None:
+        """purge should not re-archive entries that are already archived."""
+        store = FakePurgeStore()
+        await store.add_feed_source(url="https://example.com/rss", source_type="rss")
+        store.seed_entry("e1", "https://example.com/rss", status="archived")
+        store.seed_entry("e2", "https://example.com/rss", status="active")
+        result = await _handle_watch(
+            store=store,
+            arguments={
+                "action": "remove",
+                "url": "https://example.com/rss",
+                "purge": True,
+            },
+        )
+        data = parse(result)
+        assert data["purged_entries"] == 1
+
+    async def test_remove_purge_nonexistent_source_does_not_purge(self) -> None:
+        """When the source does not exist (removed=false), purge should not run."""
+        store = FakePurgeStore()
+        store.seed_entry("e1", "https://example.com/rss")
+        result = await _handle_watch(
+            store=store,
+            arguments={
+                "action": "remove",
+                "url": "https://example.com/rss",
+                "purge": True,
+            },
+        )
+        data = parse(result)
+        assert data["removed"] is False
+        assert "purged_entries" not in data
+        # Entry should remain active
+        assert store._entries[0].status == "active"
+
+    async def test_remove_purge_zero_entries(self) -> None:
+        """purge with no matching entries should report purged_entries=0."""
+        store = FakePurgeStore()
+        await store.add_feed_source(url="https://example.com/rss", source_type="rss")
+        result = await _handle_watch(
+            store=store,
+            arguments={
+                "action": "remove",
+                "url": "https://example.com/rss",
+                "purge": True,
+            },
+        )
+        data = parse(result)
+        assert data["removed"] is True
+        assert data["purged_entries"] == 0
+
+    async def test_remove_purge_error_returns_purge_error(self) -> None:
+        """If purge fails, response should include purge_error but still succeed overall."""
+        store = FakePurgeStore()
+        await store.add_feed_source(url="https://example.com/rss", source_type="rss")
+
+        # Make list_entries raise to simulate a purge failure
+        async def failing_list(*args: Any, **kwargs: Any) -> list:  # type: ignore[type-arg]
+            raise RuntimeError("DB error during purge")
+
+        store.list_entries = failing_list  # type: ignore[assignment]
+
+        result = await _handle_watch(
+            store=store,
+            arguments={
+                "action": "remove",
+                "url": "https://example.com/rss",
+                "purge": True,
+            },
+        )
+        data = parse(result)
+        assert data["removed"] is True
+        assert "purge_error" in data
+        assert "DB error during purge" in data["purge_error"]
+
+
+# ---------------------------------------------------------------------------
 # _handle_watch — invalid action
 # ---------------------------------------------------------------------------
 

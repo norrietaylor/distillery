@@ -191,19 +191,66 @@ async def _handle_watch(
     if not url:
         return error_response("INVALID_PARAMS", "url is required for action='remove'")
 
+    purge = bool(arguments.get("purge", False))
+
     try:
         removed = await store.remove_feed_source(url)
         db_sources = await store.list_feed_sources()
     except Exception as exc:  # noqa: BLE001
         logger.exception("distillery_watch: failed to remove feed source")
         return error_response("INTERNAL", f"Failed to remove feed source: {exc}")
-    return success_response(
-        {
-            "removed_url": url,
-            "removed": removed,
-            "sources": db_sources,
-        }
-    )
+
+    response_data: dict[str, Any] = {
+        "removed_url": url,
+        "removed": removed,
+        "sources": db_sources,
+    }
+
+    # When purge is requested, archive all entries from this source.
+    if purge and removed:
+        try:
+            archived_count = await _purge_source_entries(store, url)
+            response_data["purged_entries"] = archived_count
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("distillery_watch: failed to purge entries for %s", url)
+            response_data["purge_error"] = str(exc)
+
+    return success_response(response_data)
+
+
+# ---------------------------------------------------------------------------
+# Purge helper — archive entries from a removed feed source
+# ---------------------------------------------------------------------------
+
+
+async def _purge_source_entries(store: Any, source_url: str) -> int:
+    """Archive all active entries whose ``metadata.source_url`` matches *source_url*.
+
+    Iterates through matching entries in batches and sets ``status="archived"``
+    on each one via ``store.update()``.  Returns the total count of archived
+    entries.
+
+    Args:
+        store: An initialised storage backend with ``list_entries`` and ``update``.
+        source_url: The feed source URL whose entries should be archived.
+
+    Returns:
+        Number of entries that were archived.
+    """
+    archived = 0
+    batch_size = 100
+    while True:
+        entries = await store.list_entries(
+            filters={"metadata.source_url": source_url, "status": "active"},
+            limit=batch_size,
+            offset=0,
+        )
+        if not entries:
+            break
+        for entry in entries:
+            await store.update(entry.id, {"status": "archived"})
+            archived += 1
+    return archived
 
 
 # ---------------------------------------------------------------------------
