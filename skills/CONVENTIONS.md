@@ -300,7 +300,7 @@ Skills with `context: fork` run in an isolated agent context with a restricted `
 2. The forked context must not attempt to work around MCP errors by shelling out, running scripts, or using any tool not declared in `allowed-tools`.
 3. On any MCP tool failure, the skill must display the error per the Error Handling section below and halt immediately.
 
-**Skills currently using `context: fork`:** `/pour`, `/radar`, `/digest`, `/investigate`, `/briefing`.
+**Skills currently using `context: fork`:** `/pour`, `/radar`, `/digest`, `/investigate`, `/briefing`, `/gh-sync`.
 
 ## Error Handling
 
