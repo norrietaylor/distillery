@@ -183,20 +183,21 @@ async def run_sync_job_async(
     tracker.mark_running(job.job_id)
     try:
         result = await sync_coro
-        job.entries_created = result.get("created", 0)
-        job.entries_updated = result.get("updated", 0)
-        job.relations_created = result.get("relations_created", 0)
-        job.pages_processed = result.get("pages_processed", 0)
-        job.errors = result.get("errors", [])
-        tracker.mark_completed(job.job_id, result)
+        result_dict = result.to_dict()
+        job.entries_created = result.created
+        job.entries_updated = result.updated
+        job.relations_created = result.relations_created
+        job.pages_processed = result.pages_processed
+        job.errors = result.errors
+        tracker.mark_completed(job.job_id, result_dict)
         logger.info(
             "Sync job %s completed: %d created, %d updated",
             job.job_id,
             job.entries_created,
             job.entries_updated,
         )
-    except Exception as exc:  # noqa: BLE001
-        error_msg = f"Sync job failed: {exc}"
+    except Exception:  # noqa: BLE001
+        error_msg = "Sync job failed"
         logger.exception(
             "Sync job %s failed (partial progress: %d created, %d updated)",
             job.job_id,

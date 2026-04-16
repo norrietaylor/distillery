@@ -183,7 +183,13 @@ async def _handle_watch(
                     url=url,
                     token=os.environ.get("GITHUB_TOKEN"),
                 )
-                sync_coro = adapter.sync_batched()
+
+                def _on_page(page_num: int, created: int, updated: int) -> None:
+                    job.pages_processed = page_num
+                    job.entries_created += created
+                    job.entries_updated += updated
+
+                sync_coro = adapter.sync_batched(on_page=_on_page)
 
                 asyncio.create_task(run_sync_job_async(job, tracker, sync_coro))
                 response_data["sync_job"] = job.to_dict()
@@ -482,7 +488,13 @@ async def _handle_gh_sync(
 
         tracker = get_tracker()
         job = tracker.create_job(source_url=url, source_type="github")
-        sync_coro = adapter.sync_batched()
+
+        def _on_page(page_num: int, created: int, updated: int) -> None:
+            job.pages_processed = page_num
+            job.entries_created += created
+            job.entries_updated += updated
+
+        sync_coro = adapter.sync_batched(on_page=_on_page)
         asyncio.create_task(run_sync_job_async(job, tracker, sync_coro))
         return success_response(
             {
@@ -544,8 +556,8 @@ async def _handle_store_batch(
             "entries must be a non-empty list of entry dicts",
         )
 
-    stored_ids: list[str] = []
     errors: list[dict[str, Any]] = []
+    valid_entries: list[Entry] = []
 
     for idx, entry_data in enumerate(entries_raw):
         if not isinstance(entry_data, dict):
@@ -598,10 +610,16 @@ async def _handle_store_batch(
                 tags=tags,
                 metadata=metadata,
             )
-            entry_id = await store.store(entry)
-            stored_ids.append(entry_id)
+            valid_entries.append(entry)
         except Exception as exc:  # noqa: BLE001
             errors.append({"index": idx, "error": str(exc)})
+
+    stored_ids: list[str] = []
+    if valid_entries:
+        try:
+            stored_ids = await store.store_batch(valid_entries)
+        except Exception as exc:  # noqa: BLE001
+            errors.append({"index": -1, "error": f"Batch store failed: {exc}"})
 
     return success_response(
         {
