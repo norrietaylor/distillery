@@ -142,8 +142,9 @@ async def test_maintenance_combined_response_format(
     monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
     shared = _make_shared_state(store)
 
-    mock_poller = _make_poller_mock(sources_polled=2, total_fetched=10, total_stored=7,
-                                    rescored=15, upgraded=3, downgraded=2)
+    mock_poller = _make_poller_mock(
+        sources_polled=2, total_fetched=10, total_stored=7, rescored=15, upgraded=3, downgraded=2
+    )
 
     with patch("distillery.feeds.poller.FeedPoller", return_value=mock_poller):
         app = create_webhook_app(shared, _make_config())

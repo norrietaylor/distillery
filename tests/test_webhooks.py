@@ -522,9 +522,7 @@ async def test_hooks_poll_source_url_query_param(
     shared = _make_shared_state(store)
 
     target_url = "https://example.com/feed"
-    result = PollResult(
-        source_url=target_url, source_type="rss", items_fetched=3, items_stored=2
-    )
+    result = PollResult(source_url=target_url, source_type="rss", items_fetched=3, items_stored=2)
     summary = PollerSummary(results=[result], total_fetched=3, total_stored=2, sources_polled=1)
 
     mock_poller = MagicMock()

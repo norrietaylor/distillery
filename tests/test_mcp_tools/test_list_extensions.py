@@ -80,8 +80,12 @@ async def store_with_stale(store: Any) -> Any:  # type: ignore[return]
     await _store_entry_with_timestamps(store, stale1, accessed_at=thirty_days_ago)
     await _store_entry_with_timestamps(store, stale2, accessed_at=thirty_days_ago)
     await _store_entry_with_timestamps(store, recent1, accessed_at=one_day_ago)
-    await _store_entry_with_timestamps(store, old_no_access, accessed_at=None, updated_at=thirty_days_ago)
-    await _store_entry_with_timestamps(store, new_no_access, accessed_at=None, updated_at=one_day_ago)
+    await _store_entry_with_timestamps(
+        store, old_no_access, accessed_at=None, updated_at=thirty_days_ago
+    )
+    await _store_entry_with_timestamps(
+        store, new_no_access, accessed_at=None, updated_at=one_day_ago
+    )
 
     store._stale_ids = {stale1.id, stale2.id, old_no_access.id}
     store._recent_ids = {recent1.id, new_no_access.id}

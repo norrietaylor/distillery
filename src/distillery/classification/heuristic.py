@@ -116,9 +116,7 @@ class HeuristicClassifier:
         centroids = await self.compute_centroids(store, embedding_provider)
 
         if not centroids:
-            logger.info(
-                "HeuristicClassifier: no centroids available, sending to review"
-            )
+            logger.info("HeuristicClassifier: no centroids available, sending to review")
             return ClassificationResult(
                 entry_type=EntryType.INBOX,
                 confidence=0.0,
