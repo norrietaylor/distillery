@@ -327,6 +327,8 @@ Generated: 2026-04-08 09:15 UTC
 
 ## Rules
 
+- NEVER use Bash, Python, or any tool not listed in allowed-tools
+- If an MCP tool call fails, report the error to the user and STOP. Do not attempt workarounds.
 - Always call `distillery_list(limit=1)` first as the MCP health check; stop if it fails
 - Auto-detect project from `basename $(git rev-parse --show-toplevel)` when `--project` is not provided
 - Display-only — no `--store` flag, no storing of output

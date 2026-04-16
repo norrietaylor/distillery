@@ -128,6 +128,8 @@ Heading `# Pour: <Topic>`, then sections Summary, Timeline, Key Decisions, Contr
 
 ## Rules
 
+- NEVER use Bash, Python, or any tool not listed in allowed-tools
+- If an MCP tool call fails, report the error to the user and STOP. Do not attempt workarounds.
 - Always use `[Entry <short-id>]` citation format (short-id = first 8 chars of UUID)
 - Every factual claim must trace to an entry -- never synthesize without citing
 - Omit sections with no content
