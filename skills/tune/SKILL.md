@@ -46,7 +46,12 @@ No flags = read-only mode (display current thresholds).
 
 ### Step 3: Retrieve Current Configuration
 
-Call `distillery_configure(action="get", section="feeds.thresholds")` and extract `alert` (default: 0.85) and `digest` (default: 0.60). If the call returns an error or the section is absent, show defaults and note live values could not be confirmed.
+Read current thresholds by omitting the `value` parameter:
+
+- `distillery_configure(section="feeds.thresholds", key="alert")`
+- `distillery_configure(section="feeds.thresholds", key="digest")`
+
+Extract the `value` field from each response (defaults: alert=0.85, digest=0.60). If either call returns an error, show defaults and note live values could not be confirmed.
 
 ### Step 4: Apply Changes (if flags provided)
 
@@ -115,7 +120,7 @@ Tuning Guide:
 
 ## Rules
 
-- Always call `distillery_configure(action="get", section="feeds.thresholds")` first to verify MCP availability and retrieve current thresholds
+- Always call `distillery_configure(section="feeds.thresholds", key="alert")` and `distillery_configure(section="feeds.thresholds", key="digest")` first to verify MCP availability and retrieve current thresholds
 - In read-only mode, display thresholds without confirmation
 - Validate `--alert` >= `--digest` before applying; reject invalid combinations
 - Always ask for confirmation before applying changes
