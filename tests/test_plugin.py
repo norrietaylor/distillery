@@ -233,11 +233,11 @@ class TestPluginMCPServers:
         server = manifest["mcpServers"]["distillery"]
         assert "url" in server
 
-    def test_distillery_server_url_is_fly_endpoint(self) -> None:
-        """The distillery server URL must point to the Fly.io hosted endpoint."""
+    def test_distillery_server_url_uses_user_config(self) -> None:
+        """The distillery server URL must reference the userConfig template variable."""
         manifest = load_plugin_manifest()
         server = manifest["mcpServers"]["distillery"]
-        assert server["url"] == "https://distillery-mcp.fly.dev/mcp"
+        assert server["url"] == "${user_config.distillery_mcp_url}"
 
     def test_distillery_server_no_unsupported_fields(self) -> None:
         """The distillery server must not contain fields unsupported by the plugin schema."""
