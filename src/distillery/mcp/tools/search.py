@@ -293,6 +293,7 @@ _AGGREGATE_GROUP_BY_MAP: dict[str, str] = {
     "author": "author",
     "project": "project",
     "source": "source",
+    "tags": "UNNEST(tags)",
     "metadata.source_url": "json_extract_string(metadata, '$.source_url')",
     "metadata.source_type": "json_extract_string(metadata, '$.source_type')",
 }

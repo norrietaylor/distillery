@@ -80,8 +80,12 @@ async def store_with_stale(store: Any) -> Any:  # type: ignore[return]
     await _store_entry_with_timestamps(store, stale1, accessed_at=thirty_days_ago)
     await _store_entry_with_timestamps(store, stale2, accessed_at=thirty_days_ago)
     await _store_entry_with_timestamps(store, recent1, accessed_at=one_day_ago)
-    await _store_entry_with_timestamps(store, old_no_access, accessed_at=None, updated_at=thirty_days_ago)
-    await _store_entry_with_timestamps(store, new_no_access, accessed_at=None, updated_at=one_day_ago)
+    await _store_entry_with_timestamps(
+        store, old_no_access, accessed_at=None, updated_at=thirty_days_ago
+    )
+    await _store_entry_with_timestamps(
+        store, new_no_access, accessed_at=None, updated_at=one_day_ago
+    )
 
     store._stale_ids = {stale1.id, stale2.id, old_no_access.id}
     store._recent_ids = {recent1.id, new_no_access.id}
@@ -430,14 +434,6 @@ class TestGroupBy:
         assert by_source.get("manual") == 4
         assert by_source.get("claude-code") == 1
 
-    @pytest.mark.xfail(
-        reason=(
-            "DuckDB 1.5.1 does not support UNNEST() in a CTE SELECT; "
-            "group_by=tags requires store-layer fix to use a two-step CTE. "
-            "See aggregate_entries in duckdb.py."
-        ),
-        strict=True,
-    )
     async def test_group_by_tags(self, populated_store: Any) -> None:
         """group_by=tags unnests tags array — each tag gets its own count."""
         result = await _handle_list(
@@ -453,8 +449,8 @@ class TestGroupBy:
 
     @pytest.mark.xfail(
         reason=(
-            "DuckDB 1.5.1 does not support UNNEST() in a CTE SELECT; "
-            "group_by=tags with tag_prefix requires store-layer fix. "
+            "tag_prefix currently filters entries (not individual tags); "
+            "group_by=tags with tag_prefix needs post-explode filtering. "
             "See aggregate_entries in duckdb.py."
         ),
         strict=True,

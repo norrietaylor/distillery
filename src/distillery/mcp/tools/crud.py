@@ -149,9 +149,7 @@ async def _handle_store(
     output_mode_raw = arguments.get("output_mode")
     output_mode = output_mode_raw if output_mode_raw is not None else "full"
     if output_mode not in ("full", "summary"):
-        return error_response(
-            "INVALID_PARAMS", "Field 'output_mode' must be 'full' or 'summary'."
-        )
+        return error_response("INVALID_PARAMS", "Field 'output_mode' must be 'full' or 'summary'.")
 
     entry_type_str = arguments["entry_type"]
     if entry_type_str not in _VALID_ENTRY_TYPES:
@@ -227,7 +225,9 @@ async def _handle_store(
     embed_count = 1 if output_mode == "summary" else 3
     if cfg is not None:
         try:
-            record_and_check(store.connection, cfg.rate_limit.embedding_budget_daily, count=embed_count)
+            record_and_check(
+                store.connection, cfg.rate_limit.embedding_budget_daily, count=embed_count
+            )
         except EmbeddingBudgetError as exc:
             return error_response("BUDGET_EXCEEDED", str(exc))
 
@@ -420,7 +420,9 @@ async def _handle_store_batch(
                 "INVALID_PARAMS", f"entries[{idx}] must be a dict, got {type(item).__name__}."
             )
         if "content" not in item:
-            return error_response("INVALID_PARAMS", f"entries[{idx}] is missing required 'content'.")
+            return error_response(
+                "INVALID_PARAMS", f"entries[{idx}] is missing required 'content'."
+            )
         if "author" not in item:
             return error_response("INVALID_PARAMS", f"entries[{idx}] is missing required 'author'.")
 
@@ -468,7 +470,11 @@ async def _handle_store_batch(
 
         # --- reserved prefix enforcement (mirror _handle_store logic) ---
         _reserved_allowed_sources: set[str] = {EntrySource.IMPORT.value}
-        if cfg is not None and cfg.tags.reserved_prefixes and source_str not in _reserved_allowed_sources:
+        if (
+            cfg is not None
+            and cfg.tags.reserved_prefixes
+            and source_str not in _reserved_allowed_sources
+        ):
             for tag in final_tags:
                 top = tag.split("/")[0]
                 if top in cfg.tags.reserved_prefixes:
@@ -754,7 +760,7 @@ async def _handle_update(
 # ---------------------------------------------------------------------------
 
 _VALID_OUTPUT_MODES = frozenset({"full", "summary", "ids", "review"})
-_VALID_GROUP_BY_VALUES = frozenset({"entry_type", "status", "author", "project", "source"})
+_VALID_GROUP_BY_VALUES = frozenset({"entry_type", "status", "author", "project", "source", "tags"})
 
 
 def _entry_to_summary_dict(entry: Any) -> dict[str, Any]:
