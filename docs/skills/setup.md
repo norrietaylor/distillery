@@ -49,20 +49,21 @@ Lists any configured feed sources from `/watch`.
 
 ### Step 4: Scheduled Tasks
 
-Configures up to three tiers of recurring jobs:
+Configures up to three tiers of recurring tasks via **Claude Code routines**:
 
-| Schedule | Task | Purpose |
-|----------|------|---------|
-| **Hourly** | Feed polling | Fetch new items from all feed sources |
-| **Daily** | Feed rescoring | Re-score entries against updated interest profile |
-| **Weekly** | KB maintenance | Collect metrics, quality, stale entries, interests, suggestions |
+| Schedule | Routine | Purpose |
+|----------|---------|---------|
+| **Hourly** | `distillery-feed-poll` | Fetch new items from all feed sources |
+| **Daily** | `distillery-stale-check` | Identify entries needing refresh or archival |
+| **Weekly** | `distillery-weekly-maintenance` | Collect metrics, stale entries, feed activity, digest |
 
-Scheduling depends on your transport:
+Routines run automatically in the background when Claude Code is active. They work the same way for both local and hosted transport.
 
-- **Local transport** — creates cron jobs via `CronCreate` (a Claude Code platform primitive)
-- **Hosted/team transport** — scheduling is managed by the GitHub Actions workflow at `.github/workflows/scheduler.yml`, which calls the webhook endpoints (`/api/poll`, `/api/rescore`, `/api/maintenance`). No local cron configuration needed.
-- Checks for existing jobs before creating (no duplicates)
-- If no feed sources exist, poll/rescore are skipped but weekly maintenance is still offered
+- If no feed sources exist, poll and stale check are skipped but weekly maintenance is still offered
+- The wizard provides the routine name, schedule, and prompt for each tier
+
+!!! note "Migration from CronCreate / Webhooks"
+    Previous versions used `CronCreate` (local) or GitHub Actions webhook scheduling (hosted). Both approaches are now deprecated in favour of Claude Code routines. Existing jobs continue to work but should be migrated.
 
 ### Step 5: Configure Session Hooks
 
@@ -96,9 +97,9 @@ Always displayed, even if the wizard exits early:
 | Transport | Hosted (distillery-mcp.fly.dev) |
 | Entries | 42 |
 | Feed Sources | 3 |
-| Hourly Poll | Managed by GitHub Actions |
-| Daily Rescore | Managed by GitHub Actions |
-| Weekly Maintenance | Managed by GitHub Actions |
+| Hourly Poll | Active (routine) |
+| Daily Stale Check | Active (routine) |
+| Weekly Maintenance | Active (routine) |
 
 ### Available Skills
 /distill, /recall, /pour, /bookmark, /minutes,

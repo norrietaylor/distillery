@@ -998,7 +998,9 @@ def _cmd_import(
                     created_by=raw.get("created_by", ""),
                     last_modified_by=raw.get("last_modified_by", ""),
                     expires_at=(
-                        _parse_dt(raw["expires_at"]) if raw.get("expires_at") is not None else None
+                        _parse_dt(raw["expires_at"]).replace(tzinfo=None)
+                        if raw.get("expires_at") is not None
+                        else None
                     ),
                     session_id=raw.get("session_id"),
                 )

@@ -364,7 +364,7 @@ The following skills are available in `skills/`:
 | `/bookmark` | `bookmark/` | distillery_store, distillery_find_similar | Save and annotate URLs |
 | `/minutes` | `minutes/` | distillery_store, distillery_update, distillery_list | Record and update meeting notes |
 | `/classify` | `classify/` | distillery_classify, distillery_list(output_mode=review), distillery_resolve_review | Classify and review entries |
-| `/watch` | `watch/` | distillery_watch | Manage monitored feed sources + auto-poll scheduling (CronCreate local; GitHub Actions for hosted) |
+| `/watch` | `watch/` | distillery_watch | Manage monitored feed sources + auto-poll scheduling (Claude Code routines) |
 | `/radar` | `radar/` | distillery_search, distillery_list, distillery_store | Interest-driven feed digest and source suggestions |
 | `/tune` | `tune/` | distillery_configure | Display and adjust feed relevance thresholds |
 | `/setup` | `setup/` | distillery_list, distillery_watch, distillery_configure | MCP connectivity wizard and transport configuration |

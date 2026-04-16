@@ -3,10 +3,6 @@ name: watch
 description: "Add, remove, or list monitored feed sources (RSS and GitHub)"
 allowed-tools:
   - "mcp__*__distillery_watch"
-  - "CronCreate"
-  - "CronList"
-  - "CronDelete"
-  - "RemoteTrigger"
 disable-model-invocation: true
 effort: medium
 ---
@@ -61,26 +57,15 @@ Call `distillery_watch` with the parsed arguments:
 
 ### Step 4: Auto-Poll Schedule (after `add` only)
 
-After a successful `add`, ensure automatic polling is configured. Never create duplicate poll jobs.
+After a successful `add`, remind the user about routine-based polling.
 
-**4a. Determine scheduling mechanism:** Read `.mcp.json` in the project root:
-- URL contains `localhost`, `127.0.0.1`, or transport is `stdio` → **local** → use `CronCreate`
-- Remote host (e.g., `distillery-mcp.fly.dev`) → **deployed** → scheduling is handled by the GitHub Actions workflow at `.github/workflows/scheduler.yml`. Display: "Auto-poll managed by GitHub Actions (hourly at :23 UTC)." and skip to Step 5.
-
-**4b. Local schedule check:**
-
-Check `CronList` for a poll job whose prompt includes both:
-- `distillery_watch(action='list')`
-- `distillery_list(entry_type='feed'`
-If found, skip to Step 5.
-
-If no scheduled task exists, display:
+If no feed poll routine is configured, display:
 
 ```text
-No auto-poll schedule found. Run /setup to configure scheduled tasks.
+No feed poll routine found. Run /setup to configure scheduled routines.
 ```
 
-**4c. Cleanup on `remove`:** After a successful `remove`, if no sources remain, delete/pause the auto-poll schedule via `CronDelete` (local only). Display: "Auto-poll paused: no feed sources remaining."
+If the user already has routines configured (they confirm when asked), skip to Step 5.
 
 ### Step 5: Confirm
 
@@ -108,8 +93,7 @@ Changes are persisted to the database automatically — no manual YAML editing r
 - Validate `source_type` is one of: `rss`, `github`, `hackernews`, `webhook`
 - Do not proceed with `add` without a URL
 - Always show the updated source table after `add` or `remove`
-- After `add` on local transport, always check `CronList` before creating a schedule — no duplicates
-- After `remove` that leaves zero sources on local transport, pause/delete the auto-poll schedule
-- For hosted/team transport, scheduling is managed by GitHub Actions — do not create local cron jobs
+- After `add`, remind the user to run /setup if no feed poll routine is configured
+- Scheduling uses Claude Code routines for all transport modes — CronCreate and webhook scheduling are deprecated
 - On MCP errors, see CONVENTIONS.md error handling — display and stop
 - Trust weight: 0.0–1.0 (default 1.0); poll interval: positive integer minutes (default 60)

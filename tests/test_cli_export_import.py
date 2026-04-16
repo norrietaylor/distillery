@@ -133,7 +133,14 @@ async def _async_seed_store(db_path: str, entries: list[dict[str, Any]]) -> None
 
         embedding = provider.embed(raw.get("content", ""))
         expires_at_raw = raw.get("expires_at")
-        expires_at_val = _parse_dt(expires_at_raw) if expires_at_raw is not None else None
+        if expires_at_raw is not None:
+            _ea = _parse_dt(expires_at_raw)
+            # expires_at is a naive TIMESTAMP column — strip tzinfo so DuckDB
+            # does not convert to local time, which would shift the value on
+            # every roundtrip.
+            expires_at_val: datetime | None = _ea.replace(tzinfo=None)
+        else:
+            expires_at_val = None
         conn.execute(
             "INSERT INTO entries "
             "(id, content, entry_type, source, author, project, tags, status, "

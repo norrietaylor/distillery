@@ -1,5 +1,11 @@
 """Webhook REST endpoints for scheduled Distillery operations.
 
+.. deprecated::
+    The ``/hooks/poll``, ``/hooks/rescore``, and ``/hooks/classify-batch``
+    endpoints are deprecated in favour of Claude Code routines for scheduling.
+    The ``/api/maintenance`` endpoint is retained for orchestrated maintenance.
+    See issue #272 for migration details.
+
 Provides a Starlette sub-application with POST endpoints for ``/poll``,
 ``/rescore``, and ``/maintenance``.  Authentication is handled via a
 bearer token verified with constant-time comparison.  Per-endpoint
@@ -936,23 +942,45 @@ def create_webhook_app(
     async def hooks_poll_route(request: Request) -> JSONResponse:
         """Route handler for ``POST /hooks/poll``.
 
+        .. deprecated::
+            This endpoint is deprecated. Use Claude Code routines for
+            scheduled feed polling instead. See issue #272.
+
         Canonical path for the poll webhook; shares cooldown with ``/poll``.
         Accepts an optional ``source_url`` query parameter to poll a single
         source (e.g. ``POST /hooks/poll?source_url=https://example.com/feed``).
         """
-        return await _authenticated_endpoint(request, "poll")
+        response = await _authenticated_endpoint(request, "poll")
+        if response.status_code != 401:
+            logger.warning(
+                "Webhook /hooks/poll is deprecated — migrate to Claude Code routines (see #272)"
+            )
+        return response
 
     async def hooks_rescore_route(request: Request) -> JSONResponse:
         """Route handler for ``POST /hooks/rescore``.
+
+        .. deprecated::
+            This endpoint is deprecated. Use Claude Code routines for
+            scheduled feed rescoring instead. See issue #272.
 
         Canonical path for the rescore webhook; shares cooldown with ``/rescore``.
         Accepts an optional ``limit`` query parameter controlling how many
         entries are rescored (e.g. ``POST /hooks/rescore?limit=50``).
         """
-        return await _authenticated_endpoint(request, "rescore")
+        response = await _authenticated_endpoint(request, "rescore")
+        if response.status_code != 401:
+            logger.warning(
+                "Webhook /hooks/rescore is deprecated — migrate to Claude Code routines (see #272)"
+            )
+        return response
 
     async def hooks_classify_batch_route(request: Request) -> JSONResponse:
         """Route handler for ``POST /hooks/classify-batch``.
+
+        .. deprecated::
+            This endpoint is deprecated. Use Claude Code routines for
+            scheduled batch classification instead. See issue #272.
 
         Classify pending entries in batch using LLM or heuristic mode.
         Accepts optional query parameters:
@@ -960,7 +988,13 @@ def create_webhook_app(
         - ``entry_type`` (default ``"inbox"``): filter entries by type.
         - ``mode``: ``"llm"`` or ``"heuristic"`` (defaults to config value).
         """
-        return await _authenticated_endpoint(request, "classify-batch")
+        response = await _authenticated_endpoint(request, "classify-batch")
+        if response.status_code != 401:
+            logger.warning(
+                "Webhook /hooks/classify-batch is deprecated"
+                " — migrate to Claude Code routines (see #272)"
+            )
+        return response
 
     routes: list[Route] = [
         Route("/poll", poll_route, methods=["POST"]),
