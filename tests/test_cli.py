@@ -976,3 +976,34 @@ class TestRetagCommand:
         with pytest.raises(SystemExit) as exc:
             main(["retag", "--config", str(cfg_path), "--dry-run"])
         assert exc.value.code == 0
+
+    def test_retag_via_main_produces_text_output(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """``distillery retag --dry-run`` produces visible output via main()."""
+        db_path = str(tmp_path / "test.db")
+        cfg_path = write_config(tmp_path, db_path)
+        with pytest.raises(SystemExit) as exc:
+            main(["retag", "--config", str(cfg_path), "--dry-run"])
+        assert exc.value.code == 0
+        captured = capsys.readouterr()
+        assert "Retag complete" in captured.out
+        assert "total_scanned" in captured.out
+
+    def test_retag_via_main_produces_json_output(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """``distillery retag --dry-run --format json`` produces JSON via main()."""
+        db_path = str(tmp_path / "test.db")
+        cfg_path = write_config(tmp_path, db_path)
+        with pytest.raises(SystemExit) as exc:
+            main(["retag", "--config", str(cfg_path), "--dry-run", "--format", "json"])
+        assert exc.value.code == 0
+        captured = capsys.readouterr()
+        data = json.loads(captured.out)
+        assert data["dry_run"] is True
+        assert "total_scanned" in data
