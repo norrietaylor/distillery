@@ -89,8 +89,9 @@ class SyncJob:
 class SyncJobTracker:
     """In-memory registry of background sync jobs.
 
-    Thread-safe for use with asyncio tasks.  Jobs are kept in memory and
-    are lost on process restart (acceptable for MCP server lifecycle).
+    Safe for use with asyncio tasks (cooperative concurrency on a single
+    thread).  Jobs are kept in memory and are lost on process restart
+    (acceptable for MCP server lifecycle).
     """
 
     def __init__(self) -> None:
