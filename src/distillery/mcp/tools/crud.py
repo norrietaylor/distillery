@@ -760,7 +760,7 @@ async def _handle_update(
 # ---------------------------------------------------------------------------
 
 _VALID_OUTPUT_MODES = frozenset({"full", "summary", "ids", "review"})
-_VALID_GROUP_BY_VALUES = frozenset({"entry_type", "status", "author", "project", "source"})
+_VALID_GROUP_BY_VALUES = frozenset({"entry_type", "status", "author", "project", "source", "tags"})
 
 
 def _entry_to_summary_dict(entry: Any) -> dict[str, Any]:
