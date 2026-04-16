@@ -290,6 +290,18 @@ The following table lists all valid `source` values, describing their origin and
 
 Use the `source` filter in `/recall` to retrieve entries by provenance (e.g., search only documentation sources for verified facts).
 
+## Forked Context Constraints
+
+Skills with `context: fork` run in an isolated agent context with a restricted `allowed-tools` list. Due to platform limitations, the forked context may attempt to use tools outside its allowlist (such as Bash or Python) when an MCP tool call fails. To defend against this:
+
+1. Every `context: fork` skill MUST include these two rules at the top of its `## Rules` section:
+   - `NEVER use Bash, Python, or any tool not listed in allowed-tools`
+   - `If an MCP tool call fails, report the error to the user and STOP. Do not attempt workarounds.`
+2. The forked context must not attempt to work around MCP errors by shelling out, running scripts, or using any tool not declared in `allowed-tools`.
+3. On any MCP tool failure, the skill must display the error per the Error Handling section below and halt immediately.
+
+**Skills currently using `context: fork`:** `/pour`, `/radar`, `/digest`, `/investigate`, `/briefing`, `/gh-sync`.
+
 ## Error Handling
 
 If any MCP tool returns an error, display it and stop (no retry loops):

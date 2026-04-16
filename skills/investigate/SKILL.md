@@ -276,6 +276,8 @@ Investigated "<topic>": <N> entries across <phases> phases, <K> relationship edg
 
 ## Rules
 
+- NEVER use Bash, Python, or any tool not listed in allowed-tools
+- If an MCP tool call fails, report the error to the user and STOP. Do not attempt workarounds.
 - Always use `[Entry <short-id>]` citation format (short-id = first 8 chars of UUID)
 - Deduplicate the result set by entry ID across all phases — each entry counted once
 - Record which phase first discovered each entry

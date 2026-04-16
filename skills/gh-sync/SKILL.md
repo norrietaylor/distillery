@@ -219,6 +219,8 @@ Synced 8 issues, 4 PRs from norrietaylor/distillery. 5 new, 7 updated. 6 cross-r
 
 ## Rules
 
+- NEVER use Bash, Python, or any tool not listed in allowed-tools
+- If an MCP tool call fails, report the error to the user and STOP. Do not attempt workarounds.
 - `owner/repo` argument is required — ask if not provided
 - `--issues` and `--prs` can be combined (equivalent to syncing both)
 - Never store duplicate entries — always check `metadata.external_id` before storing
