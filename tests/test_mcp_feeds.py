@@ -421,7 +421,7 @@ class FakePurgeStore(FakeSourceStore):
                 match = False
             if match:
                 results.append(e)
-        return results[:limit]
+        return results[offset : offset + limit]
 
     async def update(self, entry_id: str, updates: dict[str, Any]) -> FakeEntry:
         for e in self._entries:
@@ -564,7 +564,7 @@ class TestHandleWatchRemovePurge:
         data = parse(result)
         assert data["removed"] is True
         assert "purge_error" in data
-        assert "DB error during purge" in data["purge_error"]
+        assert data["purge_error"] == "Failed to archive historic entries."
 
 
 # ---------------------------------------------------------------------------

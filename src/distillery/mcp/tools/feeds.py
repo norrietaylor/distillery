@@ -211,9 +211,9 @@ async def _handle_watch(
         try:
             archived_count = await _purge_source_entries(store, url)
             remove_data["purged_entries"] = archived_count
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             logger.exception("distillery_watch: failed to purge entries for %s", url)
-            remove_data["purge_error"] = str(exc)
+            remove_data["purge_error"] = "Failed to archive historic entries."
 
     return success_response(remove_data)
 
@@ -224,7 +224,7 @@ async def _handle_watch(
 
 
 async def _purge_source_entries(store: Any, source_url: str) -> int:
-    """Archive all active entries whose ``metadata.source_url`` matches *source_url*.
+    """Archive all non-archived entries whose ``metadata.source_url`` matches *source_url*.
 
     Iterates through matching entries in batches and sets ``status="archived"``
     on each one via ``store.update()``.  Returns the total count of archived
@@ -239,17 +239,20 @@ async def _purge_source_entries(store: Any, source_url: str) -> int:
     """
     archived = 0
     batch_size = 100
+    offset = 0
     while True:
         entries = await store.list_entries(
-            filters={"metadata.source_url": source_url, "status": "active"},
+            filters={"metadata.source_url": source_url},
             limit=batch_size,
-            offset=0,
+            offset=offset,
         )
         if not entries:
             break
         for entry in entries:
-            await store.update(entry.id, {"status": "archived"})
-            archived += 1
+            if getattr(entry, "status", None) != "archived":
+                await store.update(entry.id, {"status": "archived"})
+                archived += 1
+        offset += batch_size
     return archived
 
 
