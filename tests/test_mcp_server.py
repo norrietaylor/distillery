@@ -682,5 +682,8 @@ class TestCreateServer:
             "distillery_rescore",
             "distillery_configure",
             "distillery_relations",
+            "distillery_gh_sync",
+            "distillery_store_batch",
+            "distillery_sync_status",
         }
         assert expected == tool_names, f"Missing tools: {expected - tool_names}"

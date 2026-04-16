@@ -4,6 +4,9 @@ Implements the following tools:
   - distillery_watch: Manage feed sources (list, add, remove).
   - distillery_poll: Poll configured feed sources for new content.
   - distillery_rescore: Re-score existing feed entries against current knowledge.
+  - distillery_gh_sync: Sync GitHub issues/PRs with batched pipeline.
+  - distillery_store_batch: Store multiple entries in a single batched call.
+  - distillery_sync_status: Check status of background sync jobs.
 
 Helper functions ``_normalise_watched_set`` and ``_derive_suggestions`` are used
 by :mod:`distillery.mcp.tools.analytics` when ``distillery_interests`` is called
@@ -12,6 +15,7 @@ with ``suggest_sources=True``.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import Any
@@ -136,6 +140,8 @@ async def _handle_watch(
                 f"trust_weight must be between 0.0 and 1.0, got: {trust_weight}",
             )
 
+        sync_history = bool(arguments.get("sync_history", False))
+
         try:
             added = await store.add_feed_source(
                 url=url,
@@ -154,12 +160,30 @@ async def _handle_watch(
             logger.exception("distillery_watch: failed to add feed source")
             return error_response("WATCH_ERROR", f"Failed to add feed source: {exc}")
 
-        return success_response(
-            {
-                "added": added,
-                "sources": db_sources,
-            }
-        )
+        response_data: dict[str, Any] = {
+            "added": added,
+            "sources": db_sources,
+        }
+
+        # When sync_history is requested, kick off an async background sync
+        # instead of blocking the MCP response.
+        if sync_history and source_type == "github":
+            from distillery.feeds.github_sync import GitHubSyncAdapter
+            from distillery.feeds.sync_jobs import get_tracker, run_sync_job_async
+
+            tracker = get_tracker()
+            job = tracker.create_job(source_url=url, source_type=source_type)
+            adapter = GitHubSyncAdapter(store=store, url=url)
+            sync_coro = adapter.sync_batched()
+
+            asyncio.create_task(run_sync_job_async(job, tracker, sync_coro))
+            response_data["sync_job"] = job.to_dict()
+            response_data["message"] = (
+                "Feed source added. History sync started in background "
+                f"(job_id={job.job_id}). Use distillery_sync_status to check progress."
+            )
+
+        return success_response(response_data)
 
     # action == "remove"
     url = str(arguments.get("url", "")).strip()
@@ -393,3 +417,224 @@ def _derive_suggestions(
                 )
 
     return candidates[:max_suggestions]
+
+
+# ---------------------------------------------------------------------------
+# distillery_gh_sync handler
+# ---------------------------------------------------------------------------
+
+
+async def _handle_gh_sync(
+    store: Any,
+    arguments: dict[str, Any],
+) -> list[types.TextContent]:
+    """Handle the ``distillery_gh_sync`` tool.
+
+    Synchronises GitHub issues and PRs into the knowledge base using the
+    batched pipeline.  Supports both synchronous (blocking) and async
+    (background job) modes.
+
+    Args:
+        store: An initialised storage backend.
+        arguments: Parsed tool arguments dict.
+
+    Returns:
+        A structured MCP success or error response.
+    """
+    from distillery.feeds.github_sync import GitHubSyncAdapter
+
+    url_raw = arguments.get("url")
+    if url_raw is not None and not isinstance(url_raw, str):
+        return error_response(
+            "INVALID_FIELD", f"url must be a string, got: {type(url_raw).__name__}"
+        )
+    url = str(url_raw or "").strip()
+    if not url:
+        return error_response("MISSING_FIELD", "url is required (owner/repo or GitHub URL)")
+
+    author = str(arguments.get("author", "gh-sync"))
+    project = arguments.get("project")
+    if project is not None:
+        project = str(project)
+    background = bool(arguments.get("background", False))
+
+    adapter = GitHubSyncAdapter(
+        store=store,
+        url=url,
+        author=author,
+        project=project,
+    )
+
+    if background:
+        from distillery.feeds.sync_jobs import get_tracker, run_sync_job_async
+
+        tracker = get_tracker()
+        job = tracker.create_job(source_url=url, source_type="github")
+        sync_coro = adapter.sync_batched()
+        asyncio.create_task(run_sync_job_async(job, tracker, sync_coro))
+        return success_response(
+            {
+                "sync_job": job.to_dict(),
+                "message": (
+                    f"GitHub sync for {url!r} started in background "
+                    f"(job_id={job.job_id}). Use distillery_sync_status to check progress."
+                ),
+            }
+        )
+
+    try:
+        result = await adapter.sync_batched()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("distillery_gh_sync: sync failed for %s", url)
+        return error_response("GH_SYNC_ERROR", f"GitHub sync failed: {exc}")
+
+    return success_response(
+        {
+            "repo": result.repo,
+            "created": result.created,
+            "updated": result.updated,
+            "relations_created": result.relations_created,
+            "pages_processed": result.pages_processed,
+            "errors": result.errors,
+            "sync_timestamp": result.sync_timestamp.isoformat(),
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
+# distillery_store_batch handler
+# ---------------------------------------------------------------------------
+
+
+async def _handle_store_batch(
+    store: Any,
+    arguments: dict[str, Any],
+) -> list[types.TextContent]:
+    """Handle the ``distillery_store_batch`` tool.
+
+    Stores multiple entries in a single batched call.  Each entry is
+    processed individually with error isolation so that a failure in one
+    entry does not prevent storage of the others.
+
+    Args:
+        store: An initialised storage backend.
+        arguments: Parsed tool arguments dict with an ``entries`` list.
+
+    Returns:
+        A structured MCP success or error response.
+    """
+    from distillery.models import Entry, EntrySource, EntryType
+
+    entries_raw = arguments.get("entries")
+    if not isinstance(entries_raw, list) or not entries_raw:
+        return error_response(
+            "INVALID_FIELD",
+            "entries must be a non-empty list of entry dicts",
+        )
+
+    stored_ids: list[str] = []
+    errors: list[dict[str, Any]] = []
+
+    for idx, entry_data in enumerate(entries_raw):
+        if not isinstance(entry_data, dict):
+            errors.append({"index": idx, "error": "entry must be a dict"})
+            continue
+
+        content = entry_data.get("content")
+        entry_type_raw = entry_data.get("entry_type")
+        author = entry_data.get("author", "batch-import")
+
+        if not content or not isinstance(content, str):
+            errors.append({"index": idx, "error": "content is required and must be a string"})
+            continue
+        if not entry_type_raw or not isinstance(entry_type_raw, str):
+            errors.append({"index": idx, "error": "entry_type is required and must be a string"})
+            continue
+
+        try:
+            et = EntryType(entry_type_raw)
+        except ValueError:
+            errors.append(
+                {
+                    "index": idx,
+                    "error": f"Invalid entry_type: {entry_type_raw!r}",
+                }
+            )
+            continue
+
+        source_raw = entry_data.get("source", "import")
+        try:
+            source = EntrySource(source_raw)
+        except ValueError:
+            source = EntrySource.IMPORT
+
+        tags = entry_data.get("tags", [])
+        if not isinstance(tags, list):
+            tags = []
+        metadata = entry_data.get("metadata", {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+        project = entry_data.get("project")
+
+        try:
+            entry = Entry(
+                content=content,
+                entry_type=et,
+                source=source,
+                author=str(author),
+                project=project,
+                tags=tags,
+                metadata=metadata,
+            )
+            entry_id = await store.store(entry)
+            stored_ids.append(entry_id)
+        except Exception as exc:  # noqa: BLE001
+            errors.append({"index": idx, "error": str(exc)})
+
+    return success_response(
+        {
+            "stored_count": len(stored_ids),
+            "stored_ids": stored_ids,
+            "error_count": len(errors),
+            "errors": errors,
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
+# distillery_sync_status handler
+# ---------------------------------------------------------------------------
+
+
+async def _handle_sync_status(
+    arguments: dict[str, Any],
+) -> list[types.TextContent]:
+    """Handle the ``distillery_sync_status`` tool.
+
+    Returns the status of background sync jobs.
+
+    Args:
+        arguments: Parsed tool arguments dict (``job_id`` or ``source_url``).
+
+    Returns:
+        A structured MCP success or error response.
+    """
+    from distillery.feeds.sync_jobs import get_tracker
+
+    tracker = get_tracker()
+    job_id = arguments.get("job_id")
+
+    if job_id is not None:
+        job = tracker.get_job(str(job_id))
+        if job is None:
+            return error_response("NOT_FOUND", f"No sync job found with id={job_id!r}")
+        return success_response(job.to_dict())
+
+    source_url = arguments.get("source_url")
+    jobs = tracker.list_jobs(source_url=source_url)
+    return success_response(
+        {
+            "jobs": [j.to_dict() for j in jobs[:20]],
+            "count": len(jobs),
+        }
+    )

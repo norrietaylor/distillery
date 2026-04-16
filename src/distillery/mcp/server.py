@@ -46,8 +46,11 @@ from distillery.mcp.tools.crud import (
     _normalize_db_path,  # re-exported for webhooks.py backward compat
 )
 from distillery.mcp.tools.feeds import (
+    _handle_gh_sync,
     _handle_poll,
     _handle_rescore,
+    _handle_store_batch,
+    _handle_sync_status,
     _handle_watch,
 )
 from distillery.mcp.tools.quality import (
@@ -96,6 +99,9 @@ __all__ = [
     "_handle_watch",
     "_handle_poll",
     "_handle_rescore",
+    "_handle_gh_sync",
+    "_handle_store_batch",
+    "_handle_sync_status",
     "_handle_relations",
 ]
 
@@ -691,10 +697,13 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         label: str | None = None,
         poll_interval_minutes: int | None = None,
         trust_weight: float | None = None,
+        sync_history: bool = False,
     ) -> list[types.TextContent]:
         """Manage monitored feed sources: action is "list", "add", or "remove".
 
         add requires url and source_type (rss or github). remove requires url.
+        sync_history: when true and source_type is github, kicks off async background
+        import of historical issues/PRs (returns immediately with job_id).
         """
         c = _lc(ctx)
         return await _handle_watch(
@@ -707,6 +716,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                     label=label,
                     poll_interval_minutes=poll_interval_minutes,
                     trust_weight=trust_weight,
+                    sync_history=sync_history or None,
                 ),
             ),
         )
@@ -786,6 +796,56 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 ),
             ),
         )
+
+    @server.tool
+    async def distillery_gh_sync(
+        ctx: Context,
+        url: str,
+        author: str = "gh-sync",
+        project: str | None = None,
+        background: bool = False,
+    ) -> list[types.TextContent]:
+        """Sync GitHub issues and PRs into the knowledge base using a batched pipeline.
+
+        url: repository slug (owner/repo) or full GitHub URL.
+        author: author field for created entries (default: gh-sync).
+        project: optional project name to scope entries.
+        background: when true, runs async and returns a job_id immediately.
+        """
+        c = _lc(ctx)
+        return await _handle_gh_sync(
+            store=c["store"],
+            arguments=dict(
+                url=url, author=author, **_omit_none(project=project, background=background or None)
+            ),
+        )
+
+    @server.tool
+    async def distillery_store_batch(
+        ctx: Context,
+        entries: list[dict[str, Any]],
+    ) -> list[types.TextContent]:
+        """Store multiple knowledge entries in a single batched call.
+
+        entries: list of dicts, each with content, entry_type, and optionally
+        author, tags, metadata, project, source.
+        """
+        c = _lc(ctx)
+        return await _handle_store_batch(store=c["store"], arguments={"entries": entries})
+
+    @server.tool
+    async def distillery_sync_status(
+        ctx: Context,
+        job_id: str | None = None,
+        source_url: str | None = None,
+    ) -> list[types.TextContent]:
+        """Check the status of background sync jobs.
+
+        job_id: look up a specific job by ID.
+        source_url: list jobs for a specific source URL.
+        If neither is provided, lists all recent jobs.
+        """
+        return await _handle_sync_status(arguments=_omit_none(job_id=job_id, source_url=source_url))
 
     @server.tool
     async def distillery_configure(

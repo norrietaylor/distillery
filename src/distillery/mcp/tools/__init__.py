@@ -35,8 +35,11 @@ from distillery.mcp.tools.crud import (
     _handle_update,
 )
 from distillery.mcp.tools.feeds import (
+    _handle_gh_sync,
     _handle_poll,
     _handle_rescore,
+    _handle_store_batch,
+    _handle_sync_status,
     _handle_watch,
 )
 from distillery.mcp.tools.quality import (
@@ -64,8 +67,11 @@ __all__ = [
     "_handle_search",
     "_handle_find_similar",
     "_handle_aggregate",
+    "_handle_gh_sync",
     "_handle_poll",
     "_handle_rescore",
+    "_handle_store_batch",
+    "_handle_sync_status",
     "_handle_watch",
     "_handle_interests",
     "_handle_metrics",

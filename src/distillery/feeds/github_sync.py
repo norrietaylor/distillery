@@ -9,6 +9,14 @@ last sync timestamps, and parses cross-references (``#123``, ``Closes #123``,
 Unlike :class:`~distillery.feeds.github.GitHubAdapter` which polls the events
 stream for ambient monitoring, this adapter performs structured synchronisation
 of issue/PR content suitable for deep knowledge capture.
+
+Supports two sync modes:
+
+- :meth:`GitHubSyncAdapter.sync` — original all-at-once sync (retained for
+  backward compatibility).
+- :meth:`GitHubSyncAdapter.sync_batched` — page-at-a-time pipeline where each
+  page of issues is fetched, stored, and cross-referenced independently so that
+  partial progress survives failures and long imports do not risk timeouts.
 """
 
 from __future__ import annotations
@@ -17,7 +25,7 @@ import asyncio
 import logging
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
@@ -45,6 +53,10 @@ _MAX_FETCH_ITEMS = 1000
 
 # Maximum retries for transient errors (429 / 5xx).
 _MAX_RETRIES = 3
+
+# Maximum content length before truncation (characters).  Oversized entries
+# are truncated to avoid exceeding embedding model input limits.
+_MAX_CONTENT_LENGTH = 8000
 
 # Pattern for GitHub cross-references in issue/PR bodies and comments.
 # Matches: #123, Closes #123, Fixes #123, Resolves #123, closes #123, etc.
@@ -538,6 +550,214 @@ class GitHubSyncAdapter:
         logger.info("GitHubSyncAdapter: sync complete — %s", result)
         return result
 
+    async def _fetch_issues_page(
+        self,
+        page: int,
+        since: str | None = None,
+        client: httpx.AsyncClient | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fetch a single page of issues from the GitHub REST API.
+
+        Parameters
+        ----------
+        page:
+            1-based page number.
+        since:
+            ISO 8601 timestamp for incremental sync.
+        client:
+            Optional pre-built httpx client.
+
+        Returns
+        -------
+        list[dict[str, Any]]
+            A list of issue dicts (may be empty if no more pages).
+        """
+        api_url = f"{_GITHUB_API_BASE}/repos/{self._owner}/{self._repo}/issues"
+        params: dict[str, str | int] = {
+            "state": "all",
+            "per_page": _DEFAULT_PER_PAGE,
+            "sort": "updated",
+            "direction": "desc",
+            "page": page,
+        }
+        if since:
+            params["since"] = since
+
+        should_close = client is None
+        if client is None:
+            client = httpx.AsyncClient(timeout=_REQUEST_TIMEOUT, follow_redirects=True)
+        try:
+            response = await self._request_with_retry(client, api_url, params)
+            batch: list[dict[str, Any]] = response.json()
+            if not isinstance(batch, list):
+                return []
+            return batch
+        finally:
+            if should_close:
+                await client.aclose()
+
+    async def _process_issue_batch(
+        self,
+        issues: list[dict[str, Any]],
+        client: httpx.AsyncClient | None = None,
+    ) -> tuple[int, int, list[tuple[str, list[int]]]]:
+        """Store or update a batch of issues and return (created, updated, pending_xrefs).
+
+        Each issue in the batch is processed individually: comments are
+        fetched, the content is truncated if oversized, and the entry is
+        created or updated.
+
+        Returns
+        -------
+        tuple[int, int, list[tuple[str, list[int]]]]
+            ``(created_count, updated_count, pending_xref_pairs)``
+        """
+        created = 0
+        updated = 0
+        pending_xrefs: list[tuple[str, list[int]]] = []
+
+        for issue in issues:
+            number = issue.get("number", 0)
+            is_pr = "pull_request" in issue
+            ref_type = "pr" if is_pr else "issue"
+            external_id = _make_external_id(self._owner, self._repo, ref_type, number)
+
+            try:
+                comments = await self._fetch_comments(number, client=client)
+            except httpx.HTTPError:
+                logger.warning("Failed to fetch comments for %s #%d", external_id, number)
+                comments = []
+
+            entry = self._issue_to_entry(issue, comments)
+
+            # Truncate oversized content before embedding.
+            if len(entry.content) > _MAX_CONTENT_LENGTH:
+                entry.content = entry.content[:_MAX_CONTENT_LENGTH] + "\n\n[truncated]"
+
+            existing = await self._find_existing(external_id)
+
+            if existing is not None:
+                await self._store.update(
+                    existing.id,
+                    {
+                        "content": entry.content,
+                        "metadata": entry.metadata,
+                        "tags": entry.tags,
+                    },
+                )
+                entry_id = existing.id
+                updated += 1
+            else:
+                entry_id = await self._store.store(entry)
+                created += 1
+
+            cross_refs = _extract_cross_refs(entry.content)
+            cross_refs = [r for r in cross_refs if r != number]
+            if cross_refs:
+                pending_xrefs.append((entry_id, cross_refs))
+
+        return created, updated, pending_xrefs
+
+    async def sync_batched(
+        self,
+        client: httpx.AsyncClient | None = None,
+        on_page: Any | None = None,
+    ) -> SyncResult:
+        """Synchronise issues/PRs using a page-at-a-time batched pipeline.
+
+        Each page of issues (up to 100 items) is fetched, stored, and
+        cross-referenced independently.  This means partial progress
+        survives failures and long imports do not risk MCP timeouts.
+
+        Parameters
+        ----------
+        client:
+            Optional pre-built httpx client (for testing/injection).
+        on_page:
+            Optional callback ``(page_num: int, created: int, updated: int) -> None``
+            called after each page is committed.  Used by the sync job tracker
+            to update progress.
+
+        Returns
+        -------
+        SyncResult
+            Summary of the batched sync operation.
+        """
+        last_sync = await self._store.get_metadata(self._metadata_key)
+        sync_start = datetime.now(tz=UTC)
+
+        total_created = 0
+        total_updated = 0
+        all_pending_xrefs: list[tuple[str, list[int]]] = []
+        all_relations: list[str] = []
+        pages_processed = 0
+        errors: list[str] = []
+
+        should_close = client is None
+        if client is None:
+            client = httpx.AsyncClient(timeout=_REQUEST_TIMEOUT, follow_redirects=True)
+
+        try:
+            page = 1
+            total_fetched = 0
+            while total_fetched < _MAX_FETCH_ITEMS:
+                try:
+                    batch = await self._fetch_issues_page(page, since=last_sync, client=client)
+                except Exception as exc:  # noqa: BLE001
+                    errors.append(f"Page {page} fetch failed: {exc}")
+                    logger.warning("GitHubSyncAdapter: page %d fetch failed: %s", page, exc)
+                    break
+
+                if not batch:
+                    break
+
+                total_fetched += len(batch)
+
+                try:
+                    created, updated, pending_xrefs = await self._process_issue_batch(
+                        batch, client=client
+                    )
+                    total_created += created
+                    total_updated += updated
+                    all_pending_xrefs.extend(pending_xrefs)
+                    pages_processed += 1
+
+                    if on_page is not None:
+                        on_page(page, created, updated)
+
+                except Exception as exc:  # noqa: BLE001
+                    errors.append(f"Page {page} processing failed: {exc}")
+                    logger.warning("GitHubSyncAdapter: page %d processing failed: %s", page, exc)
+
+                if len(batch) < _DEFAULT_PER_PAGE:
+                    break
+                page += 1
+
+            # Second pass: resolve cross-references.
+            for entry_id, cross_refs in all_pending_xrefs:
+                try:
+                    new_rels = await self._create_cross_ref_relations(entry_id, cross_refs)
+                    all_relations.extend(new_rels)
+                except Exception as exc:  # noqa: BLE001
+                    errors.append(f"Cross-ref resolution failed for {entry_id}: {exc}")
+        finally:
+            if should_close:
+                await client.aclose()
+
+        await self._store.set_metadata(self._metadata_key, sync_start.isoformat())
+
+        result = SyncResult(
+            repo=f"{self._owner}/{self._repo}",
+            created=total_created,
+            updated=total_updated,
+            relations_created=len(all_relations),
+            sync_timestamp=sync_start,
+            pages_processed=pages_processed,
+            errors=errors,
+        )
+        logger.info("GitHubSyncAdapter: batched sync complete — %s", result)
+        return result
+
 
 @dataclass
 class SyncResult:
@@ -553,9 +773,25 @@ class SyncResult:
     """Number of cross-reference link relations created."""
     sync_timestamp: datetime
     """UTC timestamp when the sync started."""
+    pages_processed: int = 0
+    """Number of pages fetched and committed (batched mode only)."""
+    errors: list[str] = field(default_factory=list)
+    """Error messages encountered during sync."""
 
     def __repr__(self) -> str:
         return (
             f"SyncResult(repo={self.repo!r}, created={self.created}, "
             f"updated={self.updated}, relations={self.relations_created})"
         )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise to a plain dict for job tracking and MCP responses."""
+        return {
+            "repo": self.repo,
+            "created": self.created,
+            "updated": self.updated,
+            "relations_created": self.relations_created,
+            "sync_timestamp": self.sync_timestamp.isoformat(),
+            "pages_processed": self.pages_processed,
+            "errors": self.errors,
+        }
