@@ -950,10 +950,12 @@ def create_webhook_app(
         Accepts an optional ``source_url`` query parameter to poll a single
         source (e.g. ``POST /hooks/poll?source_url=https://example.com/feed``).
         """
-        logger.warning(
-            "Webhook /hooks/poll is deprecated — migrate to Claude Code routines (see #272)"
-        )
-        return await _authenticated_endpoint(request, "poll")
+        response = await _authenticated_endpoint(request, "poll")
+        if response.status_code != 401:
+            logger.warning(
+                "Webhook /hooks/poll is deprecated — migrate to Claude Code routines (see #272)"
+            )
+        return response
 
     async def hooks_rescore_route(request: Request) -> JSONResponse:
         """Route handler for ``POST /hooks/rescore``.
@@ -966,10 +968,12 @@ def create_webhook_app(
         Accepts an optional ``limit`` query parameter controlling how many
         entries are rescored (e.g. ``POST /hooks/rescore?limit=50``).
         """
-        logger.warning(
-            "Webhook /hooks/rescore is deprecated — migrate to Claude Code routines (see #272)"
-        )
-        return await _authenticated_endpoint(request, "rescore")
+        response = await _authenticated_endpoint(request, "rescore")
+        if response.status_code != 401:
+            logger.warning(
+                "Webhook /hooks/rescore is deprecated — migrate to Claude Code routines (see #272)"
+            )
+        return response
 
     async def hooks_classify_batch_route(request: Request) -> JSONResponse:
         """Route handler for ``POST /hooks/classify-batch``.
@@ -984,10 +988,13 @@ def create_webhook_app(
         - ``entry_type`` (default ``"inbox"``): filter entries by type.
         - ``mode``: ``"llm"`` or ``"heuristic"`` (defaults to config value).
         """
-        logger.warning(
-            "Webhook /hooks/classify-batch is deprecated — migrate to Claude Code routines (see #272)"
-        )
-        return await _authenticated_endpoint(request, "classify-batch")
+        response = await _authenticated_endpoint(request, "classify-batch")
+        if response.status_code != 401:
+            logger.warning(
+                "Webhook /hooks/classify-batch is deprecated"
+                " — migrate to Claude Code routines (see #272)"
+            )
+        return response
 
     routes: list[Route] = [
         Route("/poll", poll_route, methods=["POST"]),

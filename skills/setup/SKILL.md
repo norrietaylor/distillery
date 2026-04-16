@@ -126,11 +126,12 @@ Read `references/routine-payloads.md` for the full routine definitions and displ
 **If no feed sources are configured (from Step 3):**
 
 ```text
-Scheduled tasks: skipped (no feed sources configured)
-  Add sources with /watch add <url> — then run /setup again to configure routines.
+Scheduled tasks: feed poll and stale check skipped (no feed sources configured)
+  Weekly maintenance routine can still be configured for KB health tracking.
+  Add sources with /watch add <url> to enable feed poll and stale check routines.
 ```
 
-Skip to Step 5.
+Offer only the weekly maintenance routine (4c) if the user wants scheduled tasks.
 
 **If feed sources are configured, ask the user once — their answer applies to all three tiers:**
 
@@ -307,7 +308,7 @@ The setup wizard uses a sequential, conversational format. Each step prints its 
 - Use absolute paths to the dispatcher script in hook commands
 - Scheduling uses Claude Code routines for all transport modes (local and hosted)
 - If the user has no feed sources, skip feed poll and stale check but still offer weekly maintenance
-- This skill is idempotent — running it multiple times should not create duplicate routines
+- This skill is idempotent — before creating a routine, check if one with the same name already exists; if so, skip creation and report the existing routine
 - Use `distillery_list(limit=1)` for the MCP health check
 - Routine prompts use MCP tool calls — routines execute in Claude Code context with direct MCP access
 - The weekly maintenance routine stores its output as a digest entry — this creates a longitudinal record of KB health
