@@ -500,7 +500,7 @@ class TestCallToolDispatcher:
         tools = await server.list_tools()
         tool_names = {t.name for t in tools}
 
-        # 13-tool consolidated API (12 from #196 + store_batch from #244).
+        # 15-tool consolidated API (12 from #196 + store_batch, gh_sync, sync_status).
         # Analytics tools (aggregate, metrics, stale, tag_tree, interests)
         # absorbed into distillery_list via group_by, output="stats", stale_days.
         expected = {
@@ -518,7 +518,6 @@ class TestCallToolDispatcher:
             "distillery_configure",
             "distillery_relations",
             "distillery_gh_sync",
-            "distillery_store_batch",
             "distillery_sync_status",
         }
         assert expected == tool_names, (

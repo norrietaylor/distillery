@@ -573,9 +573,7 @@ def _parse_classification(raw: dict[str, Any]) -> ClassificationConfig:
     mode_raw = raw.get("mode", "llm")
     mode = str(mode_raw)
     if mode not in ("llm", "heuristic"):
-        raise ValueError(
-            f"classification.mode must be 'llm' or 'heuristic', got: {mode!r}"
-        )
+        raise ValueError(f"classification.mode must be 'llm' or 'heuristic', got: {mode!r}")
 
     return ClassificationConfig(
         confidence_threshold=threshold,

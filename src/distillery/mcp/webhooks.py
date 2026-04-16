@@ -509,27 +509,33 @@ async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONRe
     async with poll_lock:
         poll_response = await _run_poll(state)
     poll_body = _extract(poll_response)
-    poll_result: dict[str, Any] = poll_body.get("data", poll_body) if poll_body.get("ok") else {
-        "ok": False, "error": poll_body.get("error", "poll failed")
-    }
+    poll_result: dict[str, Any] = (
+        poll_body.get("data", poll_body)
+        if poll_body.get("ok")
+        else {"ok": False, "error": poll_body.get("error", "poll failed")}
+    )
 
     # 2. Rescore — re-score existing entries (acquire rescore lock to serialize).
     rescore_lock = _endpoint_locks.setdefault("rescore", asyncio.Lock())
     async with rescore_lock:
         rescore_response = await _run_rescore(state)
     rescore_body = _extract(rescore_response)
-    rescore_result: dict[str, Any] = rescore_body.get("data", rescore_body) if rescore_body.get("ok") else {
-        "ok": False, "error": rescore_body.get("error", "rescore failed")
-    }
+    rescore_result: dict[str, Any] = (
+        rescore_body.get("data", rescore_body)
+        if rescore_body.get("ok")
+        else {"ok": False, "error": rescore_body.get("error", "rescore failed")}
+    )
 
     # 3. Classify-batch — classify pending inbox entries (acquire classify-batch lock to serialize).
     classify_lock = _endpoint_locks.setdefault("classify-batch", asyncio.Lock())
     async with classify_lock:
         classify_response = await _run_classify_batch(state)
     classify_body = _extract(classify_response)
-    classify_result: dict[str, Any] = classify_body.get("data", classify_body) if classify_body.get("ok") else {
-        "ok": False, "error": classify_body.get("error", "classify-batch failed")
-    }
+    classify_result: dict[str, Any] = (
+        classify_body.get("data", classify_body)
+        if classify_body.get("ok")
+        else {"ok": False, "error": classify_body.get("error", "classify-batch failed")}
+    )
 
     # 4. Search log retention — prune old search_log rows.
     retention_result: dict[str, Any] = {"ok": True, "deleted": 0}
@@ -538,6 +544,7 @@ async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONRe
         store = state["store"]
         retention_days = config.rate_limit.search_log_retention_days
         try:
+
             def _prune() -> int:
                 conn = store.connection
                 result = conn.execute(
@@ -550,7 +557,11 @@ async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONRe
             deleted = await asyncio.to_thread(_prune)
             retention_result = {"ok": True, "deleted": deleted}
             if deleted:
-                logger.info("Maintenance: pruned %d search_log rows older than %d days", deleted, retention_days)
+                logger.info(
+                    "Maintenance: pruned %d search_log rows older than %d days",
+                    deleted,
+                    retention_days,
+                )
         except Exception as exc:  # noqa: BLE001
             retention_result = {"ok": False, "error": f"search_log retention failed: {exc}"}
             logger.warning("Maintenance: search_log retention failed: %s", exc)
@@ -660,9 +671,7 @@ async def _run_classify_batch(
                         )
                     else:
                         entry_embedding = embedding_provider.embed(entry.content)
-                        best_type, best_sim = classifier.classify_entry(
-                            entry_embedding, centroids
-                        )
+                        best_type, best_sim = classifier.classify_entry(entry_embedding, centroids)
                         if best_type is not None:
                             classification = ClassificationResult(
                                 entry_type=EntryType(best_type),
@@ -783,9 +792,7 @@ async def _run_classify_batch(
     )
 
 
-async def _handle_classify_batch(
-    request: Request, state: dict[str, Any]
-) -> JSONResponse:
+async def _handle_classify_batch(request: Request, state: dict[str, Any]) -> JSONResponse:
     """Handler for ``POST /hooks/classify-batch``.
 
     Delegates to :func:`_run_classify_batch`.  Accepts optional query

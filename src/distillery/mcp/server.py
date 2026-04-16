@@ -1,4 +1,4 @@
-"""MCP server for Distillery — 17 tools over stdio or HTTP.
+"""MCP server for Distillery — 15 tools over stdio or HTTP.
 
 Handlers live in ``src/distillery/mcp/tools/`` (crud, search, classify, quality,
 analytics, feeds, configure, meta). This module owns: FastMCP app creation,
@@ -41,17 +41,21 @@ from distillery.mcp.tools.crud import (
     _handle_get,
     _handle_list,
     _handle_store,
-    _handle_store_batch,
     _handle_update,
     _normalize_db_path,  # re-exported for webhooks.py backward compat
+)
+from distillery.mcp.tools.crud import (
+    _handle_store_batch as _handle_crud_store_batch,
 )
 from distillery.mcp.tools.feeds import (
     _handle_gh_sync,
     _handle_poll,
     _handle_rescore,
-    _handle_store_batch,
     _handle_sync_status,
     _handle_watch,
+)
+from distillery.mcp.tools.feeds import (
+    _handle_store_batch as _handle_feed_store_batch,
 )
 from distillery.mcp.tools.quality import (
     run_conflict_discovery,
@@ -94,7 +98,8 @@ __all__ = [
     "_handle_poll",
     "_handle_rescore",
     "_handle_gh_sync",
-    "_handle_store_batch",
+    "_handle_crud_store_batch",
+    "_handle_feed_store_batch",
     "_handle_sync_status",
     "_handle_relations",
 ]
@@ -372,7 +377,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         args: dict[str, Any] = {"entries": entries}
         if project is not None:
             args["project"] = project
-        result = await _handle_store_batch(
+        result = await _handle_crud_store_batch(
             store=c["store"], arguments=args, cfg=c["config"], created_by=user
         )
         return result
@@ -847,7 +852,6 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             store=c["store"],
             arguments=dict(
                 action=action,
-                sync_history=sync_history,
                 **_omit_none(
                     url=url,
                     source_type=source_type,
@@ -932,19 +936,6 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 url=url, author=author, **_omit_none(project=project, background=background or None)
             ),
         )
-
-    @server.tool
-    async def distillery_store_batch(
-        ctx: Context,
-        entries: list[dict[str, Any]],
-    ) -> list[types.TextContent]:
-        """Store multiple knowledge entries in a single batched call.
-
-        entries: list of dicts, each with content, entry_type, and optionally
-        author, tags, metadata, project, source.
-        """
-        c = _lc(ctx)
-        return await _handle_store_batch(store=c["store"], arguments={"entries": entries})
 
     @server.tool
     async def distillery_sync_status(

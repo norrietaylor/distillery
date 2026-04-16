@@ -116,8 +116,7 @@ def validate_required(arguments: dict[str, Any], *fields: str) -> str | None:
     missing = [
         f
         for f in fields
-        if arguments.get(f) is None
-        or (isinstance(arguments.get(f), str) and not arguments.get(f))
+        if arguments.get(f) is None or (isinstance(arguments.get(f), str) and not arguments.get(f))
     ]
     if missing:
         return f"Missing required fields: {', '.join(missing)}"

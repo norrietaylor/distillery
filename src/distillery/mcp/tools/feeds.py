@@ -496,9 +496,9 @@ async def _handle_gh_sync(
 
     try:
         result = await adapter.sync_batched()
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         logger.exception("distillery_gh_sync: sync failed for %s", url)
-        return error_response("GH_SYNC_ERROR", f"GitHub sync failed: {exc}")
+        return error_response("GH_SYNC_ERROR", "GitHub sync failed")
 
     return success_response(
         {

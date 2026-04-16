@@ -195,10 +195,11 @@ async def test_watch_add_sync_history() -> None:
         )
 
     data = parse_mcp_response(result)
-    assert "sync" in data
-    assert data["sync"]["created"] == 5
-    assert data["sync"]["updated"] == 2
-    assert data["sync"]["relations"] == 3
+    # With async background sync, the response contains a sync_job dict
+    # (status=pending) and a message, not the final sync results.
+    assert "sync_job" in data
+    assert data["sync_job"]["status"] == "pending"
+    assert "message" in data
 
 
 @pytest.mark.unit

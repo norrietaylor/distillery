@@ -197,5 +197,13 @@ async def run_sync_job_async(
         )
     except Exception as exc:  # noqa: BLE001
         error_msg = f"Sync job failed: {exc}"
-        logger.exception("Sync job %s failed", job.job_id)
+        logger.exception(
+            "Sync job %s failed (partial progress: %d created, %d updated)",
+            job.job_id,
+            job.entries_created,
+            job.entries_updated,
+        )
+        # Preserve any partial progress already set on the job before failure.
+        # mark_failed only sets status/completed_at/error_message, so progress
+        # fields (entries_created, entries_updated, etc.) are retained.
         tracker.mark_failed(job.job_id, error_msg)
