@@ -976,3 +976,158 @@ class TestRetagCommand:
         with pytest.raises(SystemExit) as exc:
             main(["retag", "--config", str(cfg_path), "--dry-run"])
         assert exc.value.code == 0
+
+
+# ---------------------------------------------------------------------------
+# maintenance classify subcommand
+# ---------------------------------------------------------------------------
+
+
+class TestMaintenanceClassifyCommand:
+    def test_maintenance_classify_empty_inbox(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Empty inbox exits with 0 and shows 0 classified/pending_review/errors."""
+        cfg_path = write_config(tmp_path, ":memory:")
+        with pytest.raises(SystemExit) as exc:
+            main(["maintenance", "classify", "--config", str(cfg_path)])
+        assert exc.value.code == 0
+        captured = capsys.readouterr()
+        assert "classified" in captured.out.lower()
+        assert "pending_review" in captured.out.lower()
+
+    def test_maintenance_classify_json_format(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """JSON output format is correctly parsed."""
+        cfg_path = write_config(tmp_path, ":memory:")
+        with pytest.raises(SystemExit) as exc:
+            main(["maintenance", "classify", "--config", str(cfg_path), "--format", "json"])
+        assert exc.value.code == 0
+        captured = capsys.readouterr()
+        data = json.loads(captured.out)
+        assert "classified" in data
+        assert "pending_review" in data
+        assert "errors" in data
+        assert "by_type" in data
+
+    def test_maintenance_classify_missing_config(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Missing config file returns exit code 1."""
+        missing = str(tmp_path / "no_such.yaml")
+        with pytest.raises(SystemExit) as exc:
+            main(["maintenance", "classify", "--config", missing])
+        assert exc.value.code == 1
+
+    def test_maintenance_classify_with_type_option(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """--type option is accepted."""
+        cfg_path = write_config(tmp_path, ":memory:")
+        with pytest.raises(SystemExit) as exc:
+            main(["maintenance", "classify", "--config", str(cfg_path), "--type", "session"])
+        assert exc.value.code == 0
+
+    def test_maintenance_classify_with_mode_option(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """--mode option is accepted."""
+        cfg_path = write_config(tmp_path, ":memory:")
+        with pytest.raises(SystemExit) as exc:
+            main(["maintenance", "classify", "--config", str(cfg_path), "--mode", "heuristic"])
+        assert exc.value.code == 0
+
+    def test_maintenance_classify_help(
+        self,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """--help displays usage information."""
+        with pytest.raises(SystemExit) as exc:
+            main(["maintenance", "classify", "--help"])
+        assert exc.value.code == 0
+        captured = capsys.readouterr()
+        assert "usage" in captured.out.lower()
+        assert "--type" in captured.out
+        assert "--mode" in captured.out
+
+    def test_maintenance_classify_invalid_mode_rejected(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """argparse rejects an invalid --mode value."""
+        cfg_path = write_config(tmp_path, ":memory:")
+        with pytest.raises(SystemExit) as exc:
+            main(["maintenance", "classify", "--config", str(cfg_path), "--mode", "invalid"])
+        assert exc.value.code != 0
+
+    def test_maintenance_classify_by_type_json_is_dict(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """JSON output by_type is a dict (empty when inbox is empty)."""
+        cfg_path = write_config(tmp_path, ":memory:")
+        with pytest.raises(SystemExit) as exc:
+            main(["maintenance", "classify", "--config", str(cfg_path), "--format", "json"])
+        assert exc.value.code == 0
+        data = json.loads(capsys.readouterr().out)
+        assert isinstance(data["by_type"], dict)
+
+    def test_maintenance_classify_zero_counts_on_empty_inbox(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Empty inbox produces all-zero counts in JSON output."""
+        cfg_path = write_config(tmp_path, ":memory:")
+        with pytest.raises(SystemExit) as exc:
+            main(["maintenance", "classify", "--config", str(cfg_path), "--format", "json"])
+        assert exc.value.code == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data["classified"] == 0
+        assert data["pending_review"] == 0
+        assert data["errors"] == 0
+
+    def test_maintenance_classify_heuristic_mode_empty_store(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Heuristic mode with no existing entries for centroids exits cleanly."""
+        cfg_path = write_config(tmp_path, ":memory:")
+        with pytest.raises(SystemExit) as exc:
+            main(
+                [
+                    "maintenance",
+                    "classify",
+                    "--config",
+                    str(cfg_path),
+                    "--mode",
+                    "heuristic",
+                    "--format",
+                    "json",
+                ]
+            )
+        assert exc.value.code == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data["classified"] == 0
+        assert data["errors"] == 0
+
+    def test_maintenance_without_subcommand_exits_nonzero(
+        self,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """'maintenance' alone (no subcommand) exits with non-zero code."""
+        with pytest.raises(SystemExit) as exc:
+            main(["maintenance"])
+        assert exc.value.code != 0

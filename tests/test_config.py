@@ -1069,3 +1069,259 @@ class TestWebhookConfigParsing:
         p = write_yaml(tmp_path, yaml_content)
         with pytest.raises(ValueError, match="server.webhooks must be a YAML mapping"):
             load_config(str(p))
+
+
+# ---------------------------------------------------------------------------
+# ClassificationConfig: mode field (new in v0.4.0)
+# ---------------------------------------------------------------------------
+
+
+class TestClassificationMode:
+    """Tests for the classification.mode config field added in v0.4.0."""
+
+    def test_classification_mode_default_is_llm(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Default classification mode is 'llm'."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        cfg = load_config()
+        assert cfg.classification.mode == "llm"
+
+    def test_classification_mode_llm_explicit(self, tmp_path: Path) -> None:
+        """Explicitly setting mode to 'llm' is accepted."""
+        yaml_content = """\
+            classification:
+              mode: llm
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.classification.mode == "llm"
+
+    def test_classification_mode_heuristic(self, tmp_path: Path) -> None:
+        """Setting mode to 'heuristic' is accepted."""
+        yaml_content = """\
+            classification:
+              mode: heuristic
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.classification.mode == "heuristic"
+
+    def test_classification_mode_invalid_raises_value_error(self, tmp_path: Path) -> None:
+        """An unrecognised mode string raises ValueError."""
+        yaml_content = """\
+            classification:
+              mode: neural
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="classification.mode"):
+            load_config(str(p))
+
+    def test_classification_mode_invalid_empty_raises_value_error(self, tmp_path: Path) -> None:
+        """An empty mode string raises ValueError."""
+        yaml_content = """\
+            classification:
+              mode: ""
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="classification.mode"):
+            load_config(str(p))
+
+    def test_classification_mode_does_not_affect_other_fields(self, tmp_path: Path) -> None:
+        """Setting mode does not alter other classification fields."""
+        yaml_content = """\
+            classification:
+              mode: heuristic
+              confidence_threshold: 0.75
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.classification.mode == "heuristic"
+        assert cfg.classification.confidence_threshold == pytest.approx(0.75)
+
+
+# ---------------------------------------------------------------------------
+# RateLimitConfig: new fields search_logging_enabled and
+# search_log_retention_days (new in v0.4.0)
+# ---------------------------------------------------------------------------
+
+
+class TestRateLimitNewFields:
+    """Tests for new RateLimitConfig fields added in v0.4.0."""
+
+    def test_search_logging_enabled_default_true(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """search_logging_enabled defaults to True."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        cfg = load_config()
+        assert cfg.rate_limit.search_logging_enabled is True
+
+    def test_search_log_retention_days_default_90(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """search_log_retention_days defaults to 90."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        cfg = load_config()
+        assert cfg.rate_limit.search_log_retention_days == 90
+
+    def test_search_logging_enabled_can_be_disabled(self, tmp_path: Path) -> None:
+        """search_logging_enabled can be set to false in YAML."""
+        yaml_content = """\
+            rate_limit:
+              search_logging_enabled: false
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.rate_limit.search_logging_enabled is False
+
+    def test_search_log_retention_days_can_be_overridden(self, tmp_path: Path) -> None:
+        """search_log_retention_days can be overridden via YAML."""
+        yaml_content = """\
+            rate_limit:
+              search_log_retention_days: 30
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.rate_limit.search_log_retention_days == 30
+
+    def test_search_log_retention_days_zero_is_accepted(self, tmp_path: Path) -> None:
+        """Zero is a valid (disable retention) value for search_log_retention_days."""
+        yaml_content = """\
+            rate_limit:
+              search_log_retention_days: 0
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.rate_limit.search_log_retention_days == 0
+
+    def test_search_log_retention_days_non_integer_raises(self, tmp_path: Path) -> None:
+        """Non-integer value for search_log_retention_days raises ValueError."""
+        yaml_content = """\
+            rate_limit:
+              search_log_retention_days: not-a-number
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError):
+            load_config(str(p))
+
+    def test_rate_limit_new_fields_coexist_with_existing(self, tmp_path: Path) -> None:
+        """New rate-limit fields can be combined with existing ones."""
+        yaml_content = """\
+            rate_limit:
+              embedding_budget_daily: 200
+              max_db_size_mb: 500
+              warn_db_size_pct: 70
+              search_logging_enabled: false
+              search_log_retention_days: 60
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.rate_limit.embedding_budget_daily == 200
+        assert cfg.rate_limit.max_db_size_mb == 500
+        assert cfg.rate_limit.warn_db_size_pct == 70
+        assert cfg.rate_limit.search_logging_enabled is False
+        assert cfg.rate_limit.search_log_retention_days == 60
+
+
+# ---------------------------------------------------------------------------
+# HttpRateLimitConfig: cors_allowed_origins field (new in v0.4.0)
+# ---------------------------------------------------------------------------
+
+
+class TestHttpRateLimitCorsOrigins:
+    """Tests for HttpRateLimitConfig.cors_allowed_origins added in v0.4.0."""
+
+    def test_cors_allowed_origins_default_empty(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """cors_allowed_origins defaults to an empty list."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        cfg = load_config()
+        assert cfg.server.http_rate_limit.cors_allowed_origins == []
+
+    def test_cors_allowed_origins_single_origin(self, tmp_path: Path) -> None:
+        """A single CORS origin is parsed correctly."""
+        yaml_content = """\
+            server:
+              http_rate_limit:
+                cors_allowed_origins:
+                  - https://example.com
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.server.http_rate_limit.cors_allowed_origins == ["https://example.com"]
+
+    def test_cors_allowed_origins_multiple_origins(self, tmp_path: Path) -> None:
+        """Multiple CORS origins are all parsed."""
+        yaml_content = """\
+            server:
+              http_rate_limit:
+                cors_allowed_origins:
+                  - https://app.example.com
+                  - https://admin.example.com
+                  - http://localhost:3000
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert len(cfg.server.http_rate_limit.cors_allowed_origins) == 3
+        assert "https://app.example.com" in cfg.server.http_rate_limit.cors_allowed_origins
+        assert "http://localhost:3000" in cfg.server.http_rate_limit.cors_allowed_origins
+
+    def test_cors_allowed_origins_empty_list(self, tmp_path: Path) -> None:
+        """An explicit empty list is accepted."""
+        yaml_content = """\
+            server:
+              http_rate_limit:
+                cors_allowed_origins: []
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.server.http_rate_limit.cors_allowed_origins == []
+
+    def test_cors_allowed_origins_whitespace_entries_stripped(self, tmp_path: Path) -> None:
+        """Origins that are only whitespace are filtered out."""
+        yaml_content = """\
+            server:
+              http_rate_limit:
+                cors_allowed_origins:
+                  - "  "
+                  - https://valid.example.com
+                  - ""
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.server.http_rate_limit.cors_allowed_origins == ["https://valid.example.com"]
+
+    def test_cors_allowed_origins_non_list_raises_value_error(self, tmp_path: Path) -> None:
+        """A non-list value for cors_allowed_origins raises ValueError."""
+        yaml_content = """\
+            server:
+              http_rate_limit:
+                cors_allowed_origins: "https://example.com"
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="cors_allowed_origins"):
+            load_config(str(p))
+
+    def test_cors_origins_coexist_with_other_http_rate_limit_fields(
+        self, tmp_path: Path
+    ) -> None:
+        """CORS origins can be combined with other http_rate_limit settings."""
+        yaml_content = """\
+            server:
+              http_rate_limit:
+                requests_per_minute: 30
+                requests_per_hour: 300
+                cors_allowed_origins:
+                  - https://ui.example.com
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.server.http_rate_limit.requests_per_minute == 30
+        assert cfg.server.http_rate_limit.requests_per_hour == 300
+        assert cfg.server.http_rate_limit.cors_allowed_origins == ["https://ui.example.com"]
