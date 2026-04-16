@@ -135,6 +135,9 @@ class ClassificationConfig:
         conflict_threshold: Similarity score at or above which two entries in
             different projects are flagged as potential conflicts. Default
             ``0.60``.
+        mode: Classification mode — ``"llm"`` for LLM-based classification
+            or ``"heuristic"`` for embedding centroid-based classification.
+            Default ``"llm"``.
     """
 
     confidence_threshold: float = 0.6
@@ -145,6 +148,7 @@ class ClassificationConfig:
     feedback_window_minutes: int = 5
     stale_days: int = 30
     conflict_threshold: float = 0.60
+    mode: str = "llm"
 
 
 @dataclass
@@ -232,6 +236,8 @@ class RateLimitConfig:
     embedding_budget_daily: int = 500
     max_db_size_mb: int = 900
     warn_db_size_pct: int = 80
+    search_logging_enabled: bool = True
+    search_log_retention_days: int = 90
 
 
 @dataclass
@@ -278,6 +284,7 @@ class HttpRateLimitConfig:
     requests_per_hour: int = 600
     max_body_bytes: int = 1_048_576  # 1 MB
     trust_proxy: bool = False
+    cors_allowed_origins: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -563,6 +570,13 @@ def _parse_classification(raw: dict[str, Any]) -> ClassificationConfig:
         raw, "conflict_threshold", 0.60, "classification.conflict_threshold"
     )
 
+    mode_raw = raw.get("mode", "llm")
+    mode = str(mode_raw)
+    if mode not in ("llm", "heuristic"):
+        raise ValueError(
+            f"classification.mode must be 'llm' or 'heuristic', got: {mode!r}"
+        )
+
     return ClassificationConfig(
         confidence_threshold=threshold,
         dedup_skip_threshold=skip,
@@ -572,6 +586,7 @@ def _parse_classification(raw: dict[str, Any]) -> ClassificationConfig:
         feedback_window_minutes=feedback_window_minutes,
         stale_days=stale_days,
         conflict_threshold=conflict_threshold,
+        mode=mode,
     )
 
 
@@ -738,6 +753,11 @@ def _parse_rate_limit(raw: dict[str, Any]) -> RateLimitConfig:
             raw.get("warn_db_size_pct", 80),
             "rate_limit.warn_db_size_pct",
         ),
+        search_logging_enabled=bool(raw.get("search_logging_enabled", True)),
+        search_log_retention_days=_parse_strict_int(
+            raw.get("search_log_retention_days", 90),
+            "rate_limit.search_log_retention_days",
+        ),
     )
 
 
@@ -789,6 +809,11 @@ def _parse_server(raw: dict[str, Any]) -> ServerConfig:
         ttl_raw, "server.auth.membership_cache_ttl_seconds"
     )
 
+    cors_origins_raw = rl_raw.get("cors_allowed_origins", []) or []
+    if not isinstance(cors_origins_raw, list):
+        raise ValueError("server.http_rate_limit.cors_allowed_origins must be a YAML list")
+    cors_allowed_origins = [str(o).strip() for o in cors_origins_raw if str(o).strip()]
+
     return ServerConfig(
         auth=ServerAuthConfig(
             provider=str(auth_raw.get("provider", "none")),
@@ -802,6 +827,7 @@ def _parse_server(raw: dict[str, Any]) -> ServerConfig:
             requests_per_hour=int(rl_raw.get("requests_per_hour", 600)),
             max_body_bytes=int(rl_raw.get("max_body_bytes", 1_048_576)),
             trust_proxy=bool(rl_raw.get("trust_proxy", False)),
+            cors_allowed_origins=cors_allowed_origins,
         ),
         webhooks=WebhookConfig(
             enabled=bool(webhooks_raw.get("enabled", True)),

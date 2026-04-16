@@ -1,7 +1,7 @@
-"""Tests for the Distillery MCP server (T04.4).
+"""Tests for the Distillery MCP server (T04.4 / T02.3).
 
-Tests cover all 7 tools via direct handler calls with a mock store and
-deterministic embedding provider:
+Tests cover the 17 registered MCP tools via direct handler calls with a mock
+store and deterministic embedding provider:
 
   store -> search -> get -> update -> find_similar -> list -> status
 
@@ -9,8 +9,13 @@ The test harness exercises the server handlers directly without requiring a
 running stdio transport.  All handlers are async functions that accept a
 store object and an arguments dict -- this is the natural unit-test seam.
 
-Also exercises the ``create_server`` factory to confirm all 7 tools are
+Also exercises the ``create_server`` factory to confirm all 17 tools are
 registered and the lifespan context initialises state correctly.
+
+Tools removed from MCP surface (now webhooks or internal handlers):
+  distillery_stale, distillery_aggregate, distillery_tag_tree,
+  distillery_metrics, distillery_interests, distillery_type_schemas,
+  distillery_poll, distillery_rescore
 """
 
 from __future__ import annotations
@@ -22,7 +27,6 @@ from distillery.mcp.server import (
     _handle_find_similar,
     _handle_get,
     _handle_list,
-    _handle_metrics,
     _handle_search,
     _handle_store,
     _handle_update,
@@ -30,6 +34,7 @@ from distillery.mcp.server import (
     error_response,
     success_response,
 )
+from distillery.mcp.tools.analytics import _handle_metrics
 from distillery.models import EntryType
 from distillery.store.duckdb import DuckDBStore
 from tests.conftest import DeterministicEmbeddingProvider, make_entry, parse_mcp_response
@@ -661,29 +666,96 @@ class TestCreateServer:
         tools = await server.list_tools()
         tool_names = {t.name for t in tools}
 
+        # 13-tool consolidated API (12 from #196 + store_batch from #244)
         expected = {
             "distillery_store",
+            "distillery_store_batch",
             "distillery_get",
             "distillery_update",
             "distillery_correct",
             "distillery_search",
             "distillery_find_similar",
             "distillery_list",
-            "distillery_aggregate",
             "distillery_classify",
             "distillery_resolve_review",
-            "distillery_metrics",
-            "distillery_stale",
-            "distillery_tag_tree",
-            "distillery_type_schemas",
-            "distillery_interests",
             "distillery_watch",
-            "distillery_poll",
-            "distillery_rescore",
             "distillery_configure",
             "distillery_relations",
             "distillery_gh_sync",
             "distillery_store_batch",
             "distillery_sync_status",
         }
-        assert expected == tool_names, f"Missing tools: {expected - tool_names}"
+        assert expected == tool_names, (
+            f"Tool mismatch — extra: {tool_names - expected}, missing: {expected - tool_names}"
+        )
+
+    async def test_server_registers_entry_type_schemas_resource(self) -> None:
+        """distillery://schemas/entry-types resource must be registered and return JSON."""
+        import json
+
+        config = DistilleryConfig(
+            storage=StorageConfig(database_path=":memory:"),
+            embedding=EmbeddingConfig(provider="", model="stub", dimensions=4),
+        )
+        server = create_server(config)
+
+        resources = await server.list_resources()
+        resource_uris = {str(r.uri) for r in resources}
+        assert "distillery://schemas/entry-types" in resource_uris
+
+        # Read the resource content — must be valid JSON with a "schemas" key.
+        result = await server.read_resource("distillery://schemas/entry-types")
+        # FastMCP returns a ResourceResult with a contents list.
+        raw = result.contents[0].content if hasattr(result, "contents") else str(result)
+        payload = json.loads(raw)
+        assert "schemas" in payload
+        assert isinstance(payload["schemas"], dict)
+        # Spot-check a known entry type is present.
+        assert "session" in payload["schemas"]
+
+
+# ---------------------------------------------------------------------------
+# Negative tests: removed tool names must not appear in the registered tools
+# ---------------------------------------------------------------------------
+
+
+class TestRemovedTools:
+    """Verify that tools moved to webhooks/resources are not registered as MCP tools.
+
+    type_schemas was moved to the distillery://schemas/entry-types MCP resource;
+    poll and rescore were moved to /api/poll and /api/rescore webhook endpoints.
+    """
+
+    _REMOVED_TOOL_NAMES = [
+        "distillery_type_schemas",
+        "distillery_poll",
+        "distillery_rescore",
+    ]
+
+    async def test_removed_tools_not_registered(self) -> None:
+        """None of the removed tools should appear in list_tools()."""
+        config = DistilleryConfig(
+            storage=StorageConfig(database_path=":memory:"),
+            embedding=EmbeddingConfig(provider="", model="stub", dimensions=4),
+        )
+        server = create_server(config)
+        tools = await server.list_tools()
+        tool_names = {t.name for t in tools}
+        for removed in self._REMOVED_TOOL_NAMES:
+            assert removed not in tool_names, (
+                f"{removed!r} should have been removed from MCP tool registry "
+                f"(moved to webhook or resource)"
+            )
+
+    async def test_removed_tools_count_unchanged(self) -> None:
+        """Exactly 13 tools must be registered — consolidated analytics tools."""
+        config = DistilleryConfig(
+            storage=StorageConfig(database_path=":memory:"),
+            embedding=EmbeddingConfig(provider="", model="stub", dimensions=4),
+        )
+        server = create_server(config)
+        tools = await server.list_tools()
+        assert len(tools) == 13, (
+            f"Expected 13 registered tools, got {len(tools)}: "
+            f"{sorted(t.name for t in tools)}"
+        )

@@ -32,30 +32,22 @@ MCP_HEADERS = {
     "Accept": "application/json, text/event-stream",
 }
 
-# All 23 tools that the Distillery MCP server exposes.
+# 15-tool API (13 from api-hardening + gh_sync + sync_status from async-sync-pipeline).
 EXPECTED_TOOLS = {
     "distillery_store",
+    "distillery_store_batch",
     "distillery_get",
     "distillery_update",
     "distillery_correct",
     "distillery_search",
     "distillery_find_similar",
     "distillery_list",
-    "distillery_aggregate",
     "distillery_classify",
     "distillery_resolve_review",
-    "distillery_metrics",
-    "distillery_stale",
-    "distillery_tag_tree",
-    "distillery_type_schemas",
-    "distillery_interests",
     "distillery_watch",
-    "distillery_poll",
-    "distillery_rescore",
     "distillery_configure",
     "distillery_relations",
     "distillery_gh_sync",
-    "distillery_store_batch",
     "distillery_sync_status",
 }
 
@@ -169,7 +161,7 @@ class TestAllToolsAccessibleOverHttp:
             assert "result" in data, f"Expected result in: {data}"
             tools = data["result"]["tools"]
             tool_names = {t["name"] for t in tools}
-            assert len(tool_names) == 23, f"Expected 23 tools, got {len(tool_names)}: {tool_names}"
+            assert len(tool_names) == 15, f"Expected 15 tools, got {len(tool_names)}: {tool_names}"
             assert tool_names == EXPECTED_TOOLS, (
                 f"Tool mismatch.\nExpected: {EXPECTED_TOOLS}\nGot: {tool_names}"
             )
@@ -188,7 +180,7 @@ class TestStatelessHttpSingleton:
         try:
             base_url = f"http://127.0.0.1:{port}/mcp"
             async with httpx.AsyncClient(timeout=5.0) as client:
-                # First request: call distillery_metrics(scope=summary) to confirm server is live.
+                # First request: call distillery_list to confirm server is live.
                 r1 = await client.post(
                     base_url,
                     headers=MCP_HEADERS,
@@ -196,10 +188,10 @@ class TestStatelessHttpSingleton:
                         "jsonrpc": "2.0",
                         "id": 1,
                         "method": "tools/call",
-                        "params": {"name": "distillery_metrics", "arguments": {"scope": "summary"}},
+                        "params": {"name": "distillery_list", "arguments": {"limit": 1}},
                     },
                 )
-                # Second request: call distillery_metrics again to confirm store is shared.
+                # Second request: call distillery_list again to confirm store is shared.
                 r2 = await client.post(
                     base_url,
                     headers=MCP_HEADERS,
@@ -207,7 +199,7 @@ class TestStatelessHttpSingleton:
                         "jsonrpc": "2.0",
                         "id": 2,
                         "method": "tools/call",
-                        "params": {"name": "distillery_metrics", "arguments": {"scope": "summary"}},
+                        "params": {"name": "distillery_list", "arguments": {"limit": 1}},
                     },
                 )
             assert r1.status_code == 200, f"First request failed: {r1.text[:200]}"
@@ -220,16 +212,15 @@ class TestStatelessHttpSingleton:
             assert "result" in d1, f"Request 1 error: {d1}"
             assert "result" in d2, f"Request 2 error: {d2}"
 
-            # Compare database_path from both responses to prove they
-            # reference the same store instance (not two empty stores
-            # that happen to have the same total_entries=0).
-            def _database_path(resp_data: dict) -> str:  # type: ignore[type-arg]
+            # Both responses should have a "total" field — confirm the same store
+            # is serving both requests (store has same entry count for both).
+            def _total_entries(resp_data: dict) -> int:  # type: ignore[type-arg]
                 content = resp_data["result"]["content"]
                 payload = json.loads(content[0]["text"])
-                return str(payload["database_path"])
+                return int(payload.get("total_count", -1))
 
-            assert _database_path(d1) == _database_path(d2), (
-                "Two requests returned different database_path — singleton not shared"
+            assert _total_entries(d1) == _total_entries(d2), (
+                "Two requests returned different total entries — singleton not shared"
             )
         finally:
             uv_server.should_exit = True

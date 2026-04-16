@@ -10,6 +10,7 @@ Provides the ``distillery`` entry point with the following subcommands:
 - ``import``: Import entries and feed sources from a JSON export file.
 - ``eval``: Run skill evaluation scenarios against Claude (requires
   ``ANTHROPIC_API_KEY`` and ``pip install 'distillery[eval]'``).
+- ``maintenance classify``: Classify pending entries using batch classification.
 
 Global options:
 - ``--version``: Print the package version and exit.
@@ -191,6 +192,31 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="Compare current run cost against baseline (requires --baseline)",
+    )
+
+    maintenance_parser = subparsers.add_parser(
+        "maintenance",
+        help="Database maintenance operations",
+        parents=[shared],
+    )
+    maintenance_subparsers = maintenance_parser.add_subparsers(dest="maintenance_command")
+
+    classify_parser = maintenance_subparsers.add_parser(
+        "classify",
+        help="Classify pending inbox entries using batch classification",
+        parents=[shared],
+    )
+    classify_parser.add_argument(
+        "--type",
+        metavar="TYPE",
+        default="inbox",
+        help="Entry type filter for classification (default: inbox)",
+    )
+    classify_parser.add_argument(
+        "--mode",
+        choices=["llm", "heuristic"],
+        default=None,
+        help="Classification mode: llm (LLM-based) or heuristic (embedding-based). Defaults to config value.",
     )
 
     return parser
@@ -1509,6 +1535,114 @@ def _cmd_eval(
 
 
 # ---------------------------------------------------------------------------
+# Maintenance subcommand
+# ---------------------------------------------------------------------------
+
+
+def _cmd_maintenance_classify(
+    config_path: str | None,
+    fmt: str,
+    entry_type: str = "inbox",
+    mode: str | None = None,
+) -> int:
+    """Implement the ``maintenance classify`` subcommand.
+
+    Classifies pending entries of a given type using either LLM-based or
+    heuristic classification.
+
+    Returns:
+        Exit code (0 on success, 1 on error).
+    """
+    try:
+        cfg = load_config(config_path)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Error loading configuration: {exc}", file=sys.stderr)
+        return 1
+
+    async def _run() -> dict[str, Any]:
+        from distillery.mcp.server import _create_embedding_provider, _normalize_db_path
+        from distillery.mcp.webhooks import _run_classify_batch
+        from distillery.store.duckdb import DuckDBStore
+
+        embedding_provider = _create_embedding_provider(cfg)
+        db_path = _normalize_db_path(cfg.storage.database_path)
+
+        store = DuckDBStore(
+            db_path=db_path,
+            embedding_provider=embedding_provider,
+            s3_region=cfg.storage.s3_region,
+            s3_endpoint=cfg.storage.s3_endpoint,
+            hybrid_search=cfg.defaults.hybrid_search,
+            rrf_k=cfg.defaults.rrf_k,
+            recency_window_days=cfg.defaults.recency_window_days,
+            recency_min_weight=cfg.defaults.recency_min_weight,
+        )
+        await store.initialize()
+        try:
+            # Build the shared state dict that _run_classify_batch expects.
+            state = {
+                "store": store,
+                "config": cfg,
+                "embedding_provider": embedding_provider,
+            }
+
+            # Call the webhook handler directly (not via HTTP).
+            response = await _run_classify_batch(state, entry_type=entry_type, mode=mode)
+
+            # Extract the JSON data from the JSONResponse.
+            import json as json_module
+
+            body = response.body
+            raw: dict[str, Any] = json_module.loads(
+                body.decode("utf-8") if isinstance(body, bytes) else str(body)
+            )
+            return raw
+        finally:
+            await store.close()
+
+    try:
+        result = asyncio.run(_run())
+    except Exception as exc:
+        print(f"Error during classification: {exc}", file=sys.stderr)
+        return 1
+
+    # Handle the response.
+    if not result.get("ok", False):
+        error_msg = result.get("error", "Unknown error")
+        print(f"Error: {error_msg}", file=sys.stderr)
+        return 1
+
+    data = result.get("data", {})
+    classified = data.get("classified", 0)
+    pending_review = data.get("pending_review", 0)
+    errors = data.get("errors", 0)
+    by_type = data.get("by_type", {})
+
+    if fmt == "json":
+        print(
+            json.dumps(
+                {
+                    "classified": classified,
+                    "pending_review": pending_review,
+                    "errors": errors,
+                    "by_type": by_type,
+                }
+            )
+        )
+    else:
+        print("Classification complete:")
+        print(f"  classified:     {classified}")
+        print(f"  pending_review: {pending_review}")
+        print(f"  errors:         {errors}")
+        if by_type:
+            print("  by_type:")
+            for type_name, count in by_type.items():
+                print(f"    {type_name}: {count}")
+
+    return 1 if errors > 0 else 0
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -1580,5 +1714,18 @@ def main(argv: list[str] | None = None) -> None:
                 compare_cost=getattr(args, "compare_cost", False),
             )
         )
+    elif command == "maintenance":
+        maintenance_command: str | None = getattr(args, "maintenance_command", None)
+        if maintenance_command == "classify":
+            sys.exit(
+                _cmd_maintenance_classify(
+                    config_path=config_path,
+                    fmt=fmt,
+                    entry_type=getattr(args, "type", "inbox"),
+                    mode=getattr(args, "mode", None),
+                )
+            )
+        else:
+            parser.error("Unknown maintenance subcommand (expected: classify)")
     else:  # pragma: no cover – argparse rejects unknown subcommands
         parser.error(f"Unknown command: {command}")

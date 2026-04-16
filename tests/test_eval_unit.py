@@ -840,7 +840,7 @@ class TestMCPBridgeAsync:
         names = {s["name"] for s in schemas}
         assert "distillery_store" in names
         assert "distillery_search" in names
-        assert "distillery_metrics" in names
+        assert "distillery_list" in names
         await bridge.close()
 
     @pytest.mark.asyncio
@@ -848,7 +848,7 @@ class TestMCPBridgeAsync:
         from distillery.eval.mcp_bridge import MCPBridge
 
         bridge = await MCPBridge.create()
-        result = await bridge.call_tool("distillery_metrics", {"scope": "summary"})
+        result = await bridge.call_tool("distillery_list", {"output": "stats", "limit": 1})
         assert isinstance(result, dict)
         assert "error" not in result or not result.get("error")
         await bridge.close()

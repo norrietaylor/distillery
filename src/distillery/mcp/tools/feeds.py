@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 from typing import Any
 
@@ -61,14 +62,14 @@ async def _handle_watch(
     action_raw = arguments.get("action")
     if action_raw is None or not isinstance(action_raw, str):
         return error_response(
-            "INVALID_ACTION",
+            "INVALID_PARAMS",
             f"action must be a non-null string, got: {action_raw!r}",
         )
     action = action_raw.strip().lower()
 
     if action not in ("list", "add", "remove"):
         return error_response(
-            "INVALID_ACTION",
+            "INVALID_PARAMS",
             f"action must be one of 'list', 'add', 'remove'; got: {action!r}",
         )
 
@@ -77,7 +78,7 @@ async def _handle_watch(
             db_sources = await store.list_feed_sources()
         except Exception as exc:  # noqa: BLE001
             logger.exception("distillery_watch: failed to list feed sources")
-            return error_response("WATCH_ERROR", f"Failed to list feed sources: {exc}")
+            return error_response("INTERNAL", f"Failed to list feed sources: {exc}")
         return success_response(
             {
                 "sources": db_sources,
@@ -89,24 +90,24 @@ async def _handle_watch(
         url_raw = arguments.get("url")
         if url_raw is not None and not isinstance(url_raw, str):
             return error_response(
-                "INVALID_FIELD", f"url must be a string, got: {type(url_raw).__name__}"
+                "INVALID_PARAMS", f"url must be a string, got: {type(url_raw).__name__}"
             )
         url = str(url_raw or "").strip()
         if not url:
-            return error_response("MISSING_FIELD", "url is required for action='add'")
+            return error_response("INVALID_PARAMS", "url is required for action='add'")
 
         source_type_raw = arguments.get("source_type")
         if source_type_raw is not None and not isinstance(source_type_raw, str):
             return error_response(
-                "INVALID_FIELD",
+                "INVALID_PARAMS",
                 f"source_type must be a string, got: {type(source_type_raw).__name__}",
             )
         source_type = str(source_type_raw or "").strip()
         if not source_type:
-            return error_response("MISSING_FIELD", "source_type is required for action='add'")
+            return error_response("INVALID_PARAMS", "source_type is required for action='add'")
         if source_type not in _VALID_SOURCE_TYPES:
             return error_response(
-                "INVALID_SOURCE_TYPE",
+                "INVALID_PARAMS",
                 f"source_type must be one of {sorted(_VALID_SOURCE_TYPES)}, got: {source_type!r}",
             )
 
@@ -117,12 +118,12 @@ async def _handle_watch(
             poll_interval = int(poll_interval_raw)
         except (TypeError, ValueError):
             return error_response(
-                "INVALID_FIELD",
+                "INVALID_PARAMS",
                 f"poll_interval_minutes must be an integer, got: {poll_interval_raw!r}",
             )
         if poll_interval <= 0:
             return error_response(
-                "INVALID_FIELD",
+                "INVALID_PARAMS",
                 f"poll_interval_minutes must be a positive integer, got: {poll_interval}",
             )
 
@@ -131,12 +132,12 @@ async def _handle_watch(
             trust_weight = float(trust_weight_raw)
         except (TypeError, ValueError):
             return error_response(
-                "INVALID_FIELD",
+                "INVALID_PARAMS",
                 f"trust_weight must be a float, got: {trust_weight_raw!r}",
             )
         if not (0.0 <= trust_weight <= 1.0):
             return error_response(
-                "INVALID_FIELD",
+                "INVALID_PARAMS",
                 f"trust_weight must be between 0.0 and 1.0, got: {trust_weight}",
             )
 
@@ -153,49 +154,60 @@ async def _handle_watch(
             db_sources = await store.list_feed_sources()
         except ValueError:
             return error_response(
-                "DUPLICATE_SOURCE",
+                "CONFLICT",
                 f"Source with URL {url!r} is already registered.",
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception("distillery_watch: failed to add feed source")
-            return error_response("WATCH_ERROR", f"Failed to add feed source: {exc}")
+            return error_response("INTERNAL", f"Failed to add feed source: {exc}")
 
         response_data: dict[str, Any] = {
             "added": added,
             "sources": db_sources,
         }
 
-        # When sync_history is requested, kick off an async background sync
-        # instead of blocking the MCP response.
+        # --- optional history sync for GitHub sources ----------------------
+        # Note: sync_history bypasses MCP-level budget checks by design (same
+        # as poll webhooks).  The GitHubSyncAdapter caps at 1000 items and
+        # uses store.store() per entry which respects store-level constraints.
+        # Runs as an async background task so the MCP response returns immediately.
         if sync_history and source_type == "github":
-            from distillery.feeds.github_sync import GitHubSyncAdapter
-            from distillery.feeds.sync_jobs import get_tracker, run_sync_job_async
+            try:
+                from distillery.feeds.github_sync import GitHubSyncAdapter
+                from distillery.feeds.sync_jobs import get_tracker, run_sync_job_async
 
-            tracker = get_tracker()
-            job = tracker.create_job(source_url=url, source_type=source_type)
-            adapter = GitHubSyncAdapter(store=store, url=url)
-            sync_coro = adapter.sync_batched()
+                tracker = get_tracker()
+                job = tracker.create_job(source_url=url, source_type=source_type)
+                adapter = GitHubSyncAdapter(
+                    store=store,
+                    url=url,
+                    token=os.environ.get("GITHUB_TOKEN"),
+                )
+                sync_coro = adapter.sync_batched()
 
-            asyncio.create_task(run_sync_job_async(job, tracker, sync_coro))
-            response_data["sync_job"] = job.to_dict()
-            response_data["message"] = (
-                "Feed source added. History sync started in background "
-                f"(job_id={job.job_id}). Use distillery_sync_status to check progress."
-            )
+                asyncio.create_task(run_sync_job_async(job, tracker, sync_coro))
+                response_data["sync_job"] = job.to_dict()
+                response_data["message"] = (
+                    "Feed source added. History sync started in background "
+                    f"(job_id={job.job_id}). Use distillery_sync_status to check progress."
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("distillery_watch: sync_history failed for %s", url)
+                response_data["sync_error"] = str(exc)
 
         return success_response(response_data)
 
     # action == "remove"
     url = str(arguments.get("url", "")).strip()
     if not url:
-        return error_response("MISSING_FIELD", "url is required for action='remove'")
+        return error_response("INVALID_PARAMS", "url is required for action='remove'")
 
     try:
         removed = await store.remove_feed_source(url)
         db_sources = await store.list_feed_sources()
     except Exception as exc:  # noqa: BLE001
         logger.exception("distillery_watch: failed to remove feed source")
-        return error_response("WATCH_ERROR", f"Failed to remove feed source: {exc}")
+        return error_response("INTERNAL", f"Failed to remove feed source: {exc}")
     return success_response(
         {
             "removed_url": url,
@@ -262,7 +274,7 @@ async def _handle_poll(
         summary = await poller.poll(source_url=source_url)
     except Exception as exc:  # noqa: BLE001
         logger.exception("distillery_poll: unexpected error during poll cycle")
-        return error_response("POLL_ERROR", f"Poll cycle failed: {exc}")
+        return error_response("INTERNAL", f"Poll cycle failed: {exc}")
 
     return success_response(
         {
@@ -309,7 +321,7 @@ async def _handle_rescore(
         limit = int(limit_raw)
     except (TypeError, ValueError):
         return error_response(
-            "INVALID_FIELD",
+            "INVALID_PARAMS",
             f"limit must be an integer, got: {limit_raw!r}",
         )
 
@@ -319,7 +331,7 @@ async def _handle_rescore(
         return success_response(stats)
     except Exception as exc:  # noqa: BLE001
         logger.exception("distillery_rescore: unexpected error")
-        return error_response("RESCORE_ERROR", f"Rescore failed: {exc}")
+        return error_response("INTERNAL", f"Rescore failed: {exc}")
 
 
 # ---------------------------------------------------------------------------

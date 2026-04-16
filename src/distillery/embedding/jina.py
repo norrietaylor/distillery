@@ -149,7 +149,7 @@ class JinaEmbeddingProvider:
 
         for attempt in range(_MAX_RETRIES):
             try:
-                with httpx.Client(timeout=60.0) as client:
+                with httpx.Client(timeout=60.0, verify=True) as client:
                     response = client.post(_JINA_API_URL, json=payload, headers=headers)
                     response.raise_for_status()
 

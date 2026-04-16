@@ -7,8 +7,6 @@ allowed-tools:
   - "mcp__*__distillery_store"
   - "mcp__*__distillery_update"
   - "mcp__*__distillery_find_similar"
-  - "mcp__*__distillery_interests"
-  - "mcp__*__distillery_metrics"
 context: fork
 effort: high
 ---
@@ -44,11 +42,11 @@ See CONVENTIONS.md — skip if already confirmed this conversation.
 
 ### Step 3: Retrieve Recent Feed Entries
 
-Use interest-driven semantic search to surface the most relevant feed entries, not just the newest.
+Use tag-driven semantic search to surface the most relevant feed entries, not just the newest.
 
-**3a. Get interest profile:**
+**3a. Get interest profile from curated entries:**
 
-Call `distillery_interests(recency_days=<days>, top_n=5)`. Extract the top interest tags (e.g., `domain/authentication` → query `"authentication"`). Convert tag paths to natural language by taking the leaf segment and replacing hyphens with spaces.
+Call `distillery_list(group_by="tags")` to get the top tags across curated (non-feed) entries. Filter out feed-type tags and take the top 5 by count. Convert tag paths to natural language by taking the leaf segment and replacing hyphens with spaces (e.g., `domain/authentication` → query `"authentication"`).
 
 **3b. Search by interests (primary path):**
 
@@ -62,9 +60,9 @@ Deduplicate results across queries by entry ID, keeping the highest similarity s
 
 Report: `Retrieved <total> entries via interest-based search (<N> queries).`
 
-**3c. Fallback (if interests unavailable):**
+**3c. Fallback (if interest tags unavailable):**
 
-If `distillery_interests` returns no tags or errors, fall back to:
+If `distillery_list(group_by="tags")` returns no tags or errors, fall back to:
 
 `distillery_list(entry_type="feed", limit=<limit>, output_mode="summary", date_from=<date>)`
 
@@ -78,7 +76,7 @@ If no feed entries are found by either path, display:
 No feed entries found in the last <N> days.
 
 Suggestions:
-- Run distillery_poll to fetch new items from configured sources
+- Trigger feed polling via POST to /hooks/poll (or use /setup to configure scheduled polling)
 - Add sources with /watch add <url>
 - Check that feed sources are configured in distillery.yaml
 ```
@@ -100,7 +98,7 @@ You (the executing Claude instance) produce the synthesis — do not dump raw en
 
 ### Step 5: Suggest Sources
 
-Call `distillery_interests(suggest_sources=true, max_suggestions=5)`. Include the returned ``suggestions`` when `--suggest` is specified or when entries were found. Omit silently if the call returns an error or empty results.
+When `--suggest` is specified, use the interest tags identified in Step 3a to suggest new sources. Based on the top interest topics, recommend 3–5 relevant RSS feeds or GitHub repos the user might want to add via `/watch add <url>`. Omit this section silently if Step 3a returned no tags or if `--suggest` was not specified.
 
 ### Step 6: Check for Duplicates (if --store specified)
 

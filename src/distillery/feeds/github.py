@@ -256,7 +256,7 @@ class GitHubAdapter:
 
         logger.debug("GitHubAdapter: fetching %s", api_url)
 
-        with httpx.Client(timeout=_REQUEST_TIMEOUT, follow_redirects=True) as client:
+        with httpx.Client(timeout=_REQUEST_TIMEOUT, follow_redirects=True, verify=True) as client:
             response = client.get(api_url, params=params, headers=headers)
             response.raise_for_status()
 

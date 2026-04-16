@@ -234,7 +234,7 @@ class TestTagTreeMCPTool:
 
     async def test_tag_tree_returns_nested_structure(self, tag_store: DuckDBStore) -> None:
         """Tag tree is nested with correct counts."""
-        from distillery.mcp.server import _handle_tag_tree
+        from distillery.mcp.tools.analytics import _handle_tag_tree
 
         entries = [
             make_entry(content=f"c{i}", tags=[tag])
@@ -274,7 +274,7 @@ class TestTagTreeMCPTool:
 
     async def test_tag_tree_filters_by_prefix(self, tag_store: DuckDBStore) -> None:
         """When prefix='project', team nodes are excluded."""
-        from distillery.mcp.server import _handle_tag_tree
+        from distillery.mcp.tools.analytics import _handle_tag_tree
 
         entries = [
             make_entry(content="billing decisions", tags=["project/billing-v2/decisions"]),
@@ -298,7 +298,7 @@ class TestTagTreeMCPTool:
 
     async def test_tag_tree_empty_store_returns_empty_tree(self, tag_store: DuckDBStore) -> None:
         """Empty store produces an empty tree."""
-        from distillery.mcp.server import _handle_tag_tree
+        from distillery.mcp.tools.analytics import _handle_tag_tree
 
         result = await _handle_tag_tree(
             store=tag_store,

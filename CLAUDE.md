@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is Distillery
 
-Distillery is a knowledge-base system for Claude Code. It stores, searches, and classifies knowledge entries using DuckDB with vector similarity search (VSS/HNSW). It includes ambient intelligence features that poll external feeds (GitHub, RSS) and score relevance using embeddings. It exposes functionality via an MCP server (stdio or streamable-HTTP transport) with 20 tools, orchestrated by 14 Claude Code skills (`/distill`, `/recall`, `/pour`, `/bookmark`, `/minutes`, `/classify`, `/watch`, `/radar`, `/tune`, `/digest`, `/gh-sync`, `/investigate`, `/briefing`, `/setup`). HTTP transport supports GitHub OAuth for team access. REST webhook endpoints (`/api/poll`, `/api/rescore`, `/api/maintenance`) run alongside the MCP server for automated scheduling via GitHub Actions cron.
+Distillery is a knowledge-base system for Claude Code. It stores, searches, and classifies knowledge entries using DuckDB with vector similarity search (VSS/HNSW). It includes ambient intelligence features that poll external feeds (GitHub, RSS) and score relevance using embeddings. It exposes functionality via an MCP server (stdio or streamable-HTTP transport) with 12 tools, orchestrated by 14 Claude Code skills (`/distill`, `/recall`, `/pour`, `/bookmark`, `/minutes`, `/classify`, `/watch`, `/radar`, `/tune`, `/digest`, `/gh-sync`, `/investigate`, `/briefing`, `/setup`). HTTP transport supports GitHub OAuth for team access. REST webhook endpoints (`/hooks/poll`, `/hooks/rescore`, `/hooks/classify-batch`, `/api/maintenance`) run alongside the MCP server for automated scheduling via GitHub Actions cron.
 
 ## Commands
 
@@ -51,8 +51,8 @@ Four-layer design:
 ```text
 Skills (skills/<name>/SKILL.md)  →  slash commands users invoke
     ↓
-MCP Server (src/distillery/mcp/server.py)  →  20 tools over stdio or HTTP (FastMCP 2.x/3.x)
-Webhook API (src/distillery/mcp/webhooks.py) →  /api/poll, /api/rescore, /api/maintenance (bearer auth)
+MCP Server (src/distillery/mcp/server.py)  →  12 tools over stdio or HTTP (FastMCP 2.x/3.x)
+Webhook API (src/distillery/mcp/webhooks.py) →  /hooks/poll, /hooks/rescore, /hooks/classify-batch, /api/maintenance (bearer auth)
     ↓
 Core Protocols (store/protocol.py, embedding/protocol.py)  →  typed Protocol interfaces
     ↓

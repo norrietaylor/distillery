@@ -29,6 +29,60 @@ ignore:
   - vulnerability: CVE-2026-4046
     reason: "glibc 2.43 (Wolfi) — no upstream fix available"
 
+  - vulnerability: CVE-2026-31790
+    reason: "openssl 3.6.1 (libcrypto3/libssl3, Wolfi base image) — CVSS High; affects TLS certificate verification. Not exploitable in our deployment: Distillery MCP server validates upstream TLS connections to Jina/OpenAI embedding APIs using system CA bundles; no user-supplied certificates are processed. The vulnerability requires a maliciously crafted certificate chain which our server never encounters in normal operation. No fix available in Wolfi yet. Reviewed: 2026-04-10"
+
+  # --- Go stdlib CVEs from Wolfi base image (go1.23.12) ---
+  # Distillery is a pure Python application. Go stdlib is present in the
+  # base image's tooling but no Go code is compiled or executed by Distillery.
+  # Reviewed: 2026-04-15
+
+  - vulnerability: CVE-2025-68121
+    reason: "Go stdlib go1.23.12 (Critical) — arbitrary code execution. Not exploitable: Distillery is pure Python, no Go code executed. From Wolfi base image tooling."
+
+  - vulnerability: CVE-2026-25679
+    reason: "Go stdlib go1.23.12 (High) — not exploitable: no Go code executed in Distillery."
+
+  - vulnerability: CVE-2025-61729
+    reason: "Go stdlib go1.23.12 (High) — not exploitable: no Go code executed in Distillery."
+
+  - vulnerability: CVE-2026-27140
+    reason: "Go stdlib go1.23.12 (High) — not exploitable: no Go code executed in Distillery."
+
+  - vulnerability: CVE-2026-32283
+    reason: "Go stdlib go1.23.12 (High) — not exploitable: no Go code executed in Distillery."
+
+  - vulnerability: CVE-2026-32280
+    reason: "Go stdlib go1.23.12 (High) — not exploitable: no Go code executed in Distillery."
+
+  - vulnerability: CVE-2026-32281
+    reason: "Go stdlib go1.23.12 (High) — not exploitable: no Go code executed in Distillery."
+
+  - vulnerability: CVE-2025-58187
+    reason: "Go stdlib go1.23.12 (High) — not exploitable: no Go code executed in Distillery."
+
+  - vulnerability: CVE-2025-61731
+    reason: "Go stdlib go1.23.12 (High) — not exploitable: no Go code executed in Distillery."
+
+  - vulnerability: CVE-2025-61732
+    reason: "Go stdlib go1.23.12 (High) — not exploitable: no Go code executed in Distillery."
+
+  - vulnerability: CVE-2025-58188
+    reason: "Go stdlib go1.23.12 (High) — not exploitable: no Go code executed in Distillery."
+
+  # --- Python 3.13 CVE ---
+  # Reviewed: 2026-04-15
+
+  - vulnerability: CVE-2026-6100
+    reason: "CPython 3.13.13 — CVSS Critical; use-after-free in lzma.LZMADecompressor, bz2.BZ2Decompressor, gzip.GzipFile when MemoryError occurs and instance is reused. Not exploitable in our deployment: Distillery does not use lzma/bz2/gzip decompression in any code path — data is stored in DuckDB and API payloads are JSON. No upstream fix available. Reviewed: 2026-04-15"
+
+  - vulnerability: CVE-2026-4786
+    reason: "CPython 3.13.13 — CVSS High; incomplete mitigation of CVE-2026-4519 in webbrowser.open() allowing command injection via %action in URLs. Not exploitable in our deployment: Distillery is a headless MCP server — webbrowser module is never imported or used. No upstream fix available. Reviewed: 2026-04-15"
+
+  - vulnerability: CVE-2026-31790
+    reason: "openssl 3.6.1 (libcrypto3/libssl3, Wolfi base image) — CVSS High; affects TLS certificate verification. Not exploitable in our deployment: Distillery MCP server validates upstream TLS connections to Jina/OpenAI embedding APIs using system CA bundles; no user-supplied certificates are processed. The vulnerability requires a maliciously crafted certificate chain which our server never encounters in normal operation. No fix available in Wolfi yet. Reviewed: 2026-04-10"
+
+
 # Fail on critical and high severity vulnerabilities.
 # This is also enforced in the CI workflow via --severity-cutoff=high,
 # but defining it here ensures consistent behavior for local scans.

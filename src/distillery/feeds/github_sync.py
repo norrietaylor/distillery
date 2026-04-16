@@ -283,7 +283,7 @@ class GitHubSyncAdapter:
 
         should_close = client is None
         if client is None:
-            client = httpx.AsyncClient(timeout=_REQUEST_TIMEOUT, follow_redirects=True)
+            client = httpx.AsyncClient(timeout=_REQUEST_TIMEOUT, follow_redirects=True, verify=True)
         try:
             all_issues: list[dict[str, Any]] = []
             page = 1
@@ -321,7 +321,7 @@ class GitHubSyncAdapter:
 
         should_close = client is None
         if client is None:
-            client = httpx.AsyncClient(timeout=_REQUEST_TIMEOUT, follow_redirects=True)
+            client = httpx.AsyncClient(timeout=_REQUEST_TIMEOUT, follow_redirects=True, verify=True)
         try:
             response = await self._request_with_retry(client, api_url, params)
             result: list[dict[str, Any]] = response.json()
@@ -366,13 +366,10 @@ class GitHubSyncAdapter:
         external_id = _make_external_id(self._owner, self._repo, ref_type, number)
         content = _build_content(title, body, comments)
 
-        # Build tags from labels (lowercase, sanitised).
-        tags: list[str] = []
-        for label in labels:
-            sanitised = label.lower().replace(" ", "-")
-            # Only include if it matches tag format.
-            if re.fullmatch(r"[a-z0-9][a-z0-9\-]*", sanitised):
-                tags.append(sanitised)
+        # Build tags from labels using shared sanitiser.
+        from distillery.feeds.tags import sanitise_label
+
+        tags: list[str] = [t for lbl in labels if (t := sanitise_label(lbl)) is not None]
 
         metadata: dict[str, Any] = {
             "repo": f"{self._owner}/{self._repo}",

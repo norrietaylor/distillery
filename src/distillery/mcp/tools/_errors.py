@@ -20,20 +20,35 @@ class ToolErrorCode(StrEnum):
     Attributes:
         INVALID_PARAMS: Request parameters fail validation (e.g., missing
             required fields, wrong types, values out of range). This replaces
-            both ``INVALID_INPUT`` and ``VALIDATION_ERROR`` to provide
-            consistency across all handlers.
+            ``INVALID_INPUT``, ``VALIDATION_ERROR``, ``MISSING_FIELD``,
+            ``INVALID_FIELD``, ``INVALID_ACTION``, ``INVALID_SOURCE_TYPE``,
+            ``INVALID_STATE``, and ``RESERVED_PREFIX`` to provide consistency
+            across all handlers.
         NOT_FOUND: The requested resource does not exist (e.g., entry ID not
             found, user not found).
         CONFLICT: The operation conflicts with existing state (e.g.,
-            deduplication detected, concurrent modification).
+            deduplication detected, duplicate feed source).
         INTERNAL: An unexpected server-side error occurred (e.g., database
-            connection failure, embedding service timeout).
+            connection failure, embedding service timeout). This replaces
+            ``STORE_ERROR``, ``SEARCH_ERROR``, ``FIND_SIMILAR_ERROR``,
+            ``WATCH_ERROR``, ``RELATIONS_ERROR``, ``LIST_ERROR``,
+            ``AGGREGATE_ERROR``, ``METRICS_ERROR``, ``TAG_TREE_ERROR``,
+            ``STALE_ERROR``, ``POLL_ERROR``, ``RESCORE_ERROR``,
+            ``DEDUP_ERROR``, ``CONFLICT_ERROR``, and ``EXTRACTION_ERROR``.
+        FORBIDDEN: The authenticated user is not allowed to perform the
+            operation (e.g., ownership violation).
+        BUDGET_EXCEEDED: A rate-limit or budget has been exhausted (e.g.,
+            daily embedding budget, database size limit).
+        RATE_LIMITED: The request was rejected due to rate limiting.
     """
 
     INVALID_PARAMS = "INVALID_PARAMS"
     NOT_FOUND = "NOT_FOUND"
     CONFLICT = "CONFLICT"
     INTERNAL = "INTERNAL"
+    FORBIDDEN = "FORBIDDEN"
+    BUDGET_EXCEEDED = "BUDGET_EXCEEDED"
+    RATE_LIMITED = "RATE_LIMITED"
 
 
 def tool_error(code: ToolErrorCode | str, message: str) -> tuple[ToolErrorCode | str, str]:

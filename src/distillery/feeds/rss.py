@@ -394,7 +394,7 @@ class RSSAdapter:
         headers = {"User-Agent": "Distillery/0.1 (RSS adapter)"}
         headers.update(self._extra_headers)
 
-        with httpx.Client(timeout=_REQUEST_TIMEOUT) as client:
+        with httpx.Client(timeout=_REQUEST_TIMEOUT, verify=True) as client:
             response = client.get(
                 self._fetch_url,
                 headers=headers,

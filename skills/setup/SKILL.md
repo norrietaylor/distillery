@@ -2,7 +2,10 @@
 name: setup
 description: "Onboarding wizard — verify MCP connectivity, detect transport, and configure scheduled tasks"
 allowed-tools:
-  - "mcp__*__distillery_metrics"
+  - "mcp__*__distillery_list"
+  - "mcp__*__distillery_watch"
+  - "mcp__*__distillery_configure"
+  - "CronList"
   - "CronCreate"
   - "RemoteTrigger"
   - "Bash(test:*)"
@@ -43,7 +46,7 @@ Use `ToolSearch` to check whether any `distillery` MCP tools are available. Also
 
 **1b. Attempt connection:**
 
-Call `distillery_metrics(scope="summary")` to confirm the Distillery MCP server is running and authenticated.
+Call `distillery_list(limit=1)` to confirm the Distillery MCP server is running and authenticated.
 
 **1c. Determine state and respond:**
 
@@ -51,21 +54,18 @@ Evaluate the result based on what was found in 1a and 1b:
 
 ---
 
-**State: Connected** — `distillery_metrics(scope="summary")` returned successfully.
+**State: Connected** — `distillery_list(limit=1)` returned successfully.
 
-Display using the actual fields from `distillery_metrics(scope="summary")`:
-
+Display:
 
 ```text
 MCP server connected.
-  Entries:  <total_entries>
-  Model:    <embedding_model>
-  DB Size:  <database_size_bytes / 1048576> MB
+  Entries:  <total_count from distillery_list>
 ```
 
 Proceed to Step 2.
 
-**State: Needs Authentication** — Server entry found but `distillery_metrics(scope="summary")` is unavailable or fails (including auth-related failures). See `references/transport-detection.md` for display instructions. Skip to Step 6 with `MCP Server: needs authentication`.
+**State: Needs Authentication** — Server entry found but `distillery_list(limit=1)` is unavailable or fails (including auth-related failures). See `references/transport-detection.md` for display instructions. Skip to Step 6 with `MCP Server: needs authentication`.
 
 ---
 
@@ -139,17 +139,17 @@ Ask the user once about enabling scheduled tasks — their answer applies to all
 ```text
 Enable scheduled tasks? This includes:
   • Feed polling — every hour
-  • Feed rescoring — daily (re-evaluates relevance after new knowledge)
-  • KB maintenance — weekly (metrics, quality, stale entries, source suggestions)
+  • Stale entry check — daily (re-evaluates relevance after new knowledge)
+  • KB maintenance — weekly (stale entry check, digest)
 (yes / no)
 ```
 
-If yes, create the cron job:
+If yes, create the cron job using MCP tool calls (local transport has no HTTP server):
 
 ```python
 CronCreate(
   cron="<random off-peak minute> * * * *",
-  prompt="Use distillery_poll to poll all configured feed sources. Report a one-line summary of items fetched and stored.",
+  prompt="Call distillery_watch(action='list') to check configured feed sources, then call distillery_list(entry_type='feed', limit=5) to verify recent feed activity. Report a one-line summary: source count and latest feed entry age.",
   recurring=True,
   durable=True
 )
@@ -168,18 +168,18 @@ Auto-poll: skipped (no feed sources configured)
   Add sources with /watch add <url> — auto-poll will be set up automatically.
 ```
 
-**4b. Daily — Feed Rescoring**
+**4b. Daily — Stale Entry Check**
 
-After new knowledge entries are added, previously-scored feed items may have stale relevance scores. A daily rescore pass re-evaluates them against the current interest profile.
+A daily check identifies entries that may need refreshing or archiving.
 
 Skip this step if the user declined scheduled tasks or if no feed sources are configured.
 
-Check `CronList` for an existing rescore job. If none exists, create one:
+Check `CronList` for an existing daily job. If none exists, create one:
 
 ```python
 CronCreate(
   cron="<random minute> 6 * * *",
-  prompt="Use distillery_rescore(limit=200) to re-score feed entries against the current knowledge base. Report: rescored, upgraded, downgraded, archived counts.",
+  prompt="Call distillery_list(stale_days=30, limit=10) to find entries not accessed in 30+ days. Report: count of stale entries and the oldest one's title/age.",
   recurring=True,
   durable=True
 )
@@ -188,12 +188,12 @@ CronCreate(
 Display:
 
 ```text
-Daily rescore enabled: 06:<minute> UTC (cron job <job_id>)
+Daily stale check enabled: 06:<minute> UTC (cron job <job_id>)
 ```
 
 **4c. Weekly — Knowledge Base Maintenance**
 
-A weekly maintenance pass collects metrics, checks search quality, identifies stale entries, and refreshes source suggestions. Results are stored as a digest entry for longitudinal tracking.
+A weekly maintenance pass checks knowledge base health and stores a digest for longitudinal tracking.
 
 Skip this step if the user declined scheduled tasks.
 
@@ -203,13 +203,11 @@ Check `CronList` for an existing maintenance job. If none exists, create one:
 CronCreate(
   cron="<random minute> 7 * * 1",
   prompt="""Run weekly Distillery maintenance:
-1. Call distillery_metrics(scope="summary", period_days=7) — note entry growth, search volume, storage usage.
-2. Call distillery_metrics(scope="search_quality") — note positive feedback rate and avg result count.
-3. Call distillery_stale(days=30, limit=10) — note count and oldest entries.
-4. Call distillery_interests(recency_days=30, top_n=10) — note top tags and domains.
-5. Call distillery_interests(suggest_sources=True, max_suggestions=3) — note any new recommendations.
-6. Store a digest: distillery_store(content=<one-paragraph summary of findings>, entry_type="session", author="distillery-maintenance", tags=["digest", "weekly", "maintenance"], metadata={"period_start": "<7 days ago ISO>", "period_end": "<today ISO>"}).
-Report: entry counts, search quality trend, stale entry count, top interests, suggested sources.""",
+1. Call distillery_list(output='stats') for entry counts by type/status and storage size.
+2. Call distillery_list(stale_days=30, limit=10) for stale entry count.
+3. Call distillery_list(entry_type='feed', limit=5) for recent feed activity.
+4. Store a digest: distillery_store(content=<one-paragraph summary of findings>, entry_type='session', author='distillery-maintenance', tags=['digest', 'weekly', 'maintenance']).
+Report: entry counts, stale entry count, feed activity, storage size.""",
   recurring=True,
   durable=True
 )
@@ -219,7 +217,7 @@ Display:
 
 ```text
 Weekly maintenance enabled: Mondays at 07:<minute> UTC (cron job <job_id>)
-  Collects: metrics, search quality, stale entries, interests, source suggestions
+  Checks: entry stats, stale entries, feed activity
   Stores: weekly digest entry for tracking trends
 ```
 
@@ -380,6 +378,7 @@ The setup wizard uses a sequential, conversational format. Each step prints its 
 - Pick an off-peak cron minute (not :00 or :30) for all schedules; use different random minutes for each job
 - If the user has no feed sources, skip feed poll and rescore but still offer weekly maintenance
 - This skill is idempotent — running it multiple times should not create duplicates
-- Use actual field names from `distillery_metrics(scope="summary")` response (`total_entries`, `embedding_model`, `database_size_bytes`)
+- Use `distillery_list(limit=1)` for the MCP health check
+- CronCreate prompts use MCP tool calls (local transport has no HTTP server — webhooks are unreachable)
 - The weekly maintenance job stores its output as a digest entry — this creates a longitudinal record of KB health
-- Ask the user once about enabling scheduled tasks; their answer applies to all three tiers (poll, rescore, maintenance)
+- Ask the user once about enabling scheduled tasks; their answer applies to all three tiers

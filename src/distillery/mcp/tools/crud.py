@@ -146,6 +146,13 @@ async def _handle_store(
     if err:
         return error_response("INVALID_PARAMS", err)
 
+    output_mode_raw = arguments.get("output_mode")
+    output_mode = output_mode_raw if output_mode_raw is not None else "full"
+    if output_mode not in ("full", "summary"):
+        return error_response(
+            "INVALID_PARAMS", "Field 'output_mode' must be 'full' or 'summary'."
+        )
+
     entry_type_str = arguments["entry_type"]
     if entry_type_str not in _VALID_ENTRY_TYPES:
         return error_response(
@@ -194,7 +201,7 @@ async def _handle_store(
                 top = tag.split("/")[0]
                 if top in cfg.tags.reserved_prefixes:
                     return error_response(
-                        "RESERVED_PREFIX",
+                        "INVALID_PARAMS",
                         f"Tag {tag!r} uses reserved prefix {top!r}. "
                         "Only internal sources may use this namespace.",
                     )
@@ -207,7 +214,7 @@ async def _handle_store(
                 size_mb = Path(db_path).stat().st_size / (1024 * 1024)
                 if size_mb >= cfg.rate_limit.max_db_size_mb:
                     return error_response(
-                        "DB_SIZE_EXCEEDED",
+                        "BUDGET_EXCEEDED",
                         f"Database size ({size_mb:.1f} MB) exceeds limit "
                         f"({cfg.rate_limit.max_db_size_mb} MB). "
                         "Delete old entries or increase rate_limit.max_db_size_mb.",
@@ -216,9 +223,11 @@ async def _handle_store(
                 pass  # can't stat, skip check
 
     # --- embedding budget check (store + dedup + conflict = 3 embeds) ------
+    # summary mode skips dedup/conflict, so only 1 embed needed.
+    embed_count = 1 if output_mode == "summary" else 3
     if cfg is not None:
         try:
-            record_and_check(store.connection, cfg.rate_limit.embedding_budget_daily, count=3)
+            record_and_check(store.connection, cfg.rate_limit.embedding_budget_daily, count=embed_count)
         except EmbeddingBudgetError as exc:
             return error_response("BUDGET_EXCEEDED", str(exc))
 
@@ -277,7 +286,11 @@ async def _handle_store(
         entry_id = await store.store(entry)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error storing entry")
-        return error_response("STORE_ERROR", f"Failed to store entry: {exc}")
+        return error_response("INTERNAL", f"Failed to store entry: {exc}")
+
+    # --- summary mode: skip dedup/conflict, return early --------------------
+    if output_mode == "summary":
+        return success_response({"entry_id": entry_id})
 
     # --- deduplication check ------------------------------------------------
     warnings: list[dict[str, Any]] = []
@@ -367,6 +380,160 @@ async def _handle_store(
 
 
 # ---------------------------------------------------------------------------
+# _handle_store_batch
+# ---------------------------------------------------------------------------
+
+
+async def _handle_store_batch(
+    store: Any,
+    arguments: dict[str, Any],
+    cfg: DistilleryConfig | None = None,
+    created_by: str = "",
+) -> list[types.TextContent]:
+    """Batch-store multiple entries without dedup or conflict checks.
+
+    Args:
+        store: An initialised storage backend.
+        arguments: Parsed tool arguments dict.  Required key: ``entries``
+            (list of dicts, each with ``content`` and ``author``).
+            Optional key: ``project`` (applied to all entries lacking one).
+        cfg: Optional config for embedding budget checks.
+        created_by: Ownership identifier (from auth layer).
+
+    Returns:
+        A structured MCP success or error response.
+    """
+    from distillery.mcp.budget import EmbeddingBudgetError, record_and_check
+    from distillery.models import Entry, EntrySource, EntryType
+
+    entries_raw = arguments.get("entries")
+    if not isinstance(entries_raw, list):
+        return error_response("INVALID_PARAMS", "Field 'entries' must be a list of dicts.")
+
+    project_default = arguments.get("project")
+
+    # --- validate each entry dict -------------------------------------------
+    built: list[Entry] = []
+    for idx, item in enumerate(entries_raw):
+        if not isinstance(item, dict):
+            return error_response(
+                "INVALID_PARAMS", f"entries[{idx}] must be a dict, got {type(item).__name__}."
+            )
+        if "content" not in item:
+            return error_response("INVALID_PARAMS", f"entries[{idx}] is missing required 'content'.")
+        if "author" not in item:
+            return error_response("INVALID_PARAMS", f"entries[{idx}] is missing required 'author'.")
+
+        entry_type_str = item.get("entry_type", "inbox")
+        if entry_type_str not in _VALID_ENTRY_TYPES:
+            return error_response(
+                "INVALID_PARAMS",
+                f"entries[{idx}] has invalid entry_type {entry_type_str!r}. "
+                f"Must be one of: {', '.join(sorted(_VALID_ENTRY_TYPES))}.",
+            )
+
+        source_str = str(item.get("source", EntrySource.CLAUDE_CODE.value))
+        if source_str not in _VALID_SOURCES:
+            return error_response(
+                "INVALID_PARAMS",
+                f"entries[{idx}] has invalid source {source_str!r}. "
+                f"Must be one of: {', '.join(sorted(_VALID_SOURCES))}.",
+            )
+
+        # --- normalize tags (mirror _handle_store logic) ---
+        tags_raw = item.get("tags")
+        if tags_raw is None:
+            tags_normalized = []
+        elif isinstance(tags_raw, str):
+            tags_normalized = [tags_raw]
+        elif isinstance(tags_raw, list):
+            tags_normalized = tags_raw
+        else:
+            return error_response(
+                "INVALID_PARAMS",
+                f"entries[{idx}] has invalid tags: must be a list or string, got {type(tags_raw).__name__}.",
+            )
+
+        # Validate each tag is a non-empty string
+        final_tags: list[str] = []
+        for tag in tags_normalized:
+            if not isinstance(tag, str):
+                return error_response(
+                    "INVALID_PARAMS",
+                    f"entries[{idx}]: each tag must be a string, got {type(tag).__name__}.",
+                )
+            tag_stripped = tag.strip()
+            if tag_stripped:
+                final_tags.append(tag_stripped)
+
+        # --- reserved prefix enforcement (mirror _handle_store logic) ---
+        _reserved_allowed_sources: set[str] = {EntrySource.IMPORT.value}
+        if cfg is not None and cfg.tags.reserved_prefixes and source_str not in _reserved_allowed_sources:
+            for tag in final_tags:
+                top = tag.split("/")[0]
+                if top in cfg.tags.reserved_prefixes:
+                    return error_response(
+                        "INVALID_PARAMS",
+                        f"entries[{idx}]: tag {tag!r} uses reserved prefix {top!r}. "
+                        "Only internal sources may use this namespace.",
+                    )
+
+        try:
+            entry = Entry(
+                content=item["content"],
+                entry_type=EntryType(entry_type_str),
+                source=EntrySource(source_str),
+                author=item["author"],
+                project=item.get("project", project_default),
+                tags=final_tags,
+                metadata=dict(item.get("metadata") or {}),
+                created_by=created_by,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return error_response(
+                "INVALID_PARAMS", f"entries[{idx}]: failed to construct entry: {exc}"
+            )
+        built.append(entry)
+
+    if not built:
+        return success_response({"entry_ids": [], "count": 0})
+
+    # --- db size check (same guard as _handle_store) -------------------------
+    if cfg is not None and cfg.rate_limit.max_db_size_mb > 0:
+        db_path = _normalize_db_path(cfg.storage.database_path)
+        if db_path != ":memory:" and not _is_remote_db_path(db_path):
+            try:
+                size_mb = Path(db_path).stat().st_size / (1024 * 1024)
+                if size_mb >= cfg.rate_limit.max_db_size_mb:
+                    return error_response(
+                        "BUDGET_EXCEEDED",
+                        f"Database size ({size_mb:.1f} MB) exceeds limit "
+                        f"({cfg.rate_limit.max_db_size_mb} MB). "
+                        "Delete old entries or increase rate_limit.max_db_size_mb.",
+                    )
+            except OSError:
+                pass  # can't stat, skip check
+
+    # --- embedding budget check (1 embed per entry, no dedup) ---------------
+    if cfg is not None:
+        try:
+            record_and_check(
+                store.connection, cfg.rate_limit.embedding_budget_daily, count=len(built)
+            )
+        except EmbeddingBudgetError as exc:
+            return error_response("BUDGET_EXCEEDED", str(exc))
+
+    # --- persist ------------------------------------------------------------
+    try:
+        entry_ids = await store.store_batch(built)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error in store_batch")
+        return error_response("INTERNAL", f"Failed to batch-store entries: {exc}")
+
+    return success_response({"entry_ids": entry_ids, "count": len(entry_ids)})
+
+
+# ---------------------------------------------------------------------------
 # _handle_get
 # ---------------------------------------------------------------------------
 
@@ -403,7 +570,7 @@ async def _handle_get(
         entry = await store.get(entry_id)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error fetching entry id=%s", entry_id)
-        return error_response("STORE_ERROR", f"Failed to retrieve entry: {exc}")
+        return error_response("INTERNAL", f"Failed to retrieve entry: {exc}")
 
     if entry is None:
         return error_response(
@@ -577,7 +744,7 @@ async def _handle_update(
         return error_response("INVALID_PARAMS", str(exc))
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error updating entry id=%s", entry_id)
-        return error_response("STORE_ERROR", f"Failed to update entry: {exc}")
+        return error_response("INTERNAL", f"Failed to update entry: {exc}")
 
     return success_response(updated_entry.to_dict())
 
@@ -587,6 +754,7 @@ async def _handle_update(
 # ---------------------------------------------------------------------------
 
 _VALID_OUTPUT_MODES = frozenset({"full", "summary", "ids", "review"})
+_VALID_GROUP_BY_VALUES = frozenset({"entry_type", "status", "author", "project", "source"})
 
 
 def _entry_to_summary_dict(entry: Any) -> dict[str, Any]:
@@ -655,6 +823,46 @@ async def _handle_list(
             return error_response("INVALID_PARAMS", "Field 'content_max_length' must be >= 1")
         content_max_length = content_max_length_raw
 
+    # --- validate stale_days -------------------------------------------------
+    stale_days_raw = arguments.get("stale_days")
+    stale_days: int | None = None
+    if stale_days_raw is not None:
+        if not isinstance(stale_days_raw, int):
+            return error_response("INVALID_PARAMS", "Field 'stale_days' must be an integer")
+        if stale_days_raw < 1:
+            return error_response("INVALID_PARAMS", "Field 'stale_days' must be >= 1")
+        stale_days = stale_days_raw
+
+    # --- validate group_by ---------------------------------------------------
+    group_by_raw = arguments.get("group_by")
+    group_by: str | None = None
+    if group_by_raw is not None:
+        if not isinstance(group_by_raw, str):
+            return error_response("INVALID_PARAMS", "Field 'group_by' must be a string")
+        if group_by_raw not in _VALID_GROUP_BY_VALUES:
+            return error_response(
+                "INVALID_PARAMS",
+                f"Field 'group_by' must be one of: {', '.join(sorted(_VALID_GROUP_BY_VALUES))}",
+            )
+        group_by = group_by_raw
+
+    # --- validate output -----------------------------------------------------
+    output_raw = arguments.get("output")
+    output: str | None = None
+    if output_raw is not None:
+        if not isinstance(output_raw, str):
+            return error_response("INVALID_PARAMS", "Field 'output' must be a string")
+        if output_raw != "stats":
+            return error_response("INVALID_PARAMS", "Field 'output' only accepts 'stats'")
+        output = output_raw
+
+    # --- mutual exclusivity: group_by and output="stats" ---------------------
+    if group_by is not None and output == "stats":
+        return error_response(
+            "INVALID_PARAMS",
+            "Fields 'group_by' and 'output' are mutually exclusive",
+        )
+
     filters = _build_filters_from_arguments(arguments)
 
     # review mode implicitly filters to pending_review status.
@@ -663,11 +871,47 @@ async def _handle_list(
             filters = {}
         filters["status"] = "pending_review"
 
+    # --- group_by mode -------------------------------------------------------
+    if group_by is not None:
+        try:
+            result = await store.list_entries(
+                filters=filters,
+                limit=limit,
+                offset=offset,
+                group_by=group_by,
+                stale_days=stale_days,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Error in distillery_list (group_by mode)")
+            return error_response("INTERNAL", f"list_entries failed: {exc}")
+        return success_response(result)
+
+    # --- stats mode ----------------------------------------------------------
+    if output == "stats":
+        try:
+            result = await store.list_entries(
+                filters=filters,
+                limit=limit,
+                offset=offset,
+                stale_days=stale_days,
+                output="stats",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Error in distillery_list (stats mode)")
+            return error_response("INTERNAL", f"list_entries failed: {exc}")
+        return success_response(result)
+
+    # --- default list mode ---------------------------------------------------
     try:
-        entries = await store.list_entries(filters=filters, limit=limit, offset=offset)
+        entries = await store.list_entries(
+            filters=filters,
+            limit=limit,
+            offset=offset,
+            stale_days=stale_days,
+        )
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error in distillery_list")
-        return error_response("LIST_ERROR", f"list_entries failed: {exc}")
+        return error_response("INTERNAL", f"list_entries failed: {exc}")
 
     try:
         total_count = await store.count_entries(filters=filters)
@@ -802,7 +1046,7 @@ async def _handle_correct(
         original = await store.get(wrong_entry_id)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error fetching entry id=%s for correction", wrong_entry_id)
-        return error_response("STORE_ERROR", f"Failed to retrieve original entry: {exc}")
+        return error_response("INTERNAL", f"Failed to retrieve original entry: {exc}")
 
     if original is None:
         return error_response(
@@ -813,7 +1057,7 @@ async def _handle_correct(
 
     if original.status == EntryStatus.ARCHIVED:
         return error_response(
-            "INVALID_STATE",
+            "INVALID_PARAMS",
             "Cannot correct an archived entry.",
             details={"wrong_entry_id": wrong_entry_id, "status": original.status.value},
         )
@@ -845,7 +1089,7 @@ async def _handle_correct(
             top = tag.split("/")[0]
             if top in cfg.tags.reserved_prefixes:
                 return error_response(
-                    "RESERVED_PREFIX",
+                    "INVALID_PARAMS",
                     f"Tag {tag!r} uses reserved prefix {top!r}. "
                     "Only internal sources may use this namespace.",
                 )
@@ -879,7 +1123,7 @@ async def _handle_correct(
                 size_mb = Path(db_path).stat().st_size / (1024 * 1024)
                 if size_mb >= cfg.rate_limit.max_db_size_mb:
                     return error_response(
-                        "DB_SIZE_EXCEEDED",
+                        "BUDGET_EXCEEDED",
                         f"Database size ({size_mb:.1f} MB) exceeds limit "
                         f"({cfg.rate_limit.max_db_size_mb} MB). "
                         "Delete old entries or increase rate_limit.max_db_size_mb.",
@@ -900,7 +1144,7 @@ async def _handle_correct(
         new_entry_id = await store.apply_correction(new_entry, wrong_entry_id)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error applying correction for entry id=%s", wrong_entry_id)
-        return error_response("STORE_ERROR", f"Failed to apply correction: {exc}")
+        return error_response("INTERNAL", f"Failed to apply correction: {exc}")
 
     return success_response(
         {
@@ -912,6 +1156,7 @@ async def _handle_correct(
 
 __all__ = [
     "_handle_store",
+    "_handle_store_batch",
     "_handle_get",
     "_handle_update",
     "_handle_correct",
