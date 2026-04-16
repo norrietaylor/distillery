@@ -810,6 +810,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         poll_interval_minutes: int | None = None,
         trust_weight: float | None = None,
         sync_history: bool = False,
+        purge: bool = False,
     ) -> list[types.TextContent]:
         """Manage monitored feed sources for ambient intelligence.
 
@@ -826,10 +827,13 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
           - sync_history (bool, optional, default=false): When true and source_type is
             "github", immediately syncs existing issues/PRs into the knowledge base
             after adding the source.
+          - purge (bool, optional, default=false): When true and action is "remove",
+            archives all entries from the removed source (soft-delete). Returns the
+            count of archived entries in purged_entries.
 
         RETURNS (success): { sources: list, count: int } (list) or
           { added: dict, sources: list, sync?: { created: int, updated: int, relations: int } } (add) or
-          { removed_url: str, removed: bool, sources: list } (remove)
+          { removed_url: str, removed: bool, sources: list, purged_entries?: int } (remove)
         RETURNS (error): { error: true, code: "INVALID_PARAMS" | "CONFLICT" | "INTERNAL", message: "..." }
 
         RELATED: distillery_interests (to discover sources to watch),
@@ -842,6 +846,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             arguments=dict(
                 action=action,
                 sync_history=sync_history,
+                purge=purge,
                 **_omit_none(
                     url=url,
                     source_type=source_type,
