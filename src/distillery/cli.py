@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
 import sys
 from pathlib import Path
@@ -1570,6 +1571,8 @@ def main(argv: list[str] | None = None) -> None:
 
     # Flush output streams before exiting to ensure all output is visible
     # when invoked via entry_points (e.g. `distillery retag --dry-run`).
-    sys.stdout.flush()
-    sys.stderr.flush()
+    # Guard against BrokenPipeError when piped to a closed consumer (e.g. `| head`).
+    for _stream in (sys.stdout, sys.stderr):
+        with contextlib.suppress(BrokenPipeError):
+            _stream.flush()
     sys.exit(exit_code)
