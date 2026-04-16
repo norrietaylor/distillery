@@ -25,6 +25,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 import duckdb
 
@@ -242,15 +243,22 @@ class DuckDBStore:
     def _rebuild_fts_index(self, conn: duckdb.DuckDBPyConnection) -> None:
         """Rebuild the full-text search index on ``entries.content``.
 
-        Uses ``overwrite=1`` so the call is idempotent — safe to run on every
-        startup and after content mutations.
+        Explicitly drops the ``fts_main_entries`` schema with ``CASCADE``
+        before recreating via the FTS PRAGMA.  The drop+create is wrapped in
+        a single transaction so an interrupted rebuild cannot leave a partial
+        schema in the WAL.
         """
         if not self._fts_available:
             return
         try:
-            conn.execute("PRAGMA create_fts_index('entries', 'id', 'content', overwrite=1)")
+            conn.execute("BEGIN TRANSACTION")
+            conn.execute("DROP SCHEMA IF EXISTS fts_main_entries CASCADE")
+            conn.execute("PRAGMA create_fts_index('entries', 'id', 'content')")
+            conn.execute("COMMIT")
             logger.debug("FTS index rebuilt on entries.content")
         except duckdb.Error as exc:
+            with contextlib.suppress(duckdb.Error):
+                conn.execute("ROLLBACK")
             logger.warning("FTS index rebuild failed: %s", exc)
             self._fts_available = False
 
@@ -429,10 +437,41 @@ class DuckDBStore:
         Write-write conflicts (common when multiple stateless HTTP sessions
         start concurrently) are retried automatically by wrapping the entire
         initialization write path in a retry loop.
+
+        If the database cannot be opened due to a corrupt WAL (e.g. from an
+        interrupted FTS index rebuild), the WAL file is deleted and the
+        connection is retried.  This is a last-resort recovery path —
+        uncommitted data in the WAL will be lost.
         """
         import time
 
-        conn = self._open_connection()
+        try:
+            conn = self._open_connection()
+        except duckdb.Error as exc:
+            exc_msg = str(exc)
+            if "fts_main_entries" in exc_msg or "WAL" in exc_msg:
+                # Only attempt WAL recovery for local file paths.
+                # Skip in-memory databases, S3, MotherDuck, and other URI schemes.
+                parsed = urlparse(self._db_path)
+                is_local_file = self._db_path != ":memory:" and parsed.scheme in ("", "file")
+                if is_local_file:
+                    wal_path = Path(self._db_path + ".wal")
+                    if wal_path.exists():
+                        logger.warning(
+                            "Database WAL appears corrupt (FTS-related): %s. "
+                            "Deleting WAL file %s and retrying — "
+                            "uncommitted data may be lost.",
+                            exc,
+                            wal_path,
+                        )
+                        wal_path.unlink()
+                        conn = self._open_connection()
+                    else:
+                        raise
+                else:
+                    raise
+            else:
+                raise
 
         # httpfs must be loaded before vss when using S3 storage.
         if self._is_s3_path(self._db_path):
