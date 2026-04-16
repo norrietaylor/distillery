@@ -172,17 +172,19 @@ async def _handle_watch(
         # uses store.store() per entry which respects store-level constraints.
         # Runs as an async background task so the MCP response returns immediately.
         if sync_history and source_type == "github":
+            tracker = None
+            job = None
             try:
                 from distillery.feeds.github_sync import GitHubSyncAdapter
                 from distillery.feeds.sync_jobs import get_tracker, run_sync_job_async
 
-                tracker = get_tracker()
-                job = tracker.create_job(source_url=url, source_type=source_type)
                 adapter = GitHubSyncAdapter(
                     store=store,
                     url=url,
                     token=os.environ.get("GITHUB_TOKEN"),
                 )
+                tracker = get_tracker()
+                job = tracker.create_job(source_url=url, source_type=source_type)
 
                 def _on_page(page_num: int, created: int, updated: int) -> None:
                     job.pages_processed = page_num
@@ -190,16 +192,17 @@ async def _handle_watch(
                     job.entries_updated += updated
 
                 sync_coro = adapter.sync_batched(on_page=_on_page)
-
                 asyncio.create_task(run_sync_job_async(job, tracker, sync_coro))
                 response_data["sync_job"] = job.to_dict()
                 response_data["message"] = (
                     "Feed source added. History sync started in background "
                     f"(job_id={job.job_id}). Use distillery_sync_status to check progress."
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 logger.exception("distillery_watch: sync_history failed for %s", url)
-                response_data["sync_error"] = str(exc)
+                if tracker is not None and job is not None:
+                    tracker.mark_failed(job.job_id, "History sync failed to start")
+                response_data["sync_error"] = "History sync failed to start"
 
         return success_response(response_data)
 

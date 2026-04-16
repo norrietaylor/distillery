@@ -83,6 +83,7 @@ class SyncJob:
             "pages_processed": self.pages_processed,
             "errors": self.errors,
             "error_message": self.error_message,
+            "result": self.result,
         }
 
 
