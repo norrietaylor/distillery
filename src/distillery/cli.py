@@ -767,7 +767,13 @@ def _cmd_export(config_path: str | None, fmt: str, output_path: str) -> int:
             for row in entry_rows:
                 entry: dict[str, Any] = {}
                 for col, val in zip(entry_cols, row, strict=True):
-                    if hasattr(val, "isoformat"):
+                    if isinstance(val, datetime.datetime):
+                        # DuckDB TIMESTAMP returns naive datetimes in local time;
+                        # normalise to UTC so exports are timezone-portable.
+                        if val.tzinfo is None:
+                            val = val.astimezone(datetime.UTC)
+                        entry[col] = val.isoformat()
+                    elif hasattr(val, "isoformat"):
                         entry[col] = val.isoformat()
                     elif col == "metadata" and isinstance(val, str):
                         entry[col] = json.loads(val) if val else {}
