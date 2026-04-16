@@ -185,6 +185,8 @@ Tags: digest, radar, ambient
 
 ## Rules
 
+- NEVER use Bash, Python, or any tool not listed in allowed-tools
+- If an MCP tool call fails, report the error to the user and STOP. Do not attempt workarounds.
 - Default lookback is 7 days; default limit is 20 — respect overrides
 - Group entries by source tag when available; fall back to topic grouping
 - Display digest by default; store only with `--store` flag

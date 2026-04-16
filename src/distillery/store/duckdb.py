@@ -1584,8 +1584,10 @@ class DuckDBStore:
         Parameters:
             group_by: Logical field name.  Supported values:
                 ``"entry_type"``, ``"status"``, ``"author"``, ``"project"``,
-                ``"source"``, ``"metadata.source_url"``, ``"metadata.source_type"``.
-                The SQL expression is resolved here so that callers only ever pass
+                ``"source"``, ``"tags"``, ``"metadata.source_url"``,
+                ``"metadata.source_type"``.  For ``"tags"`` a two-step CTE
+                is used to UNNEST the array before aggregating.  The SQL
+                expression is resolved here so that callers only ever pass
                 the logical name (validated by the MCP layer against an allowlist).
             filters: Optional metadata constraints (see ``_build_filter_clauses``).
             limit: Maximum number of groups to return.
@@ -1611,22 +1613,44 @@ class DuckDBStore:
                 params.append(stale_days)
             where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
-            # Single CTE query: window functions compute true totals over the
-            # full grouped result set, while LIMIT returns only the top-N rows.
-            sql = (
-                f"WITH grouped AS ("
-                f"SELECT {group_expr} AS value, COUNT(*) AS group_count "
-                f"FROM entries "
-                f"{where_sql} "
-                f"GROUP BY 1"
-                f") "
-                f"SELECT value, group_count, "
-                f"COUNT(*) OVER () AS total_groups, "
-                f"COALESCE(SUM(group_count) OVER (), 0) AS total_entries "
-                f"FROM grouped "
-                f"ORDER BY group_count DESC, value ASC NULLS LAST "
-                f"LIMIT ?"
-            )
+            # DuckDB does not support UNNEST() directly inside a CTE
+            # SELECT, so for array fields (tags) we use a two-step CTE:
+            # first explode rows, then aggregate.  Scalar fields use the
+            # original single-CTE path.
+            if group_by == "tags":
+                sql = (
+                    f"WITH exploded AS ("
+                    f"SELECT UNNEST(tags) AS value "
+                    f"FROM entries "
+                    f"{where_sql}"
+                    f"), "
+                    f"grouped AS ("
+                    f"SELECT value, COUNT(*) AS group_count "
+                    f"FROM exploded "
+                    f"GROUP BY 1"
+                    f") "
+                    f"SELECT value, group_count, "
+                    f"COUNT(*) OVER () AS total_groups, "
+                    f"COALESCE(SUM(group_count) OVER (), 0) AS total_entries "
+                    f"FROM grouped "
+                    f"ORDER BY group_count DESC, value ASC NULLS LAST "
+                    f"LIMIT ?"
+                )
+            else:
+                sql = (
+                    f"WITH grouped AS ("
+                    f"SELECT {group_expr} AS value, COUNT(*) AS group_count "
+                    f"FROM entries "
+                    f"{where_sql} "
+                    f"GROUP BY 1"
+                    f") "
+                    f"SELECT value, group_count, "
+                    f"COUNT(*) OVER () AS total_groups, "
+                    f"COALESCE(SUM(group_count) OVER (), 0) AS total_entries "
+                    f"FROM grouped "
+                    f"ORDER BY group_count DESC, value ASC NULLS LAST "
+                    f"LIMIT ?"
+                )
             rows = conn.execute(sql, list(params) + [limit]).fetchall()
             total_groups = int(rows[0][2]) if rows else 0
             total_entries = int(rows[0][3]) if rows else 0

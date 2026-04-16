@@ -21,7 +21,6 @@
       "mcp__plugin_distillery_distillery__distillery_status",
       "mcp__plugin_distillery_distillery__distillery_store",
       "mcp__plugin_distillery_distillery__distillery_suggest_sources",
-      "mcp__plugin_distillery_distillery__distillery_tag_tree",
       "mcp__plugin_distillery_distillery__distillery_type_schemas",
       "mcp__plugin_distillery_distillery__distillery_update",
       "mcp__plugin_distillery_distillery__distillery_watch",

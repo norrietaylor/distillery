@@ -32,7 +32,7 @@ See CONVENTIONS.md — skip if already confirmed this conversation.
 |--------------------|--------|------------|
 | `/watch` or `/watch list` | `list` | none |
 | `/watch add <url> [--type TYPE] [--label LABEL]` | `add` | url, optional source_type, label |
-| `/watch remove <url>` | `remove` | url |
+| `/watch remove <url> [--purge]` | `remove` | url, optional purge |
 
 Default to `list` if no subcommand is recognizable.
 
@@ -51,7 +51,7 @@ Call `distillery_watch` with the parsed arguments:
 
 - **list**: `distillery_watch(action="list")`
 - **add**: `distillery_watch(action="add", url=..., source_type=..., label=..., poll_interval_minutes=..., trust_weight=...)`
-- **remove**: `distillery_watch(action="remove", url="<url>")`
+- **remove**: `distillery_watch(action="remove", url="<url>")` or `distillery_watch(action="remove", url="<url>", purge=true)` to also archive all historic entries from the source
 
 - On MCP errors, see CONVENTIONS.md error handling — display and stop
 
@@ -82,7 +82,8 @@ Feed Sources (N configured)
 If no sources: show "No feed sources configured." with usage hint.
 
 - **After `add`**: show added source details, updated table, and auto-poll status
-- **After `remove`**: confirm removal, show updated table
+- **After `remove`**: confirm removal, show updated table. If `--purge` was used, also report the number of archived entries
+- **After `remove --purge`**: "Removed source and archived N historic entries."
 
 Changes are persisted to the database automatically — no manual YAML editing required.
 

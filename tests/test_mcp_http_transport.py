@@ -32,7 +32,7 @@ MCP_HEADERS = {
     "Accept": "application/json, text/event-stream",
 }
 
-# 13-tool consolidated API (12 from #196 + store_batch from #244).
+# 15-tool API (13 from api-hardening + gh_sync + sync_status from async-sync-pipeline).
 EXPECTED_TOOLS = {
     "distillery_store",
     "distillery_store_batch",
@@ -47,6 +47,8 @@ EXPECTED_TOOLS = {
     "distillery_watch",
     "distillery_configure",
     "distillery_relations",
+    "distillery_gh_sync",
+    "distillery_sync_status",
 }
 
 
@@ -159,7 +161,7 @@ class TestAllToolsAccessibleOverHttp:
             assert "result" in data, f"Expected result in: {data}"
             tools = data["result"]["tools"]
             tool_names = {t["name"] for t in tools}
-            assert len(tool_names) == 13, f"Expected 13 tools, got {len(tool_names)}: {tool_names}"
+            assert len(tool_names) == 15, f"Expected 15 tools, got {len(tool_names)}: {tool_names}"
             assert tool_names == EXPECTED_TOOLS, (
                 f"Tool mismatch.\nExpected: {EXPECTED_TOOLS}\nGot: {tool_names}"
             )

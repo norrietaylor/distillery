@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -159,29 +158,18 @@ async def test_handle_store_batch_not_a_list() -> None:
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class _FakeSyncResult:
-    repo: str
-    created: int
-    updated: int
-    relations_created: int
-
-
 @pytest.mark.unit
 async def test_watch_add_sync_history() -> None:
-    """watch add with sync_history=True should invoke GitHubSyncAdapter.sync()."""
+    """watch add with sync_history=True should start a background sync job."""
     store = AsyncMock()
     store.add_feed_source.return_value = {"url": "owner/repo", "source_type": "github"}
     store.list_feed_sources.return_value = [{"url": "owner/repo", "source_type": "github"}]
-
-    fake_result = _FakeSyncResult(repo="owner/repo", created=5, updated=2, relations_created=3)
 
     with patch(
         "distillery.feeds.github_sync.GitHubSyncAdapter",
         autospec=False,
     ) as mock_cls:
         mock_adapter = AsyncMock()
-        mock_adapter.sync.return_value = fake_result
         mock_cls.return_value = mock_adapter
 
         result = await _handle_watch(
@@ -195,10 +183,11 @@ async def test_watch_add_sync_history() -> None:
         )
 
     data = parse_mcp_response(result)
-    assert "sync" in data
-    assert data["sync"]["created"] == 5
-    assert data["sync"]["updated"] == 2
-    assert data["sync"]["relations"] == 3
+    # With async background sync, the response contains a sync_job dict
+    # (status=pending) and a message, not the final sync results.
+    assert "sync_job" in data
+    assert data["sync_job"]["status"] == "pending"
+    assert "message" in data
 
 
 @pytest.mark.unit
