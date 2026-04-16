@@ -163,7 +163,9 @@ class TestRateLimitMiddleware:
             assert cap.status == 200
 
     async def test_rejects_exceeding_per_minute_limit(self) -> None:
-        mw = RateLimitMiddleware(_dummy_app, requests_per_minute=3, requests_per_hour=100)
+        mw = RateLimitMiddleware(
+            _dummy_app, requests_per_minute=3, requests_per_hour=100, loopback_exempt=False
+        )
         # Use up quota
         for _ in range(3):
             cap = _ResponseCapture()
@@ -182,7 +184,9 @@ class TestRateLimitMiddleware:
         assert body["retry_after"] > 0
 
     async def test_rejects_exceeding_per_hour_limit(self) -> None:
-        mw = RateLimitMiddleware(_dummy_app, requests_per_minute=100, requests_per_hour=3)
+        mw = RateLimitMiddleware(
+            _dummy_app, requests_per_minute=100, requests_per_hour=3, loopback_exempt=False
+        )
         for _ in range(3):
             cap = _ResponseCapture()
             await mw(_make_scope(), _noop_receive, cap)
@@ -247,6 +251,57 @@ class TestRateLimitMiddleware:
         await mw(scope, _noop_receive, cap)
         # websocket type passes directly to app, which responds 200
         assert cap.status == 200
+
+    async def test_loopback_127_exempt_by_default(self) -> None:
+        """Requests from 127.0.0.1 bypass rate limiting when loopback_exempt=True."""
+        mw = RateLimitMiddleware(_dummy_app, requests_per_minute=1, requests_per_hour=1)
+        assert mw.loopback_exempt is True
+        # Should allow unlimited requests from 127.0.0.1
+        for _ in range(10):
+            cap = _ResponseCapture()
+            await mw(_make_scope(client=("127.0.0.1", 12345)), _noop_receive, cap)
+            assert cap.status == 200
+
+    async def test_loopback_ipv6_exempt_by_default(self) -> None:
+        """Requests from ::1 bypass rate limiting when loopback_exempt=True."""
+        mw = RateLimitMiddleware(_dummy_app, requests_per_minute=1, requests_per_hour=1)
+        for _ in range(10):
+            cap = _ResponseCapture()
+            await mw(_make_scope(client=("::1", 12345)), _noop_receive, cap)
+            assert cap.status == 200
+
+    async def test_loopback_localhost_exempt_by_default(self) -> None:
+        """Requests from 'localhost' bypass rate limiting when loopback_exempt=True."""
+        mw = RateLimitMiddleware(_dummy_app, requests_per_minute=1, requests_per_hour=1)
+        for _ in range(10):
+            cap = _ResponseCapture()
+            await mw(_make_scope(client=("localhost", 12345)), _noop_receive, cap)
+            assert cap.status == 200
+
+    async def test_loopback_exempt_disabled(self) -> None:
+        """When loopback_exempt=False, 127.0.0.1 is rate-limited normally."""
+        mw = RateLimitMiddleware(
+            _dummy_app, requests_per_minute=2, requests_per_hour=100, loopback_exempt=False
+        )
+        for _ in range(2):
+            cap = _ResponseCapture()
+            await mw(_make_scope(client=("127.0.0.1", 12345)), _noop_receive, cap)
+            assert cap.status == 200
+        # Third request should be rate-limited
+        cap = _ResponseCapture()
+        await mw(_make_scope(client=("127.0.0.1", 12345)), _noop_receive, cap)
+        assert cap.status == 429
+
+    async def test_loopback_exempt_does_not_affect_external_ips(self) -> None:
+        """External IPs are still rate-limited even when loopback_exempt=True."""
+        mw = RateLimitMiddleware(_dummy_app, requests_per_minute=2, requests_per_hour=100)
+        for _ in range(2):
+            cap = _ResponseCapture()
+            await mw(_make_scope(client=("10.0.0.1", 12345)), _noop_receive, cap)
+            assert cap.status == 200
+        cap = _ResponseCapture()
+        await mw(_make_scope(client=("10.0.0.1", 12345)), _noop_receive, cap)
+        assert cap.status == 429
 
     async def test_evicts_idle_ip_windows(self) -> None:
         """Windows for idle IPs are cleaned up to prevent unbounded memory."""
@@ -660,6 +715,7 @@ class TestApplyHttpMiddleware:
             _dummy_app,
             requests_per_minute=2,
             requests_per_hour=100,
+            loopback_exempt=False,
         )
         for _ in range(2):
             cap = _ResponseCapture()
@@ -681,6 +737,35 @@ class TestApplyHttpMiddleware:
         scope = _make_scope(headers=[(b"content-length", b"200")])
         await app(scope, _noop_receive, cap)
         assert cap.status == 413
+
+    async def test_loopback_exempt_in_composition(self) -> None:
+        """Loopback exemption works through the composed middleware stack."""
+        app = apply_http_middleware(
+            _dummy_app,
+            requests_per_minute=1,
+            requests_per_hour=1,
+            loopback_exempt=True,
+        )
+        # 127.0.0.1 should bypass rate limiting
+        for _ in range(5):
+            cap = _ResponseCapture()
+            await app(_make_scope(client=("127.0.0.1", 12345)), _noop_receive, cap)
+            assert cap.status == 200
+
+    async def test_loopback_exempt_disabled_in_composition(self) -> None:
+        """When loopback_exempt=False, localhost is rate-limited in composed stack."""
+        app = apply_http_middleware(
+            _dummy_app,
+            requests_per_minute=1,
+            requests_per_hour=100,
+            loopback_exempt=False,
+        )
+        cap = _ResponseCapture()
+        await app(_make_scope(client=("127.0.0.1", 12345)), _noop_receive, cap)
+        assert cap.status == 200
+        cap = _ResponseCapture()
+        await app(_make_scope(client=("127.0.0.1", 12345)), _noop_receive, cap)
+        assert cap.status == 429
 
     async def test_request_id_present_in_composition(self) -> None:
         """X-Request-ID header is echoed on responses from the composed stack."""
@@ -741,6 +826,7 @@ class TestRequestIDMiddleware:
             _dummy_app,
             requests_per_minute=1,
             requests_per_hour=100,
+            loopback_exempt=False,
         )
         # First request succeeds and consumes the quota.
         cap = _ResponseCapture()

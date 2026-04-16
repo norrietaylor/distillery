@@ -125,7 +125,13 @@ class RateLimitMiddleware:
         app: The wrapped ASGI application.
         requests_per_minute: Maximum requests per IP per 60-second window.
         requests_per_hour: Maximum requests per IP per 3600-second window.
+        trust_proxy: Prefer ``X-Forwarded-For`` for client IP extraction.
+        loopback_exempt: When ``True`` (default), skip rate limiting for
+            requests originating from loopback addresses (``127.0.0.1``,
+            ``::1``, ``localhost``).
     """
+
+    _LOOPBACK_ADDRS: frozenset[str] = frozenset({"127.0.0.1", "::1", "localhost"})
 
     def __init__(
         self,
@@ -133,11 +139,13 @@ class RateLimitMiddleware:
         requests_per_minute: int = 60,
         requests_per_hour: int = 600,
         trust_proxy: bool = False,
+        loopback_exempt: bool = True,
     ) -> None:
         self.app = app
         self.requests_per_minute = requests_per_minute
         self.requests_per_hour = requests_per_hour
         self.trust_proxy = trust_proxy
+        self.loopback_exempt = loopback_exempt
         # ip -> _IPWindow.  In-memory state; resets on process restart.
         self._windows: dict[str, _IPWindow] = {}
 
@@ -147,6 +155,11 @@ class RateLimitMiddleware:
             return
 
         ip = _client_ip(scope, trust_proxy=self.trust_proxy)
+
+        if self.loopback_exempt and ip in self._LOOPBACK_ADDRS:
+            await self.app(scope, receive, send)
+            return
+
         now = time.monotonic()
 
         was_existing = ip in self._windows
@@ -465,6 +478,7 @@ def apply_http_middleware(
     requests_per_hour: int = 600,
     max_body_bytes: int = 1_048_576,
     trust_proxy: bool = False,
+    loopback_exempt: bool = True,
     org_checker: OrgMembershipChecker | None = None,
     audit_callback: AuditCallback | None = None,
 ) -> ASGIApp:
@@ -485,6 +499,7 @@ def apply_http_middleware(
         requests_per_hour: Per-IP hour limit (default 600).
         max_body_bytes: Maximum body size in bytes (default 1 MB).
         trust_proxy: Prefer ``X-Forwarded-For`` for client IP extraction.
+        loopback_exempt: Skip rate limiting for loopback IPs (default ``True``).
         org_checker: Optional org membership checker.  When provided and
             :attr:`~distillery.mcp.org_membership.OrgMembershipChecker.enabled`
             is ``True``, :class:`OrgMembershipMiddleware` is added.
@@ -503,6 +518,7 @@ def apply_http_middleware(
         requests_per_minute=requests_per_minute,
         requests_per_hour=requests_per_hour,
         trust_proxy=trust_proxy,
+        loopback_exempt=loopback_exempt,
     )
     app = RequestIDMiddleware(app)
     return app
