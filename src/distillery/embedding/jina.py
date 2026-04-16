@@ -137,6 +137,7 @@ class JinaEmbeddingProvider:
             "input": texts,
             "task": task_type,
             "dimensions": self._dimensions,
+            "truncate": True,
         }
 
         headers = {
