@@ -20,7 +20,7 @@ effort: low
 
 # Setup — Distillery Onboarding
 
-Setup walks you through first-time Distillery configuration: verifying MCP connectivity, detecting your transport mode, and configuring scheduled tasks (hourly feed polling, daily relevance rescoring, weekly KB maintenance).
+Setup walks you through first-time Distillery configuration: verifying MCP connectivity, detecting your transport mode, and configuring scheduled tasks (hourly feed polling, daily stale-entry checks, weekly KB maintenance).
 
 Run this once after installing the plugin. It is safe to run again at any time to verify or update your configuration.
 
