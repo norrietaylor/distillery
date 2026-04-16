@@ -181,13 +181,9 @@ async def test_classify_batch_heuristic_mode_classifies(
     # Mock classifier: compute_centroids returns a centroid dict,
     # classify_entry returns deterministic results per entry.
     mock_classifier = MagicMock()
-    mock_classifier.compute_centroids = AsyncMock(
-        return_value={"session": [0.1, 0.2, 0.3, 0.4]}
-    )
+    mock_classifier.compute_centroids = AsyncMock(return_value={"session": [0.1, 0.2, 0.3, 0.4]})
     # First call: match → session; second call: no match
-    mock_classifier.classify_entry = MagicMock(
-        side_effect=[("session", 0.82), (None, 0.3)]
-    )
+    mock_classifier.classify_entry = MagicMock(side_effect=[("session", 0.82), (None, 0.3)])
 
     # list_entries returns our two entries; update succeeds.
     mock_store = MagicMock()
@@ -273,10 +269,12 @@ async def test_classify_batch_llm_mode_queues_as_pending_review(
     # Mock LLM client that returns classification results with different confidences
     mock_llm_client = MagicMock()
     # Entry A: high confidence -> should be classified as ACTIVE
-    mock_llm_client.classify = AsyncMock(side_effect=[
-        '{"entry_type": "session", "confidence": 0.85, "reasoning": "High confidence session", "suggested_tags": [], "suggested_project": null}',
-        '{"entry_type": "minutes", "confidence": 0.55, "reasoning": "Low confidence meeting", "suggested_tags": [], "suggested_project": null}'
-    ])
+    mock_llm_client.classify = AsyncMock(
+        side_effect=[
+            '{"entry_type": "session", "confidence": 0.85, "reasoning": "High confidence session", "suggested_tags": [], "suggested_project": null}',
+            '{"entry_type": "minutes", "confidence": 0.55, "reasoning": "Low confidence meeting", "suggested_tags": [], "suggested_project": null}',
+        ]
+    )
 
     shared = _make_shared_state(store)
     shared["llm_client"] = mock_llm_client
@@ -321,9 +319,7 @@ async def test_classify_batch_heuristic_error_counting(
     entry_b = _make_entry("Content B")
 
     mock_classifier = MagicMock()
-    mock_classifier.compute_centroids = AsyncMock(
-        return_value={"reference": [0.1, 0.2, 0.3, 0.4]}
-    )
+    mock_classifier.compute_centroids = AsyncMock(return_value={"reference": [0.1, 0.2, 0.3, 0.4]})
     # classify_entry returns a match for both entries.
     mock_classifier.classify_entry = MagicMock(return_value=("reference", 0.75))
 
