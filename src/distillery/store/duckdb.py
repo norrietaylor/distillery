@@ -1598,8 +1598,7 @@ class DuckDBStore:
             where_clauses, params = self._build_filter_clauses(filters)
             if stale_days is not None:
                 where_clauses.append(
-                    "COALESCE(accessed_at, updated_at)"
-                    " < NOW() - INTERVAL (CAST(? AS INT)) DAYS"
+                    "COALESCE(accessed_at, updated_at) < NOW() - INTERVAL (CAST(? AS INT)) DAYS"
                 )
                 params.append(stale_days)
             where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""

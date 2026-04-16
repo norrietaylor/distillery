@@ -200,7 +200,7 @@ async def _handle_watch(
         logger.exception("distillery_watch: failed to remove feed source")
         return error_response("INTERNAL", f"Failed to remove feed source: {exc}")
 
-    response_data: dict[str, Any] = {
+    remove_data: dict[str, Any] = {
         "removed_url": url,
         "removed": removed,
         "sources": db_sources,
@@ -210,12 +210,12 @@ async def _handle_watch(
     if purge and removed:
         try:
             archived_count = await _purge_source_entries(store, url)
-            response_data["purged_entries"] = archived_count
+            remove_data["purged_entries"] = archived_count
         except Exception as exc:  # noqa: BLE001
             logger.exception("distillery_watch: failed to purge entries for %s", url)
-            response_data["purge_error"] = str(exc)
+            remove_data["purge_error"] = str(exc)
 
-    return success_response(response_data)
+    return success_response(remove_data)
 
 
 # ---------------------------------------------------------------------------

@@ -243,7 +243,9 @@ class OrgMembershipChecker:
             headers["Authorization"] = f"Bearer {token}"
 
         try:
-            async with httpx.AsyncClient(timeout=10.0, follow_redirects=False, verify=True) as client:
+            async with httpx.AsyncClient(
+                timeout=10.0, follow_redirects=False, verify=True
+            ) as client:
                 resp = await client.get(
                     f"{GITHUB_API}/orgs/{org}/members/{username}",
                     headers=headers,

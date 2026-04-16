@@ -753,6 +753,5 @@ class TestRemovedTools:
         server = create_server(config)
         tools = await server.list_tools()
         assert len(tools) == 13, (
-            f"Expected 13 registered tools, got {len(tools)}: "
-            f"{sorted(t.name for t in tools)}"
+            f"Expected 13 registered tools, got {len(tools)}: {sorted(t.name for t in tools)}"
         )
