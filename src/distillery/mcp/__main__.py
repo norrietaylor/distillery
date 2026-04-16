@@ -101,9 +101,10 @@ def main(argv: list[str] | None = None) -> int:
         Exit code: ``0`` on successful exit or interruption, ``1`` on error.
     """
 
-    # Convert SIGTERM into KeyboardInterrupt so atexit handlers run.
-    # Fly.io sends SIGTERM on scale-to-zero; without this, the DuckDB
-    # atexit CHECKPOINT never fires and the WAL is left dirty on disk.
+    # Convert SIGTERM into KeyboardInterrupt so the FastMCP lifespan
+    # finally-block runs and DuckDBStore.close() can CHECKPOINT the WAL.
+    # Fly.io sends SIGTERM on scale-to-zero; without this conversion the
+    # process exits immediately and the WAL may be left dirty on disk.
     def _sigterm_handler(signum: int, frame: object) -> None:  # pragma: no cover
         raise KeyboardInterrupt
 
