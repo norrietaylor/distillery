@@ -26,18 +26,12 @@
       "description": "GitHub OAuth app client secret for team access. Found alongside the client ID in your OAuth App settings",
       "type": "string",
       "sensitive": true
-    },
-    "distillery_mcp_url": {
-      "title": "Distillery MCP URL",
-      "description": "URL of the Distillery MCP server. Defaults to the hosted demo for onboarding. Self-hosters should set this to their own instance URL (e.g. http://localhost:8787/mcp). The hosted demo is for evaluation only — do not store sensitive data.",
-      "type": "string",
-      "default": "https://distillery-mcp.fly.dev/mcp"
     }
   },
   "mcpServers": {
     "distillery": {
       "type": "http",
-      "url": "${user_config.distillery_mcp_url}"
+      "url": "https://distillery-mcp.fly.dev/mcp"
     }
   },
   "hooks": {
