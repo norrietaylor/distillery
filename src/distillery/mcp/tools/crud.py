@@ -866,18 +866,22 @@ _VALID_GROUP_BY_VALUES = frozenset({"entry_type", "status", "author", "project",
 # few tens of KB rather than hundreds.
 _SUMMARY_CONTENT_PREVIEW_CHARS = 200
 
+# Maximum character length for derived titles in summary mode.
+_SUMMARY_TITLE_CHARS = 120
+
 
 def _derive_title(entry: Any) -> str:
     """Return a short title for *entry* — the ``title`` metadata key if present,
-    otherwise the first non-empty line of ``content`` (trimmed to 120 chars)."""
+    otherwise the first non-empty line of ``content`` (trimmed to
+    ``_SUMMARY_TITLE_CHARS`` characters)."""
     md_title = entry.metadata.get("title") if isinstance(entry.metadata, dict) else None
     if isinstance(md_title, str) and md_title.strip():
-        return md_title.strip()[:120]
+        return md_title.strip()[:_SUMMARY_TITLE_CHARS]
     content = getattr(entry, "content", "") or ""
     for line in content.splitlines():
         stripped = line.strip()
         if stripped:
-            return stripped[:120]
+            return stripped[:_SUMMARY_TITLE_CHARS]
     return ""
 
 
