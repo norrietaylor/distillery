@@ -1080,7 +1080,13 @@ def _build_filters_from_arguments(arguments: dict[str, Any]) -> dict[str, Any] |
     """Extract known filter keys from *arguments* into a filters dict.
 
     Keys extracted: ``entry_type``, ``author``, ``project``, ``tags``,
-    ``status``, ``verification``, ``source``, ``date_from``, ``date_to``.
+    ``status``, ``verification``, ``source``, ``date_from``, ``date_to``,
+    ``tag_prefix``, ``session_id``, ``feed_url``.
+
+    The ``feed_url`` key is translated to a ``metadata.source_url`` filter so
+    callers can retrieve entries ingested from a registered feed source
+    (poller writes ``metadata.source_url`` to match the registry URL, while
+    the entry's ``source`` column is set to ``import``).
 
     Args:
         arguments: The tool argument dict.
@@ -1105,6 +1111,12 @@ def _build_filters_from_arguments(arguments: dict[str, Any]) -> dict[str, Any] |
     for key in filter_keys:
         if key in arguments and arguments[key] is not None:
             filters[key] = arguments[key]
+
+    # Translate feed_url → metadata.source_url (the field poller records).
+    feed_url = arguments.get("feed_url")
+    if feed_url is not None:
+        filters["metadata.source_url"] = feed_url
+
     return filters if filters else None
 
 

@@ -552,6 +552,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         stale_days: int | None = None,
         group_by: str | None = None,
         output: str | None = None,
+        feed_url: str | None = None,
     ) -> list[types.TextContent]:
         """List knowledge entries with optional filters and pagination (newest first).
 
@@ -584,6 +585,9 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             Mutually exclusive with output="stats".
           - output (str, optional): Set to "stats" for aggregate statistics.
             Mutually exclusive with group_by.
+          - feed_url (str, optional): Filter to entries ingested from a registered feed
+            source URL (matches metadata.source_url written by the poller). Use this to
+            retrieve all items polled from e.g. "https://hnrss.org/frontpage".
 
         RETURNS (success): { entries: list, count: int, total_count: int, limit: int, offset: int }
         RETURNS (error): { error: true, code: "INVALID_PARAMS" | "INTERNAL", message: "..." }
@@ -612,6 +616,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 stale_days=stale_days,
                 group_by=group_by,
                 output=output,
+                feed_url=feed_url,
             ),
         )
         return await _handle_list(store=c["store"], arguments=args)
