@@ -25,7 +25,7 @@ from distillery.mcp.tools.classify import (
     _handle_resolve_review,
 )
 from distillery.mcp.tools.crud import _handle_list
-from distillery.models import EntryStatus, EntryType
+from distillery.models import EntrySource, EntryStatus, EntryType, VerificationStatus
 from distillery.store.duckdb import DuckDBStore
 from tests.conftest import make_entry, parse_mcp_response
 
@@ -534,3 +534,368 @@ class TestClassificationEndToEnd:
         queue_data2 = parse_mcp_response(queue_response2)
         queue_ids2 = [e["id"] for e in queue_data2["entries"]]
         assert entry_id not in queue_ids2
+
+
+# ---------------------------------------------------------------------------
+# Batch classification filter tests (issue #301)
+# ---------------------------------------------------------------------------
+
+
+class TestBatchClassificationFilters:
+    """Tests for --batch mode composable filters.
+
+    The --batch mode uses distillery_list with flexible filters to retrieve
+    entries for bulk classification. These tests verify that the filter
+    combinations work correctly via the _handle_list handler.
+    """
+
+    async def test_batch_filter_by_entry_type_github(self, store: DuckDBStore) -> None:
+        """--batch --entry-type github returns only github entries."""
+        github_entry = make_entry(
+            content="PR #42 merged",
+            entry_type=EntryType.GITHUB,
+            source=EntrySource.EXTERNAL,
+            metadata={"repo": "org/repo", "ref_type": "pr", "ref_number": 42},
+        )
+        inbox_entry = make_entry(content="Random inbox item", entry_type=EntryType.INBOX)
+        await store.store(github_entry)
+        await store.store(inbox_entry)
+
+        response = await _handle_list(
+            store,
+            {"entry_type": "github", "limit": 50, "output_mode": "full", "content_max_length": 300},
+        )
+        data = parse_mcp_response(response)
+        assert "error" not in data
+        assert data["count"] == 1
+        assert data["entries"][0]["entry_type"] == "github"
+
+    async def test_batch_filter_by_entry_type_feed(self, store: DuckDBStore) -> None:
+        """--batch --entry-type feed returns only feed entries."""
+        feed_entry = make_entry(
+            content="New RSS article about AI",
+            entry_type=EntryType.FEED,
+            source=EntrySource.EXTERNAL,
+            metadata={"source_url": "https://example.com/feed", "source_type": "rss"},
+        )
+        inbox_entry = make_entry(content="Inbox item", entry_type=EntryType.INBOX)
+        await store.store(feed_entry)
+        await store.store(inbox_entry)
+
+        response = await _handle_list(
+            store,
+            {"entry_type": "feed", "limit": 50, "output_mode": "full", "content_max_length": 300},
+        )
+        data = parse_mcp_response(response)
+        assert "error" not in data
+        assert data["count"] == 1
+        assert data["entries"][0]["entry_type"] == "feed"
+
+    async def test_batch_filter_by_source(self, store: DuckDBStore) -> None:
+        """--batch --source external returns only entries from external source."""
+        external = make_entry(
+            content="External feed item",
+            entry_type=EntryType.FEED,
+            source=EntrySource.EXTERNAL,
+            metadata={"source_url": "https://example.com/feed", "source_type": "rss"},
+        )
+        manual = make_entry(
+            content="Manual entry",
+            entry_type=EntryType.INBOX,
+            source=EntrySource.MANUAL,
+        )
+        await store.store(external)
+        await store.store(manual)
+
+        response = await _handle_list(
+            store,
+            {"source": "external", "limit": 50, "output_mode": "full", "content_max_length": 300},
+        )
+        data = parse_mcp_response(response)
+        assert "error" not in data
+        assert data["count"] == 1
+        assert data["entries"][0]["id"] == external.id
+
+    async def test_batch_filter_by_author(self, store: DuckDBStore) -> None:
+        """--batch --author filters entries by author."""
+        alice = make_entry(content="Alice's entry", author="alice")
+        bob = make_entry(content="Bob's entry", author="bob")
+        await store.store(alice)
+        await store.store(bob)
+
+        response = await _handle_list(
+            store,
+            {"author": "alice", "limit": 50, "output_mode": "full"},
+        )
+        data = parse_mcp_response(response)
+        assert "error" not in data
+        assert data["count"] == 1
+        assert data["entries"][0]["id"] == alice.id
+
+    async def test_batch_filter_composable_and_semantics(self, store: DuckDBStore) -> None:
+        """Multiple filters compose with AND semantics."""
+        gh_meta = {"repo": "org/repo", "ref_type": "issue", "ref_number": 1}
+        feed_meta = {"source_url": "https://example.com/feed", "source_type": "rss"}
+        match = make_entry(
+            content="GitHub item from external",
+            entry_type=EntryType.GITHUB,
+            source=EntrySource.EXTERNAL,
+            author="alice",
+            metadata=gh_meta,
+        )
+        wrong_type = make_entry(
+            content="Feed item from external",
+            entry_type=EntryType.FEED,
+            source=EntrySource.EXTERNAL,
+            author="alice",
+            metadata=feed_meta,
+        )
+        wrong_source = make_entry(
+            content="GitHub item from manual",
+            entry_type=EntryType.GITHUB,
+            source=EntrySource.MANUAL,
+            author="alice",
+            metadata={**gh_meta, "ref_number": 2},
+        )
+        wrong_author = make_entry(
+            content="GitHub item from bob",
+            entry_type=EntryType.GITHUB,
+            source=EntrySource.EXTERNAL,
+            author="bob",
+            metadata={**gh_meta, "ref_number": 3},
+        )
+        await store.store(match)
+        await store.store(wrong_type)
+        await store.store(wrong_source)
+        await store.store(wrong_author)
+
+        response = await _handle_list(
+            store,
+            {
+                "entry_type": "github",
+                "source": "external",
+                "author": "alice",
+                "limit": 50,
+                "output_mode": "full",
+            },
+        )
+        data = parse_mcp_response(response)
+        assert "error" not in data
+        assert data["count"] == 1
+        assert data["entries"][0]["id"] == match.id
+
+    async def test_batch_filter_unclassified(self, store: DuckDBStore) -> None:
+        """--unclassified resolves to verification=unverified; empty tags checked post-fetch."""
+        gh_meta = {"repo": "org/repo", "ref_type": "issue", "ref_number": 10}
+        unclassified = make_entry(
+            content="Unclassified github entry",
+            entry_type=EntryType.GITHUB,
+            tags=[],
+            verification=VerificationStatus.UNVERIFIED,
+            metadata={**gh_meta},
+        )
+        has_tags = make_entry(
+            content="Classified github entry",
+            entry_type=EntryType.GITHUB,
+            tags=["classified"],
+            verification=VerificationStatus.UNVERIFIED,
+            metadata={**gh_meta, "ref_number": 11},
+        )
+        verified = make_entry(
+            content="Verified github entry",
+            entry_type=EntryType.GITHUB,
+            tags=[],
+            verification=VerificationStatus.VERIFIED,
+            metadata={**gh_meta, "ref_number": 12},
+        )
+        await store.store(unclassified)
+        await store.store(has_tags)
+        await store.store(verified)
+
+        # Step 1: distillery_list with verification=unverified (store-level filter)
+        response = await _handle_list(
+            store,
+            {
+                "entry_type": "github",
+                "verification": "unverified",
+                "limit": 50,
+                "output_mode": "full",
+            },
+        )
+        data = parse_mcp_response(response)
+        assert "error" not in data
+        # Both unclassified and has_tags are unverified
+        assert data["count"] == 2
+
+        # Step 2: Post-fetch filter to empty tags (done by the skill, not the tool)
+        entries_with_empty_tags = [e for e in data["entries"] if e.get("tags") == []]
+        assert len(entries_with_empty_tags) == 1
+        assert entries_with_empty_tags[0]["id"] == unclassified.id
+
+    async def test_batch_filter_by_project(self, store: DuckDBStore) -> None:
+        """--batch --project filters entries by project name."""
+        proj_a = make_entry(
+            content="Entry for project A",
+            entry_type=EntryType.GITHUB,
+            project="project-a",
+            metadata={"repo": "org/repo-a", "ref_type": "issue", "ref_number": 1},
+        )
+        proj_b = make_entry(
+            content="Entry for project B",
+            entry_type=EntryType.GITHUB,
+            project="project-b",
+            metadata={"repo": "org/repo-b", "ref_type": "issue", "ref_number": 2},
+        )
+        await store.store(proj_a)
+        await store.store(proj_b)
+
+        response = await _handle_list(
+            store,
+            {
+                "entry_type": "github",
+                "project": "project-a",
+                "limit": 50,
+                "output_mode": "full",
+            },
+        )
+        data = parse_mcp_response(response)
+        assert "error" not in data
+        assert data["count"] == 1
+        assert data["entries"][0]["id"] == proj_a.id
+
+    async def test_batch_filter_by_tag_prefix(self, store: DuckDBStore) -> None:
+        """--batch --tag-prefix filters by tag namespace."""
+        feed_meta = {"source_url": "https://example.com/feed", "source_type": "rss"}
+        tagged = make_entry(
+            content="Tagged entry",
+            entry_type=EntryType.FEED,
+            tags=["topic/ai", "source/rss"],
+            metadata={**feed_meta},
+        )
+        other = make_entry(
+            content="Other entry",
+            entry_type=EntryType.FEED,
+            tags=["unrelated"],
+            metadata={**feed_meta, "source_url": "https://other.com/feed"},
+        )
+        await store.store(tagged)
+        await store.store(other)
+
+        response = await _handle_list(
+            store,
+            {
+                "entry_type": "feed",
+                "tag_prefix": "topic",
+                "limit": 50,
+                "output_mode": "full",
+            },
+        )
+        data = parse_mcp_response(response)
+        assert "error" not in data
+        assert data["count"] == 1
+        assert data["entries"][0]["id"] == tagged.id
+
+    async def test_batch_respects_limit_cap(self, store: DuckDBStore) -> None:
+        """Batch mode caps at 50 entries per invocation."""
+        for i in range(55):
+            entry = make_entry(
+                content=f"Feed entry {i}",
+                entry_type=EntryType.FEED,
+                metadata={
+                    "source_url": f"https://example.com/feed/{i}",
+                    "source_type": "rss",
+                },
+            )
+            await store.store(entry)
+
+        response = await _handle_list(
+            store,
+            {"entry_type": "feed", "limit": 50, "output_mode": "full", "content_max_length": 300},
+        )
+        data = parse_mcp_response(response)
+        assert "error" not in data
+        assert data["count"] == 50
+        assert data["total_count"] == 55
+
+    async def test_inbox_alias_still_works(self, store: DuckDBStore) -> None:
+        """--inbox (Mode B) continues to work as before (no regression)."""
+        inbox = make_entry(content="Inbox item", entry_type=EntryType.INBOX)
+        github = make_entry(
+            content="Github item",
+            entry_type=EntryType.GITHUB,
+            metadata={"repo": "org/repo", "ref_type": "pr", "ref_number": 99},
+        )
+        await store.store(inbox)
+        await store.store(github)
+
+        response = await _handle_list(
+            store,
+            {"entry_type": "inbox", "limit": 50, "output_mode": "full", "content_max_length": 300},
+        )
+        data = parse_mcp_response(response)
+        assert "error" not in data
+        assert data["count"] == 1
+        assert data["entries"][0]["entry_type"] == "inbox"
+
+    async def test_bare_batch_produces_no_filters(self, store: DuckDBStore) -> None:
+        """Regression: bare --batch (no filter flags) yields no server-side filters.
+
+        The skill-layer contract (issue #301, SKILL.md Mode C step 1) requires
+        the skill to reject bare ``--batch`` with "At least one filter is
+        required for --batch mode." This test locks down the underlying
+        primitive: when only the non-filter params (limit/output_mode/
+        content_max_length) are passed, ``_build_filters_from_arguments``
+        returns ``None`` and ``_handle_list`` returns *all* entries unbounded
+        by type/source/etc. — demonstrating why the skill MUST enforce the
+        rejection upstream (otherwise a classify-all-entries footgun exists).
+        """
+        from distillery.mcp.tools.crud import _build_filters_from_arguments
+
+        inbox = make_entry(content="Inbox item", entry_type=EntryType.INBOX)
+        github = make_entry(
+            content="Github item",
+            entry_type=EntryType.GITHUB,
+            metadata={"repo": "org/repo", "ref_type": "pr", "ref_number": 100},
+        )
+        feed = make_entry(
+            content="Feed item",
+            entry_type=EntryType.FEED,
+            metadata={"source_url": "https://example.com/feed", "source_type": "rss"},
+        )
+        await store.store(inbox)
+        await store.store(github)
+        await store.store(feed)
+
+        bare_batch_args = {"limit": 50, "output_mode": "full", "content_max_length": 300}
+
+        # 1. The filter builder returns None for bare-batch arguments.
+        assert _build_filters_from_arguments(bare_batch_args) is None
+
+        # 2. Since no filter is applied, _handle_list returns every entry —
+        #    which is why the skill layer must reject bare --batch upstream.
+        response = await _handle_list(store, bare_batch_args)
+        data = parse_mcp_response(response)
+        assert "error" not in data
+        assert data["count"] == 3
+        returned_types = {e["entry_type"] for e in data["entries"]}
+        assert returned_types == {"inbox", "github", "feed"}
+
+    async def test_batch_rejects_bare_batch(self, store: DuckDBStore) -> None:
+        """Regression: bare --batch (no filter flags) is rejected with an error.
+
+        Issue #301 contract: ``--batch`` without at least one filter flag must
+        be rejected.  Passing ``batch_mode=True`` with no filter arguments
+        triggers the server-side guard in ``_handle_list``, returning an error
+        response — preventing a classify-all-entries footgun.
+        """
+        bare_batch_args = {
+            "batch_mode": True,
+            "limit": 50,
+            "output_mode": "full",
+            "content_max_length": 300,
+        }
+        response = await _handle_list(store, bare_batch_args)
+        data = parse_mcp_response(response)
+        assert "error" in data
+        assert data["error"] is True
+        assert "At least one filter" in data["message"]
