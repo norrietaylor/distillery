@@ -20,6 +20,7 @@ import logging
 import os
 import re
 from typing import Any
+from urllib.parse import urlparse
 
 from mcp import types
 
@@ -36,6 +37,77 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _VALID_SOURCE_TYPES = {"rss", "github"}
+
+# Probe timeout for reachability checks (seconds). Kept short so that a slow
+# host does not stall the MCP tool call.
+_PROBE_TIMEOUT_SECONDS = 3.0
+
+# GitHub owner/repo slug pattern — used by the GitHub adapter in place of a
+# full URL. Accepts the same characters as GitHub (alphanumerics, hyphen,
+# underscore, period).
+_GITHUB_SLUG_RE = re.compile(r"^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$")
+
+
+def _validate_url_syntax(url: str, source_type: str) -> str | None:
+    """Return an error message if *url* is not syntactically valid, else ``None``.
+
+    For ``source_type == "github"`` a bare ``owner/repo`` slug is also accepted
+    because the GitHub adapter uses slugs as source identifiers.
+
+    Args:
+        url: The candidate URL (pre-stripped).
+        source_type: Either ``"rss"`` or ``"github"``.
+
+    Returns:
+        A human-readable error string, or ``None`` when validation passes.
+    """
+    if source_type == "github" and _GITHUB_SLUG_RE.match(url):
+        return None
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return (
+            f"url must use http or https scheme, got: {url!r}. "
+            "Expected a URL like 'https://example.com/rss'."
+        )
+    if not parsed.netloc:
+        return f"url is missing a host (netloc), got: {url!r}"
+    return None
+
+
+async def _probe_url(url: str) -> str | None:
+    """Attempt a single lightweight reachability check against *url*.
+
+    Tries ``HEAD`` first and falls back to ``GET`` because some hosts return
+    405 for HEAD. Returns ``None`` on success (any non-5xx response counts as
+    reachable), or a short error string describing the failure.
+
+    Args:
+        url: The URL to probe. Must already be syntactically valid.
+
+    Returns:
+        ``None`` if the probe succeeded, otherwise an error description.
+    """
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=_PROBE_TIMEOUT_SECONDS, follow_redirects=True
+        ) as client:
+            try:
+                response = await client.head(url)
+            except httpx.HTTPError:
+                response = await client.get(url)
+    except httpx.TimeoutException:
+        return f"Probe timed out after {_PROBE_TIMEOUT_SECONDS:.0f}s"
+    except httpx.HTTPError as exc:
+        return f"Probe failed: {exc}"
+    except Exception as exc:  # noqa: BLE001 — defensive; httpx is strict but be safe
+        return f"Probe failed: {exc}"
+
+    if response.status_code >= 500:
+        return f"Probe returned server error: HTTP {response.status_code}"
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -142,6 +214,36 @@ async def _handle_watch(
             )
 
         sync_history = bool(arguments.get("sync_history", False))
+
+        # ------------------------------------------------------------------
+        # URL syntax validation.
+        # ------------------------------------------------------------------
+        syntax_error = _validate_url_syntax(url, source_type)
+        if syntax_error is not None:
+            return error_response("INVALID_URL", syntax_error)
+
+        # ------------------------------------------------------------------
+        # Optional reachability probe.
+        # ``probe`` defaults to True so that unreachable URLs are caught at
+        # registration time. ``force=True`` persists even when the probe
+        # fails (useful for feeds that block HEAD/GET from unknown UAs).
+        # GitHub owner/repo slugs are not probed because they are not URLs.
+        # ------------------------------------------------------------------
+        probe = bool(arguments.get("probe", True))
+        force = bool(arguments.get("force", False))
+        probe_is_url = not (source_type == "github" and _GITHUB_SLUG_RE.match(url))
+        if probe and probe_is_url:
+            probe_error = await _probe_url(url)
+            if probe_error is not None and not force:
+                return error_response(
+                    "UNREACHABLE_URL",
+                    (
+                        f"URL {url!r} failed reachability probe: {probe_error}. "
+                        "Re-run with force=True to persist anyway, "
+                        "or probe=False to skip the probe."
+                    ),
+                    details={"last_error": probe_error, "url": url},
+                )
 
         try:
             added = await store.add_feed_source(

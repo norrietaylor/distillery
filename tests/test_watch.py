@@ -10,11 +10,24 @@ Covers:
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
 
 from distillery.models import TYPE_METADATA_SCHEMAS, EntryType, validate_metadata
+
+
+@pytest.fixture(autouse=True)
+def _disable_watch_probe(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Stub out the reachability probe so unit tests never hit the network."""
+
+    async def _noop_probe(url: str) -> str | None:
+        return None
+
+    monkeypatch.setattr("distillery.mcp.tools.feeds._probe_url", _noop_probe)
+    yield
+
 
 # ---------------------------------------------------------------------------
 # Fake store for feed source tests
