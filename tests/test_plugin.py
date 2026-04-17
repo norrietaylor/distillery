@@ -420,3 +420,123 @@ class TestPluginDocumentationContent:
         content = load_plugin_doc()
         assert "mcpServers" in content
         assert "settings.json" in content
+
+
+# ---------------------------------------------------------------------------
+# .claude-plugin/plugin.json — hooks configuration (v0.4.0)
+# ---------------------------------------------------------------------------
+
+
+class TestPluginHooks:
+    """Tests for the hooks section of plugin.json, updated in v0.4.0."""
+
+    def test_hooks_field_present(self) -> None:
+        """hooks field must be present in plugin.json."""
+        manifest = load_plugin_manifest()
+        assert "hooks" in manifest, "Missing 'hooks' key in .claude-plugin/plugin.json"
+
+    def test_session_start_hook_present(self) -> None:
+        """SessionStart hook must be defined."""
+        manifest = load_plugin_manifest()
+        assert "SessionStart" in manifest["hooks"], (
+            "Missing 'SessionStart' hook in .claude-plugin/plugin.json"
+        )
+
+    def test_session_start_hook_is_list(self) -> None:
+        """SessionStart hooks must be a list."""
+        manifest = load_plugin_manifest()
+        assert isinstance(manifest["hooks"]["SessionStart"], list)
+
+    def test_session_start_hook_has_command(self) -> None:
+        """SessionStart hook must include at least one command hook."""
+        manifest = load_plugin_manifest()
+        session_hooks = manifest["hooks"]["SessionStart"]
+        # Each entry has a 'hooks' list; find any command type
+        has_command = False
+        for hook_entry in session_hooks:
+            for hook in hook_entry.get("hooks", []):
+                if hook.get("type") == "command":
+                    has_command = True
+                    break
+        assert has_command, "SessionStart hook must have at least one 'command' type hook"
+
+    def test_session_start_message_contains_version(self) -> None:
+        """SessionStart hook command must include the current plugin version string.
+
+        In v0.4.0 the hook message was updated from 'v0.3.2' to 'v0.4.0'.
+        The message must always contain a version string matching the plugin version field.
+        """
+        manifest = load_plugin_manifest()
+        plugin_version = manifest.get("version", "")
+        session_hooks = manifest["hooks"]["SessionStart"]
+        # Collect all command strings from session hooks
+        commands: list[str] = []
+        for hook_entry in session_hooks:
+            for hook in hook_entry.get("hooks", []):
+                if hook.get("type") == "command":
+                    commands.append(hook.get("command", ""))
+        combined = " ".join(commands)
+        assert f"v{plugin_version}" in combined, (
+            f"SessionStart hook command must contain 'v{plugin_version}' "
+            f"(the current plugin version). Got: {combined!r}"
+        )
+
+    def test_session_start_message_mentions_key_skills(self) -> None:
+        """SessionStart hook command must mention core skill triggers."""
+        manifest = load_plugin_manifest()
+        session_hooks = manifest["hooks"]["SessionStart"]
+        commands = []
+        for hook_entry in session_hooks:
+            for hook in hook_entry.get("hooks", []):
+                if hook.get("type") == "command":
+                    commands.append(hook.get("command", ""))
+        combined = " ".join(commands)
+        for skill in ("/recall", "/distill", "/classify"):
+            assert skill in combined, (
+                f"SessionStart hook message must mention '{skill}'"
+            )
+
+    def test_session_start_message_version_matches_plugin_version(self) -> None:
+        """SessionStart command version tag must match plugin.json version field exactly.
+
+        Regression test: in v0.3.2 → v0.4.0 transition, the hook message was
+        updated. Ensure these stay in sync for future version bumps.
+        """
+        manifest = load_plugin_manifest()
+        plugin_version = manifest.get("version", "")
+        session_hooks = manifest["hooks"]["SessionStart"]
+        for hook_entry in session_hooks:
+            for hook in hook_entry.get("hooks", []):
+                if hook.get("type") == "command":
+                    command = hook.get("command", "")
+                    if "Distillery" in command:
+                        # Must not contain any version string OTHER than the current one
+                        import re
+
+                        version_tags = re.findall(r"v(\d+\.\d+\.\d+)", command)
+                        for found_version in version_tags:
+                            assert found_version == plugin_version, (
+                                f"Hook message contains version 'v{found_version}' "
+                                f"but plugin.json version is '{plugin_version}'"
+                            )
+
+    def test_stop_hook_present(self) -> None:
+        """Stop hook must be defined."""
+        manifest = load_plugin_manifest()
+        assert "Stop" in manifest["hooks"], (
+            "Missing 'Stop' hook in .claude-plugin/plugin.json"
+        )
+
+    def test_stop_hook_mentions_distill(self) -> None:
+        """Stop hook command must mention /distill to remind users to capture knowledge."""
+        manifest = load_plugin_manifest()
+        stop_hooks = manifest["hooks"]["Stop"]
+        commands = []
+        for hook_entry in stop_hooks:
+            for hook in hook_entry.get("hooks", []):
+                if hook.get("type") == "command":
+                    commands.append(hook.get("command", ""))
+        combined = " ".join(commands)
+        assert "/distill" in combined, (
+            "Stop hook command must mention '/distill' to remind users to capture knowledge"
+        )
