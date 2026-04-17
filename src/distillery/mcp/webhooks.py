@@ -344,8 +344,7 @@ async def _handle_poll(request: Request, state: dict[str, Any]) -> JSONResponse:
     Returns:
         A :class:`~starlette.responses.JSONResponse` from :func:`_run_poll`.
     """
-    qs_source_url: str | None = request.query_params.get("source_url")
-    source_url: str | None = qs_source_url if isinstance(qs_source_url, str) else None
+    source_url: str | None = request.query_params.get("source_url")
     if source_url is None:
         body = await request.body()
         if body:
@@ -516,7 +515,7 @@ async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONRe
         poll_response = await _run_poll(state)
     poll_body = _extract(poll_response)
     poll_result: dict[str, Any] = (
-        poll_body.get("data", poll_body)
+        {"ok": True, **poll_body.get("data", {})}
         if poll_body.get("ok")
         else {"ok": False, "error": poll_body.get("error", "poll failed")}
     )
@@ -527,7 +526,7 @@ async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONRe
         rescore_response = await _run_rescore(state)
     rescore_body = _extract(rescore_response)
     rescore_result: dict[str, Any] = (
-        rescore_body.get("data", rescore_body)
+        {"ok": True, **rescore_body.get("data", {})}
         if rescore_body.get("ok")
         else {"ok": False, "error": rescore_body.get("error", "rescore failed")}
     )
@@ -538,7 +537,7 @@ async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONRe
         classify_response = await _run_classify_batch(state)
     classify_body = _extract(classify_response)
     classify_result: dict[str, Any] = (
-        classify_body.get("data", classify_body)
+        {"ok": True, **classify_body.get("data", {})}
         if classify_body.get("ok")
         else {"ok": False, "error": classify_body.get("error", "classify-batch failed")}
     )
@@ -620,8 +619,7 @@ async def _run_classify_batch(
         or ``{"ok": false, "error": "<message>"}`` with status 500 on failure.
     """
     from distillery.classification import ClassificationEngine, HeuristicClassifier
-    from distillery.classification.models import ClassificationResult
-    from distillery.models import EntryStatus, EntryType
+    from distillery.models import EntryStatus
 
     store = state["store"]
     config = state["config"]
@@ -662,46 +660,11 @@ async def _run_classify_batch(
                     },
                     status_code=500,
                 )
-            # Precompute centroids once for the entire batch (#261).
-            centroids = await classifier.compute_centroids(store, embedding_provider)
-            for entry in entries:
+            # Delegate to classify_batch which computes centroids once for the
+            # entire batch — avoids redundant store queries per entry (#261).
+            classifications = await classifier.classify_batch(entries, store, embedding_provider)
+            for entry, classification in zip(entries, classifications, strict=True):
                 try:
-                    if not centroids:
-                        classification = ClassificationResult(
-                            entry_type=EntryType.INBOX,
-                            confidence=0.0,
-                            status=EntryStatus.PENDING_REVIEW,
-                            reasoning="No entry types have sufficient data for heuristic classification.",
-                            suggested_tags=[],
-                            suggested_project=None,
-                        )
-                    else:
-                        entry_embedding = embedding_provider.embed(entry.content)
-                        best_type, best_sim = classifier.classify_entry(entry_embedding, centroids)
-                        if best_type is not None:
-                            classification = ClassificationResult(
-                                entry_type=EntryType(best_type),
-                                confidence=best_sim,
-                                status=EntryStatus.ACTIVE,
-                                reasoning=(
-                                    f"Heuristic: best centroid match {best_type!r} "
-                                    f"(similarity {best_sim:.3f})."
-                                ),
-                                suggested_tags=[],
-                                suggested_project=None,
-                            )
-                        else:
-                            classification = ClassificationResult(
-                                entry_type=EntryType.INBOX,
-                                confidence=best_sim,
-                                status=EntryStatus.PENDING_REVIEW,
-                                reasoning=(
-                                    f"Heuristic: no centroid exceeded threshold; "
-                                    f"best similarity {best_sim:.3f}."
-                                ),
-                                suggested_tags=[],
-                                suggested_project=None,
-                            )
                     await store.update(
                         entry.id,
                         {
@@ -763,8 +726,7 @@ async def _run_classify_batch(
                         else:
                             pending_review_count += 1
                     else:
-                        # No LLM client available - queue for manual classification
-                        await store.update(entry.id, {"status": "pending_review"})
+                        # No LLM client available — entry remains pending_review (already that status).
                         pending_review_count += 1
 
                 except Exception as exc:  # noqa: BLE001

@@ -248,12 +248,16 @@ class DistilleryStore(Protocol):
     async def count_entries(
         self,
         filters: dict[str, Any] | None,
+        *,
+        stale_days: int | None = None,
     ) -> int:
         """
         Count entries matching the given filters without fetching them.
 
         Parameters:
             filters (dict[str, Any] | None): Same filter keys as ``list_entries``.
+            stale_days: When set, only count entries whose last access
+                (``COALESCE(accessed_at, updated_at)``) is older than N days.
 
         Returns:
             int: Total number of matching entries.

@@ -8,6 +8,7 @@ network calls are made.
 from __future__ import annotations
 
 import math
+from typing import Any
 
 import pytest
 
@@ -35,7 +36,7 @@ def _normalise(v: list[float]) -> list[float]:
 
 
 async def _populate_store(
-    store,  # type: ignore[no-untyped-def]
+    store: Any,
     entry_type: EntryType,
     count: int,
     content_prefix: str = "",

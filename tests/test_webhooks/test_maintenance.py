@@ -146,7 +146,7 @@ async def test_maintenance_combined_response_format(
         sources_polled=2, total_fetched=10, total_stored=7, rescored=15, upgraded=3, downgraded=2
     )
 
-    with patch("distillery.feeds.poller.FeedPoller", return_value=mock_poller):
+    with patch("distillery.mcp.webhooks.FeedPoller", return_value=mock_poller):
         app = create_webhook_app(shared, _make_config())
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.post("/maintenance", headers=_AUTH_HEADER)
@@ -172,7 +172,7 @@ async def test_maintenance_poll_sub_operation_values(
 
     mock_poller = _make_poller_mock(sources_polled=3, total_fetched=12, total_stored=9)
 
-    with patch("distillery.feeds.poller.FeedPoller", return_value=mock_poller):
+    with patch("distillery.mcp.webhooks.FeedPoller", return_value=mock_poller):
         app = create_webhook_app(shared, _make_config())
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.post("/maintenance", headers=_AUTH_HEADER)
@@ -195,7 +195,7 @@ async def test_maintenance_rescore_sub_operation_values(
 
     mock_poller = _make_poller_mock(rescored=25, upgraded=7, downgraded=3)
 
-    with patch("distillery.feeds.poller.FeedPoller", return_value=mock_poller):
+    with patch("distillery.mcp.webhooks.FeedPoller", return_value=mock_poller):
         app = create_webhook_app(shared, _make_config())
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.post("/maintenance", headers=_AUTH_HEADER)
@@ -218,7 +218,7 @@ async def test_maintenance_classify_batch_sub_operation_present(
 
     mock_poller = _make_poller_mock()
 
-    with patch("distillery.feeds.poller.FeedPoller", return_value=mock_poller):
+    with patch("distillery.mcp.webhooks.FeedPoller", return_value=mock_poller):
         app = create_webhook_app(shared, _make_config())
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.post("/maintenance", headers=_AUTH_HEADER)
@@ -250,7 +250,7 @@ async def test_maintenance_calls_poll_then_rescore(
 
     mock_poller = _make_poller_mock()
 
-    with patch("distillery.feeds.poller.FeedPoller", return_value=mock_poller) as mock_cls:
+    with patch("distillery.mcp.webhooks.FeedPoller", return_value=mock_poller) as mock_cls:
         app = create_webhook_app(shared, _make_config())
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.post("/maintenance", headers=_AUTH_HEADER)
@@ -280,7 +280,7 @@ async def test_maintenance_poll_failure_does_not_block_rescore_or_classify(
 
     mock_poller = _make_poller_mock(poll_raises=RuntimeError("feed timeout"))
 
-    with patch("distillery.feeds.poller.FeedPoller", return_value=mock_poller):
+    with patch("distillery.mcp.webhooks.FeedPoller", return_value=mock_poller):
         app = create_webhook_app(shared, _make_config())
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.post("/maintenance", headers=_AUTH_HEADER)
@@ -314,7 +314,7 @@ async def test_maintenance_rescore_failure_does_not_block_classify(
 
     mock_poller = _make_poller_mock(rescore_raises=RuntimeError("rescore db error"))
 
-    with patch("distillery.feeds.poller.FeedPoller", return_value=mock_poller):
+    with patch("distillery.mcp.webhooks.FeedPoller", return_value=mock_poller):
         app = create_webhook_app(shared, _make_config())
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.post("/maintenance", headers=_AUTH_HEADER)
@@ -350,7 +350,7 @@ async def test_maintenance_cooldown_enforced(
 
     mock_poller = _make_poller_mock()
 
-    with patch("distillery.feeds.poller.FeedPoller", return_value=mock_poller):
+    with patch("distillery.mcp.webhooks.FeedPoller", return_value=mock_poller):
         app = create_webhook_app(shared, _make_config())
         client = TestClient(app, raise_server_exceptions=False)
 

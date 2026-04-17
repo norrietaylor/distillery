@@ -189,7 +189,12 @@ class HeuristicClassifier:
                 offset=0,
             )
             # list_entries without group_by/output always returns list[Entry].
-            assert isinstance(result, list)
+            if not isinstance(result, list):
+                logger.warning(
+                    "HeuristicClassifier: unexpected result type from list_entries: %s",
+                    type(result).__name__,
+                )
+                continue
             entries: list[Entry] = result
 
             if len(entries) < MIN_ENTRIES_PER_TYPE:
@@ -258,3 +263,75 @@ class HeuristicClassifier:
             return (best_type, best_similarity)
 
         return (None, best_similarity)
+
+    async def classify_batch(
+        self,
+        entries: list[Entry],
+        store: DistilleryStore,
+        embedding_provider: EmbeddingProvider,
+    ) -> list[ClassificationResult]:
+        """Classify a batch of entries, computing centroids only once.
+
+        This is more efficient than calling :meth:`classify` per entry because
+        centroid computation (which queries the store for all active entries) is
+        done once and reused for the entire batch.
+
+        Args:
+            entries: The entries to classify.
+            store: Storage backend for querying existing entries.
+            embedding_provider: Provider for generating embeddings.
+
+        Returns:
+            A list of :class:`~distillery.classification.models.ClassificationResult`
+            objects in the same order as *entries*.
+        """
+        centroids = await self.compute_centroids(store, embedding_provider)
+
+        results: list[ClassificationResult] = []
+        for entry in entries:
+            if not centroids:
+                results.append(
+                    ClassificationResult(
+                        entry_type=EntryType.INBOX,
+                        confidence=0.0,
+                        status=EntryStatus.PENDING_REVIEW,
+                        reasoning="No entry types have sufficient data for heuristic classification.",
+                        suggested_tags=[],
+                        suggested_project=None,
+                    )
+                )
+                continue
+
+            entry_embedding = embedding_provider.embed(entry.content)
+            best_type, best_similarity = self.classify_entry(entry_embedding, centroids)
+
+            if best_type is not None:
+                results.append(
+                    ClassificationResult(
+                        entry_type=EntryType(best_type),
+                        confidence=best_similarity,
+                        status=EntryStatus.ACTIVE,
+                        reasoning=(
+                            f"Heuristic classification: best centroid match is "
+                            f"{best_type!r} with similarity {best_similarity:.3f}."
+                        ),
+                        suggested_tags=[],
+                        suggested_project=None,
+                    )
+                )
+            else:
+                results.append(
+                    ClassificationResult(
+                        entry_type=EntryType.INBOX,
+                        confidence=best_similarity,
+                        status=EntryStatus.PENDING_REVIEW,
+                        reasoning=(
+                            f"Heuristic classification: no centroid exceeded threshold "
+                            f"{SIMILARITY_THRESHOLD}; best similarity was {best_similarity:.3f}."
+                        ),
+                        suggested_tags=[],
+                        suggested_project=None,
+                    )
+                )
+
+        return results

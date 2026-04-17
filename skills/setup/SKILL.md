@@ -4,7 +4,6 @@ description: "Onboarding wizard — verify MCP connectivity, detect transport, a
 allowed-tools:
   - "mcp__*__distillery_list"
   - "mcp__*__distillery_watch"
-  - "mcp__*__distillery_configure"
   - "Bash(test:*)"
   - "Bash(cat:*)"
   - "Bash(find:*)"

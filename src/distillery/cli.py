@@ -1580,8 +1580,8 @@ def _cmd_maintenance_classify(
             recency_window_days=cfg.defaults.recency_window_days,
             recency_min_weight=cfg.defaults.recency_min_weight,
         )
-        await store.initialize()
         try:
+            await store.initialize()
             # Build the shared state dict that _run_classify_batch expects.
             state = {
                 "store": store,

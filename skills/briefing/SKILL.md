@@ -348,5 +348,5 @@ Generated: 2026-04-08 09:15 UTC
 - Pending review uses `status="pending_review"` — limited to 5 entries
 - Team aggregate call failure is non-fatal — fall back to solo mode
 - Team activity, related from team, and pending review failures are non-fatal — omit each failed section
-- On MCP errors in fatal calls (summary metrics), see CONVENTIONS.md error handling — display and stop
+- On MCP errors in fatal calls (`distillery_list(limit=1)` health check), see CONVENTIONS.md error handling — display and stop
 - No retry loops — report errors and stop

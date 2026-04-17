@@ -1568,12 +1568,25 @@ class DuckDBStore:
     async def count_entries(
         self,
         filters: dict[str, Any] | None,
+        *,
+        stale_days: int | None = None,
     ) -> int:
-        """Return the total number of entries matching *filters*."""
+        """Return the total number of entries matching *filters*.
+
+        Parameters:
+            filters: Filter criteria accepted by the store.
+            stale_days: When set, only count entries whose last access
+                (``COALESCE(accessed_at, updated_at)``) is older than N days.
+        """
 
         def _sync() -> int:
             conn = self.connection
             where_clauses, params = self._build_filter_clauses(filters)
+            if stale_days is not None:
+                where_clauses.append(
+                    "COALESCE(accessed_at, updated_at) < NOW() - INTERVAL (CAST(? AS INT)) DAYS"
+                )
+                params.append(stale_days)
             where_sql = ""
             if where_clauses:
                 where_sql = "WHERE " + " AND ".join(where_clauses)

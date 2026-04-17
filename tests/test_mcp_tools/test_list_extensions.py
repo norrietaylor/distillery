@@ -32,6 +32,8 @@ async def _store_entry_with_timestamps(
     updated_at: datetime | None = None,
 ) -> None:
     """Store an entry then back-date accessed_at and/or updated_at via raw SQL."""
+    if not hasattr(store, "connection") or store.connection is None:
+        raise RuntimeError("This helper requires a DuckDB store")
     await store.store(entry)
 
     def _patch() -> None:

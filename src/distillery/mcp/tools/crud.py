@@ -161,10 +161,14 @@ async def _handle_store(
     if err:
         return error_response("INVALID_PARAMS", err)
 
-    output_mode_raw = arguments.get("output_mode")
-    output_mode = output_mode_raw if output_mode_raw is not None else "full"
-    if output_mode not in ("full", "summary"):
-        return error_response("INVALID_PARAMS", "Field 'output_mode' must be 'full' or 'summary'.")
+    output_mode = arguments.get("output_mode", "full")
+    if not isinstance(output_mode, str):
+        return error_response("INVALID_PARAMS", "Field 'output_mode' must be a string.")
+    if output_mode not in ("full", "summary", "review", "ids"):
+        return error_response(
+            "INVALID_PARAMS",
+            "Field 'output_mode' must be one of: 'full', 'ids', 'review', 'summary'.",
+        )
 
     entry_type_str = arguments["entry_type"]
     if entry_type_str not in _VALID_ENTRY_TYPES:
@@ -1019,7 +1023,7 @@ async def _handle_list(
         return error_response("INTERNAL", f"list_entries failed: {exc}")
 
     try:
-        total_count = await store.count_entries(filters=filters)
+        total_count = await store.count_entries(filters=filters, stale_days=stale_days)
     except Exception:  # noqa: BLE001
         logger.debug("count_entries failed, falling back to len(entries)", exc_info=True)
         total_count = len(entries)
