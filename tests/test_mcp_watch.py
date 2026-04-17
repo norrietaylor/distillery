@@ -220,14 +220,14 @@ class TestReachabilityProbe:
         assert await store.list_feed_sources() == []
 
     async def test_head_fallback_to_get(self, httpx_mock: HTTPXMock) -> None:
-        """Some hosts 405 HEAD; the handler falls back to GET."""
-        httpx_mock.add_exception(
-            httpx.HTTPStatusError(
-                "Method Not Allowed",
-                request=httpx.Request("HEAD", "https://example.com/rss"),
-                response=httpx.Response(405),
-            ),
-            method="HEAD",
+        """Some hosts 405 HEAD; the handler falls back to GET.
+
+        Uses an actual 405 response rather than a raised exception — that's
+        how real hosts behave, since httpx treats non-2xx responses as
+        normal data unless the caller opts into raise_for_status.
+        """
+        httpx_mock.add_response(
+            method="HEAD", url="https://example.com/rss", status_code=405
         )
         httpx_mock.add_response(method="GET", url="https://example.com/rss", status_code=200)
         store = FakeSourceStore()

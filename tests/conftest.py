@@ -227,7 +227,6 @@ async def store(
 # monkeypatch, but by default every test is insulated from outbound calls.
 # ---------------------------------------------------------------------------
 
-import contextlib  # noqa: E402
 from collections.abc import Iterator  # noqa: E402
 
 
@@ -251,6 +250,5 @@ def _disable_watch_probe(
     async def _noop_probe(url: str) -> str | None:
         return None
 
-    with contextlib.suppress(AttributeError):
-        monkeypatch.setattr("distillery.mcp.tools.feeds._probe_url", _noop_probe)
+    monkeypatch.setattr("distillery.mcp.tools.feeds._probe_url", _noop_probe)
     yield

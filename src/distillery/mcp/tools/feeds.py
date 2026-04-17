@@ -78,15 +78,18 @@ def _validate_url_syntax(url: str, source_type: str) -> str | None:
 async def _probe_url(url: str) -> str | None:
     """Attempt a single lightweight reachability check against *url*.
 
-    Tries ``HEAD`` first and falls back to ``GET`` because some hosts return
-    405 for HEAD. Returns ``None`` on success (any non-5xx response counts as
-    reachable), or a short error string describing the failure.
+    Tries ``HEAD`` first and falls back to ``GET`` when the server responds
+    with 405 Method Not Allowed or 501 Not Implemented (some hosts reject
+    HEAD) or when HEAD itself raises. Returns ``None`` on success (any
+    non-5xx response counts as reachable), or a short **generic** error
+    string describing the failure. Exception details are logged
+    server-side and deliberately kept out of the returned value.
 
     Args:
         url: The URL to probe. Must already be syntactically valid.
 
     Returns:
-        ``None`` if the probe succeeded, otherwise an error description.
+        ``None`` if the probe succeeded, otherwise a generic error string.
     """
     import httpx
 
@@ -97,17 +100,47 @@ async def _probe_url(url: str) -> str | None:
             try:
                 response = await client.head(url)
             except httpx.HTTPError:
+                logger.info("Probe HEAD %s raised; falling back to GET", url, exc_info=True)
                 response = await client.get(url)
+            else:
+                # Some hosts return 405/501 on HEAD — fall back to GET.
+                if response.status_code in (405, 501):
+                    response = await client.get(url)
     except httpx.TimeoutException:
+        logger.warning("Probe timed out for %s", url, exc_info=True)
         return f"Probe timed out after {_PROBE_TIMEOUT_SECONDS:.0f}s"
-    except httpx.HTTPError as exc:
-        return f"Probe failed: {exc}"
-    except Exception as exc:  # noqa: BLE001 — defensive; httpx is strict but be safe
-        return f"Probe failed: {exc}"
+    except httpx.HTTPError:
+        logger.warning("Probe failed for %s", url, exc_info=True)
+        return "Probe failed"
+    except Exception:  # noqa: BLE001 — defensive; httpx is strict but be safe
+        logger.exception("Probe unexpectedly raised for %s", url)
+        return "Probe failed"
 
     if response.status_code >= 500:
         return f"Probe returned server error: HTTP {response.status_code}"
     return None
+
+
+def _parse_bool_arg(raw: Any, *, default: bool) -> bool:
+    """Parse a boolean argument without silently accepting malformed input.
+
+    Accepts real booleans, the canonical strings ``"true"``/``"false"`` /
+    ``"1"``/``"0"`` (case-insensitive), and falls back to *default* for
+    ``None``. Anything else raises ``ValueError`` so the caller can return
+    a structured INVALID_PARAMS error rather than coercing via ``bool()``
+    (which treats ``"false"``/``"0"`` as truthy).
+    """
+    if raw is None:
+        return default
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, str):
+        lowered = raw.strip().lower()
+        if lowered in {"true", "1", "yes"}:
+            return True
+        if lowered in {"false", "0", "no"}:
+            return False
+    raise ValueError(f"Expected a boolean, got {raw!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -229,8 +262,11 @@ async def _handle_watch(
         # fails (useful for feeds that block HEAD/GET from unknown UAs).
         # GitHub owner/repo slugs are not probed because they are not URLs.
         # ------------------------------------------------------------------
-        probe = bool(arguments.get("probe", True))
-        force = bool(arguments.get("force", False))
+        try:
+            probe = _parse_bool_arg(arguments.get("probe"), default=True)
+            force = _parse_bool_arg(arguments.get("force"), default=False)
+        except ValueError as exc:
+            return error_response("INVALID_PARAMS", str(exc))
         probe_is_url = not (source_type == "github" and _GITHUB_SLUG_RE.match(url))
         probe_error: str | None = None
         if probe and probe_is_url:
