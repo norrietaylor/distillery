@@ -166,6 +166,7 @@ def _event_to_feed_item(event: dict[str, Any], source_url: str) -> FeedItem:
         title=title,
         url=item_url,
         content=content or None,
+        author=actor_login or None,
         published_at=published_at,
         raw=event,
         extra={"event_type": event_type, "actor": actor_login, "repo": repo_name},

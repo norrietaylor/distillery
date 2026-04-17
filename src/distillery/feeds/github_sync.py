@@ -366,6 +366,9 @@ class GitHubSyncAdapter:
         external_id = _make_external_id(self._owner, self._repo, ref_type, number)
         content = _build_content(title, body, comments)
 
+        # Extract real author from the issue/PR payload.
+        real_author: str = (issue.get("user") or {}).get("login") or self._author
+
         # Build tags from labels using shared sanitiser.
         from distillery.feeds.tags import sanitise_label
 
@@ -381,13 +384,14 @@ class GitHubSyncAdapter:
             "labels": labels,
             "assignees": assignees,
             "external_id": external_id,
+            "imported_by": "gh-sync",
         }
 
         return Entry(
             content=content,
             entry_type=EntryType.GITHUB,
             source=EntrySource.IMPORT,
-            author=self._author,
+            author=real_author,
             project=self._project,
             tags=tags,
             status=EntryStatus.ACTIVE,
