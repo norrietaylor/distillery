@@ -28,8 +28,9 @@ appropriate Distillery handler. Register this one script for `UserPromptSubmit`,
 
 ### Prerequisites
 
-- Distillery MCP server running (HTTP or stdio — auto-detected, see below)
-  (required only for the `SessionStart` briefing; the `UserPromptSubmit` nudge works offline)
+- **HTTP mode**: Distillery MCP server running at a reachable URL (must be pre-started; the hook connects to it)
+- **stdio mode**: `distillery-mcp` installed and on PATH (the hook launches it as a subprocess — no pre-running server required)
+  _(required only for the `SessionStart` briefing; the `UserPromptSubmit` nudge works offline)_
 - Python 3.11+ available on the system PATH (for `SessionStart` briefing)
 - Claude Code with hook support
 
