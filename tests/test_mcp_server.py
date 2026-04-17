@@ -1,6 +1,6 @@
 """Tests for the Distillery MCP server (T04.4 / T02.3).
 
-Tests cover the 17 registered MCP tools via direct handler calls with a mock
+Tests cover the 16 registered MCP tools via direct handler calls with a mock
 store and deterministic embedding provider:
 
   store -> search -> get -> update -> find_similar -> list -> status
@@ -9,7 +9,7 @@ The test harness exercises the server handlers directly without requiring a
 running stdio transport.  All handlers are async functions that accept a
 store object and an arguments dict -- this is the natural unit-test seam.
 
-Also exercises the ``create_server`` factory to confirm all 17 tools are
+Also exercises the ``create_server`` factory to confirm all 16 tools are
 registered and the lifespan context initialises state correctly.
 
 Tools removed from MCP surface (now webhooks or internal handlers):
@@ -666,7 +666,7 @@ class TestCreateServer:
         tools = await server.list_tools()
         tool_names = {t.name for t in tools}
 
-        # 15-tool consolidated API (12 from #196 + store_batch, gh_sync, sync_status)
+        # 16-tool consolidated API (15 prior + distillery_status from #313)
         expected = {
             "distillery_store",
             "distillery_store_batch",
@@ -683,6 +683,7 @@ class TestCreateServer:
             "distillery_relations",
             "distillery_gh_sync",
             "distillery_sync_status",
+            "distillery_status",
         }
         assert expected == tool_names, (
             f"Tool mismatch — extra: {tool_names - expected}, missing: {expected - tool_names}"
@@ -747,13 +748,13 @@ class TestRemovedTools:
             )
 
     async def test_removed_tools_count_unchanged(self) -> None:
-        """Exactly 15 tools must be registered — consolidated analytics tools."""
+        """Exactly 16 tools must be registered — consolidated analytics tools + status."""
         config = DistilleryConfig(
             storage=StorageConfig(database_path=":memory:"),
             embedding=EmbeddingConfig(provider="", model="stub", dimensions=4),
         )
         server = create_server(config)
         tools = await server.list_tools()
-        assert len(tools) == 15, (
-            f"Expected 15 registered tools, got {len(tools)}: {sorted(t.name for t in tools)}"
+        assert len(tools) == 16, (
+            f"Expected 16 registered tools, got {len(tools)}: {sorted(t.name for t in tools)}"
         )
