@@ -68,6 +68,91 @@ _XREF_PATTERN = re.compile(
 # Slug pattern for owner/repo.
 _SLUG_RE = re.compile(r"^[\w.\-]+/[\w.\-]+$")
 
+# Default author attribution when the GitHub payload omits ``user.login``.
+_DEFAULT_GH_AUTHOR = "gh-sync"
+
+# Allowed values for the ``state/*`` tag — keeps vocabulary bounded.
+_STATE_TAG_VALUES = frozenset({"open", "closed", "merged"})
+
+# Pattern each slash-separated tag segment must satisfy (see models.validate_tag).
+_TAG_CHAR_RE = re.compile(r"[^a-z0-9\-]")
+
+
+def _sanitize_tag_segment(raw: str) -> str:
+    """Return a tag segment that satisfies ``[a-z0-9][a-z0-9\\-]*``.
+
+    Lowercases, replaces ``_`` and ``.`` (and any other disallowed characters)
+    with ``-``, collapses runs of ``-``, and trims leading/trailing hyphens.
+    Digits are permitted in any position (including as the leading character)
+    because the tag schema accepts ``[a-z0-9]`` at the start.  Returns an
+    empty string when the input cannot be coerced to a valid segment.
+    """
+    if not raw:
+        return ""
+    lowered = raw.strip().lower()
+    # Replace any disallowed character with a hyphen.
+    replaced = _TAG_CHAR_RE.sub("-", lowered)
+    # Collapse runs of hyphens and strip leading/trailing hyphens.
+    collapsed = re.sub(r"-+", "-", replaced).strip("-")
+    return collapsed
+
+
+def _derive_state_tag_value(issue: dict[str, Any]) -> str | None:
+    """Return ``"merged"``/``"closed"``/``"open"`` for the issue, or ``None``.
+
+    For pull requests with ``pull_request.merged_at`` set, returns ``"merged"``.
+    Otherwise falls back to the issue's ``state`` field when it is one of
+    ``open`` or ``closed``.  Unknown states return ``None``.
+    """
+    pr_info = issue.get("pull_request")
+    if isinstance(pr_info, dict) and pr_info.get("merged_at"):
+        return "merged"
+    state = issue.get("state")
+    if isinstance(state, str) and state.lower() in _STATE_TAG_VALUES:
+        return state.lower()
+    return None
+
+
+def _build_github_tags(
+    *,
+    repo: str,
+    ref_type: str,
+    issue: dict[str, Any],
+    labels: list[str],
+) -> list[str]:
+    """Assemble the canonical tag list for a GitHub-sourced entry.
+
+    Always includes:
+      - ``source/github``
+      - ``repo/<sanitised repo>`` (only when the sanitised name is non-empty)
+      - ``ref-type/<issue|pr>``
+      - ``state/<open|closed|merged>`` (only when resolvable)
+
+    Also appends sanitised GitHub labels (``bug``, ``high-priority``) that
+    pass tag-validation; anything that cannot be coerced is silently dropped.
+    """
+    tags: list[str] = ["source/github"]
+    repo_seg = _sanitize_tag_segment(repo)
+    if repo_seg:
+        tags.append(f"repo/{repo_seg}")
+    if ref_type in {"issue", "pr"}:
+        tags.append(f"ref-type/{ref_type}")
+    state_value = _derive_state_tag_value(issue)
+    if state_value is not None:
+        tags.append(f"state/{state_value}")
+    for label in labels:
+        sanitised = _sanitize_tag_segment(label)
+        if sanitised:
+            tags.append(sanitised)
+    # Deduplicate while preserving order.
+    seen: set[str] = set()
+    unique: list[str] = []
+    for tag in tags:
+        if tag not in seen:
+            seen.add(tag)
+            unique.append(tag)
+    return unique
+
 
 def _parse_github_url(url: str) -> tuple[str, str]:
     """Extract ``(owner, repo)`` from a GitHub repository URL or slug.
@@ -164,9 +249,14 @@ class GitHubSyncAdapter:
     token:
         Optional GitHub PAT.  Falls back to ``GITHUB_TOKEN`` env var.
     author:
-        Author field for created entries.  Defaults to ``"gh-sync"``.
+        Optional override for the entry author.  When ``None`` (the default)
+        each entry's author is derived from the GitHub payload's
+        ``user.login`` field, falling back to ``"gh-sync"``.
     project:
-        Optional project name for scoping entries.
+        Optional project name for scoping entries.  When ``None`` the adapter
+        uses the bare repository name (e.g. ``"distillery"``) so synced
+        entries are filterable by the same project value that ``/distill``
+        and friends assign via ``basename $(git rev-parse --show-toplevel)``.
     """
 
     def __init__(
@@ -174,14 +264,16 @@ class GitHubSyncAdapter:
         store: DistilleryStore,
         url: str,
         token: str | None = None,
-        author: str = "gh-sync",
+        author: str | None = None,
         project: str | None = None,
     ) -> None:
         self._store = store
         self._owner, self._repo = _parse_github_url(url)
         self._token = token or os.environ.get("GITHUB_TOKEN", "")
-        self._author = author
-        self._project = project
+        self._author_override = author
+        # Default project to the bare repo name so git-derived filters line up
+        # with entries created via /distill, /bookmark, etc.
+        self._project = project if project is not None else self._repo
         self._metadata_key = f"gh_sync_last_{self._owner}/{self._repo}"
 
     @property
@@ -366,17 +458,40 @@ class GitHubSyncAdapter:
         external_id = _make_external_id(self._owner, self._repo, ref_type, number)
         content = _build_content(title, body, comments)
 
-        # Extract real author from the issue/PR payload.  Treat null,
-        # empty, and whitespace-only logins as missing so we fall back
-        # to the configured sync-tool author instead of persisting junk.
-        user_login_raw = (issue.get("user") or {}).get("login")
-        user_login = user_login_raw.strip() if isinstance(user_login_raw, str) else ""
-        real_author: str = user_login or self._author
+        # Canonical tag set (source/github, repo/<repo>, ref-type/<type>,
+        # state/<state>) plus any sanitised GitHub labels.
+        tags = _build_github_tags(
+            repo=self._repo,
+            ref_type=ref_type,
+            issue=issue,
+            labels=labels,
+        )
 
-        # Build tags from labels using shared sanitiser.
-        from distillery.feeds.tags import sanitise_label
+        # Derive author from the GitHub payload when the caller hasn't pinned
+        # an override — otherwise gh-sync entries show up with no attribution.
+        # Treat null, empty, and whitespace-only logins as missing so we fall
+        # back to the configured sync-tool author instead of persisting junk.
+        author = self._author_override
+        if not author:
+            user = issue.get("user")
+            if isinstance(user, dict):
+                gh_login = user.get("login")
+                if isinstance(gh_login, str) and gh_login.strip():
+                    author = gh_login.strip()
+        if not author:
+            author = _DEFAULT_GH_AUTHOR
 
-        tags: list[str] = [t for lbl in labels if (t := sanitise_label(lbl)) is not None]
+        # Merged-at timestamp (PRs only) — preserved so _compute_backfill_updates
+        # can detect merged PRs during backfill and keep the state/merged tag.
+        merged_at: str | None = None
+        if isinstance(pr_info := issue.get("pull_request"), dict):
+            pr_merged = pr_info.get("merged_at")
+            if isinstance(pr_merged, str) and pr_merged:
+                merged_at = pr_merged
+        if merged_at is None:
+            top_merged = issue.get("merged_at")
+            if isinstance(top_merged, str) and top_merged:
+                merged_at = top_merged
 
         metadata: dict[str, Any] = {
             "repo": f"{self._owner}/{self._repo}",
@@ -389,13 +504,22 @@ class GitHubSyncAdapter:
             "assignees": assignees,
             "external_id": external_id,
             "imported_by": "gh-sync",
+            # Convenience duplicates requested by #312 — some downstream
+            # consumers (UI, digests) look for these specific keys rather
+            # than ref_number / url.
+            "gh_number": number,
+            "gh_url": html_url,
+            "merged_at": merged_at,
+            # Persisted so ``_compute_backfill_updates`` can heal older entries
+            # that lost author attribution (see legacy_authors branch below).
+            "user_login": author,
         }
 
         return Entry(
             content=content,
             entry_type=EntryType.GITHUB,
             source=EntrySource.IMPORT,
-            author=real_author,
+            author=author,
             project=self._project,
             tags=tags,
             status=EntryStatus.ACTIVE,
@@ -513,9 +637,10 @@ class GitHubSyncAdapter:
             existing = await self._find_existing(external_id)
 
             if existing is not None:
-                # Update existing entry.  Include ``author`` so re-syncs
-                # correct stale tool-authored entries with the real payload
-                # author (see issue #302).
+                # Update existing entry.  Also backfill project/author so
+                # previously-synced items pick up the real payload author
+                # (#302) and the canonical project/tags (#312) on the next
+                # sync cycle even without a one-off backfill run.
                 await self._store.update(
                     existing.id,
                     {
@@ -523,6 +648,7 @@ class GitHubSyncAdapter:
                         "author": entry.author,
                         "metadata": entry.metadata,
                         "tags": entry.tags,
+                        "project": entry.project,
                     },
                 )
                 entry_id = existing.id
@@ -645,8 +771,9 @@ class GitHubSyncAdapter:
             existing = await self._find_existing(external_id)
 
             if existing is not None:
-                # Include ``author`` on update so re-syncs correct stale
-                # tool-authored entries with the real payload author (#302).
+                # Include ``author`` and ``project`` on update so re-syncs
+                # correct stale tool-authored entries (#302) and pick up the
+                # canonical project/tag backfill (#312) without a one-off run.
                 await self._store.update(
                     existing.id,
                     {
@@ -654,6 +781,7 @@ class GitHubSyncAdapter:
                         "author": entry.author,
                         "metadata": entry.metadata,
                         "tags": entry.tags,
+                        "project": entry.project,
                     },
                 )
                 entry_id = existing.id
@@ -806,3 +934,177 @@ class SyncResult:
             "pages_processed": self.pages_processed,
             "errors": self.errors,
         }
+
+
+# ---------------------------------------------------------------------------
+# Backfill helper (#312)
+# ---------------------------------------------------------------------------
+
+
+# How many entries to scan per page when walking the store.
+_BACKFILL_PAGE_SIZE = 200
+
+
+def _infer_repo_slug(metadata: dict[str, Any]) -> tuple[str | None, str | None]:
+    """Return ``(owner, repo)`` inferred from entry metadata, or ``(None, None)``.
+
+    Tries ``metadata["repo"]`` first (stored as ``owner/repo``), then falls
+    back to ``metadata["external_id"]`` which has the form
+    ``owner/repo#issue-42``.
+    """
+    repo_raw = metadata.get("repo")
+    if isinstance(repo_raw, str) and "/" in repo_raw:
+        owner, _, repo = repo_raw.partition("/")
+        if owner and repo:
+            return owner, repo.split("#", 1)[0]
+
+    external_id = metadata.get("external_id")
+    if isinstance(external_id, str) and "/" in external_id:
+        slug, _, _ = external_id.partition("#")
+        owner, _, repo = slug.partition("/")
+        if owner and repo:
+            return owner, repo
+
+    return None, None
+
+
+async def backfill_github_metadata(
+    store: DistilleryStore,
+    *,
+    page_size: int = _BACKFILL_PAGE_SIZE,
+    dry_run: bool = False,
+) -> int:
+    """Backfill project/tags/author/metadata on existing ``github`` entries.
+
+    Scans all entries with ``entry_type=github`` and fills in the canonical
+    metadata added in #312 without re-fetching from GitHub:
+
+    - ``project`` defaults to the bare repo name (``distillery``) when unset
+      or empty.
+    - ``tags`` are replaced with the canonical set
+      (``source/github``, ``repo/<name>``, ``ref-type/<type>``,
+      ``state/<state>``) plus any existing sanitised labels, when the entry's
+      current tag list is empty or missing any canonical tag.
+    - ``author`` is populated from the entry's own metadata when the stored
+      author is empty or the legacy ``"gh-sync"`` placeholder and we can
+      recover a real GitHub login.
+    - ``metadata.gh_number`` and ``metadata.gh_url`` are populated from the
+      existing ``ref_number`` / ``url`` fields when absent.
+
+    The helper does *not* call GitHub; all source-of-truth data must already
+    be present on the entry.  Entries without recoverable repo/ref_type
+    metadata are skipped.
+
+    Args:
+        store: The Distillery store to scan and update.
+        page_size: Number of entries to fetch per ``list_entries`` call.
+        dry_run: When ``True`` no writes are performed; the function still
+            returns the number of entries that *would* have been updated.
+
+    Returns:
+        The number of entries that were updated (or would be, for dry runs).
+    """
+    if page_size <= 0:
+        raise ValueError(f"page_size must be positive, got {page_size}")
+
+    updated = 0
+    offset = 0
+    while True:
+        batch = await store.list_entries(
+            filters={"entry_type": EntryType.GITHUB.value},
+            limit=page_size,
+            offset=offset,
+        )
+        if not batch:
+            break
+
+        for entry in batch:
+            updates = _compute_backfill_updates(entry)
+            if not updates:
+                continue
+            updated += 1
+            if not dry_run:
+                await store.update(entry.id, updates)
+
+        if len(batch) < page_size:
+            break
+        offset += len(batch)
+
+    return updated
+
+
+def _compute_backfill_updates(entry: Entry) -> dict[str, Any]:
+    """Return the update dict needed to bring *entry* up to the #312 schema.
+
+    Returns an empty dict when no changes are needed.  Splitting this logic
+    out keeps :func:`backfill_github_metadata` easy to reason about and
+    lets tests exercise the per-entry decisions without a store.
+    """
+    metadata = dict(entry.metadata or {})
+    owner, repo = _infer_repo_slug(metadata)
+
+    # Without repo info we cannot build canonical tags reliably.  Leave the
+    # entry alone rather than guessing.
+    if owner is None or repo is None:
+        return {}
+
+    ref_type_raw = metadata.get("ref_type")
+    ref_type = ref_type_raw if isinstance(ref_type_raw, str) else ""
+
+    updates: dict[str, Any] = {}
+
+    # ``project`` — prefer the repo name when the stored value is empty.
+    if not entry.project:
+        updates["project"] = repo
+
+    # ``author`` — only replace when the existing value is empty or the
+    # legacy placeholder, and only when metadata gives us a real login.
+    legacy_authors = {"", _DEFAULT_GH_AUTHOR}
+    if entry.author in legacy_authors:
+        stored_login = metadata.get("user_login")
+        if isinstance(stored_login, str) and stored_login.strip():
+            updates["author"] = stored_login.strip()
+
+    # ``metadata.gh_number`` / ``metadata.gh_url`` — copy from the legacy
+    # ``ref_number`` / ``url`` keys when missing.
+    metadata_changed = False
+    if "gh_number" not in metadata and isinstance(metadata.get("ref_number"), int):
+        metadata["gh_number"] = metadata["ref_number"]
+        metadata_changed = True
+    if "gh_url" not in metadata and isinstance(metadata.get("url"), str):
+        metadata["gh_url"] = metadata["url"]
+        metadata_changed = True
+
+    # ``tags`` — rebuild the canonical set.  We preserve any existing
+    # non-canonical tags (hand-authored labels, etc.) by merging them in.
+    issue_like: dict[str, Any] = {
+        "state": metadata.get("state"),
+    }
+    # Re-create the ``pull_request.merged_at`` signal for PR entries that
+    # were already closed at sync time.
+    if ref_type == "pr" and isinstance(metadata.get("merged_at"), str):
+        issue_like["pull_request"] = {"merged_at": metadata["merged_at"]}
+    stored_labels_raw = metadata.get("labels") or []
+    stored_labels = [lbl for lbl in stored_labels_raw if isinstance(lbl, str)]
+
+    canonical_tags = _build_github_tags(
+        repo=repo,
+        ref_type=ref_type,
+        issue=issue_like,
+        labels=stored_labels,
+    )
+    # Merge with any existing tags we don't already know about.
+    existing_tags = list(entry.tags or [])
+    seen: set[str] = set(canonical_tags)
+    merged_tags = list(canonical_tags)
+    for tag in existing_tags:
+        if tag not in seen:
+            seen.add(tag)
+            merged_tags.append(tag)
+    if merged_tags != existing_tags:
+        updates["tags"] = merged_tags
+
+    if metadata_changed:
+        updates["metadata"] = metadata
+
+    return updates
