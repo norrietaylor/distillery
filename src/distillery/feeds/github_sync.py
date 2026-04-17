@@ -480,6 +480,18 @@ class GitHubSyncAdapter:
         if not author:
             author = _DEFAULT_GH_AUTHOR
 
+        # Merged-at timestamp (PRs only) — preserved so _compute_backfill_updates
+        # can detect merged PRs during backfill and keep the state/merged tag.
+        merged_at: str | None = None
+        if isinstance(pr_info := issue.get("pull_request"), dict):
+            pr_merged = pr_info.get("merged_at")
+            if isinstance(pr_merged, str) and pr_merged:
+                merged_at = pr_merged
+        if merged_at is None:
+            top_merged = issue.get("merged_at")
+            if isinstance(top_merged, str) and top_merged:
+                merged_at = top_merged
+
         metadata: dict[str, Any] = {
             "repo": f"{self._owner}/{self._repo}",
             "ref_type": ref_type,
@@ -496,6 +508,7 @@ class GitHubSyncAdapter:
             # than ref_number / url.
             "gh_number": number,
             "gh_url": html_url,
+            "merged_at": merged_at,
         }
 
         return Entry(
@@ -754,8 +767,9 @@ class GitHubSyncAdapter:
             existing = await self._find_existing(external_id)
 
             if existing is not None:
-                # Include ``author`` on update so re-syncs correct stale
-                # tool-authored entries with the real payload author (#302).
+                # Include ``author`` and ``project`` on update so re-syncs
+                # correct stale tool-authored entries (#302) and pick up the
+                # canonical project/tag backfill (#312) without a one-off run.
                 await self._store.update(
                     existing.id,
                     {
@@ -763,6 +777,7 @@ class GitHubSyncAdapter:
                         "author": entry.author,
                         "metadata": entry.metadata,
                         "tags": entry.tags,
+                        "project": entry.project,
                     },
                 )
                 entry_id = existing.id
