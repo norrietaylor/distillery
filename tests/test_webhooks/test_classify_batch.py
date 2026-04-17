@@ -178,12 +178,32 @@ async def test_classify_batch_heuristic_mode_classifies(
     entry_a = _make_entry("Explored auth module, tried OAuth2 flow")
     entry_b = _make_entry("Bookmarked https://example.com/article")
 
-    # Mock classifier: compute_centroids returns a centroid dict,
-    # classify_entry returns deterministic results per entry.
+    # Mock classifier: classify_batch is the single entry point called by the
+    # webhook handler.  Return two ClassificationResult objects — the first an
+    # active session match, the second a pending_review inbox fallback.
+    from distillery.classification.models import ClassificationResult
+
     mock_classifier = MagicMock()
-    mock_classifier.compute_centroids = AsyncMock(return_value={"session": [0.1, 0.2, 0.3, 0.4]})
-    # First call: match → session; second call: no match
-    mock_classifier.classify_entry = MagicMock(side_effect=[("session", 0.82), (None, 0.3)])
+    mock_classifier.classify_batch = AsyncMock(
+        return_value=[
+            ClassificationResult(
+                entry_type=EntryType.SESSION,
+                confidence=0.82,
+                status=EntryStatus.ACTIVE,
+                reasoning="Heuristic: best centroid match is session.",
+                suggested_tags=[],
+                suggested_project=None,
+            ),
+            ClassificationResult(
+                entry_type=EntryType.INBOX,
+                confidence=0.3,
+                status=EntryStatus.PENDING_REVIEW,
+                reasoning="Heuristic: no centroid exceeded threshold.",
+                suggested_tags=[],
+                suggested_project=None,
+            ),
+        ]
+    )
 
     # list_entries returns our two entries; update succeeds.
     mock_store = MagicMock()
@@ -209,8 +229,8 @@ async def test_classify_batch_heuristic_mode_classifies(
     assert data["errors"] == 0
     assert data["by_type"] == {"session": 1}
 
-    # Centroids computed exactly once for the entire batch.
-    assert mock_classifier.compute_centroids.await_count == 1
+    # classify_batch invoked exactly once for the entire batch of entries.
+    assert mock_classifier.classify_batch.await_count == 1
 
     # Verify update was called for both entries (both get their store records updated).
     assert mock_store.update.await_count == 2
@@ -308,8 +328,10 @@ async def test_classify_batch_llm_mode_queues_as_pending_review(
 async def test_classify_batch_heuristic_error_counting(
     store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """When heuristic classification raises, errors count increments and
+    """When per-entry store update raises, errors count increments and
     other entries are still processed."""
+    from distillery.classification.models import ClassificationResult
+
     monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
 
     mock_embedding_provider = MagicMock()
@@ -318,19 +340,37 @@ async def test_classify_batch_heuristic_error_counting(
     entry_a = _make_entry("Content A")
     entry_b = _make_entry("Content B")
 
+    # Both entries classify successfully as reference/active; the store.update
+    # raises for the first entry, simulating a per-entry failure that should be
+    # caught and counted as an error without aborting the batch.
     mock_classifier = MagicMock()
-    mock_classifier.compute_centroids = AsyncMock(return_value={"reference": [0.1, 0.2, 0.3, 0.4]})
-    # classify_entry returns a match for both entries.
-    mock_classifier.classify_entry = MagicMock(return_value=("reference", 0.75))
-
-    # First embed call raises; second succeeds.
-    mock_embedding_provider.embed = MagicMock(
-        side_effect=[RuntimeError("embedding failure"), [0.1, 0.2, 0.3, 0.4]]
+    mock_classifier.classify_batch = AsyncMock(
+        return_value=[
+            ClassificationResult(
+                entry_type=EntryType.REFERENCE,
+                confidence=0.75,
+                status=EntryStatus.ACTIVE,
+                reasoning="Heuristic: reference centroid match.",
+                suggested_tags=[],
+                suggested_project=None,
+            ),
+            ClassificationResult(
+                entry_type=EntryType.REFERENCE,
+                confidence=0.75,
+                status=EntryStatus.ACTIVE,
+                reasoning="Heuristic: reference centroid match.",
+                suggested_tags=[],
+                suggested_project=None,
+            ),
+        ]
     )
 
     mock_store = MagicMock()
     mock_store.list_entries = AsyncMock(return_value=[entry_a, entry_b])
-    mock_store.update = AsyncMock(return_value=entry_b)
+    # First update raises; second succeeds.
+    mock_store.update = AsyncMock(
+        side_effect=[RuntimeError("update failure"), entry_b]
+    )
     mock_store.get_metadata = AsyncMock(return_value=None)
     mock_store.set_metadata = AsyncMock()
     shared["store"] = mock_store

@@ -1563,35 +1563,32 @@ class DuckDBStore:
             ).fetchall()
             entries_by_status = {str(row[0]): int(row[1]) for row in status_rows}
 
-            # Storage bytes: only include when no filters/staleness are applied,
-            # otherwise omit (would not reflect the scoped result set).
-            storage_bytes: int | None = None
-            if not where_sql:
-                try:
-                    size_row = conn.execute("PRAGMA database_size").fetchone()
-                    # PRAGMA database_size returns columns including database_size
-                    # which is a human-readable string.  For in-memory DBs the
-                    # bytes column (index 4) gives the raw value.
-                    if size_row:
-                        # DuckDB returns (database_name, database_size, block_size,
-                        # total_blocks, used_blocks, free_blocks, wal_size, ...)
-                        # total_blocks * block_size gives total allocated bytes.
-                        block_size = int(size_row[2]) if size_row[2] else 0
-                        total_blocks = int(size_row[3]) if size_row[3] else 0
-                        storage_bytes = block_size * total_blocks
-                    else:
-                        storage_bytes = 0
-                except Exception:  # noqa: BLE001
-                    storage_bytes = 0
+            # Storage bytes is a global database metric — independent of
+            # filters/staleness. Always return it so callers can observe DB
+            # size regardless of the scoped result set (filters affect counts,
+            # not physical storage).
+            storage_bytes: int = 0
+            try:
+                size_row = conn.execute("PRAGMA database_size").fetchone()
+                # PRAGMA database_size returns columns including database_size
+                # which is a human-readable string.  For in-memory DBs the
+                # bytes column (index 4) gives the raw value.
+                if size_row:
+                    # DuckDB returns (database_name, database_size, block_size,
+                    # total_blocks, used_blocks, free_blocks, wal_size, ...)
+                    # total_blocks * block_size gives total allocated bytes.
+                    block_size = int(size_row[2]) if size_row[2] else 0
+                    total_blocks = int(size_row[3]) if size_row[3] else 0
+                    storage_bytes = block_size * total_blocks
+            except Exception:  # noqa: BLE001
+                storage_bytes = 0
 
-            result = {
+            return {
                 "entries_by_type": entries_by_type,
                 "entries_by_status": entries_by_status,
                 "total_entries": total_entries,
+                "storage_bytes": storage_bytes,
             }
-            if storage_bytes is not None:
-                result["storage_bytes"] = storage_bytes
-            return result
 
         return await asyncio.to_thread(_sync)
 

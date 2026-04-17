@@ -319,9 +319,9 @@ async def test_poll_handler(store: DuckDBStore, monkeypatch: pytest.MonkeyPatch)
     mock_poller = MagicMock()
     mock_poller.poll = AsyncMock(return_value=summary)
 
-    # FeedPoller is imported lazily inside _handle_poll; patch it at its source.
+    # Patch FeedPoller where it is looked up (module-level import in webhooks).
     # Each test receives a fresh in-memory store (no pre-existing cooldowns).
-    with patch("distillery.feeds.poller.FeedPoller", return_value=mock_poller) as mock_cls:
+    with patch("distillery.mcp.webhooks.FeedPoller", return_value=mock_poller) as mock_cls:
         app = create_webhook_app(shared, config)
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.post("/poll", headers=_AUTH_HEADER)
@@ -353,9 +353,9 @@ async def test_rescore_handler(store: DuckDBStore, monkeypatch: pytest.MonkeyPat
     mock_poller = MagicMock()
     mock_poller.rescore = AsyncMock(return_value=rescore_stats)
 
-    # FeedPoller is imported lazily inside _handle_rescore; patch it at its source.
+    # Patch FeedPoller where it is looked up (module-level import in webhooks).
     # Each test receives a fresh in-memory store (no pre-existing cooldowns).
-    with patch("distillery.feeds.poller.FeedPoller", return_value=mock_poller):
+    with patch("distillery.mcp.webhooks.FeedPoller", return_value=mock_poller):
         app = create_webhook_app(shared, config)
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.post("/rescore", headers=_AUTH_HEADER, json={"limit": 50})
@@ -399,7 +399,7 @@ async def test_maintenance_handler(store: DuckDBStore, monkeypatch: pytest.Monke
     mock_poller.poll = AsyncMock(return_value=poll_summary)
     mock_poller.rescore = AsyncMock(return_value=rescore_stats)
 
-    with patch("distillery.feeds.poller.FeedPoller", return_value=mock_poller):
+    with patch("distillery.mcp.webhooks.FeedPoller", return_value=mock_poller):
         app = create_webhook_app(shared, config)
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.post("/maintenance", headers=_AUTH_HEADER)
@@ -443,9 +443,9 @@ async def test_handler_error_returns_500(
     mock_poller = MagicMock()
     mock_poller.poll = AsyncMock(side_effect=RuntimeError("feed source unavailable"))
 
-    # FeedPoller is imported lazily inside _handle_poll; patch it at its source.
+    # Patch FeedPoller where it is looked up (module-level import in webhooks).
     # Each test receives a fresh in-memory store (no pre-existing cooldowns).
-    with patch("distillery.feeds.poller.FeedPoller", return_value=mock_poller):
+    with patch("distillery.mcp.webhooks.FeedPoller", return_value=mock_poller):
         app = create_webhook_app(shared, config)
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.post("/poll", headers=_AUTH_HEADER)
@@ -480,7 +480,7 @@ async def test_hooks_poll_route_exists(store: DuckDBStore, monkeypatch: pytest.M
     mock_poller = MagicMock()
     mock_poller.poll = AsyncMock(return_value=summary)
 
-    with patch("distillery.feeds.poller.FeedPoller", return_value=mock_poller):
+    with patch("distillery.mcp.webhooks.FeedPoller", return_value=mock_poller):
         app = create_webhook_app(shared, config)
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.post("/hooks/poll", headers=_AUTH_HEADER)
@@ -528,7 +528,7 @@ async def test_hooks_poll_source_url_query_param(
     mock_poller = MagicMock()
     mock_poller.poll = AsyncMock(return_value=summary)
 
-    with patch("distillery.feeds.poller.FeedPoller", return_value=mock_poller):
+    with patch("distillery.mcp.webhooks.FeedPoller", return_value=mock_poller):
         app = create_webhook_app(shared, config)
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.post(
@@ -558,7 +558,7 @@ async def test_hooks_rescore_route_exists(
     mock_poller = MagicMock()
     mock_poller.rescore = AsyncMock(return_value=rescore_stats)
 
-    with patch("distillery.feeds.poller.FeedPoller", return_value=mock_poller):
+    with patch("distillery.mcp.webhooks.FeedPoller", return_value=mock_poller):
         app = create_webhook_app(shared, config)
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.post("/hooks/rescore", headers=_AUTH_HEADER)
@@ -601,7 +601,7 @@ async def test_hooks_rescore_limit_query_param(
     mock_poller = MagicMock()
     mock_poller.rescore = AsyncMock(return_value=rescore_stats)
 
-    with patch("distillery.feeds.poller.FeedPoller", return_value=mock_poller):
+    with patch("distillery.mcp.webhooks.FeedPoller", return_value=mock_poller):
         app = create_webhook_app(shared, config)
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.post("/hooks/rescore?limit=50", headers=_AUTH_HEADER)

@@ -34,6 +34,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from distillery.config import DistilleryConfig
+from distillery.feeds.poller import FeedPoller
 
 logger = logging.getLogger(__name__)
 
@@ -292,8 +293,6 @@ async def _run_poll(
         "items_fetched": N, "items_stored": N, "errors": [...]}}``, or
         ``{"ok": false, "error": "<message>"}`` with status 500 on failure.
     """
-    from distillery.feeds.poller import FeedPoller
-
     store = state["store"]
     config = state["config"]
 
@@ -380,8 +379,6 @@ async def _run_rescore(
         "upgraded": N, "downgraded": N}}``, or an error response with
         status 500 on failure.
     """
-    from distillery.feeds.poller import FeedPoller
-
     store = state["store"]
     config = state["config"]
 
