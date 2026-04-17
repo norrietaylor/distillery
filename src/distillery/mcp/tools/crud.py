@@ -132,7 +132,22 @@ async def _handle_store(
         cfg (DistilleryConfig | None): Optional configuration used to derive classification/conflict thresholds; when omitted a default conflict threshold of 0.60 is used.
 
     Returns:
-        list[types.TextContent]: MCP content list containing a JSON-serializable object with at least `entry_id`. May also include:
+        list[types.TextContent]: MCP content list containing a JSON-serializable object with at least:
+          - ``entry_id`` (str): the id the caller should reference — either the
+            newly persisted entry's id, or (when the call was auto-skipped /
+            effectively merged with an existing near-duplicate) the existing
+            entry's id.  Never a "ghost" id that cannot be retrieved.
+          - ``persisted`` (bool): ``True`` if a new row was written, ``False``
+            if the call was auto-skipped due to a near-duplicate.
+          - ``dedup_action`` (str): one of ``"stored"``, ``"skipped"``,
+            ``"merged"``, ``"linked"`` indicating how the new content
+            relates to existing entries.
+
+        When ``dedup_action != "stored"`` the response also includes
+        ``existing_entry_id`` (str) and ``similarity`` (float) so the caller
+        can pivot to the pre-existing entry.
+
+        May also include:
           - `warnings`: list of similar-entry summaries (id, score, content_preview) when near-duplicates were found,
           - `warning_message`: human-readable summary of warnings,
           - `conflicts`: list of conflict candidate objects (entry_id, content_preview, similarity_score, conflict_reasoning),
@@ -281,27 +296,40 @@ async def _handle_store(
     except Exception as exc:  # noqa: BLE001
         return error_response("INVALID_PARAMS", f"Failed to construct entry: {exc}")
 
-    # --- persist ------------------------------------------------------------
-    try:
-        entry_id = await store.store(entry)
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Error storing entry")
-        return error_response("INTERNAL", f"Failed to store entry: {exc}")
+    # --- pre-persist dedup check (summary mode skips this) ------------------
+    # Run dedup BEFORE persistence so that near-duplicates (score >= skip
+    # threshold) can be auto-skipped.  Auto-skip returns the existing entry's
+    # id — never a "ghost" id that was never inserted — together with
+    # ``persisted=False`` and ``dedup_action="skipped"`` so the caller knows
+    # to pivot to the existing entry.
+    skip_threshold: float | None = None
+    merge_threshold: float | None = None
+    link_threshold: float | None = None
+    if cfg is not None:
+        skip_threshold = cfg.classification.dedup_skip_threshold
+        merge_threshold = cfg.classification.dedup_merge_threshold
+        link_threshold = cfg.classification.dedup_link_threshold
 
-    # --- summary mode: skip dedup/conflict, return early --------------------
-    if output_mode == "summary":
-        return success_response({"entry_id": entry_id})
-
-    # --- deduplication check ------------------------------------------------
+    top_existing_id: str | None = None
+    top_existing_score: float | None = None
     warnings: list[dict[str, Any]] = []
-    try:
-        similar = await store.find_similar(
-            content=entry.content,
-            threshold=float(dedup_threshold),
-            limit=dedup_limit + 1,  # +1 because the new entry itself may appear
-        )
-        for result in similar:
-            if result.entry.id != entry_id:
+
+    if output_mode != "summary":
+        try:
+            similar = await store.find_similar(
+                content=entry.content,
+                threshold=float(dedup_threshold),
+                limit=dedup_limit,
+            )
+            for result in similar:
+                # At this point the new entry has not been inserted yet, so
+                # every result is an existing entry.  Still guard against
+                # degenerate cases where the store returns the same id.
+                if result.entry.id == entry.id:
+                    continue
+                if top_existing_id is None:
+                    top_existing_id = result.entry.id
+                    top_existing_score = float(result.score)
                 warnings.append(
                     {
                         "similar_entry_id": result.entry.id,
@@ -311,9 +339,54 @@ async def _handle_store(
                 )
                 if len(warnings) >= dedup_limit:
                     break
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("find_similar failed during dedup check: %s", exc)
+            # Non-fatal: fall through with no warnings and persist normally.
+
+    # --- auto-skip: near-duplicate, do NOT persist --------------------------
+    if (
+        skip_threshold is not None
+        and top_existing_id is not None
+        and top_existing_score is not None
+        and top_existing_score >= skip_threshold
+    ):
+        skip_response: dict[str, Any] = {
+            "entry_id": top_existing_id,
+            "persisted": False,
+            "dedup_action": "skipped",
+            "existing_entry_id": top_existing_id,
+            "similarity": round(top_existing_score, 4),
+        }
+        if warnings:
+            skip_response["warnings"] = warnings
+            skip_response["warning_message"] = (
+                f"Skipped as near-duplicate (score={top_existing_score:.3f}) "
+                f"of existing entry {top_existing_id!r}."
+            )
+        return success_response(skip_response)
+
+    # --- persist ------------------------------------------------------------
+    try:
+        entry_id = await store.store(entry)
     except Exception as exc:  # noqa: BLE001
-        logger.warning("find_similar failed during dedup check: %s", exc)
-        # Non-fatal: still return the stored entry_id.
+        logger.exception("Error storing entry")
+        return error_response("INTERNAL", f"Failed to store entry: {exc}")
+
+    # --- summary mode: skip conflict, return early --------------------------
+    if output_mode == "summary":
+        return success_response({"entry_id": entry_id, "persisted": True, "dedup_action": "stored"})
+
+    # --- determine dedup_action for the persisted entry ---------------------
+    # ``stored`` when no prior similar entry existed (or we lack thresholds).
+    # ``merged``/``linked`` annotate the caller that a near-match exists; the
+    # entry is still persisted — these are informational signals, not
+    # enforcement.  Only ``skipped`` (handled above) prevents persistence.
+    dedup_action = "stored"
+    if top_existing_id is not None and top_existing_score is not None:
+        if merge_threshold is not None and top_existing_score >= merge_threshold:
+            dedup_action = "merged"
+        elif link_threshold is not None and top_existing_score >= link_threshold:
+            dedup_action = "linked"
 
     # --- conflict check -------------------------------------------------------
     # Non-fatal: wrap in try/except so a conflict-checker failure never blocks
@@ -349,7 +422,15 @@ async def _handle_store(
                     }
                 )
             if conflicts:
-                response_data: dict[str, Any] = {"entry_id": entry_id}
+                response_data: dict[str, Any] = {
+                    "entry_id": entry_id,
+                    "persisted": True,
+                    "dedup_action": dedup_action,
+                }
+                if dedup_action != "stored" and top_existing_id is not None:
+                    response_data["existing_entry_id"] = top_existing_id
+                    if top_existing_score is not None:
+                        response_data["similarity"] = round(top_existing_score, 4)
                 if warnings:
                     response_data["warnings"] = warnings
                     response_data["warning_message"] = (
@@ -368,7 +449,15 @@ async def _handle_store(
         logger.warning("Conflict check failed during store: %s", exc)
         # Non-fatal: fall through and return the entry_id without conflict info.
 
-    response: dict[str, Any] = {"entry_id": entry_id}
+    response: dict[str, Any] = {
+        "entry_id": entry_id,
+        "persisted": True,
+        "dedup_action": dedup_action,
+    }
+    if dedup_action != "stored" and top_existing_id is not None:
+        response["existing_entry_id"] = top_existing_id
+        if top_existing_score is not None:
+            response["similarity"] = round(top_existing_score, 4)
     if warnings:
         response["warnings"] = warnings
         response["warning_message"] = (
@@ -401,7 +490,12 @@ async def _handle_store_batch(
         created_by: Ownership identifier (from auth layer).
 
     Returns:
-        A structured MCP success or error response.
+        A structured MCP success or error response.  On success the payload
+        contains ``entry_ids`` (list[str], preserved for backward
+        compatibility), ``count`` (int), and ``results`` — a per-entry list
+        of ``{"entry_id", "persisted", "dedup_action"}`` dicts.  Because the
+        batch path never runs deduplication, every entry is reported as
+        ``persisted=True`` with ``dedup_action="stored"``.
     """
     from distillery.mcp.budget import EmbeddingBudgetError, record_and_check
     from distillery.models import Entry, EntrySource, EntryType
@@ -502,7 +596,7 @@ async def _handle_store_batch(
         built.append(entry)
 
     if not built:
-        return success_response({"entry_ids": [], "count": 0})
+        return success_response({"entry_ids": [], "results": [], "count": 0})
 
     # --- db size check (same guard as _handle_store) -------------------------
     if cfg is not None and cfg.rate_limit.max_db_size_mb > 0:
@@ -536,7 +630,12 @@ async def _handle_store_batch(
         logger.exception("Error in store_batch")
         return error_response("INTERNAL", f"Failed to batch-store entries: {exc}")
 
-    return success_response({"entry_ids": entry_ids, "count": len(entry_ids)})
+    # Batch-store does not run deduplication; every persisted entry is
+    # reported with ``persisted=True`` and ``dedup_action="stored"``.  This
+    # keeps the batch response shape aligned with the single-entry
+    # ``distillery_store`` response so callers can rely on the same keys.
+    results = [{"entry_id": eid, "persisted": True, "dedup_action": "stored"} for eid in entry_ids]
+    return success_response({"entry_ids": entry_ids, "results": results, "count": len(entry_ids)})
 
 
 # ---------------------------------------------------------------------------
