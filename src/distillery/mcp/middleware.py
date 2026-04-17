@@ -125,7 +125,13 @@ class RateLimitMiddleware:
         app: The wrapped ASGI application.
         requests_per_minute: Maximum requests per IP per 60-second window.
         requests_per_hour: Maximum requests per IP per 3600-second window.
+        trust_proxy: Prefer ``X-Forwarded-For`` for client IP extraction.
+        loopback_exempt: When ``True`` (default), skip rate limiting for
+            requests originating from loopback addresses (``127.0.0.1``,
+            ``::1``, ``localhost``).
     """
+
+    _LOOPBACK_ADDRS: frozenset[str] = frozenset({"127.0.0.1", "::1", "localhost"})
 
     def __init__(
         self,
@@ -133,11 +139,13 @@ class RateLimitMiddleware:
         requests_per_minute: int = 60,
         requests_per_hour: int = 600,
         trust_proxy: bool = False,
+        loopback_exempt: bool = True,
     ) -> None:
         self.app = app
         self.requests_per_minute = requests_per_minute
         self.requests_per_hour = requests_per_hour
         self.trust_proxy = trust_proxy
+        self.loopback_exempt = loopback_exempt
         # ip -> _IPWindow.  In-memory state; resets on process restart.
         self._windows: dict[str, _IPWindow] = {}
 
@@ -146,7 +154,19 @@ class RateLimitMiddleware:
             await self.app(scope, receive, send)
             return
 
+        # Loopback exemption: use the raw ASGI peer address (scope["client"])
+        # directly — never trust _client_ip() here, because it may fall back
+        # to X-Forwarded-For which can be spoofed.
+        if self.loopback_exempt:
+            client = scope.get("client")
+            if client and isinstance(client, (list, tuple)) and len(client) >= 1:
+                peer_ip = str(client[0])
+                if peer_ip in self._LOOPBACK_ADDRS:
+                    await self.app(scope, receive, send)
+                    return
+
         ip = _client_ip(scope, trust_proxy=self.trust_proxy)
+
         now = time.monotonic()
 
         was_existing = ip in self._windows
@@ -465,21 +485,20 @@ def apply_http_middleware(
     requests_per_hour: int = 600,
     max_body_bytes: int = 1_048_576,
     trust_proxy: bool = False,
+    loopback_exempt: bool = True,
     org_checker: OrgMembershipChecker | None = None,
     audit_callback: AuditCallback | None = None,
-    cors_allowed_origins: list[str] | None = None,
 ) -> ASGIApp:
-    """Wrap *app* with CORS, rate-limit, body-size, request-ID, and org-membership middleware.
+    """Wrap *app* with rate-limit, body-size, request-ID, and org-membership middleware.
 
     Middleware is applied in outermost-to-innermost order:
     1. :class:`RequestIDMiddleware` (outermost — echoes ``X-Request-ID`` on
        *all* responses, including 429/403/413 rejections)
-    2. :class:`CORSMiddleware` (handles preflight and CORS headers)
-    3. :class:`RateLimitMiddleware` (counts every request so denied requests
+    2. :class:`RateLimitMiddleware` (counts every request so denied requests
        still consume quota)
-    4. :class:`OrgMembershipMiddleware` (when *org_checker* is provided and
+    3. :class:`OrgMembershipMiddleware` (when *org_checker* is provided and
        enabled — blocks non-members before body is read)
-    5. :class:`BodySizeLimitMiddleware` (innermost — rejects oversized bodies)
+    4. :class:`BodySizeLimitMiddleware` (innermost — rejects oversized bodies)
 
     Args:
         app: The ASGI application to wrap.
@@ -487,20 +506,17 @@ def apply_http_middleware(
         requests_per_hour: Per-IP hour limit (default 600).
         max_body_bytes: Maximum body size in bytes (default 1 MB).
         trust_proxy: Prefer ``X-Forwarded-For`` for client IP extraction.
+        loopback_exempt: Skip rate limiting for loopback IPs (default ``True``).
         org_checker: Optional org membership checker.  When provided and
             :attr:`~distillery.mcp.org_membership.OrgMembershipChecker.enabled`
             is ``True``, :class:`OrgMembershipMiddleware` is added.
         audit_callback: Optional async callback for writing audit log entries
             when org membership checks deny access.  Signature:
             ``(user_id, operation, entry_id, action, outcome) -> Awaitable[None]``.
-        cors_allowed_origins: List of allowed CORS origins.  When empty or
-            ``None``, no origins are permitted (restrictive default).
 
     Returns:
         A new ASGI app with all requested middleware layers applied.
     """
-    from starlette.middleware.cors import CORSMiddleware
-
     app = BodySizeLimitMiddleware(app, max_bytes=max_body_bytes)
     if org_checker is not None and org_checker.enabled:
         app = OrgMembershipMiddleware(app, org_checker, audit_callback=audit_callback)
@@ -509,14 +525,7 @@ def apply_http_middleware(
         requests_per_minute=requests_per_minute,
         requests_per_hour=requests_per_hour,
         trust_proxy=trust_proxy,
-    )
-    origins = cors_allowed_origins or []
-    app = CORSMiddleware(
-        app=app,
-        allow_origins=origins,
-        allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
-        allow_credentials=True,
+        loopback_exempt=loopback_exempt,
     )
     app = RequestIDMiddleware(app)
     return app
