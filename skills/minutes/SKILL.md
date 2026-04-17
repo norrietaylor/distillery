@@ -204,7 +204,7 @@ Tags: tag1, tag2, tag3
 ### Step 3c: List Recent Meetings
 
 ```python
-distillery_list(entry_type="minutes", limit=10)
+distillery_list(entry_type="minutes", limit=10, output_mode="full")
 ```
 
 If `--project` was specified, also pass `project=<name>` to scope results to that project.

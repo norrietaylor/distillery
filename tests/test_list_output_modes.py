@@ -85,13 +85,18 @@ class TestListOutputModes:
         data = parse_mcp_response(result)
         assert data["output_mode"] == "summary"
         assert all("content" not in e for e in data["entries"])
-        # Other fields should still be present
+        # Summary shape — issue #311 — id/title/tags/project/author/created_at
+        # plus a ~200-char content_preview (+ metadata for dedup callers).
         for entry in data["entries"]:
             assert "id" in entry
+            assert "title" in entry
             assert "entry_type" in entry
             assert "created_at" in entry
             assert "metadata" in entry
             assert "tags" in entry
+            assert "project" in entry
+            assert "author" in entry
+            assert "content_preview" in entry
 
     async def test_ids_mode_minimal_fields(self, populated_store) -> None:
         result = await _handle_list(
@@ -146,13 +151,16 @@ class TestListOutputModes:
         assert not data.get("error")
         assert all("content" not in e for e in data["entries"])
 
-    async def test_default_mode_is_full(self, store) -> None:
+    async def test_default_mode_is_summary(self, store) -> None:
+        # Default output_mode is "summary" (see issue #311) to keep list
+        # responses compact enough to avoid flooding agent context.
         entry = make_entry(content="Hello world")
         await store.store(entry)
         result = await _handle_list(store=store, arguments={"limit": 5})
         data = parse_mcp_response(result)
-        assert data["output_mode"] == "full"
-        assert any("content" in e for e in data["entries"])
+        assert data["output_mode"] == "summary"
+        assert all("content" not in e for e in data["entries"])
+        assert all("content_preview" in e for e in data["entries"])
 
     async def test_content_max_length_invalid_type_returns_error(self, store) -> None:
         result = await _handle_list(
@@ -199,6 +207,59 @@ class TestListOutputModes:
         data = parse_mcp_response(result)
         assert data["total_count"] == 0
         assert data["count"] == 0
+
+    # ------------------------------------------------------------------
+    # Issue #311 — summary-mode shape and content_preview truncation
+    # ------------------------------------------------------------------
+
+    async def test_summary_content_preview_truncated_with_ellipsis(self, store) -> None:
+        long = "A" * 500
+        await store.store(make_entry(content=long))
+        result = await _handle_list(store=store, arguments={"limit": 5})
+        data = parse_mcp_response(result)
+        assert data["output_mode"] == "summary"
+        assert len(data["entries"]) == 1
+        preview = data["entries"][0]["content_preview"]
+        # 200 character preview + single ellipsis glyph.
+        assert preview.endswith("…")
+        assert len(preview) == 201
+        assert preview[:200] == "A" * 200
+
+    async def test_summary_content_preview_not_truncated_for_short_content(self, store) -> None:
+        await store.store(make_entry(content="short body"))
+        result = await _handle_list(store=store, arguments={"limit": 5})
+        data = parse_mcp_response(result)
+        preview = data["entries"][0]["content_preview"]
+        assert preview == "short body"
+        assert not preview.endswith("…")
+
+    async def test_summary_title_derived_from_first_line(self, store) -> None:
+        await store.store(make_entry(content="My Heading\n\nBody goes here."))
+        result = await _handle_list(store=store, arguments={"limit": 5})
+        data = parse_mcp_response(result)
+        assert data["entries"][0]["title"] == "My Heading"
+
+    async def test_summary_title_uses_metadata_title_when_present(self, store) -> None:
+        await store.store(
+            make_entry(
+                content="Body line one\nBody line two",
+                metadata={"title": "Explicit Title"},
+            )
+        )
+        result = await _handle_list(store=store, arguments={"limit": 5})
+        data = parse_mcp_response(result)
+        assert data["entries"][0]["title"] == "Explicit Title"
+
+    async def test_full_mode_still_available_via_explicit_flag(self, store) -> None:
+        body = "Full body content that must round-trip verbatim."
+        await store.store(make_entry(content=body))
+        result = await _handle_list(
+            store=store,
+            arguments={"limit": 5, "output_mode": "full"},
+        )
+        data = parse_mcp_response(result)
+        assert data["output_mode"] == "full"
+        assert data["entries"][0]["content"] == body
 
 
 # ---------------------------------------------------------------------------
