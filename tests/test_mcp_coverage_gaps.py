@@ -13,7 +13,6 @@ Covers edge cases and error paths in:
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -63,17 +62,6 @@ from distillery.store.duckdb import DuckDBStore
 from tests.conftest import make_entry, parse_mcp_response
 
 pytestmark = pytest.mark.integration
-
-
-@pytest.fixture(autouse=True)
-def _disable_watch_probe(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Stub out the reachability probe so unit tests never hit the network."""
-
-    async def _noop_probe(url: str) -> str | None:
-        return None
-
-    monkeypatch.setattr("distillery.mcp.tools.feeds._probe_url", _noop_probe)
-    yield
 
 
 # ---------------------------------------------------------------------------

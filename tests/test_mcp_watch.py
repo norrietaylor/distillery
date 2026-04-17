@@ -162,6 +162,7 @@ class TestInvalidUrlRejected:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.live_probe
 class TestReachabilityProbe:
     """When probe=True (default) an unreachable URL must not persist."""
 

@@ -69,6 +69,7 @@ markers = [
     "unit: unit tests",
     "integration: integration tests",
     "eval: Claude-powered skill evaluation tests (requires claude CLI)",
+    "live_probe: opt out of the autouse feed-probe stub (tests exercise real _probe_url)",
 ]
 
 [tool.mypy]

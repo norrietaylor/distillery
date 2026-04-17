@@ -219,3 +219,38 @@ async def store(
     await s.initialize()
     yield s
     await s.close()
+
+
+# ---------------------------------------------------------------------------
+# Feed reachability probe: autouse stub so unit tests never hit the network.
+# Individual tests that exercise the real probe can override with their own
+# monkeypatch, but by default every test is insulated from outbound calls.
+# ---------------------------------------------------------------------------
+
+import contextlib  # noqa: E402
+from collections.abc import Iterator  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _disable_watch_probe(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[None]:
+    """Stub ``distillery.mcp.tools.feeds._probe_url`` so it returns ``None``.
+
+    Centralised here (per CodeRabbit #323 nitpick) instead of duplicated in
+    ``test_watch.py`` / ``test_mcp_feeds.py`` / ``test_mcp_coverage_gaps.py``.
+
+    Tests that exercise the real probe should mark themselves
+    ``@pytest.mark.live_probe`` (or live in a module registered with that
+    marker) to opt out — the autouse stub is skipped for those.
+    """
+    if request.node.get_closest_marker("live_probe") is not None:
+        yield
+        return
+
+    async def _noop_probe(url: str) -> str | None:
+        return None
+
+    with contextlib.suppress(AttributeError):
+        monkeypatch.setattr("distillery.mcp.tools.feeds._probe_url", _noop_probe)
+    yield

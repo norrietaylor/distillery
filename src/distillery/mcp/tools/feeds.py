@@ -232,6 +232,7 @@ async def _handle_watch(
         probe = bool(arguments.get("probe", True))
         force = bool(arguments.get("force", False))
         probe_is_url = not (source_type == "github" and _GITHUB_SLUG_RE.match(url))
+        probe_error: str | None = None
         if probe and probe_is_url:
             probe_error = await _probe_url(url)
             if probe_error is not None and not force:
@@ -262,6 +263,13 @@ async def _handle_watch(
         except Exception as exc:  # noqa: BLE001
             logger.exception("distillery_watch: failed to add feed source")
             return error_response("INTERNAL", f"Failed to add feed source: {exc}")
+
+        # Surface probe failure context on forced adds so operators can see
+        # why the probe was overridden.  Durable persistence onto the
+        # ``feed_sources`` row is added by issue #310 (which introduces the
+        # ``last_error`` column and ``record_poll_status`` API).
+        if probe_error is not None and force:
+            added = {**added, "probe_error": probe_error, "forced": True}
 
         response_data: dict[str, Any] = {
             "added": added,
