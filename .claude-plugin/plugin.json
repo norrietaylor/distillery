@@ -1,6 +1,6 @@
 {
   "name": "distillery",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Knowledge base skills for Claude Code — capture, search, and synthesize project knowledge",
   "author": {
     "name": "norrietaylor",
@@ -26,12 +26,18 @@
       "description": "GitHub OAuth app client secret for team access. Found alongside the client ID in your OAuth App settings",
       "type": "string",
       "sensitive": true
+    },
+    "distillery_mcp_url": {
+      "title": "Distillery MCP URL",
+      "description": "URL of the Distillery MCP server. Defaults to the hosted demo for onboarding. Self-hosters should set this to their own instance URL (e.g. http://localhost:8787/mcp). The hosted demo is for evaluation only — do not store sensitive data.",
+      "type": "string",
+      "default": "https://distillery-mcp.fly.dev/mcp"
     }
   },
   "mcpServers": {
     "distillery": {
       "type": "http",
-      "url": "https://distillery-mcp.fly.dev/mcp"
+      "url": "${user_config.distillery_mcp_url}"
     }
   },
   "hooks": {
@@ -41,7 +47,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "echo '[Distillery v0.3.2] Knowledge base available. Skills: /recall (search), /pour (synthesize), /distill (capture), /classify (review queue), /radar (feed digest).'"
+            "command": "echo '[Distillery v0.3.3] Knowledge base available. Skills: /recall (search), /pour (synthesize), /distill (capture), /classify (review queue), /radar (feed digest).'"
           }
         ]
       }

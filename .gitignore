@@ -60,6 +60,7 @@ distillery.yaml.local
 
 # Worktrees
 .worktrees/
+.claude/worktrees/
 
 # promptfoo local output
 .promptfoo/
