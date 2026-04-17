@@ -810,10 +810,17 @@ class TestMCPBridgeAsync:
         bridge = await MCPBridge.create(seed_entries=seeds)
         seed_count = await bridge.count_stored_entries()
 
-        # Store one more via tool call.
+        # Store one more via tool call.  Pass dedup_threshold above the max
+        # possible normalised similarity so the hash-based stub embedding
+        # cannot spuriously trip auto-skip dedup between unrelated strings.
         await bridge.call_tool(
             "distillery_store",
-            {"content": "new entry", "entry_type": "session", "author": "test"},
+            {
+                "content": "new entry",
+                "entry_type": "session",
+                "author": "test",
+                "dedup_threshold": 1.01,
+            },
         )
         new_entries = await bridge.count_entries_since_seed(seed_count)
         assert new_entries == 1

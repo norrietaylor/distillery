@@ -365,14 +365,18 @@ class TestMCPStoreConflictDetection:
         store: DuckDBStore,
         embedding_provider: ControlledEmbeddingProvider,
     ) -> None:
-        """When an existing entry has cosine similarity above conflict_threshold,
-        distillery_store returns conflicts in the response."""
+        """When an existing entry has cosine similarity above conflict_threshold
+        but below the dedup skip threshold, distillery_store returns conflicts
+        in the response.
+        """
         existing_text = "Cats are nocturnal animals that hunt at night"
         new_text = "Cats are diurnal animals that are active during the day"
 
-        # Register identical vectors so similarity = 1.0 (well above threshold)
+        # Use an interpolated vector so similarity lands above conflict_threshold
+        # (0.60) but below the dedup skip threshold (0.95). t=0.4 yields
+        # raw cosine ~0.83, normalised to ~0.916 — above conflict, below skip.
         embedding_provider.register(existing_text, _UNIT_A)
-        embedding_provider.register(new_text, _UNIT_A)
+        embedding_provider.register(new_text, _interpolated_vector(_UNIT_A, _UNIT_B, 0.4))
 
         existing_entry = make_entry(content=existing_text)
         await store.store(existing_entry)
@@ -390,6 +394,8 @@ class TestMCPStoreConflictDetection:
         data = parse_mcp_response(response)
 
         assert "entry_id" in data
+        # The entry must have been persisted — similarity is below skip.
+        assert data.get("persisted") is True
         assert "conflicts" in data
         assert len(data["conflicts"]) >= 1
         # Each conflict entry must have required fields
