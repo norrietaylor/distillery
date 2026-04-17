@@ -555,6 +555,14 @@ class DuckDBStore:
             )
             logger.info("Vector-only search active (%s)", reason)
 
+        # Force a WAL checkpoint so all schema changes are flushed to the
+        # main database file.  This protects against SIGKILL or abrupt parent
+        # death leaving the WAL in a partially-written state.
+        try:
+            conn.execute("CHECKPOINT")
+        except duckdb.Error as exc:  # pragma: no cover – in-memory DBs may skip
+            logger.debug("Post-init CHECKPOINT skipped: %s", exc)
+
         self._conn = conn
         self._initialized = True
         logger.info("DuckDBStore initialized at %s", self._db_path)
@@ -574,8 +582,12 @@ class DuckDBStore:
         await asyncio.to_thread(self._sync_initialize)
 
     async def close(self) -> None:
-        """Close the database connection and release resources."""
+        """Checkpoint the WAL and close the database connection."""
         if self._conn is not None:
+            try:
+                await asyncio.to_thread(self._conn.execute, "CHECKPOINT")
+            except duckdb.Error as exc:  # pragma: no cover
+                logger.debug("Shutdown CHECKPOINT skipped: %s", exc)
             await asyncio.to_thread(self._conn.close)
             self._conn = None
             self._initialized = False

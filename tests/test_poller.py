@@ -273,24 +273,40 @@ class TestFeedPollerRSS:
         assert summary.total_stored == 0
         assert summary.total_below_threshold == 1
 
-    async def test_duplicate_items_are_skipped(self) -> None:
+    async def test_duplicate_items_are_skipped_via_external_id(self) -> None:
+        """RSS sources use authoritative external_id dedup — _has_external_id match."""
         items = [_make_feed_item(item_id="id1", title="Dup title", content="Dup content")]
         src = self._rss_source()
         store = _make_store(feed_sources=[_source_to_dict(src)])
         cfg = _make_config(sources=[src], digest_threshold=0.0)
+
+        # _has_external_id calls list_entries with metadata filter — return a match.
+        from distillery.models import Entry, EntrySource, EntryType
+
+        existing = Entry(
+            content="existing",
+            entry_type=EntryType.FEED,
+            source=EntrySource.IMPORT,
+            author="poller",
+            metadata={"external_id": "id1"},
+        )
+
+        async def _list_entries(
+            filters: dict[str, object] | None = None,
+            limit: int = 10,
+            offset: int = 0,
+        ) -> list[object]:
+            if filters and filters.get("metadata.external_id") == "id1":
+                return [existing]
+            return []
+
+        store.list_entries.side_effect = _list_entries
 
         with patch("distillery.feeds.poller._build_adapter") as mock_build:
             mock_adapter = MagicMock()
             mock_adapter.fetch.return_value = items
             mock_build.return_value = mock_adapter
 
-            async def _find_similar(content: str, threshold: float, limit: int) -> list:
-                if threshold == 0.95:
-                    # Return a match with the same external_id → dedup
-                    return [_make_search_result(score=0.97, external_id="id1")]
-                return []
-
-            store.find_similar.side_effect = _find_similar
             poller = FeedPoller(store=store, config=cfg)
             summary = await poller.poll()
 
@@ -424,6 +440,154 @@ class TestFeedPollerMultipleSources:
         assert summary.total_fetched == 3
         assert summary.total_stored == 3
         assert len(summary.results) == 2
+
+
+# ---------------------------------------------------------------------------
+# Parallel source polling
+# ---------------------------------------------------------------------------
+
+
+class TestFeedPollerParallel:
+    async def test_sources_polled_concurrently(self) -> None:
+        """Verify that _poll_source is called for all sources via asyncio.gather."""
+        sources = [
+            FeedSourceConfig(url="https://a.com/rss", source_type="rss"),
+            FeedSourceConfig(url="https://b.com/rss", source_type="rss"),
+        ]
+        items_a = [_make_feed_item(item_id="a1", source_url="https://a.com/rss")]
+        items_b = [_make_feed_item(item_id="b1", source_url="https://b.com/rss")]
+
+        store = _make_store(feed_sources=[_source_to_dict(s) for s in sources])
+
+        source_items_map = {
+            "https://a.com/rss": items_a,
+            "https://b.com/rss": items_b,
+        }
+        cfg = _make_config(sources=sources, digest_threshold=0.0)
+
+        def _build_adapter_side_effect(source: FeedSourceConfig) -> MagicMock:
+            mock = MagicMock()
+            mock.fetch.return_value = source_items_map[source.url]
+            return mock
+
+        async def _find_similar(content: str, threshold: float, limit: int) -> list:
+            return [_make_search_result(score=0.8)]
+
+        store.find_similar.side_effect = _find_similar
+
+        with patch(
+            "distillery.feeds.poller._build_adapter", side_effect=_build_adapter_side_effect
+        ):
+            poller = FeedPoller(store=store, config=cfg)
+            summary = await poller.poll()
+
+        assert summary.sources_polled == 2
+        assert summary.total_fetched == 2
+        assert summary.total_stored == 2
+
+    async def test_one_source_error_does_not_block_others(self) -> None:
+        """If one source's adapter fails, other sources still complete."""
+        sources = [
+            FeedSourceConfig(url="https://good.com/rss", source_type="rss"),
+            FeedSourceConfig(url="https://bad.com/rss", source_type="rss"),
+        ]
+        store = _make_store(feed_sources=[_source_to_dict(s) for s in sources])
+
+        cfg = _make_config(sources=sources, digest_threshold=0.0)
+
+        def _build_adapter_side_effect(source: FeedSourceConfig) -> MagicMock:
+            mock = MagicMock()
+            if source.url == "https://bad.com/rss":
+                mock.fetch.side_effect = RuntimeError("network error")
+            else:
+                mock.fetch.return_value = [
+                    _make_feed_item(item_id="g1", source_url="https://good.com/rss")
+                ]
+            return mock
+
+        async def _find_similar(content: str, threshold: float, limit: int) -> list:
+            return [_make_search_result(score=0.8)]
+
+        store.find_similar.side_effect = _find_similar
+
+        with patch(
+            "distillery.feeds.poller._build_adapter", side_effect=_build_adapter_side_effect
+        ):
+            poller = FeedPoller(store=store, config=cfg)
+            summary = await poller.poll()
+
+        assert summary.sources_polled == 2
+        assert summary.sources_errored == 1
+        assert summary.total_stored == 1
+
+
+# ---------------------------------------------------------------------------
+# Authoritative external_id dedup skip
+# ---------------------------------------------------------------------------
+
+
+class TestAuthoritativeExternalIdSkip:
+    async def test_rss_skips_semantic_dedup(self) -> None:
+        """RSS sources skip _is_duplicate (find_similar with 0.95 threshold)."""
+        items = [_make_feed_item(item_id="new1", title="New item", content="Content")]
+        src = FeedSourceConfig(url="https://example.com/rss", source_type="rss")
+        store = _make_store(feed_sources=[_source_to_dict(src)])
+        cfg = _make_config(sources=[src], digest_threshold=0.0)
+
+        find_similar_thresholds: list[float] = []
+
+        async def _find_similar(content: str, threshold: float, limit: int) -> list:
+            find_similar_thresholds.append(threshold)
+            return [_make_search_result(score=0.8)]
+
+        store.find_similar.side_effect = _find_similar
+
+        with patch("distillery.feeds.poller._build_adapter") as mock_build:
+            mock_adapter = MagicMock()
+            mock_adapter.fetch.return_value = items
+            mock_build.return_value = mock_adapter
+
+            poller = FeedPoller(store=store, config=cfg)
+            summary = await poller.poll()
+
+        # find_similar should only be called for scoring (threshold 0.0),
+        # never for dedup (threshold 0.95) since RSS is authoritative.
+        assert all(t != 0.95 for t in find_similar_thresholds), (
+            f"Unexpected dedup find_similar call; thresholds seen: {find_similar_thresholds}"
+        )
+        assert summary.total_stored == 1
+
+    async def test_non_authoritative_source_still_runs_semantic_dedup(self) -> None:
+        """A source type not in _AUTHORITATIVE_EXTERNAL_ID_TYPES still runs semantic dedup."""
+        items = [_make_feed_item(item_id="new1", title="New item", content="Content")]
+        src = FeedSourceConfig(url="https://example.com/feed", source_type="hackernews")
+        store = _make_store(feed_sources=[_source_to_dict(src)])
+        cfg = _make_config(sources=[src], digest_threshold=0.0)
+
+        find_similar_thresholds: list[float] = []
+
+        async def _find_similar(content: str, threshold: float, limit: int) -> list:
+            find_similar_thresholds.append(threshold)
+            if threshold == 0.95:
+                return []  # no dedup match
+            return [_make_search_result(score=0.8)]
+
+        store.find_similar.side_effect = _find_similar
+
+        # Need to patch _build_adapter to handle 'hackernews' type
+        with patch("distillery.feeds.poller._build_adapter") as mock_build:
+            mock_adapter = MagicMock()
+            mock_adapter.fetch.return_value = items
+            mock_build.return_value = mock_adapter
+
+            poller = FeedPoller(store=store, config=cfg)
+            summary = await poller.poll()
+
+        # Should have called find_similar with 0.95 for dedup
+        assert 0.95 in find_similar_thresholds, (
+            f"Expected dedup find_similar call; thresholds seen: {find_similar_thresholds}"
+        )
+        assert summary.total_stored == 1
 
 
 # ---------------------------------------------------------------------------

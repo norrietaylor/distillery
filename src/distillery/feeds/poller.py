@@ -37,6 +37,12 @@ _DEDUP_THRESHOLD = 0.95
 # Default minimum relevance threshold to store an item.
 _DEFAULT_RELEVANCE_THRESHOLD = 0.0
 
+# Source types whose ``item_id`` is authoritative (globally unique and stable).
+# When an item from one of these source types passes the fast ``_has_external_id``
+# check (not found), the expensive semantic dedup pass via ``_is_duplicate`` is
+# skipped entirely — the external_id guarantee is sufficient.
+_AUTHORITATIVE_EXTERNAL_ID_TYPES: frozenset[str] = frozenset({"github", "rss"})
+
 
 @dataclass
 class PollResult:
@@ -510,16 +516,37 @@ class FeedPoller:
         except Exception:  # noqa: BLE001
             logger.debug("FeedPoller: keyword map build failed — topic tagging disabled")
 
-        for source in sources:
-            result = await self._poll_source(source, scorer, keyword_map=keyword_map)
-            summary.results.append(result)
-            summary.total_fetched += result.items_fetched
-            summary.total_stored += result.items_stored
-            summary.total_skipped_dedup += result.items_skipped_dedup
-            summary.total_below_threshold += result.items_below_threshold
-            summary.sources_polled += 1
-            if result.errors:
+        # Poll all sources concurrently — each _poll_source is independent.
+        results = await asyncio.gather(
+            *(self._poll_source(source, scorer, keyword_map=keyword_map) for source in sources),
+            return_exceptions=True,
+        )
+
+        for idx, result in enumerate(results):
+            if isinstance(result, BaseException):
+                # Unexpected exception from _poll_source — record as errored.
+                err_result = PollResult(
+                    source_url=sources[idx].url,
+                    source_type=sources[idx].source_type,
+                    errors=[f"Unexpected error: {result}"],
+                )
+                summary.results.append(err_result)
+                summary.sources_polled += 1
                 summary.sources_errored += 1
+                logger.warning(
+                    "FeedPoller: unexpected error polling %s: %s",
+                    sources[idx].url,
+                    result,
+                )
+            else:
+                summary.results.append(result)
+                summary.total_fetched += result.items_fetched
+                summary.total_stored += result.items_stored
+                summary.total_skipped_dedup += result.items_skipped_dedup
+                summary.total_below_threshold += result.items_below_threshold
+                summary.sources_polled += 1
+                if result.errors:
+                    summary.sources_errored += 1
 
         summary.finished_at = datetime.now(tz=UTC)
         return summary
@@ -582,8 +609,14 @@ class FeedPoller:
                 result.items_skipped_dedup += 1
                 continue
 
-            # Semantic dedup: skip if a near-duplicate already exists
-            if await self._is_duplicate(item, text, batch_entry_ids):
+            # Semantic dedup: skip if a near-duplicate already exists.
+            # For source types with authoritative external IDs (e.g. github,
+            # rss), the _has_external_id check above is sufficient — skip the
+            # expensive embedding-based similarity search entirely.
+            if (
+                source.source_type not in _AUTHORITATIVE_EXTERNAL_ID_TYPES
+                and await self._is_duplicate(item, text, batch_entry_ids)
+            ):
                 result.items_skipped_dedup += 1
                 continue
 
