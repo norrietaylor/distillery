@@ -742,6 +742,58 @@ class TestResolveReviewTool:
         assert data["entry_type"] == "reference"
         assert data["status"] == "active"
 
+    async def test_resolve_clears_stale_on_behalf_of_when_later_action_has_no_reviewer(
+        self, store: DuckDBStore
+    ) -> None:
+        """Stale *_on_behalf_of keys are removed when a subsequent action has no reviewer.
+
+        Regression test for CodeRabbit review: a delegated reclassify followed by a
+        non-delegated approve must not leave behind on_behalf_of /
+        reclassified_on_behalf_of from the first action.
+        """
+        # Step 1: Create a pending-review entry.
+        entry = make_entry(entry_type=EntryType.INBOX, status=EntryStatus.PENDING_REVIEW)
+        entry_id = await store.store(entry)
+
+        # Step 2: Delegated reclassify — actor + distinct reviewer, so
+        #         on_behalf_of and reclassified_on_behalf_of are written.
+        reclassify_response = await _handle_resolve_review(
+            store,
+            {
+                "entry_id": entry_id,
+                "action": "reclassify",
+                "new_entry_type": "meeting",
+                "actor": "server-bot",
+                "reviewer": "reviewer-alice",
+            },
+        )
+        reclassify_data = parse_mcp_response(reclassify_response)
+        assert "error" not in reclassify_data
+        assert reclassify_data["entry_type"] == "meeting"
+        assert reclassify_data["metadata"]["on_behalf_of"] == "reviewer-alice"
+        assert reclassify_data["metadata"]["reclassified_on_behalf_of"] == "reviewer-alice"
+
+        # Manually reset entry back to pending_review so we can resolve it again.
+        await store.update(entry_id, {"status": EntryStatus.PENDING_REVIEW})
+
+        # Step 3: Non-delegated approve — actor only, no reviewer.
+        approve_response = await _handle_resolve_review(
+            store,
+            {
+                "entry_id": entry_id,
+                "action": "approve",
+                "actor": "server-bot",
+            },
+        )
+        approve_data = parse_mcp_response(approve_response)
+        assert "error" not in approve_data
+        assert approve_data["status"] == "active"
+
+        # Step 4: Assert that no *_on_behalf_of keys survive from the first action.
+        metadata = approve_data["metadata"]
+        stale_keys = [k for k in metadata if k.endswith("_on_behalf_of") or k == "on_behalf_of"]
+        assert stale_keys == [], f"Stale delegation keys found: {stale_keys}"
+
 
 # ---------------------------------------------------------------------------
 # End-to-end classification flow

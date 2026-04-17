@@ -257,6 +257,11 @@ async def _handle_resolve_review(
             new_metadata["reviewed_by"] = performed_by
         if on_behalf_of:
             new_metadata["on_behalf_of"] = on_behalf_of
+        else:
+            # Clear any stale delegation keys from a previous delegated action.
+            new_metadata.pop("on_behalf_of", None)
+            new_metadata.pop("reclassified_on_behalf_of", None)
+            new_metadata.pop("archived_on_behalf_of", None)
         updates["metadata"] = new_metadata
 
     elif action == "reclassify":
@@ -283,6 +288,11 @@ async def _handle_resolve_review(
         if on_behalf_of:
             new_metadata["on_behalf_of"] = on_behalf_of
             new_metadata["reclassified_on_behalf_of"] = on_behalf_of
+        else:
+            # Clear any stale delegation keys from a previous delegated action.
+            new_metadata.pop("on_behalf_of", None)
+            new_metadata.pop("reclassified_on_behalf_of", None)
+            new_metadata.pop("archived_on_behalf_of", None)
         updates["entry_type"] = EntryType(new_type_str)
         # Reclassification implies approval: flip status out of pending_review.
         # Only promote to active if the entry is currently pending_review to
@@ -298,6 +308,11 @@ async def _handle_resolve_review(
             new_metadata["archived_by"] = performed_by
         if on_behalf_of:
             new_metadata["archived_on_behalf_of"] = on_behalf_of
+        else:
+            # Clear any stale delegation keys from a previous delegated action.
+            new_metadata.pop("on_behalf_of", None)
+            new_metadata.pop("reclassified_on_behalf_of", None)
+            new_metadata.pop("archived_on_behalf_of", None)
         updates["metadata"] = new_metadata
 
     # --- persist ------------------------------------------------------------
