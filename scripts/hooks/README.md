@@ -174,7 +174,8 @@ auto-detected configurations.
 
 ### Prerequisites
 
-- Distillery MCP server running (HTTP or stdio — auto-detected)
+- **HTTP mode**: a Distillery MCP server running at a reachable URL (auto-detected)
+- **stdio mode**: `distillery-mcp` installed so the hook can launch it as a subprocess (no pre-running server required)
 - Python 3.11+ available on the system PATH
 
 ### Transport Resolution Order

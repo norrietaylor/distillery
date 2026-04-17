@@ -16,6 +16,7 @@ No runtime dependencies beyond the Python 3.11+ stdlib.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
@@ -205,8 +206,15 @@ def resolve_localhost_fallback() -> ResolvedTransport:
     )
 
 
-def resolve_transport(cwd: Path | None = None) -> ResolvedTransport:
-    """Run the full resolution chain, returning the first match."""
+def resolve_transport(cwd: Path | None = None, bearer_token: str = "") -> ResolvedTransport:
+    """Run the full resolution chain, returning the first *reachable* match.
+
+    Each resolver's candidate is probed for reachability; if it fails, the
+    chain falls through to the next resolver. This matches the documented
+    "first reachable wins" contract. If no candidate is reachable, the
+    localhost fallback is returned (without probing, so the caller can decide
+    how to report the failure).
+    """
     if cwd is None:
         cwd = Path.cwd()
 
@@ -221,9 +229,17 @@ def resolve_transport(cwd: Path | None = None) -> ResolvedTransport:
     ]
 
     for resolver in resolvers:
-        result = resolver()
-        if result is not None:
-            return result
+        try:
+            result = resolver()
+        except Exception:
+            continue
+        if result is None:
+            continue
+        try:
+            if probe_transport(result, bearer_token):
+                return result
+        except Exception:
+            continue
 
     return resolve_localhost_fallback()
 
@@ -234,21 +250,70 @@ def resolve_transport(cwd: Path | None = None) -> ResolvedTransport:
 
 
 def _http_health_check(base_url: str, bearer_token: str = "", timeout: int = 2) -> bool:
-    """GET /health on the HTTP transport."""
-    health_url = base_url.rstrip("/")
-    if health_url.endswith("/mcp"):
-        health_url = health_url[: -len("/mcp")] + "/health"
-    elif not health_url.endswith("/health"):
-        health_url = health_url + "/health"
+    """Probe an HTTP MCP transport for reachability.
 
+    Performs ``GET /health`` first and then a minimal JSON-RPC POST to the
+    ``/mcp`` endpoint. Both must succeed with a 2xx status; the JSON-RPC
+    response must parse as a JSON-RPC reply (``jsonrpc``, ``id``, and either
+    ``result`` or ``error``). Returns False on any failure, ensuring a healthy
+    sidecar alone cannot mask a dead MCP endpoint.
+    """
+    stripped = base_url.rstrip("/")
+    if stripped.endswith("/mcp"):
+        mcp_url = stripped
+        base = stripped[: -len("/mcp")]
+    elif stripped.endswith("/health"):
+        base = stripped[: -len("/health")]
+        mcp_url = base + "/mcp"
+    else:
+        base = stripped
+        mcp_url = stripped + "/mcp"
+    health_url = base + "/health"
+
+    # Step 1: GET /health
     req = urllib.request.Request(health_url, method="GET")
     if bearer_token:
         req.add_header("Authorization", f"Bearer {bearer_token}")
     try:
-        with urllib.request.urlopen(req, timeout=timeout):
-            return True
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            if getattr(resp, "status", 200) >= 400:
+                return False
     except (urllib.error.URLError, OSError, ValueError):
         return False
+
+    # Step 2: JSON-RPC POST /mcp
+    payload = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/list",
+            "params": {},
+        }
+    ).encode()
+    mcp_req = urllib.request.Request(mcp_url, data=payload, method="POST")
+    mcp_req.add_header("Content-Type", "application/json")
+    mcp_req.add_header("Accept", "application/json, text/event-stream")
+    if bearer_token:
+        mcp_req.add_header("Authorization", f"Bearer {bearer_token}")
+    try:
+        with urllib.request.urlopen(mcp_req, timeout=timeout) as resp:
+            status = getattr(resp, "status", 200)
+            if status >= 400:
+                return False
+            body = resp.read()
+    except (urllib.error.URLError, OSError, ValueError):
+        return False
+
+    try:
+        parsed = json.loads(body)
+    except (json.JSONDecodeError, ValueError):
+        return False
+
+    if not isinstance(parsed, dict):
+        return False
+    if parsed.get("jsonrpc") != "2.0":
+        return False
+    return "result" in parsed or "error" in parsed
 
 
 def _http_call_tool(
@@ -280,18 +345,8 @@ def _http_call_tool(
         return None
 
 
-def _stdio_call_tool(
-    command: list[str],
-    tool_name: str,
-    arguments: dict[str, Any],
-    extra_env: dict[str, str] | None = None,
-    timeout: int = 10,
-) -> Any:
-    """JSON-RPC tools/call over stdio subprocess.
-
-    Sends initialize, then tools/call, reads responses line by line.
-    """
-    init_msg = json.dumps(
+def _build_init_msg() -> str:
+    return json.dumps(
         {
             "jsonrpc": "2.0",
             "id": 0,
@@ -304,6 +359,33 @@ def _stdio_call_tool(
         }
     )
 
+
+def _build_initialized_notification() -> str:
+    return json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized",
+            "params": {},
+        }
+    )
+
+
+def _stdio_call_tool(
+    command: list[str],
+    tool_name: str,
+    arguments: dict[str, Any],
+    extra_env: dict[str, str] | None = None,
+    timeout: int = 10,
+) -> Any:
+    """JSON-RPC ``tools/call`` over a stdio subprocess.
+
+    Protocol sequence: ``initialize`` request, ``notifications/initialized``
+    notification (required by MCP), then the ``tools/call`` request. All
+    messages are written as a single ``communicate`` input blob (stdin is
+    closed *by* ``communicate``, never manually before it), so we avoid the
+    "flush of closed file" ``ValueError`` that results from closing stdin and
+    then calling ``communicate``.
+    """
     call_msg = json.dumps(
         {
             "jsonrpc": "2.0",
@@ -317,6 +399,10 @@ def _stdio_call_tool(
     if extra_env:
         env.update(extra_env)
 
+    payload = (
+        _build_init_msg() + "\n" + _build_initialized_notification() + "\n" + call_msg + "\n"
+    ).encode()
+
     try:
         proc = subprocess.Popen(
             command,
@@ -325,37 +411,31 @@ def _stdio_call_tool(
             stderr=subprocess.DEVNULL,
             env=env,
         )
-        assert proc.stdin is not None
-        assert proc.stdout is not None
+    except OSError:
+        return None
 
-        # Send initialize + call, each newline-delimited
-        proc.stdin.write((init_msg + "\n").encode())
-        proc.stdin.write((call_msg + "\n").encode())
-        proc.stdin.flush()
-        proc.stdin.close()
-
-        # Read all output within timeout
+    try:
         try:
-            stdout_bytes, _ = proc.communicate(timeout=timeout)
+            stdout_bytes, _ = proc.communicate(input=payload, timeout=timeout)
         except subprocess.TimeoutExpired:
             proc.kill()
-            proc.wait()
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                proc.wait(timeout=1)
             return None
+    except OSError:
+        return None
 
-        # Parse line-delimited JSON responses, find id=1
-        for line in stdout_bytes.decode(errors="replace").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                msg = json.loads(line)
-                if isinstance(msg, dict) and msg.get("id") == 1:
-                    return msg
-            except json.JSONDecodeError:
-                continue
-
-    except (OSError, ValueError):
-        pass
+    # Parse line-delimited JSON responses, find id=1
+    for line in stdout_bytes.decode(errors="replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            msg = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(msg, dict) and msg.get("id") == 1:
+            return msg
 
     return None
 
@@ -365,23 +445,18 @@ def _stdio_health_check(
     extra_env: dict[str, str] | None = None,
     timeout: int = 3,
 ) -> bool:
-    """Check if a stdio MCP server starts successfully via initialize handshake."""
-    init_msg = json.dumps(
-        {
-            "jsonrpc": "2.0",
-            "id": 0,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": {"name": "distillery-hook", "version": "1.0.0"},
-            },
-        }
-    )
+    """Verify that a stdio MCP server completes the initialize handshake.
 
+    Writes ``initialize`` + ``notifications/initialized`` as a single input
+    blob to ``communicate``, which handles stdin close safely. A successful
+    handshake is signalled by a JSON-RPC reply with ``id == 0`` and a
+    ``result`` field (the server's initialize response).
+    """
     env = dict(os.environ)
     if extra_env:
         env.update(extra_env)
+
+    payload = (_build_init_msg() + "\n" + _build_initialized_notification() + "\n").encode()
 
     try:
         proc = subprocess.Popen(
@@ -391,33 +466,30 @@ def _stdio_health_check(
             stderr=subprocess.DEVNULL,
             env=env,
         )
-        assert proc.stdin is not None
-        assert proc.stdout is not None
+    except OSError:
+        return False
 
-        proc.stdin.write((init_msg + "\n").encode())
-        proc.stdin.flush()
-        proc.stdin.close()
-
+    try:
         try:
-            stdout_bytes, _ = proc.communicate(timeout=timeout)
+            stdout_bytes, _ = proc.communicate(input=payload, timeout=timeout)
         except subprocess.TimeoutExpired:
             proc.kill()
-            proc.wait()
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                proc.wait(timeout=1)
             return False
+    except OSError:
+        return False
 
-        for line in stdout_bytes.decode(errors="replace").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                msg = json.loads(line)
-                if isinstance(msg, dict) and "result" in msg:
-                    return True
-            except json.JSONDecodeError:
-                continue
-
-    except (OSError, ValueError):
-        pass
+    for line in stdout_bytes.decode(errors="replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            msg = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(msg, dict) and msg.get("id") == 0 and "result" in msg:
+            return True
 
     return False
 
@@ -536,10 +608,12 @@ def main() -> None:
     bearer_token = os.environ.get("DISTILLERY_BEARER_TOKEN", "")
     limit = int(os.environ.get("DISTILLERY_BRIEFING_LIMIT", "5"))
 
-    # Resolve transport
-    transport = resolve_transport(cwd_path)
+    # Resolve transport — probes each candidate, returning the first reachable
+    # match (or the localhost fallback if none were reachable).
+    transport = resolve_transport(cwd_path, bearer_token)
 
-    # Probe reachability — exit silently if unreachable
+    # Probe reachability — exit silently if unreachable (covers the fallback
+    # path where no prior candidate probed as reachable).
     if not probe_transport(transport, bearer_token):
         sys.exit(0)
 

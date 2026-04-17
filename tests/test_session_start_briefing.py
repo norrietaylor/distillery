@@ -282,7 +282,8 @@ class TestResolveLocalhostFallback:
 class TestResolveTransport:
     def test_env_url_wins(self, monkeypatch: pytest.MonkeyPatch, tmp_cwd: Path) -> None:
         monkeypatch.setenv("DISTILLERY_MCP_URL", "https://custom.example.com/mcp")
-        result = briefing.resolve_transport(tmp_cwd)
+        with patch("session_start_briefing.probe_transport", return_value=True):
+            result = briefing.resolve_transport(tmp_cwd)
         assert result.kind == "http"
         assert result.url == "https://custom.example.com/mcp"
         assert result.source == "DISTILLERY_MCP_URL"
@@ -291,7 +292,8 @@ class TestResolveTransport:
         self, monkeypatch: pytest.MonkeyPatch, clean_env: None, tmp_cwd: Path
     ) -> None:
         monkeypatch.setenv("DISTILLERY_MCP_COMMAND", "my-distillery")
-        result = briefing.resolve_transport(tmp_cwd)
+        with patch("session_start_briefing.probe_transport", return_value=True):
+            result = briefing.resolve_transport(tmp_cwd)
         assert result.kind == "stdio"
         assert result.source == "DISTILLERY_MCP_COMMAND"
 
@@ -303,6 +305,40 @@ class TestResolveTransport:
             result = briefing.resolve_transport(tmp_cwd)
         assert result.kind == "http"
         assert result.url == "http://localhost:8000/mcp"
+        assert result.source == "localhost fallback"
+
+    def test_first_reachable_wins(
+        self, monkeypatch: pytest.MonkeyPatch, clean_env: None, tmp_cwd: Path
+    ) -> None:
+        """If the first candidate exists but fails probing, the resolver must
+        continue to later candidates rather than returning early."""
+        # First candidate: DISTILLERY_MCP_URL (dead — probe will return False)
+        monkeypatch.setenv("DISTILLERY_MCP_URL", "https://dead.example.com/mcp")
+        # Second candidate: DISTILLERY_MCP_COMMAND (reachable — probe True)
+        monkeypatch.setenv("DISTILLERY_MCP_COMMAND", "my-reachable-cmd")
+
+        def fake_probe(transport: briefing.ResolvedTransport, _token: str = "") -> bool:
+            # Only the stdio candidate is "reachable"
+            return transport.source == "DISTILLERY_MCP_COMMAND"
+
+        with patch("session_start_briefing.probe_transport", side_effect=fake_probe):
+            result = briefing.resolve_transport(tmp_cwd)
+
+        assert result.kind == "stdio"
+        assert result.source == "DISTILLERY_MCP_COMMAND"
+        assert result.command == ["my-reachable-cmd"]
+
+    def test_all_candidates_unreachable_falls_back(
+        self, monkeypatch: pytest.MonkeyPatch, clean_env: None, tmp_cwd: Path
+    ) -> None:
+        """If every candidate fails probing, the localhost fallback is returned."""
+        monkeypatch.setenv("DISTILLERY_MCP_URL", "https://dead.example.com/mcp")
+        with (
+            patch("session_start_briefing.probe_transport", return_value=False),
+            patch("shutil.which", return_value=None),
+            patch.object(Path, "home", return_value=tmp_cwd / "fakehome"),
+        ):
+            result = briefing.resolve_transport(tmp_cwd)
         assert result.source == "localhost fallback"
 
 
@@ -428,3 +464,67 @@ class TestProbeTransport:
     def test_unknown_kind(self) -> None:
         transport = briefing.ResolvedTransport(kind="unknown")
         assert briefing.probe_transport(transport) is False
+
+
+# ---------------------------------------------------------------------------
+# Real stdio subprocess (exercises Popen/communicate wiring)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestStdioSubprocess:
+    """Exercise the real _stdio_health_check / _stdio_call_tool subprocess flow.
+
+    These tests guard against regressions in the Popen/communicate sequence —
+    specifically the `flush of closed file` ValueError that surfaces when
+    stdin is closed before `communicate()` is called on CPython.
+    """
+
+    def test_health_check_with_real_subprocess(self) -> None:
+        """A trivial Python script that emits a valid initialize reply should
+        cause _stdio_health_check to return True."""
+        script = (
+            "import sys, json\n"
+            "sys.stdin.readline()  # initialize request\n"
+            'reply = {"jsonrpc": "2.0", "id": 0, "result": {"capabilities": {}}}\n'
+            'sys.stdout.write(json.dumps(reply) + "\\n")\n'
+            "sys.stdout.flush()\n"
+        )
+        command = [sys.executable, "-c", script]
+        assert briefing._stdio_health_check(command, timeout=5) is True
+
+    def test_health_check_fails_on_nonzero_exit_with_no_reply(self) -> None:
+        """A subprocess that exits without emitting an initialize result
+        should cause _stdio_health_check to return False, not raise."""
+        command = [sys.executable, "-c", "import sys; sys.exit(1)"]
+        assert briefing._stdio_health_check(command, timeout=5) is False
+
+    def test_call_tool_with_real_subprocess(self) -> None:
+        """Drive the full two-round-trip flow against a fake MCP server."""
+        script = (
+            "import sys, json\n"
+            "# initialize\n"
+            "sys.stdin.readline()\n"
+            'sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": 0, '
+            '"result": {"capabilities": {}}}) + "\\n")\n'
+            "# notifications/initialized (no reply)\n"
+            "sys.stdin.readline()\n"
+            "# tools/call\n"
+            "sys.stdin.readline()\n"
+            'sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": 1, '
+            '"result": {"content": [{"type": "text", "text": "pong"}]}}) + "\\n")\n'
+            "sys.stdout.flush()\n"
+        )
+        command = [sys.executable, "-c", script]
+        resp = briefing._stdio_call_tool(command, "ping", {}, timeout=5)
+        assert isinstance(resp, dict)
+        assert resp.get("id") == 1
+        assert resp.get("result", {}).get("content", [{}])[0].get("text") == "pong"
+
+    def test_call_tool_handles_timeout(self) -> None:
+        """A subprocess that never replies should time out cleanly and
+        return None instead of hanging or raising."""
+        # Read forever; never respond.
+        script = "import sys\nwhile True:\n    if not sys.stdin.readline(): break\n"
+        command = [sys.executable, "-c", script]
+        assert briefing._stdio_call_tool(command, "noop", {}, timeout=1) is None
