@@ -222,6 +222,62 @@ def _patch_cimd_localhost_redirect() -> None:
     logger.info("Patched CIMD and proxy redirect validation for RFC 8252 localhost port handling")
 
 
+# ---------------------------------------------------------------------------
+# Pre-register Claude Code as an OAuth client
+# ---------------------------------------------------------------------------
+
+# The Claude Code CIMD document at https://claude.ai/oauth/claude-code-client-metadata
+# is fetched by FastMCP's CIMDFetcher during the first OAuth handshake.  On some
+# Fly.io machines the egress IP is Cloudflare-challenged (HTTP 403), causing the
+# fetch to fail and authentication to break.  Pre-registering the well-known
+# client metadata on startup bypasses the CIMD fetch entirely.
+
+_CLAUDE_CODE_CLIENT_METADATA = {
+    "client_id": "https://claude.ai/oauth/claude-code-client-metadata",
+    "client_name": "Claude Code",
+    "client_uri": "https://claude.ai",
+    "redirect_uris": [
+        "http://localhost/callback",
+        "http://127.0.0.1/callback",
+    ],
+    "grant_types": ["authorization_code", "refresh_token"],
+    "response_types": ["code"],
+    "token_endpoint_auth_method": "none",
+}
+
+
+async def pre_register_claude_code_client(provider: GitHubProvider) -> None:
+    """Seed the OAuth client store with the Claude Code CIMD metadata.
+
+    This avoids a runtime CIMD fetch to ``claude.ai`` which can fail when
+    Cloudflare challenges the server's egress IP.  The registration is
+    idempotent — if the client already exists in the store it is
+    overwritten with the canonical metadata.
+    """
+    try:
+        from mcp.shared.auth import OAuthClientInformationFull
+        from pydantic import AnyHttpUrl
+    except ImportError:
+        logger.warning("Cannot pre-register Claude Code client: missing mcp/pydantic")
+        return
+
+    meta = _CLAUDE_CODE_CLIENT_METADATA
+    client_info = OAuthClientInformationFull(
+        client_id="https://claude.ai/oauth/claude-code-client-metadata",
+        client_name="Claude Code",
+        client_uri=AnyHttpUrl("https://claude.ai"),
+        redirect_uris=[
+            AnyHttpUrl("http://localhost/callback"),
+            AnyHttpUrl("http://127.0.0.1/callback"),
+        ],
+        grant_types=["authorization_code", "refresh_token"],
+        response_types=["code"],
+        token_endpoint_auth_method="none",
+    )
+    await provider.register_client(client_info)
+    logger.info("Pre-registered Claude Code OAuth client (%s)", meta["client_id"])
+
+
 def build_github_auth(
     config: DistilleryConfig,
     org_checker: OrgMembershipChecker | None = None,

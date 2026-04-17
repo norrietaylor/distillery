@@ -140,6 +140,14 @@ def main(argv: list[str] | None = None) -> int:
                 _patch_cimd_localhost_redirect()
                 org_checker = build_org_checker(config)
                 auth = build_github_auth(config, org_checker=org_checker)
+
+                # Pre-register Claude Code so the server never needs to
+                # fetch the CIMD document from claude.ai at runtime (the
+                # fetch fails on Fly machines whose egress IP is
+                # Cloudflare-challenged).
+                from distillery.mcp.auth import pre_register_claude_code_client
+
+                asyncio.run(pre_register_claude_code_client(auth))
             elif provider_name == "none":
                 logger.warning(
                     "HTTP server running without authentication (server.auth.provider is 'none')",
