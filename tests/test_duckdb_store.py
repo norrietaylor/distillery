@@ -997,3 +997,47 @@ class TestHybridGracefulFallback:
     ) -> None:
         """_fts_available should be False when hybrid_search is disabled."""
         assert vector_only_store._fts_available is False  # noqa: SLF001
+
+
+# ---------------------------------------------------------------------------
+# _sanitise_last_error helper
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestSanitiseLastError:
+    """Unit tests for ``DuckDBStore._sanitise_last_error``.
+
+    Moved here from ``tests/test_mcp_feeds.py`` to keep private-helper tests
+    alongside their module.
+    """
+
+    def test_none_returns_none(self) -> None:
+        from distillery.store.duckdb import _sanitise_last_error
+
+        assert _sanitise_last_error(None, 200) is None
+
+    def test_empty_returns_none(self) -> None:
+        from distillery.store.duckdb import _sanitise_last_error
+
+        assert _sanitise_last_error("   \n\t", 200) is None
+
+    def test_short_error_is_preserved(self) -> None:
+        from distillery.store.duckdb import _sanitise_last_error
+
+        assert _sanitise_last_error("upstream 502", 200) == "upstream 502"
+
+    def test_collapses_whitespace_and_newlines(self) -> None:
+        from distillery.store.duckdb import _sanitise_last_error
+
+        raw = "Traceback:\n  File 'x'\n  ValueError: boom"
+        assert _sanitise_last_error(raw, 200) == "Traceback: File 'x' ValueError: boom"
+
+    def test_truncates_when_longer_than_max_len(self) -> None:
+        from distillery.store.duckdb import _sanitise_last_error
+
+        raw = "x" * 500
+        result = _sanitise_last_error(raw, 50)
+        assert result is not None
+        assert len(result) == 50
+        assert result.endswith("\u2026")

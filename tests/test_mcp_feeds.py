@@ -12,6 +12,7 @@ test_watch.py so they run without a live database.
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -31,7 +32,6 @@ from distillery.mcp.tools.feeds import (
     _handle_poll,
     _handle_watch,
 )
-from distillery.store.duckdb import _sanitise_last_error
 
 pytestmark = pytest.mark.unit
 
@@ -39,6 +39,21 @@ pytestmark = pytest.mark.unit
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
+
+
+def _fake_sanitise_last_error(error: str | None, max_len: int = 200) -> str | None:
+    """Mirror ``DuckDBStore._sanitise_last_error`` locally so tests don't import
+    the private helper.  Collapses whitespace, truncates to *max_len*, returns
+    ``None`` for empty/whitespace input.
+    """
+    if error is None:
+        return None
+    collapsed = re.sub(r"\s+", " ", error).strip()
+    if not collapsed:
+        return None
+    if len(collapsed) <= max_len:
+        return collapsed
+    return collapsed[: max_len - 1] + "\u2026"
 
 
 def parse(result: list) -> dict:  # type: ignore[type-arg]
@@ -111,14 +126,12 @@ class FakeSourceStore:
     ) -> bool:
         from datetime import timedelta
 
-        from distillery.store.duckdb import _sanitise_last_error
-
         for src in self._sources:
             if src["url"] != url:
                 continue
             src["last_polled_at"] = polled_at.isoformat()
             src["last_item_count"] = int(item_count)
-            src["last_error"] = _sanitise_last_error(error, 200)
+            src["last_error"] = _fake_sanitise_last_error(error, 200)
             src["next_poll_at"] = (
                 polled_at + timedelta(minutes=src["poll_interval_minutes"])
             ).isoformat()
@@ -829,31 +842,6 @@ class TestHandleSuggestSources:
         assert "entry_count" in data
 
 
-# ---------------------------------------------------------------------------
-# _sanitise_last_error — helper that truncates + sanitises poll error strings
-# ---------------------------------------------------------------------------
-
-
-class TestSanitiseLastError:
-    def test_none_returns_none(self) -> None:
-        assert _sanitise_last_error(None, 200) is None
-
-    def test_empty_returns_none(self) -> None:
-        # An all-whitespace input collapses to an empty string → None so
-        # a successful poll clears any previous error.
-        assert _sanitise_last_error("   \n\t", 200) is None
-
-    def test_short_error_is_preserved(self) -> None:
-        assert _sanitise_last_error("upstream 502", 200) == "upstream 502"
-
-    def test_collapses_whitespace_and_newlines(self) -> None:
-        raw = "Traceback:\n  File 'x'\n  ValueError: boom"
-        assert _sanitise_last_error(raw, 200) == "Traceback: File 'x' ValueError: boom"
-
-    def test_truncates_when_longer_than_max_len(self) -> None:
-        raw = "x" * 500
-        result = _sanitise_last_error(raw, 50)
-        assert result is not None
-        # Exactly max_len characters, including the ellipsis sentinel.
-        assert len(result) == 50
-        assert result.endswith("\u2026")
+# NOTE: unit tests for the internal ``_sanitise_last_error`` helper live in
+# ``tests/test_duckdb_store.py`` to avoid coupling MCP feed tests to a private
+# store implementation detail.

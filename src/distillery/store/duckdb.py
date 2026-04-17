@@ -1841,12 +1841,15 @@ class DuckDBStore:
         *url* exists.
         """
         assert self._conn is not None
+        item_count_int = int(item_count)
+        if item_count_int < 0:
+            raise ValueError(f"item_count must be non-negative, got: {item_count_int}")
         truncated = _sanitise_last_error(error, self._LAST_ERROR_MAX_LEN)
         result = self._conn.execute(
             "UPDATE feed_sources "
             "SET last_polled_at = ?, last_item_count = ?, last_error = ? "
             "WHERE url = ? RETURNING url",
-            [polled_at, int(item_count), truncated, url],
+            [polled_at, item_count_int, truncated, url],
         )
         return len(result.fetchall()) > 0
 
