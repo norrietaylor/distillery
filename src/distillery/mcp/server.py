@@ -812,9 +812,13 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         args: dict[str, Any] = dict(
             entry_id=entry_id, action=action, **_omit_none(new_entry_type=new_entry_type)
         )
-        eff_reviewer = user or reviewer
-        if eff_reviewer is not None:
-            args["reviewer"] = eff_reviewer
+        # Pass actor (server identity) and reviewer (client-supplied) as
+        # distinct fields so the handler can record both ``reviewed_by`` and
+        # ``on_behalf_of`` when they differ (issue #315).
+        if user:
+            args["actor"] = user
+        if reviewer is not None:
+            args["reviewer"] = reviewer
         result = await _handle_resolve_review(store=c["store"], arguments=args)
         await _audit(c, user, "distillery_resolve_review", entry_id, action, result)
         return result
