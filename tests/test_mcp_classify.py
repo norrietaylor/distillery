@@ -416,6 +416,49 @@ class TestResolveReviewTool:
         assert data["metadata"]["reviewed_at"]
         assert data["metadata"]["reviewed_by"] == "alice"
 
+    async def test_resolve_reclassify_sets_status_active(self, store: DuckDBStore) -> None:
+        """Regression test for #316 -- reclassify must flip status out of pending_review."""
+        entry = make_entry(entry_type=EntryType.INBOX, status=EntryStatus.PENDING_REVIEW)
+        entry_id = await store.store(entry)
+
+        response = await _handle_resolve_review(
+            store,
+            {
+                "entry_id": entry_id,
+                "action": "reclassify",
+                "new_entry_type": "meeting",
+            },
+        )
+        data = parse_mcp_response(response)
+        assert "error" not in data
+        assert data["status"] == "active"
+        assert data["entry_type"] == "meeting"
+        assert data["metadata"]["reclassified_from"] == "inbox"
+
+    async def test_resolve_reclassify_removes_from_review_queue(self, store: DuckDBStore) -> None:
+        """Reclassified entries must not linger in the pending-review queue (#316)."""
+        entry = make_entry(entry_type=EntryType.INBOX, status=EntryStatus.PENDING_REVIEW)
+        entry_id = await store.store(entry)
+
+        # Sanity check: entry is initially visible in the review queue.
+        queue_before = parse_mcp_response(await _handle_list(store, {"output_mode": "review"}))
+        assert entry_id in [e["id"] for e in queue_before["entries"]]
+
+        resolve_response = await _handle_resolve_review(
+            store,
+            {
+                "entry_id": entry_id,
+                "action": "reclassify",
+                "new_entry_type": "meeting",
+            },
+        )
+        resolve_data = parse_mcp_response(resolve_response)
+        assert "error" not in resolve_data
+        assert resolve_data["status"] == "active"
+
+        queue_after = parse_mcp_response(await _handle_list(store, {"output_mode": "review"}))
+        assert entry_id not in [e["id"] for e in queue_after["entries"]]
+
     async def test_resolve_reclassify_requires_new_entry_type(self, store: DuckDBStore) -> None:
         entry = make_entry(status=EntryStatus.PENDING_REVIEW)
         entry_id = await store.store(entry)
