@@ -366,6 +366,13 @@ class GitHubSyncAdapter:
         external_id = _make_external_id(self._owner, self._repo, ref_type, number)
         content = _build_content(title, body, comments)
 
+        # Extract real author from the issue/PR payload.  Treat null,
+        # empty, and whitespace-only logins as missing so we fall back
+        # to the configured sync-tool author instead of persisting junk.
+        user_login_raw = (issue.get("user") or {}).get("login")
+        user_login = user_login_raw.strip() if isinstance(user_login_raw, str) else ""
+        real_author: str = user_login or self._author
+
         # Build tags from labels using shared sanitiser.
         from distillery.feeds.tags import sanitise_label
 
@@ -381,13 +388,14 @@ class GitHubSyncAdapter:
             "labels": labels,
             "assignees": assignees,
             "external_id": external_id,
+            "imported_by": "gh-sync",
         }
 
         return Entry(
             content=content,
             entry_type=EntryType.GITHUB,
             source=EntrySource.IMPORT,
-            author=self._author,
+            author=real_author,
             project=self._project,
             tags=tags,
             status=EntryStatus.ACTIVE,
@@ -505,11 +513,14 @@ class GitHubSyncAdapter:
             existing = await self._find_existing(external_id)
 
             if existing is not None:
-                # Update existing entry.
+                # Update existing entry.  Include ``author`` so re-syncs
+                # correct stale tool-authored entries with the real payload
+                # author (see issue #302).
                 await self._store.update(
                     existing.id,
                     {
                         "content": entry.content,
+                        "author": entry.author,
                         "metadata": entry.metadata,
                         "tags": entry.tags,
                     },
@@ -634,10 +645,13 @@ class GitHubSyncAdapter:
             existing = await self._find_existing(external_id)
 
             if existing is not None:
+                # Include ``author`` on update so re-syncs correct stale
+                # tool-authored entries with the real payload author (#302).
                 await self._store.update(
                     existing.id,
                     {
                         "content": entry.content,
+                        "author": entry.author,
                         "metadata": entry.metadata,
                         "tags": entry.tags,
                     },

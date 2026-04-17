@@ -29,6 +29,9 @@ class FeedItem:
         url: URL pointing directly to the item (article, event page, etc.).
         content: Full or summarised body text of the item.  May be ``None``
             when the source only provides a title/link.
+        author: The original content creator (e.g. GitHub username, RSS
+            author element).  ``None`` when the source does not provide
+            author information.
         published_at: Publication or event creation timestamp.  ``None`` if
             not provided by the source.
         raw: The original parsed object (dict for JSON sources, element for
@@ -44,6 +47,7 @@ class FeedItem:
     title: str | None = None
     url: str | None = None
     content: str | None = None
+    author: str | None = None
     published_at: datetime | None = None
     raw: Any = field(default=None, compare=False, repr=False)
     extra: dict[str, Any] = field(default_factory=dict)

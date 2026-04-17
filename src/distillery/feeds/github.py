@@ -114,7 +114,10 @@ def _event_to_feed_item(event: dict[str, Any], source_url: str) -> FeedItem:
     repo_info: dict[str, Any] = event.get("repo") or {}
     repo_name: str = str(repo_info.get("name", ""))
     actor_info: dict[str, Any] = event.get("actor") or {}
-    actor_login: str = str(actor_info.get("login", ""))
+    # Preserve a real None when the login is missing or non-string, so we
+    # never persist the literal string "None" as an author (#302).
+    actor_login_raw = actor_info.get("login")
+    actor_login: str = actor_login_raw.strip() if isinstance(actor_login_raw, str) else ""
     payload: dict[str, Any] = event.get("payload") or {}
 
     # Build a human-readable title.
@@ -166,6 +169,7 @@ def _event_to_feed_item(event: dict[str, Any], source_url: str) -> FeedItem:
         title=title,
         url=item_url,
         content=content or None,
+        author=actor_login or None,
         published_at=published_at,
         raw=event,
         extra={"event_type": event_type, "actor": actor_login, "repo": repo_name},

@@ -386,6 +386,7 @@ def _item_to_entry_kwargs(
         "source_type": item.source_type,
         "external_id": item.item_id,
         "relevance_score": relevance_score,
+        "imported_by": "distillery-poller",
     }
     if item.title:
         metadata["title"] = item.title
@@ -399,11 +400,20 @@ def _item_to_entry_kwargs(
     else:
         tags = _derive_source_tags(item, item.source_type)
 
+    # Use real author from source payload when available; fall back to tool name.
+    # Treat None, empty, and whitespace-only authors as missing (#302).
+    raw_author = item.author
+    author = (
+        raw_author.strip()
+        if isinstance(raw_author, str) and raw_author.strip()
+        else "distillery-poller"
+    )
+
     return {
         "content": text or item.source_url,
         "entry_type": EntryType.FEED,
         "source": EntrySource.IMPORT,
-        "author": "distillery-poller",
+        "author": author,
         "tags": tags,
         "metadata": metadata,
     }
