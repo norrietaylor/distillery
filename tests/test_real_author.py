@@ -127,6 +127,43 @@ class TestGitHubSyncRealAuthor:
         assert entries[0].author == "carol"
 
     @pytest.mark.integration
+    async def test_existing_entry_author_is_updated_from_payload(self, store, httpx_mock) -> None:  # type: ignore[no-untyped-def]
+        """Re-syncing an existing entry should correct a stale tool author."""
+        # First sync: payload has no user → entry gets the fallback author.
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/test/repo/issues\?.*"),
+            json=[_mock_issue(number=1, user_login=None)],
+        )
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/test/repo/issues/1/comments.*"),
+            json=[],
+        )
+
+        adapter = GitHubSyncAdapter(store=store, url="test/repo")
+        await adapter.sync()
+
+        entries = await store.list_entries(filters={"entry_type": "github"}, limit=10, offset=0)
+        assert len(entries) == 1
+        assert entries[0].author == "gh-sync"
+
+        # Second sync: payload now includes a real user → existing entry
+        # should be updated with the real author.
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/test/repo/issues\?.*"),
+            json=[_mock_issue(number=1, user_login="alice")],
+        )
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/test/repo/issues/1/comments.*"),
+            json=[],
+        )
+
+        await adapter.sync()
+
+        entries = await store.list_entries(filters={"entry_type": "github"}, limit=10, offset=0)
+        assert len(entries) == 1  # still one entry, not a duplicate
+        assert entries[0].author == "alice"
+
+    @pytest.mark.integration
     async def test_mixed_authors_in_batch(self, store, httpx_mock) -> None:  # type: ignore[no-untyped-def]
         """Multiple issues with different authors should each get the correct author."""
         httpx_mock.add_response(

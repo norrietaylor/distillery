@@ -401,7 +401,13 @@ def _item_to_entry_kwargs(
         tags = _derive_source_tags(item, item.source_type)
 
     # Use real author from source payload when available; fall back to tool name.
-    author = item.author or "distillery-poller"
+    # Treat None, empty, and whitespace-only authors as missing (#302).
+    raw_author = item.author
+    author = (
+        raw_author.strip()
+        if isinstance(raw_author, str) and raw_author.strip()
+        else "distillery-poller"
+    )
 
     return {
         "content": text or item.source_url,
