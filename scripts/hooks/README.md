@@ -28,14 +28,15 @@ appropriate Distillery handler. Register this one script for `UserPromptSubmit`,
 
 ### Prerequisites
 
-- Distillery MCP server running with **HTTP transport** (`distillery-mcp --transport http`)
-  (required only for the `SessionStart` briefing; the `UserPromptSubmit` nudge works offline)
-- `curl` available on the system PATH (for `SessionStart` briefing)
+- **HTTP mode**: Distillery MCP server running at a reachable URL (must be pre-started; the hook connects to it)
+- **stdio mode**: `distillery-mcp` installed and on PATH (the hook launches it as a subprocess — no pre-running server required)
+  _(required only for the `SessionStart` briefing; the `UserPromptSubmit` nudge works offline)_
+- Python 3.11+ available on the system PATH (for `SessionStart` briefing)
 - Claude Code with hook support
 
-> **Note:** The SessionStart handler targets the HTTP MCP transport, not stdio.
-> Hooks run as shell commands outside of an MCP session, so they must
-> communicate with the server over HTTP.
+> **Note:** The SessionStart handler auto-detects how Distillery MCP is installed
+> and uses the appropriate transport (HTTP or stdio). See the
+> [Transport Resolution Order](#transport-resolution-order) section below.
 
 ### Manual Setup
 
@@ -99,16 +100,23 @@ Configure all hooks via environment variables. Set these in your shell profile
 
 | Variable | Default | Description |
 |---|---|---|
-| `DISTILLERY_MCP_URL` | `http://localhost:8000/mcp` | MCP HTTP endpoint URL |
+| `DISTILLERY_MCP_URL` | _(auto-detect)_ | MCP HTTP endpoint URL (skips auto-detection) |
+| `DISTILLERY_MCP_COMMAND` | _(auto-detect)_ | MCP stdio command (skips auto-detection) |
 | `DISTILLERY_NUDGE_INTERVAL` | `30` | Prompts between memory nudge outputs |
 | `DISTILLERY_BRIEFING_LIMIT` | `5` | Recent entries in SessionStart briefing |
 | `DISTILLERY_BEARER_TOKEN` | _(empty)_ | Bearer token if OAuth is enabled |
 
-Example — nudge every 20 prompts, custom port:
+Example — nudge every 20 prompts, custom hosted URL:
 
 ```bash
 export DISTILLERY_NUDGE_INTERVAL=20
-export DISTILLERY_MCP_URL="http://localhost:9000/mcp"
+export DISTILLERY_MCP_URL="https://distillery-mcp.fly.dev/mcp"
+```
+
+Example — force stdio transport:
+
+```bash
+export DISTILLERY_MCP_COMMAND="distillery-mcp --db /path/to/knowledge.db"
 ```
 
 > **Security note:** Do not commit `DISTILLERY_BEARER_TOKEN` or other secrets
@@ -158,17 +166,44 @@ reminder at the start of every Claude Code session. This gives Claude awareness
 of recent knowledge entries and stale items for the current project without
 requiring a manual `/briefing` invocation.
 
+The shell script is a thin wrapper that delegates to `session_start_briefing.py`,
+which handles dynamic MCP transport resolution across HTTP, stdio, and
+auto-detected configurations.
+
 > This script is called automatically by `distillery-hooks.sh` for `SessionStart`
 > events. You only need to register it separately if you do not use the dispatcher.
 
 ### Prerequisites
 
-- Distillery MCP server running with **HTTP transport** (`distillery-mcp --transport http`)
-- `curl` available on the system PATH
+- **HTTP mode**: a Distillery MCP server running at a reachable URL (auto-detected)
+- **stdio mode**: `distillery-mcp` installed so the hook can launch it as a subprocess (no pre-running server required)
+- Python 3.11+ available on the system PATH
 
-> **Note:** The hook targets the HTTP MCP transport, not stdio. Hooks run as
-> shell commands outside of an MCP session, so they must communicate with the
-> server over HTTP.
+### Transport Resolution Order
+
+The briefing hook auto-detects how Distillery MCP is installed using this
+priority order (first reachable wins):
+
+| Priority | Source | Transport |
+|----------|--------|-----------|
+| 1 | `DISTILLERY_MCP_URL` env var | HTTP |
+| 2 | `DISTILLERY_MCP_COMMAND` env var | stdio |
+| 3 | `.mcp.json` at repo root (walks up from cwd) | per config |
+| 4 | `~/.claude.json` project-scoped `mcpServers` | per config |
+| 5 | `~/.claude.json` global `mcpServers` | per config |
+| 6 | `~/.claude/plugins/**/.claude-plugin/plugin.json` | per config |
+| 7 | `distillery-mcp` on PATH | stdio |
+| 8 | `http://localhost:8000/mcp` | HTTP |
+
+For steps 3-6, the resolver looks for any `mcpServers` key containing
+"distill" (case-insensitive). Each matching entry can be either a URL-based
+(HTTP) or command-based (stdio) server configuration.
+
+After resolving a transport, the hook probes it for reachability:
+- **HTTP**: GET `/health` with a 2-second timeout
+- **stdio**: subprocess `initialize` handshake with a 3-second timeout
+
+If the resolved server is unreachable, the hook exits silently with code 0.
 
 ### Configuration
 
@@ -177,20 +212,27 @@ Configure the hook via environment variables. Set these in your shell profile
 
 | Variable | Default | Description |
 |---|---|---|
-| `DISTILLERY_MCP_URL` | `http://localhost:8000/mcp` | MCP HTTP endpoint URL |
+| `DISTILLERY_MCP_URL` | _(auto-detect)_ | MCP HTTP endpoint URL (skips auto-detection) |
+| `DISTILLERY_MCP_COMMAND` | _(auto-detect)_ | MCP stdio command (skips auto-detection) |
 | `DISTILLERY_BRIEFING_LIMIT` | `5` | Number of recent entries to include |
 | `DISTILLERY_BEARER_TOKEN` | _(empty)_ | Bearer token if OAuth is enabled |
 
-Example — custom port and more entries:
+Example — force hosted URL:
 
 ```bash
-export DISTILLERY_MCP_URL="http://localhost:9000/mcp"
+export DISTILLERY_MCP_URL="https://distillery-mcp.fly.dev/mcp"
 export DISTILLERY_BRIEFING_LIMIT="10"
+```
+
+Example — force stdio transport:
+
+```bash
+export DISTILLERY_MCP_COMMAND="distillery-mcp --db /path/to/knowledge.db"
 ```
 
 > **Security note:** Do not commit `DISTILLERY_BEARER_TOKEN` or other secrets
 > to version control. Use your shell profile or a secrets manager to set
-> these values. The hook script itself contains no credentials.
+> these values. The hook scripts contain no credentials.
 
 ### Expected Behavior
 
