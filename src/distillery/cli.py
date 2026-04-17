@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
 import sys
 from pathlib import Path
@@ -1520,59 +1521,58 @@ def main(argv: list[str] | None = None) -> None:
     fmt: str = args.format if args.format is not None else "text"
     command: str | None = args.command
 
+    exit_code: int = 0
+
     if command is None:
         parser.print_help()
-        sys.exit(0)
     elif command == "status":
-        sys.exit(_cmd_status(config_path, fmt))
+        exit_code = _cmd_status(config_path, fmt)
     elif command == "health":
-        sys.exit(_cmd_health(config_path, fmt))
+        exit_code = _cmd_health(config_path, fmt)
     elif command == "poll":
-        sys.exit(
-            _cmd_poll(
-                config_path=config_path,
-                fmt=fmt,
-                source_url=getattr(args, "source", None),
-            )
+        exit_code = _cmd_poll(
+            config_path=config_path,
+            fmt=fmt,
+            source_url=getattr(args, "source", None),
         )
     elif command == "export":
-        sys.exit(
-            _cmd_export(
-                config_path=config_path,
-                fmt=fmt,
-                output_path=args.output,
-            )
+        exit_code = _cmd_export(
+            config_path=config_path,
+            fmt=fmt,
+            output_path=args.output,
         )
     elif command == "import":
-        sys.exit(
-            _cmd_import(
-                config_path=config_path,
-                fmt=fmt,
-                input_path=args.input,
-                mode=args.mode,
-                yes=args.yes,
-            )
+        exit_code = _cmd_import(
+            config_path=config_path,
+            fmt=fmt,
+            input_path=args.input,
+            mode=args.mode,
+            yes=args.yes,
         )
     elif command == "retag":
-        sys.exit(
-            _cmd_retag(
-                config_path=config_path,
-                fmt=fmt,
-                dry_run=getattr(args, "dry_run", False),
-                force=getattr(args, "force", False),
-            )
+        exit_code = _cmd_retag(
+            config_path=config_path,
+            fmt=fmt,
+            dry_run=getattr(args, "dry_run", False),
+            force=getattr(args, "force", False),
         )
     elif command == "eval":
-        sys.exit(
-            _cmd_eval(
-                scenarios_dir=getattr(args, "scenarios_dir", None),
-                skill_filter=getattr(args, "skill", None),
-                save_baseline=getattr(args, "save_baseline", None),
-                baseline=getattr(args, "baseline", None),
-                model=getattr(args, "model", "claude-haiku-4-5-20251001"),
-                fmt=fmt,
-                compare_cost=getattr(args, "compare_cost", False),
-            )
+        exit_code = _cmd_eval(
+            scenarios_dir=getattr(args, "scenarios_dir", None),
+            skill_filter=getattr(args, "skill", None),
+            save_baseline=getattr(args, "save_baseline", None),
+            baseline=getattr(args, "baseline", None),
+            model=getattr(args, "model", "claude-haiku-4-5-20251001"),
+            fmt=fmt,
+            compare_cost=getattr(args, "compare_cost", False),
         )
     else:  # pragma: no cover – argparse rejects unknown subcommands
         parser.error(f"Unknown command: {command}")
+
+    # Flush output streams before exiting to ensure all output is visible
+    # when invoked via entry_points (e.g. `distillery retag --dry-run`).
+    # Guard against BrokenPipeError when piped to a closed consumer (e.g. `| head`).
+    for _stream in (sys.stdout, sys.stderr):
+        with contextlib.suppress(BrokenPipeError):
+            _stream.flush()
+    sys.exit(exit_code)
