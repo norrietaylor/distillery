@@ -8,6 +8,8 @@ Provides the ``distillery`` entry point with the following subcommands:
   or code 1 on failure.
 - ``export``: Export all entries and feed sources to a JSON file.
 - ``import``: Import entries and feed sources from a JSON export file.
+- ``gh-backfill``: Populate ``project``/``tags``/``author``/``metadata``
+  on existing GitHub entries synced before #312 landed.
 - ``eval``: Run skill evaluation scenarios against Claude (requires
   ``ANTHROPIC_API_KEY`` and ``pip install 'distillery[eval]'``).
 - ``maintenance classify``: Classify pending entries using batch classification.
@@ -115,6 +117,18 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="Retag all feed entries, not just those with empty tags",
+    )
+
+    gh_backfill_parser = subparsers.add_parser(
+        "gh-backfill",
+        help="Backfill project/tags/author/metadata on existing GitHub entries (#312)",
+        parents=[shared],
+    )
+    gh_backfill_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help="Report how many entries would be updated without writing changes",
     )
 
     export_parser = subparsers.add_parser(
@@ -691,6 +705,69 @@ def _cmd_retag(
         print(f"  total_scanned: {total_scanned}")
         print(f"  total_{action.replace(' ', '_')}: {total_updated}")
 
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# gh-backfill subcommand (#312)
+# ---------------------------------------------------------------------------
+
+
+def _cmd_gh_backfill(
+    config_path: str | None,
+    fmt: str,
+    dry_run: bool,
+) -> int:
+    """Implement the ``gh-backfill`` subcommand.
+
+    Walks all ``entry_type=github`` entries and populates the ``project``,
+    ``tags``, ``author``, and ``metadata.gh_number`` / ``metadata.gh_url``
+    fields that may be missing on entries synced before #312 landed.
+
+    Returns:
+        Exit code (0 on success, 1 on error).
+    """
+    try:
+        cfg = load_config(config_path)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Error loading configuration: {exc}", file=sys.stderr)
+        return 1
+
+    async def _run() -> int:
+        from distillery.feeds.github_sync import backfill_github_metadata
+        from distillery.mcp.server import _create_embedding_provider, _normalize_db_path
+        from distillery.store.duckdb import DuckDBStore
+
+        embedding_provider = _create_embedding_provider(cfg)
+        db_path = _normalize_db_path(cfg.storage.database_path)
+
+        store = DuckDBStore(
+            db_path=db_path,
+            embedding_provider=embedding_provider,
+            s3_region=cfg.storage.s3_region,
+            s3_endpoint=cfg.storage.s3_endpoint,
+            hybrid_search=cfg.defaults.hybrid_search,
+            rrf_k=cfg.defaults.rrf_k,
+            recency_window_days=cfg.defaults.recency_window_days,
+            recency_min_weight=cfg.defaults.recency_min_weight,
+        )
+        await store.initialize()
+        try:
+            return await backfill_github_metadata(store, dry_run=dry_run)
+        finally:
+            await store.close()
+
+    try:
+        updated = asyncio.run(_run())
+    except Exception as exc:
+        print(f"Error during gh-backfill: {exc}", file=sys.stderr)
+        return 1
+
+    action = "would update" if dry_run else "updated"
+    if fmt == "json":
+        print(json.dumps({"dry_run": dry_run, "entries_updated": updated}))
+    else:
+        print(f"gh-backfill complete: {action} {updated} github entries")
     return 0
 
 
@@ -1697,6 +1774,12 @@ def main(argv: list[str] | None = None) -> None:
             fmt=fmt,
             dry_run=getattr(args, "dry_run", False),
             force=getattr(args, "force", False),
+        )
+    elif command == "gh-backfill":
+        exit_code = _cmd_gh_backfill(
+            config_path=config_path,
+            fmt=fmt,
+            dry_run=getattr(args, "dry_run", False),
         )
     elif command == "eval":
         exit_code = _cmd_eval(
