@@ -883,7 +883,12 @@ class GitHubSyncAdapter:
             if should_close:
                 await client.aclose()
 
-        await self._store.set_metadata(self._metadata_key, sync_start.isoformat())
+        # Only advance the sync cursor when the run completed cleanly. If any
+        # page fetch, batch processing, or cross-ref resolution recorded an
+        # error, preserve the previous cursor so older items on failed pages
+        # are retried on the next incremental run.
+        if not errors:
+            await self._store.set_metadata(self._metadata_key, sync_start.isoformat())
 
         result = SyncResult(
             repo=f"{self._owner}/{self._repo}",

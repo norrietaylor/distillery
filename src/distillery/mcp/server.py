@@ -388,6 +388,16 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         result = await _handle_crud_store_batch(
             store=c["store"], arguments=args, cfg=c["config"], created_by=user
         )
+        # Mirror the attribution/audit pattern used by other mutating wrappers
+        # (distillery_store, distillery_update, distillery_correct,
+        # distillery_resolve_review) so batch imports are not unaudited.
+        rd = json.loads(result[0].text) if result else {}
+        entry_ids = rd.get("entry_ids", []) or []
+        if entry_ids:
+            for entry_id in entry_ids:
+                await _audit(c, user, "distillery_store_batch", entry_id, "store", result)
+        else:
+            await _audit(c, user, "distillery_store_batch", "", "store", result)
         return result
 
     @server.tool
@@ -613,7 +623,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         RETURNS (error): { error: true, code: "INVALID_PARAMS" | "INTERNAL", message: "..." }
 
         RELATED: distillery_search (for semantic search),
-        distillery_aggregate (for count-by-group analytics)
+        distillery_status (for lightweight server health/metadata)
         """
         c = _lc(ctx)
         args: dict[str, Any] = dict(

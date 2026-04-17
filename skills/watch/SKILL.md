@@ -32,7 +32,7 @@ See CONVENTIONS.md — skip if already confirmed this conversation.
 |--------------------|--------|------------|
 | `/watch` or `/watch list` | `list` | none |
 | `/watch add <url> [--type TYPE] [--label LABEL]` | `add` | url, optional source_type, label |
-| `/watch remove <url> [--purge]` | `remove` | url, optional purge |
+| `/watch remove <url> [--purge]` | `remove` | url, optional purge (requires explicit confirmation before purge) |
 
 Default to `list` if no subcommand is recognizable.
 
@@ -51,7 +51,11 @@ Call `distillery_watch` with the parsed arguments:
 
 - **list**: `distillery_watch(action="list")`
 - **add**: `distillery_watch(action="add", url=..., source_type=..., label=..., poll_interval_minutes=..., trust_weight=...)`
-- **remove**: `distillery_watch(action="remove", url="<url>")` or `distillery_watch(action="remove", url="<url>", purge=true)` to also archive all historic entries from the source
+- **remove** (no purge): `distillery_watch(action="remove", url="<url>")`
+- **remove --purge** (requires explicit confirmation):
+  1. Query historic entries for the source (e.g., `distillery_list(filters={"source_url": "<url>"}, output_mode="ids")`) to determine how many entries would be archived.
+  2. Display that count to the user and ask for explicit confirmation (e.g., "Archive N historic entries from <url>? [yes/no]").
+  3. Only after the user confirms, call `distillery_watch(action="remove", url="<url>", purge=true)` to archive all historic entries from the source.
 
 - On MCP errors, see CONVENTIONS.md error handling — display and stop
 

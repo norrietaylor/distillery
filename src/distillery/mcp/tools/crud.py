@@ -1028,14 +1028,6 @@ async def _handle_list(
 
     filters = _build_filters_from_arguments(arguments)
 
-    # batch_mode=True requires at least one filter to prevent a classify-all footgun.
-    if arguments.get("batch_mode") is True and filters is None:
-        return error_response(
-            "INVALID_PARAMS",
-            "At least one filter is required for --batch mode. "
-            "Provide source, entry_type, author, tag_prefix, project, or verification.",
-        )
-
     # review mode implicitly filters to pending_review status (takes precedence
     # over any default/visible-status logic).
     if output_mode == "review":
@@ -1048,6 +1040,34 @@ async def _handle_list(
             # Error response from validation.
             return filter_result
         filters = filter_result
+
+    # batch_mode=True requires at least one real filter to prevent a
+    # classify-all footgun. Run this guard AFTER status normalization so
+    # status="any" (which is stripped by _apply_default_status_filter) can't
+    # bypass the check, and so that the default status filter does not count
+    # as a real filter on its own.
+    if arguments.get("batch_mode") is True:
+        real_filter_keys = {
+            "source",
+            "entry_type",
+            "author",
+            "tag_prefix",
+            "project",
+            "verification",
+            "tags",
+            "session_id",
+            "feed_url",
+            "date_from",
+            "date_to",
+            "metadata.source_url",
+        }
+        has_real_filter = bool(filters and any(key in filters for key in real_filter_keys))
+        if not has_real_filter:
+            return error_response(
+                "INVALID_PARAMS",
+                "At least one filter is required for --batch mode. "
+                "Provide source, entry_type, author, tag_prefix, project, or verification.",
+            )
 
     # --- group_by mode -------------------------------------------------------
     if group_by is not None:

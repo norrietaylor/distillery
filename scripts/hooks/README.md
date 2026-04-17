@@ -113,10 +113,11 @@ export DISTILLERY_NUDGE_INTERVAL=20
 export DISTILLERY_MCP_URL="https://distillery-mcp.fly.dev/mcp"
 ```
 
-Example — force stdio transport:
+Example — force stdio transport (config-backed so the spawned server uses the
+repo's normal wiring):
 
 ```bash
-export DISTILLERY_MCP_COMMAND="distillery-mcp --db /path/to/knowledge.db"
+export DISTILLERY_MCP_COMMAND="env DISTILLERY_CONFIG=/path/to/distillery.yaml distillery-mcp"
 ```
 
 > **Security note:** Do not commit `DISTILLERY_BEARER_TOKEN` or other secrets
@@ -224,10 +225,11 @@ export DISTILLERY_MCP_URL="https://distillery-mcp.fly.dev/mcp"
 export DISTILLERY_BRIEFING_LIMIT="10"
 ```
 
-Example — force stdio transport:
+Example — force stdio transport (config-backed so the spawned server uses the
+repo's normal wiring):
 
 ```bash
-export DISTILLERY_MCP_COMMAND="distillery-mcp --db /path/to/knowledge.db"
+export DISTILLERY_MCP_COMMAND="env DISTILLERY_CONFIG=/path/to/distillery.yaml distillery-mcp"
 ```
 
 > **Security note:** Do not commit `DISTILLERY_BEARER_TOKEN` or other secrets

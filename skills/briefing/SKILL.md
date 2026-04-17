@@ -328,8 +328,9 @@ Generated: 2026-04-08 09:15 UTC
 ## Rules
 
 - NEVER use Bash, Python, or any tool not listed in allowed-tools
-- If an MCP tool call fails, report the error to the user and STOP. Do not attempt workarounds.
-- Always call `distillery_list(limit=1)` first as the MCP health check; stop if it fails
+- Always call `distillery_list(limit=1)` first as the MCP health check; stop if it fails.
+- If a required (non-optional) MCP tool call fails, report the error to the user and STOP. Do not attempt workarounds.
+- If a call is marked non-fatal below (corrections, stale knowledge, unresolved items, team-mode probes, and team sections 6/7/8), omit that section and continue.
 - Auto-detect project from `basename $(git rev-parse --show-toplevel)` when `--project` is not provided
 - Display-only — no `--store` flag, no storing of output
 - Omit any section that has no data — never show empty section headings
@@ -340,7 +341,7 @@ Generated: 2026-04-08 09:15 UTC
 - Corrections section uses `distillery_relations(action="get", relation_type="corrects")` — failure is non-fatal
 - Stale knowledge failure is non-fatal — omit the section and continue
 - Unresolved failure is non-fatal — omit the section and continue
-- Team mode is activated by `--team` flag or auto-detected: `distillery_list(group_by="author")` returning >1 author group
+- Team mode is activated by `--team` flag or auto-detected: `distillery_list(group_by="author", project=<project>)` returning >1 author group
 - Header shows `(solo)` or `(team)` based on detected mode
 - Team sections (6, 7, 8) are additive — solo sections are always rendered unchanged
 - Team activity groups entries by author from the past 7 days only — entries older than 7 days are excluded

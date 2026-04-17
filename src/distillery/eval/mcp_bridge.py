@@ -50,13 +50,16 @@ from distillery.mcp.tools.analytics import (
     _handle_tag_tree,
 )
 from distillery.mcp.tools.feeds import _handle_poll, _handle_rescore
+from distillery.mcp.tools.meta import _handle_status
 from distillery.mcp.tools.search import _handle_aggregate
 from distillery.store.duckdb import DuckDBStore
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Anthropic-compatible tool schemas for all 17 distillery MCP tools
+# Anthropic-compatible tool schemas for the distillery MCP tools exercised by
+# the eval harness. Keep this list aligned with the server catalog in
+# ``src/distillery/mcp/server.py``.
 # ---------------------------------------------------------------------------
 
 DISTILLERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
@@ -409,6 +412,15 @@ DISTILLERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
             "required": [],
         },
     },
+    {
+        "name": "distillery_status",
+        "description": (
+            "Lightweight in-protocol health/metadata probe. Returns server "
+            "version, build SHA, transport, tool count, store stats, embedding "
+            "provider name, feed poll summary, and uptime."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
 ]
 
 
@@ -557,6 +569,15 @@ class MCPBridge:
             return await _handle_poll(store=store, config=config, arguments=args)
         if name == "distillery_rescore":
             return await _handle_rescore(store=store, config=config, arguments=args)
+        if name == "distillery_status":
+            return await _handle_status(
+                store=store,
+                config=config,
+                embedding_provider=ep,
+                tool_count=len(DISTILLERY_TOOL_SCHEMAS),
+                transport=None,
+                started_at=None,
+            )
 
         logger.warning("Unknown tool requested: %s", name)
         return [

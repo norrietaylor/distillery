@@ -89,15 +89,18 @@ call_tool() {
 }
 
 # ── Fetch recent entries ──────────────────────────────────────────────────────
+# Request the full machine-readable output so downstream parsing can extract
+# entry ids and content snippets. distillery_list defaults to a summary string
+# which does not expose per-entry "id"/"content" fields.
 RECENT_RAW=""
-RECENT_PARAMS="$(jq -n --arg project "$PROJECT" --argjson limit "$LIMIT" '{project:$project,limit:$limit}')"
+RECENT_PARAMS="$(jq -n --arg project "$PROJECT" --argjson limit "$LIMIT" '{project:$project,limit:$limit,output_mode:"full"}')"
 RECENT_RAW="$(call_tool "distillery_list" "$RECENT_PARAMS" 2>/dev/null || true)"
 
 # ── Fetch stale entries ───────────────────────────────────────────────────────
 # distillery_list supports stale_days to restrict to entries not accessed in N days.
 # There is no separate distillery_stale tool on this MCP surface (see issue #307).
 STALE_RAW=""
-STALE_PARAMS="$(jq -n --arg project "$PROJECT" --argjson stale_days 30 --argjson limit 3 '{project:$project,stale_days:$stale_days,limit:$limit}')"
+STALE_PARAMS="$(jq -n --arg project "$PROJECT" --argjson stale_days 30 --argjson limit 3 '{project:$project,stale_days:$stale_days,limit:$limit,output_mode:"full"}')"
 STALE_RAW="$(call_tool "distillery_list" "$STALE_PARAMS" 2>/dev/null || true)"
 
 # ── Parse and format output ───────────────────────────────────────────────────

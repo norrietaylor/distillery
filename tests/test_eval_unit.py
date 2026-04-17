@@ -840,14 +840,36 @@ class TestMCPBridgeAsync:
     async def test_get_tool_schemas_count(self) -> None:
         from distillery.eval.mcp_bridge import MCPBridge
 
+        # The bridge advertises the consolidated tool surface exercised by the
+        # eval harness. Derive the expected count from the expected-name set so
+        # this test stays in sync with the server catalog rather than pinning a
+        # magic number.
+        expected_names = {
+            "distillery_store",
+            "distillery_get",
+            "distillery_update",
+            "distillery_list",
+            "distillery_aggregate",
+            "distillery_search",
+            "distillery_find_similar",
+            "distillery_classify",
+            "distillery_resolve_review",
+            "distillery_metrics",
+            "distillery_stale",
+            "distillery_tag_tree",
+            "distillery_type_schemas",
+            "distillery_interests",
+            "distillery_watch",
+            "distillery_poll",
+            "distillery_rescore",
+            "distillery_status",
+        }
+
         bridge = await MCPBridge.create()
         schemas = bridge.get_tool_schemas()
-        # All 17 distillery tools must be present.
-        assert len(schemas) == 17
         names = {s["name"] for s in schemas}
-        assert "distillery_store" in names
-        assert "distillery_search" in names
-        assert "distillery_list" in names
+        assert names == expected_names
+        assert len(schemas) == len(expected_names)
         await bridge.close()
 
     @pytest.mark.asyncio

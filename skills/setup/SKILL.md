@@ -61,7 +61,11 @@ MCP server connected.
 
 Proceed to Step 2.
 
-**State: Needs Authentication** — Server entry found but `distillery_list(limit=1)` is unavailable or fails (including auth-related failures). See `references/transport-detection.md` for display instructions. Skip to Step 6 with `MCP Server: needs authentication`.
+**State: Needs Authentication** — Server entry found and `distillery_list(limit=1)` fails with an authentication-specific error (e.g., 401/403 or an explicit auth-required response). See `references/transport-detection.md` for display instructions. Skip to Step 6 with `MCP Server: needs authentication`.
+
+---
+
+**State: Not Connected** — Server entry found but the Distillery MCP server is unreachable (process down, transport unreachable) or returns a non-auth error. Skip to Step 6 with `MCP Server: not connected`.
 
 ---
 

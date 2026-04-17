@@ -246,7 +246,10 @@ async def _handle_watch(
                 f"trust_weight must be between 0.0 and 1.0, got: {trust_weight}",
             )
 
-        sync_history = bool(arguments.get("sync_history", False))
+        try:
+            sync_history = _parse_bool_arg(arguments.get("sync_history"), default=False)
+        except ValueError as exc:
+            return error_response("INVALID_PARAMS", str(exc))
 
         # ------------------------------------------------------------------
         # URL syntax validation.
@@ -357,7 +360,10 @@ async def _handle_watch(
     if not url:
         return error_response("INVALID_PARAMS", "url is required for action='remove'")
 
-    purge = bool(arguments.get("purge", False))
+    try:
+        purge = _parse_bool_arg(arguments.get("purge"), default=False)
+    except ValueError as exc:
+        return error_response("INVALID_PARAMS", str(exc))
 
     try:
         removed = await store.remove_feed_source(url)
@@ -673,7 +679,10 @@ async def _handle_gh_sync(
     project = arguments.get("project")
     if project is not None:
         project = str(project)
-    background = bool(arguments.get("background", False))
+    try:
+        background = _parse_bool_arg(arguments.get("background"), default=False)
+    except ValueError as exc:
+        return error_response("INVALID_PARAMS", str(exc))
 
     adapter = GitHubSyncAdapter(
         store=store,

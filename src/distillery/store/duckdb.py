@@ -2196,6 +2196,27 @@ class DuckDBStore:
         """Write a value to the ``_meta`` key-value table (upsert)."""
         await asyncio.to_thread(self._sync_set_metadata, key, value)
 
+    def _sync_prune_search_log(self, retention_days: int) -> int:
+        """Delete ``search_log`` rows older than *retention_days*.
+
+        Returns
+        -------
+        int
+            The number of rows deleted.
+        """
+        assert self._conn is not None
+        result = self._conn.execute(
+            "DELETE FROM search_log "
+            "WHERE timestamp < current_timestamp - INTERVAL ? DAY "
+            "RETURNING id",
+            [retention_days],
+        ).fetchall()
+        return len(result)
+
+    async def prune_search_log(self, retention_days: int) -> int:
+        """Delete ``search_log`` rows older than *retention_days* (async wrapper)."""
+        return await asyncio.to_thread(self._sync_prune_search_log, retention_days)
+
     # ------------------------------------------------------------------
     # Tag vocabulary
     # ------------------------------------------------------------------

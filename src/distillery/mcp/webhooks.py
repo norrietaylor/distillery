@@ -546,17 +546,10 @@ async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONRe
         store = state["store"]
         retention_days = config.rate_limit.search_log_retention_days
         try:
-
-            def _prune() -> int:
-                conn = store.connection
-                result = conn.execute(
-                    "DELETE FROM search_log WHERE timestamp < "
-                    "current_timestamp - INTERVAL ? DAY RETURNING id",
-                    [retention_days],
-                ).fetchall()
-                return len(result)
-
-            deleted = await asyncio.to_thread(_prune)
+            # Delegate to the store's async helper so the DuckDB connection is
+            # used from its owning thread (the store's to_thread worker),
+            # rather than accessed directly from this webhook coroutine.
+            deleted = await store.prune_search_log(retention_days)
             retention_result = {"ok": True, "deleted": deleted}
             if deleted:
                 logger.info(
