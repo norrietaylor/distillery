@@ -1753,8 +1753,17 @@ class DuckDBStore:
         rows = result.fetchall()
         sources: list[dict[str, Any]] = []
         for row in rows:
-            last_polled_at: datetime | None = row[5]
+            last_polled_raw: datetime | None = row[5]
             poll_interval_minutes: int = row[3]
+            # DuckDB TIMESTAMP is naive — assume UTC and attach tzinfo so the
+            # serialised value preserves the "+00:00" offset downstream.
+            last_polled_at: datetime | None = None
+            if last_polled_raw is not None:
+                last_polled_at = (
+                    last_polled_raw.replace(tzinfo=UTC)
+                    if last_polled_raw.tzinfo is None
+                    else last_polled_raw.astimezone(UTC)
+                )
             last_polled_iso: str | None = (
                 last_polled_at.isoformat() if last_polled_at is not None else None
             )

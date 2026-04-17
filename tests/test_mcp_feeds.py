@@ -111,12 +111,14 @@ class FakeSourceStore:
     ) -> bool:
         from datetime import timedelta
 
+        from distillery.store.duckdb import _sanitise_last_error
+
         for src in self._sources:
             if src["url"] != url:
                 continue
             src["last_polled_at"] = polled_at.isoformat()
             src["last_item_count"] = int(item_count)
-            src["last_error"] = error
+            src["last_error"] = _sanitise_last_error(error, 200)
             src["next_poll_at"] = (
                 polled_at + timedelta(minutes=src["poll_interval_minutes"])
             ).isoformat()
