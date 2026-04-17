@@ -342,6 +342,29 @@ def add_session_id(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
     logger.info("Migration 11: session_id column added")
 
 
+_ADD_FEED_SOURCE_LIVENESS_COLUMNS = [
+    "ALTER TABLE feed_sources ADD COLUMN IF NOT EXISTS last_polled_at TIMESTAMP;",
+    "ALTER TABLE feed_sources ADD COLUMN IF NOT EXISTS last_item_count INTEGER DEFAULT 0;",
+    "ALTER TABLE feed_sources ADD COLUMN IF NOT EXISTS last_error VARCHAR;",
+]
+
+
+def add_feed_source_liveness(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
+    """Migration 12: Add liveness columns to ``feed_sources``.
+
+    Adds three nullable columns used by operators to answer "is this feed
+    working?" without consulting a separate sync-status tool:
+
+    - ``last_polled_at`` (TIMESTAMP) — UTC instant of the most recent poll.
+    - ``last_item_count`` (INTEGER) — items ingested on the last poll.
+    - ``last_error`` (VARCHAR) — truncated error message from the last poll,
+      or ``NULL`` when the poll succeeded.
+    """
+    for stmt in _ADD_FEED_SOURCE_LIVENESS_COLUMNS:
+        conn.execute(stmt)
+    logger.info("Migration 12: feed_sources liveness columns added")
+
+
 # ---------------------------------------------------------------------------
 # Migration registry
 # ---------------------------------------------------------------------------
@@ -358,6 +381,7 @@ MIGRATIONS: dict[int, MigrationFunc] = {
     9: add_expires_at,
     10: add_verification,
     11: add_session_id,
+    12: add_feed_source_liveness,
 }
 """Ordered mapping of schema version to migration function.
 

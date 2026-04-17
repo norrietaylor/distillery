@@ -663,6 +663,75 @@ class TestClose:
         await store.close()  # should be a no-op
 
 
+class TestFeedSourceLiveness:
+    """DuckDBStore surfaces liveness metadata alongside feed sources."""
+
+    async def test_list_includes_liveness_fields_defaults(self, store: DuckDBStore) -> None:
+        await store.add_feed_source(
+            url="https://example.com/rss",
+            source_type="rss",
+            poll_interval_minutes=30,
+        )
+        sources = await store.list_feed_sources()
+        assert len(sources) == 1
+        src = sources[0]
+        assert src["last_polled_at"] is None
+        assert src["last_item_count"] == 0
+        assert src["last_error"] is None
+        assert src["next_poll_at"] is None
+
+    async def test_record_poll_status_updates_fields(self, store: DuckDBStore) -> None:
+        await store.add_feed_source(
+            url="https://example.com/rss",
+            source_type="rss",
+            poll_interval_minutes=60,
+        )
+        polled_at = datetime(2026, 4, 16, 12, 0, tzinfo=UTC)
+        updated = await store.record_poll_status(
+            "https://example.com/rss",
+            polled_at=polled_at,
+            item_count=5,
+            error=None,
+        )
+        assert updated is True
+
+        sources = await store.list_feed_sources()
+        src = sources[0]
+        assert src["last_polled_at"] is not None
+        assert src["last_item_count"] == 5
+        assert src["last_error"] is None
+        assert src["next_poll_at"] is not None
+
+    async def test_record_poll_status_surfaces_error(self, store: DuckDBStore) -> None:
+        await store.add_feed_source(
+            url="https://example.com/rss",
+            source_type="rss",
+        )
+        polled_at = datetime(2026, 4, 16, 12, 0, tzinfo=UTC)
+        long_error = "A" * 500
+        await store.record_poll_status(
+            "https://example.com/rss",
+            polled_at=polled_at,
+            item_count=0,
+            error=long_error,
+        )
+        src = (await store.list_feed_sources())[0]
+        assert src["last_error"] is not None
+        # Truncated to 200 chars with ellipsis suffix.
+        assert len(src["last_error"]) == 200
+        assert src["last_error"].endswith("\u2026")
+        assert src["last_item_count"] == 0
+
+    async def test_record_poll_status_unknown_url_returns_false(self, store: DuckDBStore) -> None:
+        result = await store.record_poll_status(
+            "https://not-there.example/rss",
+            polled_at=datetime.now(tz=UTC),
+            item_count=0,
+            error=None,
+        )
+        assert result is False
+
+
 # ---------------------------------------------------------------------------
 # Hybrid search (BM25 + vector RRF fusion with recency decay)
 # ---------------------------------------------------------------------------
@@ -928,3 +997,47 @@ class TestHybridGracefulFallback:
     ) -> None:
         """_fts_available should be False when hybrid_search is disabled."""
         assert vector_only_store._fts_available is False  # noqa: SLF001
+
+
+# ---------------------------------------------------------------------------
+# _sanitise_last_error helper
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestSanitiseLastError:
+    """Unit tests for ``DuckDBStore._sanitise_last_error``.
+
+    Moved here from ``tests/test_mcp_feeds.py`` to keep private-helper tests
+    alongside their module.
+    """
+
+    def test_none_returns_none(self) -> None:
+        from distillery.store.duckdb import _sanitise_last_error
+
+        assert _sanitise_last_error(None, 200) is None
+
+    def test_empty_returns_none(self) -> None:
+        from distillery.store.duckdb import _sanitise_last_error
+
+        assert _sanitise_last_error("   \n\t", 200) is None
+
+    def test_short_error_is_preserved(self) -> None:
+        from distillery.store.duckdb import _sanitise_last_error
+
+        assert _sanitise_last_error("upstream 502", 200) == "upstream 502"
+
+    def test_collapses_whitespace_and_newlines(self) -> None:
+        from distillery.store.duckdb import _sanitise_last_error
+
+        raw = "Traceback:\n  File 'x'\n  ValueError: boom"
+        assert _sanitise_last_error(raw, 200) == "Traceback: File 'x' ValueError: boom"
+
+    def test_truncates_when_longer_than_max_len(self) -> None:
+        from distillery.store.duckdb import _sanitise_last_error
+
+        raw = "x" * 500
+        result = _sanitise_last_error(raw, 50)
+        assert result is not None
+        assert len(result) == 50
+        assert result.endswith("\u2026")

@@ -49,6 +49,29 @@ def _sql_escape(value: str) -> str:
     return value.replace("'", "''")
 
 
+def _sanitise_last_error(error: str | None, max_len: int) -> str | None:
+    """Collapse whitespace and truncate a feed-poll error string.
+
+    Returns ``None`` when *error* is ``None`` or empty after stripping so
+    successful polls clear any previous error.  Control characters
+    (including newlines and carriage returns) are collapsed to single
+    spaces so the payload is operator-friendly and less likely to leak
+    stack-trace fragments verbatim.  The resulting string is truncated
+    to *max_len* characters with an ellipsis suffix when truncation
+    occurs.
+    """
+    if error is None:
+        return None
+    # Collapse runs of whitespace / control chars to single spaces.
+    collapsed = re.sub(r"\s+", " ", error).strip()
+    if not collapsed:
+        return None
+    if len(collapsed) <= max_len:
+        return collapsed
+    # Preserve total length of exactly *max_len* including ellipsis.
+    return collapsed[: max_len - 1] + "\u2026"
+
+
 _AGGREGATE_EXPR_MAP: dict[str, str] = {
     "entry_type": "entry_type",
     "status": "status",
@@ -1971,23 +1994,59 @@ class DuckDBStore:
     # ------------------------------------------------------------------
 
     def _sync_list_feed_sources(self) -> list[dict[str, Any]]:
-        """Return all persisted feed sources as dicts."""
+        """Return all persisted feed sources as dicts.
+
+        Includes liveness fields (``last_polled_at``, ``last_item_count``,
+        ``last_error``, ``next_poll_at``) so operators can determine feed
+        health from a single query.  Timestamps are serialised to ISO 8601
+        strings.  ``next_poll_at`` is derived from ``last_polled_at +
+        poll_interval_minutes`` and is ``None`` when the source has never
+        been polled.
+        """
+        from datetime import timedelta
+
         assert self._conn is not None
         result = self._conn.execute(
-            "SELECT url, source_type, label, poll_interval_minutes, trust_weight "
+            "SELECT url, source_type, label, poll_interval_minutes, trust_weight, "
+            "last_polled_at, last_item_count, last_error "
             "FROM feed_sources ORDER BY created_at"
         )
         rows = result.fetchall()
-        return [
-            {
-                "url": row[0],
-                "source_type": row[1],
-                "label": row[2],
-                "poll_interval_minutes": row[3],
-                "trust_weight": row[4],
-            }
-            for row in rows
-        ]
+        sources: list[dict[str, Any]] = []
+        for row in rows:
+            last_polled_raw: datetime | None = row[5]
+            poll_interval_minutes: int = row[3]
+            # DuckDB TIMESTAMP is naive — assume UTC and attach tzinfo so the
+            # serialised value preserves the "+00:00" offset downstream.
+            last_polled_at: datetime | None = None
+            if last_polled_raw is not None:
+                last_polled_at = (
+                    last_polled_raw.replace(tzinfo=UTC)
+                    if last_polled_raw.tzinfo is None
+                    else last_polled_raw.astimezone(UTC)
+                )
+            last_polled_iso: str | None = (
+                last_polled_at.isoformat() if last_polled_at is not None else None
+            )
+            next_poll_at: str | None = (
+                (last_polled_at + timedelta(minutes=poll_interval_minutes)).isoformat()
+                if last_polled_at is not None
+                else None
+            )
+            sources.append(
+                {
+                    "url": row[0],
+                    "source_type": row[1],
+                    "label": row[2],
+                    "poll_interval_minutes": poll_interval_minutes,
+                    "trust_weight": row[4],
+                    "last_polled_at": last_polled_iso,
+                    "last_item_count": row[6] if row[6] is not None else 0,
+                    "last_error": row[7],
+                    "next_poll_at": next_poll_at,
+                }
+            )
+        return sources
 
     def _sync_add_feed_source(
         self,
@@ -2022,6 +2081,39 @@ class DuckDBStore:
         result = self._conn.execute("DELETE FROM feed_sources WHERE url = ? RETURNING url", [url])
         return len(result.fetchall()) > 0
 
+    # Maximum length of a persisted ``last_error`` string.  Longer errors are
+    # truncated to keep the liveness payload small and to avoid storing
+    # sensitive traceback fragments verbatim.
+    _LAST_ERROR_MAX_LEN = 200
+
+    def _sync_record_poll_status(
+        self,
+        url: str,
+        *,
+        polled_at: datetime,
+        item_count: int,
+        error: str | None,
+    ) -> bool:
+        """Persist the outcome of a poll against a feed source.
+
+        Stores *polled_at*, *item_count*, and a truncated+sanitised *error*
+        (or ``NULL``) on the matching ``feed_sources`` row.  Returns
+        ``True`` when a row was updated, ``False`` when no source with
+        *url* exists.
+        """
+        assert self._conn is not None
+        item_count_int = int(item_count)
+        if item_count_int < 0:
+            raise ValueError(f"item_count must be non-negative, got: {item_count_int}")
+        truncated = _sanitise_last_error(error, self._LAST_ERROR_MAX_LEN)
+        result = self._conn.execute(
+            "UPDATE feed_sources "
+            "SET last_polled_at = ?, last_item_count = ?, last_error = ? "
+            "WHERE url = ? RETURNING url",
+            [polled_at, item_count_int, truncated, url],
+        )
+        return len(result.fetchall()) > 0
+
     async def list_feed_sources(self) -> list[dict[str, Any]]:
         """Return all persisted feed sources as dicts."""
         return await asyncio.to_thread(self._sync_list_feed_sources)
@@ -2042,6 +2134,35 @@ class DuckDBStore:
     async def remove_feed_source(self, url: str) -> bool:
         """Remove a feed source by URL. Returns True if it existed."""
         return await asyncio.to_thread(self._sync_remove_feed_source, url)
+
+    async def record_poll_status(
+        self,
+        url: str,
+        *,
+        polled_at: datetime,
+        item_count: int,
+        error: str | None,
+    ) -> bool:
+        """Record the outcome of a poll against a feed source.
+
+        Args:
+            url: The feed source URL (primary key).
+            polled_at: UTC timestamp of the poll attempt.
+            item_count: Items successfully ingested during the poll.
+            error: Error message when the poll failed, or ``None`` on success.
+                The value is truncated and sanitised before persistence.
+
+        Returns:
+            ``True`` if a matching row was updated, ``False`` if no source
+            with *url* exists.
+        """
+        return await asyncio.to_thread(
+            self._sync_record_poll_status,
+            url,
+            polled_at=polled_at,
+            item_count=item_count,
+            error=error,
+        )
 
     # ------------------------------------------------------------------
     # Metadata helpers
