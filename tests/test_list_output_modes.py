@@ -315,3 +315,93 @@ class TestAggregate:
         by_author = {g["value"]: g["count"] for g in data["groups"]}
         assert by_author.get("alice") == 3
         assert by_author.get("bob") == 2
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: feed_url filter (issue #309)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestListFeedUrlFilter:
+    """Verify distillery_list(feed_url=...) matches metadata.source_url.
+
+    Regression test for issue #309: the feed poller persists each ingested
+    item with ``metadata.source_url == <registry url>`` but leaves
+    ``Entry.source == "import"``.  Callers filtering by ``source=<url>``
+    therefore got zero results even when hundreds of items had been polled
+    from that feed.  The new ``feed_url`` parameter translates to a
+    ``metadata.source_url`` filter so callers can retrieve every ingested
+    item for a registered feed.
+    """
+
+    async def test_feed_url_filters_to_matching_entries(self, populated_store) -> None:
+        result = await _handle_list(
+            store=populated_store,
+            arguments={
+                "limit": 10,
+                "feed_url": "https://github.com/org/repo",
+            },
+        )
+        data = parse_mcp_response(result)
+        assert not data.get("error"), data
+        assert data["count"] == 2
+        assert data["total_count"] == 2
+        for entry in data["entries"]:
+            assert entry["metadata"]["source_url"] == "https://github.com/org/repo"
+
+    async def test_feed_url_different_url_returns_only_that_feed(self, populated_store) -> None:
+        result = await _handle_list(
+            store=populated_store,
+            arguments={
+                "limit": 10,
+                "feed_url": "https://example.com/rss",
+            },
+        )
+        data = parse_mcp_response(result)
+        assert data["count"] == 1
+        assert data["total_count"] == 1
+        assert data["entries"][0]["metadata"]["source_url"] == "https://example.com/rss"
+
+    async def test_feed_url_no_match_returns_empty(self, populated_store) -> None:
+        result = await _handle_list(
+            store=populated_store,
+            arguments={
+                "limit": 10,
+                "feed_url": "https://nowhere.example.com/feed",
+            },
+        )
+        data = parse_mcp_response(result)
+        assert data["count"] == 0
+        assert data["total_count"] == 0
+        assert data["entries"] == []
+
+    async def test_feed_url_combines_with_entry_type(self, populated_store) -> None:
+        # feed_url must be AND-combined with other filters, not replace them.
+        result = await _handle_list(
+            store=populated_store,
+            arguments={
+                "limit": 10,
+                "feed_url": "https://github.com/org/repo",
+                "entry_type": "feed",
+            },
+        )
+        data = parse_mcp_response(result)
+        assert data["count"] == 2
+        for entry in data["entries"]:
+            assert entry["entry_type"] == "feed"
+            assert entry["metadata"]["source_url"] == "https://github.com/org/repo"
+
+    async def test_source_filter_unchanged_semantics(self, populated_store) -> None:
+        # Regression guard: source=<url> must NOT magically match feed items.
+        # It still filters by EntrySource column (claude-code, manual, import, …).
+        result = await _handle_list(
+            store=populated_store,
+            arguments={
+                "limit": 10,
+                "source": "https://github.com/org/repo",
+            },
+        )
+        data = parse_mcp_response(result)
+        # No entry's `source` column equals this URL, so the count is 0.
+        assert data["count"] == 0
