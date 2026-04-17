@@ -278,12 +278,17 @@ class HttpRateLimitConfig:
         trust_proxy: When ``True``, prefer ``X-Forwarded-For`` for client IP
             extraction.  Enable when running behind a reverse proxy (Fly.io,
             nginx, Cloudflare).
+        loopback_exempt: When ``True`` (default), skip rate limiting for
+            requests from loopback addresses (``127.0.0.1``, ``::1``,
+            ``localhost``).  This prevents local concurrent workflows from
+            being starved by the shared per-IP bucket.
     """
 
     requests_per_minute: int = 60
     requests_per_hour: int = 600
     max_body_bytes: int = 1_048_576  # 1 MB
     trust_proxy: bool = False
+    loopback_exempt: bool = True
     cors_allowed_origins: list[str] = field(default_factory=list)
 
 
@@ -759,6 +764,74 @@ def _parse_rate_limit(raw: dict[str, Any]) -> RateLimitConfig:
     )
 
 
+def _parse_http_rate_limit(rl_raw: dict[str, Any]) -> HttpRateLimitConfig:
+    """Parse ``server.http_rate_limit`` with strict boolean validation."""
+    trust_proxy_raw = rl_raw.get("trust_proxy", False)
+    if not isinstance(trust_proxy_raw, bool):
+        raise ValueError(
+            f"server.http_rate_limit.trust_proxy must be a boolean, got: {trust_proxy_raw!r}"
+        )
+
+    loopback_exempt_raw = rl_raw.get("loopback_exempt", True)
+    if not isinstance(loopback_exempt_raw, bool):
+        raise ValueError(
+            f"server.http_rate_limit.loopback_exempt must be a boolean, got: {loopback_exempt_raw!r}"
+        )
+
+    requests_per_minute = _parse_strict_int(
+        rl_raw.get("requests_per_minute", 60),
+        "server.http_rate_limit.requests_per_minute",
+    )
+    if requests_per_minute <= 0:
+        raise ValueError(
+            f"server.http_rate_limit.requests_per_minute must be > 0, got: {requests_per_minute}"
+        )
+
+    requests_per_hour = _parse_strict_int(
+        rl_raw.get("requests_per_hour", 600),
+        "server.http_rate_limit.requests_per_hour",
+    )
+    if requests_per_hour <= 0:
+        raise ValueError(
+            f"server.http_rate_limit.requests_per_hour must be > 0, got: {requests_per_hour}"
+        )
+
+    max_body_bytes = _parse_strict_int(
+        rl_raw.get("max_body_bytes", 1_048_576),
+        "server.http_rate_limit.max_body_bytes",
+    )
+    if max_body_bytes <= 0:
+        raise ValueError(
+            f"server.http_rate_limit.max_body_bytes must be > 0, got: {max_body_bytes}"
+        )
+
+    cors_origins_raw = rl_raw.get("cors_allowed_origins", []) or []
+    if not isinstance(cors_origins_raw, list):
+        raise ValueError("server.http_rate_limit.cors_allowed_origins must be a YAML list")
+    cors_allowed_origins = [str(o).strip() for o in cors_origins_raw if str(o).strip()]
+
+    return HttpRateLimitConfig(
+        requests_per_minute=requests_per_minute,
+        requests_per_hour=requests_per_hour,
+        max_body_bytes=max_body_bytes,
+        trust_proxy=trust_proxy_raw,
+        loopback_exempt=loopback_exempt_raw,
+        cors_allowed_origins=cors_allowed_origins,
+    )
+
+
+def _parse_webhooks(webhooks_raw: dict[str, Any]) -> WebhookConfig:
+    """Parse ``server.webhooks`` with strict boolean validation."""
+    enabled_raw = webhooks_raw.get("enabled", True)
+    if not isinstance(enabled_raw, bool):
+        raise ValueError(f"server.webhooks.enabled must be a boolean, got: {enabled_raw!r}")
+
+    return WebhookConfig(
+        enabled=enabled_raw,
+        secret_env=str(webhooks_raw.get("secret_env", "DISTILLERY_WEBHOOK_SECRET")),
+    )
+
+
 def _parse_server(raw: dict[str, Any]) -> ServerConfig:
     """Parse the ``server`` section from a raw YAML mapping.
 
@@ -807,11 +880,6 @@ def _parse_server(raw: dict[str, Any]) -> ServerConfig:
         ttl_raw, "server.auth.membership_cache_ttl_seconds"
     )
 
-    cors_origins_raw = rl_raw.get("cors_allowed_origins", []) or []
-    if not isinstance(cors_origins_raw, list):
-        raise ValueError("server.http_rate_limit.cors_allowed_origins must be a YAML list")
-    cors_allowed_origins = [str(o).strip() for o in cors_origins_raw if str(o).strip()]
-
     return ServerConfig(
         auth=ServerAuthConfig(
             provider=str(auth_raw.get("provider", "none")),
@@ -820,17 +888,8 @@ def _parse_server(raw: dict[str, Any]) -> ServerConfig:
             allowed_orgs=allowed_orgs,
             membership_cache_ttl_seconds=membership_cache_ttl_seconds,
         ),
-        http_rate_limit=HttpRateLimitConfig(
-            requests_per_minute=int(rl_raw.get("requests_per_minute", 60)),
-            requests_per_hour=int(rl_raw.get("requests_per_hour", 600)),
-            max_body_bytes=int(rl_raw.get("max_body_bytes", 1_048_576)),
-            trust_proxy=bool(rl_raw.get("trust_proxy", False)),
-            cors_allowed_origins=cors_allowed_origins,
-        ),
-        webhooks=WebhookConfig(
-            enabled=bool(webhooks_raw.get("enabled", True)),
-            secret_env=str(webhooks_raw.get("secret_env", "DISTILLERY_WEBHOOK_SECRET")),
-        ),
+        http_rate_limit=_parse_http_rate_limit(rl_raw),
+        webhooks=_parse_webhooks(webhooks_raw),
     )
 
 

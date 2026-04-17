@@ -200,6 +200,7 @@ def main(argv: list[str] | None = None) -> int:
                 requests_per_hour=rl.requests_per_hour,
                 max_body_bytes=rl.max_body_bytes,
                 trust_proxy=rl.trust_proxy,
+                loopback_exempt=rl.loopback_exempt,
                 org_checker=org_checker,
                 audit_callback=_auth_audit_cb,
             )
