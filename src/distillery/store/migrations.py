@@ -290,6 +290,13 @@ def create_fts_index(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
         logger.info("Migration 7: FTS extension loaded and index created on entries.content")
     except duckdb.IOException as exc:
         # Extension install requires network access; gracefully degrade.
+        # ``INSTALL fts`` may leave the current transaction in an aborted state
+        # when it fails — rollback and begin a fresh transaction so the
+        # schema_version INSERT in run_pending_migrations can proceed.
+        with contextlib.suppress(Exception):
+            conn.execute("ROLLBACK")
+        with contextlib.suppress(Exception):
+            conn.execute("BEGIN TRANSACTION")
         kwargs["fts_available"] = False
         logger.warning("Migration 7: FTS extension install failed (offline?): %s", exc)
     except Exception:

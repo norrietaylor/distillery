@@ -884,11 +884,10 @@ def _derive_title(entry: Any) -> str:
 def _entry_to_summary_dict(entry: Any) -> dict[str, Any]:
     """Serialise *entry* as a compact summary (no full ``content``).
 
-    Returns the fields most useful for browsing — ``id``, derived ``title``,
-    ``entry_type``, ``tags``, ``project``, ``author``, ``created_at``, and a
-    short ``content_preview`` truncated to ``_SUMMARY_CONTENT_PREVIEW_CHARS``
-    characters (with an ellipsis when truncated).  Optional ``status``,
-    ``source``, and ``session_id`` are included when non-default.
+    Always returns: ``id``, derived ``title``, ``entry_type``, ``tags``,
+    ``project``, ``author``, ``created_at``, ``content_preview`` (truncated
+    to ``_SUMMARY_CONTENT_PREVIEW_CHARS`` characters with an ellipsis when
+    truncated), ``metadata``, and ``session_id``.
     """
     content: str = getattr(entry, "content", "") or ""
     if len(content) > _SUMMARY_CONTENT_PREVIEW_CHARS:
