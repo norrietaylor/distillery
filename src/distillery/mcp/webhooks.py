@@ -590,10 +590,15 @@ async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONRe
     )
 
 
+_DEFAULT_CLASSIFY_BATCH_LIMIT: int = 500
+"""Default maximum number of entries to classify in a single batch."""
+
+
 async def _run_classify_batch(
     state: dict[str, Any],
     entry_type: str = "inbox",
     mode: str | None = None,
+    limit: int = _DEFAULT_CLASSIFY_BATCH_LIMIT,
 ) -> JSONResponse:
     """Core classify-batch logic shared by ``/hooks/classify-batch`` route.
 
@@ -612,6 +617,8 @@ async def _run_classify_batch(
         mode: Classification mode — ``"llm"`` or ``"heuristic"``.  When
             ``None``, the value from ``config.classification.mode`` (falling
             back to ``"llm"``) is used.
+        limit: Maximum number of entries to classify in a single batch.
+            Defaults to :data:`_DEFAULT_CLASSIFY_BATCH_LIMIT` (500).
 
     Returns:
         JSON response ``{"ok": true, "data": {"classified": N,
@@ -631,18 +638,25 @@ async def _run_classify_batch(
         effective_mode = getattr(config.classification, "mode", "llm")
 
     logger.info(
-        "Webhook classify-batch: starting (entry_type=%r, mode=%r)",
+        "Webhook classify-batch: starting (entry_type=%r, mode=%r, limit=%d)",
         entry_type,
         effective_mode,
+        limit,
     )
 
     try:
         # Fetch entries awaiting classification.
         result = await store.list_entries(
             filters={"entry_type": entry_type, "status": EntryStatus.PENDING_REVIEW.value},
-            limit=500,
+            limit=limit,
             offset=0,
         )
+        if len(result if isinstance(result, list) else []) >= limit:
+            logger.warning(
+                "Webhook classify-batch: batch limit reached (%d entries) — "
+                "additional pending entries may exist; consider increasing the limit.",
+                limit,
+            )
         entries = result if isinstance(result, list) else []
 
         classified_count = 0
@@ -768,6 +782,7 @@ async def _handle_classify_batch(request: Request, state: dict[str, Any]) -> JSO
 
     - ``entry_type`` (default ``"inbox"``): filter entries by type.
     - ``mode`` (default from config): ``"llm"`` or ``"heuristic"``.
+    - ``limit`` (default 500): maximum number of entries to classify per batch.
 
     Args:
         request: The incoming Starlette request.
@@ -787,7 +802,19 @@ async def _handle_classify_batch(request: Request, state: dict[str, Any]) -> JSO
             status_code=400,
         )
 
-    return await _run_classify_batch(state, entry_type=entry_type, mode=mode)
+    # Parse optional limit query param.
+    limit_param: str | None = request.query_params.get("limit")
+    limit = _DEFAULT_CLASSIFY_BATCH_LIMIT
+    if limit_param is not None:
+        try:
+            limit = int(limit_param)
+        except (ValueError, TypeError):
+            return JSONResponse(
+                {"ok": False, "error": "limit query parameter must be an integer"},
+                status_code=400,
+            )
+
+    return await _run_classify_batch(state, entry_type=entry_type, mode=mode, limit=limit)
 
 
 # Mapping of endpoint names to their handler callables.

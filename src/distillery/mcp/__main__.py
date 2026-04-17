@@ -201,7 +201,6 @@ def main(argv: list[str] | None = None) -> int:
                 trust_proxy=rl.trust_proxy,
                 org_checker=org_checker,
                 audit_callback=_auth_audit_cb,
-                cors_allowed_origins=rl.cors_allowed_origins,
             )
 
             from starlette.types import ASGIApp, Receive, Scope, Send
