@@ -760,19 +760,37 @@ def _parse_http_rate_limit(rl_raw: dict[str, Any]) -> HttpRateLimitConfig:
             f"server.http_rate_limit.loopback_exempt must be a boolean, got: {loopback_exempt_raw!r}"
         )
 
+    requests_per_minute = _parse_strict_int(
+        rl_raw.get("requests_per_minute", 60),
+        "server.http_rate_limit.requests_per_minute",
+    )
+    if requests_per_minute <= 0:
+        raise ValueError(
+            f"server.http_rate_limit.requests_per_minute must be > 0, got: {requests_per_minute}"
+        )
+
+    requests_per_hour = _parse_strict_int(
+        rl_raw.get("requests_per_hour", 600),
+        "server.http_rate_limit.requests_per_hour",
+    )
+    if requests_per_hour <= 0:
+        raise ValueError(
+            f"server.http_rate_limit.requests_per_hour must be > 0, got: {requests_per_hour}"
+        )
+
+    max_body_bytes = _parse_strict_int(
+        rl_raw.get("max_body_bytes", 1_048_576),
+        "server.http_rate_limit.max_body_bytes",
+    )
+    if max_body_bytes <= 0:
+        raise ValueError(
+            f"server.http_rate_limit.max_body_bytes must be > 0, got: {max_body_bytes}"
+        )
+
     return HttpRateLimitConfig(
-        requests_per_minute=_parse_strict_int(
-            rl_raw.get("requests_per_minute", 60),
-            "server.http_rate_limit.requests_per_minute",
-        ),
-        requests_per_hour=_parse_strict_int(
-            rl_raw.get("requests_per_hour", 600),
-            "server.http_rate_limit.requests_per_hour",
-        ),
-        max_body_bytes=_parse_strict_int(
-            rl_raw.get("max_body_bytes", 1_048_576),
-            "server.http_rate_limit.max_body_bytes",
-        ),
+        requests_per_minute=requests_per_minute,
+        requests_per_hour=requests_per_hour,
+        max_body_bytes=max_body_bytes,
         trust_proxy=trust_proxy_raw,
         loopback_exempt=loopback_exempt_raw,
     )
