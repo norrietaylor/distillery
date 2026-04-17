@@ -82,9 +82,10 @@ def _sanitize_tag_segment(raw: str) -> str:
     """Return a tag segment that satisfies ``[a-z0-9][a-z0-9\\-]*``.
 
     Lowercases, replaces ``_`` and ``.`` (and any other disallowed characters)
-    with ``-``, collapses runs of ``-``, and trims leading/trailing hyphens
-    and digits-only leading characters as needed.  Returns an empty string
-    when the input cannot be coerced to a valid segment.
+    with ``-``, collapses runs of ``-``, and trims leading/trailing hyphens.
+    Digits are permitted in any position (including as the leading character)
+    because the tag schema accepts ``[a-z0-9]`` at the start.  Returns an
+    empty string when the input cannot be coerced to a valid segment.
     """
     if not raw:
         return ""
@@ -509,6 +510,9 @@ class GitHubSyncAdapter:
             "gh_number": number,
             "gh_url": html_url,
             "merged_at": merged_at,
+            # Persisted so ``_compute_backfill_updates`` can heal older entries
+            # that lost author attribution (see legacy_authors branch below).
+            "user_login": author,
         }
 
         return Entry(
