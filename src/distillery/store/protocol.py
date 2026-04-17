@@ -223,7 +223,9 @@ class DistilleryStore(Protocol):
         Parameters:
             filters: Optional metadata constraints. Supported keys:
                 ``entry_type``, ``author``, ``project``, ``tags`` (matches any
-                tag), ``status``, ``verification``, ``date_from``, ``date_to``.
+                tag), ``status`` (str or list[str] — a list matches any of the
+                listed statuses via SQL ``IN``), ``verification`` (one of
+                "unverified", "testing", "verified"), ``date_from``, ``date_to``.
             limit: Maximum number of entries (or groups) to return.
             offset: Number of entries to skip for pagination (ignored in
                 group_by / stats modes).
@@ -242,6 +244,13 @@ class DistilleryStore(Protocol):
         Returns:
             ``list[Entry]`` in default mode; ``dict[str, Any]`` when
             *group_by* or *output="stats"* is supplied.
+
+        Notes:
+            This method performs no implicit status filtering. Callers that want
+            to exclude archived entries by default must pass
+            ``status=["active", "pending_review"]`` (or similar) explicitly. The
+            MCP ``distillery_list`` tool applies this default on behalf of the
+            caller.
         """
         ...
 

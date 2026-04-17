@@ -22,7 +22,10 @@ from distillery.mcp.tools._common import (
     validate_type,
 )
 from distillery.mcp.tools._errors import validate_limit
-from distillery.mcp.tools.crud import _build_filters_from_arguments
+from distillery.mcp.tools.crud import (
+    _apply_default_status_filter,
+    _build_filters_from_arguments,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +80,11 @@ async def _handle_search(
             return error_response("BUDGET_EXCEEDED", str(exc))
 
     filters = _build_filters_from_arguments(arguments)
+    filter_result = _apply_default_status_filter(filters, arguments)
+    if isinstance(filter_result, list):
+        # Error response from status-filter validation.
+        return filter_result
+    filters = filter_result
 
     try:
         search_results = await store.search(query=query, filters=filters, limit=limit)

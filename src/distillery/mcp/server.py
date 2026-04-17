@@ -561,11 +561,17 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         group_by: str | None = None,
         output: str | None = None,
         feed_url: str | None = None,
+        include_archived: bool = False,
     ) -> list[types.TextContent]:
         """List knowledge entries with optional filters and pagination (newest first).
 
         USE WHEN: browsing or filtering entries without a semantic query.
         Use distillery_search instead when you have a natural-language question.
+
+        By default, only entries with status in (active, pending_review) are
+        returned — archived entries are hidden. Pass ``status="archived"`` to
+        list only archived entries, ``status="any"`` to include every status,
+        or ``include_archived=true`` to add archived entries to the default view.
 
         PARAMS:
           - entry_type (str, optional): Filter by type. Valid: [session, bookmark, minutes,
@@ -573,7 +579,8 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
           - author (str, optional): Filter by author.
           - project (str, optional): Filter by project scope.
           - tags (list[str], optional): Filter by tags (AND match).
-          - status (str, optional): Filter by status. Valid: [active, pending_review, archived].
+          - status (str, optional): Filter by status. Valid: [active, pending_review,
+            archived, any]. Default hides archived; use "any" to include all.
           - verification (str, optional): Filter by verification. Valid: [unverified, testing, verified].
           - source (str, optional): Filter by origin. Valid: [claude-code, manual, import,
             inference, documentation, external].
@@ -599,6 +606,8 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
           - feed_url (str, optional): Filter to entries ingested from a registered feed
             source URL (matches metadata.source_url written by the poller). Use this to
             retrieve all items polled from e.g. "https://hnrss.org/frontpage".
+          - include_archived (bool, optional, default=False): Include archived entries
+            in the default view (same effect as status="any" when status is unset).
 
         RETURNS (success): { entries: list, count: int, total_count: int, limit: int, offset: int }
         RETURNS (error): { error: true, code: "INVALID_PARAMS" | "INTERNAL", message: "..." }
@@ -611,6 +620,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             limit=limit,
             offset=offset,
             output_mode=output_mode,
+            include_archived=include_archived,
             **_omit_none(
                 entry_type=entry_type,
                 author=author,
@@ -647,11 +657,18 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         date_to: str | None = None,
         limit: int = 10,
         tag_prefix: str | None = None,
+        include_archived: bool = False,
     ) -> list[types.TextContent]:
         """Search knowledge entries using semantic similarity (cosine distance, ranked descending).
 
         USE WHEN: finding entries that match a natural-language question or topic.
         Each result includes a similarity score (0-1, higher is more relevant).
+
+        By default, only entries with status in (active, pending_review) are
+        considered — archived entries are hidden. Pass ``status="archived"``
+        to search only archived entries, ``status="any"`` to include every
+        status, or ``include_archived=true`` to add archived entries to the
+        default candidate set.
 
         PARAMS:
           - query (str, required): Natural-language search query.
@@ -666,6 +683,8 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
           - date_to (str, optional): ISO 8601 upper bound.
           - limit (int, optional, default=10): Max results (1-200).
           - tag_prefix (str, optional): Filter tags by namespace prefix.
+          - include_archived (bool, optional, default=False): Include archived entries
+            in the candidate set.
 
         RETURNS (success): { results: [{ score: float, entry: {...} }], count: int }
         RETURNS (error): { error: true, code: "INVALID_PARAMS" | "BUDGET_EXCEEDED" | "INTERNAL", message: "..." }
@@ -677,6 +696,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         args: dict[str, Any] = dict(
             query=query,
             limit=limit,
+            include_archived=include_archived,
             **_omit_none(
                 entry_type=entry_type,
                 author=author,

@@ -125,14 +125,30 @@ DISTILLERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
     {
         "name": "distillery_list",
-        "description": "List entries without semantic ranking (newest first).",
+        "description": (
+            "List entries without semantic ranking (newest first). "
+            "Archived entries are hidden by default; pass include_archived=true "
+            "or status='any' to include them, or status='archived' to list only them."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "entry_type": {"type": "string"},
                 "author": {"type": "string"},
                 "project": {"type": "string"},
-                "status": {"type": "string"},
+                "status": {
+                    "type": "string",
+                    "description": (
+                        "Filter by status. Defaults to active + pending_review. "
+                        "Pass 'archived' for archived only, or 'any' for all statuses."
+                    ),
+                },
+                "include_archived": {
+                    "type": "boolean",
+                    "description": (
+                        "When true, include archived entries alongside the default set."
+                    ),
+                },
                 "limit": {"type": "integer", "description": "Max results (default 10)."},
                 "offset": {"type": "integer"},
                 "output_mode": {
