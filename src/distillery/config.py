@@ -769,6 +769,18 @@ def _parse_http_rate_limit(rl_raw: dict[str, Any]) -> HttpRateLimitConfig:
     )
 
 
+def _parse_webhooks(webhooks_raw: dict[str, Any]) -> WebhookConfig:
+    """Parse ``server.webhooks`` with strict boolean validation."""
+    enabled_raw = webhooks_raw.get("enabled", True)
+    if not isinstance(enabled_raw, bool):
+        raise ValueError(f"server.webhooks.enabled must be a boolean, got: {enabled_raw!r}")
+
+    return WebhookConfig(
+        enabled=enabled_raw,
+        secret_env=str(webhooks_raw.get("secret_env", "DISTILLERY_WEBHOOK_SECRET")),
+    )
+
+
 def _parse_server(raw: dict[str, Any]) -> ServerConfig:
     """Parse the ``server`` section from a raw YAML mapping.
 
@@ -826,10 +838,7 @@ def _parse_server(raw: dict[str, Any]) -> ServerConfig:
             membership_cache_ttl_seconds=membership_cache_ttl_seconds,
         ),
         http_rate_limit=_parse_http_rate_limit(rl_raw),
-        webhooks=WebhookConfig(
-            enabled=bool(webhooks_raw.get("enabled", True)),
-            secret_env=str(webhooks_raw.get("secret_env", "DISTILLERY_WEBHOOK_SECRET")),
-        ),
+        webhooks=_parse_webhooks(webhooks_raw),
     )
 
 
