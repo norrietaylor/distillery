@@ -233,11 +233,21 @@ class TestPluginMCPServers:
         server = manifest["mcpServers"]["distillery"]
         assert "url" in server
 
-    def test_distillery_server_url_is_fly_endpoint(self) -> None:
-        """The distillery server URL must point to the Fly.io hosted endpoint."""
+    def test_distillery_server_url_uses_user_config(self) -> None:
+        """The distillery server URL must reference the userConfig template variable.
+
+        ${user_config.<key>} interpolation is supported in mcpServers.*.url for
+        HTTP-type servers per the Claude Code plugin reference. Self-hosters override
+        the URL by setting the distillery_mcp_url userConfig field at plugin enable
+        time. The default resolves to the hosted Fly.io demo.
+        """
         manifest = load_plugin_manifest()
         server = manifest["mcpServers"]["distillery"]
-        assert server["url"] == "https://distillery-mcp.fly.dev/mcp"
+        assert server["url"] == "${user_config.distillery_mcp_url}"
+        assert (
+            manifest["userConfig"]["distillery_mcp_url"]["default"]
+            == "https://distillery-mcp.fly.dev/mcp"
+        )
 
     def test_distillery_server_no_unsupported_fields(self) -> None:
         """The distillery server must not contain fields unsupported by the plugin schema."""

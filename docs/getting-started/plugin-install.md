@@ -116,6 +116,8 @@ To configure manually, add to `~/.claude/settings.json`:
 
 Deploy your own Distillery server with GitHub OAuth. See [Operator Deployment](../team/deployment.md) for setup and the [distill_ops](https://github.com/norrietaylor/distill_ops) repo for platform-specific guides (Fly.io, Prefect Horizon).
 
+To point the plugin at your own instance, set the `distillery_mcp_url` plugin config field at enable time. Claude Code prompts for userConfig values when you enable the plugin, and the value is substituted into the plugin's MCP server registration automatically. Leave it at the default to use the hosted demo.
+
 ## Remote Auto-Poll Setup
 
 Enable remote auto-polling so feed sources are polled automatically even when Claude Code is not running. This uses Claude Code's scheduled remote agents (triggers).
