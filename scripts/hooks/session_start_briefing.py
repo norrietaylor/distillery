@@ -39,7 +39,29 @@ class ResolvedTransport:
     url: str = ""
     command: list[str] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
+    headers: dict[str, str] = field(default_factory=dict)
     source: str = ""
+
+
+def _normalize_mcp_url(url: str) -> tuple[str, str]:
+    """Normalize a base URL into canonical (mcp_url, health_url).
+
+    The MCP endpoint always ends with ``/mcp`` (no trailing slash) and the
+    health endpoint is its sibling ``/health``. If the input already ends with
+    ``/mcp`` or ``/health``, the base is derived accordingly; otherwise the
+    input is treated as a base and ``/mcp`` is appended.
+    """
+    stripped = url.rstrip("/")
+    if stripped.endswith("/mcp"):
+        mcp_url = stripped
+        base = stripped[: -len("/mcp")]
+    elif stripped.endswith("/health"):
+        base = stripped[: -len("/health")]
+        mcp_url = base + "/mcp"
+    else:
+        base = stripped
+        mcp_url = stripped + "/mcp"
+    return mcp_url, base + "/health"
 
 
 # ---------------------------------------------------------------------------
@@ -70,7 +92,13 @@ def _server_entry_to_transport(entry: dict[str, Any], source: str) -> ResolvedTr
     # HTTP (url-based or type: sse/streamable-http)
     url = entry.get("url", "")
     if url:
-        return ResolvedTransport(kind="http", url=url, source=source)
+        raw_headers = entry.get("headers") or {}
+        headers = (
+            {str(k): str(v) for k, v in raw_headers.items()}
+            if isinstance(raw_headers, dict)
+            else {}
+        )
+        return ResolvedTransport(kind="http", url=url, headers=headers, source=source)
 
     # stdio (command-based)
     cmd = entry.get("command", "")
@@ -135,7 +163,12 @@ def resolve_mcp_json(cwd: Path) -> ResolvedTransport | None:
 
 
 def resolve_claude_json_project(cwd: Path) -> ResolvedTransport | None:
-    """Step 4: ~/.claude.json -> projects[<cwd>].mcpServers."""
+    """Step 4: ~/.claude.json -> projects[<cwd>].mcpServers.
+
+    When cwd is nested under multiple configured project paths, the *deepest*
+    (longest) matching project wins so nested subprojects override their
+    parents.
+    """
     claude_json = Path.home() / ".claude.json"
     data = _read_json(claude_json)
     if not isinstance(data, dict):
@@ -143,15 +176,29 @@ def resolve_claude_json_project(cwd: Path) -> ResolvedTransport | None:
     projects = data.get("projects", {})
     if not isinstance(projects, dict):
         return None
-    cwd_str = str(cwd.resolve())
+    cwd_resolved = cwd.resolve()
+    best: tuple[int, str, dict[str, Any]] | None = None
     for project_path, project_data in projects.items():
-        if not isinstance(project_data, dict):
+        if not isinstance(project_data, dict) or not isinstance(project_path, str):
             continue
-        if cwd_str == project_path or cwd_str.startswith(project_path + "/"):
-            servers = project_data.get("mcpServers", {})
-            entry = _find_distillery_server(servers)
-            if entry is not None:
-                return _server_entry_to_transport(entry, f"~/.claude.json projects[{project_path}]")
+        try:
+            candidate = Path(project_path).resolve()
+        except (OSError, ValueError):
+            continue
+        try:
+            if not (cwd_resolved == candidate or cwd_resolved.is_relative_to(candidate)):
+                continue
+        except (OSError, ValueError):
+            continue
+        depth = len(candidate.parts)
+        if best is None or depth > best[0]:
+            best = (depth, project_path, project_data)
+    if best is not None:
+        _, project_path, project_data = best
+        servers = project_data.get("mcpServers", {})
+        entry = _find_distillery_server(servers)
+        if entry is not None:
+            return _server_entry_to_transport(entry, f"~/.claude.json projects[{project_path}]")
     return None
 
 
@@ -251,7 +298,12 @@ def resolve_transport(cwd: Path | None = None, bearer_token: str = "") -> Resolv
 # ---------------------------------------------------------------------------
 
 
-def _http_health_check(base_url: str, bearer_token: str = "", timeout: int = 2) -> bool:
+def _http_health_check(
+    base_url: str,
+    bearer_token: str = "",
+    timeout: int = 2,
+    transport_headers: dict[str, str] | None = None,
+) -> bool:
     """Probe an HTTP MCP transport for reachability.
 
     Performs ``GET /health`` first and then a minimal JSON-RPC POST to the
@@ -260,22 +312,21 @@ def _http_health_check(base_url: str, bearer_token: str = "", timeout: int = 2) 
     ``result`` or ``error``). Returns False on any failure, ensuring a healthy
     sidecar alone cannot mask a dead MCP endpoint.
     """
-    stripped = base_url.rstrip("/")
-    if stripped.endswith("/mcp"):
-        mcp_url = stripped
-        base = stripped[: -len("/mcp")]
-    elif stripped.endswith("/health"):
-        base = stripped[: -len("/health")]
-        mcp_url = base + "/mcp"
-    else:
-        base = stripped
-        mcp_url = stripped + "/mcp"
-    health_url = base + "/health"
+    mcp_url, health_url = _normalize_mcp_url(base_url)
+
+    def _merge(call_headers: dict[str, str]) -> dict[str, str]:
+        merged: dict[str, str] = {}
+        if transport_headers:
+            merged.update(transport_headers)
+        merged.update(call_headers)
+        if bearer_token and "Authorization" not in merged:
+            merged["Authorization"] = f"Bearer {bearer_token}"
+        return merged
 
     # Step 1: GET /health
     req = urllib.request.Request(health_url, method="GET")
-    if bearer_token:
-        req.add_header("Authorization", f"Bearer {bearer_token}")
+    for name, value in _merge({}).items():
+        req.add_header(name, value)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             if getattr(resp, "status", 200) >= 400:
@@ -293,10 +344,13 @@ def _http_health_check(base_url: str, bearer_token: str = "", timeout: int = 2) 
         }
     ).encode()
     mcp_req = urllib.request.Request(mcp_url, data=payload, method="POST")
-    mcp_req.add_header("Content-Type", "application/json")
-    mcp_req.add_header("Accept", "application/json, text/event-stream")
-    if bearer_token:
-        mcp_req.add_header("Authorization", f"Bearer {bearer_token}")
+    for name, value in _merge(
+        {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+        }
+    ).items():
+        mcp_req.add_header(name, value)
     try:
         with urllib.request.urlopen(mcp_req, timeout=timeout) as resp:
             status = getattr(resp, "status", 200)
@@ -324,8 +378,17 @@ def _http_call_tool(
     arguments: dict[str, Any],
     bearer_token: str = "",
     timeout: int = 10,
+    transport_headers: dict[str, str] | None = None,
 ) -> Any:
-    """JSON-RPC tools/call over HTTP."""
+    """JSON-RPC tools/call over HTTP.
+
+    ``url`` is normalized to the canonical ``/mcp`` endpoint so tool calls
+    always hit the MCP handler, never the health sidecar or bare base URL.
+    Per-call headers (``Content-Type``, ``Accept``, and bearer) override
+    matching ``transport_headers`` defaults.
+    """
+    mcp_url, _ = _normalize_mcp_url(url)
+
     payload = json.dumps(
         {
             "jsonrpc": "2.0",
@@ -335,10 +398,16 @@ def _http_call_tool(
         }
     ).encode()
 
-    req = urllib.request.Request(url, data=payload, method="POST")
-    req.add_header("Content-Type", "application/json")
+    req = urllib.request.Request(mcp_url, data=payload, method="POST")
+    merged: dict[str, str] = {}
+    if transport_headers:
+        merged.update(transport_headers)
+    merged["Content-Type"] = "application/json"
+    merged.setdefault("Accept", "application/json, text/event-stream")
     if bearer_token:
-        req.add_header("Authorization", f"Bearer {bearer_token}")
+        merged["Authorization"] = f"Bearer {bearer_token}"
+    for name, value in merged.items():
+        req.add_header(name, value)
 
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -499,7 +568,7 @@ def _stdio_health_check(
 def probe_transport(transport: ResolvedTransport, bearer_token: str = "") -> bool:
     """Verify that the resolved transport is actually reachable."""
     if transport.kind == "http":
-        return _http_health_check(transport.url, bearer_token)
+        return _http_health_check(transport.url, bearer_token, transport_headers=transport.headers)
     elif transport.kind == "stdio":
         return _stdio_health_check(transport.command, transport.env)
     return False
@@ -513,7 +582,13 @@ def call_tool(
 ) -> Any:
     """Call an MCP tool via the resolved transport."""
     if transport.kind == "http":
-        return _http_call_tool(transport.url, tool_name, arguments, bearer_token)
+        return _http_call_tool(
+            transport.url,
+            tool_name,
+            arguments,
+            bearer_token,
+            transport_headers=transport.headers,
+        )
     elif transport.kind == "stdio":
         return _stdio_call_tool(transport.command, tool_name, arguments, transport.env)
     return None

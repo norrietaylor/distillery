@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -528,3 +529,131 @@ class TestStdioSubprocess:
         script = "import sys\nwhile True:\n    if not sys.stdin.readline(): break\n"
         command = [sys.executable, "-c", script]
         assert briefing._stdio_call_tool(command, "noop", {}, timeout=1) is None
+
+
+# ---------------------------------------------------------------------------
+# CodeRabbit follow-ups: URL normalization, header passthrough, deepest project
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestNormalizeMcpUrl:
+    def test_bare_base_appends_mcp(self) -> None:
+        mcp_url, health_url = briefing._normalize_mcp_url("https://host.example/")
+        assert mcp_url == "https://host.example/mcp"
+        assert health_url == "https://host.example/health"
+
+    def test_already_mcp(self) -> None:
+        mcp_url, health_url = briefing._normalize_mcp_url("https://host.example/mcp")
+        assert mcp_url == "https://host.example/mcp"
+        assert health_url == "https://host.example/health"
+
+    def test_trailing_slash_on_mcp(self) -> None:
+        mcp_url, _ = briefing._normalize_mcp_url("https://host.example/mcp/")
+        assert mcp_url == "https://host.example/mcp"
+
+    def test_health_url_input(self) -> None:
+        mcp_url, health_url = briefing._normalize_mcp_url("https://host.example/health")
+        assert mcp_url == "https://host.example/mcp"
+        assert health_url == "https://host.example/health"
+
+
+@pytest.mark.unit
+class TestTransportHeaders:
+    def test_server_entry_preserves_headers(self) -> None:
+        entry = {
+            "url": "https://team.example/mcp",
+            "headers": {"X-Team-Token": "secret"},
+        }
+        transport = briefing._server_entry_to_transport(entry, "test")
+        assert transport is not None
+        assert transport.headers == {"X-Team-Token": "secret"}
+
+    def test_server_entry_missing_headers_is_empty(self) -> None:
+        transport = briefing._server_entry_to_transport({"url": "https://team.example/mcp"}, "test")
+        assert transport is not None
+        assert transport.headers == {}
+
+    def test_http_call_tool_merges_transport_headers(self) -> None:
+        captured: dict[str, Any] = {}
+
+        class _FakeResp:
+            status = 200
+
+            def read(self) -> bytes:
+                return b'{"jsonrpc":"2.0","id":1,"result":{}}'
+
+            def __enter__(self) -> _FakeResp:
+                return self
+
+            def __exit__(self, *_: Any) -> None:
+                return None
+
+        def fake_urlopen(req: Any, timeout: int = 10) -> _FakeResp:
+            captured["url"] = req.full_url
+            captured["headers"] = dict(req.header_items())
+            return _FakeResp()
+
+        with patch.object(briefing.urllib.request, "urlopen", fake_urlopen):
+            briefing._http_call_tool(
+                "https://team.example",
+                "ping",
+                {},
+                bearer_token="tok",
+                transport_headers={"X-Team-Token": "secret"},
+            )
+        assert captured["url"] == "https://team.example/mcp"
+        # header_items lowercases keys in urllib
+        headers = {k.lower(): v for k, v in captured["headers"].items()}
+        assert headers["x-team-token"] == "secret"
+        assert headers["authorization"] == "Bearer tok"
+        assert headers["content-type"] == "application/json"
+
+
+@pytest.mark.unit
+class TestDeepestProjectMatch:
+    def test_nested_subproject_wins(self, tmp_path: Path) -> None:
+        parent = tmp_path / "workspace"
+        child = parent / "packages" / "app"
+        child.mkdir(parents=True)
+
+        claude_json = tmp_path / "home" / ".claude.json"
+        claude_json.parent.mkdir(parents=True, exist_ok=True)
+        claude_json.write_text(
+            json.dumps(
+                {
+                    "projects": {
+                        str(parent): {
+                            "mcpServers": {"distillery": {"url": "http://parent-server/mcp"}}
+                        },
+                        str(child): {
+                            "mcpServers": {"distillery": {"url": "http://child-server/mcp"}}
+                        },
+                    }
+                }
+            )
+        )
+        with patch.object(Path, "home", return_value=tmp_path / "home"):
+            result = briefing.resolve_claude_json_project(child)
+        assert result is not None
+        assert result.url == "http://child-server/mcp"
+
+    def test_no_match_returns_none(self, tmp_path: Path) -> None:
+        other = tmp_path / "other"
+        other.mkdir()
+        claude_json = tmp_path / "home" / ".claude.json"
+        claude_json.parent.mkdir(parents=True, exist_ok=True)
+        claude_json.write_text(
+            json.dumps(
+                {
+                    "projects": {
+                        str(tmp_path / "elsewhere"): {
+                            "mcpServers": {"distillery": {"url": "http://x/mcp"}}
+                        }
+                    }
+                }
+            )
+        )
+        with patch.object(Path, "home", return_value=tmp_path / "home"):
+            result = briefing.resolve_claude_json_project(other)
+        assert result is None
