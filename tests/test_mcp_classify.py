@@ -879,3 +879,23 @@ class TestBatchClassificationFilters:
         assert data["count"] == 3
         returned_types = {e["entry_type"] for e in data["entries"]}
         assert returned_types == {"inbox", "github", "feed"}
+
+    async def test_batch_rejects_bare_batch(self, store: DuckDBStore) -> None:
+        """Regression: bare --batch (no filter flags) is rejected with an error.
+
+        Issue #301 contract: ``--batch`` without at least one filter flag must
+        be rejected.  Passing ``batch_mode=True`` with no filter arguments
+        triggers the server-side guard in ``_handle_list``, returning an error
+        response — preventing a classify-all-entries footgun.
+        """
+        bare_batch_args = {
+            "batch_mode": True,
+            "limit": 50,
+            "output_mode": "full",
+            "content_max_length": 300,
+        }
+        response = await _handle_list(store, bare_batch_args)
+        data = parse_mcp_response(response)
+        assert "error" in data
+        assert data["error"] is True
+        assert "At least one filter" in data["message"]

@@ -657,6 +657,14 @@ async def _handle_list(
 
     filters = _build_filters_from_arguments(arguments)
 
+    # batch_mode=True requires at least one filter to prevent a classify-all footgun.
+    if arguments.get("batch_mode") is True and filters is None:
+        return error_response(
+            "INVALID_PARAMS",
+            "At least one filter is required for --batch mode. "
+            "Provide source, entry_type, author, tag_prefix, project, or verification.",
+        )
+
     # review mode implicitly filters to pending_review status.
     if output_mode == "review":
         if filters is None:
