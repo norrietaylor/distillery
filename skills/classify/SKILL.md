@@ -67,7 +67,7 @@ Filters are composable with AND semantics. At least one filter is required when 
 
 1. Call `distillery_get` to retrieve the entry. If not found, tell the user to check the ID or use `/recall`.
 2. Analyse the content and determine:
-   - `entry_type`: best fit from `session`, `bookmark`, `minutes`, `meeting`, `reference`, `idea`, `inbox`
+   - `entry_type`: best fit from `session`, `bookmark`, `minutes`, `meeting`, `reference`, `idea`, `inbox`, `person`, `project`, `digest`, `github`, `feed`
    - `confidence`: 0.0–1.0 based on how clearly the content fits
    - `reasoning`: concise explanation
    - `suggested_tags`: 2–5 keywords

@@ -836,3 +836,46 @@ class TestBatchClassificationFilters:
         assert "error" not in data
         assert data["count"] == 1
         assert data["entries"][0]["entry_type"] == "inbox"
+
+    async def test_bare_batch_produces_no_filters(self, store: DuckDBStore) -> None:
+        """Regression: bare --batch (no filter flags) yields no server-side filters.
+
+        The skill-layer contract (issue #301, SKILL.md Mode C step 1) requires
+        the skill to reject bare ``--batch`` with "At least one filter is
+        required for --batch mode." This test locks down the underlying
+        primitive: when only the non-filter params (limit/output_mode/
+        content_max_length) are passed, ``_build_filters_from_arguments``
+        returns ``None`` and ``_handle_list`` returns *all* entries unbounded
+        by type/source/etc. — demonstrating why the skill MUST enforce the
+        rejection upstream (otherwise a classify-all-entries footgun exists).
+        """
+        from distillery.mcp.tools.crud import _build_filters_from_arguments
+
+        inbox = make_entry(content="Inbox item", entry_type=EntryType.INBOX)
+        github = make_entry(
+            content="Github item",
+            entry_type=EntryType.GITHUB,
+            metadata={"repo": "org/repo", "ref_type": "pr", "ref_number": 100},
+        )
+        feed = make_entry(
+            content="Feed item",
+            entry_type=EntryType.FEED,
+            metadata={"source_url": "https://example.com/feed", "source_type": "rss"},
+        )
+        await store.store(inbox)
+        await store.store(github)
+        await store.store(feed)
+
+        bare_batch_args = {"limit": 50, "output_mode": "full", "content_max_length": 300}
+
+        # 1. The filter builder returns None for bare-batch arguments.
+        assert _build_filters_from_arguments(bare_batch_args) is None
+
+        # 2. Since no filter is applied, _handle_list returns every entry —
+        #    which is why the skill layer must reject bare --batch upstream.
+        response = await _handle_list(store, bare_batch_args)
+        data = parse_mcp_response(response)
+        assert "error" not in data
+        assert data["count"] == 3
+        returned_types = {e["entry_type"] for e in data["entries"]}
+        assert returned_types == {"inbox", "github", "feed"}
