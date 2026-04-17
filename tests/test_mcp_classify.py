@@ -523,6 +523,182 @@ class TestResolveReviewTool:
         assert "error" not in data
         assert data["status"] == "active"
         assert "reviewed_by" not in data["metadata"]
+        assert "on_behalf_of" not in data["metadata"]
+
+    # ------------------------------------------------------------------
+    # Issue #315: actor + on-behalf-of tracking
+    # ------------------------------------------------------------------
+
+    async def test_resolve_approve_records_reviewer_on_behalf_of_actor(
+        self, store: DuckDBStore
+    ) -> None:
+        """When actor and reviewer differ, record both (issue #315)."""
+        entry = make_entry(status=EntryStatus.PENDING_REVIEW)
+        entry_id = await store.store(entry)
+
+        response = await _handle_resolve_review(
+            store,
+            {
+                "entry_id": entry_id,
+                "action": "approve",
+                "actor": "server-identity",
+                "reviewer": "uxtest-a4",
+            },
+        )
+        data = parse_mcp_response(response)
+        assert "error" not in data
+        assert data["metadata"]["reviewed_by"] == "server-identity"
+        assert data["metadata"]["on_behalf_of"] == "uxtest-a4"
+
+    async def test_resolve_approve_actor_only_no_on_behalf_of(self, store: DuckDBStore) -> None:
+        """Actor alone populates reviewed_by; on_behalf_of is not written."""
+        entry = make_entry(status=EntryStatus.PENDING_REVIEW)
+        entry_id = await store.store(entry)
+
+        response = await _handle_resolve_review(
+            store,
+            {
+                "entry_id": entry_id,
+                "action": "approve",
+                "actor": "server-identity",
+            },
+        )
+        data = parse_mcp_response(response)
+        assert data["metadata"]["reviewed_by"] == "server-identity"
+        assert "on_behalf_of" not in data["metadata"]
+
+    async def test_resolve_approve_actor_equals_reviewer_no_on_behalf_of(
+        self, store: DuckDBStore
+    ) -> None:
+        """When reviewer == actor, skip on_behalf_of (no self-delegation)."""
+        entry = make_entry(status=EntryStatus.PENDING_REVIEW)
+        entry_id = await store.store(entry)
+
+        response = await _handle_resolve_review(
+            store,
+            {
+                "entry_id": entry_id,
+                "action": "approve",
+                "actor": "alice",
+                "reviewer": "alice",
+            },
+        )
+        data = parse_mcp_response(response)
+        assert data["metadata"]["reviewed_by"] == "alice"
+        assert "on_behalf_of" not in data["metadata"]
+
+    async def test_resolve_approve_reviewer_only_falls_back_to_reviewed_by(
+        self, store: DuckDBStore
+    ) -> None:
+        """No actor (stdio transport): reviewer populates reviewed_by directly."""
+        entry = make_entry(status=EntryStatus.PENDING_REVIEW)
+        entry_id = await store.store(entry)
+
+        response = await _handle_resolve_review(
+            store,
+            {"entry_id": entry_id, "action": "approve", "reviewer": "uxtest-a4"},
+        )
+        data = parse_mcp_response(response)
+        assert data["metadata"]["reviewed_by"] == "uxtest-a4"
+        assert "on_behalf_of" not in data["metadata"]
+
+    async def test_resolve_archive_records_actor_and_on_behalf_of(self, store: DuckDBStore) -> None:
+        """Archive action honours both actor and reviewer (issue #315)."""
+        entry = make_entry(status=EntryStatus.PENDING_REVIEW)
+        entry_id = await store.store(entry)
+
+        response = await _handle_resolve_review(
+            store,
+            {
+                "entry_id": entry_id,
+                "action": "archive",
+                "actor": "server-identity",
+                "reviewer": "uxtest-a4",
+            },
+        )
+        data = parse_mcp_response(response)
+        assert data["status"] == "archived"
+        assert data["metadata"]["archived_by"] == "server-identity"
+        assert data["metadata"]["archived_on_behalf_of"] == "uxtest-a4"
+
+    async def test_resolve_archive_without_reviewer(self, store: DuckDBStore) -> None:
+        """Archive with actor only: no archived_on_behalf_of written."""
+        entry = make_entry(status=EntryStatus.PENDING_REVIEW)
+        entry_id = await store.store(entry)
+
+        response = await _handle_resolve_review(
+            store,
+            {
+                "entry_id": entry_id,
+                "action": "archive",
+                "actor": "server-identity",
+            },
+        )
+        data = parse_mcp_response(response)
+        assert data["metadata"]["archived_by"] == "server-identity"
+        assert "archived_on_behalf_of" not in data["metadata"]
+
+    async def test_resolve_reclassify_records_actor_and_on_behalf_of(
+        self, store: DuckDBStore
+    ) -> None:
+        """Reclassify honours actor + reviewer with reclassified_* fields."""
+        entry = make_entry(entry_type=EntryType.INBOX, status=EntryStatus.PENDING_REVIEW)
+        entry_id = await store.store(entry)
+
+        response = await _handle_resolve_review(
+            store,
+            {
+                "entry_id": entry_id,
+                "action": "reclassify",
+                "new_entry_type": "meeting",
+                "actor": "server-identity",
+                "reviewer": "uxtest-a4",
+            },
+        )
+        data = parse_mcp_response(response)
+        assert data["entry_type"] == "meeting"
+        assert data["metadata"]["reviewed_by"] == "server-identity"
+        assert data["metadata"]["reclassified_by"] == "server-identity"
+        assert data["metadata"]["on_behalf_of"] == "uxtest-a4"
+        assert data["metadata"]["reclassified_on_behalf_of"] == "uxtest-a4"
+
+    async def test_resolve_reclassify_without_reviewer(self, store: DuckDBStore) -> None:
+        """Reclassify with actor only: no on_behalf_of fields."""
+        entry = make_entry(entry_type=EntryType.INBOX, status=EntryStatus.PENDING_REVIEW)
+        entry_id = await store.store(entry)
+
+        response = await _handle_resolve_review(
+            store,
+            {
+                "entry_id": entry_id,
+                "action": "reclassify",
+                "new_entry_type": "meeting",
+                "actor": "server-identity",
+            },
+        )
+        data = parse_mcp_response(response)
+        assert data["metadata"]["reviewed_by"] == "server-identity"
+        assert data["metadata"]["reclassified_by"] == "server-identity"
+        assert "on_behalf_of" not in data["metadata"]
+        assert "reclassified_on_behalf_of" not in data["metadata"]
+
+    async def test_resolve_approve_ignores_empty_reviewer(self, store: DuckDBStore) -> None:
+        """Empty-string reviewer is treated as absent (no on_behalf_of)."""
+        entry = make_entry(status=EntryStatus.PENDING_REVIEW)
+        entry_id = await store.store(entry)
+
+        response = await _handle_resolve_review(
+            store,
+            {
+                "entry_id": entry_id,
+                "action": "approve",
+                "actor": "server-identity",
+                "reviewer": "",
+            },
+        )
+        data = parse_mcp_response(response)
+        assert data["metadata"]["reviewed_by"] == "server-identity"
+        assert "on_behalf_of" not in data["metadata"]
 
     async def test_resolve_reclassify_does_not_reactivate_archived_entry(
         self, store: DuckDBStore
