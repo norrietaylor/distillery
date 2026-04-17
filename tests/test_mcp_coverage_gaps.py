@@ -63,6 +63,7 @@ from tests.conftest import make_entry, parse_mcp_response
 
 pytestmark = pytest.mark.integration
 
+
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------

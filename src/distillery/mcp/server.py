@@ -862,6 +862,8 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         trust_weight: float | None = None,
         sync_history: bool = False,
         purge: bool = False,
+        probe: bool = True,
+        force: bool = False,
     ) -> list[types.TextContent]:
         """Manage monitored feed sources for ambient intelligence.
 
@@ -881,11 +883,18 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
           - purge (bool, optional, default=false): When true and action is "remove",
             archives all entries from the removed source (soft-delete). Returns the
             count of archived entries in purged_entries.
+          - probe (bool, optional, default=true): When adding, lightly probe the URL
+            for reachability (HEAD with GET fallback, short timeout). Returns an
+            UNREACHABLE_URL error if the probe fails.
+          - force (bool, optional, default=false): When adding, persist the source
+            even if the reachability probe fails (useful for sites that block HEAD
+            but work via the poller).
 
         RETURNS (success): { sources: list, count: int } (list) or
           { added: dict, sources: list, sync_job?: dict } (add) or
           { removed_url: str, removed: bool, sources: list, purged_entries?: int } (remove)
-        RETURNS (error): { error: true, code: "INVALID_PARAMS" | "CONFLICT" | "INTERNAL", message: "..." }
+        RETURNS (error): { error: true, code: "INVALID_PARAMS" | "CONFLICT" | "INVALID_URL"
+          | "UNREACHABLE_URL" | "INTERNAL", message: "..." }
 
         RELATED: distillery_interests (to discover sources to watch),
         distillery_configure (to adjust feed thresholds),
@@ -896,6 +905,8 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             store=c["store"],
             arguments=dict(
                 action=action,
+                probe=probe,
+                force=force,
                 **_omit_none(
                     url=url,
                     source_type=source_type,

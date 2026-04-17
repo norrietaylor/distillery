@@ -20,6 +20,7 @@ import logging
 import os
 import re
 from typing import Any
+from urllib.parse import urlparse
 
 from mcp import types
 
@@ -36,6 +37,110 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _VALID_SOURCE_TYPES = {"rss", "github"}
+
+# Probe timeout for reachability checks (seconds). Kept short so that a slow
+# host does not stall the MCP tool call.
+_PROBE_TIMEOUT_SECONDS = 3.0
+
+# GitHub owner/repo slug pattern — used by the GitHub adapter in place of a
+# full URL. Accepts the same characters as GitHub (alphanumerics, hyphen,
+# underscore, period).
+_GITHUB_SLUG_RE = re.compile(r"^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$")
+
+
+def _validate_url_syntax(url: str, source_type: str) -> str | None:
+    """Return an error message if *url* is not syntactically valid, else ``None``.
+
+    For ``source_type == "github"`` a bare ``owner/repo`` slug is also accepted
+    because the GitHub adapter uses slugs as source identifiers.
+
+    Args:
+        url: The candidate URL (pre-stripped).
+        source_type: Either ``"rss"`` or ``"github"``.
+
+    Returns:
+        A human-readable error string, or ``None`` when validation passes.
+    """
+    if source_type == "github" and _GITHUB_SLUG_RE.match(url):
+        return None
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return (
+            f"url must use http or https scheme, got: {url!r}. "
+            "Expected a URL like 'https://example.com/rss'."
+        )
+    if not parsed.netloc:
+        return f"url is missing a host (netloc), got: {url!r}"
+    return None
+
+
+async def _probe_url(url: str) -> str | None:
+    """Attempt a single lightweight reachability check against *url*.
+
+    Tries ``HEAD`` first and falls back to ``GET`` when the server responds
+    with 405 Method Not Allowed or 501 Not Implemented (some hosts reject
+    HEAD) or when HEAD itself raises. Returns ``None`` on success (any
+    non-5xx response counts as reachable), or a short **generic** error
+    string describing the failure. Exception details are logged
+    server-side and deliberately kept out of the returned value.
+
+    Args:
+        url: The URL to probe. Must already be syntactically valid.
+
+    Returns:
+        ``None`` if the probe succeeded, otherwise a generic error string.
+    """
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=_PROBE_TIMEOUT_SECONDS, follow_redirects=True
+        ) as client:
+            try:
+                response = await client.head(url)
+            except httpx.HTTPError:
+                logger.info("Probe HEAD %s raised; falling back to GET", url, exc_info=True)
+                response = await client.get(url)
+            else:
+                # Some hosts return 405/501 on HEAD — fall back to GET.
+                if response.status_code in (405, 501):
+                    response = await client.get(url)
+    except httpx.TimeoutException:
+        logger.warning("Probe timed out for %s", url, exc_info=True)
+        return f"Probe timed out after {_PROBE_TIMEOUT_SECONDS:.0f}s"
+    except httpx.HTTPError:
+        logger.warning("Probe failed for %s", url, exc_info=True)
+        return "Probe failed"
+    except Exception:  # noqa: BLE001 — defensive; httpx is strict but be safe
+        logger.exception("Probe unexpectedly raised for %s", url)
+        return "Probe failed"
+
+    if response.status_code >= 500:
+        return f"Probe returned server error: HTTP {response.status_code}"
+    return None
+
+
+def _parse_bool_arg(raw: Any, *, default: bool) -> bool:
+    """Parse a boolean argument without silently accepting malformed input.
+
+    Accepts real booleans, the canonical strings ``"true"``/``"false"`` /
+    ``"1"``/``"0"`` (case-insensitive), and falls back to *default* for
+    ``None``. Anything else raises ``ValueError`` so the caller can return
+    a structured INVALID_PARAMS error rather than coercing via ``bool()``
+    (which treats ``"false"``/``"0"`` as truthy).
+    """
+    if raw is None:
+        return default
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, str):
+        lowered = raw.strip().lower()
+        if lowered in {"true", "1", "yes"}:
+            return True
+        if lowered in {"false", "0", "no"}:
+            return False
+    raise ValueError(f"Expected a boolean, got {raw!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +248,40 @@ async def _handle_watch(
 
         sync_history = bool(arguments.get("sync_history", False))
 
+        # ------------------------------------------------------------------
+        # URL syntax validation.
+        # ------------------------------------------------------------------
+        syntax_error = _validate_url_syntax(url, source_type)
+        if syntax_error is not None:
+            return error_response("INVALID_URL", syntax_error)
+
+        # ------------------------------------------------------------------
+        # Optional reachability probe.
+        # ``probe`` defaults to True so that unreachable URLs are caught at
+        # registration time. ``force=True`` persists even when the probe
+        # fails (useful for feeds that block HEAD/GET from unknown UAs).
+        # GitHub owner/repo slugs are not probed because they are not URLs.
+        # ------------------------------------------------------------------
+        try:
+            probe = _parse_bool_arg(arguments.get("probe"), default=True)
+            force = _parse_bool_arg(arguments.get("force"), default=False)
+        except ValueError as exc:
+            return error_response("INVALID_PARAMS", str(exc))
+        probe_is_url = not (source_type == "github" and _GITHUB_SLUG_RE.match(url))
+        probe_error: str | None = None
+        if probe and probe_is_url:
+            probe_error = await _probe_url(url)
+            if probe_error is not None and not force:
+                return error_response(
+                    "UNREACHABLE_URL",
+                    (
+                        f"URL {url!r} failed reachability probe: {probe_error}. "
+                        "Re-run with force=True to persist anyway, "
+                        "or probe=False to skip the probe."
+                    ),
+                    details={"last_error": probe_error, "url": url},
+                )
+
         try:
             added = await store.add_feed_source(
                 url=url,
@@ -160,6 +299,13 @@ async def _handle_watch(
         except Exception as exc:  # noqa: BLE001
             logger.exception("distillery_watch: failed to add feed source")
             return error_response("INTERNAL", f"Failed to add feed source: {exc}")
+
+        # Surface probe failure context on forced adds so operators can see
+        # why the probe was overridden.  Durable persistence onto the
+        # ``feed_sources`` row is added by issue #310 (which introduces the
+        # ``last_error`` column and ``record_poll_status`` API).
+        if probe_error is not None and force:
+            added = {**added, "probe_error": probe_error, "forced": True}
 
         response_data: dict[str, Any] = {
             "added": added,
