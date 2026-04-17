@@ -547,7 +547,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         limit: int = 20,
         offset: int = 0,
         tag_prefix: str | None = None,
-        output_mode: str = "full",
+        output_mode: str = "summary",
         content_max_length: int | None = None,
         stale_days: int | None = None,
         group_by: str | None = None,
@@ -575,9 +575,12 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
           - limit (int, optional, default=20): Max entries to return (1-500).
           - offset (int, optional, default=0): Pagination offset.
           - tag_prefix (str, optional): Filter tags by namespace prefix.
-          - output_mode (str, optional, default="full"): Response shape.
-            Valid: [full, summary, ids, review]. "review" filters to pending_review
-            and enriches with confidence/classification_reasoning.
+          - output_mode (str, optional, default="summary"): Response shape.
+            Valid: [full, summary, ids, review]. "summary" returns id/title/tags/project/
+            author/created_at plus a ~200-char content_preview (default — keeps responses
+            small to conserve context). "full" returns entire content body. "ids" returns
+            id/entry_type/created_at only. "review" filters to pending_review and enriches
+            with confidence/classification_reasoning.
           - content_max_length (int, optional): Truncate content to N chars (full mode only).
           - stale_days (int, optional): Restrict to entries not accessed in N days (>= 1).
           - group_by (str, optional): Return grouped counts instead of entries.

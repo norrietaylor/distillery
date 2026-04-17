@@ -137,7 +137,13 @@ DISTILLERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
                 "offset": {"type": "integer"},
                 "output_mode": {
                     "type": "string",
-                    "description": "Output mode: 'full' (default), 'summary' (no content), 'ids'.",
+                    "description": (
+                        "Output mode: 'summary' (default — id/title/tags/project/author/"
+                        "created_at plus a ~200-char content_preview), 'full' (entire "
+                        "content body), 'ids' (id/entry_type/created_at only), 'review' "
+                        "(entries needing review/classification — filters to pending_review "
+                        "status and enriches with confidence/classification_reasoning)."
+                    ),
                 },
                 "content_max_length": {
                     "type": "integer",

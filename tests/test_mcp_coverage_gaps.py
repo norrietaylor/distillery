@@ -606,7 +606,9 @@ class TestListGaps:
         long_content = "x" * 500
         entry = make_entry(content=long_content)
         await store.store(entry)
-        response = await _handle_list(store, {"content_max_length": 10})
+        # content_max_length applies to output_mode="full"; pass it explicitly
+        # since the default is now "summary" (issue #311).
+        response = await _handle_list(store, {"content_max_length": 10, "output_mode": "full"})
         data = parse_mcp_response(response)
         assert data["count"] >= 1
         for e in data["entries"]:

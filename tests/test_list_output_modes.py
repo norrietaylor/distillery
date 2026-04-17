@@ -85,13 +85,21 @@ class TestListOutputModes:
         data = parse_mcp_response(result)
         assert data["output_mode"] == "summary"
         assert all("content" not in e for e in data["entries"])
-        # Other fields should still be present
+        # Summary shape — issue #311 — assert exact keyset so stray fields
+        # are caught as well as missing ones.
         for entry in data["entries"]:
-            assert "id" in entry
-            assert "entry_type" in entry
-            assert "created_at" in entry
-            assert "metadata" in entry
-            assert "tags" in entry
+            assert set(entry.keys()) == {
+                "id",
+                "title",
+                "entry_type",
+                "tags",
+                "project",
+                "author",
+                "created_at",
+                "content_preview",
+                "metadata",
+                "session_id",
+            }
 
     async def test_ids_mode_minimal_fields(self, populated_store) -> None:
         result = await _handle_list(
@@ -146,13 +154,14 @@ class TestListOutputModes:
         assert not data.get("error")
         assert all("content" not in e for e in data["entries"])
 
-    async def test_default_mode_is_full(self, store) -> None:
+    async def test_default_mode_is_summary(self, store) -> None:
         entry = make_entry(content="Hello world")
         await store.store(entry)
         result = await _handle_list(store=store, arguments={"limit": 5})
         data = parse_mcp_response(result)
-        assert data["output_mode"] == "full"
-        assert any("content" in e for e in data["entries"])
+        assert data["output_mode"] == "summary"
+        assert all("content" not in e for e in data["entries"])
+        assert any("content_preview" in e for e in data["entries"])
 
     async def test_content_max_length_invalid_type_returns_error(self, store) -> None:
         result = await _handle_list(

@@ -865,12 +865,60 @@ async def _handle_update(
 _VALID_OUTPUT_MODES = frozenset({"full", "summary", "ids", "review"})
 _VALID_GROUP_BY_VALUES = frozenset({"entry_type", "status", "author", "project", "source", "tags"})
 
+# Summary-mode content preview length (characters).  Chosen to keep each
+# entry ~300-500 bytes so a full ``distillery_list(limit=50)`` fits in a
+# few tens of KB rather than hundreds.
+_SUMMARY_CONTENT_PREVIEW_CHARS = 200
+
+# Maximum character length for derived titles in summary mode.
+_SUMMARY_TITLE_CHARS = 120
+
+
+def _derive_title(entry: Any) -> str:
+    """Return a short title for *entry* — the ``title`` metadata key if present,
+    otherwise the first non-empty line of ``content`` (trimmed to
+    ``_SUMMARY_TITLE_CHARS`` characters)."""
+    md_title = entry.metadata.get("title") if isinstance(entry.metadata, dict) else None
+    if isinstance(md_title, str) and md_title.strip():
+        return md_title.strip()[:_SUMMARY_TITLE_CHARS]
+    content = getattr(entry, "content", "") or ""
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped:
+            return stripped[:_SUMMARY_TITLE_CHARS]
+    return ""
+
 
 def _entry_to_summary_dict(entry: Any) -> dict[str, Any]:
-    """Serialise *entry* without the ``content`` field (summary mode)."""
-    d: dict[str, Any] = entry.to_dict()
-    d.pop("content", None)
-    return d
+    """Serialise *entry* as a compact summary (no full ``content``).
+
+    Always returns: ``id``, derived ``title``, ``entry_type``, ``tags``,
+    ``project``, ``author``, ``created_at``, ``content_preview`` (truncated
+    to ``_SUMMARY_CONTENT_PREVIEW_CHARS`` characters with an ellipsis when
+    truncated), ``metadata``, and ``session_id``.
+    """
+    content: str = getattr(entry, "content", "") or ""
+    if len(content) > _SUMMARY_CONTENT_PREVIEW_CHARS:
+        preview = content[:_SUMMARY_CONTENT_PREVIEW_CHARS] + "…"
+    else:
+        preview = content
+
+    summary: dict[str, Any] = {
+        "id": entry.id,
+        "title": _derive_title(entry),
+        "entry_type": entry.entry_type.value,
+        "tags": list(entry.tags),
+        "project": entry.project,
+        "author": entry.author,
+        "created_at": entry.created_at.isoformat(),
+        "content_preview": preview,
+        # Metadata is retained (not the full content body) because callers frequently
+        # need identifiers like ``external_id`` / ``source_url`` for dedup.  It is
+        # typically <1 KB per entry.
+        "metadata": dict(entry.metadata) if isinstance(entry.metadata, dict) else {},
+        "session_id": entry.session_id,
+    }
+    return summary
 
 
 def _entry_to_id_dict(entry: Any) -> dict[str, Any]:
@@ -913,7 +961,7 @@ async def _handle_list(
     if offset < 0:
         return error_response("INVALID_PARAMS", "Field 'offset' must be >= 0")
 
-    output_mode = arguments.get("output_mode", "full")
+    output_mode = arguments.get("output_mode", "summary")
     err_output_mode = validate_type(arguments, "output_mode", str, "string")
     if err_output_mode:
         return error_response("INVALID_PARAMS", err_output_mode)
