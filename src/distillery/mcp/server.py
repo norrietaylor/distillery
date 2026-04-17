@@ -906,8 +906,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         RETURNS (error): { error: true, code: "INVALID_PARAMS" | "CONFLICT" | "INVALID_URL"
           | "UNREACHABLE_URL" | "INTERNAL", message: "..." }
 
-        RELATED: distillery_interests (to discover sources to watch),
-        distillery_configure (to adjust feed thresholds),
+        RELATED: distillery_configure (to adjust feed thresholds),
         distillery_store_batch (for bulk entry ingestion)
         """
         c = _lc(ctx)
@@ -1046,7 +1045,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         RETURNS (error): { error: true, code: "INVALID_PARAMS" | "INTERNAL", message: "..." }
 
         RELATED: distillery_watch (to manage feed sources),
-        distillery_metrics (to review current system state)
+        distillery_status (to review current system state)
         """
         c = _lc(ctx)
         return await _handle_configure(
@@ -1076,7 +1075,8 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             uptime_seconds?: int          # seconds since server startup
         }
 
-        RELATED: distillery_metrics (for deep activity/quality metrics),
+        RELATED: distillery_list (for entry counts, filtering, and
+        per-group aggregates),
         distillery_configure (to inspect/adjust runtime configuration)
         """
         c = _lc(ctx)

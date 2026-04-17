@@ -471,13 +471,17 @@ class GitHubSyncAdapter:
         # an override — otherwise gh-sync entries show up with no attribution.
         # Treat null, empty, and whitespace-only logins as missing so we fall
         # back to the configured sync-tool author instead of persisting junk.
-        author = self._author_override
-        if not author:
-            user = issue.get("user")
-            if isinstance(user, dict):
-                gh_login = user.get("login")
-                if isinstance(gh_login, str) and gh_login.strip():
-                    author = gh_login.strip()
+        # Capture the raw GitHub login separately so metadata["user_login"]
+        # always reflects the payload author (not an override), which lets
+        # ``_compute_backfill_updates`` recover attribution later.
+        gh_login: str | None = None
+        user = issue.get("user")
+        if isinstance(user, dict):
+            raw_login = user.get("login")
+            if isinstance(raw_login, str) and raw_login.strip():
+                gh_login = raw_login.strip()
+
+        author = self._author_override or gh_login
         if not author:
             author = _DEFAULT_GH_AUTHOR
 
@@ -512,7 +516,10 @@ class GitHubSyncAdapter:
             "merged_at": merged_at,
             # Persisted so ``_compute_backfill_updates`` can heal older entries
             # that lost author attribution (see legacy_authors branch below).
-            "user_login": author,
+            # Store the raw GitHub login (or ``None`` when missing) so an
+            # ``author_override`` cannot permanently overwrite the payload
+            # author in metadata.
+            "user_login": gh_login,
         }
 
         return Entry(
@@ -764,9 +771,12 @@ class GitHubSyncAdapter:
 
             entry = self._issue_to_entry(issue, comments)
 
-            # Truncate oversized content before embedding.
+            # Truncate oversized content before embedding. Reserve space for
+            # the truncation marker so the final length never exceeds the cap.
             if len(entry.content) > _MAX_CONTENT_LENGTH:
-                entry.content = entry.content[:_MAX_CONTENT_LENGTH] + "\n\n[truncated]"
+                marker = "\n\n[truncated]"
+                cutoff = max(0, _MAX_CONTENT_LENGTH - len(marker))
+                entry.content = entry.content[:cutoff] + marker
 
             existing = await self._find_existing(external_id)
 

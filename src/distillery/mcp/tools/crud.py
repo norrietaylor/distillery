@@ -1333,10 +1333,15 @@ async def _handle_correct(
     tags_err = validate_type(arguments, "tags", list, "list of strings")
     if tags_err:
         return error_response("INVALID_PARAMS", tags_err)
-    tags = list(arguments["tags"]) if "tags" in arguments else list(original.tags)
+    explicit_tags = "tags" in arguments
+    tags = list(arguments["tags"]) if explicit_tags else list(original.tags)
 
     # --- reserved prefix enforcement (match distillery_store guard) ---------
-    if cfg is not None and cfg.tags.reserved_prefixes:
+    # Only validate when the caller explicitly supplied ``tags``: inherited
+    # tags from the original entry (e.g. imported/internal sources carrying
+    # reserved-prefix tags) must not block legitimate corrections when the
+    # caller never touched the tag list.
+    if cfg is not None and cfg.tags.reserved_prefixes and explicit_tags:
         for tag in tags:
             if not isinstance(tag, str):
                 return error_response(

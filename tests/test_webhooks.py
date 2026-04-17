@@ -453,7 +453,9 @@ async def test_handler_error_returns_500(
     assert resp.status_code == 500, f"Expected 500, got {resp.status_code}: {resp.text}"
     body = resp.json()
     assert body["ok"] is False
-    assert "feed source unavailable" in body["error"]
+    # The webhook returns a stable, generic error message to clients and keeps
+    # the exception details (e.g. "feed source unavailable") in server logs.
+    assert body["error"] == "poll cycle failed"
 
 
 # ---------------------------------------------------------------------------

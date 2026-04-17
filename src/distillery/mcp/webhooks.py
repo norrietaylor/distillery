@@ -300,9 +300,11 @@ async def _run_poll(
     try:
         poller = FeedPoller(store=store, config=config)
         summary = await poller.poll(source_url=source_url)
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
+        # Keep the full traceback in logs; return a stable generic message to
+        # the client so exception internals are not leaked over HTTP.
         logger.exception("Webhook poll: poll cycle failed")
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        return JSONResponse({"ok": False, "error": "poll cycle failed"}, status_code=500)
 
     # Collect errors from all per-source results.
     errors: list[str] = []
@@ -386,9 +388,10 @@ async def _run_rescore(
     try:
         poller = FeedPoller(store=store, config=config)
         stats = await poller.rescore(limit=limit)
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
+        # Keep the full traceback in logs; return a stable generic message.
         logger.exception("Webhook rescore: rescore failed")
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        return JSONResponse({"ok": False, "error": "rescore failed"}, status_code=500)
 
     logger.info(
         "Webhook rescore: completed — rescored=%d upgraded=%d downgraded=%d",
@@ -434,6 +437,11 @@ async def _handle_rescore(request: Request, state: dict[str, Any]) -> JSONRespon
                 {"ok": False, "error": "limit query parameter must be an integer"},
                 status_code=400,
             )
+        if limit <= 0:
+            return JSONResponse(
+                {"ok": False, "error": "limit must be a positive integer"},
+                status_code=400,
+            )
     else:
         limit = 200
         body = await request.body()
@@ -455,6 +463,11 @@ async def _handle_rescore(request: Request, state: dict[str, Any]) -> JSONRespon
                 if not isinstance(raw_limit, int) or isinstance(raw_limit, bool):
                     return JSONResponse(
                         {"ok": False, "error": "limit must be an integer"},
+                        status_code=400,
+                    )
+                if raw_limit <= 0:
+                    return JSONResponse(
+                        {"ok": False, "error": "limit must be a positive integer"},
                         status_code=400,
                     )
                 limit = raw_limit
@@ -557,9 +570,11 @@ async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONRe
                     deleted,
                     retention_days,
                 )
-        except Exception as exc:  # noqa: BLE001
-            retention_result = {"ok": False, "error": f"search_log retention failed: {exc}"}
-            logger.warning("Maintenance: search_log retention failed: %s", exc)
+        except Exception:  # noqa: BLE001
+            # Log full details server-side; keep the client-facing message
+            # stable and free of exception internals.
+            retention_result = {"ok": False, "error": "search_log retention failed"}
+            logger.exception("Maintenance: search_log retention failed")
 
     logger.info(
         "Webhook maintenance: completed — poll_ok=%s rescore_ok=%s classify_ok=%s",
@@ -669,15 +684,21 @@ async def _run_classify_batch(
             classifications = await classifier.classify_batch(entries, store, embedding_provider)
             for entry, classification in zip(entries, classifications, strict=True):
                 try:
+                    # Merge classification fields into the existing metadata so
+                    # previously-set keys (e.g. external_id, source_url, repo)
+                    # are preserved. Store the score under "confidence" — the
+                    # key that distillery_list(output_mode="review") reads.
+                    merged_metadata = {
+                        **(entry.metadata or {}),
+                        "confidence": classification.confidence,
+                        "classification_reasoning": classification.reasoning,
+                    }
                     await store.update(
                         entry.id,
                         {
                             "entry_type": classification.entry_type.value,
                             "status": classification.status.value,
-                            "metadata": {
-                                "classification_confidence": classification.confidence,
-                                "classification_reasoning": classification.reasoning,
-                            },
+                            "metadata": merged_metadata,
                         },
                     )
                     if classification.status == EntryStatus.ACTIVE:
@@ -711,15 +732,21 @@ async def _run_classify_batch(
                         llm_response = await llm_client.classify(prompt)
                         classification = engine.parse_response(llm_response)
 
+                        # Merge classification fields into the existing
+                        # metadata (preserve external_id/source_url/etc.) and
+                        # store the score under "confidence" — the key read
+                        # by distillery_list(output_mode="review").
+                        merged_metadata = {
+                            **(entry.metadata or {}),
+                            "confidence": classification.confidence,
+                            "classification_reasoning": classification.reasoning,
+                        }
                         await store.update(
                             entry.id,
                             {
                                 "entry_type": classification.entry_type.value,
                                 "status": classification.status.value,
-                                "metadata": {
-                                    "classification_confidence": classification.confidence,
-                                    "classification_reasoning": classification.reasoning,
-                                },
+                                "metadata": merged_metadata,
                             },
                         )
 
@@ -741,9 +768,10 @@ async def _run_classify_batch(
                     )
                     error_count += 1
 
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
+        # Keep the full traceback in logs; return a stable generic message.
         logger.exception("Webhook classify-batch: batch operation failed")
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        return JSONResponse({"ok": False, "error": "classify-batch failed"}, status_code=500)
 
     logger.info(
         "Webhook classify-batch: completed — classified=%d pending_review=%d errors=%d",
@@ -801,6 +829,11 @@ async def _handle_classify_batch(request: Request, state: dict[str, Any]) -> JSO
         except (ValueError, TypeError):
             return JSONResponse(
                 {"ok": False, "error": "limit query parameter must be an integer"},
+                status_code=400,
+            )
+        if limit <= 0:
+            return JSONResponse(
+                {"ok": False, "error": "limit must be a positive integer"},
                 status_code=400,
             )
 

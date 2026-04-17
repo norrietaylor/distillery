@@ -410,7 +410,9 @@ async def test_classify_batch_store_error_returns_500(
     assert resp.status_code == 500
     body = resp.json()
     assert body["ok"] is False
-    assert "db connection lost" in body["error"]
+    # The webhook returns a stable, generic error message to clients and keeps
+    # the exception details (e.g. "db connection lost") in server logs.
+    assert body["error"] == "classify-batch failed"
 
 
 # ---------------------------------------------------------------------------
