@@ -873,6 +873,12 @@ _SUMMARY_CONTENT_PREVIEW_CHARS = 200
 # Maximum character length for derived titles in summary mode.
 _SUMMARY_TITLE_CHARS = 120
 
+# Default statuses returned when the caller does not specify one.  Archived
+# entries are excluded from default views so that deleted/superseded content
+# does not leak into user-facing lists or searches.  Callers can opt back in
+# via ``include_archived=True`` or the sentinel ``status="any"``.
+_DEFAULT_VISIBLE_STATUSES: tuple[str, ...] = ("active", "pending_review")
+
 
 def _derive_title(entry: Any) -> str:
     """Return a short title for *entry* — the ``title`` metadata key if present,
@@ -1030,11 +1036,18 @@ async def _handle_list(
             "Provide source, entry_type, author, tag_prefix, project, or verification.",
         )
 
-    # review mode implicitly filters to pending_review status.
+    # review mode implicitly filters to pending_review status (takes precedence
+    # over any default/visible-status logic).
     if output_mode == "review":
         if filters is None:
             filters = {}
         filters["status"] = "pending_review"
+    else:
+        filter_result = _apply_default_status_filter(filters, arguments)
+        if isinstance(filter_result, list):
+            # Error response from validation.
+            return filter_result
+        filters = filter_result
 
     # --- group_by mode -------------------------------------------------------
     if group_by is not None:
@@ -1130,6 +1143,52 @@ async def _handle_list(
 # ---------------------------------------------------------------------------
 # Shared filter builder (used by _handle_list and search handlers)
 # ---------------------------------------------------------------------------
+
+
+def _apply_default_status_filter(
+    filters: dict[str, Any] | None,
+    arguments: dict[str, Any],
+) -> dict[str, Any] | None | list[types.TextContent]:
+    """Apply the default ``status`` filter that hides archived entries.
+
+    Semantics:
+
+    * If the caller passed ``include_archived=True``: no status filter is
+      added (all statuses returned).
+    * If the caller passed ``status="any"``: the sentinel is stripped and no
+      status filter is added (all statuses returned).
+    * If the caller passed any other explicit ``status`` value (including a
+      list): it is left untouched.
+    * Otherwise: the filter is populated with
+      ``status IN ('active', 'pending_review')`` so archived entries are
+      excluded from default views.
+
+    Returns the (possibly mutated) filters dict, or an MCP error response
+    list when ``include_archived`` has the wrong type.
+    """
+    include_archived_raw = arguments.get("include_archived")
+    if include_archived_raw is not None and not isinstance(include_archived_raw, bool):
+        return error_response("INVALID_PARAMS", "Field 'include_archived' must be a boolean")
+    include_archived = bool(include_archived_raw) if include_archived_raw is not None else False
+
+    # Detect the sentinel ``status="any"`` early; it overrides the default
+    # archived-exclusion and means "return every status".
+    if filters is not None and filters.get("status") == "any":
+        remaining = {k: v for k, v in filters.items() if k != "status"}
+        return remaining if remaining else None
+
+    # If the caller has a specific status filter, leave it alone.
+    if filters is not None and "status" in filters:
+        return filters
+
+    # If the caller opted out of the default filter, do nothing.
+    if include_archived:
+        return filters
+
+    if filters is None:
+        filters = {}
+    filters["status"] = list(_DEFAULT_VISIBLE_STATUSES)
+    return filters
 
 
 def _build_filters_from_arguments(arguments: dict[str, Any]) -> dict[str, Any] | None:
@@ -1339,6 +1398,8 @@ __all__ = [
     "_handle_correct",
     "_handle_list",
     "_build_filters_from_arguments",
+    "_apply_default_status_filter",
+    "_DEFAULT_VISIBLE_STATUSES",
     "_VALID_ENTRY_TYPES",
     "_VALID_STATUSES",
     "_VALID_VERIFICATIONS",

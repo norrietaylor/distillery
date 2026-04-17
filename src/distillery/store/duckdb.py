@@ -1016,8 +1016,15 @@ class DuckDBStore:
                 params.append(tag_list)
 
         if "status" in filters:
-            clauses.append("status = ?")
-            params.append(str(filters["status"]))
+            val = filters["status"]
+            if isinstance(val, list):
+                if val:
+                    placeholders = ", ".join("?" for _ in val)
+                    clauses.append(f"status IN ({placeholders})")
+                    params.extend(str(v) for v in val)
+            else:
+                clauses.append("status = ?")
+                params.append(str(val))
 
         if "verification" in filters:
             clauses.append("verification = ?")
