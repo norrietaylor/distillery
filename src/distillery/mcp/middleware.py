@@ -95,7 +95,7 @@ def _client_ip(scope: Scope, *, trust_proxy: bool = False) -> str:
         headers = Headers(scope=scope)
         forwarded = headers.get("x-forwarded-for")
         if forwarded:
-            return forwarded.split(",")[0].strip()
+            return str(forwarded).split(",")[0].strip()
 
     client = scope.get("client")
     if client and isinstance(client, (list, tuple)) and len(client) >= 1:
@@ -105,7 +105,7 @@ def _client_ip(scope: Scope, *, trust_proxy: bool = False) -> str:
         headers = Headers(scope=scope)
         forwarded = headers.get("x-forwarded-for")
         if forwarded:
-            return forwarded.split(",")[0].strip()
+            return str(forwarded).split(",")[0].strip()
 
     return "unknown"
 
@@ -261,7 +261,7 @@ class BodySizeLimitMiddleware:
 
         async def _limited_receive() -> _State:
             nonlocal total
-            message = await receive()
+            message: _State = await receive()
             if message["type"] == "http.request":
                 chunk = message.get("body", b"")
                 total += len(chunk)
