@@ -764,3 +764,98 @@ class TestBuildAdapterGitHubToken:
             assert "ghp_secrettoken9999" not in record.getMessage(), (
                 "Raw token must not appear in log output"
             )
+
+
+# ---------------------------------------------------------------------------
+# FeedPoller._persist_poll_status — persists liveness metadata per poll
+# ---------------------------------------------------------------------------
+
+
+class TestPersistPollStatus:
+    async def test_records_successful_poll_on_store(self) -> None:
+        """After poll() the store receives record_poll_status with success details."""
+        items = [_make_feed_item(item_id="id1", title="Test", content="Body")]
+        src = FeedSourceConfig(url="https://example.com/rss", source_type="rss")
+        store = _make_store(feed_sources=[_source_to_dict(src)])
+        cfg = _make_config(sources=[src], digest_threshold=0.0)
+
+        with patch("distillery.feeds.poller._build_adapter") as mock_build:
+            mock_adapter = MagicMock()
+            mock_adapter.fetch.return_value = items
+            mock_build.return_value = mock_adapter
+
+            async def _find_similar(content: str, threshold: float, limit: int) -> list:
+                if threshold == 0.95:
+                    return []
+                return [_make_search_result(score=0.9)]
+
+            store.find_similar.side_effect = _find_similar
+            poller = FeedPoller(store=store, config=cfg)
+            await poller.poll()
+
+        store.record_poll_status.assert_called_once()
+        call = store.record_poll_status.call_args
+        assert call.args[0] == "https://example.com/rss"
+        assert call.kwargs["item_count"] == 1
+        assert call.kwargs["error"] is None
+
+    async def test_records_error_on_adapter_failure(self) -> None:
+        """A fetch failure is persisted via record_poll_status with the error string."""
+        src = FeedSourceConfig(url="https://example.com/rss", source_type="rss")
+        store = _make_store(feed_sources=[_source_to_dict(src)])
+        cfg = _make_config(sources=[src])
+
+        with patch("distillery.feeds.poller._build_adapter") as mock_build:
+            mock_adapter = MagicMock()
+            mock_adapter.fetch.side_effect = RuntimeError("network error")
+            mock_build.return_value = mock_adapter
+
+            poller = FeedPoller(store=store, config=cfg)
+            await poller.poll()
+
+        store.record_poll_status.assert_called_once()
+        call = store.record_poll_status.call_args
+        assert call.args[0] == "https://example.com/rss"
+        assert call.kwargs["item_count"] == 0
+        assert call.kwargs["error"] is not None
+        assert "network error" in call.kwargs["error"]
+
+    async def test_persist_failure_is_swallowed(self) -> None:
+        """A failing record_poll_status does not break the poll cycle."""
+        src = FeedSourceConfig(url="https://example.com/rss", source_type="rss")
+        store = _make_store(feed_sources=[_source_to_dict(src)])
+        store.record_poll_status.side_effect = RuntimeError("DB unreachable")
+        cfg = _make_config(sources=[src], digest_threshold=0.0)
+
+        with patch("distillery.feeds.poller._build_adapter") as mock_build:
+            mock_adapter = MagicMock()
+            mock_adapter.fetch.return_value = []
+            mock_build.return_value = mock_adapter
+
+            poller = FeedPoller(store=store, config=cfg)
+            summary = await poller.poll()
+
+        # Poll returned a normal summary despite the persistence failure.
+        assert summary.sources_polled == 1
+
+    async def test_missing_recorder_method_is_ignored(self) -> None:
+        """Stores predating the protocol addition (no record_poll_status) don't crash."""
+        src = FeedSourceConfig(url="https://example.com/rss", source_type="rss")
+        # Use MagicMock (not AsyncMock) so getattr(store, "record_poll_status", None)
+        # returns the default None for missing attrs.  spec limits attribute access.
+        store = MagicMock(spec=["find_similar", "list_entries", "store", "list_feed_sources"])
+        store.find_similar = AsyncMock(return_value=[])
+        store.list_entries = AsyncMock(return_value=[])
+        store.store = AsyncMock(return_value="eid")
+        store.list_feed_sources = AsyncMock(return_value=[_source_to_dict(src)])
+        cfg = _make_config(sources=[src], digest_threshold=0.0)
+
+        with patch("distillery.feeds.poller._build_adapter") as mock_build:
+            mock_adapter = MagicMock()
+            mock_adapter.fetch.return_value = []
+            mock_build.return_value = mock_adapter
+
+            poller = FeedPoller(store=store, config=cfg)
+            summary = await poller.poll()
+
+        assert summary.sources_polled == 1

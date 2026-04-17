@@ -31,6 +31,7 @@ from distillery.mcp.tools.feeds import (
     _handle_poll,
     _handle_watch,
 )
+from distillery.store.duckdb import _sanitise_last_error
 
 pytestmark = pytest.mark.unit
 
@@ -66,7 +67,10 @@ class FakeSourceStore:
         self._sources: list[dict[str, Any]] = []
 
     async def list_feed_sources(self) -> list[dict[str, Any]]:
-        return list(self._sources)
+        # Deep-copy so callers mutating the returned dicts do not affect
+        # subsequent lookups — mirrors DuckDBStore, which rebuilds the dicts
+        # from the underlying rows on every call.
+        return [dict(s) for s in self._sources]
 
     async def add_feed_source(
         self,
@@ -84,6 +88,10 @@ class FakeSourceStore:
             "label": label,
             "poll_interval_minutes": poll_interval_minutes,
             "trust_weight": trust_weight,
+            "last_polled_at": None,
+            "last_item_count": 0,
+            "last_error": None,
+            "next_poll_at": None,
         }
         self._sources.append(entry)
         return entry
@@ -92,6 +100,28 @@ class FakeSourceStore:
         before = len(self._sources)
         self._sources = [s for s in self._sources if s["url"] != url]
         return len(self._sources) < before
+
+    async def record_poll_status(
+        self,
+        url: str,
+        *,
+        polled_at: datetime,
+        item_count: int,
+        error: str | None,
+    ) -> bool:
+        from datetime import timedelta
+
+        for src in self._sources:
+            if src["url"] != url:
+                continue
+            src["last_polled_at"] = polled_at.isoformat()
+            src["last_item_count"] = int(item_count)
+            src["last_error"] = error
+            src["next_poll_at"] = (
+                polled_at + timedelta(minutes=src["poll_interval_minutes"])
+            ).isoformat()
+            return True
+        return False
 
 
 class FailingSourceStore:
@@ -155,6 +185,74 @@ class TestHandleWatchList:
         data = parse(result)
         assert data["error"] is True
         assert data["code"] == "WATCH_ERROR"
+
+    async def test_list_includes_liveness_fields_for_never_polled_source(self) -> None:
+        """Newly added sources expose liveness keys with null/zero defaults."""
+        store = FakeSourceStore()
+        await store.add_feed_source(
+            url="https://example.com/rss",
+            source_type="rss",
+            poll_interval_minutes=60,
+        )
+        result = await _handle_watch(store=store, arguments={"action": "list"})
+        data = parse(result)
+        src = data["sources"][0]
+        # New liveness fields must be present in the payload.
+        assert "last_polled_at" in src
+        assert "last_item_count" in src
+        assert "last_error" in src
+        assert "next_poll_at" in src
+        # Defaults for an unpolled source.
+        assert src["last_polled_at"] is None
+        assert src["last_item_count"] == 0
+        assert src["last_error"] is None
+        assert src["next_poll_at"] is None
+
+    async def test_list_surfaces_recorded_poll_success(self) -> None:
+        """After a successful poll the liveness fields reflect the outcome."""
+        store = FakeSourceStore()
+        await store.add_feed_source(
+            url="https://example.com/rss",
+            source_type="rss",
+            poll_interval_minutes=30,
+        )
+        polled_at = datetime(2026, 4, 16, 12, 0, tzinfo=UTC)
+        assert await store.record_poll_status(
+            "https://example.com/rss",
+            polled_at=polled_at,
+            item_count=7,
+            error=None,
+        )
+
+        result = await _handle_watch(store=store, arguments={"action": "list"})
+        src = parse(result)["sources"][0]
+        assert src["last_polled_at"] == polled_at.isoformat()
+        assert src["last_item_count"] == 7
+        assert src["last_error"] is None
+        # next_poll_at = last_polled_at + poll_interval_minutes
+        assert src["next_poll_at"] == "2026-04-16T12:30:00+00:00"
+
+    async def test_list_surfaces_last_error_when_poll_fails(self) -> None:
+        """When a poll fails the error string is surfaced on the list payload."""
+        store = FakeSourceStore()
+        await store.add_feed_source(
+            url="https://example.com/rss",
+            source_type="rss",
+        )
+        polled_at = datetime(2026, 4, 16, 12, 0, tzinfo=UTC)
+        await store.record_poll_status(
+            "https://example.com/rss",
+            polled_at=polled_at,
+            item_count=0,
+            error="Connection refused: upstream 502",
+        )
+
+        result = await _handle_watch(store=store, arguments={"action": "list"})
+        src = parse(result)["sources"][0]
+        assert src["last_error"] == "Connection refused: upstream 502"
+        assert src["last_item_count"] == 0
+        assert src["last_polled_at"] == polled_at.isoformat()
+        assert src["next_poll_at"] is not None
 
 
 # ---------------------------------------------------------------------------
@@ -727,3 +825,33 @@ class TestHandleSuggestSources:
         assert "suggestion_context" in data
         assert "watched_sources" in data
         assert "entry_count" in data
+
+
+# ---------------------------------------------------------------------------
+# _sanitise_last_error — helper that truncates + sanitises poll error strings
+# ---------------------------------------------------------------------------
+
+
+class TestSanitiseLastError:
+    def test_none_returns_none(self) -> None:
+        assert _sanitise_last_error(None, 200) is None
+
+    def test_empty_returns_none(self) -> None:
+        # An all-whitespace input collapses to an empty string → None so
+        # a successful poll clears any previous error.
+        assert _sanitise_last_error("   \n\t", 200) is None
+
+    def test_short_error_is_preserved(self) -> None:
+        assert _sanitise_last_error("upstream 502", 200) == "upstream 502"
+
+    def test_collapses_whitespace_and_newlines(self) -> None:
+        raw = "Traceback:\n  File 'x'\n  ValueError: boom"
+        assert _sanitise_last_error(raw, 200) == "Traceback: File 'x' ValueError: boom"
+
+    def test_truncates_when_longer_than_max_len(self) -> None:
+        raw = "x" * 500
+        result = _sanitise_last_error(raw, 50)
+        assert result is not None
+        # Exactly max_len characters, including the ellipsis sentinel.
+        assert len(result) == 50
+        assert result.endswith("\u2026")

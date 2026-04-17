@@ -263,7 +263,10 @@ class DistilleryStore(Protocol):
         """Return all persisted feed sources as dicts.
 
         Each dict contains keys: ``url``, ``source_type``, ``label``,
-        ``poll_interval_minutes``, ``trust_weight``.
+        ``poll_interval_minutes``, ``trust_weight``, ``last_polled_at``
+        (ISO 8601 string or ``None``), ``last_item_count`` (int),
+        ``last_error`` (str or ``None``), and ``next_poll_at``
+        (ISO 8601 string or ``None``).
 
         Returns:
             List of feed source dicts ordered by creation time.
@@ -304,6 +307,30 @@ class DistilleryStore(Protocol):
         Returns:
             ``True`` if the source existed and was removed, ``False``
             otherwise.
+        """
+        ...
+
+    async def record_poll_status(
+        self,
+        url: str,
+        *,
+        polled_at: datetime,
+        item_count: int,
+        error: str | None,
+    ) -> bool:
+        """Persist the outcome of a poll against a feed source.
+
+        Args:
+            url: The feed source URL (primary key).
+            polled_at: UTC timestamp of the poll attempt.
+            item_count: Items successfully ingested during the poll.
+            error: Error message when the poll failed, or ``None`` on
+                success.  Implementations must truncate and sanitise the
+                value before persistence.
+
+        Returns:
+            ``True`` if the row was updated, ``False`` if no source with
+            *url* exists.
         """
         ...
 

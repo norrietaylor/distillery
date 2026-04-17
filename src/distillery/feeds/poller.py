@@ -466,7 +466,13 @@ class FeedPoller:
         db_sources = await self._store.list_feed_sources()
         if source_url is not None:
             db_sources = [s for s in db_sources if s["url"] == source_url]
-        sources = [FeedSourceConfig(**s) for s in db_sources]
+        # list_feed_sources returns liveness fields (last_polled_at, etc.)
+        # that are not part of FeedSourceConfig — filter to the constructor
+        # kwargs before instantiation.
+        _cfg_fields = {"url", "source_type", "label", "poll_interval_minutes", "trust_weight"}
+        sources = [
+            FeedSourceConfig(**{k: v for k, v in s.items() if k in _cfg_fields}) for s in db_sources
+        ]
         if not sources:
             logger.debug("FeedPoller: no sources configured — skipping poll")
             summary.finished_at = datetime.now(tz=UTC)
@@ -530,6 +536,7 @@ class FeedPoller:
                     sources[idx].url,
                     result,
                 )
+                await self._persist_poll_status(err_result)
             else:
                 summary.results.append(result)
                 summary.total_fetched += result.items_fetched
@@ -539,9 +546,41 @@ class FeedPoller:
                 summary.sources_polled += 1
                 if result.errors:
                     summary.sources_errored += 1
+                await self._persist_poll_status(result)
 
         summary.finished_at = datetime.now(tz=UTC)
         return summary
+
+    async def _persist_poll_status(self, result: PollResult) -> None:
+        """Persist liveness metadata for a single poll outcome.
+
+        The store is the source of truth for feed health — update the
+        ``last_polled_at``, ``last_item_count``, and ``last_error``
+        columns after each source poll so ``distillery_watch(action=
+        'list')`` can surface them without a separate status tool.
+
+        Any exception raised by ``record_poll_status`` is swallowed with a
+        debug log so that persistence failures do not mask poll results.
+        Backends that predate the protocol addition may not expose the
+        method — in that case we simply skip the update.
+        """
+        recorder = getattr(self._store, "record_poll_status", None)
+        if recorder is None:
+            return
+        error_msg = result.errors[0] if result.errors else None
+        try:
+            await recorder(
+                result.source_url,
+                polled_at=result.polled_at,
+                item_count=result.items_stored,
+                error=error_msg,
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "FeedPoller: failed to persist poll status for %s",
+                result.source_url,
+                exc_info=True,
+            )
 
     async def _poll_source(
         self,
