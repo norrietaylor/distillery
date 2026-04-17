@@ -19,11 +19,13 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
 import urllib.error
 import urllib.request
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -112,7 +114,7 @@ def resolve_env_command() -> ResolvedTransport | None:
     """Step 2: DISTILLERY_MCP_COMMAND env var."""
     cmd = os.environ.get("DISTILLERY_MCP_COMMAND", "").strip()
     if cmd:
-        parts = cmd.split()
+        parts = shlex.split(cmd)
         return ResolvedTransport(kind="stdio", command=parts, source="DISTILLERY_MCP_COMMAND")
     return None
 
@@ -537,32 +539,56 @@ def extract_text(response: Any) -> str:
     return ""
 
 
+def _extract_snippets(text: str, max_items: int) -> tuple[int, list[str]]:
+    """Parse JSON entries and extract content snippets, falling back to string scanning.
+
+    Returns a (count, snippets) tuple where count is the number of entries found
+    and snippets is a list of truncated content strings (up to max_items).
+    """
+    # Attempt JSON parsing first
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, list):
+            count = len(parsed)
+            snippets: list[str] = []
+            for item in parsed[:max_items]:
+                if isinstance(item, dict):
+                    content = item.get("content", "")
+                    if isinstance(content, str) and content:
+                        snippets.append(content[:60])
+            return count, snippets
+        if isinstance(parsed, dict):
+            # Single entry wrapped in a dict — treat as a list of one
+            count = 1
+            content = parsed.get("content", "")
+            snippet = [content[:60]] if isinstance(content, str) and content else []
+            return count, snippet
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # Fallback: brittle string scanning (preserves behaviour for non-JSON text)
+    count = text.count('"id"')
+    snippets = []
+    for part in text.split('"content":"')[1 : max_items + 1]:
+        snippet = part.split('"')[0][:60]
+        if snippet:
+            snippets.append(snippet)
+    return count, snippets
+
+
 def build_briefing(project: str, recent_text: str, stale_text: str) -> list[str]:
     """Build condensed briefing lines (max 20)."""
     lines: list[str] = [f"[Distillery] Project: {project}"]
 
     if recent_text and recent_text != "null":
-        entry_count = recent_text.count('"id"')
-        if entry_count > 0:
-            # Extract content snippets
-            snippets: list[str] = []
-            for part in recent_text.split('"content":"')[1:4]:
-                snippet = part.split('"')[0][:60]
-                if snippet:
-                    snippets.append(snippet)
-            if snippets:
-                lines.append(f"Recent ({entry_count}): {', '.join(snippets)}")
+        entry_count, snippets = _extract_snippets(recent_text, 3)
+        if entry_count > 0 and snippets:
+            lines.append(f"Recent ({entry_count}): {', '.join(snippets)}")
 
     if stale_text and stale_text != "null":
-        stale_count = stale_text.count('"id"')
-        if stale_count > 0:
-            snippets = []
-            for part in stale_text.split('"content":"')[1:3]:
-                snippet = part.split('"')[0][:60]
-                if snippet:
-                    snippets.append(snippet)
-            if snippets:
-                lines.append(f"Stale ({stale_count}): {', '.join(snippets)}")
+        stale_count, snippets = _extract_snippets(stale_text, 2)
+        if stale_count > 0 and snippets:
+            lines.append(f"Stale ({stale_count}): {', '.join(snippets)}")
 
     return lines[:20]
 
@@ -606,7 +632,15 @@ def main() -> None:
 
     # Configuration
     bearer_token = os.environ.get("DISTILLERY_BEARER_TOKEN", "")
-    limit = int(os.environ.get("DISTILLERY_BRIEFING_LIMIT", "5"))
+    _limit_raw = os.environ.get("DISTILLERY_BRIEFING_LIMIT", "5")
+    try:
+        limit = int(_limit_raw)
+    except ValueError:
+        warnings.warn(
+            f"DISTILLERY_BRIEFING_LIMIT={_limit_raw!r} is not a valid integer; defaulting to 5",
+            stacklevel=1,
+        )
+        limit = 5
 
     # Resolve transport — probes each candidate, returning the first reachable
     # match (or the localhost fallback if none were reachable).
