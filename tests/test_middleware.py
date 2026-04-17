@@ -753,7 +753,7 @@ class TestApplyHttpMiddleware:
             assert cap.status == 200
 
     async def test_loopback_exempt_disabled_in_composition(self) -> None:
-        """When loopback_exempt=False, localhost is rate-limited in composed stack."""
+        """When loopback_exempt=False, 127.0.0.1 is rate-limited in composed stack."""
         app = apply_http_middleware(
             _dummy_app,
             requests_per_minute=1,

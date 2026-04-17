@@ -761,9 +761,18 @@ def _parse_http_rate_limit(rl_raw: dict[str, Any]) -> HttpRateLimitConfig:
         )
 
     return HttpRateLimitConfig(
-        requests_per_minute=int(rl_raw.get("requests_per_minute", 60)),
-        requests_per_hour=int(rl_raw.get("requests_per_hour", 600)),
-        max_body_bytes=int(rl_raw.get("max_body_bytes", 1_048_576)),
+        requests_per_minute=_parse_strict_int(
+            rl_raw.get("requests_per_minute", 60),
+            "server.http_rate_limit.requests_per_minute",
+        ),
+        requests_per_hour=_parse_strict_int(
+            rl_raw.get("requests_per_hour", 600),
+            "server.http_rate_limit.requests_per_hour",
+        ),
+        max_body_bytes=_parse_strict_int(
+            rl_raw.get("max_body_bytes", 1_048_576),
+            "server.http_rate_limit.max_body_bytes",
+        ),
         trust_proxy=trust_proxy_raw,
         loopback_exempt=loopback_exempt_raw,
     )
