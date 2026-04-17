@@ -172,9 +172,10 @@ async def _handle_resolve_review(
 
     * **approve**: sets ``status=active`` and records ``reviewed_at`` /
       ``reviewed_by`` in metadata.
-    * **reclassify**: updates ``entry_type``, sets ``status=active`` (a
-      reclassification implies approval), and records ``reclassified_from``
-      in metadata.  Requires ``new_entry_type``.
+    * **reclassify**: updates ``entry_type`` and records ``reclassified_from``
+      in metadata.  Requires ``new_entry_type``.  Only promotes status to
+      ``active`` when the entry is currently ``pending_review`` — archived and
+      already-active entries keep their existing status.
     * **archive**: soft-deletes the entry by setting ``status=archived``.
 
     Args:
@@ -248,7 +249,10 @@ async def _handle_resolve_review(
             new_metadata["reviewed_by"] = reviewer
         updates["entry_type"] = EntryType(new_type_str)
         # Reclassification implies approval: flip status out of pending_review.
-        updates["status"] = EntryStatus.ACTIVE
+        # Only promote to active if the entry is currently pending_review to
+        # avoid accidentally reactivating archived or already-active entries.
+        if entry.status == EntryStatus.PENDING_REVIEW:
+            updates["status"] = EntryStatus.ACTIVE
         updates["metadata"] = new_metadata
 
     elif action == "archive":
