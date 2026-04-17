@@ -165,6 +165,7 @@ def main(argv: list[str] | None = None) -> int:
             # reads the store from the server's shared state so it works
             # even though the store is only initialised at first request.
             _shared_ref = server._distillery_shared  # type: ignore[attr-defined]
+            _shared_ref["transport"] = "http"
 
             async def _auth_audit_cb(
                 user_id: str,
@@ -249,6 +250,7 @@ def main(argv: list[str] | None = None) -> int:
             uv_server.run()
         else:
             server = create_server(config=config)
+            server._distillery_shared["transport"] = "stdio"  # type: ignore[attr-defined]
             asyncio.run(server.run_stdio_async(show_banner=False))
 
         return 0

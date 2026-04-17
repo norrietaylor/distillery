@@ -9,7 +9,7 @@ Domain modules:
                    suggest_sources), type_schemas
   - feeds.py     — watch, poll, rescore
   - configure.py — distillery_configure runtime config tool
-  - meta.py      — reserved for future cross-cutting tool concerns
+  - meta.py      — distillery_status (server/health metadata probe)
   - _common.py   — shared helpers (error/success response, validation)
   - _errors.py   — standardized error code constants
 
@@ -42,6 +42,7 @@ from distillery.mcp.tools.feeds import (
     _handle_sync_status,
     _handle_watch,
 )
+from distillery.mcp.tools.meta import _handle_status
 from distillery.mcp.tools.quality import (
     run_conflict_discovery,
     run_conflict_evaluation,
@@ -55,6 +56,7 @@ from distillery.mcp.tools.search import (
 
 __all__ = [
     "_handle_configure",
+    "_handle_status",
     "_handle_classify",
     "_handle_resolve_review",
     "_handle_get",

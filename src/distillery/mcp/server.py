@@ -1,4 +1,4 @@
-"""MCP server for Distillery — 15 tools over stdio or HTTP.
+"""MCP server for Distillery — 16 tools over stdio or HTTP.
 
 Handlers live in ``src/distillery/mcp/tools/`` (crud, search, classify, quality,
 analytics, feeds, configure, meta). This module owns: FastMCP app creation,
@@ -17,6 +17,7 @@ import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from fastmcp import Context, FastMCP  # noqa: F401
@@ -57,6 +58,7 @@ from distillery.mcp.tools.feeds import (
 from distillery.mcp.tools.feeds import (
     _handle_store_batch as _handle_feed_store_batch,
 )
+from distillery.mcp.tools.meta import _handle_status
 from distillery.mcp.tools.quality import (
     run_conflict_discovery,
     run_conflict_evaluation,
@@ -102,6 +104,7 @@ __all__ = [
     "_handle_feed_store_batch",
     "_handle_sync_status",
     "_handle_relations",
+    "_handle_status",
 ]
 
 
@@ -195,6 +198,11 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                         )
                 await store.set_metadata("feeds_seeded", "true")
             _shared.update(store=store, config=config, embedding_provider=ep)
+            # Record startup timestamp for distillery_status uptime reporting.
+            # Stored in shared state (not replaced on subsequent lifespan entries
+            # for stateless HTTP sessions).
+            if "started_at" not in _shared:
+                _shared["started_at"] = datetime.now(UTC)
             logger.info(
                 "Distillery MCP server ready (db=%s, embedding=%s)",
                 db,
@@ -991,6 +999,51 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         return await _handle_configure(
             config=c["config"],
             arguments={"section": section, "key": key, "value": value},
+        )
+
+    @server.tool
+    async def distillery_status(ctx: Context) -> list[types.TextContent]:
+        """Return a lightweight in-protocol health/metadata probe.
+
+        USE WHEN: verifying MCP connectivity (e.g. from the ``/setup`` wizard)
+        without relying on the HTTP-only ``/health`` endpoint. Works uniformly
+        on stdio and HTTP transports.
+
+        PARAMS: (none)
+
+        RETURNS (success): {
+            status: "ok",
+            version: str,                 # distillery package version
+            build_sha: str,               # git SHA (or "dev")
+            transport: "stdio" | "http" | "unknown",
+            tool_count: int,              # number of registered MCP tools
+            store: { entry_count: int | null, db_size_bytes: int | null },
+            embedding_provider: str,      # model name or provider class name
+            last_feed_poll: { source_count: int, last_poll_at: str | null },
+            uptime_seconds?: int          # seconds since server startup
+        }
+
+        RELATED: distillery_metrics (for deep activity/quality metrics),
+        distillery_configure (to inspect/adjust runtime configuration)
+        """
+        c = _lc(ctx)
+        try:
+            tools = await server.list_tools()
+            tool_count = len(tools)
+        except Exception:  # noqa: BLE001
+            logger.debug("distillery_status: server.list_tools() failed", exc_info=True)
+            tool_count = 0
+        # Read transport from _shared (set by __main__.py post-construction);
+        # fall back to the lifespan-scoped copy if present.
+        transport = _shared.get("transport") or c.get("transport")
+        started_at = _shared.get("started_at") or c.get("started_at")
+        return await _handle_status(
+            store=c["store"],
+            config=c["config"],
+            embedding_provider=c["embedding_provider"],
+            tool_count=tool_count,
+            transport=transport,
+            started_at=started_at,
         )
 
     @server.resource("distillery://schemas/entry-types")
