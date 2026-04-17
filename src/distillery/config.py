@@ -746,6 +746,29 @@ def _parse_rate_limit(raw: dict[str, Any]) -> RateLimitConfig:
     )
 
 
+def _parse_http_rate_limit(rl_raw: dict[str, Any]) -> HttpRateLimitConfig:
+    """Parse ``server.http_rate_limit`` with strict boolean validation."""
+    trust_proxy_raw = rl_raw.get("trust_proxy", False)
+    if not isinstance(trust_proxy_raw, bool):
+        raise ValueError(
+            f"server.http_rate_limit.trust_proxy must be a boolean, got: {trust_proxy_raw!r}"
+        )
+
+    loopback_exempt_raw = rl_raw.get("loopback_exempt", True)
+    if not isinstance(loopback_exempt_raw, bool):
+        raise ValueError(
+            f"server.http_rate_limit.loopback_exempt must be a boolean, got: {loopback_exempt_raw!r}"
+        )
+
+    return HttpRateLimitConfig(
+        requests_per_minute=int(rl_raw.get("requests_per_minute", 60)),
+        requests_per_hour=int(rl_raw.get("requests_per_hour", 600)),
+        max_body_bytes=int(rl_raw.get("max_body_bytes", 1_048_576)),
+        trust_proxy=trust_proxy_raw,
+        loopback_exempt=loopback_exempt_raw,
+    )
+
+
 def _parse_server(raw: dict[str, Any]) -> ServerConfig:
     """Parse the ``server`` section from a raw YAML mapping.
 
@@ -802,13 +825,7 @@ def _parse_server(raw: dict[str, Any]) -> ServerConfig:
             allowed_orgs=allowed_orgs,
             membership_cache_ttl_seconds=membership_cache_ttl_seconds,
         ),
-        http_rate_limit=HttpRateLimitConfig(
-            requests_per_minute=int(rl_raw.get("requests_per_minute", 60)),
-            requests_per_hour=int(rl_raw.get("requests_per_hour", 600)),
-            max_body_bytes=int(rl_raw.get("max_body_bytes", 1_048_576)),
-            trust_proxy=bool(rl_raw.get("trust_proxy", False)),
-            loopback_exempt=bool(rl_raw.get("loopback_exempt", True)),
-        ),
+        http_rate_limit=_parse_http_rate_limit(rl_raw),
         webhooks=WebhookConfig(
             enabled=bool(webhooks_raw.get("enabled", True)),
             secret_env=str(webhooks_raw.get("secret_env", "DISTILLERY_WEBHOOK_SECRET")),

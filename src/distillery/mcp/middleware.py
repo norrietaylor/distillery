@@ -154,11 +154,18 @@ class RateLimitMiddleware:
             await self.app(scope, receive, send)
             return
 
-        ip = _client_ip(scope, trust_proxy=self.trust_proxy)
+        # Loopback exemption: use the raw ASGI peer address (scope["client"])
+        # directly — never trust _client_ip() here, because it may fall back
+        # to X-Forwarded-For which can be spoofed.
+        if self.loopback_exempt:
+            client = scope.get("client")
+            if client and isinstance(client, (list, tuple)) and len(client) >= 1:
+                peer_ip = str(client[0])
+                if peer_ip in self._LOOPBACK_ADDRS:
+                    await self.app(scope, receive, send)
+                    return
 
-        if self.loopback_exempt and ip in self._LOOPBACK_ADDRS:
-            await self.app(scope, receive, send)
-            return
+        ip = _client_ip(scope, trust_proxy=self.trust_proxy)
 
         now = time.monotonic()
 
