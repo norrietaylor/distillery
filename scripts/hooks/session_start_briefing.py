@@ -738,11 +738,13 @@ def main() -> None:
     )
     recent_text = extract_text(recent_resp)
 
-    # Fetch stale entries
+    # Fetch stale entries.
+    # Issue #307: there is no ``distillery_stale`` MCP tool on the consolidated
+    # surface; route via ``distillery_list`` with ``stale_days`` instead.
     stale_resp = call_tool(
         transport,
-        "distillery_stale",
-        {"days": 30, "limit": 3},
+        "distillery_list",
+        {"project": project, "stale_days": 30, "limit": 3},
         bearer_token,
     )
     stale_text = extract_text(stale_resp)
