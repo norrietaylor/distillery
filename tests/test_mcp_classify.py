@@ -794,6 +794,155 @@ class TestResolveReviewTool:
         stale_keys = [k for k in metadata if k.endswith("_on_behalf_of") or k == "on_behalf_of"]
         assert stale_keys == [], f"Stale delegation keys found: {stale_keys}"
 
+    # ------------------------------------------------------------------
+    # Issue #333: idempotent no-op transitions
+    # ------------------------------------------------------------------
+
+    async def test_resolve_approve_is_idempotent_on_active_entry(self, store: DuckDBStore) -> None:
+        """Approving an already-active entry is a no-op (issue #333).
+
+        version must not bump, reviewed_at must not be rewritten, and the
+        response must carry the ``already_in_state`` marker so callers can
+        distinguish idempotent hits from real state transitions.
+        """
+        # Start pending_review, approve once to reach active with reviewed_at.
+        entry = make_entry(status=EntryStatus.PENDING_REVIEW)
+        entry_id = await store.store(entry)
+
+        first = parse_mcp_response(
+            await _handle_resolve_review(
+                store, {"entry_id": entry_id, "action": "approve", "reviewer": "alice"}
+            )
+        )
+        assert first["status"] == "active"
+        first_version = first["version"]
+        first_reviewed_at = first["metadata"]["reviewed_at"]
+        first_reviewed_by = first["metadata"]["reviewed_by"]
+
+        # Second approve on active entry: must be a no-op.
+        second = parse_mcp_response(
+            await _handle_resolve_review(
+                store, {"entry_id": entry_id, "action": "approve", "reviewer": "bob"}
+            )
+        )
+        assert "error" not in second
+        assert second["already_in_state"] is True
+        assert second["status"] == "active"
+        assert second["version"] == first_version
+        assert second["metadata"]["reviewed_at"] == first_reviewed_at
+        # reviewed_by must not flip to the second caller.
+        assert second["metadata"]["reviewed_by"] == first_reviewed_by
+
+    async def test_resolve_archive_is_idempotent_on_archived_entry(
+        self, store: DuckDBStore
+    ) -> None:
+        """Archiving an already-archived entry is a no-op (issue #333)."""
+        entry = make_entry(status=EntryStatus.PENDING_REVIEW)
+        entry_id = await store.store(entry)
+
+        first = parse_mcp_response(
+            await _handle_resolve_review(store, {"entry_id": entry_id, "action": "archive"})
+        )
+        assert first["status"] == "archived"
+        first_version = first["version"]
+        first_archived_at = first["metadata"]["archived_at"]
+
+        second = parse_mcp_response(
+            await _handle_resolve_review(store, {"entry_id": entry_id, "action": "archive"})
+        )
+        assert "error" not in second
+        assert second["already_in_state"] is True
+        assert second["status"] == "archived"
+        assert second["version"] == first_version
+        assert second["metadata"]["archived_at"] == first_archived_at
+
+    async def test_resolve_reclassify_is_idempotent_when_type_matches_and_active(
+        self, store: DuckDBStore
+    ) -> None:
+        """Reclassify to the same type on an active entry is a no-op (issue #333)."""
+        entry = make_entry(entry_type=EntryType.MEETING, status=EntryStatus.ACTIVE)
+        entry_id = await store.store(entry)
+        original_version = entry.version
+
+        response = await _handle_resolve_review(
+            store,
+            {
+                "entry_id": entry_id,
+                "action": "reclassify",
+                "new_entry_type": "meeting",
+            },
+        )
+        data = parse_mcp_response(response)
+        assert "error" not in data
+        assert data["already_in_state"] is True
+        assert data["status"] == "active"
+        assert data["entry_type"] == "meeting"
+        assert data["version"] == original_version
+        # No reclassified_from should have been written.
+        assert "reclassified_from" not in data["metadata"]
+
+    async def test_resolve_reclassify_same_type_from_pending_still_runs(
+        self, store: DuckDBStore
+    ) -> None:
+        """Reclassify to the same type from pending_review still promotes to active.
+
+        This is *not* a no-op: the status flip is real work, so version must
+        bump and ``already_in_state`` must NOT be set.
+        """
+        entry = make_entry(entry_type=EntryType.MEETING, status=EntryStatus.PENDING_REVIEW)
+        entry_id = await store.store(entry)
+
+        response = await _handle_resolve_review(
+            store,
+            {
+                "entry_id": entry_id,
+                "action": "reclassify",
+                "new_entry_type": "meeting",
+            },
+        )
+        data = parse_mcp_response(response)
+        assert "error" not in data
+        assert "already_in_state" not in data
+        assert data["status"] == "active"
+        assert data["entry_type"] == "meeting"
+        assert data["version"] > entry.version
+
+    async def test_resolve_reclassify_different_type_on_active_still_runs(
+        self, store: DuckDBStore
+    ) -> None:
+        """Reclassify to a different type on an active entry performs real work."""
+        entry = make_entry(entry_type=EntryType.INBOX, status=EntryStatus.ACTIVE)
+        entry_id = await store.store(entry)
+
+        response = await _handle_resolve_review(
+            store,
+            {
+                "entry_id": entry_id,
+                "action": "reclassify",
+                "new_entry_type": "reference",
+            },
+        )
+        data = parse_mcp_response(response)
+        assert "error" not in data
+        assert "already_in_state" not in data
+        assert data["entry_type"] == "reference"
+        assert data["metadata"]["reclassified_from"] == "inbox"
+        assert data["version"] > entry.version
+
+    async def test_resolve_reclassify_missing_new_entry_type_still_rejected(
+        self, store: DuckDBStore
+    ) -> None:
+        """Idempotency check must not swallow INVALID_PARAMS for missing new_entry_type."""
+        entry = make_entry(entry_type=EntryType.MEETING, status=EntryStatus.ACTIVE)
+        entry_id = await store.store(entry)
+
+        response = await _handle_resolve_review(
+            store, {"entry_id": entry_id, "action": "reclassify"}
+        )
+        data = parse_mcp_response(response)
+        assert data["error"] is True
+        assert data["code"] == "INVALID_PARAMS"
+
 
 # ---------------------------------------------------------------------------
 # End-to-end classification flow
