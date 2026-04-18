@@ -633,6 +633,25 @@ def _extract_snippets(text: str, max_items: int) -> tuple[int, list[str]]:
                         snippets.append(content[:60])
             return count, snippets
         if isinstance(parsed, dict):
+            # ``distillery_list`` shape: {"entries": [...], "count": N, "total_count": M, ...}
+            entries = parsed.get("entries")
+            if isinstance(entries, list):
+                count_raw = parsed.get("total_count", parsed.get("count", len(entries)))
+                count = count_raw if isinstance(count_raw, int) else len(entries)
+                entry_snippets: list[str] = []
+                for item in entries[:max_items]:
+                    if not isinstance(item, dict):
+                        continue
+                    snippet_src = (
+                        item.get("content_preview")
+                        or item.get("title")
+                        or item.get("content")
+                        or ""
+                    )
+                    if isinstance(snippet_src, str) and snippet_src:
+                        entry_snippets.append(snippet_src[:60])
+                return count, entry_snippets
+
             # Single entry wrapped in a dict — treat as a list of one
             count = 1
             content = parsed.get("content", "")
