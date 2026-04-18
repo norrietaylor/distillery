@@ -1,12 +1,17 @@
 """Feed tool handlers for the Distillery MCP server.
 
-Implements the following tools:
+Implements the following MCP tools:
   - distillery_watch: Manage feed sources (list, add, remove).
-  - distillery_poll: Poll configured feed sources for new content.
-  - distillery_rescore: Re-score existing feed entries against current knowledge.
   - distillery_gh_sync: Sync GitHub issues/PRs with batched pipeline.
   - distillery_store_batch: Store multiple entries in a single batched call.
   - distillery_sync_status: Check status of background sync jobs.
+
+Also implements shared feed handlers that are invoked by the REST webhook
+layer (``/hooks/poll``, ``/hooks/rescore``) and the eval bridge — these are
+NOT registered as MCP tools:
+  - ``_handle_poll``: Poll configured feed sources for new content.
+  - ``_handle_rescore``: Re-score existing feed entries against current
+    knowledge.
 
 Helper functions ``_normalise_watched_set`` and ``_derive_suggestions`` are used
 by :mod:`distillery.mcp.tools.analytics` when ``distillery_interests`` is called
@@ -411,20 +416,23 @@ async def _purge_source_entries(store: Any, source_url: str) -> int:
     """
     archived = 0
     batch_size = 100
-    offset = 0
+    # Always re-query from offset=0 using an explicit non-archived filter so
+    # that archiving entries in one iteration does not cause later pages to be
+    # skipped. The loop terminates when no more non-archived matches remain.
     while True:
         entries = await store.list_entries(
-            filters={"metadata.source_url": source_url},
+            filters={
+                "metadata.source_url": source_url,
+                "status": ["active", "pending_review"],
+            },
             limit=batch_size,
-            offset=offset,
+            offset=0,
         )
         if not entries:
             break
         for entry in entries:
-            if getattr(entry, "status", None) != "archived":
-                await store.update(entry.id, {"status": "archived"})
-                archived += 1
-        offset += batch_size
+            await store.update(entry.id, {"status": "archived"})
+            archived += 1
     return archived
 
 
@@ -819,15 +827,20 @@ async def _handle_store_batch(
                 metadata=metadata,
             )
             valid_entries.append(entry)
-        except Exception as exc:  # noqa: BLE001
-            errors.append({"index": idx, "error": str(exc)})
+        except Exception:  # noqa: BLE001
+            # Log full traceback for diagnostics but return a stable,
+            # non-sensitive message to the client so we do not leak
+            # backend/validation internals through the MCP response.
+            logger.exception("distillery_store_batch: failed to build entry at index %d", idx)
+            errors.append({"index": idx, "error": "invalid entry payload"})
 
     stored_ids: list[str] = []
     if valid_entries:
         try:
             stored_ids = await store.store_batch(valid_entries)
-        except Exception as exc:  # noqa: BLE001
-            errors.append({"index": -1, "error": f"Batch store failed: {exc}"})
+        except Exception:  # noqa: BLE001
+            logger.exception("distillery_store_batch: batch store failed")
+            errors.append({"index": -1, "error": "batch store failed"})
 
     return success_response(
         {

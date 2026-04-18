@@ -361,14 +361,24 @@ async def _handle_poll(request: Request, state: dict[str, Any]) -> JSONResponse:
                     {"ok": False, "error": "request body must be a JSON object"},
                     status_code=400,
                 )
-            if "source_url" in payload:
-                val = payload["source_url"]
-                if not isinstance(val, str):
-                    return JSONResponse(
-                        {"ok": False, "error": "source_url must be a string"},
-                        status_code=400,
-                    )
-                source_url = val
+            # If a JSON body is supplied it must carry source_url. Silently
+            # treating `{}` or typo'd keys like `{"src":"…"}` as an all-sources
+            # poll turns a malformed targeted request into the most expensive
+            # mutation path in this handler. Callers that want an all-sources
+            # poll should send no body (or an empty body) instead.
+            val = payload.get("source_url")
+            if not isinstance(val, str):
+                return JSONResponse(
+                    {
+                        "ok": False,
+                        "error": (
+                            "source_url is required in the request body and must "
+                            "be a string; send an empty body to poll all sources"
+                        ),
+                    },
+                    status_code=400,
+                )
+            source_url = val
     return await _run_poll(state, source_url=source_url)
 
 
@@ -528,9 +538,15 @@ async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONRe
             return {"ok": False, "error": "failed to parse sub-operation response"}
         return body
 
+    store = state["store"]
+
     # 1. Poll — fetch new feed items (acquire poll lock to serialize with direct /hooks/poll calls).
+    # Reserve the child endpoint cooldown inside the locked section so a direct
+    # POST /hooks/poll that queues behind poll_lock does not run immediately
+    # after this phase finishes, which would cause duplicate fetch work.
     poll_lock = _endpoint_locks.setdefault("poll", asyncio.Lock())
     async with poll_lock:
+        await _set_cooldown(store, "poll")
         poll_response = await _run_poll(state)
     poll_body = _extract(poll_response)
     poll_result: dict[str, Any] = (
@@ -542,6 +558,7 @@ async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONRe
     # 2. Rescore — re-score existing entries (acquire rescore lock to serialize).
     rescore_lock = _endpoint_locks.setdefault("rescore", asyncio.Lock())
     async with rescore_lock:
+        await _set_cooldown(store, "rescore")
         rescore_response = await _run_rescore(state)
     rescore_body = _extract(rescore_response)
     rescore_result: dict[str, Any] = (
@@ -553,6 +570,7 @@ async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONRe
     # 3. Classify-batch — classify pending inbox entries (acquire classify-batch lock to serialize).
     classify_lock = _endpoint_locks.setdefault("classify-batch", asyncio.Lock())
     async with classify_lock:
+        await _set_cooldown(store, "classify-batch")
         classify_response = await _run_classify_batch(state)
     classify_body = _extract(classify_response)
     classify_result: dict[str, Any] = (
@@ -565,7 +583,6 @@ async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONRe
     retention_result: dict[str, Any] = {"ok": True, "deleted": 0}
     config = state.get("config")
     if config is not None and config.rate_limit.search_log_retention_days > 0:
-        store = state["store"]
         retention_days = config.rate_limit.search_log_retention_days
         try:
             # Delegate to the store's async helper so the DuckDB connection is

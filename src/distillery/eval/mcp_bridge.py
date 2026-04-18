@@ -491,7 +491,10 @@ DISTILLERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "repo": {"type": "string"},
+                "url": {
+                    "type": "string",
+                    "description": "GitHub owner/repo slug or full repository URL.",
+                },
                 "background": {"type": "boolean"},
             },
             "required": [],

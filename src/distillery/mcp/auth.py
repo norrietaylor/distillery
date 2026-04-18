@@ -274,6 +274,15 @@ async def pre_register_claude_code_client(provider: GitHubProvider) -> None:
         try:
             existing = await get_client(client_id)
         except Exception:  # noqa: BLE001
+            # A failed client-store lookup is not necessarily fatal (e.g. a
+            # newly-provisioned backend or transient connectivity hiccup), but
+            # we must not silently swallow it — log with traceback so operators
+            # can diagnose real storage failures instead of masking them.
+            logger.warning(
+                "Claude Code OAuth pre-check failed to query client store; "
+                "will attempt registration anyway",
+                exc_info=True,
+            )
             existing = None
         if existing is not None:
             logger.debug("Claude Code OAuth client already registered; skipping")
@@ -293,9 +302,22 @@ async def pre_register_claude_code_client(provider: GitHubProvider) -> None:
     try:
         await provider.register_client(client_info)
     except Exception as exc:  # noqa: BLE001
-        # Duplicate registrations raise in FastMCP. Treat as a benign no-op
-        # so a restart against a persistent OAuth store does not crash.
-        logger.debug("Pre-registration of Claude Code OAuth client skipped (%s)", exc)
+        # FastMCP does not expose a stable ClientExistsError — distinguish
+        # duplicate-client errors (benign no-op across restarts with a
+        # persistent OAuth store) from real registration failures by
+        # inspecting the exception message.
+        msg = str(exc).lower()
+        if any(token in msg for token in ("already exists", "duplicate", "already registered")):
+            logger.debug(
+                "Pre-registration of Claude Code OAuth client skipped (already exists): %s",
+                exc,
+            )
+            return
+        logger.warning(
+            "Pre-registration of Claude Code OAuth client failed; "
+            "Claude Code onboarding may require a live CIMD fetch",
+            exc_info=True,
+        )
         return
     logger.info("Pre-registered Claude Code OAuth client (%s)", meta["client_id"])
 
