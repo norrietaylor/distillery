@@ -367,9 +367,7 @@ async def _handle_watch(
                 job = tracker.create_job(source_url=url, source_type=source_type)
 
                 def _on_page(page_num: int, created: int, updated: int) -> None:
-                    job.pages_processed = page_num
-                    job.entries_created += created
-                    job.entries_updated += updated
+                    tracker.update_progress(job.job_id, page_num, created, updated)
 
                 sync_coro = adapter.sync_batched(on_page=_on_page)
                 asyncio.create_task(run_sync_job_async(job, tracker, sync_coro))
@@ -732,9 +730,7 @@ async def _handle_gh_sync(
         job = tracker.create_job(source_url=url, source_type="github")
 
         def _on_page(page_num: int, created: int, updated: int) -> None:
-            job.pages_processed = page_num
-            job.entries_created += created
-            job.entries_updated += updated
+            tracker.update_progress(job.job_id, page_num, created, updated)
 
         sync_coro = adapter.sync_batched(on_page=_on_page)
         asyncio.create_task(run_sync_job_async(job, tracker, sync_coro))

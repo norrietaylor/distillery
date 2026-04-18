@@ -156,6 +156,212 @@ class TestSyncJobTracker:
 
 
 # ---------------------------------------------------------------------------
+# SyncJobTracker DuckDB persistence tests
+# ---------------------------------------------------------------------------
+
+
+def _count_sync_jobs(store: Any, job_id: str) -> int:
+    """Helper: count rows in sync_jobs for a given job_id."""
+    row = store.connection.execute(
+        "SELECT COUNT(*) FROM sync_jobs WHERE job_id = ?", [job_id]
+    ).fetchone()
+    return int(row[0])
+
+
+def _fetch_sync_job_row(store: Any, job_id: str) -> dict[str, Any] | None:
+    """Helper: return the sync_jobs row for a given job_id as a dict."""
+    row = store.connection.execute(
+        """SELECT job_id, source_url, source_type, status, entries_created,
+                  entries_updated, pages_processed, error_message, result, errors
+           FROM sync_jobs WHERE job_id = ?""",
+        [job_id],
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "job_id": row[0],
+        "source_url": row[1],
+        "source_type": row[2],
+        "status": row[3],
+        "entries_created": row[4],
+        "entries_updated": row[5],
+        "pages_processed": row[6],
+        "error_message": row[7],
+        "result": row[8],
+        "errors": row[9],
+    }
+
+
+class TestSyncJobTrackerPersistence:
+    """Write-through persistence and restart hydration."""
+
+    @pytest.mark.integration
+    async def test_create_job_writes_row(self, store) -> None:  # type: ignore[no-untyped-def]
+        tracker = SyncJobTracker(store=store)
+        job = tracker.create_job(source_url="owner/repo", source_type="github")
+        row = _fetch_sync_job_row(store, job.job_id)
+        assert row is not None
+        assert row["status"] == "pending"
+        assert row["source_url"] == "owner/repo"
+        assert row["source_type"] == "github"
+
+    @pytest.mark.integration
+    async def test_state_transitions_persist(self, store) -> None:  # type: ignore[no-untyped-def]
+        tracker = SyncJobTracker(store=store)
+        job = tracker.create_job(source_url="owner/repo", source_type="github")
+
+        tracker.mark_running(job.job_id)
+        row = _fetch_sync_job_row(store, job.job_id)
+        assert row is not None
+        assert row["status"] == "running"
+
+        tracker.mark_completed(job.job_id, result={"created": 3, "updated": 1})
+        row = _fetch_sync_job_row(store, job.job_id)
+        assert row is not None
+        assert row["status"] == "completed"
+        assert row["result"] is not None
+        assert json.loads(row["result"])["created"] == 3
+
+    @pytest.mark.integration
+    async def test_mark_failed_persists_error(self, store) -> None:  # type: ignore[no-untyped-def]
+        tracker = SyncJobTracker(store=store)
+        job = tracker.create_job(source_url="owner/repo", source_type="github")
+        tracker.mark_running(job.job_id)
+        tracker.mark_failed(job.job_id, error="API down")
+        row = _fetch_sync_job_row(store, job.job_id)
+        assert row is not None
+        assert row["status"] == "failed"
+        assert row["error_message"] == "API down"
+
+    @pytest.mark.integration
+    async def test_update_progress_accumulates(self, store) -> None:  # type: ignore[no-untyped-def]
+        tracker = SyncJobTracker(store=store)
+        job = tracker.create_job(source_url="owner/repo", source_type="github")
+        tracker.update_progress(job.job_id, pages_processed=1, created_delta=5, updated_delta=2)
+        tracker.update_progress(job.job_id, pages_processed=2, created_delta=3, updated_delta=0)
+
+        row = _fetch_sync_job_row(store, job.job_id)
+        assert row is not None
+        assert row["pages_processed"] == 2
+        assert row["entries_created"] == 8  # 5 + 3
+        assert row["entries_updated"] == 2  # 2 + 0
+
+    @pytest.mark.integration
+    async def test_attach_store_after_construction(self, store) -> None:  # type: ignore[no-untyped-def]
+        """attach_store() after construction lights up persistence."""
+        tracker = SyncJobTracker()  # no store yet
+        job = tracker.create_job(source_url="a/b", source_type="github")
+        assert _count_sync_jobs(store, job.job_id) == 0  # no persistence yet
+
+        tracker.attach_store(store)
+        # Subsequent transitions should persist the full snapshot.
+        tracker.mark_running(job.job_id)
+        row = _fetch_sync_job_row(store, job.job_id)
+        assert row is not None
+        assert row["status"] == "running"
+
+    @pytest.mark.integration
+    async def test_persistence_failure_is_silent(
+        self,
+        store,  # type: ignore[no-untyped-def]
+        caplog,  # type: ignore[no-untyped-def]
+    ) -> None:
+        """A DB error during persistence must not abort the in-memory update."""
+        tracker = SyncJobTracker(store=store)
+        job = tracker.create_job(source_url="a/b", source_type="github")
+
+        # Force a persistence error by dropping the table between transitions.
+        store.connection.execute("DROP TABLE sync_jobs")
+        caplog.clear()
+        # Should not raise — in-memory state still updates.
+        tracker.mark_running(job.job_id)
+        assert tracker.get_job(job.job_id).status == SyncJobStatus.RUNNING  # type: ignore[union-attr]
+        assert any(
+            "failed to persist snapshot" in rec.message.lower() for rec in caplog.records
+        )
+
+    @pytest.mark.integration
+    async def test_hydrate_no_op_without_store(self) -> None:
+        tracker = SyncJobTracker()
+        interrupted = await tracker.hydrate()
+        assert interrupted == 0
+
+    @pytest.mark.integration
+    async def test_hydrate_marks_running_as_interrupted(self, store) -> None:  # type: ignore[no-untyped-def]
+        """Jobs with status=running at hydrate-time are reconciled as failed."""
+        # Seed the DB directly to simulate a pre-restart running job.
+        from datetime import UTC, datetime
+
+        job_id = "seeded-running-job"
+        store.connection.execute(
+            """INSERT INTO sync_jobs
+               (job_id, source_url, source_type, status, created_at,
+                started_at, entries_created, entries_updated)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            [
+                job_id,
+                "owner/repo",
+                "github",
+                "running",
+                datetime.now(tz=UTC),
+                datetime.now(tz=UTC),
+                2,
+                0,
+            ],
+        )
+
+        tracker = SyncJobTracker(store=store)
+        interrupted = await tracker.hydrate()
+        assert interrupted == 1
+
+        # Verify both the in-memory copy and the persisted row are updated.
+        job = tracker.get_job(job_id)
+        assert job is not None
+        assert job.status == SyncJobStatus.FAILED
+        assert job.error_message == "interrupted by server restart"
+        assert job.entries_created == 2  # preserved partial progress
+
+        row = _fetch_sync_job_row(store, job_id)
+        assert row is not None
+        assert row["status"] == "failed"
+        assert row["error_message"] == "interrupted by server restart"
+
+    @pytest.mark.integration
+    async def test_hydrate_preserves_completed_jobs(self, store) -> None:  # type: ignore[no-untyped-def]
+        """Completed jobs survive hydration unchanged and are visible via get_job."""
+        from datetime import UTC, datetime
+
+        job_id = "seeded-completed-job"
+        store.connection.execute(
+            """INSERT INTO sync_jobs
+               (job_id, source_url, source_type, status, created_at,
+                completed_at, entries_created, entries_updated, result)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            [
+                job_id,
+                "owner/repo",
+                "github",
+                "completed",
+                datetime.now(tz=UTC),
+                datetime.now(tz=UTC),
+                7,
+                2,
+                json.dumps({"created": 7, "updated": 2}),
+            ],
+        )
+
+        tracker = SyncJobTracker(store=store)
+        interrupted = await tracker.hydrate()
+        assert interrupted == 0
+
+        job = tracker.get_job(job_id)
+        assert job is not None
+        assert job.status == SyncJobStatus.COMPLETED
+        assert job.entries_created == 7
+        assert job.result == {"created": 7, "updated": 2}
+
+
+# ---------------------------------------------------------------------------
 # run_sync_job_async tests
 # ---------------------------------------------------------------------------
 

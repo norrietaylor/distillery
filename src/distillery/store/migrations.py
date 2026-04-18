@@ -365,6 +365,44 @@ def add_feed_source_liveness(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> 
     logger.info("Migration 12: feed_sources liveness columns added")
 
 
+_CREATE_SYNC_JOBS_TABLE = """
+CREATE TABLE IF NOT EXISTS sync_jobs (
+    job_id            VARCHAR PRIMARY KEY,
+    source_url        VARCHAR NOT NULL,
+    source_type       VARCHAR NOT NULL,
+    status            VARCHAR NOT NULL,
+    created_at        TIMESTAMPTZ NOT NULL,
+    started_at        TIMESTAMPTZ,
+    completed_at      TIMESTAMPTZ,
+    entries_created   INTEGER NOT NULL DEFAULT 0,
+    entries_updated   INTEGER NOT NULL DEFAULT 0,
+    relations_created INTEGER NOT NULL DEFAULT 0,
+    pages_processed   INTEGER NOT NULL DEFAULT 0,
+    errors            VARCHAR,
+    error_message     VARCHAR,
+    result            VARCHAR
+);
+"""
+
+_CREATE_SYNC_JOBS_CREATED_AT_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_sync_jobs_created_at
+ON sync_jobs (created_at);
+"""
+
+
+def create_sync_jobs(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
+    """Migration 13: Create the ``sync_jobs`` table.
+
+    Backs the :class:`distillery.feeds.sync_jobs.SyncJobTracker` so background
+    gh-sync / feed-history jobs survive server restarts. Fields mirror
+    :class:`distillery.feeds.sync_jobs.SyncJob`; ``errors`` and ``result``
+    are JSON-encoded strings.
+    """
+    conn.execute(_CREATE_SYNC_JOBS_TABLE)
+    conn.execute(_CREATE_SYNC_JOBS_CREATED_AT_INDEX)
+    logger.info("Migration 13: sync_jobs table created")
+
+
 # ---------------------------------------------------------------------------
 # Migration registry
 # ---------------------------------------------------------------------------
@@ -382,6 +420,7 @@ MIGRATIONS: dict[int, MigrationFunc] = {
     10: add_verification,
     11: add_session_id,
     12: add_feed_source_liveness,
+    13: create_sync_jobs,
 }
 """Ordered mapping of schema version to migration function.
 

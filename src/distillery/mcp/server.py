@@ -198,6 +198,21 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                             trust_weight=src.trust_weight,
                         )
                 await store.set_metadata("feeds_seeded", "true")
+            # Wire the sync-job tracker to the store and reconcile any
+            # background jobs interrupted by a prior restart.
+            from distillery.feeds.sync_jobs import get_tracker
+
+            tracker = get_tracker()
+            tracker.attach_store(store)
+            try:
+                interrupted = await tracker.hydrate()
+                if interrupted:
+                    logger.info(
+                        "Marked %d sync jobs as interrupted during startup hydration",
+                        interrupted,
+                    )
+            except Exception:  # noqa: BLE001
+                logger.exception("Sync-job tracker hydration failed (non-fatal)")
             _shared.update(store=store, config=config, embedding_provider=ep)
             # Record startup timestamp for distillery_status uptime reporting.
             # Stored in shared state (not replaced on subsequent lifespan entries

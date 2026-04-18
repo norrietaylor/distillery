@@ -2,8 +2,15 @@
 
 When a feed source is added with ``sync_history=True``, the import runs as a
 background :mod:`asyncio` task instead of blocking the MCP tool response.  This
-module provides an in-memory job registry that tracks status, progress, and
-results so callers can check on running imports.
+module provides a registry that tracks status, progress, and results so
+callers can check on running imports.
+
+The tracker is backed by an in-memory dict for hot reads plus (when a
+:class:`~distillery.store.duckdb.DuckDBStore` is attached) write-through
+persistence to the ``sync_jobs`` table. On server startup, :meth:`hydrate`
+reloads recent rows and marks any ``pending`` / ``running`` jobs as
+``failed`` with ``error_message="interrupted by server restart"`` — the
+asyncio tasks backing them don't survive a restart.
 
 Job lifecycle::
 
@@ -12,10 +19,12 @@ Job lifecycle::
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Any
 
@@ -87,16 +96,128 @@ class SyncJob:
         }
 
 
+_HYDRATE_HORIZON_HOURS = 24
+
+_INSERT_SYNC_JOB = """
+INSERT INTO sync_jobs (
+    job_id, source_url, source_type, status, created_at,
+    started_at, completed_at,
+    entries_created, entries_updated, relations_created, pages_processed,
+    errors, error_message, result
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT (job_id) DO UPDATE SET
+    status = EXCLUDED.status,
+    started_at = EXCLUDED.started_at,
+    completed_at = EXCLUDED.completed_at,
+    entries_created = EXCLUDED.entries_created,
+    entries_updated = EXCLUDED.entries_updated,
+    relations_created = EXCLUDED.relations_created,
+    pages_processed = EXCLUDED.pages_processed,
+    errors = EXCLUDED.errors,
+    error_message = EXCLUDED.error_message,
+    result = EXCLUDED.result
+"""
+
+_SELECT_RECENT_SYNC_JOBS = """
+SELECT job_id, source_url, source_type, status, created_at,
+       started_at, completed_at,
+       entries_created, entries_updated, relations_created, pages_processed,
+       errors, error_message, result
+FROM sync_jobs
+WHERE created_at > ?
+ORDER BY created_at DESC
+"""
+
+
+def _job_from_row(row: tuple[Any, ...]) -> SyncJob:
+    """Rebuild a :class:`SyncJob` from a DuckDB row (SELECT order above)."""
+    (
+        job_id,
+        source_url,
+        source_type,
+        status,
+        created_at,
+        started_at,
+        completed_at,
+        entries_created,
+        entries_updated,
+        relations_created,
+        pages_processed,
+        errors_raw,
+        error_message,
+        result_raw,
+    ) = row
+
+    errors: list[str] = []
+    if errors_raw:
+        try:
+            parsed = json.loads(errors_raw)
+            if isinstance(parsed, list):
+                errors = [str(e) for e in parsed]
+        except (TypeError, ValueError):
+            errors = []
+
+    result: dict[str, Any] | None = None
+    if result_raw:
+        try:
+            parsed = json.loads(result_raw)
+            if isinstance(parsed, dict):
+                result = parsed
+        except (TypeError, ValueError):
+            result = None
+
+    # DuckDB returns datetimes as tz-aware for TIMESTAMPTZ; defend against
+    # naïve values by attaching UTC.
+    def _as_utc(dt: datetime | None) -> datetime | None:
+        if dt is None:
+            return None
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=UTC)
+        return dt
+
+    return SyncJob(
+        job_id=str(job_id),
+        source_url=str(source_url),
+        source_type=str(source_type),
+        status=SyncJobStatus(str(status)),
+        created_at=_as_utc(created_at) or datetime.now(tz=UTC),
+        started_at=_as_utc(started_at),
+        completed_at=_as_utc(completed_at),
+        entries_created=int(entries_created or 0),
+        entries_updated=int(entries_updated or 0),
+        relations_created=int(relations_created or 0),
+        pages_processed=int(pages_processed or 0),
+        errors=errors,
+        error_message=str(error_message) if error_message is not None else None,
+        result=result,
+    )
+
+
 class SyncJobTracker:
-    """In-memory registry of background sync jobs.
+    """Registry of background sync jobs.
+
+    The in-memory dict is the primary hot-read surface. When a store is
+    attached (via :meth:`attach_store`, or passed to the constructor),
+    every state transition is mirrored to the ``sync_jobs`` table.
+    Persistence failures are logged and swallowed — they never abort an
+    in-memory update.
 
     Safe for use with asyncio tasks (cooperative concurrency on a single
-    thread).  Jobs are kept in memory and are lost on process restart
-    (acceptable for MCP server lifecycle).
+    thread). DuckDB writes block the event loop briefly (<1 ms); acceptable
+    for the single-row transitions here.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, store: Any | None = None) -> None:
         self._jobs: dict[str, SyncJob] = {}
+        self._store: Any | None = store
+
+    def attach_store(self, store: Any) -> None:
+        """Attach a store for write-through persistence.
+
+        Intended to be called from the MCP server lifespan once the
+        :class:`~distillery.store.duckdb.DuckDBStore` has been initialised.
+        """
+        self._store = store
 
     def create_job(self, source_url: str, source_type: str) -> SyncJob:
         """Create and register a new pending sync job.
@@ -110,6 +231,7 @@ class SyncJobTracker:
         """
         job = SyncJob(source_url=source_url, source_type=source_type)
         self._jobs[job.job_id] = job
+        self._persist_snapshot(job)
         return job
 
     def get_job(self, job_id: str) -> SyncJob | None:
@@ -137,25 +259,137 @@ class SyncJobTracker:
     def mark_running(self, job_id: str) -> None:
         """Transition a job to running status."""
         job = self._jobs.get(job_id)
-        if job is not None:
-            job.status = SyncJobStatus.RUNNING
-            job.started_at = datetime.now(tz=UTC)
+        if job is None:
+            return
+        job.status = SyncJobStatus.RUNNING
+        job.started_at = datetime.now(tz=UTC)
+        self._persist_snapshot(job)
 
     def mark_completed(self, job_id: str, result: dict[str, Any] | None = None) -> None:
         """Transition a job to completed status."""
         job = self._jobs.get(job_id)
-        if job is not None:
-            job.status = SyncJobStatus.COMPLETED
-            job.completed_at = datetime.now(tz=UTC)
-            job.result = result
+        if job is None:
+            return
+        job.status = SyncJobStatus.COMPLETED
+        job.completed_at = datetime.now(tz=UTC)
+        job.result = result
+        self._persist_snapshot(job)
 
     def mark_failed(self, job_id: str, error: str) -> None:
         """Transition a job to failed status."""
         job = self._jobs.get(job_id)
-        if job is not None:
-            job.status = SyncJobStatus.FAILED
-            job.completed_at = datetime.now(tz=UTC)
-            job.error_message = error
+        if job is None:
+            return
+        job.status = SyncJobStatus.FAILED
+        job.completed_at = datetime.now(tz=UTC)
+        job.error_message = error
+        self._persist_snapshot(job)
+
+    def update_progress(
+        self,
+        job_id: str,
+        pages_processed: int,
+        created_delta: int,
+        updated_delta: int,
+    ) -> None:
+        """Record per-page progress for a running job.
+
+        Mirrors what the legacy ``_on_page`` inline callback used to do
+        (absolute ``pages_processed``, accumulated ``entries_created`` /
+        ``entries_updated``) but also write-throughs to the DB so restart
+        hydration sees accurate intermediate progress.
+        """
+        job = self._jobs.get(job_id)
+        if job is None:
+            return
+        job.pages_processed = pages_processed
+        job.entries_created += created_delta
+        job.entries_updated += updated_delta
+        self._persist_snapshot(job)
+
+    async def hydrate(self) -> int:
+        """Load recent rows from DB into memory and reconcile dangling jobs.
+
+        Any jobs whose persisted status is ``pending`` or ``running`` are
+        stale (their asyncio task didn't survive the restart); they're
+        rewritten as ``failed`` with ``error_message="interrupted by server
+        restart"``.
+
+        Returns:
+            Number of jobs reconciled as interrupted. Zero when no store
+            is attached.
+        """
+        if self._store is None:
+            return 0
+
+        cutoff = datetime.now(tz=UTC) - timedelta(hours=_HYDRATE_HORIZON_HOURS)
+        try:
+            rows = await asyncio.to_thread(
+                lambda: self._store.connection.execute(
+                    _SELECT_RECENT_SYNC_JOBS, [cutoff]
+                ).fetchall()
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("SyncJobTracker.hydrate: failed to load sync_jobs")
+            return 0
+
+        interrupted = 0
+        for row in rows:
+            try:
+                job = _job_from_row(row)
+            except Exception:  # noqa: BLE001
+                logger.exception("SyncJobTracker.hydrate: skipping malformed row")
+                continue
+            self._jobs[job.job_id] = job
+            if job.status in (SyncJobStatus.PENDING, SyncJobStatus.RUNNING):
+                job.status = SyncJobStatus.FAILED
+                job.completed_at = datetime.now(tz=UTC)
+                job.error_message = "interrupted by server restart"
+                self._persist_snapshot(job)
+                interrupted += 1
+
+        if interrupted:
+            logger.info(
+                "SyncJobTracker.hydrate: marked %d dangling jobs as interrupted",
+                interrupted,
+            )
+        return interrupted
+
+    # ------------------------------------------------------------------
+    # Persistence helpers (no-ops when no store is attached)
+    # ------------------------------------------------------------------
+
+    def _persist_snapshot(self, job: SyncJob) -> None:
+        """Write the full job row to DB via UPSERT. Silent on failure."""
+        if self._store is None:
+            return
+        try:
+            errors_json = json.dumps(job.errors) if job.errors else None
+            result_json = json.dumps(job.result) if job.result is not None else None
+            self._store.connection.execute(
+                _INSERT_SYNC_JOB,
+                [
+                    job.job_id,
+                    job.source_url,
+                    job.source_type,
+                    str(job.status),
+                    job.created_at,
+                    job.started_at,
+                    job.completed_at,
+                    job.entries_created,
+                    job.entries_updated,
+                    job.relations_created,
+                    job.pages_processed,
+                    errors_json,
+                    job.error_message,
+                    result_json,
+                ],
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "SyncJobTracker: failed to persist snapshot for job %s",
+                job.job_id,
+            )
 
 
 # Module-level singleton for the MCP server process.
