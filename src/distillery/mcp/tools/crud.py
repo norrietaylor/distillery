@@ -134,18 +134,30 @@ async def _handle_store(
     Returns:
         list[types.TextContent]: MCP content list containing a JSON-serializable object with at least:
           - ``entry_id`` (str): the id the caller should reference — either the
-            newly persisted entry's id, or (when the call was auto-skipped /
-            effectively merged with an existing near-duplicate) the existing
-            entry's id.  Never a "ghost" id that cannot be retrieved.
+            newly persisted entry's id, or (when the call was auto-skipped due
+            to a near-duplicate above the skip threshold) the existing entry's
+            id.  Never a "ghost" id that cannot be retrieved.
           - ``persisted`` (bool): ``True`` if a new row was written, ``False``
             if the call was auto-skipped due to a near-duplicate.
-          - ``dedup_action`` (str): one of ``"stored"``, ``"skipped"``,
-            ``"merged"``, ``"linked"`` indicating how the new content
-            relates to existing entries.
+          - ``dedup_action`` (str): one of ``"stored"`` or ``"skipped"``.
+            ``"stored"`` means a new row was persisted (even if a similar
+            entry exists above the merge or link threshold — the similarity
+            is reported informationally via ``existing_entry_id`` and
+            ``similarity``).  ``"skipped"`` means no new row was created and
+            the caller is pointed at an existing near-duplicate.
 
-        When ``dedup_action != "stored"`` the response also includes
-        ``existing_entry_id`` (str) and ``similarity`` (float) so the caller
-        can pivot to the pre-existing entry.
+            ``"merged"`` and ``"linked"`` are reserved for future behaviour
+            where the server actually folds new content into an existing row
+            or creates an explicit link without a new row; they are not
+            returned by the current implementation because both outcomes
+            persist the new entry independently.
+
+        When a similar existing entry is found above the merge or link
+        threshold (but below the skip threshold), the response also includes
+        ``existing_entry_id`` (str) and ``similarity`` (float) as an
+        informational hint.  ``dedup_action`` remains ``"stored"`` — callers
+        who want to avoid independent duplicates should use
+        ``distillery_find_similar(dedup_action=true)`` before storing.
 
         May also include:
           - `warnings`: list of similar-entry summaries (id, score, content_preview) when near-duplicates were found,
@@ -381,16 +393,27 @@ async def _handle_store(
         return success_response({"entry_id": entry_id, "persisted": True, "dedup_action": "stored"})
 
     # --- determine dedup_action for the persisted entry ---------------------
-    # ``stored`` when no prior similar entry existed (or we lack thresholds).
-    # ``merged``/``linked`` annotate the caller that a near-match exists; the
-    # entry is still persisted — these are informational signals, not
-    # enforcement.  Only ``skipped`` (handled above) prevents persistence.
+    # When a new row is persisted independently, ``dedup_action`` is always
+    # ``"stored"`` — even if a similar entry exists above the merge/link
+    # threshold.  ``"merged"`` / ``"linked"`` are reserved for true fold
+    # cases (no separate row is created) and are not emitted by the current
+    # implementation.  The similarity signal is still surfaced via
+    # ``existing_entry_id`` + ``similarity`` when the top match crosses the
+    # link threshold, so callers can follow up (e.g. issue a
+    # ``distillery_find_similar(dedup_action=true)`` before future stores).
+    # Only ``"skipped"`` (handled above) prevents persistence.
     dedup_action = "stored"
-    if top_existing_id is not None and top_existing_score is not None:
-        if merge_threshold is not None and top_existing_score >= merge_threshold:
-            dedup_action = "merged"
-        elif link_threshold is not None and top_existing_score >= link_threshold:
-            dedup_action = "linked"
+    has_similar_hint = (
+        top_existing_id is not None
+        and top_existing_score is not None
+        and (
+            (merge_threshold is not None and top_existing_score >= merge_threshold)
+            or (link_threshold is not None and top_existing_score >= link_threshold)
+        )
+    )
+    # ``merge_threshold`` / ``link_threshold`` only drive ``has_similar_hint``.
+    # They no longer influence ``dedup_action``; see the reserved-semantics
+    # note above.
 
     # --- conflict check -------------------------------------------------------
     # Non-fatal: wrap in try/except so a conflict-checker failure never blocks
@@ -431,7 +454,7 @@ async def _handle_store(
                     "persisted": True,
                     "dedup_action": dedup_action,
                 }
-                if dedup_action != "stored" and top_existing_id is not None:
+                if has_similar_hint and top_existing_id is not None:
                     response_data["existing_entry_id"] = top_existing_id
                     if top_existing_score is not None:
                         response_data["similarity"] = round(top_existing_score, 4)
@@ -458,7 +481,7 @@ async def _handle_store(
         "persisted": True,
         "dedup_action": dedup_action,
     }
-    if dedup_action != "stored" and top_existing_id is not None:
+    if has_similar_hint and top_existing_id is not None:
         response["existing_entry_id"] = top_existing_id
         if top_existing_score is not None:
             response["similarity"] = round(top_existing_score, 4)
