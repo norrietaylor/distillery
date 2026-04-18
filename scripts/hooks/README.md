@@ -149,8 +149,8 @@ If that script is not present or not executable, exits silently with no output.
 - Verify `DISTILLERY_NUDGE_INTERVAL` is a positive integer (non-zero, non-empty)
 
 **SessionStart produces no output:**
-- Check the MCP server is running: `curl http://localhost:8000/health`
-- Verify `DISTILLERY_MCP_URL` is correct
+- **HTTP transport**: Check the MCP server is running: `curl http://localhost:8000/health`; verify `DISTILLERY_MCP_URL` is correct
+- **stdio transport**: Check `distillery-mcp` is on PATH: `which distillery-mcp`; ensure the package is installed (`pip install distillery`)
 - Ensure `session-start-briefing.sh` is present and executable in the same directory
 
 **Hook not executing:**
@@ -267,8 +267,8 @@ When the MCP server is unreachable: no output (silent exit).
 ### Troubleshooting
 
 **Hook produces no output:**
-- Check the MCP server is running: `curl http://localhost:8000/health`
-- Verify `DISTILLERY_MCP_URL` is correct
+- **HTTP transport**: Check the MCP server is running: `curl http://localhost:8000/health`; verify `DISTILLERY_MCP_URL` is correct
+- **stdio transport**: Check `distillery-mcp` is on PATH: `which distillery-mcp`; ensure the package is installed (`pip install distillery`)
 - Check the server logs for errors
 
 **Authentication errors:**

@@ -53,13 +53,18 @@ Configures up to three tiers of recurring tasks via **Claude Code routines**:
 
 | Schedule | Routine | Purpose |
 |----------|---------|---------|
-| **Hourly** | `distillery-feed-poll` | Fetch new items from all feed sources |
-| **Daily** | `distillery-stale-check` | Identify entries needing refresh or archival |
+| **Hourly** | `distillery-feed-health-check` | Check feed source health and age of most-recent feed entry |
+| **Daily** | `distillery-stale-check` | Identify entries not accessed in 30+ days |
 | **Weekly** | `distillery-weekly-maintenance` | Collect metrics, stale entries, feed activity, digest |
 
 Routines run automatically in the background when Claude Code is active. They work the same way for both local and hosted transport.
 
-- If no feed sources exist, poll and stale check are skipped but weekly maintenance is still offered
+!!! note "Feed polling vs. health check"
+    The hourly routine checks **feed health** (source reachability, age of latest entry) but does **not** fetch new items.
+    Actual feed ingestion (`POST /hooks/poll`) is driven by the `distill_ops` GitHub Actions schedule for hosted deployments,
+    or by the existing `CronCreate` / webhook schedule for local deployments.
+
+- If no feed sources exist, the hourly poll health check is skipped but daily stale check and weekly maintenance are still offered
 - The wizard provides the routine name, schedule, and prompt for each tier
 
 !!! note "Migration from CronCreate / Webhooks"
@@ -97,7 +102,7 @@ Always displayed, even if the wizard exits early:
 | Transport | Hosted (distillery-mcp.fly.dev) |
 | Entries | 42 |
 | Feed Sources | 3 |
-| Hourly Poll | Active (routine) |
+| Hourly Feed Health Check | Active (routine) |
 | Daily Stale Check | Active (routine) |
 | Weekly Maintenance | Active (routine) |
 

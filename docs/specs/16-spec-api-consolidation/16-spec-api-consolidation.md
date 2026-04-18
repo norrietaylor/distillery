@@ -109,13 +109,13 @@ Distillery v0.3 exposes 20 MCP tools, several of which overlap in functionality 
 - The system shall update the `/digest` skill to use `list(output="stats")` instead of calling `metrics`
 - The system shall update the `/radar` skill to remove any reference to the `interests` tool (interest profile is now internal to poll pipeline)
 - The system shall update the `/setup` skill to generate webhook URLs for `/hooks/poll`, `/hooks/rescore`, and `/hooks/classify-batch`
-- The system shall update all skill SKILL.md frontmatter `tools:` lists to reflect the 12-tool surface
+- The system shall update all skill SKILL.md frontmatter `tools:` lists to reflect the 16-tool surface
 
 **Proof Artifacts:**
 
 - Test: `tests/test_webhooks/test_maintenance.py` passes — verifies orchestrator calls poll → rescore → classify-batch in sequence
 - CLI: `POST /api/maintenance` returns combined results from all three sub-operations
-- File: All `skills/*/SKILL.md` files reference only the 12 active tools in their `tools:` frontmatter
+- File: All `skills/*/SKILL.md` files reference only the 16 active tools in their `tools:` frontmatter
 - Test: `pytest tests/` passes — full test suite green with no references to removed tool names in skill logic
 
 ## Non-Goals (Out of Scope)

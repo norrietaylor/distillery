@@ -11,7 +11,7 @@ Covers:
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 from starlette.testclient import TestClient
@@ -256,10 +256,13 @@ async def test_maintenance_calls_poll_then_rescore(
         resp = client.post("/maintenance", headers=_AUTH_HEADER)
 
     assert resp.status_code == 200
-    # FeedPoller was instantiated (at least once for poll, possibly again for rescore
-    # depending on import scope — just verify both methods were awaited).
+    # Both methods must be awaited, and poll must precede rescore.
     mock_poller.poll.assert_awaited()
     mock_poller.rescore.assert_awaited()
+    call_names = [c[0] for c in mock_poller.mock_calls]
+    assert call_names.index("poll") < call_names.index("rescore"), (
+        "poll() must be called before rescore() in the maintenance pipeline"
+    )
     _ = mock_cls  # referenced to suppress unused-variable lint
 
 

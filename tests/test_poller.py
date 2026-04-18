@@ -849,11 +849,14 @@ class TestPersistPollStatus:
         src = FeedSourceConfig(url="https://example.com/rss", source_type="rss")
         # Use MagicMock (not AsyncMock) so getattr(store, "record_poll_status", None)
         # returns the default None for missing attrs.  spec limits attribute access.
-        store = MagicMock(spec=["find_similar", "list_entries", "store", "list_feed_sources"])
+        store = MagicMock(
+            spec=["find_similar", "list_entries", "store", "list_feed_sources", "get_tag_vocabulary"]
+        )
         store.find_similar = AsyncMock(return_value=[])
         store.list_entries = AsyncMock(return_value=[])
         store.store = AsyncMock(return_value="eid")
         store.list_feed_sources = AsyncMock(return_value=[_source_to_dict(src)])
+        store.get_tag_vocabulary = AsyncMock(return_value={})
         cfg = _make_config(sources=[src], digest_threshold=0.0)
 
         with patch("distillery.feeds.poller._build_adapter") as mock_build:

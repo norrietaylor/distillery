@@ -144,8 +144,11 @@ class TestApplyDefaultStatusFilter:
 
     def test_include_archived_invalid_returns_error_response(self) -> None:
         out = _apply_default_status_filter(None, {"include_archived": "yes"})
-        # Error responses are lists of TextContent.
+        # Error responses are lists of TextContent — parse and verify payload.
         assert isinstance(out, list)
+        data = parse_mcp_response(out)
+        assert data.get("error") is True
+        assert data.get("code") == "INVALID_PARAMS"
 
 
 # ---------------------------------------------------------------------------

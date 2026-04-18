@@ -5,6 +5,7 @@ allowed-tools:
   - "mcp__*__distillery_list"
   - "mcp__*__distillery_relations"
   - "mcp__*__distillery_search"
+  - "Bash(git rev-parse --show-toplevel)"
 context: fork
 effort: medium
 ---

@@ -585,7 +585,16 @@ class FeedPoller:
         recorder = getattr(self._store, "record_poll_status", None)
         if recorder is None:
             return
-        error_msg = result.errors[0] if result.errors else None
+        # Normalise the first error string before persisting: collapse whitespace /
+        # control characters to single spaces and cap at 200 chars with an ellipsis
+        # so that raw backend exception text (including stack-trace fragments) is not
+        # stored verbatim and cannot be exfiltrated via distillery_watch(action='list').
+        raw_error = result.errors[0] if result.errors else None
+        if raw_error is not None:
+            sanitised = re.sub(r"\s+", " ", raw_error).strip()
+            error_msg: str | None = sanitised[:199] + "…" if len(sanitised) > 200 else sanitised or None
+        else:
+            error_msg = None
         try:
             # Record the fetched count for source-liveness: a feed that fetched
             # 20 items but stored 0 due to dedup/thresholds still proves the

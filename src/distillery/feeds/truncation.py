@@ -37,6 +37,10 @@ def truncate_content(text: str, max_chars: int = MAX_CONTENT_CHARS) -> str:
         The original string if it fits, or a truncated version with a
         ``[truncated]`` suffix.
     """
+    if max_chars < 0:
+        msg = f"max_chars must be >= 0, got: {max_chars}"
+        raise ValueError(msg)
+
     if len(text) <= max_chars:
         return text
 

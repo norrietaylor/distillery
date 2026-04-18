@@ -45,14 +45,14 @@ Feed health-check routine: configured (hourly)
 
 ## 4b. Daily — Stale Entry Check
 
-Skip this step if the user declined scheduled tasks or if no feed sources are configured.
+Skip this step if the user declined scheduled tasks.
 
 **Routine name:** `distillery-stale-check`
 **Schedule:** Daily
 **Prompt:**
 
 ```text
-Call distillery_list(stale_days=30, limit=10) to find entries not accessed in 30+ days. Report: count of stale entries and the oldest one's title/age.
+Call distillery_list(stale_days=30, limit=10, output_mode="full") to find entries not accessed in 30+ days. Report: count of stale entries and the oldest one's title/age.
 ```
 
 Display after configuration:

@@ -1060,6 +1060,11 @@ def _validate(config: DistilleryConfig) -> None:
         raise ValueError(
             f"rate_limit.warn_db_size_pct must be between 0 and 100, got: {rl.warn_db_size_pct}"
         )
+    if rl.search_log_retention_days <= 0:
+        raise ValueError(
+            "rate_limit.search_log_retention_days must be a positive integer, "
+            f"got: {rl.search_log_retention_days}"
+        )
 
     # Validate server.auth.provider
     valid_auth_providers = {"github", "none"}

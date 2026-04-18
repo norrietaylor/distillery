@@ -3,7 +3,6 @@
 Implements the following MCP tools:
   - distillery_watch: Manage feed sources (list, add, remove).
   - distillery_gh_sync: Sync GitHub issues/PRs with batched pipeline.
-  - distillery_store_batch: Store multiple entries in a single batched call.
   - distillery_sync_status: Check status of background sync jobs.
 
 Also implements shared feed handlers that are invoked by the REST webhook
@@ -385,7 +384,13 @@ async def _handle_watch(
         return success_response(response_data)
 
     # action == "remove"
-    url = str(arguments.get("url", "")).strip()
+    url_raw = arguments.get("url")
+    if url_raw is not None and not isinstance(url_raw, str):
+        return error_response(
+            "INVALID_PARAMS",
+            f"url must be a string, got: {type(url_raw).__name__}",
+        )
+    url = str(url_raw or "").strip()
     if not url:
         return error_response("INVALID_PARAMS", "url is required for action='remove'")
 
@@ -764,117 +769,6 @@ async def _handle_gh_sync(
 
 
 # ---------------------------------------------------------------------------
-# distillery_store_batch handler
-# ---------------------------------------------------------------------------
-
-
-async def _handle_store_batch(
-    store: Any,
-    arguments: dict[str, Any],
-) -> list[types.TextContent]:
-    """Handle the ``distillery_store_batch`` tool.
-
-    Stores multiple entries in a single batched call.  Each entry is
-    processed individually with error isolation so that a failure in one
-    entry does not prevent storage of the others.
-
-    Args:
-        store: An initialised storage backend.
-        arguments: Parsed tool arguments dict with an ``entries`` list.
-
-    Returns:
-        A structured MCP success or error response.
-    """
-    from distillery.models import Entry, EntrySource, EntryType
-
-    entries_raw = arguments.get("entries")
-    if not isinstance(entries_raw, list) or not entries_raw:
-        return error_response(
-            "INVALID_FIELD",
-            "entries must be a non-empty list of entry dicts",
-        )
-
-    errors: list[dict[str, Any]] = []
-    valid_entries: list[Entry] = []
-
-    for idx, entry_data in enumerate(entries_raw):
-        if not isinstance(entry_data, dict):
-            errors.append({"index": idx, "error": "entry must be a dict"})
-            continue
-
-        content = entry_data.get("content")
-        entry_type_raw = entry_data.get("entry_type")
-        author = entry_data.get("author", "batch-import")
-
-        if not content or not isinstance(content, str):
-            errors.append({"index": idx, "error": "content is required and must be a string"})
-            continue
-        if not entry_type_raw or not isinstance(entry_type_raw, str):
-            errors.append({"index": idx, "error": "entry_type is required and must be a string"})
-            continue
-
-        try:
-            et = EntryType(entry_type_raw)
-        except ValueError:
-            errors.append(
-                {
-                    "index": idx,
-                    "error": f"Invalid entry_type: {entry_type_raw!r}",
-                }
-            )
-            continue
-
-        source_raw = entry_data.get("source", "import")
-        try:
-            source = EntrySource(source_raw)
-        except ValueError:
-            source = EntrySource.IMPORT
-
-        tags = entry_data.get("tags", [])
-        if not isinstance(tags, list):
-            tags = []
-        metadata = entry_data.get("metadata", {})
-        if not isinstance(metadata, dict):
-            metadata = {}
-        project = entry_data.get("project")
-
-        try:
-            entry = Entry(
-                content=content,
-                entry_type=et,
-                source=source,
-                author=str(author),
-                project=project,
-                tags=tags,
-                metadata=metadata,
-            )
-            valid_entries.append(entry)
-        except Exception:  # noqa: BLE001
-            # Log full traceback for diagnostics but return a stable,
-            # non-sensitive message to the client so we do not leak
-            # backend/validation internals through the MCP response.
-            logger.exception("distillery_store_batch: failed to build entry at index %d", idx)
-            errors.append({"index": idx, "error": "invalid entry payload"})
-
-    stored_ids: list[str] = []
-    if valid_entries:
-        try:
-            stored_ids = await store.store_batch(valid_entries)
-        except Exception:  # noqa: BLE001
-            logger.exception("distillery_store_batch: batch store failed")
-            errors.append({"index": -1, "error": "batch store failed"})
-
-    return success_response(
-        {
-            "stored_count": len(stored_ids),
-            "stored_ids": stored_ids,
-            "error_count": len(errors),
-            "errors": errors,
-        }
-    )
-
-
-# ---------------------------------------------------------------------------
 # distillery_sync_status handler
 # ---------------------------------------------------------------------------
 
@@ -905,9 +799,11 @@ async def _handle_sync_status(
 
     source_url = arguments.get("source_url")
     jobs = tracker.list_jobs(source_url=source_url)
+    visible_jobs = jobs[:20]
     return success_response(
         {
-            "jobs": [j.to_dict() for j in jobs[:20]],
-            "count": len(jobs),
+            "jobs": [j.to_dict() for j in visible_jobs],
+            "count": len(visible_jobs),
+            "total_count": len(jobs),
         }
     )
