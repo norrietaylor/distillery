@@ -1,14 +1,22 @@
-"""Tests for ``distillery_store`` dedup response contract (issue #314).
+"""Tests for ``distillery_store`` dedup response contract (issues #314, #332).
 
 Verifies that the ``_handle_store`` tool handler always surfaces:
 
 * ``persisted`` (bool)
-* ``dedup_action`` — one of ``stored`` / ``skipped`` / ``merged`` / ``linked``
+* ``dedup_action`` — one of ``stored`` or ``skipped``
 
-and that when a near-duplicate is auto-skipped the returned ``entry_id`` is
-the *existing* entry's id (never a ghost id that was never inserted), and
+When a near-duplicate is auto-skipped the returned ``entry_id`` is the
+*existing* entry's id (never a ghost id that was never inserted), and
 ``existing_entry_id`` plus ``similarity`` are supplied so the caller can
 pivot.
+
+Per issue #332, when a new row IS persisted independently, ``dedup_action``
+is always ``"stored"`` regardless of similarity to existing entries.  The
+similarity signal is surfaced via the informational ``existing_entry_id`` /
+``similarity`` fields when the top match crosses the merge or link
+threshold, but ``dedup_action`` stays ``"stored"`` to honestly reflect that
+a separate row was created.  ``"merged"`` / ``"linked"`` are reserved for
+future behaviour where content is actually folded into an existing row.
 """
 
 from __future__ import annotations
@@ -63,7 +71,9 @@ def _make_config(
 
     The ``dedup_threshold`` (on DefaultsConfig) drives which similar entries
     ``_handle_store`` collects as warnings; the classification thresholds
-    drive the dedup_action classification (skipped/merged/linked).
+    drive the auto-skip decision and (per issue #332) whether the response
+    carries an informational ``existing_entry_id`` / ``similarity`` hint.
+    ``dedup_action`` is only ever ``"stored"`` or ``"skipped"``.
     """
     return DistilleryConfig(
         storage=StorageConfig(database_path=":memory:"),
@@ -219,16 +229,24 @@ class TestStoreNearDuplicateSkipped:
 
 
 # ---------------------------------------------------------------------------
-# Test: similar (merge band) -> persisted=True, dedup_action="merged"
+# Test: similar (merge band) -> persisted=True, dedup_action="stored" +
+#       informational existing_entry_id / similarity hint (issue #332)
 # ---------------------------------------------------------------------------
 
 
-class TestStoreDuplicateMerged:
-    async def test_merge_band_is_persisted_with_merged_action(
+class TestStoreDuplicateMergeBand:
+    async def test_merge_band_is_persisted_as_stored_with_similarity_hint(
         self,
         store: DuckDBStore,
         embedding_provider: ControlledEmbeddingProvider,
     ) -> None:
+        """A new row above the merge threshold is still reported as ``stored``.
+
+        Per issue #332, ``dedup_action`` must honestly reflect that a new
+        separate row was created.  The similarity to the existing entry is
+        still available via ``existing_entry_id`` + ``similarity`` as an
+        informational hint, but ``dedup_action`` stays ``"stored"``.
+        """
         existing_vec = _UNIT_A
         # Interpolate so cosine sim falls between merge (0.80) and skip (0.95)
         # normalized.  Raw cos from interp with t=0.3 ~ 0.89, normalised to
@@ -266,7 +284,9 @@ class TestStoreDuplicateMerged:
 
         assert data.get("error") is not True, data
         assert data["persisted"] is True
-        assert data["dedup_action"] == "merged"
+        # Per issue #332, a new independent row is always ``stored``.
+        assert data["dedup_action"] == "stored"
+        # The similarity signal remains as an informational hint.
         assert data["existing_entry_id"] == existing_id
         assert data["entry_id"] != existing_id  # new row was written
         assert data["similarity"] >= cfg.classification.dedup_merge_threshold
@@ -278,16 +298,23 @@ class TestStoreDuplicateMerged:
 
 
 # ---------------------------------------------------------------------------
-# Test: related (link band) -> persisted=True, dedup_action="linked"
+# Test: related (link band) -> persisted=True, dedup_action="stored" +
+#       informational existing_entry_id / similarity hint (issue #332)
 # ---------------------------------------------------------------------------
 
 
-class TestStoreRelatedLinked:
-    async def test_link_band_is_persisted_with_linked_action(
+class TestStoreRelatedLinkBand:
+    async def test_link_band_is_persisted_as_stored_with_similarity_hint(
         self,
         store: DuckDBStore,
         embedding_provider: ControlledEmbeddingProvider,
     ) -> None:
+        """A new row above the link threshold is still reported as ``stored``.
+
+        As with the merge band (issue #332), a new independent row must
+        report ``dedup_action="stored"`` — the link-band similarity is
+        surfaced informationally only.
+        """
         existing_vec = _UNIT_A
         interp = _interpolated_vector(_UNIT_A, _UNIT_B, 0.7)  # lower similarity
         cos_sim = _cosine(interp, existing_vec)
@@ -319,7 +346,9 @@ class TestStoreRelatedLinked:
 
         assert data.get("error") is not True, data
         assert data["persisted"] is True
-        assert data["dedup_action"] == "linked"
+        # Per issue #332, a new independent row is always ``stored``.
+        assert data["dedup_action"] == "stored"
+        # The similarity signal remains as an informational hint.
         assert data["existing_entry_id"] == existing_id
         assert data["entry_id"] != existing_id
         assert data["similarity"] >= cfg.classification.dedup_link_threshold
