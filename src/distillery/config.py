@@ -743,6 +743,13 @@ def _parse_rate_limit(raw: dict[str, Any]) -> RateLimitConfig:
     if not isinstance(raw, dict):
         raise ValueError(f"rate_limit must be a YAML mapping, got: {type(raw).__name__}")
 
+    search_logging_enabled_raw = raw.get("search_logging_enabled", True)
+    if not isinstance(search_logging_enabled_raw, bool):
+        raise ValueError(
+            "rate_limit.search_logging_enabled must be a boolean, "
+            f"got: {search_logging_enabled_raw!r}"
+        )
+
     return RateLimitConfig(
         embedding_budget_daily=_parse_strict_int(
             raw.get("embedding_budget_daily", 500),
@@ -756,7 +763,7 @@ def _parse_rate_limit(raw: dict[str, Any]) -> RateLimitConfig:
             raw.get("warn_db_size_pct", 80),
             "rate_limit.warn_db_size_pct",
         ),
-        search_logging_enabled=bool(raw.get("search_logging_enabled", True)),
+        search_logging_enabled=search_logging_enabled_raw,
         search_log_retention_days=_parse_strict_int(
             raw.get("search_log_retention_days", 90),
             "rate_limit.search_log_retention_days",

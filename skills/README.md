@@ -76,16 +76,16 @@ To create a new skill:
 
 ## MCP Tools Available
 
-The Distillery MCP server provides 12 tools:
+The Distillery MCP server provides 16 tools:
 
-**CRUD:** `distillery_store`, `distillery_get`, `distillery_update`, `distillery_correct`
+**CRUD:** `distillery_store`, `distillery_store_batch`, `distillery_get`, `distillery_update`, `distillery_correct`
 **Discovery:** `distillery_search`, `distillery_find_similar`, `distillery_list` (with `stale_days`, `group_by`, `output` extensions)
 **Classification:** `distillery_classify`, `distillery_resolve_review`
-**Feeds:** `distillery_watch`
-**Configuration:** `distillery_configure`
+**Feeds / GitHub sync:** `distillery_watch`, `distillery_gh_sync`, `distillery_sync_status`
+**Configuration / Health:** `distillery_configure`, `distillery_status`
 **Relations:** `distillery_relations` (actions: `"add"`, `"get"`, `"remove"`)
 
-**Webhook-only endpoints** (not MCP tools): `POST /hooks/poll`, `POST /hooks/rescore`, `POST /hooks/classify-batch`
+**Webhook-only endpoints** (not MCP tools): `POST /hooks/poll`, `POST /hooks/rescore`, `POST /hooks/classify-batch`, `POST /api/maintenance`
 **MCP resource:** `distillery://schemas/entry-types` (entry type schemas)
 
 See `/docs/getting-started/mcp-setup.md` for full tool documentation.

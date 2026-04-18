@@ -240,7 +240,7 @@ Tags: digest, team-activity, internal
 ## Rules
 
 - NEVER use Bash, Python, or any tool not listed in allowed-tools
-- If an MCP tool call fails, report the error to the user and STOP. Do not attempt workarounds.
+- If a required MCP tool call fails, report the error to the user and STOP. Do not attempt workarounds. Exceptions that are explicitly non-fatal are listed below (e.g. `distillery_list(group_by=...)` grouped-breakdown failures): for those, omit the affected section and continue.
 - Default lookback is 7 days — respect `--days` override
 - Only include `session`, `bookmark`, `minutes`, `idea`, `reference` entry types — never `feed`, `github`, or `digest`
 - Display digest by default; store only with `--store` flag

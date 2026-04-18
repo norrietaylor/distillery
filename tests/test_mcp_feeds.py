@@ -811,7 +811,10 @@ class TestHandlePoll:
         data = parse(result)
         assert data["error"] is True
         assert data["code"] == "INTERNAL"
-        assert "network failure" in data["message"]
+        # Hardened contract: the handler returns a stable generic message
+        # rather than echoing the underlying exception text back to clients.
+        # The traceback is still preserved via ``logger.exception``.
+        assert data["message"] == "Poll cycle failed"
 
     async def test_poll_result_has_iso_polled_at(self) -> None:
         """polled_at in each result must be an ISO-formatted datetime string."""

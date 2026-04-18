@@ -146,7 +146,7 @@ Distillery is built as a 4-layer system where skills (SKILL.md files) drive all 
 |-------|-------------|-----------|
 | **Skills** | 14 SKILL.md files — portable, version-controlled slash commands. Not Python code. | `skills/*/SKILL.md` |
 | **MCP Server** | Tools exposed over stdio (local) or streamable-HTTP (team). Built on FastMCP 2.x/3.x with `@server.tool` decorators. | `src/distillery/mcp/server.py` |
-| **Webhook API** | REST endpoints (`/api/maintenance`) for orchestrated operations. Individual scheduling endpoints (`/hooks/poll`, `/hooks/rescore`, `/hooks/classify-batch`) are deprecated in favour of Claude Code routines. Bearer token auth, per-endpoint cooldowns persisted to DuckDB. Mounted alongside MCP in HTTP mode. | `src/distillery/mcp/webhooks.py` |
+| **Webhook API** | REST endpoints mounted under `/api/*` for orchestrated operations. The active endpoint is `POST /api/maintenance` (full poll → rescore → classify-batch pipeline). Individual scheduling endpoints — `POST /api/poll`, `POST /api/rescore`, `POST /api/classify-batch` (also reachable at `POST /api/hooks/poll`, `/api/hooks/rescore`, `/api/hooks/classify-batch` during the deprecation window) — are deprecated in favour of Claude Code routines and the orchestrated maintenance endpoint. Bearer token auth, per-endpoint cooldowns persisted to DuckDB. Mounted alongside MCP in HTTP mode. | `src/distillery/mcp/webhooks.py` |
 | **Auth** | MCP: GitHub OAuth with org-restricted access. Webhooks: bearer token via `DISTILLERY_WEBHOOK_SECRET`. Middleware handles logging, rate limiting, security headers, budget tracking. | `src/distillery/mcp/auth.py`, `middleware.py`, `budget.py` |
 | **Core Protocols** | Typed `Protocol` interfaces (structural subtyping, not ABCs). All storage operations are async. Includes `query_audit_log` for audit data access. | `src/distillery/store/protocol.py`, `embedding/protocol.py` |
 | **Feeds** | GitHub events and RSS/Atom polling. Authenticated via `GITHUB_TOKEN` for private repos. Auto-tagging (source + topic tags from KB vocabulary). Relevance scoring via embeddings. Interest extraction for source suggestions. | `src/distillery/feeds/` |
@@ -292,13 +292,13 @@ REST endpoints mounted at `/api/*` alongside the MCP server in HTTP mode. Enable
 
 | Endpoint | Operation | Cooldown | Status |
 |----------|-----------|----------|--------|
-| `POST /api/poll` | Poll all feed sources | 5 min | **Deprecated** — use routines |
-| `POST /api/rescore` | Re-score feed entries | 1 hour | **Deprecated** — use routines |
-| `POST /hooks/classify-batch` | Batch classification | 5 min | **Deprecated** — use routines |
+| `POST /api/poll` | Poll all feed sources (alias: `POST /api/hooks/poll`) | 5 min | **Deprecated** — use `/api/maintenance` or routines |
+| `POST /api/rescore` | Re-score feed entries (alias: `POST /api/hooks/rescore`) | 1 hour | **Deprecated** — use `/api/maintenance` or routines |
+| `POST /api/classify-batch` | Batch classification (alias: `POST /api/hooks/classify-batch`) | 5 min | **Deprecated** — use `/api/maintenance` or routines |
 | `POST /api/maintenance` | Orchestrated maintenance (poll + rescore + classify + retention) | 6 hours | Active |
 
 !!! warning "Deprecation Notice"
-    The `/hooks/poll`, `/hooks/rescore`, and `/hooks/classify-batch` endpoints are deprecated. Scheduling should use Claude Code routines instead. The `/api/maintenance` endpoint is retained for orchestrated maintenance operations. See [issue #272](https://github.com/norrietaylor/distillery/issues/272) for migration details.
+    The individual `/api/poll`, `/api/rescore`, and `/api/classify-batch` endpoints (and their `/api/hooks/*` aliases) are deprecated. Scheduling should use Claude Code routines or the orchestrated `/api/maintenance` endpoint instead. See [issue #272](https://github.com/norrietaylor/distillery/issues/272) for migration details.
 
 **Auth:** `Authorization: Bearer <DISTILLERY_WEBHOOK_SECRET>` with `hmac.compare_digest`.
 

@@ -181,9 +181,9 @@ async def _handle_watch(
     if action == "list":
         try:
             db_sources = await store.list_feed_sources()
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             logger.exception("distillery_watch: failed to list feed sources")
-            return error_response("INTERNAL", f"Failed to list feed sources: {exc}")
+            return error_response("INTERNAL", "Failed to list feed sources")
         return success_response(
             {
                 "sources": db_sources,
@@ -299,9 +299,9 @@ async def _handle_watch(
                 "CONFLICT",
                 f"Source with URL {url!r} is already registered.",
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             logger.exception("distillery_watch: failed to add feed source")
-            return error_response("INTERNAL", f"Failed to add feed source: {exc}")
+            return error_response("INTERNAL", "Failed to add feed source")
 
         # Surface probe failure context on forced adds so operators can see
         # why the probe was overridden.  Durable persistence onto the
@@ -368,9 +368,9 @@ async def _handle_watch(
     try:
         removed = await store.remove_feed_source(url)
         db_sources = await store.list_feed_sources()
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         logger.exception("distillery_watch: failed to remove feed source")
-        return error_response("INTERNAL", f"Failed to remove feed source: {exc}")
+        return error_response("INTERNAL", "Failed to remove feed source")
 
     remove_data: dict[str, Any] = {
         "removed_url": url,
@@ -483,9 +483,9 @@ async def _handle_poll(
 
         poller = FeedPoller(store=store, config=config)
         summary = await poller.poll(source_url=source_url)
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         logger.exception("distillery_poll: unexpected error during poll cycle")
-        return error_response("INTERNAL", f"Poll cycle failed: {exc}")
+        return error_response("INTERNAL", "Poll cycle failed")
 
     return success_response(
         {
@@ -540,9 +540,9 @@ async def _handle_rescore(
     try:
         stats = await poller.rescore(limit=limit)
         return success_response(stats)
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         logger.exception("distillery_rescore: unexpected error")
-        return error_response("INTERNAL", f"Rescore failed: {exc}")
+        return error_response("INTERNAL", "Rescore failed")
 
 
 # ---------------------------------------------------------------------------

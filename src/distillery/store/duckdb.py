@@ -1670,24 +1670,49 @@ class DuckDBStore:
             # first explode rows, then aggregate.  Scalar fields use the
             # original single-CTE path.
             if group_by == "tags":
+                # When a tag_prefix filter is present we must apply the same
+                # filter to the exploded values, otherwise every tag on a
+                # matching row would still be counted (e.g. a row tagged
+                # ``["topic/ai", "status/draft"]`` with tag_prefix="topic"
+                # would contribute "status/draft" to the grouping). We also
+                # recompute ``total_entries`` as the number of distinct
+                # matched entries rather than the sum of per-group counts,
+                # so its semantics stay consistent with scalar group_by.
+                tag_prefix_val: str | None = None
+                if filters:
+                    raw_prefix = filters.get("tag_prefix")
+                    if isinstance(raw_prefix, str) and raw_prefix:
+                        tag_prefix_val = raw_prefix
+                if tag_prefix_val is not None:
+                    exploded_sql = (
+                        f"SELECT id AS entry_id, UNNEST(tags) AS value FROM entries {where_sql}"
+                    )
+                    tag_filter_sql = "WHERE value = ? OR starts_with(value, ?)"
+                    params_extra = [tag_prefix_val, tag_prefix_val + "/"]
+                else:
+                    exploded_sql = (
+                        f"SELECT id AS entry_id, UNNEST(tags) AS value FROM entries {where_sql}"
+                    )
+                    tag_filter_sql = ""
+                    params_extra = []
                 sql = (
-                    f"WITH exploded AS ("
-                    f"SELECT UNNEST(tags) AS value "
-                    f"FROM entries "
-                    f"{where_sql}"
-                    f"), "
+                    f"WITH exploded AS ({exploded_sql}), "
+                    f"filtered AS (SELECT entry_id, value FROM exploded {tag_filter_sql}), "
                     f"grouped AS ("
                     f"SELECT value, COUNT(*) AS group_count "
-                    f"FROM exploded "
+                    f"FROM filtered "
                     f"GROUP BY 1"
                     f") "
                     f"SELECT value, group_count, "
                     f"COUNT(*) OVER () AS total_groups, "
-                    f"COALESCE(SUM(group_count) OVER (), 0) AS total_entries "
+                    f"(SELECT COUNT(DISTINCT entry_id) FROM filtered) AS total_entries "
                     f"FROM grouped "
                     f"ORDER BY group_count DESC, value ASC NULLS LAST "
                     f"LIMIT ?"
                 )
+                # Insert tag_prefix params after the row-level WHERE params so
+                # ordering matches placeholder positions.
+                params = params + params_extra
             else:
                 sql = (
                     f"WITH grouped AS ("
@@ -2207,7 +2232,7 @@ class DuckDBStore:
         assert self._conn is not None
         result = self._conn.execute(
             "DELETE FROM search_log "
-            "WHERE timestamp < current_timestamp - INTERVAL ? DAY "
+            "WHERE timestamp < current_timestamp - INTERVAL (CAST(? AS INT)) DAYS "
             "RETURNING id",
             [retention_days],
         ).fetchall()

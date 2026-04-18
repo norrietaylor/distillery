@@ -351,15 +351,24 @@ async def _handle_poll(request: Request, state: dict[str, Any]) -> JSONResponse:
         if body:
             try:
                 payload = json.loads(body)
-                if isinstance(payload, dict):
-                    val = payload.get("source_url")
-                    if isinstance(val, str):
-                        source_url = val
             except (json.JSONDecodeError, ValueError):
                 return JSONResponse(
                     {"ok": False, "error": "Invalid JSON in request body"},
                     status_code=400,
                 )
+            if not isinstance(payload, dict):
+                return JSONResponse(
+                    {"ok": False, "error": "request body must be a JSON object"},
+                    status_code=400,
+                )
+            if "source_url" in payload:
+                val = payload["source_url"]
+                if not isinstance(val, str):
+                    return JSONResponse(
+                        {"ok": False, "error": "source_url must be a string"},
+                        status_code=400,
+                    )
+                source_url = val
     return await _run_poll(state, source_url=source_url)
 
 
@@ -448,9 +457,9 @@ async def _handle_rescore(request: Request, state: dict[str, Any]) -> JSONRespon
         if body:
             try:
                 payload = json.loads(body)
-            except (json.JSONDecodeError, ValueError) as exc:
+            except (json.JSONDecodeError, ValueError):
                 return JSONResponse(
-                    {"ok": False, "error": f"malformed JSON body: {exc}"},
+                    {"ok": False, "error": "malformed JSON body"},
                     status_code=400,
                 )
             if not isinstance(payload, dict):
@@ -608,11 +617,14 @@ async def _run_classify_batch(
     """Core classify-batch logic shared by ``/hooks/classify-batch`` route.
 
     Fetches entries matching *entry_type* filter with
-    ``status=pending_review``, classifies each one using either the LLM-based
-    :class:`~distillery.classification.engine.ClassificationEngine` (``mode="llm"``)
-    or the embedding-centroid-based
-    :class:`~distillery.classification.heuristic.HeuristicClassifier`
-    (``mode="heuristic"``), then updates each entry in the store.
+    ``status=pending_review``. For ``mode="heuristic"`` each entry is
+    classified in-process using the embedding-centroid-based
+    :class:`~distillery.classification.heuristic.HeuristicClassifier` and
+    persisted. For ``mode="llm"`` the webhook is **intentionally headless for
+    v1** — it counts the backlog and returns all entries as
+    ``pending_review`` so a human can triage via ``/classify --review``. It
+    will not dispatch an LLM call even if ``state["llm_client"]`` is
+    populated; that responsibility belongs to the skill side.
 
     Args:
         state: The populated shared-state dict containing ``"store"``,
@@ -630,7 +642,7 @@ async def _run_classify_batch(
         "pending_review": N, "errors": N, "by_type": {type: count}}}``,
         or ``{"ok": false, "error": "<message>"}`` with status 500 on failure.
     """
-    from distillery.classification import ClassificationEngine, HeuristicClassifier
+    from distillery.classification import HeuristicClassifier
     from distillery.models import EntryStatus
 
     store = state["store"]
@@ -715,58 +727,16 @@ async def _run_classify_batch(
                     )
                     error_count += 1
         else:
-            # LLM mode: use ClassificationEngine.
-            # The ClassificationEngine formats prompts and parses LLM responses,
-            # but does not itself call an LLM.  If an llm_client is available in
-            # state, we use it to classify entries; otherwise, we set each entry
-            # to pending_review to signal that it requires a /classify skill invocation.
-            engine = ClassificationEngine(config.classification)
-            llm_client = state.get("llm_client")
-
-            for entry in entries:
-                try:
-                    prompt = engine.build_prompt(entry.content)
-
-                    if llm_client is not None:
-                        # Call the LLM client and parse the response
-                        llm_response = await llm_client.classify(prompt)
-                        classification = engine.parse_response(llm_response)
-
-                        # Merge classification fields into the existing
-                        # metadata (preserve external_id/source_url/etc.) and
-                        # store the score under "confidence" — the key read
-                        # by distillery_list(output_mode="review").
-                        merged_metadata = {
-                            **(entry.metadata or {}),
-                            "confidence": classification.confidence,
-                            "classification_reasoning": classification.reasoning,
-                        }
-                        await store.update(
-                            entry.id,
-                            {
-                                "entry_type": classification.entry_type.value,
-                                "status": classification.status.value,
-                                "metadata": merged_metadata,
-                            },
-                        )
-
-                        if classification.status == EntryStatus.ACTIVE:
-                            classified_count += 1
-                            type_key = classification.entry_type.value
-                            by_type[type_key] = by_type.get(type_key, 0) + 1
-                        else:
-                            pending_review_count += 1
-                    else:
-                        # No LLM client available — entry remains pending_review (already that status).
-                        pending_review_count += 1
-
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning(
-                        "Webhook classify-batch: llm classification failed for %s: %s",
-                        entry.id,
-                        exc,
-                    )
-                    error_count += 1
+            # LLM mode (v1): intentionally headless. The webhook is meant to
+            # surface backlog to human reviewers via ``/classify --review``
+            # rather than drive expensive LLM calls from the cron path. Every
+            # pending inbox entry is therefore written back as
+            # ``pending_review`` regardless of any ``llm_client`` that happens
+            # to be present in shared state. If a future release moves LLM
+            # classification into the webhook, bump the contract with a new
+            # ``mode`` (e.g. ``"llm-sync"``) rather than changing this branch
+            # in place.
+            pending_review_count += len(entries)
 
     except Exception:  # noqa: BLE001
         # Keep the full traceback in logs; return a stable generic message.

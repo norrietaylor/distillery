@@ -226,9 +226,7 @@ class TestReachabilityProbe:
         how real hosts behave, since httpx treats non-2xx responses as
         normal data unless the caller opts into raise_for_status.
         """
-        httpx_mock.add_response(
-            method="HEAD", url="https://example.com/rss", status_code=405
-        )
+        httpx_mock.add_response(method="HEAD", url="https://example.com/rss", status_code=405)
         httpx_mock.add_response(method="GET", url="https://example.com/rss", status_code=200)
         store = FakeSourceStore()
         result = await _handle_watch(

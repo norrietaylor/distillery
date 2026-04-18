@@ -159,7 +159,13 @@ def validate_enum(
         An error message string or ``None``.
     """
     val = arguments.get(field)
-    if val is not None and val not in valid_values:
+    if val is None:
+        return None
+    # Reject non-string inputs early — JSON arrays and objects come through as
+    # ``list``/``dict`` which are unhashable and would raise ``TypeError`` on
+    # ``val not in valid_values``. Returning a structured error keeps the tool
+    # contract stable (INVALID_PARAMS rather than an uncaught 500).
+    if not isinstance(val, str) or val not in valid_values:
         desc = label or field
         return f"Invalid {desc} {val!r}. Must be one of: {', '.join(sorted(valid_values))}."
     return None

@@ -257,6 +257,12 @@ async def _handle_resolve_review(
             metadata.pop(k)
 
     if action == "approve":
+        # Always strip stale delegation keys before writing the current
+        # action's delegation fields, otherwise leftover markers like
+        # ``archived_on_behalf_of`` from an earlier delegated archive
+        # survive a non-delegated approve and make the audit trail
+        # internally inconsistent.
+        _clear_stale_delegation_keys(new_metadata)
         updates["status"] = EntryStatus.ACTIVE
         new_metadata["reviewed_at"] = now
         if performed_by:
@@ -265,8 +271,6 @@ async def _handle_resolve_review(
             new_metadata.pop("reviewed_by", None)
         if on_behalf_of:
             new_metadata["on_behalf_of"] = on_behalf_of
-        else:
-            _clear_stale_delegation_keys(new_metadata)
         updates["metadata"] = new_metadata
 
     elif action == "reclassify":
@@ -282,6 +286,7 @@ async def _handle_resolve_review(
                 f"Invalid new_entry_type {new_type_str!r}. "
                 f"Must be one of: {', '.join(sorted(_VALID_ENTRY_TYPES))}.",
             )
+        _clear_stale_delegation_keys(new_metadata)
         new_metadata["reclassified_from"] = entry.entry_type.value
         new_metadata["reviewed_at"] = now
         if performed_by:
@@ -296,8 +301,6 @@ async def _handle_resolve_review(
         if on_behalf_of:
             new_metadata["on_behalf_of"] = on_behalf_of
             new_metadata["reclassified_on_behalf_of"] = on_behalf_of
-        else:
-            _clear_stale_delegation_keys(new_metadata)
         updates["entry_type"] = EntryType(new_type_str)
         # Reclassification implies approval: flip status out of pending_review.
         # Only promote to active if the entry is currently pending_review to
@@ -307,6 +310,7 @@ async def _handle_resolve_review(
         updates["metadata"] = new_metadata
 
     elif action == "archive":
+        _clear_stale_delegation_keys(new_metadata)
         updates["status"] = EntryStatus.ARCHIVED
         new_metadata["archived_at"] = now
         if performed_by:
@@ -315,8 +319,6 @@ async def _handle_resolve_review(
             new_metadata.pop("archived_by", None)
         if on_behalf_of:
             new_metadata["archived_on_behalf_of"] = on_behalf_of
-        else:
-            _clear_stale_delegation_keys(new_metadata)
         updates["metadata"] = new_metadata
 
     # --- persist ------------------------------------------------------------

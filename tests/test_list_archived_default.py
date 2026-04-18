@@ -43,7 +43,9 @@ async def status_mixed_store(store):  # type: ignore[return]
 @pytest.mark.unit
 class TestListDefaultExcludesArchived:
     async def test_default_excludes_archived(self, status_mixed_store) -> None:
-        result = await _handle_list(store=status_mixed_store, arguments={"limit": 50, "output_mode": "full"})
+        result = await _handle_list(
+            store=status_mixed_store, arguments={"limit": 50, "output_mode": "full"}
+        )
         data = parse_mcp_response(result)
         statuses = {e["status"] for e in data["entries"]}
         assert "archived" not in statuses

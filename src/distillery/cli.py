@@ -846,10 +846,14 @@ def _cmd_export(config_path: str | None, fmt: str, output_path: str) -> int:
                 entry: dict[str, Any] = {}
                 for col, val in zip(entry_cols, row, strict=True):
                     if isinstance(val, datetime.datetime):
-                        # DuckDB TIMESTAMP returns naive datetimes in local time;
-                        # normalise to UTC so exports are timezone-portable.
+                        # DuckDB TIMESTAMP returns naive datetimes that already
+                        # represent UTC wall-clock time; attach tzinfo directly
+                        # rather than calling ``astimezone`` (which would treat
+                        # the value as local time and shift it by the host's
+                        # UTC offset). Mirrors the pattern used in the import
+                        # path around lines 1043–1045.
                         if val.tzinfo is None:
-                            val = val.astimezone(datetime.UTC)
+                            val = val.replace(tzinfo=datetime.UTC)
                         entry[col] = val.isoformat()
                     elif hasattr(val, "isoformat"):
                         entry[col] = val.isoformat()
@@ -1794,13 +1798,14 @@ def main(argv: list[str] | None = None) -> None:
     elif command == "maintenance":
         maintenance_command: str | None = getattr(args, "maintenance_command", None)
         if maintenance_command == "classify":
-            sys.exit(
-                _cmd_maintenance_classify(
-                    config_path=config_path,
-                    fmt=fmt,
-                    entry_type=getattr(args, "type", "inbox"),
-                    mode=getattr(args, "mode", None),
-                )
+            # Do not call sys.exit() here — fall through to the shared epilogue
+            # below so stdout/stderr are flushed before the interpreter exits
+            # (matches the behaviour of every other subcommand).
+            exit_code = _cmd_maintenance_classify(
+                config_path=config_path,
+                fmt=fmt,
+                entry_type=getattr(args, "type", "inbox"),
+                mode=getattr(args, "mode", None),
             )
         else:
             parser.error("Unknown maintenance subcommand (expected: classify)")

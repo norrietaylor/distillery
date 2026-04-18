@@ -163,7 +163,12 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
 
     @asynccontextmanager
     async def lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
-        if not _shared:
+        # Reuse the store only if it is still live. The previous "not _shared"
+        # check fell through to the else branch when earlier lifespan exits had
+        # closed the DuckDBStore but left stub entries (e.g. "transport",
+        # "started_at") populated by ``__main__``, which would hand later
+        # stateless HTTP sessions a closed connection.
+        if "store" not in _shared:
             logger.info("Distillery MCP server starting up …")
             ep = _create_embedding_provider(config)
             raw = config.storage.database_path
@@ -218,6 +223,14 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 logger.info("Shutting down — closing DuckDB (WAL checkpoint) …")
                 await _store.close()
                 logger.info("DuckDB closed cleanly")
+            # Invalidate the store/embedding references so that a subsequent
+            # lifespan entry (e.g. the next stateless HTTP session) re-enters
+            # the initialisation branch above rather than reusing a closed
+            # DuckDBStore whose ``_conn`` has already been released. Other
+            # entries like "transport" / "started_at" / "config" are kept so
+            # that cross-session metadata (populated by ``__main__``) survives.
+            _shared.pop("store", None)
+            _shared.pop("embedding_provider", None)
 
     server = FastMCP("distillery", lifespan=lifespan, auth=auth)
     server._distillery_shared = _shared  # type: ignore[attr-defined]

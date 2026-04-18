@@ -51,7 +51,10 @@ Read current thresholds by omitting the `value` parameter:
 - `distillery_configure(section="feeds.thresholds", key="alert")`
 - `distillery_configure(section="feeds.thresholds", key="digest")`
 
-Extract the `value` field from each response (defaults: alert=0.85, digest=0.60). If either call returns an error, show defaults and note live values could not be confirmed.
+Extract the `value` field from each response.
+
+- In read-only mode (no `--alert`, `--digest`, `--max`, or `--reset` flag provided), if either call returns an error, show defaults (alert=0.85, digest=0.60) and note that live values could not be confirmed.
+- If the user requested changes and either read returns an error, display the MCP error and STOP. Do not apply writes against assumed defaults — Step 4's `alert >= digest` check depends on the true current values.
 
 ### Step 4: Apply Changes (if flags provided)
 

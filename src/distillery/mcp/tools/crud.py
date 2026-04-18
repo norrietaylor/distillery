@@ -372,9 +372,9 @@ async def _handle_store(
     # --- persist ------------------------------------------------------------
     try:
         entry_id = await store.store(entry)
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         logger.exception("Error storing entry")
-        return error_response("INTERNAL", f"Failed to store entry: {exc}")
+        return error_response("INTERNAL", "Failed to store entry")
 
     # --- summary mode: skip conflict, return early --------------------------
     if output_mode == "summary":
@@ -630,9 +630,9 @@ async def _handle_store_batch(
     # --- persist ------------------------------------------------------------
     try:
         entry_ids = await store.store_batch(built)
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         logger.exception("Error in store_batch")
-        return error_response("INTERNAL", f"Failed to batch-store entries: {exc}")
+        return error_response("INTERNAL", "Failed to batch-store entries")
 
     # Batch-store does not run deduplication; every persisted entry is
     # reported with ``persisted=True`` and ``dedup_action="stored"``.  This
@@ -677,9 +677,9 @@ async def _handle_get(
 
     try:
         entry = await store.get(entry_id)
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         logger.exception("Error fetching entry id=%s", entry_id)
-        return error_response("INTERNAL", f"Failed to retrieve entry: {exc}")
+        return error_response("INTERNAL", "Failed to retrieve entry")
 
     if entry is None:
         return error_response(
@@ -851,9 +851,9 @@ async def _handle_update(
         )
     except ValueError as exc:
         return error_response("INVALID_PARAMS", str(exc))
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         logger.exception("Error updating entry id=%s", entry_id)
-        return error_response("INTERNAL", f"Failed to update entry: {exc}")
+        return error_response("INTERNAL", "Failed to update entry")
 
     return success_response(updated_entry.to_dict())
 
@@ -1079,9 +1079,9 @@ async def _handle_list(
                 group_by=group_by,
                 stale_days=stale_days,
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             logger.exception("Error in distillery_list (group_by mode)")
-            return error_response("INTERNAL", f"list_entries failed: {exc}")
+            return error_response("INTERNAL", "list_entries failed")
         return success_response(result)
 
     # --- stats mode ----------------------------------------------------------
@@ -1094,9 +1094,9 @@ async def _handle_list(
                 stale_days=stale_days,
                 output="stats",
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             logger.exception("Error in distillery_list (stats mode)")
-            return error_response("INTERNAL", f"list_entries failed: {exc}")
+            return error_response("INTERNAL", "list_entries failed")
         return success_response(result)
 
     # --- default list mode ---------------------------------------------------
@@ -1107,9 +1107,9 @@ async def _handle_list(
             offset=offset,
             stale_days=stale_days,
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         logger.exception("Error in distillery_list")
-        return error_response("INTERNAL", f"list_entries failed: {exc}")
+        return error_response("INTERNAL", "list_entries failed")
 
     try:
         total_count = await store.count_entries(filters=filters, stale_days=stale_days)
@@ -1300,9 +1300,9 @@ async def _handle_correct(
     # --- fetch original entry -----------------------------------------------
     try:
         original = await store.get(wrong_entry_id)
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         logger.exception("Error fetching entry id=%s for correction", wrong_entry_id)
-        return error_response("INTERNAL", f"Failed to retrieve original entry: {exc}")
+        return error_response("INTERNAL", "Failed to retrieve original entry")
 
     if original is None:
         return error_response(
@@ -1403,9 +1403,9 @@ async def _handle_correct(
     # --- atomically persist entry, relation, and archive original -----------
     try:
         new_entry_id = await store.apply_correction(new_entry, wrong_entry_id)
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         logger.exception("Error applying correction for entry id=%s", wrong_entry_id)
-        return error_response("INTERNAL", f"Failed to apply correction: {exc}")
+        return error_response("INTERNAL", "Failed to apply correction")
 
     return success_response(
         {

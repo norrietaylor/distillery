@@ -53,9 +53,9 @@ Call `distillery_watch` with the parsed arguments:
 - **add**: `distillery_watch(action="add", url=..., source_type=..., label=..., poll_interval_minutes=..., trust_weight=...)`
 - **remove** (no purge): `distillery_watch(action="remove", url="<url>")`
 - **remove --purge** (requires explicit confirmation):
-  1. Query historic entries for the source (e.g., `distillery_list(filters={"source_url": "<url>"}, output_mode="ids")`) to determine how many entries would be archived.
-  2. Display that count to the user and ask for explicit confirmation (e.g., "Archive N historic entries from <url>? [yes/no]").
-  3. Only after the user confirms, call `distillery_watch(action="remove", url="<url>", purge=true)` to archive all historic entries from the source.
+  1. Explain to the user that `--purge` will archive **all historic entries** previously ingested from `<url>`. This skill's allowlist only includes `mcp__*__distillery_watch`, so the exact count cannot be fetched here — describe the impact in-prompt instead of issuing a `distillery_list` call.
+  2. Ask for explicit confirmation (e.g., "Archive all historic entries from `<url>`? This cannot be undone without re-ingesting. [yes/no]").
+  3. Only after the user replies with an unambiguous affirmative (e.g., `yes`), call `distillery_watch(action="remove", url="<url>", purge=true)`. Report the archived count returned by the tool when confirming to the user.
 
 - On MCP errors, see CONVENTIONS.md error handling — display and stop
 

@@ -846,8 +846,10 @@ class TestMCPBridgeAsync:
         # magic number.
         expected_names = {
             "distillery_store",
+            "distillery_store_batch",
             "distillery_get",
             "distillery_update",
+            "distillery_correct",
             "distillery_list",
             "distillery_aggregate",
             "distillery_search",
@@ -863,6 +865,10 @@ class TestMCPBridgeAsync:
             "distillery_poll",
             "distillery_rescore",
             "distillery_status",
+            "distillery_relations",
+            "distillery_gh_sync",
+            "distillery_sync_status",
+            "distillery_configure",
         }
 
         bridge = await MCPBridge.create()

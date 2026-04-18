@@ -37,16 +37,24 @@ async def _store_entry_with_timestamps(
     await store.store(entry)
 
     def _patch() -> None:
-        if accessed_at is not None:
-            store.connection.execute(
-                "UPDATE entries SET accessed_at = ? WHERE id = ?",
-                [accessed_at.isoformat(), entry.id],
-            )
-        if updated_at is not None:
-            store.connection.execute(
-                "UPDATE entries SET updated_at = ?, accessed_at = NULL WHERE id = ?",
-                [updated_at.isoformat(), entry.id],
-            )
+        # DuckDB connections are thread-affine: the connection was created in
+        # the event-loop thread and we are now running inside ``to_thread``
+        # (a worker thread), so using ``store.connection.execute`` directly
+        # raises ``RuntimeError``. Open a thread-local cursor instead.
+        cursor = store.connection.cursor()
+        try:
+            if accessed_at is not None:
+                cursor.execute(
+                    "UPDATE entries SET accessed_at = ? WHERE id = ?",
+                    [accessed_at.isoformat(), entry.id],
+                )
+            if updated_at is not None:
+                cursor.execute(
+                    "UPDATE entries SET updated_at = ?, accessed_at = NULL WHERE id = ?",
+                    [updated_at.isoformat(), entry.id],
+                )
+        finally:
+            cursor.close()
 
     await asyncio.to_thread(_patch)
 
@@ -449,34 +457,53 @@ class TestGroupBy:
         by_tag = {g["value"]: g["count"] for g in data["groups"]}
         assert by_tag.get("api") == 3
 
-    @pytest.mark.xfail(
-        reason=(
-            "tag_prefix currently filters entries (not individual tags); "
-            "group_by=tags with tag_prefix needs post-explode filtering. "
-            "See aggregate_entries in duckdb.py."
-        ),
-        strict=True,
-    )
     async def test_group_by_tags_with_tag_prefix(self, store: Any) -> None:
-        """group_by=tags with tag_prefix filter limits to matching tags."""
+        """group_by=tags with tag_prefix limits the grouping to matching tags.
+
+        The filter uses the project-standard hierarchical prefix semantics —
+        a tag matches when it equals the prefix exactly or starts with
+        ``prefix + "/"`` — so post-explode filtering must strip unrelated
+        tags off matching rows (``api``/``cli`` below) instead of counting
+        them as group values.
+        """
         entries = [
-            make_entry(content="py1", tags=["python", "api"], entry_type=EntryType.INBOX),
-            make_entry(content="py2", tags=["python", "cli"], entry_type=EntryType.INBOX),
-            make_entry(content="rs1", tags=["rust", "perf"], entry_type=EntryType.INBOX),
+            make_entry(
+                content="py1",
+                tags=["topic/python", "topic/api"],
+                entry_type=EntryType.INBOX,
+            ),
+            make_entry(
+                content="py2",
+                tags=["topic/python", "topic/cli"],
+                entry_type=EntryType.INBOX,
+            ),
+            make_entry(
+                content="rs1",
+                tags=["lang/rust", "perf"],
+                entry_type=EntryType.INBOX,
+            ),
         ]
         for e in entries:
             await store.store(e)
 
         result = await _handle_list(
             store=store,
-            arguments={"group_by": "tags", "tag_prefix": "py", "limit": 50},
+            arguments={"group_by": "tags", "tag_prefix": "topic", "limit": 50},
         )
         data = parse_mcp_response(result)
         assert not data.get("error")
         tag_values = {g["value"] for g in data["groups"]}
-        # Only "python" starts with "py"
-        assert "python" in tag_values
-        assert "rust" not in tag_values
+        tag_counts = {g["value"]: g["count"] for g in data["groups"]}
+        # Only tags under the "topic/" hierarchy survive post-explode filtering.
+        assert "topic/python" in tag_values
+        assert "topic/api" in tag_values
+        assert "topic/cli" in tag_values
+        assert "lang/rust" not in tag_values
+        assert "perf" not in tag_values
+        # total_entries reflects distinct matched entries (the two python rows),
+        # not the sum of per-group counts.
+        assert data["total_entries"] == 2
+        assert tag_counts["topic/python"] == 2
 
     async def test_group_by_ordering_count_desc(self, populated_store: Any) -> None:
         """Groups are ordered by count descending."""

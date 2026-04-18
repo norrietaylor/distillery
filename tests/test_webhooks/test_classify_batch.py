@@ -276,8 +276,15 @@ async def test_classify_batch_heuristic_requires_embedding_provider(
 async def test_classify_batch_llm_mode_queues_as_pending_review(
     store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """POST /hooks/classify-batch?mode=llm uses an LLM client if available,
-    and classifies entries according to LLM-returned confidences."""
+    """POST /hooks/classify-batch?mode=llm is intentionally headless for v1.
+
+    Per the file header and the `/hooks/classify-batch` contract, the webhook
+    enqueues every pending inbox entry as ``pending_review`` so a human can
+    triage via ``/classify --review``. The endpoint must NOT invoke an LLM,
+    even when an ``llm_client`` is injected into shared state — the webhook
+    body itself is cheap and headless; any real classification must be driven
+    by the skill side.
+    """
     monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
 
     # Create real entries in the store
@@ -286,14 +293,13 @@ async def test_classify_batch_llm_mode_queues_as_pending_review(
     await store.store(entry_a)
     await store.store(entry_b)
 
-    # Mock LLM client that returns classification results with different confidences
+    # An LLM client is injected — but the v1 webhook must NOT use it.
     mock_llm_client = MagicMock()
-    # Entry A: high confidence -> should be classified as ACTIVE
     mock_llm_client.classify = AsyncMock(
-        side_effect=[
-            '{"entry_type": "session", "confidence": 0.85, "reasoning": "High confidence session", "suggested_tags": [], "suggested_project": null}',
-            '{"entry_type": "minutes", "confidence": 0.55, "reasoning": "Low confidence meeting", "suggested_tags": [], "suggested_project": null}',
-        ]
+        side_effect=AssertionError(
+            "POST /hooks/classify-batch?mode=llm must be headless for v1 — "
+            "it must not invoke the injected llm_client."
+        )
     )
 
     shared = _make_shared_state(store)
@@ -308,15 +314,15 @@ async def test_classify_batch_llm_mode_queues_as_pending_review(
     assert body["ok"] is True
     data = body["data"]
 
-    # Entry A: confidence 0.85 >= threshold (0.6) -> classified
-    # Entry B: confidence 0.55 < threshold (0.6) -> pending_review
-    assert data["classified"] == 1
-    assert data["pending_review"] == 1
+    # v1 contract: all inbox entries queued as pending_review, regardless of
+    # the injected llm_client.
+    assert data["classified"] == 0
+    assert data["pending_review"] == 2
     assert data["errors"] == 0
-    assert data["by_type"]["session"] == 1
+    assert "session" not in data["by_type"]
 
-    # Verify LLM was called twice
-    assert mock_llm_client.classify.call_count == 2
+    # The webhook must not have dispatched any LLM call.
+    assert mock_llm_client.classify.call_count == 0
 
 
 # ---------------------------------------------------------------------------
@@ -368,9 +374,7 @@ async def test_classify_batch_heuristic_error_counting(
     mock_store = MagicMock()
     mock_store.list_entries = AsyncMock(return_value=[entry_a, entry_b])
     # First update raises; second succeeds.
-    mock_store.update = AsyncMock(
-        side_effect=[RuntimeError("update failure"), entry_b]
-    )
+    mock_store.update = AsyncMock(side_effect=[RuntimeError("update failure"), entry_b])
     mock_store.get_metadata = AsyncMock(return_value=None)
     mock_store.set_metadata = AsyncMock()
     shared["store"] = mock_store

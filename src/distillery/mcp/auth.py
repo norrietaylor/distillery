@@ -250,9 +250,15 @@ async def pre_register_claude_code_client(provider: GitHubProvider) -> None:
     """Seed the OAuth client store with the Claude Code CIMD metadata.
 
     This avoids a runtime CIMD fetch to ``claude.ai`` which can fail when
-    Cloudflare challenges the server's egress IP.  The registration is
-    idempotent — if the client already exists in the store it is
-    overwritten with the canonical metadata.
+    Cloudflare challenges the server's egress IP.
+
+    FastMCP's :meth:`GitHubProvider.register_client` does **not** upsert —
+    calling it twice with the same ``client_id`` raises against a persistent
+    store. This helper therefore probes the provider for an existing record
+    (via :meth:`get_client` when available) and skips registration if the
+    Claude Code client is already present. It also swallows the duplicate
+    error from providers whose lookup hook is missing so repeated calls
+    remain safe during a single process lifetime.
     """
     try:
         from mcp.shared.auth import OAuthClientInformationFull
@@ -262,8 +268,18 @@ async def pre_register_claude_code_client(provider: GitHubProvider) -> None:
         return
 
     meta = _CLAUDE_CODE_CLIENT_METADATA
+    client_id = "https://claude.ai/oauth/claude-code-client-metadata"
+    get_client = getattr(provider, "get_client", None)
+    if callable(get_client):
+        try:
+            existing = await get_client(client_id)
+        except Exception:  # noqa: BLE001
+            existing = None
+        if existing is not None:
+            logger.debug("Claude Code OAuth client already registered; skipping")
+            return
     client_info = OAuthClientInformationFull(
-        client_id="https://claude.ai/oauth/claude-code-client-metadata",
+        client_id=client_id,
         client_name="Claude Code",
         client_uri=AnyHttpUrl("https://claude.ai"),
         redirect_uris=[
@@ -274,7 +290,13 @@ async def pre_register_claude_code_client(provider: GitHubProvider) -> None:
         response_types=["code"],
         token_endpoint_auth_method="none",
     )
-    await provider.register_client(client_info)
+    try:
+        await provider.register_client(client_info)
+    except Exception as exc:  # noqa: BLE001
+        # Duplicate registrations raise in FastMCP. Treat as a benign no-op
+        # so a restart against a persistent OAuth store does not crash.
+        logger.debug("Pre-registration of Claude Code OAuth client skipped (%s)", exc)
+        return
     logger.info("Pre-registered Claude Code OAuth client (%s)", meta["client_id"])
 
 
