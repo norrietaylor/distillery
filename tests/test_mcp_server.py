@@ -1,6 +1,6 @@
 """Tests for the Distillery MCP server (T04.4 / T02.3).
 
-Tests cover the 17 registered MCP tools via direct handler calls with a mock
+Tests cover the 18 registered MCP tools via direct handler calls with a mock
 store and deterministic embedding provider:
 
   store -> search -> get -> update -> find_similar -> list -> status
@@ -9,7 +9,7 @@ The test harness exercises the server handlers directly without requiring a
 running stdio transport.  All handlers are async functions that accept a
 store object and an arguments dict -- this is the natural unit-test seam.
 
-Also exercises the ``create_server`` factory to confirm all 17 tools are
+Also exercises the ``create_server`` factory to confirm all 18 tools are
 registered and the lifespan context initialises state correctly.
 
 Tools removed from MCP surface (now webhooks or internal handlers):
@@ -685,6 +685,7 @@ class TestCreateServer:
             "distillery_sync_status",
             "distillery_status",
             "distillery_dashboard",
+            "distillery_recall",
         }
         assert expected == tool_names, (
             f"Tool mismatch — extra: {tool_names - expected}, missing: {expected - tool_names}"
@@ -749,13 +750,13 @@ class TestRemovedTools:
             )
 
     async def test_removed_tools_count_unchanged(self) -> None:
-        """Exactly 17 tools must be registered — consolidated analytics tools + status + dashboard."""
+        """Exactly 18 tools must be registered — consolidated analytics + status + dashboard + recall."""
         config = DistilleryConfig(
             storage=StorageConfig(database_path=":memory:"),
             embedding=EmbeddingConfig(provider="", model="stub", dimensions=4),
         )
         server = create_server(config)
         tools = await server.list_tools()
-        assert len(tools) == 17, (
-            f"Expected 17 registered tools, got {len(tools)}: {sorted(t.name for t in tools)}"
+        assert len(tools) == 18, (
+            f"Expected 18 registered tools, got {len(tools)}: {sorted(t.name for t in tools)}"
         )

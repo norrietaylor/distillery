@@ -26,8 +26,9 @@ COPY dashboard/ ./
 RUN npm run build
 
 # Sanity check: fail the build here (not silently at runtime with a
-# fallback HTML stub) if Vite didn't produce the expected entry point.
+# fallback HTML stub) if Vite didn't produce every expected entry point.
 RUN test -f /build/dist/index.html || (echo "Dashboard build did not produce dist/index.html" && exit 1)
+RUN test -f /build/dist/recall.html || (echo "Recall widget build did not produce dist/recall.html" && exit 1)
 
 # ──────────────────────────────────────────────────────────────────────
 # Stage 2: Python runtime

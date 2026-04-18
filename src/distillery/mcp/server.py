@@ -24,7 +24,7 @@ from fastmcp import Context, FastMCP  # noqa: F401
 from mcp import types
 
 from distillery.config import DistilleryConfig, load_config
-from distillery.mcp.resources import register_dashboard_resource
+from distillery.mcp.resources import register_dashboard_resource, register_widget_resource
 from distillery.mcp.tools._common import (
     _get_authenticated_user,
     error_response,
@@ -79,6 +79,7 @@ _UNSET: Any = object()
 __all__ = [
     "create_server",
     "register_dashboard_resource",
+    "register_widget_resource",
     "error_response",
     "success_response",
     "_get_authenticated_user",
@@ -1130,6 +1131,62 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             arguments={"output": "stats", "limit": 0},
         )
 
+    @server.tool(
+        meta={"ui": {"resourceUri": "ui://distillery/recall"}},
+        annotations={"readOnlyHint": True},
+    )
+    async def distillery_recall(  # noqa: PLR0913
+        ctx: Context,
+        query: str,
+        entry_type: str | None = None,
+        author: str | None = None,
+        project: str | None = None,
+        tags: list[str] | None = None,
+        status: str | None = None,
+        source: str | None = None,
+        session_id: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        limit: int = 10,
+        tag_prefix: str | None = None,
+        include_archived: bool = False,
+    ) -> list[types.TextContent]:
+        """Open the Recall widget and return ranked semantic search results.
+
+        USE WHEN: the user invokes the ``/recall`` skill. Behaves identically to
+        ``distillery_search`` (same arguments and return shape) but additionally
+        surfaces the interactive Recall widget on MCP Apps-capable clients (e.g.
+        Claude mobile chat) via ``meta.ui.resourceUri =
+        ui://distillery/recall``.
+
+        Programmatic callers that do not want a UI side-effect should call
+        ``distillery_search`` directly.
+
+        PARAMS / RETURNS: see ``distillery_search``.
+
+        RELATED: distillery_search (text-only search),
+        distillery_find_similar (compare against arbitrary text)
+        """
+        c = _lc(ctx)
+        args: dict[str, Any] = dict(
+            query=query,
+            limit=limit,
+            include_archived=include_archived,
+            **_omit_none(
+                entry_type=entry_type,
+                author=author,
+                project=project,
+                tags=tags,
+                status=status,
+                source=source,
+                session_id=session_id,
+                date_from=date_from,
+                date_to=date_to,
+                tag_prefix=tag_prefix,
+            ),
+        )
+        return await _handle_search(store=c["store"], arguments=args, cfg=c["config"])
+
     @server.resource("distillery://schemas/entry-types")
     async def entry_type_schemas() -> str:
         """Return the metadata schemas for all structured entry types as a JSON resource.
@@ -1142,8 +1199,17 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         result = await _handle_type_schemas()
         return result[0].text if result else "{}"
 
-    # Register ui:// resources (MCP Apps dashboard).
+    # Register ui:// resources (MCP Apps widgets).
     register_dashboard_resource(server)
+    register_widget_resource(
+        server,
+        slug="recall",
+        title="Distillery Recall",
+        description=(
+            "Ranked semantic search across the Distillery knowledge base. "
+            "Surfaced as an interactive widget on MCP Apps-capable clients."
+        ),
+    )
 
     return server
 

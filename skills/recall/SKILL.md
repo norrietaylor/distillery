@@ -2,6 +2,7 @@
 name: recall
 description: "Search the knowledge base using natural language and return matching entries with provenance"
 allowed-tools:
+  - "mcp__*__distillery_recall"
   - "mcp__*__distillery_search"
   - "mcp__*__distillery_get"
 effort: low
@@ -50,7 +51,9 @@ Valid `entry_type` values: `session`, `bookmark`, `minutes`, `meeting`, `referen
 
 ### Step 4: Search the Knowledge Base
 
-Call `distillery_search` with the parsed query, limit, and any filters. Only include filter parameters that were explicitly provided — do not pass empty or null values.
+Call `distillery_recall` with the parsed query, limit, and any filters. Only include filter parameters that were explicitly provided — do not pass empty or null values.
+
+`distillery_recall` takes the same arguments as `distillery_search` and returns the same payload, but additionally surfaces the interactive Recall widget on MCP Apps-capable clients (e.g. Claude mobile chat). Programmatic callers that do not want a UI side-effect should call `distillery_search` directly.
 
 ### Step 5: Display Results
 
@@ -92,7 +95,7 @@ Separate results with `---`.
 - Always show provenance (ID, author, project, created_at) for every result
 - Default limit is 10; respect `--limit` override
 - Parse filter flags before treating remaining text as the query
-- Do not include unused filter parameters in the `distillery_search` call
+- Do not include unused filter parameters in the `distillery_recall` call
 - Show full entry content — do not truncate
 - Omit the Tags line for entries with no tags; do not show `Tags: (none)`
 - On MCP errors, see CONVENTIONS.md error handling — display and stop

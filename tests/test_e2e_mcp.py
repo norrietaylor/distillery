@@ -500,7 +500,9 @@ class TestCallToolDispatcher:
         tools = await server.list_tools()
         tool_names = {t.name for t in tools}
 
-        # 16-tool consolidated API (12 from #196 + store_batch, gh_sync, sync_status, status).
+        # 18-tool surface: 16-tool consolidated API (12 from #196 + store_batch,
+        # gh_sync, sync_status, status) + distillery_dashboard + distillery_recall
+        # (widget launcher for /recall skill).
         # Analytics tools (aggregate, metrics, stale, tag_tree, interests)
         # absorbed into distillery_list via group_by, output="stats", stale_days.
         expected = {
@@ -521,6 +523,7 @@ class TestCallToolDispatcher:
             "distillery_sync_status",
             "distillery_status",
             "distillery_dashboard",
+            "distillery_recall",
         }
         assert expected == tool_names, (
             f"Tool mismatch — extra: {tool_names - expected}, missing: {expected - tool_names}"
