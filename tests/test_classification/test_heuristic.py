@@ -1,8 +1,10 @@
 """Tests for HeuristicClassifier -- centroid computation and similarity classification.
 
-All tests use the DeterministicEmbeddingProvider (4D, registry-backed) from
-conftest.py so that cosine similarity values are predictable.  No LLM or
-network calls are made.
+All tests use the DeterministicEmbeddingProvider (registry-backed) from
+conftest.py so that cosine similarity values are predictable.  Vector
+dimensionality is derived from ``deterministic_embedding_provider.dimensions``
+where the fixture is available; static math tests use small fixed-length
+vectors.  No LLM or network calls are made.
 """
 
 from __future__ import annotations
@@ -33,6 +35,13 @@ def _normalise(v: list[float]) -> list[float]:
     """Return L2-normalised copy of *v*."""
     mag = math.sqrt(sum(x * x for x in v))
     return [x / mag for x in v]
+
+
+def _axis_vector(dimensions: int, axis: int) -> list[float]:
+    """Return a unit vector with 1.0 at *axis* and 0.0 elsewhere."""
+    v = [0.0] * dimensions
+    v[axis] = 1.0
+    return v
 
 
 async def _populate_store(
@@ -251,12 +260,13 @@ class TestClassifyIntegration:
         deterministic_embedding_provider: DeterministicEmbeddingProvider,
     ) -> None:
         """An inbox entry similar to session entries is classified as session."""
-        # Register known vectors: session entries cluster around [1,0,0,0].
-        session_vec = _normalise([1.0, 0.0, 0.0, 0.0])
+        # Register known vectors: session entries cluster around axis 0.
+        dims = deterministic_embedding_provider.dimensions
+        session_vec = _axis_vector(dims, 0)
         for i in range(MIN_ENTRIES_PER_TYPE):
             content = f"session work item {i}"
             deterministic_embedding_provider.register(
-                content, [session_vec[j] + (i * 0.01) for j in range(4)]
+                content, [session_vec[j] + (i * 0.01) for j in range(dims)]
             )
             entry = make_entry(
                 content=content,
@@ -288,9 +298,10 @@ class TestClassifyIntegration:
     ) -> None:
         """An entry far from all centroids gets pending_review status."""
         # Session cluster in one direction.
+        dims = deterministic_embedding_provider.dimensions
         for i in range(MIN_ENTRIES_PER_TYPE):
             content = f"session content {i}"
-            deterministic_embedding_provider.register(content, _normalise([1.0, 0.0, 0.0, 0.0]))
+            deterministic_embedding_provider.register(content, _axis_vector(dims, 0))
             entry = make_entry(
                 content=content,
                 entry_type=EntryType.SESSION,
@@ -300,7 +311,7 @@ class TestClassifyIntegration:
 
         # Inbox entry in an orthogonal direction.
         inbox_content = "completely unrelated content"
-        deterministic_embedding_provider.register(inbox_content, _normalise([0.0, 0.0, 0.0, 1.0]))
+        deterministic_embedding_provider.register(inbox_content, _axis_vector(dims, dims - 1))
         inbox_entry = make_entry(
             content=inbox_content,
             entry_type=EntryType.INBOX,
@@ -337,10 +348,11 @@ class TestClassifyIntegration:
         deterministic_embedding_provider: DeterministicEmbeddingProvider,
     ) -> None:
         """Types with < MIN_ENTRIES_PER_TYPE entries are not candidates."""
-        # Only 2 session entries -- insufficient.
+        # Only MIN_ENTRIES_PER_TYPE - 1 session entries -- insufficient.
+        dims = deterministic_embedding_provider.dimensions
         for i in range(MIN_ENTRIES_PER_TYPE - 1):
             content = f"session item {i}"
-            deterministic_embedding_provider.register(content, _normalise([1.0, 0.0, 0.0, 0.0]))
+            deterministic_embedding_provider.register(content, _axis_vector(dims, 0))
             entry = make_entry(
                 content=content,
                 entry_type=EntryType.SESSION,
@@ -349,7 +361,7 @@ class TestClassifyIntegration:
             await store.store(entry)
 
         inbox_content = "similar to session"
-        deterministic_embedding_provider.register(inbox_content, _normalise([1.0, 0.0, 0.0, 0.0]))
+        deterministic_embedding_provider.register(inbox_content, _axis_vector(dims, 0))
         inbox_entry = make_entry(
             content=inbox_content,
             entry_type=EntryType.INBOX,

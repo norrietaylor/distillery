@@ -698,7 +698,7 @@ async def _run_classify_batch(
         error_count = 0
         by_type: dict[str, int] = {}
 
-        if effective_mode == "heuristic":
+        if effective_mode == "heuristic" and entries:
             classifier = HeuristicClassifier()
             if embedding_provider is None:
                 return JSONResponse(
@@ -813,7 +813,12 @@ async def _handle_classify_batch(request: Request, state: dict[str, Any]) -> JSO
         )
 
     mode_param = request.query_params.get("mode")
-    mode: str | None = mode_param if isinstance(mode_param, str) and mode_param else None
+    if mode_param is not None and not mode_param.strip():
+        return JSONResponse(
+            {"ok": False, "error": "mode must be 'llm' or 'heuristic'"},
+            status_code=400,
+        )
+    mode: str | None = mode_param.strip() if isinstance(mode_param, str) else None
 
     if mode is not None and mode not in ("llm", "heuristic"):
         return JSONResponse(

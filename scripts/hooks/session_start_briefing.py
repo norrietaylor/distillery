@@ -5,11 +5,13 @@ Resolves the Distillery MCP server using this priority order:
 1. DISTILLERY_MCP_URL env var -> HTTP
 2. DISTILLERY_MCP_COMMAND env var -> stdio
 3. .mcp.json at repo root (walk upward from cwd) -> mcpServers.*distill*
-4. ~/.claude.json -> projects[<cwd>].mcpServers.*distill*
-5. ~/.claude.json -> top-level mcpServers.*distill*
-6. ~/.claude/plugins/**/.claude-plugin/plugin.json -> mcpServers.distillery
-7. Fallback: distillery-mcp command on PATH (stdio)
-8. Fallback: http://localhost:8000/mcp
+4a. .claude/settings.json at project root -> mcpServers.*distill*  (current format)
+4b. ~/.claude/settings.json -> mcpServers.*distill*  (current format, global)
+5. ~/.claude.json -> projects[<cwd>].mcpServers.*distill*  (legacy format)
+6. ~/.claude.json -> top-level mcpServers.*distill*  (legacy format)
+7. ~/.claude/plugins/**/.claude-plugin/plugin.json -> mcpServers.distillery
+8. Fallback: distillery-mcp command on PATH (stdio)
+9. Fallback: http://localhost:8000/mcp
 
 No runtime dependencies beyond the Python 3.11+ stdlib.
 """
@@ -162,12 +164,48 @@ def resolve_mcp_json(cwd: Path) -> ResolvedTransport | None:
     return None
 
 
-def resolve_claude_json_project(cwd: Path) -> ResolvedTransport | None:
-    """Step 4: ~/.claude.json -> projects[<cwd>].mcpServers.
+def resolve_claude_settings_project(cwd: Path) -> ResolvedTransport | None:
+    """Step 4a: .claude/settings.json at or above cwd -> mcpServers.*distill*.
 
-    When cwd is nested under multiple configured project paths, the *deepest*
-    (longest) matching project wins so nested subprojects override their
-    parents.
+    Claude Code (current format) stores project-scoped MCP servers in
+    `.claude/settings.json` relative to the project root.
+    """
+    settings_path = _walk_up_for_file(cwd, ".claude/settings.json")
+    if settings_path is None:
+        return None
+    data = _read_json(settings_path)
+    if not isinstance(data, dict):
+        return None
+    servers = data.get("mcpServers", {})
+    entry = _find_distillery_server(servers)
+    if entry is not None:
+        return _server_entry_to_transport(entry, f".claude/settings.json ({settings_path})")
+    return None
+
+
+def resolve_claude_settings_global() -> ResolvedTransport | None:
+    """Step 4b: ~/.claude/settings.json -> mcpServers.*distill*.
+
+    Claude Code (current format) stores global MCP servers in
+    `~/.claude/settings.json`.
+    """
+    settings_path = Path.home() / ".claude" / "settings.json"
+    data = _read_json(settings_path)
+    if not isinstance(data, dict):
+        return None
+    servers = data.get("mcpServers", {})
+    entry = _find_distillery_server(servers)
+    if entry is not None:
+        return _server_entry_to_transport(entry, "~/.claude/settings.json (global)")
+    return None
+
+
+def resolve_claude_json_project(cwd: Path) -> ResolvedTransport | None:
+    """Step 5 (legacy): ~/.claude.json -> projects[<cwd>].mcpServers.
+
+    Legacy Claude Code format. When cwd is nested under multiple configured
+    project paths, the *deepest* (longest) matching project wins so nested
+    subprojects override their parents.
     """
     claude_json = Path.home() / ".claude.json"
     data = _read_json(claude_json)
@@ -203,7 +241,7 @@ def resolve_claude_json_project(cwd: Path) -> ResolvedTransport | None:
 
 
 def resolve_claude_json_global() -> ResolvedTransport | None:
-    """Step 5: ~/.claude.json -> top-level mcpServers."""
+    """Step 6: ~/.claude.json -> top-level mcpServers."""
     claude_json = Path.home() / ".claude.json"
     data = _read_json(claude_json)
     if not isinstance(data, dict):
@@ -216,7 +254,7 @@ def resolve_claude_json_global() -> ResolvedTransport | None:
 
 
 def resolve_plugin_json() -> ResolvedTransport | None:
-    """Step 6: ~/.claude/plugins/**/.claude-plugin/plugin.json."""
+    """Step 7: ~/.claude/plugins/**/.claude-plugin/plugin.json."""
     plugins_dir = Path.home() / ".claude" / "plugins"
     if not plugins_dir.is_dir():
         return None
@@ -236,7 +274,7 @@ def resolve_plugin_json() -> ResolvedTransport | None:
 
 
 def resolve_path_command() -> ResolvedTransport | None:
-    """Step 7: distillery-mcp on PATH."""
+    """Step 8: distillery-mcp on PATH."""
     if shutil.which("distillery-mcp") is not None:
         return ResolvedTransport(
             kind="stdio",
@@ -247,7 +285,7 @@ def resolve_path_command() -> ResolvedTransport | None:
 
 
 def resolve_localhost_fallback() -> ResolvedTransport:
-    """Step 8: Fallback to localhost."""
+    """Step 9: Fallback to localhost."""
     return ResolvedTransport(
         kind="http",
         url="http://localhost:8000/mcp",
@@ -271,6 +309,8 @@ def resolve_transport(cwd: Path | None = None, bearer_token: str = "") -> Resolv
         lambda: resolve_env_url(),
         lambda: resolve_env_command(),
         lambda: resolve_mcp_json(cwd),
+        lambda: resolve_claude_settings_project(cwd),
+        lambda: resolve_claude_settings_global(),
         lambda: resolve_claude_json_project(cwd),
         lambda: resolve_claude_json_global(),
         lambda: resolve_plugin_json(),

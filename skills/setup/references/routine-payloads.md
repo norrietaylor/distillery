@@ -6,38 +6,41 @@ All routines use Claude Code's built-in routine system. Routine prompts execute 
 
 > **Migration note:** This replaces the previous `cron-payloads.md` reference. CronCreate-based scheduling and webhook-based scheduling (GitHub Actions + `/hooks/*` endpoints) are deprecated. Existing CronCreate jobs and webhook schedules continue to work but should be migrated to routines.
 
-## 4a. Hourly — Feed Status Check
+## 4a. Hourly — Feed Health Check (status only)
 
-> **Note on ingestion:** The consolidated MCP surface does not expose a
-> `distillery_poll` tool directly. Polling is driven by the
+> **Important — this routine does NOT fetch new items.**
+> The consolidated MCP surface does not expose a `distillery_poll` tool
+> directly. Polling (fetching new feed items) is driven by the
 > `POST /hooks/poll` webhook, which runs on the hosted/team deployment's
-> GitHub Actions schedule. This hourly routine is therefore status-only for
-> local MCP clients; hosted deployments configure the webhook schedule in
-> the `distill_ops` deployment repo (see the MCP Deployment guide), not in
-> `/setup`.
+> GitHub Actions schedule. This routine only inspects the state of already-
+> stored entries and reports whether the webhook poller appears healthy.
+> To set up actual polling, configure the webhook schedule in the
+> `distill_ops` deployment repo (see the MCP Deployment guide).
 
 Guide the user to create a Claude Code routine with these parameters:
 
-**Routine name:** `distillery-feed-poll-status`
+**Routine name:** `distillery-feed-health-check`
 **Schedule:** Every hour
 **Prompt:**
 
 ```text
-Call distillery_watch(action='list') to check configured feed sources, then
-call distillery_list(entry_type='feed', limit=5) to verify recent feed
-activity. Report a one-line summary: source count and latest feed entry age.
-If the latest feed entry is more than 2× the configured poll_interval_minutes
-old, warn that the webhook poller may be unhealthy and point the user at
-`POST /hooks/poll`.
+This is a health-check routine only — it does NOT fetch new feed items.
+Call distillery_watch(action='list') to list configured feed sources.
+Call distillery_list(entry_type='feed', limit=5) to check recent feed entries.
+Report: number of configured sources and age of the newest feed entry.
+If the newest feed entry is more than 2× the expected poll interval old,
+warn that the POST /hooks/poll webhook poller may be unhealthy — no new items
+are being fetched. Direct the user to check the distill_ops GitHub Actions
+schedule to verify the webhook cron job is running.
 ```
 
 Display after configuration:
 
 ```text
-Feed poll status routine: configured (hourly)
+Feed health-check routine: configured (hourly)
   Create this routine in Claude Code Settings > Routines with the prompt above.
-  Note: this routine reports status only. Actual polling runs via the
-  POST /hooks/poll webhook (GitHub Actions schedule, configured in distill_ops).
+  IMPORTANT: this routine checks feed health only. It does NOT fetch new items.
+  Actual polling runs via POST /hooks/poll (GitHub Actions schedule in distill_ops).
 ```
 
 ## 4b. Daily — Stale Entry Check

@@ -190,11 +190,13 @@ priority order (first reachable wins):
 | 1 | `DISTILLERY_MCP_URL` env var | HTTP |
 | 2 | `DISTILLERY_MCP_COMMAND` env var | stdio |
 | 3 | `.mcp.json` at repo root (walks up from cwd) | per config |
-| 4 | `~/.claude.json` project-scoped `mcpServers` | per config |
-| 5 | `~/.claude.json` global `mcpServers` | per config |
-| 6 | `~/.claude/plugins/**/.claude-plugin/plugin.json` | per config |
-| 7 | `distillery-mcp` on PATH | stdio |
-| 8 | `http://localhost:8000/mcp` | HTTP |
+| 4a | `.claude/settings.json` at project root (current format) | per config |
+| 4b | `~/.claude/settings.json` global (current format) | per config |
+| 5 | `~/.claude.json` → `projects[<cwd>].mcpServers` (legacy) | per config |
+| 6 | `~/.claude.json` → top-level `mcpServers` (legacy) | per config |
+| 7 | `~/.claude/plugins/**/.claude-plugin/plugin.json` | per config |
+| 8 | `distillery-mcp` on PATH | stdio |
+| 9 | `http://localhost:8000/mcp` | HTTP |
 
 For steps 3-6, the resolver looks for any `mcpServers` key containing
 "distill" (case-insensitive). Each matching entry can be either a URL-based

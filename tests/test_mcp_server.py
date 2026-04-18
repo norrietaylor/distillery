@@ -705,11 +705,9 @@ class TestCreateServer:
 
         # Read the resource content — must be valid JSON with a "schemas" key.
         result = await server.read_resource("distillery://schemas/entry-types")
-        # FastMCP returns a ResourceResult with a contents list.
-        # FastMCP ResourceContent exposes the body via .content, not .text —
-        # .text is the MCP-protocol field on TextResourceContents but this
-        # version of FastMCP surfaces the pre-conversion ResourceContent here.
-        raw = result.contents[0].content if hasattr(result, "contents") else str(result)
+        # FastMCP returns a ReadResourceResult with a contents list.
+        # Text resources are accessed via .text (TextResourceContents.text).
+        raw = result.contents[0].text if hasattr(result, "contents") else str(result)
         payload = json.loads(raw)
         assert "schemas" in payload
         assert isinstance(payload["schemas"], dict)
@@ -726,7 +724,7 @@ class TestRemovedTools:
     """Verify that tools moved to webhooks/resources are not registered as MCP tools.
 
     type_schemas was moved to the distillery://schemas/entry-types MCP resource;
-    poll and rescore were moved to /api/poll and /api/rescore webhook endpoints.
+    poll and rescore were moved to /hooks/poll and /hooks/rescore webhook endpoints.
     """
 
     _REMOVED_TOOL_NAMES = [

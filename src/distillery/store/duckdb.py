@@ -1049,10 +1049,11 @@ class DuckDBStore:
         if "status" in filters:
             val = filters["status"]
             if isinstance(val, list):
-                if val:
-                    placeholders = ", ".join("?" for _ in val)
-                    clauses.append(f"status IN ({placeholders})")
-                    params.extend(str(v) for v in val)
+                if not val:
+                    raise ValueError("status filter list must not be empty")
+                placeholders = ", ".join("?" for _ in val)
+                clauses.append(f"status IN ({placeholders})")
+                params.extend(str(v) for v in val)
             else:
                 clauses.append("status = ?")
                 params.append(str(val))
@@ -1571,41 +1572,20 @@ class DuckDBStore:
             ).fetchall()
             entries_by_status = {str(row[0]): int(row[1]) for row in status_rows}
 
-            # Storage bytes: when no filters/staleness are applied this is the
-            # whole-DB physical size (via PRAGMA database_size). When the
-            # caller narrows the result set we instead return the sum of
-            # content byte lengths over the filtered entries so the reported
-            # number is consistent with the filtered counts above. Returning
-            # the whole-DB size with filtered counts would otherwise be
-            # misleading.
+            # Storage bytes: always reported as the sum of content byte lengths
+            # over the matching entries. Using a consistent SUM(LENGTH(content))
+            # metric regardless of scope ensures the field is comparable across
+            # filtered and unfiltered calls — mixing physical DB size with a
+            # filtered content sum would make the same field incomparable.
             storage_bytes: int = 0
-            has_scope = bool(where_sql)
-            if has_scope:
-                try:
-                    byte_row = conn.execute(
-                        f"SELECT COALESCE(SUM(LENGTH(content)), 0) FROM entries {where_sql}",
-                        list(params),
-                    ).fetchone()
-                    storage_bytes = int(byte_row[0]) if byte_row else 0
-                except Exception:  # noqa: BLE001
-                    storage_bytes = 0
-            else:
-                try:
-                    size_row = conn.execute("PRAGMA database_size").fetchone()
-                    # PRAGMA database_size returns columns including
-                    # database_size which is a human-readable string.  For
-                    # in-memory DBs the bytes column (index 4) gives the raw
-                    # value.
-                    if size_row:
-                        # DuckDB returns (database_name, database_size,
-                        # block_size, total_blocks, used_blocks, free_blocks,
-                        # wal_size, ...) — total_blocks * block_size gives
-                        # total allocated bytes.
-                        block_size = int(size_row[2]) if size_row[2] else 0
-                        total_blocks = int(size_row[3]) if size_row[3] else 0
-                        storage_bytes = block_size * total_blocks
-                except Exception:  # noqa: BLE001
-                    storage_bytes = 0
+            try:
+                byte_row = conn.execute(
+                    f"SELECT COALESCE(SUM(LENGTH(content)), 0) FROM entries {where_sql}",
+                    list(params),
+                ).fetchone()
+                storage_bytes = int(byte_row[0]) if byte_row else 0
+            except Exception:  # noqa: BLE001
+                storage_bytes = 0
 
             return {
                 "entries_by_type": entries_by_type,

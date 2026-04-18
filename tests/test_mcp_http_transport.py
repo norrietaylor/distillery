@@ -218,7 +218,7 @@ class TestStatelessHttpSingleton:
             def _total_entries(resp_data: dict) -> int:  # type: ignore[type-arg]
                 content = resp_data["result"]["content"]
                 payload = json.loads(content[0]["text"])
-                return int(payload.get("total_count", -1))
+                return int(payload["total_count"])
 
             assert _total_entries(d1) == _total_entries(d2), (
                 "Two requests returned different total entries — singleton not shared"
