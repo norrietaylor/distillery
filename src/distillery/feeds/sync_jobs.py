@@ -322,10 +322,11 @@ class SyncJobTracker:
         if self._store is None:
             return 0
 
+        store = self._store
         cutoff = datetime.now(tz=UTC) - timedelta(hours=_HYDRATE_HORIZON_HOURS)
         try:
             rows = await asyncio.to_thread(
-                lambda: self._store.connection.execute(
+                lambda: store.connection.execute(
                     _SELECT_RECENT_SYNC_JOBS, [cutoff]
                 ).fetchall()
             )
