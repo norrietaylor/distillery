@@ -860,7 +860,11 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             github, person, project, digest, feed].
           - reviewer (str, optional): Reviewer identity for audit metadata.
 
-        RETURNS (success): { id: str, status: str, ... } (full updated entry)
+        RETURNS (success): { id: str, status: str, ... } (full updated entry).
+        When the requested action is a no-op (e.g. approve on an already-active
+        entry), the response also includes { already_in_state: true } and the
+        entry is returned unchanged (version is NOT bumped, reviewed_at /
+        archived_at are NOT rewritten).
         RETURNS (error): { error: true, code: "NOT_FOUND" | "INVALID_PARAMS" | "FORBIDDEN" | "INTERNAL", message: "..." }
 
         RELATED: distillery_classify (to classify entries),

@@ -187,6 +187,12 @@ async def _handle_resolve_review(
         actor.  If only ``reviewer`` is supplied (no actor), it becomes the
         *_by field for backward compatibility.
 
+    Idempotency (see issue #333): if the requested action would leave the
+    entry in its current state (approve-of-active, archive-of-archived, or
+    reclassify-to-same-type on a non-pending entry), the handler returns the
+    entry unchanged with an ``already_in_state: true`` marker.  ``version``
+    and ``reviewed_at`` / ``archived_at`` are not rewritten.
+
     Args:
         store: Initialised ``DuckDBStore``.
         arguments: Raw MCP tool arguments dict.  Recognised keys include
@@ -225,6 +231,31 @@ async def _handle_resolve_review(
             f"No entry found with id={entry_id!r}.",
             details={"entry_id": entry_id},
         )
+
+    # --- detect idempotent no-op transitions --------------------------------
+    # If the requested action would leave the entry in its current state,
+    # return it unchanged with an ``already_in_state`` marker rather than
+    # bumping ``version`` / rewriting ``reviewed_at`` (issue #333).
+    #
+    # A reclassify is only a no-op when the entry is *not* in pending_review
+    # (so the status would not flip to active) *and* ``new_entry_type``
+    # matches the current type — otherwise real work is performed.
+    new_type_preview = arguments.get("new_entry_type")
+    is_noop = (
+        (action == "approve" and entry.status == EntryStatus.ACTIVE)
+        or (action == "archive" and entry.status == EntryStatus.ARCHIVED)
+        or (
+            action == "reclassify"
+            and isinstance(new_type_preview, str)
+            and new_type_preview == entry.entry_type.value
+            and entry.status != EntryStatus.PENDING_REVIEW
+        )
+    )
+
+    if is_noop:
+        payload = entry.to_dict()
+        payload["already_in_state"] = True
+        return success_response(payload)
 
     # --- resolve actor vs reviewer -----------------------------------------
     # ``actor`` is the authenticated server identity (OAuth/git); ``reviewer``
