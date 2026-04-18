@@ -77,6 +77,25 @@ def _validate_url_syntax(url: str, source_type: str) -> str | None:
         )
     if not parsed.netloc:
         return f"url is missing a host (netloc), got: {url!r}"
+
+    # For GitHub sources, require the URL to point at github.com/<owner>/<repo>
+    # (optionally with a trailing slash). Otherwise non-GitHub URLs can be
+    # registered as GitHub sources and only fail later in the sync pipeline.
+    if source_type == "github":
+        host = parsed.netloc.lower()
+        if host not in ("github.com", "www.github.com"):
+            return (
+                f"github url must point at github.com, got host {parsed.netloc!r}. "
+                "Expected 'owner/repo' or 'https://github.com/<owner>/<repo>'."
+            )
+        path = parsed.path.rstrip("/")
+        # Expect exactly "/owner/repo" after stripping a trailing slash.
+        stripped = path.lstrip("/")
+        if not _GITHUB_SLUG_RE.match(stripped):
+            return (
+                f"github url path must be '/owner/repo', got {parsed.path!r}. "
+                "Expected 'owner/repo' or 'https://github.com/<owner>/<repo>'."
+            )
     return None
 
 
@@ -123,6 +142,13 @@ async def _probe_url(url: str) -> str | None:
 
     if response.status_code >= 500:
         return f"Probe returned server error: HTTP {response.status_code}"
+    # Treat 404 (missing resource) and 410 (gone) as probe failures — a typoed
+    # or deleted URL should not pass registration just because the server
+    # answered at all. Other 4xx codes (401/403/429, etc.) are preserved as
+    # "reachable" because they often indicate auth/rate-limit gates on
+    # otherwise-valid endpoints.
+    if response.status_code in (404, 410):
+        return f"Probe returned client error: HTTP {response.status_code}"
     return None
 
 

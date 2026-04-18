@@ -503,7 +503,14 @@ DISTILLERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "name": "distillery_sync_status",
         "description": "Return the status of the most recent background sync.",
-        "input_schema": {"type": "object", "properties": {}, "required": []},
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "job_id": {"type": "string"},
+                "source_url": {"type": "string"},
+            },
+            "required": [],
+        },
     },
     {
         "name": "distillery_configure",
