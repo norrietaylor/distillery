@@ -117,7 +117,7 @@ If no relations exist for any seed entry, note this in the Phase 2 report and co
 
 **Phase 3 — Tag Expansion:**
 
-Extract all tags from entries currently in the result set. Identify unique namespace prefixes (e.g., tags like `domain/authentication`, `domain/oauth` → prefix `domain`). For each relevant namespace, call:
+Extract all tags from entries currently in the result set. Identify unique namespace prefixes (e.g., tags like `domain/authentication`, `domain/oauth` → prefix `domain`). Call once and reuse the result across all namespaces:
 
 ```python
 distillery_list(group_by="tags")

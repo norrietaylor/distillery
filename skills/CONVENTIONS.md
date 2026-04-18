@@ -367,7 +367,7 @@ The following skills are available in `skills/`:
 | `/watch` | `watch/` | distillery_watch | Manage monitored feed sources + auto-poll scheduling (Claude Code routines) |
 | `/radar` | `radar/` | distillery_search, distillery_list, distillery_store | Interest-driven feed digest and source suggestions |
 | `/tune` | `tune/` | distillery_configure | Display and adjust feed relevance thresholds |
-| `/setup` | `setup/` | distillery_list, distillery_watch, distillery_configure | MCP connectivity wizard and transport configuration |
+| `/setup` | `setup/` | distillery_list, distillery_watch | MCP connectivity wizard and transport configuration |
 | `/digest` | `digest/` | distillery_list, distillery_search, distillery_store, distillery_find_similar | Generate structured summaries of internal team activity |
 | `/gh-sync` | `gh-sync/` | distillery_store, distillery_get, distillery_update, distillery_list, distillery_relations | Sync GitHub issues and PRs into the knowledge base |
 | `/investigate` | `investigate/` | distillery_search, distillery_get, distillery_relations, distillery_list | Deep context builder combining semantic search with relationship traversal |

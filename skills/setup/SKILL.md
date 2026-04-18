@@ -301,8 +301,8 @@ The setup wizard uses a sequential, conversational format. Each step prints its 
 
 ## Rules
 
-- Always start by checking MCP availability — distinguish between "not configured", "needs authentication", and "connected"
-- When an MCP server entry exists but tools are unavailable, treat this as "needs authentication" — guide the user through the OAuth flow
+- Always start by checking MCP availability — distinguish between "not configured", "needs authentication", "not connected", and "connected" (see Step 1)
+- Only auth-specific failures (e.g., 401/403 or an explicit auth-required response) map to "needs authentication" and trigger the OAuth flow; unreachable servers or other non-auth errors map to "not connected"
 - Always show the Step 6 summary — even on early exits (MCP unavailable, auth needed)
 - Session hooks are installed to the same scope as the plugin (user or project) — detect via `enabledPlugins`
 - Merge hook config into the scope-appropriate settings file — never overwrite other settings

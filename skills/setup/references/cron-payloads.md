@@ -88,7 +88,7 @@ CronCreate(
 1. Call distillery_list(output='stats') for entry counts by type/status and storage size.
 2. Call distillery_list(stale_days=30, limit=10) for stale entry count.
 3. Call distillery_list(entry_type='feed', limit=5) for recent feed activity.
-4. Store a digest: distillery_store(content=<one-paragraph summary of findings>, entry_type='session', author='distillery-maintenance', tags=['digest', 'weekly', 'maintenance']).
+4. Store a digest: distillery_store(content=<one-paragraph summary of findings>, entry_type='digest', author='distillery-maintenance', tags=['digest', 'weekly', 'maintenance']).
 Report: entry counts, stale entry count, feed activity, storage size.""",
   recurring=True,
   durable=True
