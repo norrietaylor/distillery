@@ -32,9 +32,9 @@ Feature: Extend list Tool with stale_days, group_by, and output Parameters
   Scenario: group_by results are ordered by count descending
     Given the store contains entries with 10 of type "session", 5 of type "bookmark", and 2 of type "note"
     When the list tool is called with group_by="entry_type"
-    Then the first group has value"session" with count 10
-    And the second group has value"bookmark" with count 5
-    And the third group has value"note" with count 2
+    Then the first group has value "session" with count 10
+    And the second group has value "bookmark" with count 5
+    And the third group has value "note" with count 2
 
   Scenario: group_by tags with tag_prefix replicates tag_tree functionality
     Given the store contains entries tagged "topic/python", "topic/rust", and "project/distillery"

@@ -53,8 +53,8 @@ Feature: Rewire Maintenance Orchestrator and Update Skills
     When it generates webhook URLs for the maintenance pipeline
     Then the URLs include /hooks/poll, /hooks/rescore, and /hooks/classify-batch
 
-  Scenario: All skill definitions reference only the 12 active tools
+  Scenario: All skill definitions reference only the active tools
     Given all skill SKILL.md files are loaded
     When the tools listed in each skill frontmatter are collected
-    Then no skill references any of the 8 removed tool names
-    And every referenced tool exists in the 12-tool MCP surface
+    Then no skill references removed tool names
+    And every referenced tool exists in the current MCP surface

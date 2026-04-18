@@ -7,10 +7,10 @@ Feature: Add classify-batch Webhook with Heuristic Mode
   Scenario: LLM mode classifies inbox entries using ClassificationEngine
     Given the store contains 5 entries with status "inbox"
     And classification mode is set to "llm"
-    When a POST request is sent to /hooks/classify-batch with the bearer token
-    Then the response contains classified count, pending_review count, errors count, and by_type breakdown
-    And entries with confidence >= threshold have status "active"
-    And entries with confidence < threshold have status "pending_review"
+    When a POST request is sent to /hooks/classify-batch?mode=llm with the bearer token
+    Then the response contains classified_count, pending_review_count, errors_count, and by_type breakdown
+    And all processed inbox entries are written back with status "pending_review" for human triage
+    And no entries are auto-promoted to status "active" based on confidence
 
   Scenario: Heuristic mode classifies entries using embedding similarity
     Given the store contains 10 active entries of type "session" and 10 active entries of type "bookmark"
