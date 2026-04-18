@@ -15,7 +15,7 @@ Check `CronList` for any existing poll job before creating — do not create dup
 **If a poll job already exists:**
 
 ```text
-Auto-poll: active (cron job <job_id>, every hour at :<minute>)
+Feed status check: active (cron job <job_id>, every hour at :<minute>)
 ```
 
 **If no poll job exists and feed sources are configured:**
@@ -24,7 +24,7 @@ Ask the user:
 
 ```text
 Enable scheduled tasks? This includes:
-  • Feed polling — every hour
+  • Feed status check — every hour (no ingestion; watch/list + recent activity)
   • Stale entry check — daily
   • KB maintenance — weekly (stats, stale entries, digest)
 (yes / no)
@@ -44,14 +44,14 @@ CronCreate(
 Display:
 
 ```text
-Auto-poll enabled: every hour at :<minute> (cron job <job_id>)
+Feed status check enabled: every hour at :<minute> (cron job <job_id>)
 ```
 
 **If no feed sources are configured:**
 
 ```text
-Auto-poll: skipped (no feed sources configured)
-  Add sources with /watch add <url> — auto-poll will be set up automatically.
+Feed status check: skipped (no feed sources configured)
+  Add sources with /watch add <url> — the status check will be set up automatically.
 ```
 
 ## 4b. Daily — Stale Entry Check

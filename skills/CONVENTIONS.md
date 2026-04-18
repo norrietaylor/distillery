@@ -89,7 +89,7 @@ If already resolved earlier in the conversation, reuse the cached values without
 
 ## MCP Health Check
 
-Skills depend on the Distillery MCP server. Call `distillery_list(limit=1)` at the start of the first skill invoked in a conversation. **If this check has already succeeded earlier in the same conversation, skip and proceed directly.**
+Skills depend on the Distillery MCP server. Call `distillery_status()` at the start of the first skill invoked in a conversation. **If this check has already succeeded earlier in the same conversation, skip and proceed directly.**
 
 If the check fails, display:
 
@@ -106,7 +106,7 @@ Stop immediately if MCP is unavailable.
 
 ### Server Version Compatibility
 
-Skills that require MCP tools added in a specific server version should declare `min_server_version` in their frontmatter. During the MCP health check, compare the returned server version against `min_server_version`. If the server version is older, display:
+Skills that require MCP tools added in a specific server version should declare `min_server_version` in their frontmatter. During the `distillery_status()` health check, compare the returned `version` field against `min_server_version`. If the server version is older, display:
 
 ```text
 Warning: This skill requires Distillery MCP server >= {min_server_version}.

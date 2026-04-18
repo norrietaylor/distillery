@@ -530,8 +530,16 @@ class FakePurgeStore(FakeSourceStore):
                 and e.metadata["source_url"] != filters["metadata.source_url"]
             ):
                 match = False
-            if "status" in filters and e.status != filters["status"]:
-                match = False
+            if "status" in filters:
+                status_filter = filters["status"]
+                # Production store accepts either a string or a list of strings;
+                # mirror that contract so the fake stays in sync with the real
+                # filter semantics (status IN (...)).
+                if isinstance(status_filter, list):
+                    if e.status not in status_filter:
+                        match = False
+                elif e.status != status_filter:
+                    match = False
             if match:
                 results.append(e)
         return results[offset : offset + limit]

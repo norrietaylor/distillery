@@ -38,3 +38,13 @@ def test_truncates_when_longer_than_max_len() -> None:
     assert result is not None
     assert len(result) == 50
     assert result.endswith("\u2026")
+
+
+def test_zero_max_len_raises_value_error() -> None:
+    with pytest.raises(ValueError, match="max_len must be a positive integer"):
+        _sanitise_last_error("boom", 0)
+
+
+def test_negative_max_len_raises_value_error() -> None:
+    with pytest.raises(ValueError, match="max_len must be a positive integer"):
+        _sanitise_last_error("boom", -1)

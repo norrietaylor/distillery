@@ -59,7 +59,15 @@ def _sanitise_last_error(error: str | None, max_len: int) -> str | None:
     stack-trace fragments verbatim.  The resulting string is truncated
     to *max_len* characters with an ellipsis suffix when truncation
     occurs.
+
+    Raises:
+        ValueError: if *max_len* is not a positive integer. Without this
+            guard, ``collapsed[: max_len - 1] + "…"`` would return a value
+            longer than the caller-requested limit, which could persist
+            oversized ``last_error`` strings.
     """
+    if max_len <= 0:
+        raise ValueError("max_len must be a positive integer")
     if error is None:
         return None
     # Collapse runs of whitespace / control chars to single spaces.

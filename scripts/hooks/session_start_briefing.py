@@ -298,6 +298,90 @@ def resolve_transport(cwd: Path | None = None, bearer_token: str = "") -> Resolv
 # ---------------------------------------------------------------------------
 
 
+def _http_initialize(
+    mcp_url: str,
+    base_headers: dict[str, str],
+    timeout: int = 2,
+) -> tuple[bool, str | None]:
+    """Perform an MCP ``initialize`` JSON-RPC request over HTTP.
+
+    Returns ``(ok, session_id)``. ``ok`` is True when the server replies with a
+    valid JSON-RPC 2.0 response containing ``result``. ``session_id`` is the
+    value of the ``Mcp-Session-Id`` response header when present (streamable
+    HTTP sessions), or None for stateless servers.
+    """
+    payload = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": 0,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "distillery-hook", "version": "1.0.0"},
+            },
+        }
+    ).encode()
+    req = urllib.request.Request(mcp_url, data=payload, method="POST")
+    headers = dict(base_headers)
+    headers["Content-Type"] = "application/json"
+    # Only advertise application/json — we do not parse SSE frames here.
+    headers["Accept"] = "application/json"
+    for name, value in headers.items():
+        req.add_header(name, value)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            status = getattr(resp, "status", 200)
+            if status >= 400:
+                return False, None
+            body = resp.read()
+            session_id = resp.headers.get("Mcp-Session-Id")
+    except (urllib.error.URLError, OSError, ValueError):
+        return False, None
+    try:
+        parsed = json.loads(body)
+    except (json.JSONDecodeError, ValueError):
+        return False, None
+    if not isinstance(parsed, dict) or parsed.get("jsonrpc") != "2.0":
+        return False, None
+    if "result" not in parsed:
+        return False, None
+    return True, session_id
+
+
+def _http_send_initialized(
+    mcp_url: str,
+    base_headers: dict[str, str],
+    session_id: str | None,
+    timeout: int = 2,
+) -> None:
+    """Fire-and-forget ``notifications/initialized`` over HTTP.
+
+    Errors are swallowed — the notification is best-effort and an MCP server
+    that declines to accept it should not fail the health probe or tool call.
+    """
+    payload = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized",
+            "params": {},
+        }
+    ).encode()
+    req = urllib.request.Request(mcp_url, data=payload, method="POST")
+    headers = dict(base_headers)
+    headers["Content-Type"] = "application/json"
+    headers["Accept"] = "application/json"
+    if session_id:
+        headers["Mcp-Session-Id"] = session_id
+    for name, value in headers.items():
+        req.add_header(name, value)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            resp.read()
+    except (urllib.error.URLError, OSError, ValueError):
+        return
+
+
 def _http_health_check(
     base_url: str,
     bearer_token: str = "",
@@ -306,11 +390,13 @@ def _http_health_check(
 ) -> bool:
     """Probe an HTTP MCP transport for reachability.
 
-    Performs ``GET /health`` first and then a minimal JSON-RPC POST to the
-    ``/mcp`` endpoint. Both must succeed with a 2xx status; the JSON-RPC
-    response must parse as a JSON-RPC reply (``jsonrpc``, ``id``, and either
-    ``result`` or ``error``). Returns False on any failure, ensuring a healthy
-    sidecar alone cannot mask a dead MCP endpoint.
+    Performs ``GET /health`` first, then a proper MCP ``initialize`` handshake
+    against ``/mcp`` (initialize request followed by a best-effort
+    ``notifications/initialized``). Both the health GET and the initialize POST
+    must succeed with a 2xx status and the initialize response must be a valid
+    JSON-RPC 2.0 reply with a ``result``. This avoids falsely reporting a
+    session-enforcing streamable-HTTP server as unreachable by skipping the
+    mandatory initialize step.
     """
     mcp_url, health_url = _normalize_mcp_url(base_url)
 
@@ -334,42 +420,17 @@ def _http_health_check(
     except (urllib.error.URLError, OSError, ValueError):
         return False
 
-    # Step 2: JSON-RPC POST /mcp
-    payload = json.dumps(
-        {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/list",
-            "params": {},
-        }
-    ).encode()
-    mcp_req = urllib.request.Request(mcp_url, data=payload, method="POST")
-    for name, value in _merge(
-        {
-            "Content-Type": "application/json",
-            "Accept": "application/json, text/event-stream",
-        }
-    ).items():
-        mcp_req.add_header(name, value)
-    try:
-        with urllib.request.urlopen(mcp_req, timeout=timeout) as resp:
-            status = getattr(resp, "status", 200)
-            if status >= 400:
-                return False
-            body = resp.read()
-    except (urllib.error.URLError, OSError, ValueError):
+    # Step 2: MCP initialize handshake (no tools/list — initialize is the
+    # canonical liveness probe and is required before any tools/* call on
+    # session-enforcing servers).
+    base_headers = _merge({})
+    ok, session_id = _http_initialize(mcp_url, base_headers, timeout=timeout)
+    if not ok:
         return False
-
-    try:
-        parsed = json.loads(body)
-    except (json.JSONDecodeError, ValueError):
-        return False
-
-    if not isinstance(parsed, dict):
-        return False
-    if parsed.get("jsonrpc") != "2.0":
-        return False
-    return "result" in parsed or "error" in parsed
+    # Best-effort initialized notification so the server can move past the
+    # handshake if it tracks session state. Failures are intentionally ignored.
+    _http_send_initialized(mcp_url, base_headers, session_id, timeout=timeout)
+    return True
 
 
 def _http_call_tool(
@@ -382,12 +443,28 @@ def _http_call_tool(
 ) -> Any:
     """JSON-RPC tools/call over HTTP.
 
-    ``url`` is normalized to the canonical ``/mcp`` endpoint so tool calls
-    always hit the MCP handler, never the health sidecar or bare base URL.
-    Per-call headers (``Content-Type``, ``Accept``, and bearer) override
-    matching ``transport_headers`` defaults.
+    Performs the full MCP handshake before the tool call — ``initialize``,
+    best-effort ``notifications/initialized``, then ``tools/call`` — and
+    threads any ``Mcp-Session-Id`` header returned from initialize through
+    subsequent requests. ``url`` is normalized to the canonical ``/mcp``
+    endpoint so tool calls always hit the MCP handler, never the health
+    sidecar or bare base URL. Per-call headers (``Content-Type``, ``Accept``,
+    and bearer) override matching ``transport_headers`` defaults.
     """
     mcp_url, _ = _normalize_mcp_url(url)
+
+    base_headers: dict[str, str] = {}
+    if transport_headers:
+        base_headers.update(transport_headers)
+    if bearer_token and "Authorization" not in base_headers:
+        base_headers["Authorization"] = f"Bearer {bearer_token}"
+
+    # MCP handshake. Short-circuit on initialize failure so we don't issue a
+    # tools/call against a server that has not accepted us.
+    ok, session_id = _http_initialize(mcp_url, base_headers, timeout=timeout)
+    if not ok:
+        return None
+    _http_send_initialized(mcp_url, base_headers, session_id, timeout=timeout)
 
     payload = json.dumps(
         {
@@ -399,13 +476,12 @@ def _http_call_tool(
     ).encode()
 
     req = urllib.request.Request(mcp_url, data=payload, method="POST")
-    merged: dict[str, str] = {}
-    if transport_headers:
-        merged.update(transport_headers)
+    merged = dict(base_headers)
     merged["Content-Type"] = "application/json"
-    merged.setdefault("Accept", "application/json, text/event-stream")
-    if bearer_token:
-        merged["Authorization"] = f"Bearer {bearer_token}"
+    # Only advertise application/json — we do not parse SSE frames here.
+    merged["Accept"] = "application/json"
+    if session_id:
+        merged["Mcp-Session-Id"] = session_id
     for name, value in merged.items():
         req.add_header(name, value)
 
@@ -729,9 +805,12 @@ def main() -> None:
     _limit_raw = os.environ.get("DISTILLERY_BRIEFING_LIMIT", "5")
     try:
         limit = int(_limit_raw)
+        if limit <= 0:
+            raise ValueError
     except ValueError:
         warnings.warn(
-            f"DISTILLERY_BRIEFING_LIMIT={_limit_raw!r} is not a valid integer; defaulting to 5",
+            f"DISTILLERY_BRIEFING_LIMIT={_limit_raw!r} is not a valid positive integer; "
+            "defaulting to 5",
             stacklevel=1,
         )
         limit = 5
