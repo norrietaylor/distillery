@@ -50,7 +50,7 @@ See [`distillery.yaml.example`](https://github.com/norrietaylor/distillery/blob/
 | `distillery_store` | Store a new knowledge entry with content, tags, and metadata |
 | `distillery_get` | Retrieve a single entry by UUID |
 | `distillery_update` | Partially update an existing entry (tags, status, metadata) |
-| `distillery_list` | List entries with filtering, pagination, and optional review-queue enrichment (`output_mode="review"`) |
+| `distillery_list` | List entries with filtering, pagination, and optional review-queue enrichment (`output_mode="review"`). Accepts `source=<origin>` (e.g. `"import"`, `"claude-code"`) and `feed_url=<url>` (matches `metadata.source_url` written by the feed poller); passing a URL to `source=` is aliased to `feed_url`. |
 | **Discovery** | |
 | `distillery_search` | Hybrid BM25 + vector search with RRF fusion; returns ranked results (falls back to vector-only if FTS unavailable) |
 | `distillery_find_similar` | Find similar entries — supports dedup mode (`dedup_action=true`) and conflict detection (`conflict_check=true`) |

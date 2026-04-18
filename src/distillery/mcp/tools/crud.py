@@ -1026,6 +1026,17 @@ async def _handle_list(
             "Fields 'group_by' and 'output' are mutually exclusive",
         )
 
+    # --- source=<url> aliasing ----------------------------------------------
+    # Issue #335: users often try `source="https://…/feed"` expecting it to
+    # match feed-ingested entries.  The `source` column actually stores the
+    # ingest origin (e.g. "import"), not the feed URL, so this silently
+    # returned 0 results.  Treat a URL-shaped `source` value as an alias
+    # for `feed_url` to remove the footgun.
+    aliased = _alias_source_url_to_feed_url(arguments)
+    if isinstance(aliased, list):
+        return aliased  # error response
+    arguments = aliased
+
     filters = _build_filters_from_arguments(arguments)
 
     # review mode implicitly filters to pending_review status (takes precedence
@@ -1211,6 +1222,62 @@ def _apply_default_status_filter(
     return filters
 
 
+def _looks_like_url(value: Any) -> bool:
+    """Return True when *value* is a str that starts with ``http://`` or ``https://``.
+
+    Used to detect when a caller has passed a feed URL into the ``source``
+    parameter of ``distillery_list`` — a common footgun where ``source`` is
+    the more discoverable name but only filters on the entry-origin column
+    (e.g. ``"import"``).  See :func:`_alias_source_url_to_feed_url`.
+    """
+    if not isinstance(value, str):
+        return False
+    return value.startswith("http://") or value.startswith("https://")
+
+
+def _alias_source_url_to_feed_url(
+    arguments: dict[str, Any],
+) -> dict[str, Any] | list[types.TextContent]:
+    """Transparently route ``source=<url>`` to the ``feed_url`` filter.
+
+    When the caller passes a URL-shaped value (``http://…`` or ``https://…``)
+    as the ``source`` argument, treat it as an alias for ``feed_url``.  This
+    removes a silent-zero footgun where users try ``source="https://…/feed"``
+    expecting to see feed items but get an empty result because the
+    ``source`` column stores ingest origin (``"import"``), not the feed URL.
+
+    Returns a possibly-mutated copy of *arguments* when aliasing is needed.
+    Returns the original dict when no aliasing applies.  Returns an MCP
+    error response list when both ``source`` (URL-shaped) and ``feed_url``
+    were provided with different values.
+
+    The non-URL ``source`` behaviour is unchanged — strings like
+    ``"import"`` / ``"claude-code"`` continue to filter on the ``source``
+    column as before.
+    """
+    source = arguments.get("source")
+    feed_url = arguments.get("feed_url")
+
+    if not _looks_like_url(source):
+        return arguments
+
+    if feed_url is not None and feed_url != source:
+        return error_response(
+            "INVALID_PARAMS",
+            "Field 'source' is a URL and 'feed_url' is also set to a different "
+            "URL. Pass only one, or set both to the same value. "
+            "(URL-shaped 'source' is aliased to 'feed_url'.)",
+            details={"source": source, "feed_url": feed_url},
+        )
+
+    # Route URL-shaped source to feed_url and drop the original source value
+    # so it isn't also translated to a (never-matching) source-column filter.
+    aliased = dict(arguments)
+    aliased["feed_url"] = source
+    aliased.pop("source", None)
+    return aliased
+
+
 def _build_filters_from_arguments(arguments: dict[str, Any]) -> dict[str, Any] | None:
     """Extract known filter keys from *arguments* into a filters dict.
 
@@ -1221,7 +1288,9 @@ def _build_filters_from_arguments(arguments: dict[str, Any]) -> dict[str, Any] |
     The ``feed_url`` key is translated to a ``metadata.source_url`` filter so
     callers can retrieve entries ingested from a registered feed source
     (poller writes ``metadata.source_url`` to match the registry URL, while
-    the entry's ``source`` column is set to ``import``).
+    the entry's ``source`` column is set to ``import``).  URL-shaped
+    ``source`` values are routed to ``feed_url`` upstream by
+    :func:`_alias_source_url_to_feed_url`.
 
     Args:
         arguments: The tool argument dict.
