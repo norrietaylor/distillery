@@ -21,6 +21,7 @@ from mcp import types
 
 from distillery.config import DistilleryConfig
 from distillery.mcp.tools._common import success_response
+from distillery.store.protocol import DistilleryStore
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ def _db_size_bytes(config: DistilleryConfig) -> int | None:
 
 async def _handle_status(
     *,
-    store: Any,
+    store: DistilleryStore,
     config: DistilleryConfig,
     embedding_provider: Any,
     tool_count: int,
@@ -57,7 +58,7 @@ async def _handle_status(
     HTTP-only ``/health`` endpoint).
 
     Args:
-        store: Initialised storage backend.
+        store: Initialised storage backend implementing :class:`DistilleryStore`.
         config: Loaded :class:`~distillery.config.DistilleryConfig`.
         embedding_provider: Active embedding provider (used for its name).
         tool_count: Number of MCP tools registered on the current server.
@@ -78,14 +79,14 @@ async def _handle_status(
     }
 
     # --- store stats ---------------------------------------------------------
+    # Use the async protocol contract rather than poking at the DuckDB-specific
+    # ``store.connection`` — keeps this handler backend-agnostic and prevents
+    # synchronous DB I/O on the async request path.
     entry_count: int | None = None
     try:
-        conn = getattr(store, "connection", None)
-        if conn is not None:
-            row = conn.execute("SELECT COUNT(*) FROM entries").fetchone()
-            entry_count = int(row[0]) if row else 0
+        entry_count = await store.count_entries(filters=None)
     except Exception:  # noqa: BLE001
-        logger.debug("distillery_status: entry_count query failed", exc_info=True)
+        logger.debug("distillery_status: count_entries failed", exc_info=True)
 
     db_size = _db_size_bytes(config)
     store_info: dict[str, Any] = {

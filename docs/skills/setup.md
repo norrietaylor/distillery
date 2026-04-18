@@ -109,8 +109,9 @@ Always displayed, even if the wizard exits early:
 
 ## Tips
 
-- The wizard is **idempotent** — running it multiple times won't create duplicate jobs
-- Scheduled tasks use off-peak cron minutes (not `:00` or `:30`) to spread load
+- The wizard is **idempotent** — running it multiple times won't create duplicate routines
+- Scheduled work runs as **Claude Code routines** (hourly, daily, weekly) — the same flow for both local and hosted transport
 - Weekly maintenance stores a digest entry for longitudinal KB health tracking
 - You're asked once about enabling scheduled tasks, and the answer applies to all three tiers
-- For hosted deployments, the webhook endpoints provide audit records in DuckDB (see `webhook_audit:*` metadata keys)
+- Previous `CronCreate` jobs and GitHub Actions webhook schedules still run if present, but are deprecated in favour of routines — see the Migration note in Step 4
+- For hosted deployments, the `POST /api/maintenance` webhook still drives the actual poll → rescore → classify-batch pipeline (configured in the `distill_ops` repo); Distillery records an audit trail under `webhook_audit:*` metadata keys that the weekly routine can surface

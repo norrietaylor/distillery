@@ -2,9 +2,9 @@
 
 Note: the analytics handlers tested here were decoupled from the MCP tool
 surface in T02.2.  They are no longer registered as MCP tools; instead they
-power webhook endpoints (/api/poll, /api/rescore, /api/maintenance) and
-internal helpers.  The distillery_type_schemas tool was replaced by the
-distillery://schemas/entry-types MCP resource.
+power webhook endpoints (POST /hooks/poll, POST /hooks/rescore,
+POST /api/maintenance) and internal helpers.  The distillery_type_schemas
+tool was replaced by the distillery://schemas/entry-types MCP resource.
 
 These tests exercise the underlying handler functions directly:
 

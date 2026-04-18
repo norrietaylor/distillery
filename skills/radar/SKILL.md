@@ -62,11 +62,13 @@ Report: `Retrieved <total> entries via interest-based search (<N> queries).`
 
 **3c. Fallback (if interest tags unavailable):**
 
-If `distillery_list(group_by="tags")` returns no tags or errors, fall back to:
+If `distillery_list(group_by="tags")` returns no tags, fall back to:
 
 `distillery_list(entry_type="feed", limit=<limit>, output_mode="summary", date_from=<date>)`
 
 Report: `Retrieved <total> entries via recent listing (fallback).`
+
+If `distillery_list(group_by="tags")` itself errors, treat that as an MCP error per the Rules section below — report and stop.
 
 **3d. Empty results:**
 

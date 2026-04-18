@@ -797,7 +797,21 @@ async def _handle_classify_batch(request: Request, state: dict[str, Any]) -> JSO
         A :class:`~starlette.responses.JSONResponse` from
         :func:`_run_classify_batch`.
     """
+    from distillery.models import EntryType
+
     entry_type = request.query_params.get("entry_type", "inbox")
+    valid_entry_types = {member.value for member in EntryType}
+    if entry_type not in valid_entry_types:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": (
+                    f"entry_type must be one of: {sorted(valid_entry_types)}, got: {entry_type!r}"
+                ),
+            },
+            status_code=400,
+        )
+
     mode_param = request.query_params.get("mode")
     mode: str | None = mode_param if isinstance(mode_param, str) and mode_param else None
 

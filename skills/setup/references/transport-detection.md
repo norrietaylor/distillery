@@ -8,13 +8,13 @@ Use `ToolSearch` to check whether any `distillery` MCP tools are available. Also
 
 - The plugin manifest (`.claude-plugin/plugin.json` in the plugin directory)
 - `.mcp.json` in the project root
-- `~/.claude/settings.json`
+- `~/.claude.json` (MCP server registrations — project-scoped under `projects[<cwd>].mcpServers` or global `mcpServers`)
 
 Look for any Distillery MCP server entry in these config files to determine if a server is configured.
 
 ## State: Needs Authentication
 
-A Distillery MCP server entry exists (in `plugin.json`, `.mcp.json`, or `settings.json`) but `distillery_list(limit=1)` is unavailable or fails (including auth-related failures). This typically means the server is configured with HTTP transport and GitHub OAuth, but the user has not completed the OAuth flow yet.
+A Distillery MCP server entry exists (in `plugin.json`, `.mcp.json`, or `~/.claude.json`) but `distillery_list(limit=1)` is unavailable or fails (including auth-related failures). This typically means the server is configured with HTTP transport and GitHub OAuth, but the user has not completed the OAuth flow yet.
 
 Display:
 
@@ -34,11 +34,11 @@ To authenticate:
 Alternatively, you can type: ! claude mcp authenticate distillery
 ```
 
-Then skip to Step 5 (Summary) with `MCP Server: needs authentication`.
+Then skip to Step 6 (Summary) with `MCP Server: needs authentication`.
 
 ## Step 2: Transport Classification Table
 
-Read the `.mcp.json` file in the project root (or `~/.claude/settings.json` if `.mcp.json` does not exist) to determine the Distillery MCP server configuration.
+Read the `.mcp.json` file in the project root (or `~/.claude.json` if `.mcp.json` does not exist) to determine the Distillery MCP server configuration.
 
 | URL Pattern | Transport | Mode |
 |-------------|-----------|------|

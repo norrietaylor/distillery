@@ -8,7 +8,7 @@ Feature: Add classify-batch Webhook with Heuristic Mode
     Given the store contains 5 entries with status "inbox"
     And classification mode is set to "llm"
     When a POST request is sent to /hooks/classify-batch?mode=llm with the bearer token
-    Then the response contains classified_count, pending_review_count, errors_count, and by_type breakdown
+    Then the response contains classified, pending_review, errors, and by_type breakdown
     And all processed inbox entries are written back with status "pending_review" for human triage
     And no entries are auto-promoted to status "active" based on confidence
 

@@ -632,3 +632,33 @@ async def test_hooks_rescore_invalid_limit_query_param(
     body = resp.json()
     assert body["ok"] is False
     assert "integer" in body["error"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("bad_limit", ["0", "-1"])
+async def test_hooks_rescore_non_positive_limit_query_param(
+    store: DuckDBStore, monkeypatch: pytest.MonkeyPatch, bad_limit: str
+) -> None:
+    """POST /hooks/rescore?limit=0 and ?limit=-1 return 400 bad request.
+
+    Guards the ``limit <= 0`` branch in :func:`_handle_rescore` against
+    regression — a purely typed check would let zero/negative values slip
+    through.  Each bad limit runs in its own parametrised invocation so the
+    fresh in-memory ``store`` fixture provides a clean cooldown slate.
+    """
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+    config = _make_config()
+    shared = _make_shared_state(store)
+    app = create_webhook_app(shared, config)
+
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.post(f"/hooks/rescore?limit={bad_limit}", headers=_AUTH_HEADER)
+
+    assert resp.status_code == 400, (
+        f"limit={bad_limit!r} should be rejected; got {resp.status_code}: {resp.text}"
+    )
+    body = resp.json()
+    assert body["ok"] is False
+    assert "positive" in body["error"], (
+        f"error should mention 'positive' for limit={bad_limit!r}; got {body['error']!r}"
+    )

@@ -706,6 +706,9 @@ class TestCreateServer:
         # Read the resource content — must be valid JSON with a "schemas" key.
         result = await server.read_resource("distillery://schemas/entry-types")
         # FastMCP returns a ResourceResult with a contents list.
+        # FastMCP ResourceContent exposes the body via .content, not .text —
+        # .text is the MCP-protocol field on TextResourceContents but this
+        # version of FastMCP surfaces the pre-conversion ResourceContent here.
         raw = result.contents[0].content if hasattr(result, "contents") else str(result)
         payload = json.loads(raw)
         assert "schemas" in payload
