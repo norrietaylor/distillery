@@ -2224,12 +2224,24 @@ class DuckDBStore:
     def _sync_prune_search_log(self, retention_days: int) -> int:
         """Delete ``search_log`` rows older than *retention_days*.
 
+        Raises
+        ------
+        ValueError
+            If *retention_days* is not a non-negative integer. Negative values
+            flip the interval sign and would match almost the entire table.
+
         Returns
         -------
         int
             The number of rows deleted.
         """
         assert self._conn is not None
+        if not isinstance(retention_days, int) or isinstance(retention_days, bool):
+            raise ValueError("retention_days must be a non-negative integer")
+        if retention_days < 0:
+            raise ValueError(
+                f"retention_days must be a non-negative integer, got: {retention_days}"
+            )
         result = self._conn.execute(
             "DELETE FROM search_log "
             "WHERE timestamp < current_timestamp - INTERVAL (CAST(? AS INT)) DAYS "

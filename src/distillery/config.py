@@ -812,10 +812,13 @@ def _parse_http_rate_limit(rl_raw: dict[str, Any]) -> HttpRateLimitConfig:
             f"server.http_rate_limit.max_body_bytes must be > 0, got: {max_body_bytes}"
         )
 
-    cors_origins_raw = rl_raw.get("cors_allowed_origins", []) or []
-    if not isinstance(cors_origins_raw, list):
+    cors_origins_raw = rl_raw.get("cors_allowed_origins")
+    if cors_origins_raw is None:
+        cors_allowed_origins: list[str] = []
+    elif not isinstance(cors_origins_raw, list):
         raise ValueError("server.http_rate_limit.cors_allowed_origins must be a YAML list")
-    cors_allowed_origins = [str(o).strip() for o in cors_origins_raw if str(o).strip()]
+    else:
+        cors_allowed_origins = [str(o).strip() for o in cors_origins_raw if str(o).strip()]
 
     return HttpRateLimitConfig(
         requests_per_minute=requests_per_minute,

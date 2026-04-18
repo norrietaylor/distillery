@@ -587,10 +587,13 @@ class FeedPoller:
             return
         error_msg = result.errors[0] if result.errors else None
         try:
+            # Record the fetched count for source-liveness: a feed that fetched
+            # 20 items but stored 0 due to dedup/thresholds still proves the
+            # source is alive, so ``items_fetched`` is the right liveness signal.
             await recorder(
                 result.source_url,
                 polled_at=result.polled_at,
-                item_count=result.items_stored,
+                item_count=result.items_fetched,
                 error=error_msg,
             )
         except Exception:  # noqa: BLE001
