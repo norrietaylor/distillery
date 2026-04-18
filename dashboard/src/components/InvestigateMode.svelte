@@ -573,7 +573,7 @@
           {bridge}
           seedTags={phase3SeedTags}
           project={$selectedProject}
-          investigationTopic={buildQuery(seedContent)}
+          investigationTopic={currentQuery}
           onResults={(results) => {
             // Capture discovered tags from Phase 3 for Phase 4 synthesis
             if (results.length > 0) {

@@ -274,9 +274,13 @@
 
   async function handleTagClick(tag: string) {
     if (expandedTag === tag) {
-      // Toggle closed
+      // Toggle closed — bump the request counter so any in-flight
+      // search for this tag is ignored when it resolves.
+      activeTagRequest += 1;
       expandedTag = null;
       tagResults = [];
+      tagResultsLoading = false;
+      tagResultsError = null;
       return;
     }
 

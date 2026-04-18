@@ -28,6 +28,7 @@ def _make_config() -> DistilleryConfig:
     )
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(("slug", "_tool"), _WIDGET_TOOL_BINDINGS)
 async def test_widget_resource_registered(slug: str, _tool: str) -> None:
     """Each widget slug must be registered as ``ui://distillery/<slug>``."""
@@ -39,6 +40,7 @@ async def test_widget_resource_registered(slug: str, _tool: str) -> None:
     )
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(("slug", "_tool"), _WIDGET_TOOL_BINDINGS)
 async def test_widget_resource_returns_html(slug: str, _tool: str) -> None:
     """Reading a widget resource must return an HTML document.
@@ -61,11 +63,10 @@ async def test_widget_resource_returns_html(slug: str, _tool: str) -> None:
     # fallback page has no /assets/ references either, so this holds in both
     # built and unbuilt modes.
     unresolved = re.findall(r'["\'](/assets/[^"\']+)["\']', raw)
-    assert not unresolved, (
-        f"{slug} resource has unresolved asset references: {unresolved}"
-    )
+    assert not unresolved, f"{slug} resource has unresolved asset references: {unresolved}"
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(("slug", "tool"), _WIDGET_TOOL_BINDINGS)
 async def test_widget_tool_binds_resource_uri(slug: str, tool: str) -> None:
     """Each widget-bound tool must advertise ``meta.ui.resourceUri``."""

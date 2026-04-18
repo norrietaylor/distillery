@@ -264,6 +264,7 @@
 
   /** Toggle expand/collapse for a degree-1 entry's second-degree relations. */
   async function toggleSecondDegree(nodeId: string) {
+    const version = graphVersion;
     const existing = secondDegree.get(nodeId);
     if (existing) {
       // Toggle expanded state
@@ -299,6 +300,9 @@
         action: "get",
         entry_id: nodeId,
       });
+
+      // Ignore stale responses after the graph has been reset (e.g. user pivoted).
+      if (version !== graphVersion) return;
 
       if (result.isError) {
         secondDegree = new Map(secondDegree).set(nodeId, {
@@ -340,6 +344,7 @@
         error: null,
       });
     } catch (err) {
+      if (version !== graphVersion) return;
       const currentState = secondDegree.get(nodeId) ?? state;
       secondDegree = new Map(secondDegree).set(nodeId, {
         ...currentState,

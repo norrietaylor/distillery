@@ -40,6 +40,7 @@
   let entries = $state<RecentEntry[]>([]);
   let loading = $state(true);
   let error = $state<string | null>(null);
+  let loadSeq = 0;
 
   /**
    * Fetch the N most-recent entries with a single distillery_list call.
@@ -50,6 +51,7 @@
    * (see src/distillery/mcp/tools/crud.py).
    */
   async function loadEntries() {
+    const seq = ++loadSeq;
     loading = true;
     error = null;
     try {
@@ -63,6 +65,7 @@
       }
 
       const result = await bridge.callTool("distillery_list", args);
+      if (seq !== loadSeq) return;
 
       if (result.isError) {
         error = result.text || "Failed to load recent entries";
@@ -72,10 +75,11 @@
 
       entries = parseEntries(result.text);
     } catch (err) {
+      if (seq !== loadSeq) return;
       error = err instanceof Error ? err.message : "Failed to load recent entries";
       entries = [];
     } finally {
-      loading = false;
+      if (seq === loadSeq) loading = false;
     }
   }
 

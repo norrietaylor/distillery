@@ -20,8 +20,10 @@
   let entries = $state<ExpiryEntry[]>([]);
   let loading = $state(true);
   let error = $state<string | null>(null);
+  let requestSeq = 0;
 
   async function loadExpiring() {
+    const reqId = ++requestSeq;
     loading = true;
     error = null;
     try {
@@ -32,6 +34,7 @@
       }
 
       const result = await bridge.callTool("distillery_list", args);
+      if (reqId !== requestSeq) return;
 
       if (result.isError) {
         error = "Failed to load expiring entries.";
@@ -62,9 +65,10 @@
         })
         .sort((a, b) => a.daysRemaining - b.daysRemaining);
     } catch (err) {
+      if (reqId !== requestSeq) return;
       error = err instanceof Error ? err.message : "Failed to load expiring entries.";
     } finally {
-      loading = false;
+      if (reqId === requestSeq) loading = false;
     }
   }
 

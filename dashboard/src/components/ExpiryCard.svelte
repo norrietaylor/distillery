@@ -82,7 +82,7 @@
   );
 </script>
 
-<div class="expiry-card {urgencyClass}" role="alert" aria-label="Expiring entry: {entry.title}">
+<div class="expiry-card {urgencyClass}" aria-label="Expiring entry: {entry.title}">
   <div class="card-header">
     <span class="entry-title">{entry.title}</span>
     <span class="days-badge" aria-label="{entry.daysRemaining} days remaining">

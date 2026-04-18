@@ -101,7 +101,11 @@
   }
 
   function getRowId(row: T): string {
-    return String(row[rowKey] ?? "");
+    const value = row[rowKey];
+    if (value == null || value === "") {
+      throw new Error(`DataTable requires a stable "${rowKey}" value for each row`);
+    }
+    return String(value);
   }
 </script>
 
@@ -139,10 +143,19 @@
             class="datatable-row"
             class:expanded={isExpanded}
             class:clickable={!!onRowClick}
-            onclick={() => onRowClick?.(row)}
+            onclick={(e) => {
+              const target = e.target as HTMLElement;
+              if (target.closest("button, a, input, select, textarea, [role='button']")) return;
+              onRowClick?.(row);
+            }}
             tabindex={onRowClick ? 0 : undefined}
             onkeydown={(e) => {
-              if (onRowClick && (e.key === "Enter" || e.key === " ")) {
+              const target = e.target as HTMLElement;
+              if (
+                onRowClick &&
+                !target.closest("button, a, input, select, textarea, [role='button']") &&
+                (e.key === "Enter" || e.key === " ")
+              ) {
                 e.preventDefault();
                 onRowClick(row);
               }

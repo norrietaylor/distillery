@@ -51,6 +51,7 @@
 
   /** Track refresh ticks so we can re-submit the current query when it fires. */
   let lastRefreshTick = $state(0);
+  let refreshGeneration = 0;
 
   // When refreshTick changes (auto-refresh or manual trigger), resubmit the
   // active query so results stay current.
@@ -58,13 +59,19 @@
     const tick = $refreshTick;
     if (tick > lastRefreshTick && isSearchMode && currentQuery) {
       lastRefreshTick = tick;
+      const generation = ++refreshGeneration;
       // Force ResultsList to re-fetch by toggling query off/on.
       // We reassign to trigger Svelte reactivity.
       const q = currentQuery;
       currentQuery = "";
       // Use a microtask to let Svelte process the empty assignment first.
       void Promise.resolve().then(() => {
-        currentQuery = q;
+        // Only restore if no other state change (manual submit / clear) has
+        // happened since this microtask was scheduled. Otherwise we risk
+        // resurrecting a stale query.
+        if (refreshGeneration === generation && isSearchMode && !currentQuery) {
+          currentQuery = q;
+        }
       });
     } else {
       lastRefreshTick = tick;

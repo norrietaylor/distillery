@@ -22,6 +22,7 @@
     score: number;
     created_at: string;
     tags: string[];
+    project?: string | null;
     [key: string]: unknown;
   }
 
@@ -79,6 +80,7 @@
       score: typeof raw.score === "number" ? raw.score : 0,
       created_at: String(raw.created_at ?? raw.published_at ?? ""),
       tags: Array.isArray(raw.tags) ? (raw.tags as string[]) : [],
+      project: typeof raw.project === "string" ? raw.project : null,
     };
   }
 
@@ -205,7 +207,10 @@
         entry_type: "bookmark",
         author: $currentUser?.login ?? "user",
       };
-      if ($selectedProject) args["project"] = $selectedProject;
+      // Prefer the entry's own project so bookmarks don't get misattributed
+      // when viewing "All projects" or if the filter changes after open.
+      if (entry.project) args["project"] = entry.project;
+      else if ($selectedProject) args["project"] = $selectedProject;
       const result = await bridge.callTool("distillery_store", args);
       bookmarkStatus = {
         ...bookmarkStatus,

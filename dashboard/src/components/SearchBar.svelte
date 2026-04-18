@@ -39,6 +39,8 @@
   let searchError = $state<string | null>(null);
   /** Whether a search has been attempted at least once. */
   let hasSearched = $state(false);
+  /** Monotonic counter so we can ignore stale search responses. */
+  let activeSearchRequest = 0;
 
   /** Parse the text response from distillery_search into SearchResult objects. */
   function parseResults(text: string): SearchResult[] {
@@ -110,6 +112,7 @@
     if (!trimmedQuery) return;
     if (!bridge?.isConnected) return;
 
+    const requestId = ++activeSearchRequest;
     loading = true;
     searchError = null;
     hasSearched = true;
@@ -123,6 +126,7 @@
         args["project"] = $selectedProject;
       }
       const result = await bridge.callTool("distillery_search", args);
+      if (requestId !== activeSearchRequest) return;
       if (result.isError) {
         searchError = result.text || "Search failed";
         results = [];
@@ -130,10 +134,13 @@
       }
       results = parseResults(result.text);
     } catch (err) {
+      if (requestId !== activeSearchRequest) return;
       searchError = err instanceof Error ? err.message : "Search failed";
       results = [];
     } finally {
-      loading = false;
+      if (requestId === activeSearchRequest) {
+        loading = false;
+      }
     }
   }
 

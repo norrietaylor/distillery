@@ -54,19 +54,23 @@ export interface McpBridgeOptions {
  */
 export class McpBridge {
   private app: App;
+  private readonly appInfo: { name: string; version: string };
   private connected = false;
   private connectPromise: Promise<void> | null = null;
   private readonly timeoutMs: number;
 
   constructor(options?: McpBridgeOptions) {
     this.timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-    this.app = new App(
-      {
-        name: options?.appName ?? "Distillery Dashboard",
-        version: options?.appVersion ?? "0.1.0",
-      },
-      {},
-    );
+    this.appInfo = {
+      name: options?.appName ?? "Distillery Dashboard",
+      version: options?.appVersion ?? "0.1.0",
+    };
+    this.app = this.createApp();
+  }
+
+  /** Construct a fresh underlying App with the stored info. */
+  private createApp(): App {
+    return new App(this.appInfo, {});
   }
 
   /** Whether the bridge is currently connected to the host. */
@@ -117,6 +121,16 @@ export class McpBridge {
       await Promise.race([this.app.connect(t), timeoutPromise]);
       this.connected = true;
     } catch (error) {
+      // Reset the underlying App so a late-resolving connect() from the
+      // race can't leave us in a half-connected state. Any subsequent
+      // connect() will build on a fresh App + transport.
+      try {
+        await this.app.close();
+      } catch {
+        // best-effort cleanup after a failed handshake
+      }
+      this.app = this.createApp();
+      this.connected = false;
       if (error instanceof McpBridgeError) throw error;
       throw new McpBridgeError("Failed to connect to MCP host", { cause: error });
     } finally {
