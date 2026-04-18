@@ -46,7 +46,7 @@ Use tag-driven semantic search to surface the most relevant feed entries, not ju
 
 **3a. Get interest profile from curated entries:**
 
-Call `distillery_list(group_by="tags")` to get the top tags across all entries. Filter out any groups whose value starts with `feed/` or whose tag namespace suggests feed-only content, and take the top 5 by count. Convert tag paths to natural language by taking the leaf segment and replacing hyphens with spaces (e.g., `domain/authentication` → query `"authentication"`).
+Build an interest profile that excludes feed-ingested content. Make separate `distillery_list(group_by="tags", entry_type=<type>)` calls for curated types: `session`, `reference`, `bookmark`, `idea`, `note`, and `minutes`. Merge the group counts across all responses, take the top 5 tags by combined count. Convert tag paths to natural language by taking the leaf segment and replacing hyphens with spaces (e.g., `domain/authentication` → query `"authentication"`).
 
 **3b. Search by interests (primary path):**
 
@@ -62,13 +62,13 @@ Report: `Retrieved <total> entries via interest-based search (<N> queries).`
 
 **3c. Fallback (if interest tags unavailable):**
 
-If `distillery_list(group_by="tags")` returns no tags, fall back to:
+If none of the curated-type `group_by="tags"` calls return any tags, fall back to:
 
 `distillery_list(entry_type="feed", limit=<limit>, output_mode="summary", date_from=<date>)`
 
 Report: `Retrieved <total> entries via recent listing (fallback).`
 
-If `distillery_list(group_by="tags")` itself errors, treat that as an MCP error per the Rules section below — report and stop.
+If the curated-type `group_by="tags"` calls themselves error, treat that as an MCP error per the Rules section below — report and stop.
 
 **3d. Empty results:**
 
