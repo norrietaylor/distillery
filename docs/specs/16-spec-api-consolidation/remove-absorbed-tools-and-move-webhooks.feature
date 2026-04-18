@@ -4,10 +4,10 @@
 
 Feature: Remove Absorbed Tools and Move Poll/Rescore to Webhooks
 
-  Scenario: MCP server exposes exactly 12 tools after consolidation
+  Scenario: MCP server exposes exactly 16 tools after consolidation
     Given the MCP server is started
     When a client calls list_tools
-    Then exactly 12 tools are returned
+    Then exactly 16 tools are returned
     And no tool named "distillery_stale" is in the list
     And no tool named "distillery_aggregate" is in the list
     And no tool named "distillery_tag_tree" is in the list
