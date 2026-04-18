@@ -104,7 +104,13 @@ INSERT INTO sync_jobs (
     started_at, completed_at,
     entries_created, entries_updated, relations_created, pages_processed,
     errors, error_message, result
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (
+    ?, ?, ?, ?,
+    CAST(? AS TIMESTAMPTZ),
+    CAST(? AS TIMESTAMPTZ),
+    CAST(? AS TIMESTAMPTZ),
+    ?, ?, ?, ?, ?, ?, ?
+)
 ON CONFLICT (job_id) DO UPDATE SET
     status = EXCLUDED.status,
     started_at = EXCLUDED.started_at,
@@ -119,14 +125,30 @@ ON CONFLICT (job_id) DO UPDATE SET
 """
 
 _SELECT_RECENT_SYNC_JOBS = """
-SELECT job_id, source_url, source_type, status, created_at,
-       started_at, completed_at,
+SELECT job_id, source_url, source_type, status,
+       strftime(created_at AT TIME ZONE 'UTC', '%Y-%m-%dT%H:%M:%S+00:00'),
+       strftime(started_at AT TIME ZONE 'UTC', '%Y-%m-%dT%H:%M:%S+00:00'),
+       strftime(completed_at AT TIME ZONE 'UTC', '%Y-%m-%dT%H:%M:%S+00:00'),
        entries_created, entries_updated, relations_created, pages_processed,
        errors, error_message, result
 FROM sync_jobs
-WHERE created_at > ?
+WHERE created_at > CAST(? AS TIMESTAMPTZ)
 ORDER BY created_at DESC
 """
+
+
+def _dt_to_iso(dt: datetime | None) -> str | None:
+    """Format a tz-aware datetime as ISO-8601 UTC for TIMESTAMPTZ binding.
+
+    DuckDB's Python binding for TIMESTAMPTZ requires ``pytz`` when the
+    parameter is a tz-aware :class:`datetime`. Passing an ISO string and
+    casting with ``CAST(? AS TIMESTAMPTZ)`` in SQL avoids the dependency.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC).isoformat()
 
 
 def _job_from_row(row: tuple[Any, ...]) -> SyncJob:
@@ -166,23 +188,25 @@ def _job_from_row(row: tuple[Any, ...]) -> SyncJob:
         except (TypeError, ValueError):
             result = None
 
-    # DuckDB returns datetimes as tz-aware for TIMESTAMPTZ; defend against
-    # naïve values by attaching UTC.
-    def _as_utc(dt: datetime | None) -> datetime | None:
-        if dt is None:
+    # TIMESTAMPTZ values are projected as ISO-8601 UTC strings by
+    # ``_SELECT_RECENT_SYNC_JOBS`` to avoid the pytz dependency DuckDB's
+    # Python binding requires for tz-aware datetime conversion.
+    def _parse(value: Any) -> datetime | None:
+        if value is None:
             return None
-        if dt.tzinfo is None:
-            return dt.replace(tzinfo=UTC)
-        return dt
+        if isinstance(value, datetime):
+            return value if value.tzinfo else value.replace(tzinfo=UTC)
+        parsed = datetime.fromisoformat(str(value))
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
     return SyncJob(
         job_id=str(job_id),
         source_url=str(source_url),
         source_type=str(source_type),
         status=SyncJobStatus(str(status)),
-        created_at=_as_utc(created_at) or datetime.now(tz=UTC),
-        started_at=_as_utc(started_at),
-        completed_at=_as_utc(completed_at),
+        created_at=_parse(created_at) or datetime.now(tz=UTC),
+        started_at=_parse(started_at),
+        completed_at=_parse(completed_at),
         entries_created=int(entries_created or 0),
         entries_updated=int(entries_updated or 0),
         relations_created=int(relations_created or 0),
@@ -324,10 +348,11 @@ class SyncJobTracker:
 
         store = self._store
         cutoff = datetime.now(tz=UTC) - timedelta(hours=_HYDRATE_HORIZON_HOURS)
+        cutoff_iso = _dt_to_iso(cutoff)
         try:
             rows = await asyncio.to_thread(
                 lambda: store.connection.execute(
-                    _SELECT_RECENT_SYNC_JOBS, [cutoff]
+                    _SELECT_RECENT_SYNC_JOBS, [cutoff_iso]
                 ).fetchall()
             )
         except Exception:  # noqa: BLE001
@@ -374,9 +399,9 @@ class SyncJobTracker:
                     job.source_url,
                     job.source_type,
                     str(job.status),
-                    job.created_at,
-                    job.started_at,
-                    job.completed_at,
+                    _dt_to_iso(job.created_at),
+                    _dt_to_iso(job.started_at),
+                    _dt_to_iso(job.completed_at),
                     job.entries_created,
                     job.entries_updated,
                     job.relations_created,
