@@ -90,7 +90,7 @@ class TestComputeCentroids:
 
     async def test_computes_centroid_for_type_with_enough_entries(
         self,
-        store,  # type: ignore[no-untyped-def]
+        store: Any,
         deterministic_embedding_provider: DeterministicEmbeddingProvider,
     ) -> None:
         """A type with >= MIN_ENTRIES_PER_TYPE entries produces a centroid."""
@@ -104,7 +104,7 @@ class TestComputeCentroids:
 
     async def test_skips_type_with_insufficient_entries(
         self,
-        store,  # type: ignore[no-untyped-def]
+        store: Any,
         deterministic_embedding_provider: DeterministicEmbeddingProvider,
     ) -> None:
         """A type with < MIN_ENTRIES_PER_TYPE entries is excluded."""
@@ -117,7 +117,7 @@ class TestComputeCentroids:
 
     async def test_inbox_type_excluded_from_centroids(
         self,
-        store,  # type: ignore[no-untyped-def]
+        store: Any,
         deterministic_embedding_provider: DeterministicEmbeddingProvider,
     ) -> None:
         """INBOX entries are never used as centroid sources."""
@@ -130,7 +130,7 @@ class TestComputeCentroids:
 
     async def test_centroid_is_normalised(
         self,
-        store,  # type: ignore[no-untyped-def]
+        store: Any,
         deterministic_embedding_provider: DeterministicEmbeddingProvider,
     ) -> None:
         """The computed centroid vector has unit magnitude."""
@@ -145,7 +145,7 @@ class TestComputeCentroids:
 
     async def test_no_active_entries_returns_empty(
         self,
-        store,  # type: ignore[no-untyped-def]
+        store: Any,
         deterministic_embedding_provider: DeterministicEmbeddingProvider,
     ) -> None:
         """An empty store yields no centroids."""
@@ -156,7 +156,7 @@ class TestComputeCentroids:
 
     async def test_multiple_types_produce_multiple_centroids(
         self,
-        store,  # type: ignore[no-untyped-def]
+        store: Any,
         deterministic_embedding_provider: DeterministicEmbeddingProvider,
     ) -> None:
         """Two types with enough entries both get centroids."""
@@ -247,7 +247,7 @@ class TestClassifyIntegration:
 
     async def test_classifies_entry_matching_centroid(
         self,
-        store,  # type: ignore[no-untyped-def]
+        store: Any,
         deterministic_embedding_provider: DeterministicEmbeddingProvider,
     ) -> None:
         """An inbox entry similar to session entries is classified as session."""
@@ -283,7 +283,7 @@ class TestClassifyIntegration:
 
     async def test_pending_review_when_no_centroid_match(
         self,
-        store,  # type: ignore[no-untyped-def]
+        store: Any,
         deterministic_embedding_provider: DeterministicEmbeddingProvider,
     ) -> None:
         """An entry far from all centroids gets pending_review status."""
@@ -315,7 +315,7 @@ class TestClassifyIntegration:
 
     async def test_pending_review_when_no_centroids_available(
         self,
-        store,  # type: ignore[no-untyped-def]
+        store: Any,
         deterministic_embedding_provider: DeterministicEmbeddingProvider,
     ) -> None:
         """With an empty store, the entry goes to pending_review."""
@@ -333,7 +333,7 @@ class TestClassifyIntegration:
 
     async def test_insufficient_data_sends_to_review(
         self,
-        store,  # type: ignore[no-untyped-def]
+        store: Any,
         deterministic_embedding_provider: DeterministicEmbeddingProvider,
     ) -> None:
         """Types with < MIN_ENTRIES_PER_TYPE entries are not candidates."""
@@ -362,7 +362,7 @@ class TestClassifyIntegration:
 
     async def test_result_is_classification_result(
         self,
-        store,  # type: ignore[no-untyped-def]
+        store: Any,
         deterministic_embedding_provider: DeterministicEmbeddingProvider,
     ) -> None:
         """classify() always returns a ClassificationResult instance."""

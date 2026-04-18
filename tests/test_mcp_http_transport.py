@@ -213,7 +213,7 @@ class TestStatelessHttpSingleton:
             assert "result" in d1, f"Request 1 error: {d1}"
             assert "result" in d2, f"Request 2 error: {d2}"
 
-            # Both responses should have a "total" field — confirm the same store
+            # Both responses should have a "total_count" field — confirm the same store
             # is serving both requests (store has same entry count for both).
             def _total_entries(resp_data: dict) -> int:  # type: ignore[type-arg]
                 content = resp_data["result"]["content"]
