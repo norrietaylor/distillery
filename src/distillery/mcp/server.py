@@ -55,9 +55,6 @@ from distillery.mcp.tools.feeds import (
     _handle_sync_status,
     _handle_watch,
 )
-from distillery.mcp.tools.feeds import (
-    _handle_store_batch as _handle_feed_store_batch,
-)
 from distillery.mcp.tools.meta import _handle_status
 from distillery.mcp.tools.quality import (
     run_conflict_discovery,
@@ -101,7 +98,6 @@ __all__ = [
     "_handle_rescore",
     "_handle_gh_sync",
     "_handle_crud_store_batch",
-    "_handle_feed_store_batch",
     "_handle_sync_status",
     "_handle_relations",
     "_handle_status",
@@ -258,9 +254,9 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             return None
         try:
             existing = await lc["store"].get(eid)
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             logger.exception("Ownership pre-check failed for entry %s", eid)
-            return error_response("INTERNAL", f"Failed to read entry: {exc}")
+            return error_response("INTERNAL", "Failed to read entry")
         if existing is None:
             await lc["store"].write_audit_log(user, op, eid, op, "not_found")
             return error_response("NOT_FOUND", f"No entry found with id={eid!r}.")

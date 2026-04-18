@@ -26,7 +26,7 @@ Guide the user to create a Claude Code routine with these parameters:
 ```text
 This is a health-check routine only — it does NOT fetch new feed items.
 Call distillery_watch(action='list') to list configured feed sources.
-Call distillery_list(entry_type='feed', limit=5) to check recent feed entries.
+Call distillery_list(entry_type='feed', limit=5, output_mode='full') to check recent feed entries.
 Report: number of configured sources and age of the newest feed entry.
 If the newest feed entry is more than 2× the expected poll interval old,
 warn that the POST /hooks/poll webhook poller may be unhealthy — no new items
@@ -84,7 +84,7 @@ Weekly Distillery maintenance report:
 2. Call distillery_list(output='stats') for entry counts by type/status and
    storage size.
 3. Call distillery_list(stale_days=30, limit=10) for stale entry count.
-4. Call distillery_list(entry_type='feed', limit=5) for recent feed activity.
+4. Call distillery_list(entry_type='feed', limit=5, output_mode='full') for recent feed activity.
 5. Store a digest: distillery_store(content=<one-paragraph summary of
    findings>, entry_type='digest', author='distillery-maintenance',
    tags=['digest', 'weekly', 'maintenance']).

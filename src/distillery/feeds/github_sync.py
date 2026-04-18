@@ -640,6 +640,13 @@ class GitHubSyncAdapter:
 
             entry = self._issue_to_entry(issue, comments)
 
+            # Apply the same content cap used by sync_batched() so oversized
+            # issue bodies don't bypass the embedding-model input limit here.
+            if len(entry.content) > _MAX_CONTENT_LENGTH:
+                marker = "\n\n[truncated]"
+                cutoff = max(0, _MAX_CONTENT_LENGTH - len(marker))
+                entry.content = entry.content[:cutoff] + marker
+
             # Check for existing entry.
             existing = await self._find_existing(external_id)
 

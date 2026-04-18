@@ -30,9 +30,9 @@ from distillery.feeds.sync_jobs import (
     SyncJobTracker,
     run_sync_job_async,
 )
+from distillery.mcp.tools.crud import _handle_store_batch
 from distillery.mcp.tools.feeds import (
     _handle_gh_sync,
-    _handle_store_batch,
     _handle_sync_status,
 )
 
@@ -377,27 +377,26 @@ class TestHandleStoreBatch:
         ]
         result = await _handle_store_batch(store=store, arguments={"entries": entries})
         data = _parse_response(result)
-        assert data["stored_count"] == 2
-        assert len(data["stored_ids"]) == 2
-        assert data["error_count"] == 0
+        assert data["count"] == 2
+        assert len(data["entry_ids"]) == 2
 
-    @pytest.mark.integration
-    async def test_batch_store_partial_failure(self, store) -> None:  # type: ignore[no-untyped-def]
+    @pytest.mark.unit
+    async def test_batch_store_missing_author(self, store) -> None:  # type: ignore[no-untyped-def]
+        # crud._handle_store_batch requires 'author' for each entry; missing
+        # author returns an INVALID_PARAMS error response immediately.
         entries = [
-            {"content": "Valid entry", "entry_type": "reference"},
-            {"content": "", "entry_type": "reference"},  # empty content
-            {"entry_type": "reference"},  # missing content
+            {"content": "Valid entry", "entry_type": "reference"},  # missing author
         ]
         result = await _handle_store_batch(store=store, arguments={"entries": entries})
         data = _parse_response(result)
-        assert data["stored_count"] == 1
-        assert data["error_count"] == 2
+        assert "error" in data or data.get("error_code")
 
     @pytest.mark.unit
     async def test_batch_store_empty_list(self, store) -> None:  # type: ignore[no-untyped-def]
+        # crud._handle_store_batch accepts an empty list and returns count=0.
         result = await _handle_store_batch(store=store, arguments={"entries": []})
         data = _parse_response(result)
-        assert "error" in data or data.get("error_code")
+        assert data.get("count") == 0 or "error" in data or data.get("error_code")
 
     @pytest.mark.unit
     async def test_batch_store_invalid_type(self, store) -> None:  # type: ignore[no-untyped-def]

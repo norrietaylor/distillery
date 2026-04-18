@@ -29,90 +29,46 @@ ignore:
   - vulnerability: CVE-2026-4046
     reason: "glibc 2.43 (Wolfi) — no upstream fix available"
 
-  # --- Go stdlib CVEs from Wolfi base image (go1.23.12) ---
+  # --- Go stdlib CVEs from Wolfi base image ---
   # Distillery is a pure Python application. Go stdlib is present in the
   # base image's tooling but no Go code is compiled or executed by Distillery.
-  # Each rule is scoped to the `stdlib` Go package (type `go-module`) at the
-  # pinned Wolfi base image version so future occurrences of these CVEs in
-  # non-stdlib packages are NOT silently ignored.
+  # Rules use global (vulnerability-only) scoping to avoid brittleness when
+  # Wolfi rebuilds update the stdlib package identifier (name/version/type
+  # fields vary across image rebuilds and would silently fail to suppress).
   # Reviewed: 2026-04-15
 
   - vulnerability: CVE-2025-68121
-    package:
-      name: stdlib
-      version: go1.23.12
-      type: go-module
-    reason: "Go stdlib go1.23.12 (Critical) — arbitrary code execution. Not exploitable: Distillery is pure Python, no Go code executed. From Wolfi base image tooling."
+    reason: "Go stdlib (Critical) — arbitrary code execution. Not exploitable: Distillery is pure Python, no Go code executed. From Wolfi base image tooling."
 
   - vulnerability: CVE-2026-25679
-    package:
-      name: stdlib
-      version: go1.23.12
-      type: go-module
-    reason: "Go stdlib go1.23.12 (High) — not exploitable: no Go code executed in Distillery."
+    reason: "Go stdlib (High) — not exploitable: no Go code executed in Distillery."
 
   - vulnerability: CVE-2025-61729
-    package:
-      name: stdlib
-      version: go1.23.12
-      type: go-module
-    reason: "Go stdlib go1.23.12 (High) — not exploitable: no Go code executed in Distillery."
+    reason: "Go stdlib (High) — not exploitable: no Go code executed in Distillery."
 
   - vulnerability: CVE-2026-27140
-    package:
-      name: stdlib
-      version: go1.23.12
-      type: go-module
-    reason: "Go stdlib go1.23.12 (High) — not exploitable: no Go code executed in Distillery."
+    reason: "Go stdlib (High) — not exploitable: no Go code executed in Distillery."
 
   - vulnerability: CVE-2026-32283
-    package:
-      name: stdlib
-      version: go1.23.12
-      type: go-module
-    reason: "Go stdlib go1.23.12 (High) — not exploitable: no Go code executed in Distillery."
+    reason: "Go stdlib (High) — not exploitable: no Go code executed in Distillery."
 
   - vulnerability: CVE-2026-32280
-    package:
-      name: stdlib
-      version: go1.23.12
-      type: go-module
-    reason: "Go stdlib go1.23.12 (High) — not exploitable: no Go code executed in Distillery."
+    reason: "Go stdlib (High) — not exploitable: no Go code executed in Distillery."
 
   - vulnerability: CVE-2026-32281
-    package:
-      name: stdlib
-      version: go1.23.12
-      type: go-module
-    reason: "Go stdlib go1.23.12 (High) — not exploitable: no Go code executed in Distillery."
+    reason: "Go stdlib (High) — not exploitable: no Go code executed in Distillery."
 
   - vulnerability: CVE-2025-58187
-    package:
-      name: stdlib
-      version: go1.23.12
-      type: go-module
-    reason: "Go stdlib go1.23.12 (High) — not exploitable: no Go code executed in Distillery."
+    reason: "Go stdlib (High) — not exploitable: no Go code executed in Distillery."
 
   - vulnerability: CVE-2025-61731
-    package:
-      name: stdlib
-      version: go1.23.12
-      type: go-module
-    reason: "Go stdlib go1.23.12 (High) — not exploitable: no Go code executed in Distillery."
+    reason: "Go stdlib (High) — not exploitable: no Go code executed in Distillery."
 
   - vulnerability: CVE-2025-61732
-    package:
-      name: stdlib
-      version: go1.23.12
-      type: go-module
-    reason: "Go stdlib go1.23.12 (High) — not exploitable: no Go code executed in Distillery."
+    reason: "Go stdlib (High) — not exploitable: no Go code executed in Distillery."
 
   - vulnerability: CVE-2025-58188
-    package:
-      name: stdlib
-      version: go1.23.12
-      type: go-module
-    reason: "Go stdlib go1.23.12 (High) — not exploitable: no Go code executed in Distillery."
+    reason: "Go stdlib (High) — not exploitable: no Go code executed in Distillery."
 
   # --- Python 3.13 CVE ---
   # Reviewed: 2026-04-15

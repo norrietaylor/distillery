@@ -35,7 +35,7 @@ If yes, create the cron job:
 ```python
 CronCreate(
   cron="<random off-peak minute> * * * *",
-  prompt="Call distillery_watch(action='list') to check configured feed sources, then call distillery_list(entry_type='feed', limit=5) to verify recent feed activity. Report a one-line summary: source count and latest feed entry age.",
+  prompt="Call distillery_watch(action='list') to check configured feed sources, then call distillery_list(entry_type='feed', limit=5, output_mode='full') to verify recent feed activity. Report a one-line summary: source count and latest feed entry age.",
   recurring=True,
   durable=True
 )

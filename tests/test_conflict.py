@@ -374,7 +374,7 @@ class TestMCPStoreConflictDetection:
 
         # Use an interpolated vector so similarity lands above conflict_threshold
         # (0.60) but below the dedup skip threshold (0.95). t=0.4 yields
-        # raw cosine ~0.83, normalised to ~0.916 — above conflict, below skip.
+        # cosine similarity ~0.83 with _UNIT_A — above conflict, below skip.
         embedding_provider.register(existing_text, _UNIT_A)
         embedding_provider.register(new_text, _interpolated_vector(_UNIT_A, _UNIT_B, 0.4))
 

@@ -2,11 +2,11 @@
 
 ## Introduction/Overview
 
-Distillery v0.3 exposes 20 MCP tools, several of which overlap in functionality (e.g., `stale`, `aggregate`, `tag_tree`, `metrics` are all filtered views of entry data). This spec consolidates the MCP tool surface from 20 to 12 by absorbing 6 analytics tools into `list` parameter extensions, moving `poll` and `rescore` to webhook-only endpoints, adding a new `classify-batch` webhook, and rewiring the existing `/api/maintenance` orchestrator. The result is a smaller, more composable API that reduces cognitive load for skill authors and LLM tool-use while preserving all existing functionality.
+Distillery v0.3 exposes 20 MCP tools, several of which overlap in functionality (e.g., `stale`, `aggregate`, `tag_tree`, `metrics` are all filtered views of entry data). This spec consolidates the MCP tool surface from 20 to 16 by absorbing analytics tools into `list` parameter extensions, moving `poll`, `rescore`, and `classify-batch` to webhook-only endpoints, and rewiring the existing `/api/maintenance` orchestrator. The result is a smaller, more composable API that reduces cognitive load for skill authors and LLM tool-use while preserving all existing functionality.
 
 ## Goals
 
-1. **Reduce MCP tool count from 20 to 12** by absorbing redundant analytics tools into `list` and moving poll/rescore to webhooks
+1. **Reduce MCP tool count from 20 to 16** by absorbing redundant analytics tools into `list` and moving poll/rescore/classify-batch to webhooks
 2. **Extend `list` with 3 new parameters** (`stale_days`, `group_by`, `output`) that replace 4 standalone tools
 3. **Add `classify-batch` webhook** with configurable LLM and heuristic classification modes
 4. **Maintain backward compatibility** — all functionality currently exposed by removed tools remains accessible through the consolidated API
@@ -14,7 +14,7 @@ Distillery v0.3 exposes 20 MCP tools, several of which overlap in functionality 
 
 ## User Stories
 
-- As a **skill author**, I want fewer MCP tools with composable parameters so that I can build skills without memorizing 20 tool signatures
+- As a **skill author**, I want fewer MCP tools with composable parameters so that I can build skills without memorizing 20 tool signatures (consolidated to 16)
 - As an **LLM agent**, I want a smaller tool surface so that tool selection is faster and less error-prone
 - As an **operator**, I want a single maintenance endpoint that runs all periodic tasks so that I only need one cron entry
 - As a **self-hosted user**, I want heuristic classification so that I can classify inbox entries without LLM inference costs
@@ -47,7 +47,7 @@ Distillery v0.3 exposes 20 MCP tools, several of which overlap in functionality 
 
 ### Unit 2: Remove Absorbed Tools and Move Poll/Rescore to Webhooks
 
-**Purpose:** Delete the 8 MCP tool registrations that are now redundant, completing the 20→12 reduction. Move poll and rescore logic to webhook-only handlers.
+**Purpose:** Delete the redundant MCP tool registrations, completing the 20→16 reduction. Move poll, rescore, and classify-batch logic to webhook-only handlers.
 
 **Functional Requirements:**
 
@@ -62,7 +62,7 @@ Distillery v0.3 exposes 20 MCP tools, several of which overlap in functionality 
 **Proof Artifacts:**
 
 - Test: `pytest tests/test_mcp_tools/` passes — no test references removed tool names except as negative cases
-- CLI: MCP server `list_tools()` returns exactly 12 tools
+- CLI: MCP server `list_tools()` returns exactly 16 tools
 - CLI: `POST /hooks/poll` returns poll results with per-source breakdown
 - CLI: `POST /hooks/rescore?limit=50` returns rescore statistics
 - File: `src/distillery/mcp/server.py` — no registration calls for the 8 removed tools
@@ -158,7 +158,7 @@ No UI components. All changes are to the MCP tool API, webhook endpoints, CLI, a
 
 ## Success Metrics
 
-- MCP tool count drops from 20 to exactly 12
+- MCP tool count drops from 20 to exactly 16
 - All existing tests pass after migration (zero regression)
 - Full test suite maintains ≥80% coverage
 - Heuristic classification achieves ≥70% accuracy on a sample of pre-classified entries (measured via test fixture)

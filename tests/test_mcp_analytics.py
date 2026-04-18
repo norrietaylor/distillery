@@ -34,6 +34,7 @@ from distillery.mcp.tools.analytics import (
     _handle_tag_tree,
     _handle_type_schemas,
 )
+from distillery.mcp.tools.meta import _handle_status
 from distillery.models import EntryStatus, EntryType
 from distillery.store.duckdb import DuckDBStore
 from tests.conftest import DeterministicEmbeddingProvider, make_entry, parse_mcp_response
@@ -566,3 +567,56 @@ class TestInterests:
             generated_at=datetime(2026, 1, 1, tzinfo=UTC),
             entry_count=42,
         )
+
+
+# ---------------------------------------------------------------------------
+# _handle_status tests — exercises the distillery_status public MCP tool path
+# ---------------------------------------------------------------------------
+
+
+class TestStatus:
+    """Tests for the distillery_status tool handler.
+
+    These tests exercise _handle_status (the function that backs the live
+    distillery_status MCP tool) directly so any drift between the status
+    handler and _handle_metrics is caught early.
+    """
+
+    async def test_status_basic_shape(
+        self,
+        store: DuckDBStore,
+        config: DistilleryConfig,
+        embedding_provider: DeterministicEmbeddingProvider,
+    ) -> None:
+        response = await _handle_status(
+            store=store,
+            config=config,
+            embedding_provider=embedding_provider,
+            tool_count=16,
+            transport="stdio",
+            started_at=None,
+        )
+        data = parse_mcp_response(response)
+        assert data["status"] == "ok"
+        assert data["tool_count"] == 16
+        assert data["transport"] == "stdio"
+        assert "store" in data
+        assert data["store"]["entry_count"] == 0
+
+    async def test_status_with_entries(
+        self,
+        store: DuckDBStore,
+        config: DistilleryConfig,
+        embedding_provider: DeterministicEmbeddingProvider,
+    ) -> None:
+        await store.store(make_entry(content="Status test entry"))
+        response = await _handle_status(
+            store=store,
+            config=config,
+            embedding_provider=embedding_provider,
+            tool_count=16,
+            transport="http",
+            started_at=None,
+        )
+        data = parse_mcp_response(response)
+        assert data["store"]["entry_count"] == 1

@@ -188,6 +188,9 @@ async def test_watch_add_sync_history() -> None:
     assert "sync_job" in data
     assert data["sync_job"]["status"] == "pending"
     assert "message" in data
+    # Verify GitHubSyncAdapter was instantiated — proves sync_history=True
+    # actually started a background job rather than silently skipping it.
+    mock_cls.assert_called_once()
 
 
 @pytest.mark.unit
@@ -197,14 +200,21 @@ async def test_watch_add_without_sync_history() -> None:
     store.add_feed_source.return_value = {"url": "owner/repo", "source_type": "github"}
     store.list_feed_sources.return_value = [{"url": "owner/repo", "source_type": "github"}]
 
-    result = await _handle_watch(
-        store=store,
-        arguments={
-            "action": "add",
-            "url": "owner/repo",
-            "source_type": "github",
-        },
-    )
+    with patch(
+        "distillery.feeds.github_sync.GitHubSyncAdapter",
+        autospec=False,
+    ) as mock_cls:
+        result = await _handle_watch(
+            store=store,
+            arguments={
+                "action": "add",
+                "url": "owner/repo",
+                "source_type": "github",
+            },
+        )
+
     data = parse_mcp_response(result)
     assert "sync" not in data
     assert "added" in data
+    # Verify GitHubSyncAdapter was NOT instantiated when sync_history is omitted.
+    mock_cls.assert_not_called()

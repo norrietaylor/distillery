@@ -107,9 +107,9 @@ async def _handle_relations(
                 "NOT_FOUND",
                 f"Cannot create relation: {exc}",
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             logger.exception("distillery_relations add: unexpected error")
-            return error_response("INTERNAL", f"Failed to add relation: {exc}")
+            return error_response("INTERNAL", "Failed to add relation")
 
         return success_response(
             {
@@ -158,9 +158,9 @@ async def _handle_relations(
             relations = await store.get_related(
                 entry_id, direction=direction, relation_type=get_relation_type
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             logger.exception("distillery_relations get: unexpected error")
-            return error_response("INTERNAL", f"Failed to get relations: {exc}")
+            return error_response("INTERNAL", "Failed to get relations")
 
         return success_response(
             {
@@ -184,9 +184,9 @@ async def _handle_relations(
 
     try:
         removed = await store.remove_relation(relation_id)
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         logger.exception("distillery_relations remove: unexpected error")
-        return error_response("INTERNAL", f"Failed to remove relation: {exc}")
+        return error_response("INTERNAL", "Failed to remove relation")
 
     return success_response(
         {

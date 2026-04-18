@@ -180,7 +180,10 @@ async def run_sync_job_async(
         job: The job to track.
         tracker: The tracker to update.
         sync_coro: An awaitable that performs the actual sync and returns
-            a result dict.
+            a SyncResult-like object with ``to_dict()``, ``created``,
+            ``updated``, ``relations_created``, ``pages_processed``, and
+            ``errors`` attributes (e.g. ``GitHubSyncAdapter.sync()`` or
+            ``GitHubSyncAdapter.sync_batched()``).
     """
     tracker.mark_running(job.job_id)
     try:

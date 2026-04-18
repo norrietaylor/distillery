@@ -120,9 +120,9 @@ Distillery uses three tiers of scheduled tasks, all configured as **Claude Code 
 
 | Tier | Frequency | Purpose |
 |------|-----------|---------|
-| Feed polling | Hourly | Fetch new items from feed sources |
+| Feed health check | Hourly | Check feed source status and newest entry age (status only — actual ingestion runs via `POST /hooks/poll` on hosted deployments) |
 | Stale entry check | Daily | Identify entries needing refresh or archival |
-| KB maintenance | Weekly | Stats, stale entries, feed activity, digest |
+| KB maintenance | Weekly | Stats, stale entries, feed activity, digest (reporting only — the poll → rescore → classify-batch pipeline runs via `POST /api/maintenance` on hosted deployments) |
 
 Read `references/routine-payloads.md` for the full routine definitions and display instructions for Steps 4a, 4b, and 4c.
 

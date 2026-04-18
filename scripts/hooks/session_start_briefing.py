@@ -816,7 +816,7 @@ def derive_project(cwd: str) -> str:
             return os.path.basename(result.stdout.strip())
     except (OSError, subprocess.TimeoutExpired):
         pass
-    return os.path.basename(cwd)
+    return os.path.basename(cwd.rstrip("/\\"))
 
 
 def main() -> None:
