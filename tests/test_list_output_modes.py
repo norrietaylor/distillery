@@ -458,15 +458,25 @@ class TestSourceUrlAliasesToFeedUrl:
         assert src_ids == feed_ids
 
     async def test_source_http_url_also_aliased(self, populated_store) -> None:
-        # http:// (not just https://) should also be treated as a URL.
-        # Use an RSS-shaped URL that exists in the fixture.
+        # http:// (not just https://) must also trigger the URL alias.  Add a
+        # dedicated http-scheme entry so the assertion is unambiguous.
+        http_feed_url = "http://example.com/rss"
+        await populated_store.store(
+            make_entry(
+                content="HTTP feed item",
+                entry_type=EntryType.FEED,
+                source=EntrySource.MANUAL,
+                author="bob",
+                metadata={"source_url": http_feed_url, "source_type": "rss"},
+            )
+        )
         result = await _handle_list(
             store=populated_store,
-            arguments={"limit": 10, "source": "https://example.com/rss"},
+            arguments={"limit": 10, "source": http_feed_url},
         )
         data = parse_mcp_response(result)
         assert data["count"] == 1
-        assert data["entries"][0]["metadata"]["source_url"] == "https://example.com/rss"
+        assert data["entries"][0]["metadata"]["source_url"] == http_feed_url
 
     async def test_source_internal_value_still_works(self, populated_store) -> None:
         # "import" is a real EntrySource enum value and must keep filtering on
