@@ -405,6 +405,7 @@ async def run_sync_job_async(
     job: SyncJob,
     tracker: SyncJobTracker,
     sync_coro: Any,
+    store: Any | None = None,
 ) -> None:
     """Execute a sync coroutine as a background task and update job state.
 
@@ -418,6 +419,14 @@ async def run_sync_job_async(
             ``updated``, ``relations_created``, ``pages_processed``, and
             ``errors`` attributes (e.g. ``GitHubSyncAdapter.sync()`` or
             ``GitHubSyncAdapter.sync_batched()``).
+        store: Optional :class:`DistilleryStore` used to record liveness
+            metadata (``last_polled_at``, ``last_item_count``,
+            ``last_error``) on the matching ``feed_sources`` row once the
+            sync finishes.  When provided the runner mirrors what
+            :meth:`FeedPoller._persist_poll_status` does for scheduled
+            polls — without this call, sources that only ever backfilled
+            via ``sync_history=True`` would surface as "never polled" to
+            ``distillery_watch(action='list')`` (issue #334).
     """
     tracker.mark_running(job.job_id)
     try:
@@ -435,6 +444,12 @@ async def run_sync_job_async(
             job.entries_created,
             job.entries_updated,
         )
+        await _record_sync_liveness(
+            store,
+            source_url=job.source_url,
+            item_count=result.created + result.updated,
+            error=result.errors[0] if result.errors else None,
+        )
     except Exception:  # noqa: BLE001
         error_msg = "Sync job failed"
         logger.exception(
@@ -447,3 +462,43 @@ async def run_sync_job_async(
         # mark_failed only sets status/completed_at/error_message, so progress
         # fields (entries_created, entries_updated, etc.) are retained.
         tracker.mark_failed(job.job_id, error_msg)
+        await _record_sync_liveness(
+            store,
+            source_url=job.source_url,
+            item_count=job.entries_created + job.entries_updated,
+            error=error_msg,
+        )
+
+
+async def _record_sync_liveness(
+    store: Any | None,
+    *,
+    source_url: str,
+    item_count: int,
+    error: str | None,
+) -> None:
+    """Write poll-status liveness for a completed bulk-sync job.
+
+    Kept separate from :func:`run_sync_job_async` so persistence failures do
+    not mask sync-job state changes.  A missing ``record_poll_status`` on
+    the store (older backend) or a raised exception is logged at
+    ``WARNING`` and then swallowed.
+    """
+    if store is None:
+        return
+    recorder = getattr(store, "record_poll_status", None)
+    if recorder is None:
+        return
+    try:
+        await recorder(
+            source_url,
+            polled_at=datetime.now(tz=UTC),
+            item_count=item_count,
+            error=error,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Sync job liveness persistence failed for %s",
+            source_url,
+            exc_info=True,
+        )

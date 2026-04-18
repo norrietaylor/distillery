@@ -405,6 +405,106 @@ class TestRunSyncJobAsync:
         # Error message is sanitized (does not leak exception detail).
         assert job.error_message == "Sync job failed"
 
+    @pytest.mark.unit
+    async def test_successful_sync_records_liveness_on_store(self) -> None:
+        """After a successful bulk sync the store receives ``record_poll_status``.
+
+        Regression test for issue #334: feeds added with ``sync_history=True``
+        were never reaching ``FeedPoller.poll`` so ``last_polled_at`` stayed
+        ``NULL``.  ``run_sync_job_async`` now writes liveness directly when a
+        store is provided.
+        """
+        from datetime import UTC, datetime
+        from unittest.mock import AsyncMock
+
+        tracker = SyncJobTracker()
+        job = tracker.create_job(source_url="owner/repo", source_type="github")
+        store = AsyncMock()
+
+        async def mock_sync() -> SyncResult:
+            return SyncResult(
+                repo="owner/repo",
+                created=5,
+                updated=2,
+                relations_created=1,
+                sync_timestamp=datetime.now(tz=UTC),
+                pages_processed=1,
+            )
+
+        await run_sync_job_async(job, tracker, mock_sync(), store)
+        store.record_poll_status.assert_awaited_once()
+        call = store.record_poll_status.call_args
+        assert call.args[0] == "owner/repo"
+        # Liveness item_count sums created + updated: the source is alive so
+        # long as it produced any activity.
+        assert call.kwargs["item_count"] == 7
+        assert call.kwargs["error"] is None
+
+    @pytest.mark.unit
+    async def test_failed_sync_records_liveness_error(self) -> None:
+        """A failed bulk sync must still update ``last_error`` on the store."""
+        from unittest.mock import AsyncMock
+
+        tracker = SyncJobTracker()
+        job = tracker.create_job(source_url="owner/repo", source_type="github")
+        store = AsyncMock()
+
+        async def failing_sync() -> SyncResult:
+            raise RuntimeError("API down")
+
+        await run_sync_job_async(job, tracker, failing_sync(), store)
+        store.record_poll_status.assert_awaited_once()
+        call = store.record_poll_status.call_args
+        assert call.args[0] == "owner/repo"
+        assert call.kwargs["error"] == "Sync job failed"
+
+    @pytest.mark.unit
+    async def test_liveness_persistence_failure_is_swallowed(self) -> None:
+        """A failing ``record_poll_status`` must not mask sync-job completion."""
+        from datetime import UTC, datetime
+        from unittest.mock import AsyncMock
+
+        tracker = SyncJobTracker()
+        job = tracker.create_job(source_url="owner/repo", source_type="github")
+        store = AsyncMock()
+        store.record_poll_status.side_effect = RuntimeError("DB unreachable")
+
+        async def mock_sync() -> SyncResult:
+            return SyncResult(
+                repo="owner/repo",
+                created=1,
+                updated=0,
+                relations_created=0,
+                sync_timestamp=datetime.now(tz=UTC),
+                pages_processed=1,
+            )
+
+        await run_sync_job_async(job, tracker, mock_sync(), store)
+        # Job still transitions to COMPLETED despite the liveness failure.
+        assert job.status == SyncJobStatus.COMPLETED
+
+    @pytest.mark.unit
+    async def test_no_store_skips_liveness_call(self) -> None:
+        """Backwards-compat: calls without a store argument must still succeed."""
+        from datetime import UTC, datetime
+
+        tracker = SyncJobTracker()
+        job = tracker.create_job(source_url="owner/repo", source_type="github")
+
+        async def mock_sync() -> SyncResult:
+            return SyncResult(
+                repo="owner/repo",
+                created=1,
+                updated=0,
+                relations_created=0,
+                sync_timestamp=datetime.now(tz=UTC),
+                pages_processed=1,
+            )
+
+        # No store argument — must not raise.
+        await run_sync_job_async(job, tracker, mock_sync())
+        assert job.status == SyncJobStatus.COMPLETED
+
 
 # ---------------------------------------------------------------------------
 # SyncResult tests

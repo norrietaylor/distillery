@@ -369,7 +369,13 @@ async def _handle_watch(
                     tracker.update_progress(job.job_id, page_num, created, updated)
 
                 sync_coro = adapter.sync_batched(on_page=_on_page)
-                asyncio.create_task(run_sync_job_async(job, tracker, sync_coro))
+                # Pass ``store`` so ``run_sync_job_async`` can record liveness
+                # metadata (``last_polled_at``/``last_item_count``/``last_error``)
+                # once the bulk sync finishes — otherwise sources that only
+                # ever backfilled via ``sync_history=True`` would surface as
+                # "never polled" to ``distillery_watch(action='list')`` even
+                # after thousands of entries were ingested (issue #334).
+                asyncio.create_task(run_sync_job_async(job, tracker, sync_coro, store))
                 response_data["sync_job"] = job.to_dict()
                 response_data["message"] = (
                     "Feed source added. History sync started in background "

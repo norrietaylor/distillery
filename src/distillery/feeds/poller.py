@@ -577,10 +577,13 @@ class FeedPoller:
         columns after each source poll so ``distillery_watch(action=
         'list')`` can surface them without a separate status tool.
 
-        Any exception raised by ``record_poll_status`` is swallowed with a
-        debug log so that persistence failures do not mask poll results.
-        Backends that predate the protocol addition may not expose the
-        method — in that case we simply skip the update.
+        Any exception raised by ``record_poll_status`` is swallowed so
+        that persistence failures do not mask poll results, but we log at
+        ``WARNING`` with ``exc_info`` so operators can diagnose — a silent
+        failure here was the root cause of liveness fields staying ``NULL``
+        in production (issue #334).  Backends that predate the protocol
+        addition may not expose the method — in that case we simply skip
+        the update.
         """
         recorder = getattr(self._store, "record_poll_status", None)
         if recorder is None:
@@ -606,7 +609,7 @@ class FeedPoller:
                 error=error_msg,
             )
         except Exception:  # noqa: BLE001
-            logger.debug(
+            logger.warning(
                 "FeedPoller: failed to persist poll status for %s",
                 result.source_url,
                 exc_info=True,
