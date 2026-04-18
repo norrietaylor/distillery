@@ -109,7 +109,7 @@ class TestItemTextTruncation:
         )
         result = _item_text(item, apply_truncation=False)
         assert len(result) == MAX_CONTENT_CHARS + 1000
-        assert "[truncated]" not in result
+        assert _TRUNCATED_SUFFIX not in result
 
 
 # ---------------------------------------------------------------------------
