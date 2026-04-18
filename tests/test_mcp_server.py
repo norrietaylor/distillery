@@ -705,9 +705,10 @@ class TestCreateServer:
 
         # Read the resource content — must be valid JSON with a "schemas" key.
         result = await server.read_resource("distillery://schemas/entry-types")
-        # FastMCP returns a ReadResourceResult with a contents list.
-        # Text resources are accessed via .text (TextResourceContents.text).
-        raw = result.contents[0].text if hasattr(result, "contents") else str(result)
+        # FastMCP returns a ResourceResult with a contents list of ResourceContent.
+        # Text resources are accessed via .content (ResourceContent.content).
+        first = result.contents[0]
+        raw = getattr(first, "content", None) or getattr(first, "text", None) or str(first)
         payload = json.loads(raw)
         assert "schemas" in payload
         assert isinstance(payload["schemas"], dict)
