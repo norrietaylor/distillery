@@ -731,6 +731,35 @@ class TestFeedSourceLiveness:
         )
         assert result is False
 
+    async def test_record_poll_status_accepts_tz_aware_datetime(self, store: DuckDBStore) -> None:
+        """A tz-aware UTC datetime must round-trip via ``list_feed_sources``.
+
+        Regression test for issue #334: DuckDB's naive ``TIMESTAMP`` column
+        previously silently rejected or coerced tz-aware values which made
+        ``last_polled_at`` stay ``NULL`` despite successful poll writes.
+        """
+        await store.add_feed_source(
+            url="https://example.com/rss",
+            source_type="rss",
+            poll_interval_minutes=60,
+        )
+        polled_at = datetime(2026, 4, 18, 9, 30, tzinfo=UTC)
+        updated = await store.record_poll_status(
+            "https://example.com/rss",
+            polled_at=polled_at,
+            item_count=12,
+            error=None,
+        )
+        assert updated is True
+
+        src = (await store.list_feed_sources())[0]
+        assert src["last_polled_at"] is not None
+        # The stored value reattaches UTC on read — must equal the tz-aware
+        # input exactly (no drift, no None).
+        assert src["last_polled_at"] == polled_at.isoformat()
+        assert src["last_item_count"] == 12
+        assert src["next_poll_at"] == "2026-04-18T10:30:00+00:00"
+
 
 # ---------------------------------------------------------------------------
 # Hybrid search (BM25 + vector RRF fusion with recency decay)

@@ -2139,11 +2139,22 @@ class DuckDBStore:
         if item_count_int < 0:
             raise ValueError(f"item_count must be non-negative, got: {item_count_int}")
         truncated = _sanitise_last_error(error, self._LAST_ERROR_MAX_LEN)
+        # DuckDB's ``TIMESTAMP`` column is timezone-naive — a tz-aware value
+        # can be silently coerced or rejected depending on the driver version,
+        # which in production surfaced as ``last_polled_at`` staying ``NULL``
+        # despite a successful poll (issue #334).  Normalise to naive UTC so
+        # the stored value matches what ``_sync_list_feed_sources`` expects
+        # (see the naive-UTC reattachment around line 2054).
+        polled_at_naive = (
+            polled_at.astimezone(UTC).replace(tzinfo=None)
+            if polled_at.tzinfo is not None
+            else polled_at
+        )
         result = self._conn.execute(
             "UPDATE feed_sources "
             "SET last_polled_at = ?, last_item_count = ?, last_error = ? "
             "WHERE url = ? RETURNING url",
-            [polled_at, item_count_int, truncated, url],
+            [polled_at_naive, item_count_int, truncated, url],
         )
         return len(result.fetchall()) > 0
 
