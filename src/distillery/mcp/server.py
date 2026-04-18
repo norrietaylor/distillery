@@ -617,7 +617,10 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             archived, any]. Default hides archived; use "any" to include all.
           - verification (str, optional): Filter by verification. Valid: [unverified, testing, verified].
           - source (str, optional): Filter by origin. Valid: [claude-code, manual, import,
-            inference, documentation, external].
+            inference, documentation, external]. As a convenience, a URL-shaped value
+            (starting with "http://" or "https://") is aliased to ``feed_url`` so
+            ``source="https://hnrss.org/frontpage"`` matches feed items ingested from
+            that source (same semantics as passing ``feed_url=...``).
           - session_id (str, optional): Filter by session identifier.
           - date_from (str, optional): ISO 8601 lower bound on created_at.
           - date_to (str, optional): ISO 8601 upper bound on created_at.
