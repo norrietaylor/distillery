@@ -89,5 +89,6 @@ nav:
   - Architecture: architecture.md
   - Contributing: contributing.md
   - Blog:
+    - "Full-Proof: Distillery 0.4.0 and the Agent Memory Problem": blog/distillery-0-4-0-full-proof.md
     - Building a Second Brain for Claude Code: blog/building-a-second-brain-for-claude-code.md
   - Roadmap: roadmap.md
