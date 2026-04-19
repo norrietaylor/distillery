@@ -684,3 +684,31 @@ class TestCreateServer:
             "distillery_relations",
         }
         assert expected == tool_names, f"Missing tools: {expected - tool_names}"
+
+    async def test_entry_type_docstrings_cover_all_enum_values(self) -> None:
+        """Tools that accept entry_type must document every EntryType value.
+
+        Guards against the drift class found in issue #232: the docstring
+        enumeration diverges from the server's validator (``_VALID_ENTRY_TYPES``
+        in :mod:`distillery.mcp.tools.crud`) whenever a new member is added to
+        :class:`EntryType` without also updating the prose.
+        """
+        config = DistilleryConfig(
+            storage=StorageConfig(database_path=":memory:"),
+            embedding=EmbeddingConfig(provider="", model="stub", dimensions=4),
+        )
+        server = create_server(config)
+        tools = {t.name: t for t in await server.list_tools()}
+
+        entry_type_documenting_tools = (
+            "distillery_store",
+            "distillery_update",
+            "distillery_classify",
+        )
+        for tool_name in entry_type_documenting_tools:
+            description = tools[tool_name].description or ""
+            missing = [et.value for et in EntryType if et.value not in description]
+            assert not missing, (
+                f"{tool_name} docstring omits EntryType values {missing}; "
+                "update the description to list every enum member."
+            )

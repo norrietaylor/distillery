@@ -281,8 +281,9 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         """Store a new knowledge entry and return its ID with dedup/conflict information.
 
         entry_type must be one of: session, bookmark, minutes, meeting, reference,
-        idea, inbox. source: claude-code (default), manual, import, inference,
-        documentation, or external. session_id: opaque session identifier for grouping.
+        idea, inbox, person, project, digest, github, feed.
+        source: claude-code (default), manual, import, inference, documentation,
+        or external. session_id: opaque session identifier for grouping.
         dedup_threshold (0–1) controls near-duplicate warnings.
         verification: unverified, testing, or verified (default: unverified).
         expires_at accepts ISO 8601 datetime; entries past expiry appear in stale results.
@@ -340,7 +341,8 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
 
         At least one field must be provided. status: active, pending_review, or
         archived. entry_type: session, bookmark, minutes, meeting, reference,
-        idea, or inbox. verification: unverified, testing, or verified.
+        idea, inbox, person, project, digest, github, or feed.
+        verification: unverified, testing, or verified.
         session_id: opaque session identifier for grouping.
         expires_at accepts ISO 8601 datetime; pass null to clear.
         """
@@ -578,7 +580,8 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
     ) -> list[types.TextContent]:
         """Apply a pre-computed classification to an existing entry.
 
-        entry_type: session, bookmark, minutes, meeting, reference, idea, or inbox.
+        entry_type: session, bookmark, minutes, meeting, reference, idea, inbox,
+        person, project, digest, github, or feed.
         confidence (0–1) determines the updated entry status.
         """
         c = _lc(ctx)

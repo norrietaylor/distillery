@@ -72,8 +72,8 @@ DISTILLERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
                 "entry_type": {
                     "type": "string",
                     "description": (
-                        "One of: session, bookmark, minutes, meeting, "
-                        "reference, idea, inbox, person, project, digest, github."
+                        "One of: session, bookmark, minutes, meeting, reference, "
+                        "idea, inbox, person, project, digest, github, feed."
                     ),
                 },
                 "author": {"type": "string", "description": "Author identifier."},
