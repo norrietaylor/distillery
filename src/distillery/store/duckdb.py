@@ -319,6 +319,41 @@ class DuckDBStore:
         except duckdb.Error as exc:  # pragma: no cover — best-effort
             logger.debug("Post-FTS-rebuild CHECKPOINT skipped: %s", exc)
 
+    def _checkpoint_after_write(self, conn: duckdb.DuckDBPyConnection) -> None:
+        """Flush WAL to the main database file after a write operation.
+
+        DuckDB's implicit auto-commit writes each statement to the WAL, but
+        those writes only reach the main database file on the next
+        ``CHECKPOINT``.  Without periodic checkpoints the WAL can grow
+        unbounded and — more importantly — any ungraceful termination
+        (SIGKILL, OOM, crash, abrupt scale-to-zero) leaves user writes
+        stranded in the WAL.  On the next startup, DuckDB attempts to
+        replay the WAL; if that replay fails for any reason (e.g. a
+        partially-written FTS schema rebuild), the
+        :meth:`_sync_initialize` recovery path can discard the WAL
+        entirely — silently losing the writes.  This was the root cause of
+        issue #346: entries returned ``persisted: true`` then vanished
+        between creation and later mutation.
+
+        Calling ``CHECKPOINT`` after each successful write bounds the WAL
+        delta to a single entry's worth of data, making writes durable
+        even under ungraceful termination.  DuckDB's ``CHECKPOINT`` is a
+        no-op when the WAL is already empty, so the overhead on an idle
+        database is negligible.
+
+        Checkpoint failures are logged and swallowed — the write itself
+        has already been committed to the WAL, so returning success to
+        the caller is still correct.  A failed checkpoint just means the
+        WAL stays slightly larger than usual.
+        """
+        try:
+            conn.execute("CHECKPOINT")
+        except duckdb.Error as exc:
+            # Non-fatal: the row is already in the WAL.  Log so operators
+            # can see repeated failures, but don't raise — the caller has
+            # already observed a successful write.
+            logger.debug("CHECKPOINT after write failed (non-fatal): %s", exc)
+
     def _setup_httpfs(self, conn: duckdb.DuckDBPyConnection) -> None:
         """Install and load the httpfs extension, then configure S3 credentials.
 
@@ -635,11 +670,20 @@ class DuckDBStore:
 
         If the database cannot be opened due to a corrupt WAL (e.g. from an
         interrupted FTS index rebuild), the WAL is moved aside to a
-        timestamped backup file and the connection is retried.  The backup
-        preserves any uncommitted data for manual recovery — it is NOT
-        automatically replayed.  :meth:`_rebuild_fts_index` aggressively
-        checkpoints after each rebuild to minimise how often this path is
-        exercised (see issue #349).
+        ``.wal.corrupt.<timestamp>`` sidecar and the connection is retried
+        via :meth:`_recover_from_wal_replay_failure`.  The backup preserves
+        any uncommitted data for manual recovery — it is NOT automatically
+        replayed.
+
+        Historically this recovery path was the last link in the chain
+        that produced "ghost entry_ids" (issue #346): writes sitting in
+        a WAL on an ungraceful restart were silently discarded, causing
+        entries that returned ``persisted: true`` to disappear on a later
+        ``get`` / ``update``.  Writes now checkpoint eagerly (see
+        :meth:`_checkpoint_after_write`) so reaching this branch with
+        user data in the WAL should be rare; :meth:`_rebuild_fts_index`
+        aggressively checkpoints after each rebuild to further minimise
+        how often this path is exercised (see issue #349).
         """
         import time
 
@@ -848,6 +892,9 @@ class DuckDBStore:
         conn.execute(sql, params)
         # Rebuild FTS index so new content is searchable via BM25.
         self._rebuild_fts_index(conn)
+        # Flush WAL so the new row survives ungraceful termination.
+        # See :meth:`_checkpoint_after_write` for why this matters (issue #346).
+        self._checkpoint_after_write(conn)
         logger.debug("Stored entry id=%s", entry.id)
         return entry.id
 
@@ -918,6 +965,9 @@ class DuckDBStore:
             raise
 
         self._rebuild_fts_index(conn)
+        # Flush WAL so the new rows survive ungraceful termination.
+        # See :meth:`_checkpoint_after_write` for why this matters (issue #346).
+        self._checkpoint_after_write(conn)
         logger.debug("Batch-stored %d entries", len(entries))
         return [e.id for e in entries]
 
@@ -1072,6 +1122,9 @@ class DuckDBStore:
         # Rebuild FTS index when content changes.
         if "content" in updates:
             self._rebuild_fts_index(conn)
+        # Flush WAL so the update survives ungraceful termination.
+        # See :meth:`_checkpoint_after_write` for why this matters (issue #346).
+        self._checkpoint_after_write(conn)
         logger.debug("Updated entry id=%s", entry_id)
 
         # Re-fetch to return the updated state.
@@ -1117,6 +1170,9 @@ class DuckDBStore:
         count: int = count_row[0] if count_row is not None else 0
         found = count > 0
         if found:
+            # Flush WAL so the status change survives ungraceful termination.
+            # See :meth:`_checkpoint_after_write` for why this matters (issue #346).
+            self._checkpoint_after_write(conn)
             logger.debug("Soft-deleted (archived) entry id=%s", entry_id)
         else:
             logger.debug("delete() called for non-existent entry id=%s", entry_id)
