@@ -259,7 +259,7 @@ Initial public release of the Distillery MVP, covering three specification areas
 - `/classify` skill — classify entries by ID, process full inbox, and manage review queue
 - Config extensions: deduplication thresholds, classification taxonomy, review-queue settings
 
-[Unreleased]: https://github.com/norrietaylor/distillery/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/norrietaylor/distillery/compare/v0.3.2...HEAD
 [v0.2.1]: https://github.com/norrietaylor/distillery/compare/v0.2.0...v0.2.1
 [v0.2.0]: https://github.com/norrietaylor/distillery/compare/v0.1.1...v0.2.0
 [v0.1.0]: https://github.com/norrietaylor/distillery/releases/tag/v0.1.0

@@ -719,7 +719,7 @@ wheels = [
 
 [[package]]
 name = "distillery-mcp"
-version = "0.3.2"
+version = "0.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "defusedxml" },
@@ -751,17 +751,17 @@ ragas = [
 [package.metadata]
 requires-dist = [
     { name = "datasets", marker = "extra == 'ragas'", specifier = ">=2.14.0" },
-    { name = "defusedxml", specifier = ">=0.7.0" },
+    { name = "defusedxml", specifier = ">=0.7.0,<1.0" },
     { name = "duckdb", specifier = "~=1.5.0" },
-    { name = "fastmcp", specifier = ">=2.12.0" },
-    { name = "httpx", specifier = ">=0.24.0" },
+    { name = "fastmcp", specifier = ">=2.12.0,<4.0" },
+    { name = "httpx", specifier = ">=0.24.0,<1.0" },
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.5" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0" },
     { name = "pytest-httpx", marker = "extra == 'dev'", specifier = ">=0.30.0" },
-    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "pyyaml", specifier = ">=6.0,<7.0" },
     { name = "ragas", marker = "extra == 'ragas'", specifier = ">=0.2.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
     { name = "types-defusedxml", marker = "extra == 'dev'", specifier = ">=0.7.0" },
