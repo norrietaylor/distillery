@@ -75,7 +75,7 @@ Stability is boring on its own. What makes it worth writing about is everything 
 
 **Memory-layer integrations.** LangChain orchestrators, Letta-style stateful-agent frameworks, and any MCP-native runtime can now treat Distillery as a durable backend instead of a moving target.
 
-*_Stability is the prerequisite for anyone else building on top._*
+***Stability is the prerequisite for anyone else building on top.***
 
 ## Try it
 
