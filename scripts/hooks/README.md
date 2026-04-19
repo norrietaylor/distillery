@@ -149,9 +149,15 @@ If that script is not present or not executable, exits silently with no output.
 - Verify `DISTILLERY_NUDGE_INTERVAL` is a positive integer (non-zero, non-empty)
 
 **SessionStart produces no output:**
-- **HTTP transport**: Check the MCP server is running: `curl http://localhost:8000/health`; verify `DISTILLERY_MCP_URL` is correct
+- **HTTP transport**: Check the MCP server accepts JSON-RPC probes — the hook
+  does NOT use a `/health` sibling route (some deployments 404 on it, see #347).
+  Test directly with:
+  `curl -s -H 'Accept: application/json, text/event-stream' -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":0,"method":"tools/list","params":{}}' "$DISTILLERY_MCP_URL"`
+  Verify `DISTILLERY_MCP_URL` is correct.
 - **stdio transport**: Check `distillery-mcp` is on PATH: `which distillery-mcp`; ensure the package is installed (`pip install distillery`)
 - Ensure `session-start-briefing.sh` is present and executable in the same directory
+- If the endpoint is unreachable, the hook writes a `[Distillery] briefing disabled — ...`
+  line to stderr. Set `DISTILLERY_BRIEFING_QUIET=1` to silence.
 
 **Hook not executing:**
 - Verify the script path in `settings.json` is absolute
@@ -203,7 +209,8 @@ For steps 3-6, the resolver looks for any `mcpServers` key containing
 (HTTP) or command-based (stdio) server configuration.
 
 After resolving a transport, the hook probes it for reachability:
-- **HTTP**: GET `/health` with a 2-second timeout
+- **HTTP**: JSON-RPC `initialize` handshake against `/mcp` with a 2-second timeout
+  (no sibling `/health` route required — FastMCP deployments do not expose one)
 - **stdio**: subprocess `initialize` handshake with a 3-second timeout
 
 If the resolved server is unreachable, the hook exits silently with code 0.

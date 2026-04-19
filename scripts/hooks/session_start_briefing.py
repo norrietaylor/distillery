@@ -430,15 +430,19 @@ def _http_health_check(
 ) -> bool:
     """Probe an HTTP MCP transport for reachability.
 
-    Performs ``GET /health`` first, then a proper MCP ``initialize`` handshake
-    against ``/mcp`` (initialize request followed by a best-effort
-    ``notifications/initialized``). Both the health GET and the initialize POST
-    must succeed with a 2xx status and the initialize response must be a valid
-    JSON-RPC 2.0 reply with a ``result``. This avoids falsely reporting a
-    session-enforcing streamable-HTTP server as unreachable by skipping the
-    mandatory initialize step.
+    Performs an MCP ``initialize`` handshake against ``/mcp`` (initialize
+    request followed by a best-effort ``notifications/initialized``). The
+    initialize response must be a valid JSON-RPC 2.0 reply with a ``result``.
+    This is the canonical MCP liveness probe and is required before any
+    ``tools/*`` call on session-enforcing servers.
+
+    Historically this also did a ``GET /health`` first, but FastMCP deployments
+    (e.g. the hosted staging MCP on Fly.io) do not expose a sibling ``/health``
+    route and return 404, which would cause the briefing to silently no-op on
+    any reachable hosted deployment (issue #347). Relying solely on the
+    ``initialize`` handshake resolves that.
     """
-    mcp_url, health_url = _normalize_mcp_url(base_url)
+    mcp_url, _ = _normalize_mcp_url(base_url)
 
     def _merge(call_headers: dict[str, str]) -> dict[str, str]:
         merged: dict[str, str] = {}
@@ -449,20 +453,7 @@ def _http_health_check(
             merged["Authorization"] = f"Bearer {bearer_token}"
         return merged
 
-    # Step 1: GET /health
-    req = urllib.request.Request(health_url, method="GET")
-    for name, value in _merge({}).items():
-        req.add_header(name, value)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            if getattr(resp, "status", 200) >= 400:
-                return False
-    except (urllib.error.URLError, OSError, ValueError):
-        return False
-
-    # Step 2: MCP initialize handshake (no tools/list — initialize is the
-    # canonical liveness probe and is required before any tools/* call on
-    # session-enforcing servers).
+    # MCP initialize handshake — canonical liveness probe.
     base_headers = _merge({})
     ok, session_id = _http_initialize(mcp_url, base_headers, timeout=timeout)
     if not ok:
