@@ -231,6 +231,46 @@ class TestClassifyTool:
         data = parse_mcp_response(response)
         assert data["error"] is True
         assert data["code"] == "INVALID_PARAMS"
+        # Unknown values that don't match an alias carry no suggestion but
+        # must still include the allowed list for client introspection.
+        assert "suggestion" not in data.get("details", {})
+        assert "inbox" in data["details"]["allowed"]
+        assert data["details"]["field"] == "entry_type"
+        assert data["details"]["provided"] == "bogus_type"
+
+    async def test_classify_suggests_inbox_for_note_alias(
+        self, store: DuckDBStore, config: DistilleryConfig
+    ) -> None:
+        """Issue #345: 'note' -> 'inbox' suggestion in details + inline message."""
+        entry = make_entry(content="Some jotting")
+        entry_id = await store.store(entry)
+
+        response = await _handle_classify(
+            store,
+            config,
+            {"entry_id": entry_id, "entry_type": "note", "confidence": 0.9},
+        )
+        data = parse_mcp_response(response)
+        assert data["error"] is True
+        assert data["code"] == "INVALID_PARAMS"
+        assert data["details"]["suggestion"] == "inbox"
+        assert "inbox" in data["message"]
+
+    async def test_classify_suggestion_is_case_insensitive(
+        self, store: DuckDBStore, config: DistilleryConfig
+    ) -> None:
+        """Aliases match case-insensitively so 'Note' / 'NOTES' also resolve."""
+        entry = make_entry(content="Some jotting")
+        entry_id = await store.store(entry)
+
+        response = await _handle_classify(
+            store,
+            config,
+            {"entry_id": entry_id, "entry_type": "NOTES", "confidence": 0.9},
+        )
+        data = parse_mcp_response(response)
+        assert data["error"] is True
+        assert data["details"]["suggestion"] == "inbox"
 
     async def test_classify_validates_confidence_out_of_range(
         self, store: DuckDBStore, config: DistilleryConfig
@@ -485,6 +525,25 @@ class TestResolveReviewTool:
         data = parse_mcp_response(response)
         assert data["error"] is True
         assert data["code"] == "INVALID_PARAMS"
+
+    async def test_resolve_reclassify_suggests_alias_for_note(self, store: DuckDBStore) -> None:
+        """Reclassify rejection for a known alias surfaces the canonical target."""
+        entry = make_entry(status=EntryStatus.PENDING_REVIEW)
+        entry_id = await store.store(entry)
+
+        response = await _handle_resolve_review(
+            store,
+            {
+                "entry_id": entry_id,
+                "action": "reclassify",
+                "new_entry_type": "note",
+            },
+        )
+        data = parse_mcp_response(response)
+        assert data["error"] is True
+        assert data["code"] == "INVALID_PARAMS"
+        assert data["details"]["field"] == "new_entry_type"
+        assert data["details"]["suggestion"] == "inbox"
 
     async def test_resolve_returns_not_found_for_missing_entry(self, store: DuckDBStore) -> None:
         response = await _handle_resolve_review(

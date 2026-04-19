@@ -22,7 +22,7 @@ from distillery.mcp.tools._common import (
     validate_required,
     validate_type,
 )
-from distillery.mcp.tools.crud import _VALID_ENTRY_TYPES
+from distillery.mcp.tools.crud import _VALID_ENTRY_TYPES, _invalid_entry_type_response
 
 logger = logging.getLogger(__name__)
 
@@ -67,11 +67,7 @@ async def _handle_classify(
     confidence_raw = arguments["confidence"]
 
     if entry_type_str not in _VALID_ENTRY_TYPES:
-        return error_response(
-            "INVALID_PARAMS",
-            f"Invalid entry_type {entry_type_str!r}. "
-            f"Must be one of: {', '.join(sorted(_VALID_ENTRY_TYPES))}.",
-        )
+        return _invalid_entry_type_response(entry_type_str)
 
     if not isinstance(confidence_raw, (int, float)):
         return error_response("INVALID_PARAMS", "Field 'confidence' must be a number")
@@ -312,11 +308,7 @@ async def _handle_resolve_review(
                 "Field 'new_entry_type' is required when action='reclassify'.",
             )
         if new_type_str not in _VALID_ENTRY_TYPES:
-            return error_response(
-                "INVALID_PARAMS",
-                f"Invalid new_entry_type {new_type_str!r}. "
-                f"Must be one of: {', '.join(sorted(_VALID_ENTRY_TYPES))}.",
-            )
+            return _invalid_entry_type_response(new_type_str, field="new_entry_type")
         _clear_stale_delegation_keys(new_metadata)
         new_metadata["reclassified_from"] = entry.entry_type.value
         new_metadata["reviewed_at"] = now

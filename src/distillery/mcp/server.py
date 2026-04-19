@@ -813,6 +813,9 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
           - entry_id (str, required): UUID of the entry to classify.
           - entry_type (str, required): Assigned type. Valid: [session, bookmark, minutes,
             meeting, reference, idea, inbox, github, person, project, digest, feed].
+            Common intuitive aliases like ``"note"`` are NOT accepted but the
+            error response includes a ``details.suggestion`` pointing to the
+            canonical type (e.g. ``"note"`` -> ``"inbox"``).
           - confidence (float, required): Classification confidence (0-1). Entries below
             the configured threshold (default 0.6) go to pending_review.
           - reasoning (str, optional): Explanation of the classification decision.
@@ -820,7 +823,8 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
           - suggested_project (str, optional): Project to assign if entry has none.
 
         RETURNS (success): { id: str, entry_type: str, status: str, ... } (full updated entry)
-        RETURNS (error): { error: true, code: "NOT_FOUND" | "INVALID_PARAMS" | "INTERNAL", message: "..." }
+        RETURNS (error): { error: true, code: "NOT_FOUND" | "INVALID_PARAMS" | "INTERNAL",
+        message: "...", details?: { field, provided, allowed, suggestion? } }
 
         RELATED: distillery_resolve_review (to act on pending_review entries),
         distillery_list (with output_mode="review" to see the review queue)
