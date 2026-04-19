@@ -14,7 +14,7 @@ canonical_url: https://norrietaylor.github.io/distillery/blog/distillery-0-4-0-f
     consistent error codes, predictable response shapes. The release
     body lives on the [GitHub release page](https://github.com/norrietaylor/distillery/releases/tag/v0.4.0).
 
-Six months ago, I wrote about why I built Distillery. The short version: the knowledge your team generates while working with Claude Code is mostly evaporating, and the fix is to capture it where the work happens, not in a separate tool.
+A few weeks ago I wrote [the first post in this series](building-a-second-brain-for-claude-code.md) about why I built Distillery. The short version: the knowledge your team generates while working with Claude Code is mostly evaporating, and the fix is to capture it where the work happens, not in a separate tool.
 
 That was the capture story. This post is about the memory story, and why I spent a release hardening the surface instead of shipping features.
 
@@ -24,11 +24,13 @@ The shape of the agent-memory conversation changed in April. Karpathy posted his
 
 - Raw sources are not useful on their own. Chat logs, PRs, tickets, and docs are too lossy to reason over directly.
 - The intermediate layer is an LLM-maintained wiki that compounds synthesis over time. You don't re-derive context per query. You maintain a living artifact.
-- The query layer sits on top of that artifact. CLAUDE.md style, schema-first, trimmed for the budget of whatever model you're running.
+- A query layer sits on top of that, CLAUDE.md-style and schema-first, trimmed for whatever context budget the model in use gives you.
 
 Distillery was already built around this pattern. `/distill` writes, `/recall` queries, `/pour` synthesizes. What Karpathy's post did was make the pattern legible to a much broader audience, and put a name on what everyone was converging toward.
 
-My own investigation of the memory research last week kept landing on the same conclusion. Three-tier layered memory (fast index on top, episodes in the middle, raw transcripts on demand) is now the default pattern. The best captured benchmark number I have is LongMemEval-S at 73%, from a BGE-M3 plus Flash-2.5-lite setup. The leaked Claude Code memory internals, three subsystems plus a "Dream" consolidation pass, is almost exactly this architecture. The failures in agent memory aren't mostly retrieval: they're in the reasoning layer between retrieval and action, and in the moment a session ends and all the volatile context evaporates.
+The operational side of the wiki pattern is where the interesting work actually lives, though, and it's where contributor feedback shaped what 0.x shipped. Every entry carries provenance (author, session ID, source). Every entry can be corrected without losing its history. Entries can be marked expired or unreliable without being deleted (issue #177). Those aren't decorative. They're the primitives that let a shared knowledge base admit it was wrong, which is what separates a living memory layer from a static dump.
+
+My own investigation of the memory research last week kept landing on the same conclusion. Three-tier layered memory (fast index on top, episodes in the middle, raw transcripts on demand) is now the default pattern. LongMemEval-S at 73% is a reasonable community-stack baseline (BGE-M3 plus Flash-2.5-lite), and MemPalace's ChromaDB-backed stack has since posted 96.6% on LongMemEval R@5 in raw mode, which is the kind of jump worth watching. Distillery is tracking a LongMemEval retrieval benchmark and transcript-mining integration in issue #233 so we can measure against the same yardstick. The leaked Claude Code memory internals, three subsystems plus a "Dream" consolidation pass, is almost exactly this architecture. The failures in agent memory aren't mostly retrieval: they sit in the reasoning layer between retrieval and action, and in the moment a session ends and all the volatile context evaporates.
 
 ## The memory layer is load-bearing
 
