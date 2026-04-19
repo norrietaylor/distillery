@@ -127,6 +127,26 @@ async def test_handle_store_batch_invalid_entry_type() -> None:
 
 
 @pytest.mark.unit
+async def test_handle_store_batch_entry_type_note_suggests_inbox() -> None:
+    """Issue #345: bulk ingest also surfaces the 'note' -> 'inbox' suggestion."""
+    store = _make_mock_store()
+    result = await _handle_store_batch(
+        store=store,
+        arguments={
+            "entries": [
+                {"content": "text", "author": "alice", "entry_type": "note"},
+            ],
+        },
+    )
+    data = parse_mcp_response(result)
+    assert data["error"] is True
+    assert data["code"] == "INVALID_PARAMS"
+    assert data["details"]["suggestion"] == "inbox"
+    # The prefixed message keeps per-entry context.
+    assert "entries[0]" in data["message"]
+
+
+@pytest.mark.unit
 async def test_handle_store_batch_empty_list() -> None:
     """Empty entries list should return count=0 without calling store."""
     store = _make_mock_store()

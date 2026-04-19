@@ -66,6 +66,90 @@ _VALID_ENTRY_TYPES = {
     "feed",
 }
 
+
+# Common aliases callers reach for intuitively that don't map 1:1 to a
+# canonical entry_type. These are used only to surface a ``suggestion`` in the
+# INVALID_PARAMS error payload — they are NOT accepted as entry_type values.
+#
+# Rationale for each mapping:
+#   note / notes  -> ``inbox``   (unclassified jottings awaiting triage)
+#   task / todo   -> ``idea``    (open question / action item)
+#   issue / pr    -> ``github``  (GitHub artifacts have a dedicated type)
+#   article / url -> ``bookmark`` (saved external URLs)
+#   summary       -> ``digest``  (periodic summaries)
+#   doc / docs    -> ``reference`` (reference material)
+#   contact       -> ``person``  (people profiles)
+#   repo          -> ``project`` (project/repo records)
+_ENTRY_TYPE_ALIASES: dict[str, str] = {
+    "note": "inbox",
+    "notes": "inbox",
+    "task": "idea",
+    "todo": "idea",
+    "issue": "github",
+    "pr": "github",
+    "article": "bookmark",
+    "url": "bookmark",
+    "link": "bookmark",
+    "summary": "digest",
+    "doc": "reference",
+    "docs": "reference",
+    "contact": "person",
+    "repo": "project",
+}
+
+
+def _suggest_entry_type(value: Any) -> str | None:
+    """Return a suggested canonical entry_type for a rejected *value*, if any.
+
+    The match is case-insensitive and only considers exact string lookups in
+    the alias map — no fuzzy distance search. This keeps the suggestion stable
+    and predictable for tool callers.
+
+    Args:
+        value: The raw value that was rejected as an entry_type.
+
+    Returns:
+        A canonical ``EntryType`` string value (e.g. ``"inbox"``) if an alias
+        match was found, otherwise ``None``.
+    """
+    if not isinstance(value, str):
+        return None
+    return _ENTRY_TYPE_ALIASES.get(value.strip().lower())
+
+
+def _invalid_entry_type_response(
+    value: Any, *, field: str = "entry_type", prefix: str = ""
+) -> list[types.TextContent]:
+    """Build the standard INVALID_PARAMS response for an invalid *entry_type*.
+
+    When ``value`` matches a known alias (e.g. ``"note"`` -> ``"inbox"``), the
+    suggestion is surfaced both inline in the human-readable message *and* as
+    a structured ``details.suggestion`` field so programmatic callers can
+    retry automatically without parsing the message string.
+
+    Args:
+        value: The raw entry_type value that failed validation.
+        field: The field name to reference in the error message (e.g.
+            ``"entry_type"`` or ``"new_entry_type"``).
+        prefix: Optional prefix for the message (e.g. ``"entries[3] has "``).
+
+    Returns:
+        MCP error response content list ready to return from a tool handler.
+    """
+    allowed = ", ".join(sorted(_VALID_ENTRY_TYPES))
+    message = f"{prefix}Invalid {field} {value!r}. Must be one of: {allowed}."
+    details: dict[str, Any] = {
+        "field": field,
+        "provided": value,
+        "allowed": sorted(_VALID_ENTRY_TYPES),
+    }
+    suggestion = _suggest_entry_type(value)
+    if suggestion is not None:
+        message += f" Did you mean {suggestion!r}?"
+        details["suggestion"] = suggestion
+    return error_response("INVALID_PARAMS", message, details=details)
+
+
 # Valid status values (mirrors EntryStatus enum).
 _VALID_STATUSES = {"active", "pending_review", "archived"}
 
@@ -184,11 +268,7 @@ async def _handle_store(
 
     entry_type_str = arguments["entry_type"]
     if entry_type_str not in _VALID_ENTRY_TYPES:
-        return error_response(
-            "INVALID_PARAMS",
-            f"Invalid entry_type {entry_type_str!r}. "
-            f"Must be one of: {', '.join(sorted(_VALID_ENTRY_TYPES))}.",
-        )
+        return _invalid_entry_type_response(entry_type_str)
 
     tags_err = validate_type(arguments, "tags", list, "list of strings")
     if tags_err:
@@ -549,11 +629,7 @@ async def _handle_store_batch(
 
         entry_type_str = item.get("entry_type", "inbox")
         if entry_type_str not in _VALID_ENTRY_TYPES:
-            return error_response(
-                "INVALID_PARAMS",
-                f"entries[{idx}] has invalid entry_type {entry_type_str!r}. "
-                f"Must be one of: {', '.join(sorted(_VALID_ENTRY_TYPES))}.",
-            )
+            return _invalid_entry_type_response(entry_type_str, prefix=f"entries[{idx}] has ")
 
         source_str = str(item.get("source", EntrySource.CLAUDE_CODE.value))
         if source_str not in _VALID_SOURCES:
@@ -816,11 +892,7 @@ async def _handle_update(
     if "entry_type" in updates:
         et_str = updates["entry_type"]
         if et_str not in _VALID_ENTRY_TYPES:
-            return error_response(
-                "INVALID_PARAMS",
-                f"Invalid entry_type {et_str!r}. "
-                f"Must be one of: {', '.join(sorted(_VALID_ENTRY_TYPES))}.",
-            )
+            return _invalid_entry_type_response(et_str)
         updates["entry_type"] = EntryType(et_str)
 
     if "status" in updates:
@@ -1413,11 +1485,7 @@ async def _handle_correct(
     # --- resolve fields (inherit from original if not provided) -------------
     entry_type_str = arguments.get("entry_type", original.entry_type.value)
     if entry_type_str not in _VALID_ENTRY_TYPES:
-        return error_response(
-            "INVALID_PARAMS",
-            f"Invalid entry_type {entry_type_str!r}. "
-            f"Must be one of: {', '.join(sorted(_VALID_ENTRY_TYPES))}.",
-        )
+        return _invalid_entry_type_response(entry_type_str)
 
     author = arguments.get("author", original.author)
     project = arguments.get("project", original.project)
@@ -1518,6 +1586,9 @@ __all__ = [
     "_apply_default_status_filter",
     "_DEFAULT_VISIBLE_STATUSES",
     "_VALID_ENTRY_TYPES",
+    "_ENTRY_TYPE_ALIASES",
+    "_suggest_entry_type",
+    "_invalid_entry_type_response",
     "_VALID_STATUSES",
     "_VALID_VERIFICATIONS",
     "_VALID_SOURCES",
