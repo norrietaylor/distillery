@@ -356,6 +356,20 @@ async def _handle_store(
                 )
                 if len(warnings) >= dedup_limit:
                     break
+        except EmbeddingProviderError as exc:
+            # Upstream 429/5xx here would silently skip the dedup auto-skip
+            # path and persist anyway, producing duplicates.  Surface the
+            # structured UPSTREAM_* contract the same way the final
+            # ``store.store`` call does.
+            logger.warning(
+                "Upstream embedding provider failed during store dedup precheck "
+                "(provider=%s status=%s retry_after=%s): %s",
+                exc.provider,
+                exc.status_code,
+                exc.retry_after,
+                exc,
+            )
+            return upstream_error_response(exc)
         except Exception as exc:  # noqa: BLE001
             logger.warning("find_similar failed during dedup check: %s", exc)
             # Non-fatal: fall through with no warnings and persist normally.

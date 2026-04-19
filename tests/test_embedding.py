@@ -351,37 +351,13 @@ class TestJinaRateLimitRetry:
         assert result[0] == [0.1, 0.2, 0.3, 0.4]
         assert result[1] == [0.5, 0.6, 0.7, 0.8]
 
-    def test_exhausted_429_raises_embedding_provider_error(self) -> None:
-        """Exhausted 429 retries raise EmbeddingProviderError tagged as rate limited."""
-        rate_limit_response = MagicMock(spec=httpx.Response)
-        rate_limit_response.status_code = 429
-        rate_limit_response.text = "Rate limit exceeded"
-        rate_limit_response.headers = {"Retry-After": "42"}
-        rate_limit_error = httpx.HTTPStatusError(
-            "429 Too Many Requests",
-            request=MagicMock(),
-            response=rate_limit_response,
-        )
-
-        provider = JinaEmbeddingProvider(api_key="test-key", dimensions=4)
-
-        with patch("httpx.Client") as mock_client_cls, patch("time.sleep"):
-            mock_client = MagicMock()
-            mock_client_cls.return_value.__enter__.return_value = mock_client
-            mock_resp = MagicMock()
-            mock_resp.raise_for_status.side_effect = rate_limit_error
-            mock_client.post.return_value = mock_resp
-
-            with pytest.raises(EmbeddingProviderError) as exc_info:
-                provider.embed("test text")
-
-        assert exc_info.value.is_rate_limited
-        assert exc_info.value.status_code == 429
-        assert exc_info.value.provider == "jina"
-        assert exc_info.value.retry_after == 42.0
-
     def test_exhausted_5xx_raises_embedding_provider_error(self) -> None:
-        """Exhausted 5xx retries raise EmbeddingProviderError (not rate limited)."""
+        """Exhausted 5xx retries raise EmbeddingProviderError (not rate limited).
+
+        429 exhaustion for Jina is covered by the canonical
+        ``test_exhausted_retries_raise_embedding_provider_error`` above;
+        this case pins the non-rate-limited 5xx contract.
+        """
         server_error_response = MagicMock(spec=httpx.Response)
         server_error_response.status_code = 503
         server_error_response.text = "Service Unavailable"
@@ -758,24 +734,15 @@ class TestOpenAIRateLimitRetry:
         assert len(sleep_calls) >= 1
         assert all(s >= 0 for s in sleep_calls)
 
-    def test_exhausted_429_raises_embedding_provider_error(self) -> None:
-        """Exhausted 429 retries raise EmbeddingProviderError tagged as rate limited."""
-        rate_limit_response = _mock_httpx_response(429, {"error": "rate limit"})
-        rate_limit_response.headers = {"Retry-After": "15"}
-        provider = OpenAIEmbeddingProvider(api_key="sk-test", dimensions=4)
-
-        with patch.object(provider, "_client") as mock_client, patch("time.sleep"):
-            mock_client.post.return_value = rate_limit_response
-            with pytest.raises(EmbeddingProviderError) as exc_info:
-                provider.embed_batch(["test"])
-
-        assert exc_info.value.is_rate_limited
-        assert exc_info.value.status_code == 429
-        assert exc_info.value.provider == "openai"
-        assert exc_info.value.retry_after == 15.0
-
     def test_exhausted_5xx_raises_embedding_provider_error(self) -> None:
-        """Exhausted 5xx retries raise EmbeddingProviderError (not rate limited)."""
+        """Exhausted 5xx retries raise EmbeddingProviderError (not rate limited).
+
+        429 exhaustion for OpenAI is covered by the canonical
+        ``test_exhausted_retries_raise_embedding_provider_error`` above
+        (and the single-item ``test_single_embed_exhausts_to_embedding_provider_error``
+        covers the ``embed()`` → ``embed_batch`` delegation path); this
+        case pins the non-rate-limited 5xx contract.
+        """
         server_error_response = _mock_httpx_response(502, {"error": "bad gateway"})
         server_error_response.headers = {}
         provider = OpenAIEmbeddingProvider(api_key="sk-test", dimensions=4)
