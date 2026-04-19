@@ -81,7 +81,7 @@ Before processing, retrieve the list of already-synced entries for this reposito
 distillery_list(
     entry_type="github",
     limit=500,
-    output_mode="metadata",
+    output_mode="summary",
     # scope to the target repo
 )
 ```
