@@ -34,9 +34,9 @@ My own investigation of the memory research last week kept landing on the same c
 
 ## The memory layer is load-bearing
 
-If you're building agents, the memory layer sits under everything else. Your planner reads from it. Your tools write to it. Your evals depend on it being deterministic across runs. When Claude Managed Agents launched in April with memory labeled "research preview," the entire community ecosystem (memsearch, Honcho, Hippo, Memoriki, thebrain, Knowledge Raven, Octopoda, MemPalace) rushed to fill the gap, because nobody is going to ship serious agent work on top of something marked "preview."
+If you're building agents, the memory layer sits under everything else. Planners read from it. Tools write to it. Evals depend on it being deterministic across runs. When Claude Managed Agents launched in April with memory labeled "research preview," the entire community ecosystem (memsearch, Honcho, Hippo, Memoriki, thebrain, Knowledge Raven, Octopoda, MemPalace) rushed to fill the gap, because nobody ships serious agent work on top of a preview.
 
-The same argument applies one layer down. If the memory layer you build on has drifting tool names, inconsistent error codes, response envelopes that change shape between minor versions, and defaults that flood your context window without warning, every downstream agent inherits that instability. Your planner inherits it. Your evals inherit it. Your team's shared knowledge base inherits it.
+The same argument applies one layer down. If the memory layer you build on has drifting tool names, inconsistent error codes, response envelopes that change shape between minor versions, and defaults that flood your context window without warning, every downstream agent inherits that instability. Planners inherit it. Evals inherit it. Shared team knowledge bases inherit it.
 
 That's what this release is about.
 
@@ -61,7 +61,7 @@ Sixty-plus PRs landed under the `staging/api-hardening` line. The narrative cate
 
 **Storage quality.** Aborted transactions roll back and surface query failures in `distillery_status` instead of swallowing them (#363). WAL is flushed after writes and preserved on recovery, with signature matching (#346). FTS WAL replay no longer fails on cold start (#349). The "ghost entry ID" class of bug is gone. `storage_bytes` scopes to the filtered set when filters are active, so usage numbers stop lying about what you actually searched.
 
-**Feeds.** `gh-sync` now runs async via server-side background jobs (#348), so long syncs don't block the caller. Poll `sync_status` for progress. Liveness fields are populated across poll and sync paths (#334), so `/watch` reports accurate freshness. Crucially for anyone using ambient intelligence: feed entries are now excluded from the interest profile, which means `/radar` no longer drifts toward whatever feed happens to be loudest that week.
+**Feeds.** `gh-sync` now runs async via server-side background jobs (#348), so long syncs don't block the caller. Poll `distillery_sync_status` for progress. Liveness fields are populated across poll and sync paths (#334), so `/watch` reports accurate freshness. Crucially for anyone using ambient intelligence: feed entries are now excluded from the interest profile, which means `/radar` no longer drifts toward whatever feed happens to be loudest that week.
 
 **Scheduling.** `/setup` and `/watch` now configure Claude Code routines (#272) instead of CronCreate jobs or GitHub Actions webhook scheduling. Three routines ship: hourly feed poll, daily stale check, weekly maintenance. The webhook endpoints (`/hooks/poll`, `/hooks/rescore`, `/hooks/classify-batch`) are deprecated and log warnings when hit. `/api/maintenance` is retained for orchestrated ops.
 
