@@ -22,10 +22,10 @@ import logging
 import os
 import re
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, overload
+from typing import TYPE_CHECKING, Any, TypeVar, overload
 from urllib.parse import unquote, urlparse
 
 import duckdb
@@ -38,6 +38,8 @@ if TYPE_CHECKING:
     from distillery.store.protocol import SearchResult
 
 logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
 
 
 def _sql_escape(value: str) -> str:
@@ -831,6 +833,106 @@ class DuckDBStore:
         return self._embedding_provider
 
     # ------------------------------------------------------------------
+    # Transaction safety (issue #363)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _rollback_quietly(conn: duckdb.DuckDBPyConnection) -> None:
+        """Best-effort ``ROLLBACK`` to clear an aborted transaction.
+
+        DuckDB leaves a connection in an aborted-transaction state when a
+        statement raises inside an implicit or explicit transaction — every
+        subsequent call on the same connection fails with
+        ``TransactionContext Error: Current transaction is aborted (please
+        ROLLBACK)``.  Issuing a ``ROLLBACK`` clears the aborted state and
+        restores the connection to a usable baseline.
+
+        Errors from ``ROLLBACK`` itself are logged at debug level and
+        swallowed — if rollback fails we are no worse off than if we had
+        never tried.  Callers must still propagate the original exception.
+        """
+        try:
+            conn.rollback()
+        except duckdb.Error as rollback_exc:
+            logger.debug("Post-error ROLLBACK skipped: %s", rollback_exc)
+
+    async def _run_sync(
+        self,
+        fn: Callable[..., _T],
+        /,
+        *args: Any,
+        **kwargs: Any,
+    ) -> _T:
+        """Run *fn* via :func:`asyncio.to_thread` with rollback on error.
+
+        Wraps every sync store operation so that any exception raised by
+        *fn* triggers a best-effort ``ROLLBACK`` on the shared DuckDB
+        connection **before** the exception propagates.  Without this,
+        a single failed write would leave the shared connection in an
+        aborted-transaction state and all subsequent reads and writes
+        would fail until the connection was recycled (issue #363).
+
+        Read-only operations (e.g. :meth:`_sync_get`) can also reach this
+        path when a prior uncaught exception poisoned the connection;
+        running ``ROLLBACK`` after the failed read restores the connection
+        so the next call succeeds rather than cascading the same error.
+        """
+        try:
+            return await asyncio.to_thread(fn, *args, **kwargs)
+        except Exception:
+            # Catching ``Exception`` — not ``BaseException`` — so that
+            # ``asyncio.CancelledError`` does not trigger rollback.  When a
+            # task is cancelled while awaiting ``asyncio.to_thread(fn, …)``
+            # the worker thread executing *fn* keeps running (Python has no
+            # safe way to forcibly stop a thread), so issuing
+            # ``conn.rollback()`` from a second worker thread would race
+            # against the still-live first one on the shared DuckDB
+            # connection — which is not thread-safe for concurrent use.
+            # On cancellation we simply re-raise; on ordinary exceptions
+            # *fn* has already returned control so the rollback is safe.
+            conn = self._conn
+            if conn is not None:
+                await asyncio.to_thread(self._rollback_quietly, conn)
+            raise
+
+    async def rollback(self) -> None:
+        """Public rollback hook for non-store code paths that touch the connection.
+
+        The MCP tool layer occasionally issues raw ``conn.execute`` calls
+        (e.g. the per-request embedding-budget counter in
+        :mod:`distillery.mcp.budget`) that bypass :meth:`_run_sync`.  Those
+        call sites can invoke ``await store.rollback()`` in their exception
+        handlers to clear an aborted transaction before the next request.
+        """
+        if self._conn is None:
+            return
+        await asyncio.to_thread(self._rollback_quietly, self._conn)
+
+    async def probe_readiness(self) -> tuple[bool, str | None]:
+        """Return ``(True, None)`` when the connection can answer a trivial query.
+
+        Exercised by the MCP status handler (``distillery_status``) and by
+        :meth:`initialize` immediately after schema setup so that a database
+        file which mounts but is not queryable (e.g. after a partial WAL
+        replay / volume snapshot inconsistency — see issue #363 follow-up)
+        surfaces as an explicit error instead of a silent null in the
+        status payload.
+
+        The probe runs ``SELECT COUNT(*) FROM entries`` via the normal
+        async path so transient aborted-transaction state is rolled back
+        by :meth:`_run_sync` before a second probe is attempted.
+        """
+        if self._conn is None:
+            return False, "store not initialized"
+        try:
+            await self._run_sync(
+                lambda: self._conn.execute("SELECT COUNT(*) FROM entries").fetchone()  # type: ignore[union-attr]
+            )
+        except Exception as exc:  # noqa: BLE001
+            return False, f"{type(exc).__name__}: {exc}"
+        return True, None
+
+    # ------------------------------------------------------------------
     # CRUD protocol methods (T02.3)
     # ------------------------------------------------------------------
 
@@ -907,7 +1009,7 @@ class DuckDBStore:
         Returns:
             The UUID string of the stored entry.
         """
-        return await asyncio.to_thread(self._sync_store, entry)
+        return await self._run_sync(self._sync_store, entry)
 
     def _sync_store_batch(self, entries: Sequence[Entry]) -> list[str]:
         """Synchronous batch-store implementation; called via asyncio.to_thread."""
@@ -980,7 +1082,7 @@ class DuckDBStore:
         Returns:
             List of UUID strings for the stored entries.
         """
-        return await asyncio.to_thread(self._sync_store_batch, entries)
+        return await self._run_sync(self._sync_store_batch, entries)
 
     def _sync_get(self, entry_id: str) -> Entry | None:
         """
@@ -1018,7 +1120,7 @@ class DuckDBStore:
         Returns:
             The matching ``Entry``, or ``None`` if the ID does not exist.
         """
-        return await asyncio.to_thread(self._sync_get, entry_id)
+        return await self._run_sync(self._sync_get, entry_id)
 
     def _sync_update(self, entry_id: str, updates: dict[str, Any]) -> Entry:
         """
@@ -1152,7 +1254,7 @@ class DuckDBStore:
         Returns:
             The updated ``Entry``.
         """
-        return await asyncio.to_thread(self._sync_update, entry_id, updates)
+        return await self._run_sync(self._sync_update, entry_id, updates)
 
     def _sync_delete(self, entry_id: str) -> bool:
         """Synchronous implementation of delete(); called via asyncio.to_thread."""
@@ -1184,7 +1286,7 @@ class DuckDBStore:
         Returns:
             ``True`` if the entry was found and archived, ``False`` otherwise.
         """
-        return await asyncio.to_thread(self._sync_delete, entry_id)
+        return await self._run_sync(self._sync_delete, entry_id)
 
     # ------------------------------------------------------------------
     # Filter helpers (shared by search, find_similar, list_entries)
@@ -1556,7 +1658,7 @@ class DuckDBStore:
             self._touch_accessed(conn, returned_ids)
             return results
 
-        return await asyncio.to_thread(_sync)
+        return await self._run_sync(_sync)
 
     @staticmethod
     def _touch_accessed(conn: duckdb.DuckDBPyConnection, entry_ids: list[str]) -> None:
@@ -1617,7 +1719,7 @@ class DuckDBStore:
                 results.append(SearchResult(entry=entry, score=score))
             return results
 
-        return await asyncio.to_thread(_sync)
+        return await self._run_sync(_sync)
 
     @overload
     async def list_entries(
@@ -1728,7 +1830,7 @@ class DuckDBStore:
             rows = result.fetchall()
             return [self._row_to_entry(row, col_names) for row in rows]
 
-        return await asyncio.to_thread(_sync)
+        return await self._run_sync(_sync)
 
     async def _get_entry_stats(
         self,
@@ -1803,7 +1905,7 @@ class DuckDBStore:
                 "storage_bytes": storage_bytes,
             }
 
-        return await asyncio.to_thread(_sync)
+        return await self._run_sync(_sync)
 
     async def count_entries(
         self,
@@ -1838,7 +1940,7 @@ class DuckDBStore:
             row = conn.execute(sql, params).fetchone()
             return int(row[0]) if row else 0
 
-        return await asyncio.to_thread(_sync)
+        return await self._run_sync(_sync)
 
     async def aggregate_entries(
         self,
@@ -1955,7 +2057,7 @@ class DuckDBStore:
                 "total_entries": total_entries,
             }
 
-        return await asyncio.to_thread(_sync)
+        return await self._run_sync(_sync)
 
     # ------------------------------------------------------------------
     # Audit logging
@@ -1984,7 +2086,7 @@ class DuckDBStore:
             )
 
         try:
-            await asyncio.to_thread(_sync)
+            await self._run_sync(_sync)
         except Exception:  # noqa: BLE001
             logger.debug("audit_log write failed (ignored)", exc_info=True)
 
@@ -2098,7 +2200,7 @@ class DuckDBStore:
             ``user_id``, ``tool``, ``entry_id``, ``action``, ``outcome``.
             Ordered by descending timestamp.
         """
-        return await asyncio.to_thread(self._sync_query_audit_log, filters, limit)
+        return await self._run_sync(self._sync_query_audit_log, filters, limit)
 
     # ------------------------------------------------------------------
     # Feedback logging (T01.2)
@@ -2155,7 +2257,7 @@ class DuckDBStore:
         Returns:
             search_id (str): UUID string of the newly created `search_log` row.
         """
-        return await asyncio.to_thread(
+        return await self._run_sync(
             self._sync_log_search, query, result_entry_ids, result_scores, session_id
         )
 
@@ -2203,7 +2305,7 @@ class DuckDBStore:
         Returns:
             str: UUID string of the created `feedback_log` row.
         """
-        return await asyncio.to_thread(self._sync_log_feedback, search_id, entry_id, signal)
+        return await self._run_sync(self._sync_log_feedback, search_id, entry_id, signal)
 
     # ------------------------------------------------------------------
     # Search log queries for implicit feedback
@@ -2233,7 +2335,7 @@ class DuckDBStore:
         Returns:
             list[str]: Search IDs (UUIDs) of matching ``search_log`` rows.
         """
-        return await asyncio.to_thread(self._sync_get_searches_for_entry, entry_id, since)
+        return await self._run_sync(self._sync_get_searches_for_entry, entry_id, since)
 
     # ------------------------------------------------------------------
     # Feed source persistence
@@ -2373,7 +2475,7 @@ class DuckDBStore:
 
     async def list_feed_sources(self) -> list[dict[str, Any]]:
         """Return all persisted feed sources as dicts."""
-        return await asyncio.to_thread(self._sync_list_feed_sources)
+        return await self._run_sync(self._sync_list_feed_sources)
 
     async def add_feed_source(
         self,
@@ -2384,13 +2486,13 @@ class DuckDBStore:
         trust_weight: float = 1.0,
     ) -> dict[str, Any]:
         """Add a feed source. Raises ValueError if URL already exists."""
-        return await asyncio.to_thread(
+        return await self._run_sync(
             self._sync_add_feed_source, url, source_type, label, poll_interval_minutes, trust_weight
         )
 
     async def remove_feed_source(self, url: str) -> bool:
         """Remove a feed source by URL. Returns True if it existed."""
-        return await asyncio.to_thread(self._sync_remove_feed_source, url)
+        return await self._run_sync(self._sync_remove_feed_source, url)
 
     async def record_poll_status(
         self,
@@ -2413,7 +2515,7 @@ class DuckDBStore:
             ``True`` if a matching row was updated, ``False`` if no source
             with *url* exists.
         """
-        return await asyncio.to_thread(
+        return await self._run_sync(
             self._sync_record_poll_status,
             url,
             polled_at=polled_at,
@@ -2443,11 +2545,11 @@ class DuckDBStore:
 
     async def get_metadata(self, key: str) -> str | None:
         """Read a value from the ``_meta`` key-value table."""
-        return await asyncio.to_thread(self._sync_get_metadata, key)
+        return await self._run_sync(self._sync_get_metadata, key)
 
     async def set_metadata(self, key: str, value: str) -> None:
         """Write a value to the ``_meta`` key-value table (upsert)."""
-        await asyncio.to_thread(self._sync_set_metadata, key, value)
+        await self._run_sync(self._sync_set_metadata, key, value)
 
     def _sync_prune_search_log(self, retention_days: int) -> int:
         """Delete ``search_log`` rows older than *retention_days*.
@@ -2480,7 +2582,7 @@ class DuckDBStore:
 
     async def prune_search_log(self, retention_days: int) -> int:
         """Delete ``search_log`` rows older than *retention_days* (async wrapper)."""
-        return await asyncio.to_thread(self._sync_prune_search_log, retention_days)
+        return await self._run_sync(self._sync_prune_search_log, retention_days)
 
     # ------------------------------------------------------------------
     # Tag vocabulary
@@ -2517,7 +2619,7 @@ class DuckDBStore:
         Returns:
             Dict mapping each matching tag string to its occurrence count.
         """
-        return await asyncio.to_thread(self._sync_get_tag_vocabulary, prefix)
+        return await self._run_sync(self._sync_get_tag_vocabulary, prefix)
 
     # ------------------------------------------------------------------
     # Entry relations
@@ -2586,7 +2688,7 @@ class DuckDBStore:
             ValueError: If either ``from_id`` or ``to_id`` does not exist in
                 the store.
         """
-        return await asyncio.to_thread(self._sync_add_relation, from_id, to_id, relation_type)
+        return await self._run_sync(self._sync_add_relation, from_id, to_id, relation_type)
 
     def _sync_apply_correction(
         self,
@@ -2684,7 +2786,7 @@ class DuckDBStore:
 
         See :meth:`_sync_apply_correction` for details.
         """
-        return await asyncio.to_thread(self._sync_apply_correction, new_entry, wrong_entry_id)
+        return await self._run_sync(self._sync_apply_correction, new_entry, wrong_entry_id)
 
     def _sync_get_related(
         self,
@@ -2751,7 +2853,7 @@ class DuckDBStore:
             List of dicts with keys: ``id``, ``from_id``, ``to_id``,
             ``relation_type``, ``created_at`` (ISO 8601 str).
         """
-        return await asyncio.to_thread(self._sync_get_related, entry_id, direction, relation_type)
+        return await self._run_sync(self._sync_get_related, entry_id, direction, relation_type)
 
     def _sync_remove_relation(self, relation_id: str) -> bool:
         """Synchronous implementation of remove_relation(); called via asyncio.to_thread."""
@@ -2774,4 +2876,4 @@ class DuckDBStore:
         Returns:
             ``True`` if the row existed and was deleted, ``False`` otherwise.
         """
-        return await asyncio.to_thread(self._sync_remove_relation, relation_id)
+        return await self._run_sync(self._sync_remove_relation, relation_id)

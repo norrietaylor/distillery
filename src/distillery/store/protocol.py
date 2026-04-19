@@ -47,6 +47,28 @@ class DistilleryStore(Protocol):
         result = await store.get(entry_id)
     """
 
+    async def rollback(self) -> None:
+        """Roll back any aborted transaction on the shared connection.
+
+        Safe to call at any time.  Intended for MCP tool handlers that
+        touch the underlying connection directly (e.g. the per-request
+        embedding-budget counter) so they can clear an aborted-transaction
+        state before subsequent requests hit the same connection.  See
+        issue #363.
+        """
+        ...
+
+    async def probe_readiness(self) -> tuple[bool, str | None]:
+        """Return ``(True, None)`` when the store can answer a trivial query.
+
+        Returns ``(False, message)`` when the underlying database is
+        present but unqueryable (e.g. partial WAL replay, half-applied
+        migration, corrupt segment) so health probes can surface the
+        durable failure instead of silently falling back to null in the
+        ``distillery_status`` payload.  See issue #363 follow-up.
+        """
+        ...
+
     async def store(self, entry: Entry) -> str:
         """Persist a new entry and return its ID.
 
