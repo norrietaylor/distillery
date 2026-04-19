@@ -315,6 +315,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         verification: str | None = None,
         expires_at: str | None = _UNSET,
         output_mode: str | None = None,
+        include_conflict_prompt: bool = False,
     ) -> list[types.TextContent]:
         """Store a new knowledge entry and return its ID with dedup/conflict information.
 
@@ -340,8 +341,15 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
           - expires_at (str, optional): ISO 8601 datetime; entries past expiry appear in stale results.
           - output_mode (str, optional, default="full"): Response verbosity.
             Valid: [full, summary]. Use "summary" for bulk imports to skip dedup/conflict checks.
+          - include_conflict_prompt (bool, optional, default=False): When true,
+            each conflict candidate carries the ~1–2 KB ``conflict_prompt``
+            LLM template required to round-trip through
+            ``distillery_find_similar(conflict_check=true)``. Defaults to
+            false to keep store responses small (issue #348).
 
-        RETURNS (success): { entry_id: str, warnings?: list, conflict_candidates?: list }
+        RETURNS (success): { entry_id: str, persisted: bool, dedup_action: str,
+            conflicts?: list[{entry_id, content_preview, similarity_score,
+            conflict_prompt?}], warnings?: list }
         RETURNS (error): { error: true, code: "INVALID_PARAMS" | "BUDGET_EXCEEDED" | "INTERNAL", message: "..." }
 
         RELATED: distillery_find_similar (for pre-store dedup checks),
@@ -353,6 +361,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             content=content,
             entry_type=entry_type,
             author=author,
+            include_conflict_prompt=include_conflict_prompt,
             **_omit_none(
                 project=project,
                 tags=tags,
