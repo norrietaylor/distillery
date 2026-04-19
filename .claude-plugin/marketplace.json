@@ -13,7 +13,7 @@
       "name": "distillery",
       "source": "./",
       "description": "Knowledge base skills — capture, search, and synthesize project knowledge",
-      "version": "0.3.3",
+      "version": "0.4.0",
       "keywords": ["knowledge-base", "second-brain", "mcp", "embeddings"],
       "category": "knowledge-management"
     }
