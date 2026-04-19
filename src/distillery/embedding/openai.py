@@ -80,6 +80,14 @@ class OpenAIEmbeddingProvider:
     def embed(self, text: str) -> list[float]:
         """Embed a single text string.
 
+        Delegates to :meth:`embed_batch` so single-item calls go through
+        the same retry + structured-error contract as batch calls.
+        Previously ``embed`` called ``_request`` directly, which bypassed
+        the retry loop and surfaced rate-limit / server errors as bare
+        ``RuntimeError`` / ``_RateLimitError`` — MCP callers depend on
+        ``EmbeddingProviderError`` to render ``retry_after`` correctly
+        (see #351).
+
         Args:
             text: The text to embed.
 
@@ -87,9 +95,12 @@ class OpenAIEmbeddingProvider:
             A list of floats representing the embedding vector.
 
         Raises:
-            RuntimeError: If the API request fails.
+            EmbeddingProviderError: After exhausted retries against
+                upstream 429 / 5xx responses, carrying
+                ``provider`` / ``status_code`` / ``retry_after``.
+            RuntimeError: On malformed API responses.
         """
-        results = self._request([text])
+        results = self.embed_batch([text])
         return results[0]
 
     def embed_batch(self, texts: list[str]) -> list[list[float]]:

@@ -700,6 +700,32 @@ class TestOpenAIRateLimitRetry:
         assert excinfo.value.retry_after == 7.0
         assert excinfo.value.is_rate_limited is True
 
+    def test_single_embed_exhausts_to_embedding_provider_error(self) -> None:
+        """OpenAI.embed() routes through embed_batch() and honours the
+        structured-error contract on retry exhaustion.
+
+        Regression guard for #351 follow-up: before that fix, ``embed``
+        called ``_request`` directly, bypassed the retry loop, and surfaced
+        rate-limit failures as a bare ``RuntimeError`` / internal
+        ``_RateLimitError`` — which made single-entry MCP flows
+        (``distillery_store``, ``distillery_update``, ``distillery_correct``,
+        search/find_similar) fall through to ``INTERNAL`` instead of
+        ``UPSTREAM_RATE_LIMITED`` with ``retry_after``.
+        """
+        rate_limit_response = _mock_httpx_response(429, {"error": "rate limit"})
+        rate_limit_response.headers = {"Retry-After": "4"}
+        provider = OpenAIEmbeddingProvider(api_key="sk-test", dimensions=4)
+
+        with patch.object(provider, "_client") as mock_client, patch("time.sleep"):
+            mock_client.post.return_value = rate_limit_response
+            with pytest.raises(EmbeddingProviderError, match="retries") as excinfo:
+                provider.embed("single")
+
+        assert excinfo.value.provider == "openai"
+        assert excinfo.value.status_code == 429
+        assert excinfo.value.retry_after == 4.0
+        assert excinfo.value.is_rate_limited is True
+
     def test_exponential_backoff_called(self) -> None:
         """Sleep is called with exponential backoff values on retry."""
         vector = [0.1, 0.2, 0.3, 0.4]
