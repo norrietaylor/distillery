@@ -8,6 +8,14 @@ canonical_url: https://norrietaylor.github.io/distillery/blog/building-a-second-
 
 # Building a Second Brain for Claude Code
 
+!!! note "Updated for Distillery 0.4.0"
+    The tool counts, skill list, and examples in this post were refreshed
+    for the Distillery 0.4.0 release (April 2026) — the MCP surface
+    consolidation that landed in `staging/api-hardening` folded eight
+    tools into broader handlers, moved feed polling/rescoring to webhook
+    endpoints, and lifted the skill total to fourteen. Earlier drafts
+    reflecting the pre-0.4 surface have been overwritten.
+
 Every team I've worked on has the same problem. Someone makes a decision — a good one, usually — with a lot of context behind it. Why we chose DuckDB over Postgres. Why we inverted that dependency. Why the authentication flow goes through a middleware layer instead of a decorator. And then, six months later, someone asks "why does this work this way?" and the answer is... gone. Buried in Slack. Lost in a PR description nobody remembers. Living only in the head of the person who wrote it, if they're still on the team.
 
 In the age of agentic development this fundamental problem has only been exacerbated. The time it takes to code up an epic is no longer the long pole in the SDLC tent. Knowledge is being generated at exponential rates and no one seems to be able to keep up.
