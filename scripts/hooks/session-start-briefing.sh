@@ -157,8 +157,8 @@ RECENT_RAW="$(call_tool "distillery_list" "$RECENT_PARAMS" 2>/dev/null || true)"
 
 # ── Fetch stale entries ───────────────────────────────────────────────────────
 STALE_RAW=""
-STALE_PARAMS="$(jq -n --argjson days 30 --argjson limit 3 '{days:$days,limit:$limit}')"
-STALE_RAW="$(call_tool "distillery_stale" "$STALE_PARAMS" 2>/dev/null || true)"
+STALE_PARAMS="$(jq -n --arg project "$PROJECT" --argjson stale_days 30 --argjson limit 3 '{project:$project,stale_days:$stale_days,limit:$limit}')"
+STALE_RAW="$(call_tool "distillery_list" "$STALE_PARAMS" 2>/dev/null || true)"
 
 # ── Parse and format output ───────────────────────────────────────────────────
 # Extract content snippets using robust JSON parsing. FastMCP may respond with
