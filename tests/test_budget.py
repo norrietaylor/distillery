@@ -128,11 +128,28 @@ class TestRecordAndCheck:
 @pytest.mark.unit
 class TestRateLimitConfig:
     def test_defaults(self) -> None:
-        """Default values match documented defaults (500/900/80)."""
+        """Default values are 0 (unlimited) / 900 / 80.
+
+        As of issue #351 ``embedding_budget_daily`` defaults to ``0`` so
+        the provider's own rate limiter is the source of truth. Users can
+        opt into a hard cost ceiling by setting a positive integer.
+        """
         cfg = RateLimitConfig()
-        assert cfg.embedding_budget_daily == 500
+        assert cfg.embedding_budget_daily == 0
         assert cfg.max_db_size_mb == 900
         assert cfg.warn_db_size_pct == 80
+
+    def test_load_config_without_rate_limit_section_defaults_to_unlimited(
+        self, tmp_path: object
+    ) -> None:
+        """Omitting ``rate_limit`` from YAML yields unlimited embedding budget."""
+        import pathlib
+
+        p = pathlib.Path(str(tmp_path)) / "empty.yaml"
+        # Provide the minimum valid config: an empty mapping.
+        p.write_text("{}\n")
+        config = load_config(str(p))
+        assert config.rate_limit.embedding_budget_daily == 0
 
     def test_validate_negative_budget_raises(self) -> None:
         """Negative embedding_budget_daily is rejected by validation."""

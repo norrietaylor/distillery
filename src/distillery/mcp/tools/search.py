@@ -15,13 +15,14 @@ from typing import Any
 from mcp import types
 
 from distillery.config import DistilleryConfig
+from distillery.embedding.errors import EmbeddingProviderError
 from distillery.mcp.tools._common import (
     error_response,
     success_response,
     validate_required,
     validate_type,
 )
-from distillery.mcp.tools._errors import validate_limit
+from distillery.mcp.tools._errors import upstream_error_response, validate_limit
 from distillery.mcp.tools.crud import (
     _apply_default_status_filter,
     _build_filters_from_arguments,
@@ -88,6 +89,17 @@ async def _handle_search(
 
     try:
         search_results = await store.search(query=query, filters=filters, limit=limit)
+    except EmbeddingProviderError as exc:
+        logger.warning(
+            "Upstream embedding provider failed during search "
+            "(provider=%s endpoint=%s status=%s retry_after=%s): %s",
+            exc.provider,
+            exc.endpoint,
+            exc.status_code,
+            exc.retry_after,
+            exc,
+        )
+        return upstream_error_response(exc)
     except Exception:  # noqa: BLE001
         logger.exception("Error in distillery_search")
         return error_response("INTERNAL", "Search failed")
@@ -194,6 +206,17 @@ async def _handle_find_similar(
 
     try:
         search_results = await store.find_similar(content=content, threshold=threshold, limit=limit)
+    except EmbeddingProviderError as exc:
+        logger.warning(
+            "Upstream embedding provider failed during find_similar "
+            "(provider=%s endpoint=%s status=%s retry_after=%s): %s",
+            exc.provider,
+            exc.endpoint,
+            exc.status_code,
+            exc.retry_after,
+            exc,
+        )
+        return upstream_error_response(exc)
     except Exception:  # noqa: BLE001
         logger.exception("Error in distillery_find_similar")
         return error_response("INTERNAL", "find_similar failed")

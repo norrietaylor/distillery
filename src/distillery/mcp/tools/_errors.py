@@ -11,7 +11,12 @@ to produce structured JSON error responses.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from mcp import types
+
+    from distillery.embedding.errors import EmbeddingProviderError
 
 
 class ToolErrorCode(StrEnum):
@@ -40,6 +45,14 @@ class ToolErrorCode(StrEnum):
         BUDGET_EXCEEDED: A rate-limit or budget has been exhausted (e.g.,
             daily embedding budget, database size limit).
         RATE_LIMITED: The request was rejected due to rate limiting.
+        UPSTREAM_RATE_LIMITED: An upstream dependency (e.g. embedding
+            provider) rate-limited the request after internal retries were
+            exhausted.  Response ``details`` includes ``provider``,
+            ``status_code``, and ``retry_after`` (seconds) when available
+            so clients can back off appropriately.
+        UPSTREAM_ERROR: An upstream dependency returned an error (5xx,
+            transport failure) after internal retries were exhausted.
+            Response ``details`` mirrors ``UPSTREAM_RATE_LIMITED``.
     """
 
     INVALID_PARAMS = "INVALID_PARAMS"
@@ -49,6 +62,8 @@ class ToolErrorCode(StrEnum):
     FORBIDDEN = "FORBIDDEN"
     BUDGET_EXCEEDED = "BUDGET_EXCEEDED"
     RATE_LIMITED = "RATE_LIMITED"
+    UPSTREAM_RATE_LIMITED = "UPSTREAM_RATE_LIMITED"
+    UPSTREAM_ERROR = "UPSTREAM_ERROR"
 
 
 def tool_error(code: ToolErrorCode | str, message: str) -> tuple[ToolErrorCode | str, str]:
@@ -125,3 +140,45 @@ def validate_limit(
         )
 
     return limit
+
+
+def upstream_error_response(exc: EmbeddingProviderError) -> list[types.TextContent]:
+    """Build a structured MCP error response from an :class:`EmbeddingProviderError`.
+
+    Chooses between :class:`ToolErrorCode.UPSTREAM_RATE_LIMITED` (HTTP
+    429) and :class:`ToolErrorCode.UPSTREAM_ERROR` (everything else) and
+    populates ``details`` with ``provider``, ``status_code``, and
+    ``retry_after`` so clients can react appropriately.
+
+    Args:
+        exc: The :class:`EmbeddingProviderError` raised by the provider
+            after retries were exhausted.
+
+    Returns:
+        A single-element list of :class:`~mcp.types.TextContent` suitable
+        for returning from an MCP tool handler.
+    """
+    from distillery.mcp.tools._common import error_response
+
+    code = (
+        ToolErrorCode.UPSTREAM_RATE_LIMITED
+        if exc.is_rate_limited
+        else ToolErrorCode.UPSTREAM_ERROR
+    )
+    details: dict[str, Any] = {"provider": exc.provider}
+    if exc.status_code is not None:
+        details["status_code"] = exc.status_code
+    if exc.retry_after is not None:
+        details["retry_after"] = exc.retry_after
+    if exc.endpoint is not None:
+        details["endpoint"] = exc.endpoint
+
+    message = (
+        f"Embedding provider {exc.provider!r} rate limit reached after retries."
+        if exc.is_rate_limited
+        else f"Embedding provider {exc.provider!r} failed after retries."
+    )
+    if exc.retry_after is not None:
+        message = f"{message} Retry after {exc.retry_after:g} seconds."
+
+    return error_response(code, message, details=details)

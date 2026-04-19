@@ -224,8 +224,16 @@ class RateLimitConfig:
     """Rate limiting and resource budget configuration.
 
     Attributes:
-        embedding_budget_daily: Maximum embedding API calls per calendar day.
-            Set to ``0`` to disable the budget (unlimited).  Default ``500``.
+        embedding_budget_daily: Optional opt-in daily ceiling on embedding
+            API calls per calendar day, intended as a cost ceiling rather
+            than a rate limiter.  Defaults to ``0`` (unlimited): we rely on
+            the embedding provider's own rate limiter (Jina, OpenAI) as the
+            source of truth, which already returns HTTP 429 with
+            ``Retry-After`` guidance.  Set to a positive integer to enforce
+            a hard cap that raises ``EmbeddingBudgetError`` when exceeded.
+            Historically defaulted to ``500`` which was far stricter than
+            any upstream free-tier limit and routinely blocked normal
+            ``/radar`` and backfill workloads.
         max_db_size_mb: Maximum database file size in megabytes before new
             writes are rejected.  Set to ``0`` to disable.  Default ``900``
             (leaves ~100 MB headroom on a 1 GB Fly volume).
@@ -233,7 +241,7 @@ class RateLimitConfig:
             surfaced in ``distillery_status``.  Default ``80``.
     """
 
-    embedding_budget_daily: int = 500
+    embedding_budget_daily: int = 0
     max_db_size_mb: int = 900
     warn_db_size_pct: int = 80
     search_logging_enabled: bool = True
@@ -752,7 +760,7 @@ def _parse_rate_limit(raw: dict[str, Any]) -> RateLimitConfig:
 
     return RateLimitConfig(
         embedding_budget_daily=_parse_strict_int(
-            raw.get("embedding_budget_daily", 500),
+            raw.get("embedding_budget_daily", 0),
             "rate_limit.embedding_budget_daily",
         ),
         max_db_size_mb=_parse_strict_int(
