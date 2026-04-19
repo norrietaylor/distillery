@@ -472,6 +472,15 @@ class TestParseRetryAfter:
     def test_returns_none_for_garbage(self) -> None:
         assert parse_retry_after("not-a-number") is None
 
+    @pytest.mark.parametrize(
+        "header_value",
+        ["nan", "NaN", "inf", "+inf", "-inf", "Infinity", "-Infinity"],
+    )
+    def test_returns_none_for_non_finite(self, header_value: str) -> None:
+        """NaN / +Inf / -Inf would propagate as an unbounded sleep or
+        crash in the retry loop.  ``parse_retry_after`` must reject them."""
+        assert parse_retry_after(header_value) is None
+
 
 # ---------------------------------------------------------------------------
 # EmbeddingProvider protocol compliance: OpenAIEmbeddingProvider

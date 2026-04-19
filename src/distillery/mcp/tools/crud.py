@@ -363,8 +363,9 @@ async def _handle_store(
             # ``store.store`` call does.
             logger.warning(
                 "Upstream embedding provider failed during store dedup precheck "
-                "(provider=%s status=%s retry_after=%s): %s",
+                "(provider=%s endpoint=%s status=%s retry_after=%s): %s",
                 exc.provider,
+                exc.endpoint,
                 exc.status_code,
                 exc.retry_after,
                 exc,
@@ -402,8 +403,9 @@ async def _handle_store(
     except EmbeddingProviderError as exc:
         logger.warning(
             "Upstream embedding provider failed during store "
-            "(provider=%s status=%s retry_after=%s): %s",
+            "(provider=%s endpoint=%s status=%s retry_after=%s): %s",
             exc.provider,
+            exc.endpoint,
             exc.status_code,
             exc.retry_after,
             exc,
@@ -681,8 +683,9 @@ async def _handle_store_batch(
     except EmbeddingProviderError as exc:
         logger.warning(
             "Upstream embedding provider failed during store_batch "
-            "(provider=%s status=%s retry_after=%s): %s",
+            "(provider=%s endpoint=%s status=%s retry_after=%s): %s",
             exc.provider,
+            exc.endpoint,
             exc.status_code,
             exc.retry_after,
             exc,
@@ -912,8 +915,9 @@ async def _handle_update(
     except EmbeddingProviderError as exc:
         logger.warning(
             "Upstream embedding provider failed during update "
-            "(provider=%s status=%s retry_after=%s): %s",
+            "(provider=%s endpoint=%s status=%s retry_after=%s): %s",
             exc.provider,
+            exc.endpoint,
             exc.status_code,
             exc.retry_after,
             exc,
@@ -1543,8 +1547,9 @@ async def _handle_correct(
     except EmbeddingProviderError as exc:
         logger.warning(
             "Upstream embedding provider failed during apply_correction "
-            "(provider=%s status=%s retry_after=%s): %s",
+            "(provider=%s endpoint=%s status=%s retry_after=%s): %s",
             exc.provider,
+            exc.endpoint,
             exc.status_code,
             exc.retry_after,
             exc,

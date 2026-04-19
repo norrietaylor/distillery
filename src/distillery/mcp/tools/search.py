@@ -92,8 +92,9 @@ async def _handle_search(
     except EmbeddingProviderError as exc:
         logger.warning(
             "Upstream embedding provider failed during search "
-            "(provider=%s status=%s retry_after=%s): %s",
+            "(provider=%s endpoint=%s status=%s retry_after=%s): %s",
             exc.provider,
+            exc.endpoint,
             exc.status_code,
             exc.retry_after,
             exc,
@@ -208,8 +209,9 @@ async def _handle_find_similar(
     except EmbeddingProviderError as exc:
         logger.warning(
             "Upstream embedding provider failed during find_similar "
-            "(provider=%s status=%s retry_after=%s): %s",
+            "(provider=%s endpoint=%s status=%s retry_after=%s): %s",
             exc.provider,
+            exc.endpoint,
             exc.status_code,
             exc.retry_after,
             exc,
