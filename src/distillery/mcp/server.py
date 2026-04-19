@@ -276,6 +276,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         dedup_threshold: float | None = None,
         dedup_limit: int | None = None,
         verification: str | None = None,
+        output_mode: str | None = None,
         expires_at: str | None = _UNSET,
     ) -> list[types.TextContent]:
         """Store a new knowledge entry and return its ID with dedup/conflict information.
@@ -285,6 +286,9 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         documentation, or external. session_id: opaque session identifier for grouping.
         dedup_threshold (0–1) controls near-duplicate warnings.
         verification: unverified, testing, or verified (default: unverified).
+        output_mode: "full" (default) runs dedup and conflict checks and returns any
+        warnings or conflict candidates; "summary" skips both checks and returns only
+        the entry_id, suitable for bulk/trusted sources that do their own dedup.
         expires_at accepts ISO 8601 datetime; entries past expiry appear in stale results.
         """
         c = _lc(ctx)
@@ -302,6 +306,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 dedup_threshold=dedup_threshold,
                 dedup_limit=dedup_limit,
                 verification=verification,
+                output_mode=output_mode,
             ),
         )
         if expires_at is not _UNSET:

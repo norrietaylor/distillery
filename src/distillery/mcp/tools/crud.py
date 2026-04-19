@@ -50,6 +50,15 @@ def _normalize_db_path(raw: str) -> str:
 # CRUD-related constants
 # ---------------------------------------------------------------------------
 
+# Valid output_mode values for distillery_store.
+#
+# "full" (default) runs the dedup and conflict checks after persisting the
+# entry (three embeddings per call).  "summary" skips both checks and
+# returns just the ``entry_id`` (one embedding per call), for callers that
+# have already deduplicated their input — for example ``/gh-sync``, which
+# does its own ``external_id`` dedup map and does not need conflict prompts.
+_VALID_STORE_OUTPUT_MODES = frozenset({"full", "summary"})
+
 # Valid entry_type values (mirrors EntryType enum).
 _VALID_ENTRY_TYPES = {
     "session",
@@ -128,15 +137,17 @@ async def _handle_store(
     Create and persist a new Entry from the provided arguments, run deduplication and a non-fatal conflict check, and return the stored entry id along with any warnings or conflict candidates.
 
     Parameters:
-        arguments (dict): MCP tool arguments. Required keys: `content`, `entry_type`, `author`. Optional keys: `project`, `tags` (list), `metadata` (dict), `dedup_threshold` (number), `dedup_limit` (int).
+        arguments (dict): MCP tool arguments. Required keys: `content`, `entry_type`, `author`. Optional keys: `project`, `tags` (list), `metadata` (dict), `dedup_threshold` (number), `dedup_limit` (int), `output_mode` (``"full"`` or ``"summary"``).
         cfg (DistilleryConfig | None): Optional configuration used to derive classification/conflict thresholds; when omitted a default conflict threshold of 0.60 is used.
 
     Returns:
-        list[types.TextContent]: MCP content list containing a JSON-serializable object with at least `entry_id`. May also include:
+        list[types.TextContent]: MCP content list containing a JSON-serializable object with at least `entry_id`. In the default ``output_mode="full"`` it may also include:
           - `warnings`: list of similar-entry summaries (id, score, content_preview) when near-duplicates were found,
           - `warning_message`: human-readable summary of warnings,
           - `conflicts`: list of conflict candidate objects (entry_id, content_preview, similarity_score, conflict_reasoning),
           - `conflict_message`: guidance message when conflict candidates are returned.
+
+        With ``output_mode="summary"`` the dedup and conflict checks are skipped and only ``entry_id`` is returned.
     """
     from distillery.mcp.budget import EmbeddingBudgetError, record_and_check
     from distillery.models import Entry, EntrySource, EntryType, VerificationStatus
@@ -165,6 +176,17 @@ async def _handle_store(
     session_id_err = validate_type(arguments, "session_id", str, "string")
     if session_id_err:
         return error_response("INVALID_PARAMS", session_id_err)
+
+    output_mode_err = validate_type(arguments, "output_mode", str, "string")
+    if output_mode_err:
+        return error_response("INVALID_PARAMS", output_mode_err)
+    output_mode = arguments.get("output_mode") or "full"
+    if output_mode not in _VALID_STORE_OUTPUT_MODES:
+        return error_response(
+            "INVALID_PARAMS",
+            "Field 'output_mode' must be one of: " + ", ".join(sorted(_VALID_STORE_OUTPUT_MODES)),
+        )
+    skip_analysis = output_mode == "summary"
 
     from distillery.config import DefaultsConfig
 
@@ -215,10 +237,15 @@ async def _handle_store(
             except OSError:
                 pass  # can't stat, skip check
 
-    # --- embedding budget check (store + dedup + conflict = 3 embeds) ------
+    # --- embedding budget check --------------------------------------------
+    # Full mode: store + dedup + conflict = 3 embeds.
+    # Summary mode: store only = 1 embed (dedup and conflict are skipped).
     if cfg is not None:
+        embed_count = 1 if skip_analysis else 3
         try:
-            record_and_check(store.connection, cfg.rate_limit.embedding_budget_daily, count=3)
+            record_and_check(
+                store.connection, cfg.rate_limit.embedding_budget_daily, count=embed_count
+            )
         except EmbeddingBudgetError as exc:
             return error_response("BUDGET_EXCEEDED", str(exc))
 
@@ -278,6 +305,10 @@ async def _handle_store(
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error storing entry")
         return error_response("STORE_ERROR", f"Failed to store entry: {exc}")
+
+    # Summary mode: skip dedup + conflict analysis and return just the id.
+    if skip_analysis:
+        return success_response({"entry_id": entry_id})
 
     # --- deduplication check ------------------------------------------------
     warnings: list[dict[str, Any]] = []
@@ -923,6 +954,7 @@ __all__ = [
     "_VALID_SOURCES",
     "_IMMUTABLE_FIELDS",
     "_VALID_OUTPUT_MODES",
+    "_VALID_STORE_OUTPUT_MODES",
     "_entry_to_summary_dict",
     "_entry_to_id_dict",
     "_is_remote_db_path",
