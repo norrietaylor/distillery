@@ -120,7 +120,7 @@ Or use `python -m` (if installed from source):
 Restart Claude Code and verify:
 
 ```text
-distillery_metrics(scope="summary")
+distillery_status()
 ```
 
 ## Private Repository Polling

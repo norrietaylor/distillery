@@ -26,7 +26,7 @@ This verifies MCP connectivity, detects your transport, and configures auto-poll
     The plugin defaults to the hosted instance at `distillery-mcp.fly.dev`, which is a **demo server** for evaluation only. Do not store sensitive or confidential data. For production use, [deploy your own instance](../team/deployment.md) or use [local setup](local-setup.md).
 
 !!! note "Claude Desktop"
-    The Claude Desktop app does not support Claude Code skills or the plugin install system. Desktop users can connect the MCP server directly (all 20 tools are available) but slash commands like `/distill` and `/recall` are CLI-only features.
+    The Claude Desktop app does not support Claude Code skills or the plugin install system. Desktop users can connect the MCP server directly (all 16 tools are available) but slash commands like `/distill` and `/recall` are CLI-only features.
 
 ## Manual Install (Copy Skills)
 
@@ -152,10 +152,10 @@ You should see your feed sources and a note about the active remote trigger.
 
 ## Verifying the Setup
 
-After saving the settings file, restart Claude Code or reload MCP servers, then check connectivity by calling the `distillery_metrics` MCP tool:
+After saving the settings file, restart Claude Code or reload MCP servers, then check connectivity by calling the `distillery_status` MCP tool:
 
 ```text
-distillery_metrics(scope="summary")
+distillery_status()
 ```
 
 You should see a JSON response with `"status": "ok"`.

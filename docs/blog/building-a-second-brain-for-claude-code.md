@@ -46,7 +46,7 @@ This is the core insight Distillery is built on: capture-at-source, inside the a
 
 ## What Distillery Does
 
-Distillery is a knowledge base system for Claude Code. It stores, searches, and classifies knowledge entries using DuckDB with vector similarity search. It includes ambient intelligence that monitors GitHub repos and RSS feeds for relevant developments. It exposes 18 MCP tools and 10 Claude Code slash commands. Install it with `pip install distillery-mcp`.
+Distillery is a knowledge base system for Claude Code. It stores, searches, and classifies knowledge entries using DuckDB with vector similarity search. It includes ambient intelligence that monitors GitHub repos and RSS feeds for relevant developments. It exposes 16 MCP tools and 14 Claude Code slash commands. Install it with `pip install distillery-mcp`.
 
 Here are the commands:
 
@@ -111,7 +111,7 @@ The architecture is four layers:
 ```
 Skills (skills/)                   ← slash commands users invoke
     ↓
-MCP Server (src/distillery/mcp/)   ← 18 tools, stdio or HTTP transport
+MCP Server (src/distillery/mcp/)   ← 16 tools, stdio or HTTP transport
     ↓
 Core Protocols (store/, embedding/) ← typed Protocol interfaces
     ↓

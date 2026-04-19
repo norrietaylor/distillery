@@ -304,4 +304,4 @@ REST endpoints mounted at `/api/*` alongside the MCP server in HTTP mode. Enable
 
 **Hardening:** Per-endpoint `asyncio.Lock` serializes cooldown checks. `BodySizeLimitMiddleware` + `RateLimitMiddleware` (10 req/min, 100 req/hour). Cooldown timestamps persisted to DuckDB via `get_metadata`/`set_metadata`.
 
-**Audit:** Each invocation stores a `webhook_audit:{endpoint}` metadata record with timestamp, status, and response data. All tool invocations and login events are recorded in the `audit_log` table, queryable via `distillery_metrics(scope="audit")` or `store.query_audit_log()`.
+**Audit:** Each invocation stores a `webhook_audit:{endpoint}` metadata record with timestamp, status, and response data. All tool invocations and login events are recorded in the `audit_log` table, queryable via `distillery_list(output_mode="audit")` or `store.query_audit_log()`.

@@ -224,20 +224,27 @@ DuckDB's on-disk format is not guaranteed stable across minor versions. Distille
 
 ## Audit Log
 
-All authenticated tool invocations and login events are recorded in the `audit_log` table. Operators can query this data via the metrics tool:
+All authenticated tool invocations and login events are recorded in the `audit_log` table. As of the API-hardening release there is no public MCP tool that exposes this data — operators query it directly from Python:
 
-```text
-distillery_metrics(scope="audit")
+```python
+from distillery.config import load_config
+from distillery.store.duckdb import DuckDBStore
+
+store = DuckDBStore(load_config().storage.database_path)
+rows = await store.query_audit_log(
+    filters={"date_from": "2026-04-01T00:00:00Z"},
+    limit=50,
+)
 ```
 
-Returns four sections:
+The previous `distillery_metrics(scope="audit")` MCP tool was removed in the consolidation; if you need MCP-surfaced audit access, file an issue.
 
-- **recent_logins** — last 50 login events (successful, failed, org-denied)
-- **login_summary** — aggregate counts: total logins, unique users, failed attempts, org denials
-- **active_users** — unique users with last-seen timestamp and operation count
-- **recent_operations** — last 50 non-login tool invocations
+`query_audit_log` accepts a `filters` dict with optional `user` (exact `user_id` match), `operation` (exact tool name), `date_from`, and `date_to` keys. Each row contains `user_id`, `tool`, `entry_id`, `action`, `outcome`, and `timestamp`. From these rows operators can reconstruct the historical four-section view:
 
-Optional filters: `date_from` (ISO 8601 string, narrows all sections) and `user` (narrows operations and active users only — login sections always show all users for security visibility).
+- **recent_logins** — rows where `tool == "login"` (successful, failed, org-denied)
+- **login_summary** — aggregate counts over login rows
+- **active_users** — distinct `user_id` values with their max `timestamp`
+- **recent_operations** — rows where `tool != "login"`
 
 ## Scaling
 

@@ -8,7 +8,7 @@
 - [x] DuckDB backend with VSS extension and HNSW index (cosine similarity)
 - [x] Configurable embedding providers (Jina v3 default, OpenAI adapter)
 - [x] Embedding model lock via `_meta` table — prevents mixed-model corruption
-- [x] MCP server with 18 tools over stdio and streamable-HTTP
+- [x] MCP server with 16 tools over stdio and streamable-HTTP (consolidated from 20 in `staging/api-hardening`)
 - [x] `distillery.yaml` config system with validation
 
 ### Core Skills
@@ -25,16 +25,16 @@
 - [x] `/classify` skill — classify by ID, batch inbox, review queue triage
 
 ### Quality & Observability
-- [x] Implicit retrieval feedback + quality metrics (now via `distillery_metrics(scope="search_quality")`)
-- [x] Stale entry detection — `distillery_stale` tool
-- [x] Conflict detection (now via `distillery_find_similar(conflict_check=true)`)
-- [x] Usage metrics dashboard — `distillery_metrics` tool
+- [x] Implicit retrieval feedback + quality metrics (folded into `distillery_status`)
+- [x] Stale entry detection — `distillery_list(stale_days=…)` (formerly the `distillery_stale` tool)
+- [x] Conflict detection — `distillery_find_similar(conflict_check=true)`
+- [x] Usage metrics dashboard — `distillery_status` tool (replaces former `distillery_metrics`)
 
 ### Infrastructure
 - [x] FastMCP 2.x/3.x with `@server.tool` decorators
-- [x] Hierarchical tag namespace with validation and `distillery_tag_tree` tool
+- [x] Hierarchical tag namespace with validation; tag inventory via `distillery_list(group_by="tag")` (formerly `distillery_tag_tree`)
 - [x] 12 entry types including `person`, `project`, `digest`, `github`, `feed`
-- [x] `distillery_type_schemas` MCP tool for schema discovery
+- [x] Entry-type schema discovery via MCP resource `distillery://schemas/entry-types` (replaces `distillery_type_schemas`)
 
 ### Team Access
 - [x] HTTP transport — `distillery-mcp --transport http`
@@ -86,26 +86,25 @@
 - [x] `/setup` skill — MCP connectivity wizard, auto-poll configuration, session hook setup
 - [x] uvx-first setup — `uvx distillery-mcp` as recommended first-time path
 
+### API Hardening (`staging/api-hardening` → released)
+- [x] API consolidation: 20 → 16 tools. Removed `distillery_aggregate`, `distillery_stale`, `distillery_tag_tree`, `distillery_metrics`, `distillery_interests`, `distillery_type_schemas`, `distillery_poll`, `distillery_rescore`. Functionality folded into `distillery_list`, `distillery_status`, `distillery_configure`, REST `/api/maintenance`, and the `distillery://schemas/entry-types` resource.
+- [x] [#244](https://github.com/norrietaylor/distillery/issues/244) — Bulk ingest pipeline: new `distillery_store_batch` tool; `/gh-sync` runs as a server-side background job tracked by `distillery_sync_status`
+- [x] [#245](https://github.com/norrietaylor/distillery/issues/245) — Hardened MCP interface: tool descriptions, structured error codes, schema validation, INVALID_PARAMS suggestions
+- [x] [#232](https://github.com/norrietaylor/distillery/issues/232) — `distillery_store` enum includes `github`
+- [x] [#238](https://github.com/norrietaylor/distillery/issues/238) — `distillery_store` accepts `output_mode="summary"` to skip dedup/conflict checks
+- [x] [#241](https://github.com/norrietaylor/distillery/issues/241) — label→tag sanitiser handles underscored labels
+- [x] [#240](https://github.com/norrietaylor/distillery/issues/240) — `/gh-sync` passes valid `output_mode`
+- [x] [#317](https://github.com/norrietaylor/distillery/issues/317) — `distillery_list` / `distillery_search` exclude archived entries by default
+- [x] [#311](https://github.com/norrietaylor/distillery/issues/311) — `distillery_list` default `output_mode="summary"`
+- [x] [#346](https://github.com/norrietaylor/distillery/issues/346), [#347](https://github.com/norrietaylor/distillery/issues/347), [#349](https://github.com/norrietaylor/distillery/issues/349) — DuckDB WAL recovery and FTS replay hardening
+- [x] [#351](https://github.com/norrietaylor/distillery/issues/351) — Embedding budget default raised to unlimited; provider 429s surface to caller
+
 ---
 
 ## Planned
 
-### P0 — API Hardening
+### P0 — Follow-up
 
-Work targets `staging/api-hardening` branch. Sequenced — foundation fixes unblock bulk ingest.
-
-**Phase A: Foundation fixes**
-
-- [ ] Re-land API consolidation (20→12 tools) and conflict prompt leak fix onto `staging/api-hardening` from `main`
-- [ ] [#232](https://github.com/norrietaylor/distillery/issues/232) — `distillery_store` tool description enum omits `github` entry type
-- [ ] [#238](https://github.com/norrietaylor/distillery/issues/238) — Add `output_mode: "summary"` to skip dedup/conflict checks
-- [ ] [#241](https://github.com/norrietaylor/distillery/issues/241) — label→tag sanitiser fails on underscored labels
-- [ ] [#240](https://github.com/norrietaylor/distillery/issues/240) — `/gh-sync` passes invalid `output_mode="metadata"`
-
-**Phase B: API surface + infrastructure**
-
-- [ ] [#245](https://github.com/norrietaylor/distillery/issues/245) — Harden MCP interface: tool descriptions, error codes, validation, docs
-- [ ] [#244](https://github.com/norrietaylor/distillery/issues/244) — Bulk ingest pipeline (`store_batch`, `watch --sync-history`, gh-sync elimination)
 - [ ] [#112](https://github.com/norrietaylor/distillery/issues/112) — Security Review Follow-Up
 
 ### P0 — Quality & Bugfixing
