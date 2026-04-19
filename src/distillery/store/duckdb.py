@@ -591,9 +591,30 @@ class DuckDBStore:
             return Path(raw)
 
         if scheme == "file":
-            # file:// URI: the path component carries the filesystem
-            # path; unquote %-encoded bytes.
-            return Path(unquote(parsed.path))
+            # file:// URI: combine authority (UNC host) + path.  Two
+            # edge cases matter:
+            #   * file://server/share/path → UNC; re-attach "//server"
+            #     in front of the path so the resulting Path points at
+            #     \\server\share\path on Windows (and stays harmless on
+            #     POSIX, where UNC is not a thing).
+            #   * file:///C:/path → parsed.path is "/C:/path".  Strip
+            #     the leading slash so Path("C:/path") resolves to the
+            #     Windows drive-letter form instead of a relative
+            #     "/C:/..." that no filesystem understands.
+            path_part = unquote(parsed.path)
+            netloc = parsed.netloc
+            if netloc:
+                return Path("//" + netloc + path_part)
+            # Strip the synthetic leading slash in front of a Windows
+            # drive letter (e.g. "/C:/foo" → "C:/foo").
+            if (
+                len(path_part) >= 3
+                and path_part[0] == "/"
+                and path_part[1].isalpha()
+                and path_part[2] == ":"
+            ):
+                path_part = path_part[1:]
+            return Path(path_part)
 
         if scheme == "":
             return Path(raw)
