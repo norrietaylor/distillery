@@ -752,9 +752,13 @@ async def _handle_store_batch(
                 metadata=metadata,
                 created_by=created_by,
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
+            # Log the full traceback server-side so operators can diagnose,
+            # but return a generic client-facing message — raw exception text
+            # may include unsanitised payload fragments or internal details.
+            logger.exception("distillery_store_batch: Entry() rejected item %d", idx)
             return error_response(
-                "INVALID_PARAMS", f"entries[{idx}]: failed to construct entry: {exc}"
+                "INVALID_PARAMS", f"entries[{idx}]: failed to construct entry"
             )
         built.append(entry)
 
@@ -1167,7 +1171,9 @@ async def _handle_list(
     stale_days_raw = arguments.get("stale_days")
     stale_days: int | None = None
     if stale_days_raw is not None:
-        if not isinstance(stale_days_raw, int):
+        # ``bool`` is a subclass of ``int``, so isinstance(True, int) is True.
+        # Explicitly reject bool so True/False don't slip through as 1/0 days.
+        if not isinstance(stale_days_raw, int) or isinstance(stale_days_raw, bool):
             return error_response("INVALID_PARAMS", "Field 'stale_days' must be an integer")
         if stale_days_raw < 1:
             return error_response("INVALID_PARAMS", "Field 'stale_days' must be >= 1")
@@ -1234,6 +1240,12 @@ async def _handle_list(
     # status="any" (which is stripped by _apply_default_status_filter) can't
     # bypass the check, and so that the default status filter does not count
     # as a real filter on its own.
+    # Validate the type first so truthy non-bool values (e.g. ``1``, ``"true"``)
+    # can't slip past the ``is True`` check below and skip the guard entirely.
+    if "batch_mode" in arguments and not isinstance(arguments["batch_mode"], bool):
+        return error_response(
+            "INVALID_PARAMS", "Field 'batch_mode' must be a boolean (true/false)"
+        )
     if arguments.get("batch_mode") is True:
         real_filter_keys = {
             "source",

@@ -151,8 +151,9 @@ If that script is not present or not executable, exits silently with no output.
 **SessionStart produces no output:**
 - **HTTP transport**: Check the MCP server accepts JSON-RPC probes — the hook
   does NOT use a `/health` sibling route (some deployments 404 on it, see #347).
-  Test directly with:
-  `curl -s -H 'Accept: application/json, text/event-stream' -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":0,"method":"tools/list","params":{}}' "$DISTILLERY_MCP_URL"`
+  Test directly with the same `initialize` handshake the hook uses
+  (`_build_init_msg()` in `session_start_briefing.py`):
+  `curl -s -H 'Accept: application/json, text/event-stream' -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"distillery-hook-probe","version":"1"}}}' "$DISTILLERY_MCP_URL"`
   Verify `DISTILLERY_MCP_URL` is correct.
 - **stdio transport**: Check `distillery-mcp` is on PATH: `which distillery-mcp`; ensure the package is installed (`pip install distillery-mcp`)
 - Ensure `session-start-briefing.sh` is present and executable in the same directory
@@ -253,7 +254,7 @@ When a Claude Code session starts, the hook:
 2. Derives the project name from the git root basename (or `cwd` basename if not in a git repo)
 3. Performs a 2-second health check to the MCP server
 4. If the server is unreachable — exits silently with no output (no disruption)
-5. If reachable — fetches recent entries (`distillery_list`) and stale knowledge (`distillery_stale`)
+5. If reachable — fetches recent entries (`distillery_list(limit=5)`) and stale knowledge (`distillery_list(stale_days=30, limit=10)`) — `distillery_stale` was consolidated into `distillery_list` via the `stale_days` parameter
 6. Formats a condensed summary (max 20 lines) and writes it to stdout
 
 Claude Code injects the stdout as a system reminder, giving the LLM context
@@ -274,7 +275,11 @@ When the MCP server is unreachable: no output (silent exit).
 ### Troubleshooting
 
 **Hook produces no output:**
-- **HTTP transport**: Check the MCP server is running: `curl http://localhost:8000/health`; verify `DISTILLERY_MCP_URL` is correct
+- **HTTP transport**: Verify `DISTILLERY_MCP_URL` is correct and the server
+  accepts JSON-RPC probes — the hook does NOT use a `/health` sibling route
+  (FastMCP deployments don't expose one; some return 404). Exercise the same
+  `initialize` handshake the hook uses:
+  `curl -s -H 'Accept: application/json, text/event-stream' -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"distillery-hook-probe","version":"1"}}}' "$DISTILLERY_MCP_URL"`
 - **stdio transport**: Check `distillery-mcp` is on PATH: `which distillery-mcp`; ensure the package is installed (`pip install distillery-mcp`)
 - Check the server logs for errors
 

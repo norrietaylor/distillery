@@ -277,9 +277,9 @@ Distillery Setup Complete
   Feed Sources:  <N> configured
 
   Scheduled Routines:
-    Feed poll:     <active (hourly routine) | inactive>
-    Stale check:   <active (daily routine) | inactive>
-    KB maintenance:<active (weekly routine) | inactive>
+    Feed health check: <active (hourly routine, status only) | inactive>
+    Stale check:       <active (daily routine) | inactive>
+    KB maintenance:    <active (weekly routine) | inactive>
 
   Session Hooks:   <SCOPE_LABEL> scope
     Memory nudge:  <active (every 30 prompts) | inactive | skipped>

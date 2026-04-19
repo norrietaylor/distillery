@@ -125,7 +125,7 @@ Check with: /gh-sync status <job_id>
   [if errors]: <error_message>
 ```
 
-**Status (list):** markdown table as above.
+**Status (list):** Markdown table as above.
 
 ## Rules
 
