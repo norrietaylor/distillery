@@ -176,7 +176,7 @@ def upstream_error_response(exc: EmbeddingProviderError) -> list[types.TextConte
     message = (
         f"Embedding provider {exc.provider!r} rate limit reached after retries."
         if exc.is_rate_limited
-        else f"Embedding provider {exc.provider!r} failed after retries: {exc}"
+        else f"Embedding provider {exc.provider!r} failed after retries."
     )
     if exc.retry_after is not None:
         message = f"{message} Retry after {exc.retry_after:g} seconds."

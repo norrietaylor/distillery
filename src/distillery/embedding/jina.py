@@ -200,6 +200,10 @@ class JinaEmbeddingProvider:
             except httpx.RequestError as exc:
                 last_error = exc
                 last_status = None
+                # Transport failure has no Retry-After; clear any stale
+                # hint from a prior 429/5xx so the terminal
+                # EmbeddingProviderError doesn't give misleading guidance.
+                last_retry_after = None
                 if attempt < _MAX_RETRIES - 1:
                     logger.warning(
                         "Upstream embedding provider network error "

@@ -7,6 +7,9 @@ MCP layer can surface structured errors with ``retry_after`` hints.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
+
 
 class EmbeddingProviderError(RuntimeError):
     """Raised when an embedding provider call fails after all retries.
@@ -48,10 +51,12 @@ class EmbeddingProviderError(RuntimeError):
 def parse_retry_after(header_value: object) -> float | None:
     """Parse a ``Retry-After`` header value into seconds.
 
-    Supports the two forms permitted by RFC 7231:
+    Supports both forms permitted by RFC 7231:
 
-    * Integer (or float) number of seconds.
-    * HTTP-date — currently not parsed; returns ``None``.
+    * Integer (or float) number of seconds (delta-seconds).
+    * HTTP-date (e.g. ``Wed, 21 Oct 2015 07:28:00 GMT``) — converted
+      to the number of seconds remaining until that instant.  Past
+      dates clamp to ``0.0`` rather than returning a negative hint.
 
     Args:
         header_value: Raw header string or ``None``.  Non-string values
@@ -59,14 +64,25 @@ def parse_retry_after(header_value: object) -> float | None:
 
     Returns:
         Non-negative float seconds, or ``None`` when the header is missing
-        or not in a numeric form.
+        or unparseable.
     """
     if not isinstance(header_value, str) or not header_value:
         return None
+    value = header_value.strip()
     try:
-        seconds = float(header_value.strip())
-    except (TypeError, ValueError):
-        return None
+        seconds = float(value)
+    except ValueError:
+        # Not delta-seconds; try the HTTP-date form.
+        try:
+            retry_at = parsedate_to_datetime(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if retry_at is None:
+            return None
+        if retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=UTC)
+        delta = (retry_at - datetime.now(UTC)).total_seconds()
+        return max(0.0, delta)
     if seconds < 0:
         return None
     return seconds

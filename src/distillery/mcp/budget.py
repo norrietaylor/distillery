@@ -8,7 +8,7 @@ The budget is an **opt-in cost ceiling**, not a rate limiter.  By default
 ``rate_limit.embedding_budget_daily`` is ``0`` (unlimited) and the
 embedding provider's own rate limiter (Jina / OpenAI) is the source of
 truth — it already returns HTTP 429 with ``Retry-After`` hints.  Set the
-budget to a positive integer only when you want a hard monthly-cost
+budget to a positive integer only when you want a hard daily cost
 guard.
 """
 

@@ -138,7 +138,7 @@ class OpenAIEmbeddingProvider:
                         exc.retry_after,
                         wait,
                     )
-                time.sleep(wait)
+                    time.sleep(wait)
 
         logger.warning(
             "Upstream embedding provider exhausted retries "

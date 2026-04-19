@@ -466,9 +466,21 @@ class TestParseRetryAfter:
     def test_returns_none_for_negative(self) -> None:
         assert parse_retry_after("-5") is None
 
-    def test_returns_none_for_http_date(self) -> None:
-        # HTTP-date form is not parsed — returns None.
-        assert parse_retry_after("Wed, 21 Oct 2015 07:28:00 GMT") is None
+    def test_clamps_past_http_date_to_zero(self) -> None:
+        # HTTP-date in the past clamps to 0.0 rather than returning a
+        # negative hint — keeps callers' "sleep(retry_after)" safe.
+        assert parse_retry_after("Wed, 21 Oct 2015 07:28:00 GMT") == 0.0
+
+    def test_parses_future_http_date_as_positive_seconds(self) -> None:
+        from datetime import UTC, datetime, timedelta
+        from email.utils import format_datetime
+
+        future = datetime.now(UTC) + timedelta(seconds=60)
+        header = format_datetime(future, usegmt=True)
+        result = parse_retry_after(header)
+        assert result is not None
+        # Allow a small fudge for wall-clock between format + parse.
+        assert 30.0 <= result <= 60.0
 
     def test_returns_none_for_garbage(self) -> None:
         assert parse_retry_after("not-a-number") is None
