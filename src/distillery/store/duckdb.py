@@ -26,7 +26,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, overload
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import duckdb
 
@@ -508,17 +508,24 @@ class DuckDBStore:
             exists on disk.
         """
         exc_msg = str(exc)
-        if "fts_main_entries" not in exc_msg and "WAL" not in exc_msg:
+        # Match only the specific replay-failure signature.  A broader
+        # substring match on "WAL" would also trigger on unrelated WAL
+        # open errors, silently moving user data aside.
+        is_fts_replay_failure = "Failure while replaying WAL file" in exc_msg and (
+            "fts_main_entries" in exc_msg or "Cannot drop entry" in exc_msg
+        )
+        if not is_fts_replay_failure:
             raise exc
 
-        # Only attempt WAL recovery for local file paths.  Skip in-memory
-        # databases, S3, MotherDuck, and other URI schemes.
-        parsed = urlparse(self._db_path)
-        is_local_file = self._db_path != ":memory:" and parsed.scheme in ("", "file")
-        if not is_local_file:
+        # Resolve _db_path to a real filesystem path.  urlparse treats
+        # Windows drive letters (``C:\...``) as URI schemes, and file://
+        # URIs need unquoting + path extraction rather than a raw
+        # ``Path(self._db_path + ".wal")`` concat.
+        db_file = self._resolve_local_db_path()
+        if db_file is None:
             raise exc
 
-        wal_path = Path(self._db_path + ".wal")
+        wal_path = Path(str(db_file) + ".wal")
         if not wal_path.exists():
             raise exc
 
@@ -526,18 +533,22 @@ class DuckDBStore:
         # recover uncommitted data if needed.  Silently deleting the WAL
         # (the previous behaviour) is unrecoverable and unfriendly.
         timestamp = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%SZ")
-        backup_path: Path | None = wal_path.with_suffix(f".wal.corrupt.{timestamp}")
+        backup_path = wal_path.with_suffix(f".wal.corrupt.{timestamp}")
         try:
-            assert backup_path is not None
             wal_path.rename(backup_path)
-        except OSError:
-            # Fall back to unlink if rename fails (e.g. cross-device).
-            logger.warning(
-                "Could not rename WAL to %s; deleting instead. Uncommitted data will be lost.",
+        except OSError as rename_exc:
+            # Leave the WAL in place and propagate the failure.  The
+            # previous behaviour unlinked the WAL as a fallback, which
+            # reintroduced the exact data-loss path this recovery is
+            # meant to eliminate.
+            logger.error(
+                "Could not preserve WAL as %s; leaving the original WAL file "
+                "in place for manual recovery.  Original replay failure: %s",
                 backup_path,
+                exc,
+                exc_info=rename_exc,
             )
-            wal_path.unlink()
-            backup_path = None
+            raise exc from rename_exc
 
         logger.warning(
             "Database WAL appears corrupt (FTS-related): %s. "
@@ -545,9 +556,49 @@ class DuckDBStore:
             "been preserved for manual recovery but will NOT be replayed. "
             "The FTS index will be rebuilt from scratch during init.",
             exc,
-            backup_path if backup_path is not None else "(deleted)",
+            backup_path,
         )
         return self._open_connection()
+
+    def _resolve_local_db_path(self) -> Path | None:
+        """Return the filesystem path for ``self._db_path`` if it's local.
+
+        Handles four shapes:
+
+        * ``":memory:"`` — not local.
+        * S3 / MotherDuck URIs — not local.
+        * ``file://`` URIs — local; unquote the path component.
+        * Windows drive-letter paths (``C:\\...``) — local; ``urlparse``
+          would otherwise mistake ``C`` for a URI scheme.
+        * Plain POSIX or relative paths — local.
+
+        Returns ``None`` for non-local paths so the caller can skip
+        recovery rather than acting on a URI that has no meaningful
+        ``.wal`` sidecar on the local filesystem.
+        """
+        raw = self._db_path
+        if raw == ":memory:":
+            return None
+        if self._is_s3_path(raw) or self._is_motherduck_path(raw):
+            return None
+
+        parsed = urlparse(raw)
+        scheme = parsed.scheme.lower()
+
+        # Windows drive letter: scheme is a single ASCII letter and the
+        # "netloc" is empty; treat the raw string as a local path.
+        if len(scheme) == 1 and scheme.isalpha():
+            return Path(raw)
+
+        if scheme == "file":
+            # file:// URI: the path component carries the filesystem
+            # path; unquote %-encoded bytes.
+            return Path(unquote(parsed.path))
+
+        if scheme == "":
+            return Path(raw)
+
+        return None
 
     def _sync_initialize(self) -> None:
         """Initialize the DuckDB connection and run pending schema migrations.
