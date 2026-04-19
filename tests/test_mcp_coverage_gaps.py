@@ -149,6 +149,7 @@ class TestSearchBudgetAndErrors:
             assert data["error"] is True
             assert data["code"] == "UPSTREAM_RATE_LIMITED"
             assert data["details"]["provider"] == "jina"
+            assert data["details"]["endpoint"] == "https://api.jina.ai/v1/embeddings"
             assert data["details"]["status_code"] == 429
             assert data["details"]["retry_after"] == 30.0
 

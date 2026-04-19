@@ -266,11 +266,17 @@ class TestJinaRateLimitRetry:
         assert result == [0.1, 0.2, 0.3, 0.4]
         assert call_count["n"] == 2
 
-    def test_exhausted_retries_raise_runtime_error(self) -> None:
-        """After MAX_RETRIES consecutive 429 responses RuntimeError is raised."""
+    def test_exhausted_retries_raise_embedding_provider_error(self) -> None:
+        """After MAX_RETRIES consecutive 429 responses EmbeddingProviderError is raised.
+
+        Pins the new contract introduced in #351: MCP callers rely on
+        ``provider`` / ``status_code`` / ``retry_after`` carrying upstream
+        detail, not a bare ``RuntimeError``.
+        """
         rate_limit_response = MagicMock(spec=httpx.Response)
         rate_limit_response.status_code = 429
         rate_limit_response.text = "Rate limit exceeded"
+        rate_limit_response.headers = {"Retry-After": "5"}
         rate_limit_error = httpx.HTTPStatusError(
             "429 Too Many Requests",
             request=MagicMock(),
@@ -286,8 +292,13 @@ class TestJinaRateLimitRetry:
             mock_resp.raise_for_status.side_effect = rate_limit_error
             mock_client.post.return_value = mock_resp
 
-            with pytest.raises(RuntimeError, match="3 attempts"):
+            with pytest.raises(EmbeddingProviderError, match="3 attempts") as excinfo:
                 provider.embed("test text")
+
+        assert excinfo.value.provider == "jina"
+        assert excinfo.value.status_code == 429
+        assert excinfo.value.retry_after == 5.0
+        assert excinfo.value.is_rate_limited is True
 
     def test_embed_batch_empty_list_returns_empty(self) -> None:
         """embed_batch([]) must return [] without hitting the API."""
@@ -670,15 +681,24 @@ class TestOpenAIRateLimitRetry:
         assert result == [vector]
         assert call_count["n"] == 2
 
-    def test_exhausted_retries_raise_runtime_error(self) -> None:
-        """After MAX_RETRIES consecutive 429 responses RuntimeError is raised."""
+    def test_exhausted_retries_raise_embedding_provider_error(self) -> None:
+        """After MAX_RETRIES consecutive 429 responses EmbeddingProviderError is raised.
+
+        Pins the new contract introduced in #351 for the OpenAI path.
+        """
         rate_limit_response = _mock_httpx_response(429, {"error": "rate limit"})
+        rate_limit_response.headers = {"Retry-After": "7"}
         provider = OpenAIEmbeddingProvider(api_key="sk-test", dimensions=4)
 
         with patch.object(provider, "_client") as mock_client, patch("time.sleep"):
             mock_client.post.return_value = rate_limit_response
-            with pytest.raises(RuntimeError, match="retries"):
+            with pytest.raises(EmbeddingProviderError, match="retries") as excinfo:
                 provider.embed_batch(["test"])
+
+        assert excinfo.value.provider == "openai"
+        assert excinfo.value.status_code == 429
+        assert excinfo.value.retry_after == 7.0
+        assert excinfo.value.is_rate_limited is True
 
     def test_exponential_backoff_called(self) -> None:
         """Sleep is called with exponential backoff values on retry."""

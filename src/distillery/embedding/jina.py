@@ -176,10 +176,18 @@ class JinaEmbeddingProvider:
                     last_retry_after = retry_after
                     if attempt < _MAX_RETRIES - 1:
                         wait = retry_after if retry_after is not None else backoff
+                        # Distinguish 429 (real throttling) from 5xx
+                        # (upstream instability) in operator logs.
+                        event = (
+                            "throttled request"
+                            if status == 429
+                            else "returned retryable upstream error"
+                        )
                         logger.warning(
-                            "Upstream embedding provider throttled request "
+                            "Upstream embedding provider %s "
                             "(provider=%s endpoint=%s status=%d attempt=%d/%d "
                             "retry_after=%s). Retrying in %.1f seconds.",
+                            event,
                             _PROVIDER_NAME,
                             _JINA_API_URL,
                             status,

@@ -664,6 +664,16 @@ async def _handle_store_batch(
     # --- persist ------------------------------------------------------------
     try:
         entry_ids = await store.store_batch(built)
+    except EmbeddingProviderError as exc:
+        logger.warning(
+            "Upstream embedding provider failed during store_batch "
+            "(provider=%s status=%s retry_after=%s): %s",
+            exc.provider,
+            exc.status_code,
+            exc.retry_after,
+            exc,
+        )
+        return upstream_error_response(exc)
     except Exception:  # noqa: BLE001
         logger.exception("Error in store_batch")
         return error_response("INTERNAL", "Failed to batch-store entries")

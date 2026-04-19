@@ -126,10 +126,16 @@ class OpenAIEmbeddingProvider:
                 last_retry_after = exc.retry_after
                 wait = exc.retry_after if exc.retry_after is not None else 2**attempt
                 if attempt < self._MAX_RETRIES - 1:
+                    event = (
+                        "throttled request"
+                        if exc.status_code == 429
+                        else "returned retryable upstream error"
+                    )
                     logger.warning(
-                        "Upstream embedding provider throttled request "
+                        "Upstream embedding provider %s "
                         "(provider=%s endpoint=%s status=%d attempt=%d/%d "
                         "retry_after=%s). Retrying in %.1f seconds.",
+                        event,
                         _PROVIDER_NAME,
                         self._BASE_URL,
                         exc.status_code,

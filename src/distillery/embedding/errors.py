@@ -7,6 +7,7 @@ MCP layer can surface structured errors with ``retry_after`` hints.
 
 from __future__ import annotations
 
+import math
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 
@@ -83,7 +84,9 @@ def parse_retry_after(header_value: object) -> float | None:
             retry_at = retry_at.replace(tzinfo=UTC)
         delta = (retry_at - datetime.now(UTC)).total_seconds()
         return max(0.0, delta)
-    if seconds < 0:
+    # Reject NaN / +Inf / -Inf — they would propagate into the retry
+    # loop as an unbounded sleep or arithmetic crash.
+    if not math.isfinite(seconds) or seconds < 0:
         return None
     return seconds
 
