@@ -1676,6 +1676,15 @@ class DuckDBStore:
         if stale_days is not None and stale_days < 0:
             raise ValueError("stale_days must be non-negative")
 
+        # ----- reject mutually-exclusive modes -----
+        # ``group_by`` and ``output`` return different shapes
+        # (grouped counts vs. aggregate stats); combining them would silently
+        # drop one. Reject explicitly so callers get a clear error.
+        if group_by is not None and output is not None:
+            raise ValueError(
+                "group_by and output cannot be combined — pick one"
+            )
+
         # ----- group_by mode: delegate to aggregate_entries -----
         if group_by is not None:
             return await self.aggregate_entries(
@@ -1771,14 +1780,16 @@ class DuckDBStore:
             entries_by_status = {str(row[0]): int(row[1]) for row in status_rows}
 
             # Storage bytes: always reported as the sum of content byte lengths
-            # over the matching entries. Using a consistent SUM(LENGTH(content))
+            # over the matching entries. ``strlen`` returns the UTF-8 byte
+            # count (``length`` counts characters), so non-ASCII content is
+            # measured correctly. Using a consistent SUM(strlen(content))
             # metric regardless of scope ensures the field is comparable across
             # filtered and unfiltered calls — mixing physical DB size with a
             # filtered content sum would make the same field incomparable.
             storage_bytes: int = 0
             try:
                 byte_row = conn.execute(
-                    f"SELECT COALESCE(SUM(LENGTH(content)), 0) FROM entries {where_sql}",
+                    f"SELECT COALESCE(SUM(strlen(content)), 0) FROM entries {where_sql}",
                     list(params),
                 ).fetchone()
                 storage_bytes = int(byte_row[0]) if byte_row else 0
@@ -1806,7 +1817,11 @@ class DuckDBStore:
             filters: Filter criteria accepted by the store.
             stale_days: When set, only count entries whose last access
                 (``COALESCE(accessed_at, updated_at)``) is older than N days.
+                Must be non-negative; negatives would invert the cutoff and
+                count almost every row.
         """
+        if stale_days is not None and stale_days < 0:
+            raise ValueError("stale_days must be non-negative")
 
         def _sync() -> int:
             conn = self.connection

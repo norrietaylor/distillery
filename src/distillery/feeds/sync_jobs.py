@@ -476,6 +476,25 @@ async def run_sync_job_async(
             item_count=result.created + result.updated,
             error=result.errors[0] if result.errors else None,
         )
+    except asyncio.CancelledError:
+        # Preserve cancellation semantics: record the job as failed with a
+        # stable "cancelled" message and re-raise so the event loop/task
+        # owner can continue its teardown (e.g. lifespan shutdown).
+        cancel_msg = "Sync job cancelled"
+        logger.info(
+            "Sync job %s cancelled (partial progress: %d created, %d updated)",
+            job.job_id,
+            job.entries_created,
+            job.entries_updated,
+        )
+        tracker.mark_failed(job.job_id, cancel_msg)
+        await _record_sync_liveness(
+            store,
+            source_url=job.source_url,
+            item_count=job.entries_created + job.entries_updated,
+            error=cancel_msg,
+        )
+        raise
     except Exception:  # noqa: BLE001
         error_msg = "Sync job failed"
         logger.exception(

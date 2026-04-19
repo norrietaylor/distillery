@@ -11,7 +11,7 @@ Provides the ``distillery`` entry point with the following subcommands:
 - ``gh-backfill``: Populate ``project``/``tags``/``author``/``metadata``
   on existing GitHub entries synced before #312 landed.
 - ``eval``: Run skill evaluation scenarios against Claude (requires
-  ``ANTHROPIC_API_KEY`` and ``pip install 'distillery[eval]'``).
+  ``ANTHROPIC_API_KEY`` and ``pip install 'distillery-mcp[eval]'``).
 - ``maintenance classify``: Classify pending entries using batch classification.
 
 Global options:
@@ -1374,7 +1374,7 @@ def _cmd_eval(
         from distillery.eval.scenarios import load_scenarios_from_dir
     except ImportError as exc:
         print(
-            f"Error: eval dependencies not installed. Run: pip install 'distillery[eval]'\n{exc}",
+            f"Error: eval dependencies not installed. Run: pip install 'distillery-mcp[eval]'\n{exc}",
             file=sys.stderr,
         )
         return 1

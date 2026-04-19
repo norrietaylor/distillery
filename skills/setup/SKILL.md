@@ -129,9 +129,9 @@ Read `references/routine-payloads.md` for the full routine definitions and displ
 **If no feed sources are configured (from Step 3):**
 
 ```text
-Scheduled tasks: feed poll and stale check skipped (no feed sources configured)
+Scheduled tasks: feed health check and stale check skipped (no feed sources configured)
   Weekly maintenance routine can still be configured for KB health tracking.
-  Add sources with /watch add <url> to enable feed poll and stale check routines.
+  Add sources with /watch add <url> to enable feed health check and stale check routines.
 ```
 
 Offer only the weekly maintenance routine (4c) if the user wants scheduled tasks.
@@ -140,7 +140,7 @@ Offer only the weekly maintenance routine (4c) if the user wants scheduled tasks
 
 ```text
 Enable scheduled tasks via Claude Code routines? This creates:
-  • Feed polling routine — every hour
+  • Feed health check routine — every hour (status only, no ingestion)
   • Stale entry check routine — daily
   • KB maintenance routine — weekly (stats, stale entries, digest)
 

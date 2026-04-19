@@ -154,7 +154,7 @@ If that script is not present or not executable, exits silently with no output.
   Test directly with:
   `curl -s -H 'Accept: application/json, text/event-stream' -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":0,"method":"tools/list","params":{}}' "$DISTILLERY_MCP_URL"`
   Verify `DISTILLERY_MCP_URL` is correct.
-- **stdio transport**: Check `distillery-mcp` is on PATH: `which distillery-mcp`; ensure the package is installed (`pip install distillery`)
+- **stdio transport**: Check `distillery-mcp` is on PATH: `which distillery-mcp`; ensure the package is installed (`pip install distillery-mcp`)
 - Ensure `session-start-briefing.sh` is present and executable in the same directory
 - If the endpoint is unreachable, the hook writes a `[Distillery] briefing disabled — ...`
   line to stderr. Set `DISTILLERY_BRIEFING_QUIET=1` to silence.
@@ -275,7 +275,7 @@ When the MCP server is unreachable: no output (silent exit).
 
 **Hook produces no output:**
 - **HTTP transport**: Check the MCP server is running: `curl http://localhost:8000/health`; verify `DISTILLERY_MCP_URL` is correct
-- **stdio transport**: Check `distillery-mcp` is on PATH: `which distillery-mcp`; ensure the package is installed (`pip install distillery`)
+- **stdio transport**: Check `distillery-mcp` is on PATH: `which distillery-mcp`; ensure the package is installed (`pip install distillery-mcp`)
 - Check the server logs for errors
 
 **Authentication errors:**

@@ -104,10 +104,25 @@ def _server_entry_to_transport(entry: dict[str, Any], source: str) -> ResolvedTr
 
     # stdio (command-based)
     cmd = entry.get("command", "")
-    args: list[str] = entry.get("args", [])
-    env_vars: dict[str, str] = entry.get("env", {})
+    raw_args = entry.get("args", [])
+    raw_env = entry.get("env", {})
+
+    # Coerce/validate args: accept a list/tuple (stringify each element) or a
+    # bare string (split on whitespace for convenience). Anything else is
+    # treated as malformed.
+    args: list[str]
+    if isinstance(raw_args, list | tuple):
+        args = [str(a) for a in raw_args]
+    elif isinstance(raw_args, str):
+        args = raw_args.split()
+    else:
+        args = []
+
+    env_vars: dict[str, str] = (
+        {str(k): str(v) for k, v in raw_env.items()} if isinstance(raw_env, dict) else {}
+    )
     if cmd:
-        full_cmd = [cmd] + [str(a) for a in args]
+        full_cmd = [cmd] + args
         return ResolvedTransport(kind="stdio", command=full_cmd, env=env_vars, source=source)
 
     return None

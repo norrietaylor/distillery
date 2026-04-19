@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -727,6 +728,19 @@ async def _handle_store_batch(
                         "Only internal sources may use this namespace.",
                     )
 
+        # Validate metadata shape before coercion. ``dict(x)`` accepts
+        # lists-of-pairs and other iterables, so bare coercion would let
+        # malformed payloads slip through (or raise TypeError opaquely).
+        raw_meta = item.get("metadata")
+        if raw_meta is None:
+            metadata: dict[str, Any] = {}
+        elif isinstance(raw_meta, Mapping):
+            metadata = dict(raw_meta)
+        else:
+            return error_response(
+                "INVALID_PARAMS",
+                f"entries[{idx}].metadata must be an object",
+            )
         try:
             entry = Entry(
                 content=item["content"],
@@ -735,7 +749,7 @@ async def _handle_store_batch(
                 author=item["author"],
                 project=item.get("project", project_default),
                 tags=final_tags,
-                metadata=dict(item.get("metadata") or {}),
+                metadata=metadata,
                 created_by=created_by,
             )
         except Exception as exc:  # noqa: BLE001
@@ -1236,11 +1250,18 @@ async def _handle_list(
             "metadata.source_url",
         }
         has_real_filter = bool(filters and any(key in filters for key in real_filter_keys))
+        # ``stale_days`` is passed as a top-level argument rather than inside
+        # the filters dict, so it must be checked separately — otherwise
+        # batch_mode=True with stale_days=N (a legitimate narrowing filter)
+        # is incorrectly rejected as "no real filter".
+        if not has_real_filter and arguments.get("stale_days") is not None:
+            has_real_filter = True
         if not has_real_filter:
             return error_response(
                 "INVALID_PARAMS",
                 "At least one filter is required for --batch mode. "
-                "Provide source, entry_type, author, tag_prefix, project, or verification.",
+                "Provide source, entry_type, author, tag_prefix, project, "
+                "verification, or stale_days.",
             )
 
     # --- group_by mode -------------------------------------------------------

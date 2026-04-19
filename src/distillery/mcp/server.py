@@ -1039,6 +1039,23 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         background: when true, runs async and returns a job_id immediately.
         """
         c = _lc(ctx)
+        # In stateless HTTP mode each request gets its own lifespan, so the
+        # shared ``store`` is closed as soon as the request returns. A
+        # background=True call would spawn a detached asyncio task that keeps
+        # a reference to the now-closing store, racing with ``_store.close()``
+        # and corrupting WAL/checkpoint state. Reject the combination up-front
+        # so callers see a clear error instead of a silent failure.
+        transport = _shared.get("transport") or c.get("transport")
+        if background and transport == "http":
+            return error_response(
+                "INVALID_PARAMS",
+                (
+                    "background=True is not supported when the server runs in "
+                    "stateless HTTP mode — the detached sync task would outlive "
+                    "the request lifespan and race with store shutdown. "
+                    "Retry with background=False, or run the server in stdio mode."
+                ),
+            )
         return await _handle_gh_sync(
             store=c["store"],
             arguments=dict(

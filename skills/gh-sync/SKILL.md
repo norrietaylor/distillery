@@ -48,7 +48,11 @@ and stop. If no argument at all, ask:
 
 Determine `author` and `project` per CONVENTIONS.md. Accept an optional `--project <name>` flag to override the git-derived project.
 
-Flags `--issues`, `--prs`, `--since`, `--limit` are **not currently passed through** — the backend tool does not accept them. If the user supplies one, note that it's not yet supported and proceed with a full sync (or ask whether to continue).
+Flags `--issues`, `--prs`, `--since`, `--limit` are **not currently passed through** — the backend tool does not accept them. If the user supplies any of these flags, **do not silently start an unfiltered sync**. Stop and ask the user for explicit confirmation, e.g.:
+
+> The `--issues`/`--prs`/`--since`/`--limit` flags are not yet supported by the backend. Running this will trigger a **full, unfiltered sync** of all issues and PRs. Proceed anyway? (yes / no)
+
+Only start the sync if the user confirms with `yes`. Otherwise abort without calling `distillery_gh_sync`.
 
 ### Step 3: Start Background Sync
 

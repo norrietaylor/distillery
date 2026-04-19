@@ -27,14 +27,14 @@ Syncs GitHub issues and pull requests from a repository into the Distillery know
 
 ## Options
 
-Currently the backend tool accepts only `url`, `author`, `project`, and `background`. The flags below were previously documented but are not wired through — they'll be noted as unsupported if supplied, and the sync will run without them:
+Currently the backend tool accepts only `url`, `author`, `project`, and `background`. The flags below were previously documented but are not wired through. **If you supply any of these filter flags, the skill will not silently start an unfiltered sync** — it will prompt for explicit confirmation that a full sync is acceptable, and abort if you decline:
 
 | Flag | Status |
 |------|--------|
-| `--issues` | not supported |
-| `--prs` | not supported |
-| `--since DATE` | not supported |
-| `--limit N` | not supported |
+| `--issues` | not supported — prompts for confirmation before running a full sync |
+| `--prs` | not supported — prompts for confirmation before running a full sync |
+| `--since DATE` | not supported — prompts for confirmation before running a full sync |
+| `--limit N` | not supported — prompts for confirmation before running a full sync |
 | `--project <name>` | supported (overrides git-derived project) |
 
 ## Tips
