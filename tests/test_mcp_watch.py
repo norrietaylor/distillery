@@ -76,7 +76,7 @@ def _parse(result: list[Any]) -> dict[str, Any]:
 
 
 class TestInvalidUrlRejected:
-    """Syntactically invalid URLs must return INVALID_URL without persisting."""
+    """Syntactically invalid URLs must return INVALID_PARAMS without persisting."""
 
     async def test_missing_scheme_returns_invalid_url(self) -> None:
         store = FakeSourceStore()
@@ -91,7 +91,7 @@ class TestInvalidUrlRejected:
         )
         data = _parse(result)
         assert data["error"] is True
-        assert data["code"] == "INVALID_URL"
+        assert data["code"] == "INVALID_PARAMS"
         assert await store.list_feed_sources() == []
 
     async def test_ftp_scheme_returns_invalid_url(self) -> None:
@@ -107,7 +107,7 @@ class TestInvalidUrlRejected:
         )
         data = _parse(result)
         assert data["error"] is True
-        assert data["code"] == "INVALID_URL"
+        assert data["code"] == "INVALID_PARAMS"
         assert await store.list_feed_sources() == []
 
     async def test_missing_host_returns_invalid_url(self) -> None:
@@ -123,7 +123,7 @@ class TestInvalidUrlRejected:
         )
         data = _parse(result)
         assert data["error"] is True
-        assert data["code"] == "INVALID_URL"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_github_bare_slug_accepted(self) -> None:
         """GitHub adapter accepts owner/repo slugs; probe is skipped."""
@@ -154,7 +154,7 @@ class TestInvalidUrlRejected:
         )
         data = _parse(result)
         assert data["error"] is True
-        assert data["code"] == "INVALID_URL"
+        assert data["code"] == "INVALID_PARAMS"
 
 
 # ---------------------------------------------------------------------------
@@ -199,7 +199,8 @@ class TestReachabilityProbe:
         )
         data = _parse(result)
         assert data["error"] is True
-        assert data["code"] == "UNREACHABLE_URL"
+        assert data["code"] == "INVALID_PARAMS"
+        assert data.get("details", {}).get("probe_failed") is True
         assert "last_error" in data.get("details", {})
         assert await store.list_feed_sources() == []
 
@@ -216,7 +217,8 @@ class TestReachabilityProbe:
         )
         data = _parse(result)
         assert data["error"] is True
-        assert data["code"] == "UNREACHABLE_URL"
+        assert data["code"] == "INVALID_PARAMS"
+        assert data.get("details", {}).get("probe_failed") is True
         assert await store.list_feed_sources() == []
 
     async def test_head_fallback_to_get(self, httpx_mock: HTTPXMock) -> None:

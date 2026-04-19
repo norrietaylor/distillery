@@ -286,7 +286,11 @@ async def _handle_watch(
         # ------------------------------------------------------------------
         syntax_error = _validate_url_syntax(url, source_type)
         if syntax_error is not None:
-            return error_response("INVALID_URL", syntax_error)
+            return error_response(
+                "INVALID_PARAMS",
+                syntax_error,
+                details={"field": "url", "url": url, "syntax_error": syntax_error},
+            )
 
         # ------------------------------------------------------------------
         # Optional reachability probe.
@@ -306,13 +310,18 @@ async def _handle_watch(
             probe_error = await _probe_url(url)
             if probe_error is not None and not force:
                 return error_response(
-                    "UNREACHABLE_URL",
+                    "INVALID_PARAMS",
                     (
                         f"URL {url!r} failed reachability probe: {probe_error}. "
                         "Re-run with force=True to persist anyway, "
                         "or probe=False to skip the probe."
                     ),
-                    details={"last_error": probe_error, "url": url},
+                    details={
+                        "field": "url",
+                        "url": url,
+                        "last_error": probe_error,
+                        "probe_failed": True,
+                    },
                 )
 
         try:
@@ -712,11 +721,17 @@ async def _handle_gh_sync(
     url_raw = arguments.get("url")
     if url_raw is not None and not isinstance(url_raw, str):
         return error_response(
-            "INVALID_FIELD", f"url must be a string, got: {type(url_raw).__name__}"
+            "INVALID_PARAMS",
+            f"url must be a string, got: {type(url_raw).__name__}",
+            details={"field": "url"},
         )
     url = str(url_raw or "").strip()
     if not url:
-        return error_response("MISSING_FIELD", "url is required (owner/repo or GitHub URL)")
+        return error_response(
+            "INVALID_PARAMS",
+            "url is required (owner/repo or GitHub URL)",
+            details={"field": "url"},
+        )
 
     author = str(arguments.get("author", "gh-sync"))
     project = arguments.get("project")
@@ -759,7 +774,7 @@ async def _handle_gh_sync(
         result = await adapter.sync_batched()
     except Exception:  # noqa: BLE001
         logger.exception("distillery_gh_sync: sync failed for %s", url)
-        return error_response("GH_SYNC_ERROR", "GitHub sync failed")
+        return error_response("INTERNAL", "GitHub sync failed")
 
     return success_response(
         {

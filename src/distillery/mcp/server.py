@@ -939,7 +939,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             count of archived entries in purged_entries.
           - probe (bool, optional, default=true): When adding, lightly probe the URL
             for reachability (HEAD with GET fallback, short timeout). Returns an
-            UNREACHABLE_URL error if the probe fails.
+            INVALID_PARAMS error (with details.probe_failed=true) if the probe fails.
           - force (bool, optional, default=false): When adding, persist the source
             even if the reachability probe fails (useful for sites that block HEAD
             but work via the poller).
@@ -947,8 +947,8 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         RETURNS (success): { sources: list, count: int } (list) or
           { added: dict, sources: list, sync_job?: dict } (add) or
           { removed_url: str, removed: bool, sources: list, purged_entries?: int } (remove)
-        RETURNS (error): { error: true, code: "INVALID_PARAMS" | "CONFLICT" | "INVALID_URL"
-          | "UNREACHABLE_URL" | "INTERNAL", message: "..." }
+        RETURNS (error): { error: true, code: "INVALID_PARAMS" | "CONFLICT"
+          | "INTERNAL", message: "..." }
 
         RELATED: distillery_configure (to adjust feed thresholds),
         distillery_store_batch (for bulk entry ingestion)

@@ -734,7 +734,7 @@ class TestHandleGhSync:
     async def test_missing_url(self, store) -> None:  # type: ignore[no-untyped-def]
         result = await _handle_gh_sync(store=store, arguments={})
         data = _parse_response(result)
-        assert data.get("code") == "MISSING_FIELD"
+        assert data.get("code") == "INVALID_PARAMS"
 
     @pytest.mark.integration
     async def test_background_mode(self, store, httpx_mock) -> None:  # type: ignore[no-untyped-def]
