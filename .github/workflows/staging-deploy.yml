@@ -119,16 +119,24 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          # Use --body-file with a quoted heredoc so Markdown backticks are
+          # passed through literally without bash's escape-dance. The old
+          # --body "…\`url\`…" form leaked the backslash into the rendered
+          # comment (visible as %5C%60 in server access logs), so link-preview
+          # crawlers slurped the trailing \` into the URL and hit fresh 404s
+          # on every deploy. GitHub Actions expands ${{ … }} before bash runs,
+          # so a quoted heredoc is safe for all the values we need.
           gh pr comment "${{ steps.pr.outputs.pr_number }}" \
             --repo "${{ github.repository }}" \
-            --body "⏳ Staging deploy pending review — resolved head SHA \`${{ steps.pr.outputs.head_sha }}\`. A repo collaborator must approve the \`staging-deploy\` environment before the image is built: ${RUN_URL}
+            --body-file - <<'EOF'
+          ⏳ Staging deploy pending review — resolved head SHA `${{ steps.pr.outputs.head_sha }}`. A repo collaborator must approve the `staging-deploy` environment before the image is built: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
           Once deployed, staging will be reachable at:
-          - Web / claude.ai: \`https://distillery-mcp-dev.fly.dev/mcp\`
-          - Health check: \`https://distillery-mcp-dev.fly.dev/.well-known/oauth-authorization-server\`
+          - Web / claude.ai: `https://distillery-mcp-dev.fly.dev/mcp`
+          - Health check: `https://distillery-mcp-dev.fly.dev/.well-known/oauth-authorization-server`
 
-          (note the \`/mcp\` path — the bare hostname returns 404)"
+          (note the `/mcp` path — `GET /mcp` returns 405 (MCP only accepts POST), and the bare hostname returns 404)
+          EOF
 
   # ──────────────────────────────────────────────────────────────────
   # Job 1b: Build and push the staging image.
@@ -210,16 +218,19 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          # See the "Announce pending approval" step for why we use
+          # --body-file + a quoted heredoc here instead of --body "…\`…\`…".
           gh pr comment "${{ needs.resolve.outputs.pr_number }}" \
             --repo "${{ github.repository }}" \
-            --body "🚀 Staging deploy dispatched — image \`${{ needs.resolve.outputs.image_tag }}\` pushed. Build log: ${RUN_URL}. Fly deploy is handled in [distill_ops staging-deploy](https://github.com/norrietaylor/distill_ops/actions/workflows/staging-deploy.yml); it will comment back when the app is healthy.
+            --body-file - <<'EOF'
+          🚀 Staging deploy dispatched — image `${{ needs.resolve.outputs.image_tag }}` pushed. Build log: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}. Fly deploy is handled in [distill_ops staging-deploy](https://github.com/norrietaylor/distill_ops/actions/workflows/staging-deploy.yml); it will comment back when the app is healthy.
 
           **Staging endpoint** (once healthy):
-          - MCP URL: \`https://distillery-mcp-dev.fly.dev/mcp\`  ← use this to connect from Claude Code / claude.ai
+          - MCP URL: `https://distillery-mcp-dev.fly.dev/mcp`  ← use this to connect from Claude Code / claude.ai
           - Health check: https://distillery-mcp-dev.fly.dev/.well-known/oauth-authorization-server
 
-          The \`/mcp\` path suffix is required — the bare hostname returns 404."
+          The `/mcp` path suffix is required — `GET /mcp` returns 405 (MCP only accepts POST), and the bare hostname returns 404.
+          EOF
 
   # ──────────────────────────────────────────────────────────────────
   # Job 2: /teardown-staging via comment
