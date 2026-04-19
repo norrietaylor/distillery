@@ -112,6 +112,17 @@ def _new_uuid() -> str:
 _TAG_SEGMENT_RE = re.compile(r"^[a-z0-9][a-z0-9\-]*$")
 
 
+def is_valid_tag_segment(segment: str) -> bool:
+    """Return ``True`` if *segment* is a valid single-level tag segment.
+
+    A segment is the portion between forward slashes in a hierarchical tag
+    (see :func:`validate_tag`). This is a non-raising probe used by
+    sanitisers that need to decide whether a derived string is usable as a
+    tag without paying for exception overhead.
+    """
+    return bool(_TAG_SEGMENT_RE.match(segment))
+
+
 def validate_tag(tag: str) -> None:
     """Validate a single tag string.
 

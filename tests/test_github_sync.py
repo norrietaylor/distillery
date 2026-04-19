@@ -338,13 +338,25 @@ class TestGitHubSyncAdapterSync:
 
     @pytest.mark.integration
     async def test_sync_handles_labels_as_tags(self, store, httpx_mock) -> None:  # type: ignore[no-untyped-def]
-        """Issue labels should become entry tags (lowercase, sanitised)."""
+        """Issue labels become entry tags via the shared sanitiser.
+
+        Covers the coercion classes the shared helper promises (see
+        :mod:`distillery.feeds.github_tag`): already-valid, spaces,
+        underscores (issue #241 regression), mixed case, and uncoercible
+        labels that must be dropped without failing the whole entry.
+        """
         httpx_mock.add_response(
             url=re.compile(r".*/repos/test/repo/issues\?.*"),
             json=[
                 _mock_issue(
                     number=1,
-                    labels=[{"name": "bug"}, {"name": "high-priority"}],
+                    labels=[
+                        {"name": "bug"},
+                        {"name": "high-priority"},
+                        {"name": "github_actions"},
+                        {"name": "CLA Signed"},
+                        {"name": "!!! urgent"},
+                    ],
                 )
             ],
         )
@@ -357,8 +369,7 @@ class TestGitHubSyncAdapterSync:
         await adapter.sync()
 
         entries = await store.list_entries(filters={"entry_type": "github"}, limit=10, offset=0)
-        assert "bug" in entries[0].tags
-        assert "high-priority" in entries[0].tags
+        assert set(entries[0].tags) == {"bug", "high-priority", "github-actions", "cla-signed"}
 
     @pytest.mark.integration
     async def test_sync_skips_self_references(self, store, httpx_mock) -> None:  # type: ignore[no-untyped-def]

@@ -225,7 +225,7 @@ Synced 8 issues, 4 PRs from norrietaylor/distillery. 5 new, 7 updated. 6 cross-r
 - Use `entry_type="github"` for all synced entries
 - `metadata.external_id` format: `{owner}/{repo}#issue-{number}` or `{owner}/{repo}#pr-{number}`
 - Required metadata fields: `repo`, `ref_type`, `ref_number`, `title`, `url`, `state`
-- Labels are converted to tags: lowercase, hyphens replacing spaces, invalid characters stripped
+- Labels are converted to tags by the shared sanitiser (`distillery.feeds.github_tag.sanitize_label`): lowercase, spaces and underscores become hyphens, consecutive hyphens collapse, leading/trailing hyphens are stripped, and labels that still do not match the tag grammar `[a-z0-9][a-z0-9-]*` are dropped rather than failing the whole entry. Example: `github_actions` → `github-actions`, `!!! urgent` → dropped.
 - Entry content: `# {title}\n\n{body}\n\n**{commenter}**: {comment}` (top 10 comments max)
 - Cross-reference relation creation is non-fatal — continue on failure, report in summary
 - Self-references (an issue referencing its own number) are skipped
