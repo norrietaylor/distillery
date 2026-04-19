@@ -5,8 +5,7 @@ allowed-tools:
   - "mcp__*__distillery_search"
   - "mcp__*__distillery_get"
   - "mcp__*__distillery_store"
-  - "mcp__*__distillery_metrics"
-  - "mcp__*__distillery_tag_tree"
+  - "mcp__*__distillery_list"
 context: fork
 effort: high
 ---
@@ -60,7 +59,7 @@ Analyze Pass 1 for related concepts, people, sub-topics, or terms not directly c
 
 `distillery_search(query="<related concept>", limit=10, project="<project if specified>")`
 
-**Tag-based expansion:** Extract tags from Pass 1 results and identify their namespace prefixes (e.g., tags like `domain/authentication`, `domain/oauth` → namespace prefix `domain`). For each relevant namespace, call `distillery_tag_tree(prefix="<namespace>")` to get the subtree. Traverse the returned tree's children nodes and collect leaf tags, ranking them by entry count (the `count` field on each node). Convert the top-ranked leaf segments to search queries by taking the leaf segment and replacing hyphens with spaces (e.g., `domain/oauth` → `"oauth"`, `domain/session-management` → `"session management"`). Run up to 3 `distillery_search` calls from these ranked tag-derived queries, skipping any that duplicate an existing Pass 2 concept query.
+**Tag-based expansion:** Extract tags from Pass 1 results and identify their namespace prefixes (e.g., tags like `domain/authentication`, `domain/oauth` → namespace prefix `domain`). Call `distillery_list(group_by="tags", project="<project if specified>", limit=200)` to get tag frequencies across the knowledge base. From the returned tag groups, filter to those matching the namespace prefixes and rank by count. Convert the top-ranked tag segments to search queries by taking the leaf segment and replacing hyphens with spaces (e.g., `domain/oauth` → `"oauth"`, `domain/session-management` → `"session management"`). Run up to 3 `distillery_search` calls from these ranked tag-derived queries, skipping any that duplicate an existing Pass 2 concept query.
 
 Report: `Tag expansion: discovered <N> related topics from tag vocabulary.` (Omit this line entirely if no tags are found in Pass 1 results — Pass 2 proceeds with concept-based queries only.)
 
@@ -129,6 +128,8 @@ Heading `# Pour: <Topic>`, then sections Summary, Timeline, Key Decisions, Contr
 
 ## Rules
 
+- NEVER use Bash, Python, or any tool not listed in allowed-tools
+- If an MCP tool call fails, report the error to the user and STOP. Do not attempt workarounds.
 - Always use `[Entry <short-id>]` citation format (short-id = first 8 chars of UUID)
 - Every factual claim must trace to an entry -- never synthesize without citing
 - Omit sections with no content

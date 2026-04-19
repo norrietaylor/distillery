@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -19,13 +20,14 @@ from typing import Any
 from mcp import types
 
 from distillery.config import DistilleryConfig
+from distillery.embedding.errors import EmbeddingProviderError
 from distillery.mcp.tools._common import (
     error_response,
     success_response,
     validate_required,
     validate_type,
 )
-from distillery.mcp.tools._errors import validate_limit
+from distillery.mcp.tools._errors import upstream_error_response, validate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +67,90 @@ _VALID_ENTRY_TYPES = {
     "github",
     "feed",
 }
+
+
+# Common aliases callers reach for intuitively that don't map 1:1 to a
+# canonical entry_type. These are used only to surface a ``suggestion`` in the
+# INVALID_PARAMS error payload — they are NOT accepted as entry_type values.
+#
+# Rationale for each mapping:
+#   note / notes  -> ``inbox``   (unclassified jottings awaiting triage)
+#   task / todo   -> ``idea``    (open question / action item)
+#   issue / pr    -> ``github``  (GitHub artifacts have a dedicated type)
+#   article / url -> ``bookmark`` (saved external URLs)
+#   summary       -> ``digest``  (periodic summaries)
+#   doc / docs    -> ``reference`` (reference material)
+#   contact       -> ``person``  (people profiles)
+#   repo          -> ``project`` (project/repo records)
+_ENTRY_TYPE_ALIASES: dict[str, str] = {
+    "note": "inbox",
+    "notes": "inbox",
+    "task": "idea",
+    "todo": "idea",
+    "issue": "github",
+    "pr": "github",
+    "article": "bookmark",
+    "url": "bookmark",
+    "link": "bookmark",
+    "summary": "digest",
+    "doc": "reference",
+    "docs": "reference",
+    "contact": "person",
+    "repo": "project",
+}
+
+
+def _suggest_entry_type(value: Any) -> str | None:
+    """Return a suggested canonical entry_type for a rejected *value*, if any.
+
+    The match is case-insensitive and only considers exact string lookups in
+    the alias map — no fuzzy distance search. This keeps the suggestion stable
+    and predictable for tool callers.
+
+    Args:
+        value: The raw value that was rejected as an entry_type.
+
+    Returns:
+        A canonical ``EntryType`` string value (e.g. ``"inbox"``) if an alias
+        match was found, otherwise ``None``.
+    """
+    if not isinstance(value, str):
+        return None
+    return _ENTRY_TYPE_ALIASES.get(value.strip().lower())
+
+
+def _invalid_entry_type_response(
+    value: Any, *, field: str = "entry_type", prefix: str = ""
+) -> list[types.TextContent]:
+    """Build the standard INVALID_PARAMS response for an invalid *entry_type*.
+
+    When ``value`` matches a known alias (e.g. ``"note"`` -> ``"inbox"``), the
+    suggestion is surfaced both inline in the human-readable message *and* as
+    a structured ``details.suggestion`` field so programmatic callers can
+    retry automatically without parsing the message string.
+
+    Args:
+        value: The raw entry_type value that failed validation.
+        field: The field name to reference in the error message (e.g.
+            ``"entry_type"`` or ``"new_entry_type"``).
+        prefix: Optional prefix for the message (e.g. ``"entries[3] has "``).
+
+    Returns:
+        MCP error response content list ready to return from a tool handler.
+    """
+    allowed = ", ".join(sorted(_VALID_ENTRY_TYPES))
+    message = f"{prefix}Invalid {field} {value!r}. Must be one of: {allowed}."
+    details: dict[str, Any] = {
+        "field": field,
+        "provided": value,
+        "allowed": sorted(_VALID_ENTRY_TYPES),
+    }
+    suggestion = _suggest_entry_type(value)
+    if suggestion is not None:
+        message += f" Did you mean {suggestion!r}?"
+        details["suggestion"] = suggestion
+    return error_response("INVALID_PARAMS", message, details=details)
+
 
 # Valid status values (mirrors EntryStatus enum).
 _VALID_STATUSES = {"active", "pending_review", "archived"}
@@ -128,14 +214,46 @@ async def _handle_store(
     Create and persist a new Entry from the provided arguments, run deduplication and a non-fatal conflict check, and return the stored entry id along with any warnings or conflict candidates.
 
     Parameters:
-        arguments (dict): MCP tool arguments. Required keys: `content`, `entry_type`, `author`. Optional keys: `project`, `tags` (list), `metadata` (dict), `dedup_threshold` (number), `dedup_limit` (int).
+        arguments (dict): MCP tool arguments. Required keys: `content`, `entry_type`, `author`. Optional keys: `project`, `tags` (list), `metadata` (dict), `dedup_threshold` (number), `dedup_limit` (int), `include_conflict_prompt` (bool — default False; when True each conflict candidate carries the ~1–2 KB `conflict_prompt` template required to round-trip through `distillery_find_similar(conflict_check=true)`).
         cfg (DistilleryConfig | None): Optional configuration used to derive classification/conflict thresholds; when omitted a default conflict threshold of 0.60 is used.
 
     Returns:
-        list[types.TextContent]: MCP content list containing a JSON-serializable object with at least `entry_id`. May also include:
+        list[types.TextContent]: MCP content list containing a JSON-serializable object with at least:
+          - ``entry_id`` (str): the id the caller should reference — either the
+            newly persisted entry's id, or (when the call was auto-skipped due
+            to a near-duplicate above the skip threshold) the existing entry's
+            id.  Never a "ghost" id that cannot be retrieved.
+          - ``persisted`` (bool): ``True`` if a new row was written, ``False``
+            if the call was auto-skipped due to a near-duplicate.
+          - ``dedup_action`` (str): one of ``"stored"`` or ``"skipped"``.
+            ``"stored"`` means a new row was persisted (even if a similar
+            entry exists above the merge or link threshold — the similarity
+            is reported informationally via ``existing_entry_id`` and
+            ``similarity``).  ``"skipped"`` means no new row was created and
+            the caller is pointed at an existing near-duplicate.
+
+            ``"merged"`` and ``"linked"`` are reserved for future behaviour
+            where the server actually folds new content into an existing row
+            or creates an explicit link without a new row; they are not
+            returned by the current implementation because both outcomes
+            persist the new entry independently.
+
+        When a similar existing entry is found above the merge or link
+        threshold (but below the skip threshold), the response also includes
+        ``existing_entry_id`` (str) and ``similarity`` (float) as an
+        informational hint.  ``dedup_action`` remains ``"stored"`` — callers
+        who want to avoid independent duplicates should use
+        ``distillery_find_similar(dedup_action=true)`` before storing.
+
+        May also include:
           - `warnings`: list of similar-entry summaries (id, score, content_preview) when near-duplicates were found,
           - `warning_message`: human-readable summary of warnings,
-          - `conflicts`: list of conflict candidate objects (entry_id, content_preview, similarity_score, conflict_reasoning),
+          - `conflicts`: list of conflict candidate objects. Every item carries
+            ``entry_id``, ``content_preview``, and ``similarity_score``. When
+            ``include_conflict_prompt=True`` each item additionally carries
+            ``conflict_prompt`` (the ~1–2 KB LLM template used by
+            ``distillery_find_similar(conflict_check=true)``). The prompt is
+            omitted by default to keep store responses small; see issue #348.
           - `conflict_message`: guidance message when conflict candidates are returned.
     """
     from distillery.mcp.budget import EmbeddingBudgetError, record_and_check
@@ -146,13 +264,28 @@ async def _handle_store(
     if err:
         return error_response("INVALID_PARAMS", err)
 
-    entry_type_str = arguments["entry_type"]
-    if entry_type_str not in _VALID_ENTRY_TYPES:
+    output_mode = arguments.get("output_mode", "full")
+    if not isinstance(output_mode, str):
+        return error_response("INVALID_PARAMS", "Field 'output_mode' must be a string.")
+    if output_mode not in ("full", "summary", "review", "ids"):
         return error_response(
             "INVALID_PARAMS",
-            f"Invalid entry_type {entry_type_str!r}. "
-            f"Must be one of: {', '.join(sorted(_VALID_ENTRY_TYPES))}.",
+            "Field 'output_mode' must be one of: 'full', 'ids', 'review', 'summary'.",
         )
+
+    # include_conflict_prompt opts the caller into receiving the per-candidate
+    # LLM prompt template (~1–2 KB each). Default False keeps responses small
+    # (see issue #348); callers that actually round-trip via
+    # distillery_find_similar(conflict_check=true) pass True explicitly.
+    include_conflict_prompt = arguments.get("include_conflict_prompt", False)
+    if not isinstance(include_conflict_prompt, bool):
+        return error_response(
+            "INVALID_PARAMS", "Field 'include_conflict_prompt' must be a boolean."
+        )
+
+    entry_type_str = arguments["entry_type"]
+    if entry_type_str not in _VALID_ENTRY_TYPES:
+        return _invalid_entry_type_response(entry_type_str)
 
     tags_err = validate_type(arguments, "tags", list, "list of strings")
     if tags_err:
@@ -194,7 +327,7 @@ async def _handle_store(
                 top = tag.split("/")[0]
                 if top in cfg.tags.reserved_prefixes:
                     return error_response(
-                        "RESERVED_PREFIX",
+                        "INVALID_PARAMS",
                         f"Tag {tag!r} uses reserved prefix {top!r}. "
                         "Only internal sources may use this namespace.",
                     )
@@ -207,7 +340,7 @@ async def _handle_store(
                 size_mb = Path(db_path).stat().st_size / (1024 * 1024)
                 if size_mb >= cfg.rate_limit.max_db_size_mb:
                     return error_response(
-                        "DB_SIZE_EXCEEDED",
+                        "BUDGET_EXCEEDED",
                         f"Database size ({size_mb:.1f} MB) exceeds limit "
                         f"({cfg.rate_limit.max_db_size_mb} MB). "
                         "Delete old entries or increase rate_limit.max_db_size_mb.",
@@ -216,11 +349,28 @@ async def _handle_store(
                 pass  # can't stat, skip check
 
     # --- embedding budget check (store + dedup + conflict = 3 embeds) ------
+    # summary mode skips dedup/conflict, so only 1 embed needed.
+    embed_count = 1 if output_mode == "summary" else 3
     if cfg is not None:
         try:
-            record_and_check(store.connection, cfg.rate_limit.embedding_budget_daily, count=3)
+            record_and_check(
+                store.connection, cfg.rate_limit.embedding_budget_daily, count=embed_count
+            )
         except EmbeddingBudgetError as exc:
             return error_response("BUDGET_EXCEEDED", str(exc))
+        except Exception:  # noqa: BLE001
+            # Any non-budget failure here (e.g. TransactionContext aborted on a
+            # shared connection — see issue #363) would otherwise propagate as
+            # a raw DuckDB message.  Roll back the connection and return a
+            # sanitised INTERNAL response so clients see a stable contract.
+            logger.exception("Embedding budget check failed")
+            rollback = getattr(store, "rollback", None)
+            if callable(rollback):
+                try:
+                    await rollback()
+                except Exception:  # noqa: BLE001
+                    logger.debug("post-budget rollback skipped", exc_info=True)
+            return error_response("INTERNAL", "Failed to check embedding budget")
 
     # --- parse verification ---------------------------------------------------
     verification_val = VerificationStatus.UNVERIFIED
@@ -272,23 +422,40 @@ async def _handle_store(
     except Exception as exc:  # noqa: BLE001
         return error_response("INVALID_PARAMS", f"Failed to construct entry: {exc}")
 
-    # --- persist ------------------------------------------------------------
-    try:
-        entry_id = await store.store(entry)
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Error storing entry")
-        return error_response("STORE_ERROR", f"Failed to store entry: {exc}")
+    # --- pre-persist dedup check (summary mode skips this) ------------------
+    # Run dedup BEFORE persistence so that near-duplicates (score >= skip
+    # threshold) can be auto-skipped.  Auto-skip returns the existing entry's
+    # id — never a "ghost" id that was never inserted — together with
+    # ``persisted=False`` and ``dedup_action="skipped"`` so the caller knows
+    # to pivot to the existing entry.
+    skip_threshold: float | None = None
+    merge_threshold: float | None = None
+    link_threshold: float | None = None
+    if cfg is not None:
+        skip_threshold = cfg.classification.dedup_skip_threshold
+        merge_threshold = cfg.classification.dedup_merge_threshold
+        link_threshold = cfg.classification.dedup_link_threshold
 
-    # --- deduplication check ------------------------------------------------
+    top_existing_id: str | None = None
+    top_existing_score: float | None = None
     warnings: list[dict[str, Any]] = []
-    try:
-        similar = await store.find_similar(
-            content=entry.content,
-            threshold=float(dedup_threshold),
-            limit=dedup_limit + 1,  # +1 because the new entry itself may appear
-        )
-        for result in similar:
-            if result.entry.id != entry_id:
+
+    if output_mode != "summary":
+        try:
+            similar = await store.find_similar(
+                content=entry.content,
+                threshold=float(dedup_threshold),
+                limit=dedup_limit,
+            )
+            for result in similar:
+                # At this point the new entry has not been inserted yet, so
+                # every result is an existing entry.  Still guard against
+                # degenerate cases where the store returns the same id.
+                if result.entry.id == entry.id:
+                    continue
+                if top_existing_id is None:
+                    top_existing_id = result.entry.id
+                    top_existing_score = float(result.score)
                 warnings.append(
                     {
                         "similar_entry_id": result.entry.id,
@@ -298,9 +465,91 @@ async def _handle_store(
                 )
                 if len(warnings) >= dedup_limit:
                     break
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("find_similar failed during dedup check: %s", exc)
-        # Non-fatal: still return the stored entry_id.
+        except EmbeddingProviderError as exc:
+            # Upstream 429/5xx here would silently skip the dedup auto-skip
+            # path and persist anyway, producing duplicates.  Surface the
+            # structured UPSTREAM_* contract the same way the final
+            # ``store.store`` call does.
+            logger.warning(
+                "Upstream embedding provider failed during store dedup precheck "
+                "(provider=%s endpoint=%s status=%s retry_after=%s): %s",
+                exc.provider,
+                exc.endpoint,
+                exc.status_code,
+                exc.retry_after,
+                exc,
+            )
+            return upstream_error_response(exc)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("find_similar failed during dedup check: %s", exc)
+            # Non-fatal: fall through with no warnings and persist normally.
+
+    # --- auto-skip: near-duplicate, do NOT persist --------------------------
+    if (
+        skip_threshold is not None
+        and top_existing_id is not None
+        and top_existing_score is not None
+        and top_existing_score >= skip_threshold
+    ):
+        skip_response: dict[str, Any] = {
+            "entry_id": top_existing_id,
+            "persisted": False,
+            "dedup_action": "skipped",
+            "existing_entry_id": top_existing_id,
+            "similarity": round(top_existing_score, 4),
+        }
+        if warnings:
+            skip_response["warnings"] = warnings
+            skip_response["warning_message"] = (
+                f"Skipped as near-duplicate (score={top_existing_score:.3f}) "
+                f"of existing entry {top_existing_id!r}."
+            )
+        return success_response(skip_response)
+
+    # --- persist ------------------------------------------------------------
+    try:
+        entry_id = await store.store(entry)
+    except EmbeddingProviderError as exc:
+        logger.warning(
+            "Upstream embedding provider failed during store "
+            "(provider=%s endpoint=%s status=%s retry_after=%s): %s",
+            exc.provider,
+            exc.endpoint,
+            exc.status_code,
+            exc.retry_after,
+            exc,
+        )
+        return upstream_error_response(exc)
+    except Exception:  # noqa: BLE001
+        logger.exception("Error storing entry")
+        return error_response("INTERNAL", "Failed to store entry")
+
+    # --- summary mode: skip conflict, return early --------------------------
+    if output_mode == "summary":
+        return success_response({"entry_id": entry_id, "persisted": True, "dedup_action": "stored"})
+
+    # --- determine dedup_action for the persisted entry ---------------------
+    # When a new row is persisted independently, ``dedup_action`` is always
+    # ``"stored"`` — even if a similar entry exists above the merge/link
+    # threshold.  ``"merged"`` / ``"linked"`` are reserved for true fold
+    # cases (no separate row is created) and are not emitted by the current
+    # implementation.  The similarity signal is still surfaced via
+    # ``existing_entry_id`` + ``similarity`` when the top match crosses the
+    # link threshold, so callers can follow up (e.g. issue a
+    # ``distillery_find_similar(dedup_action=true)`` before future stores).
+    # Only ``"skipped"`` (handled above) prevents persistence.
+    dedup_action = "stored"
+    has_similar_hint = (
+        top_existing_id is not None
+        and top_existing_score is not None
+        and (
+            (merge_threshold is not None and top_existing_score >= merge_threshold)
+            or (link_threshold is not None and top_existing_score >= link_threshold)
+        )
+    )
+    # ``merge_threshold`` / ``link_threshold`` only drive ``has_similar_hint``.
+    # They no longer influence ``dedup_action``; see the reserved-semantics
+    # note above.
 
     # --- conflict check -------------------------------------------------------
     # Non-fatal: wrap in try/except so a conflict-checker failure never blocks
@@ -326,17 +575,29 @@ async def _handle_store(
                     continue
                 lines = result.entry.content.splitlines()
                 preview = lines[0][:120] if lines else result.entry.content[:120]
-                prompt = conflict_checker.build_prompt(entry.content, result.entry.content)
-                conflicts.append(
-                    {
-                        "entry_id": result.entry.id,
-                        "content_preview": preview,
-                        "similarity_score": round(result.score, 4),
-                        "conflict_prompt": prompt,
-                    }
-                )
+                candidate: dict[str, Any] = {
+                    "entry_id": result.entry.id,
+                    "content_preview": preview,
+                    "similarity_score": round(result.score, 4),
+                }
+                # conflict_prompt is opt-in (issue #348); the full template is
+                # only useful to callers who will round-trip it through
+                # distillery_find_similar(conflict_check=true).
+                if include_conflict_prompt:
+                    candidate["conflict_prompt"] = conflict_checker.build_prompt(
+                        entry.content, result.entry.content
+                    )
+                conflicts.append(candidate)
             if conflicts:
-                response_data: dict[str, Any] = {"entry_id": entry_id}
+                response_data: dict[str, Any] = {
+                    "entry_id": entry_id,
+                    "persisted": True,
+                    "dedup_action": dedup_action,
+                }
+                if has_similar_hint and top_existing_id is not None:
+                    response_data["existing_entry_id"] = top_existing_id
+                    if top_existing_score is not None:
+                        response_data["similarity"] = round(top_existing_score, 4)
                 if warnings:
                     response_data["warnings"] = warnings
                     response_data["warning_message"] = (
@@ -355,7 +616,15 @@ async def _handle_store(
         logger.warning("Conflict check failed during store: %s", exc)
         # Non-fatal: fall through and return the entry_id without conflict info.
 
-    response: dict[str, Any] = {"entry_id": entry_id}
+    response: dict[str, Any] = {
+        "entry_id": entry_id,
+        "persisted": True,
+        "dedup_action": dedup_action,
+    }
+    if has_similar_hint and top_existing_id is not None:
+        response["existing_entry_id"] = top_existing_id
+        if top_existing_score is not None:
+            response["similarity"] = round(top_existing_score, 4)
     if warnings:
         response["warnings"] = warnings
         response["warning_message"] = (
@@ -364,6 +633,209 @@ async def _handle_store(
             "Review before storing to avoid duplicates."
         )
     return success_response(response)
+
+
+# ---------------------------------------------------------------------------
+# _handle_store_batch
+# ---------------------------------------------------------------------------
+
+
+async def _handle_store_batch(
+    store: Any,
+    arguments: dict[str, Any],
+    cfg: DistilleryConfig | None = None,
+    created_by: str = "",
+) -> list[types.TextContent]:
+    """Batch-store multiple entries without dedup or conflict checks.
+
+    Args:
+        store: An initialised storage backend.
+        arguments: Parsed tool arguments dict.  Required key: ``entries``
+            (list of dicts, each with ``content`` and ``author``).
+            Optional key: ``project`` (applied to all entries lacking one).
+        cfg: Optional config for embedding budget checks.
+        created_by: Ownership identifier (from auth layer).
+
+    Returns:
+        A structured MCP success or error response.  On success the payload
+        contains ``entry_ids`` (list[str], preserved for backward
+        compatibility), ``count`` (int), and ``results`` — a per-entry list
+        of ``{"entry_id", "persisted", "dedup_action"}`` dicts.  Because the
+        batch path never runs deduplication, every entry is reported as
+        ``persisted=True`` with ``dedup_action="stored"``.
+    """
+    from distillery.mcp.budget import EmbeddingBudgetError, record_and_check
+    from distillery.models import Entry, EntrySource, EntryType
+
+    entries_raw = arguments.get("entries")
+    if not isinstance(entries_raw, list):
+        return error_response("INVALID_PARAMS", "Field 'entries' must be a list of dicts.")
+
+    project_default = arguments.get("project")
+
+    # --- validate each entry dict -------------------------------------------
+    built: list[Entry] = []
+    for idx, item in enumerate(entries_raw):
+        if not isinstance(item, dict):
+            return error_response(
+                "INVALID_PARAMS", f"entries[{idx}] must be a dict, got {type(item).__name__}."
+            )
+        if "content" not in item:
+            return error_response(
+                "INVALID_PARAMS", f"entries[{idx}] is missing required 'content'."
+            )
+        if "author" not in item:
+            return error_response("INVALID_PARAMS", f"entries[{idx}] is missing required 'author'.")
+
+        entry_type_str = item.get("entry_type", "inbox")
+        if entry_type_str not in _VALID_ENTRY_TYPES:
+            return _invalid_entry_type_response(entry_type_str, prefix=f"entries[{idx}] has ")
+
+        source_str = str(item.get("source", EntrySource.CLAUDE_CODE.value))
+        if source_str not in _VALID_SOURCES:
+            return error_response(
+                "INVALID_PARAMS",
+                f"entries[{idx}] has invalid source {source_str!r}. "
+                f"Must be one of: {', '.join(sorted(_VALID_SOURCES))}.",
+            )
+
+        # --- normalize tags (mirror _handle_store logic) ---
+        tags_raw = item.get("tags")
+        if tags_raw is None:
+            tags_normalized = []
+        elif isinstance(tags_raw, str):
+            tags_normalized = [tags_raw]
+        elif isinstance(tags_raw, list):
+            tags_normalized = tags_raw
+        else:
+            return error_response(
+                "INVALID_PARAMS",
+                f"entries[{idx}] has invalid tags: must be a list or string, got {type(tags_raw).__name__}.",
+            )
+
+        # Validate each tag is a non-empty string
+        final_tags: list[str] = []
+        for tag in tags_normalized:
+            if not isinstance(tag, str):
+                return error_response(
+                    "INVALID_PARAMS",
+                    f"entries[{idx}]: each tag must be a string, got {type(tag).__name__}.",
+                )
+            tag_stripped = tag.strip()
+            if tag_stripped:
+                final_tags.append(tag_stripped)
+
+        # --- reserved prefix enforcement (mirror _handle_store logic) ---
+        _reserved_allowed_sources: set[str] = {EntrySource.IMPORT.value}
+        if (
+            cfg is not None
+            and cfg.tags.reserved_prefixes
+            and source_str not in _reserved_allowed_sources
+        ):
+            for tag in final_tags:
+                top = tag.split("/")[0]
+                if top in cfg.tags.reserved_prefixes:
+                    return error_response(
+                        "INVALID_PARAMS",
+                        f"entries[{idx}]: tag {tag!r} uses reserved prefix {top!r}. "
+                        "Only internal sources may use this namespace.",
+                    )
+
+        # Validate metadata shape before coercion. ``dict(x)`` accepts
+        # lists-of-pairs and other iterables, so bare coercion would let
+        # malformed payloads slip through (or raise TypeError opaquely).
+        raw_meta = item.get("metadata")
+        if raw_meta is None:
+            metadata: dict[str, Any] = {}
+        elif isinstance(raw_meta, Mapping):
+            metadata = dict(raw_meta)
+        else:
+            return error_response(
+                "INVALID_PARAMS",
+                f"entries[{idx}].metadata must be an object",
+            )
+        try:
+            entry = Entry(
+                content=item["content"],
+                entry_type=EntryType(entry_type_str),
+                source=EntrySource(source_str),
+                author=item["author"],
+                project=item.get("project", project_default),
+                tags=final_tags,
+                metadata=metadata,
+                created_by=created_by,
+            )
+        except Exception:  # noqa: BLE001
+            # Log the full traceback server-side so operators can diagnose,
+            # but return a generic client-facing message — raw exception text
+            # may include unsanitised payload fragments or internal details.
+            logger.exception("distillery_store_batch: Entry() rejected item %d", idx)
+            return error_response(
+                "INVALID_PARAMS", f"entries[{idx}]: failed to construct entry"
+            )
+        built.append(entry)
+
+    if not built:
+        return success_response({"entry_ids": [], "results": [], "count": 0})
+
+    # --- db size check (same guard as _handle_store) -------------------------
+    if cfg is not None and cfg.rate_limit.max_db_size_mb > 0:
+        db_path = _normalize_db_path(cfg.storage.database_path)
+        if db_path != ":memory:" and not _is_remote_db_path(db_path):
+            try:
+                size_mb = Path(db_path).stat().st_size / (1024 * 1024)
+                if size_mb >= cfg.rate_limit.max_db_size_mb:
+                    return error_response(
+                        "BUDGET_EXCEEDED",
+                        f"Database size ({size_mb:.1f} MB) exceeds limit "
+                        f"({cfg.rate_limit.max_db_size_mb} MB). "
+                        "Delete old entries or increase rate_limit.max_db_size_mb.",
+                    )
+            except OSError:
+                pass  # can't stat, skip check
+
+    # --- embedding budget check (1 embed per entry, no dedup) ---------------
+    if cfg is not None:
+        try:
+            record_and_check(
+                store.connection, cfg.rate_limit.embedding_budget_daily, count=len(built)
+            )
+        except EmbeddingBudgetError as exc:
+            return error_response("BUDGET_EXCEEDED", str(exc))
+        except Exception:  # noqa: BLE001
+            logger.exception("Embedding budget check failed (store_batch)")
+            rollback = getattr(store, "rollback", None)
+            if callable(rollback):
+                try:
+                    await rollback()
+                except Exception:  # noqa: BLE001
+                    logger.debug("post-budget rollback skipped", exc_info=True)
+            return error_response("INTERNAL", "Failed to check embedding budget")
+
+    # --- persist ------------------------------------------------------------
+    try:
+        entry_ids = await store.store_batch(built)
+    except EmbeddingProviderError as exc:
+        logger.warning(
+            "Upstream embedding provider failed during store_batch "
+            "(provider=%s endpoint=%s status=%s retry_after=%s): %s",
+            exc.provider,
+            exc.endpoint,
+            exc.status_code,
+            exc.retry_after,
+            exc,
+        )
+        return upstream_error_response(exc)
+    except Exception:  # noqa: BLE001
+        logger.exception("Error in store_batch")
+        return error_response("INTERNAL", "Failed to batch-store entries")
+
+    # Batch-store does not run deduplication; every persisted entry is
+    # reported with ``persisted=True`` and ``dedup_action="stored"``.  This
+    # keeps the batch response shape aligned with the single-entry
+    # ``distillery_store`` response so callers can rely on the same keys.
+    results = [{"entry_id": eid, "persisted": True, "dedup_action": "stored"} for eid in entry_ids]
+    return success_response({"entry_ids": entry_ids, "results": results, "count": len(entry_ids)})
 
 
 # ---------------------------------------------------------------------------
@@ -401,9 +873,9 @@ async def _handle_get(
 
     try:
         entry = await store.get(entry_id)
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         logger.exception("Error fetching entry id=%s", entry_id)
-        return error_response("STORE_ERROR", f"Failed to retrieve entry: {exc}")
+        return error_response("INTERNAL", "Failed to retrieve entry")
 
     if entry is None:
         return error_response(
@@ -517,11 +989,7 @@ async def _handle_update(
     if "entry_type" in updates:
         et_str = updates["entry_type"]
         if et_str not in _VALID_ENTRY_TYPES:
-            return error_response(
-                "INVALID_PARAMS",
-                f"Invalid entry_type {et_str!r}. "
-                f"Must be one of: {', '.join(sorted(_VALID_ENTRY_TYPES))}.",
-            )
+            return _invalid_entry_type_response(et_str)
         updates["entry_type"] = EntryType(et_str)
 
     if "status" in updates:
@@ -575,9 +1043,20 @@ async def _handle_update(
         )
     except ValueError as exc:
         return error_response("INVALID_PARAMS", str(exc))
-    except Exception as exc:  # noqa: BLE001
+    except EmbeddingProviderError as exc:
+        logger.warning(
+            "Upstream embedding provider failed during update "
+            "(provider=%s endpoint=%s status=%s retry_after=%s): %s",
+            exc.provider,
+            exc.endpoint,
+            exc.status_code,
+            exc.retry_after,
+            exc,
+        )
+        return upstream_error_response(exc)
+    except Exception:  # noqa: BLE001
         logger.exception("Error updating entry id=%s", entry_id)
-        return error_response("STORE_ERROR", f"Failed to update entry: {exc}")
+        return error_response("INTERNAL", "Failed to update entry")
 
     return success_response(updated_entry.to_dict())
 
@@ -587,13 +1066,68 @@ async def _handle_update(
 # ---------------------------------------------------------------------------
 
 _VALID_OUTPUT_MODES = frozenset({"full", "summary", "ids", "review"})
+_VALID_GROUP_BY_VALUES = frozenset({"entry_type", "status", "author", "project", "source", "tags"})
+
+# Summary-mode content preview length (characters).  Chosen to keep each
+# entry ~300-500 bytes so a full ``distillery_list(limit=50)`` fits in a
+# few tens of KB rather than hundreds.
+_SUMMARY_CONTENT_PREVIEW_CHARS = 200
+
+# Maximum character length for derived titles in summary mode.
+_SUMMARY_TITLE_CHARS = 120
+
+# Default statuses returned when the caller does not specify one.  Archived
+# entries are excluded from default views so that deleted/superseded content
+# does not leak into user-facing lists or searches.  Callers can opt back in
+# via ``include_archived=True`` or the sentinel ``status="any"``.
+_DEFAULT_VISIBLE_STATUSES: tuple[str, ...] = ("active", "pending_review")
+
+
+def _derive_title(entry: Any) -> str:
+    """Return a short title for *entry* — the ``title`` metadata key if present,
+    otherwise the first non-empty line of ``content`` (trimmed to
+    ``_SUMMARY_TITLE_CHARS`` characters)."""
+    md_title = entry.metadata.get("title") if isinstance(entry.metadata, dict) else None
+    if isinstance(md_title, str) and md_title.strip():
+        return md_title.strip()[:_SUMMARY_TITLE_CHARS]
+    content = getattr(entry, "content", "") or ""
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped:
+            return stripped[:_SUMMARY_TITLE_CHARS]
+    return ""
 
 
 def _entry_to_summary_dict(entry: Any) -> dict[str, Any]:
-    """Serialise *entry* without the ``content`` field (summary mode)."""
-    d: dict[str, Any] = entry.to_dict()
-    d.pop("content", None)
-    return d
+    """Serialise *entry* as a compact summary (no full ``content``).
+
+    Always returns: ``id``, derived ``title``, ``entry_type``, ``tags``,
+    ``project``, ``author``, ``created_at``, ``content_preview`` (truncated
+    to ``_SUMMARY_CONTENT_PREVIEW_CHARS`` characters with an ellipsis when
+    truncated), ``metadata``, and ``session_id``.
+    """
+    content: str = getattr(entry, "content", "") or ""
+    if len(content) > _SUMMARY_CONTENT_PREVIEW_CHARS:
+        preview = content[:_SUMMARY_CONTENT_PREVIEW_CHARS] + "…"
+    else:
+        preview = content
+
+    summary: dict[str, Any] = {
+        "id": entry.id,
+        "title": _derive_title(entry),
+        "entry_type": entry.entry_type.value,
+        "tags": list(entry.tags),
+        "project": entry.project,
+        "author": entry.author,
+        "created_at": entry.created_at.isoformat(),
+        "content_preview": preview,
+        # Metadata is retained (not the full content body) because callers frequently
+        # need identifiers like ``external_id`` / ``source_url`` for dedup.  It is
+        # typically <1 KB per entry.
+        "metadata": dict(entry.metadata) if isinstance(entry.metadata, dict) else {},
+        "session_id": entry.session_id,
+    }
+    return summary
 
 
 def _entry_to_id_dict(entry: Any) -> dict[str, Any]:
@@ -636,7 +1170,7 @@ async def _handle_list(
     if offset < 0:
         return error_response("INVALID_PARAMS", "Field 'offset' must be >= 0")
 
-    output_mode = arguments.get("output_mode", "full")
+    output_mode = arguments.get("output_mode", "summary")
     err_output_mode = validate_type(arguments, "output_mode", str, "string")
     if err_output_mode:
         return error_response("INVALID_PARAMS", err_output_mode)
@@ -655,22 +1189,159 @@ async def _handle_list(
             return error_response("INVALID_PARAMS", "Field 'content_max_length' must be >= 1")
         content_max_length = content_max_length_raw
 
+    # --- validate stale_days -------------------------------------------------
+    stale_days_raw = arguments.get("stale_days")
+    stale_days: int | None = None
+    if stale_days_raw is not None:
+        # ``bool`` is a subclass of ``int``, so isinstance(True, int) is True.
+        # Explicitly reject bool so True/False don't slip through as 1/0 days.
+        if not isinstance(stale_days_raw, int) or isinstance(stale_days_raw, bool):
+            return error_response("INVALID_PARAMS", "Field 'stale_days' must be an integer")
+        if stale_days_raw < 1:
+            return error_response("INVALID_PARAMS", "Field 'stale_days' must be >= 1")
+        stale_days = stale_days_raw
+
+    # --- validate group_by ---------------------------------------------------
+    group_by_raw = arguments.get("group_by")
+    group_by: str | None = None
+    if group_by_raw is not None:
+        if not isinstance(group_by_raw, str):
+            return error_response("INVALID_PARAMS", "Field 'group_by' must be a string")
+        if group_by_raw not in _VALID_GROUP_BY_VALUES:
+            return error_response(
+                "INVALID_PARAMS",
+                f"Field 'group_by' must be one of: {', '.join(sorted(_VALID_GROUP_BY_VALUES))}",
+            )
+        group_by = group_by_raw
+
+    # --- validate output -----------------------------------------------------
+    output_raw = arguments.get("output")
+    output: str | None = None
+    if output_raw is not None:
+        if not isinstance(output_raw, str):
+            return error_response("INVALID_PARAMS", "Field 'output' must be a string")
+        if output_raw != "stats":
+            return error_response("INVALID_PARAMS", "Field 'output' only accepts 'stats'")
+        output = output_raw
+
+    # --- mutual exclusivity: group_by and output="stats" ---------------------
+    if group_by is not None and output == "stats":
+        return error_response(
+            "INVALID_PARAMS",
+            "Fields 'group_by' and 'output' are mutually exclusive",
+        )
+
+    # --- source=<url> aliasing ----------------------------------------------
+    # Issue #335: users often try `source="https://…/feed"` expecting it to
+    # match feed-ingested entries.  The `source` column actually stores the
+    # ingest origin (e.g. "import"), not the feed URL, so this silently
+    # returned 0 results.  Treat a URL-shaped `source` value as an alias
+    # for `feed_url` to remove the footgun.
+    aliased = _alias_source_url_to_feed_url(arguments)
+    if isinstance(aliased, list):
+        return aliased  # error response
+    arguments = aliased
+
     filters = _build_filters_from_arguments(arguments)
 
-    # review mode implicitly filters to pending_review status.
+    # review mode implicitly filters to pending_review status (takes precedence
+    # over any default/visible-status logic).
     if output_mode == "review":
         if filters is None:
             filters = {}
         filters["status"] = "pending_review"
+    else:
+        filter_result = _apply_default_status_filter(filters, arguments)
+        if isinstance(filter_result, list):
+            # Error response from validation.
+            return filter_result
+        filters = filter_result
 
+    # batch_mode=True requires at least one real filter to prevent a
+    # classify-all footgun. Run this guard AFTER status normalization so
+    # status="any" (which is stripped by _apply_default_status_filter) can't
+    # bypass the check, and so that the default status filter does not count
+    # as a real filter on its own.
+    # Validate the type first so truthy non-bool values (e.g. ``1``, ``"true"``)
+    # can't slip past the ``is True`` check below and skip the guard entirely.
+    if "batch_mode" in arguments and not isinstance(arguments["batch_mode"], bool):
+        return error_response(
+            "INVALID_PARAMS", "Field 'batch_mode' must be a boolean (true/false)"
+        )
+    if arguments.get("batch_mode") is True:
+        real_filter_keys = {
+            "source",
+            "entry_type",
+            "author",
+            "tag_prefix",
+            "project",
+            "verification",
+            "tags",
+            "session_id",
+            "feed_url",
+            "date_from",
+            "date_to",
+            "metadata.source_url",
+        }
+        has_real_filter = bool(filters and any(key in filters for key in real_filter_keys))
+        # ``stale_days`` is passed as a top-level argument rather than inside
+        # the filters dict, so it must be checked separately — otherwise
+        # batch_mode=True with stale_days=N (a legitimate narrowing filter)
+        # is incorrectly rejected as "no real filter".
+        if not has_real_filter and arguments.get("stale_days") is not None:
+            has_real_filter = True
+        if not has_real_filter:
+            return error_response(
+                "INVALID_PARAMS",
+                "At least one filter is required for --batch mode. "
+                "Provide source, entry_type, author, tag_prefix, project, "
+                "verification, or stale_days.",
+            )
+
+    # --- group_by mode -------------------------------------------------------
+    if group_by is not None:
+        try:
+            result = await store.list_entries(
+                filters=filters,
+                limit=limit,
+                offset=offset,
+                group_by=group_by,
+                stale_days=stale_days,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("Error in distillery_list (group_by mode)")
+            return error_response("INTERNAL", "list_entries failed")
+        return success_response(result)
+
+    # --- stats mode ----------------------------------------------------------
+    if output == "stats":
+        try:
+            result = await store.list_entries(
+                filters=filters,
+                limit=limit,
+                offset=offset,
+                stale_days=stale_days,
+                output="stats",
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("Error in distillery_list (stats mode)")
+            return error_response("INTERNAL", "list_entries failed")
+        return success_response(result)
+
+    # --- default list mode ---------------------------------------------------
     try:
-        entries = await store.list_entries(filters=filters, limit=limit, offset=offset)
-    except Exception as exc:  # noqa: BLE001
+        entries = await store.list_entries(
+            filters=filters,
+            limit=limit,
+            offset=offset,
+            stale_days=stale_days,
+        )
+    except Exception:  # noqa: BLE001
         logger.exception("Error in distillery_list")
-        return error_response("LIST_ERROR", f"list_entries failed: {exc}")
+        return error_response("INTERNAL", "list_entries failed")
 
     try:
-        total_count = await store.count_entries(filters=filters)
+        total_count = await store.count_entries(filters=filters, stale_days=stale_days)
     except Exception:  # noqa: BLE001
         logger.debug("count_entries failed, falling back to len(entries)", exc_info=True)
         total_count = len(entries)
@@ -723,11 +1394,121 @@ async def _handle_list(
 # ---------------------------------------------------------------------------
 
 
+def _apply_default_status_filter(
+    filters: dict[str, Any] | None,
+    arguments: dict[str, Any],
+) -> dict[str, Any] | None | list[types.TextContent]:
+    """Apply the default ``status`` filter that hides archived entries.
+
+    Semantics:
+
+    * If the caller passed ``include_archived=True``: no status filter is
+      added (all statuses returned).
+    * If the caller passed ``status="any"``: the sentinel is stripped and no
+      status filter is added (all statuses returned).
+    * If the caller passed any other explicit ``status`` value (including a
+      list): it is left untouched.
+    * Otherwise: the filter is populated with
+      ``status IN ('active', 'pending_review')`` so archived entries are
+      excluded from default views.
+
+    Returns the (possibly mutated) filters dict, or an MCP error response
+    list when ``include_archived`` has the wrong type.
+    """
+    include_archived_raw = arguments.get("include_archived")
+    if include_archived_raw is not None and not isinstance(include_archived_raw, bool):
+        return error_response("INVALID_PARAMS", "Field 'include_archived' must be a boolean")
+    include_archived = bool(include_archived_raw) if include_archived_raw is not None else False
+
+    # Detect the sentinel ``status="any"`` early; it overrides the default
+    # archived-exclusion and means "return every status".
+    if filters is not None and filters.get("status") == "any":
+        remaining = {k: v for k, v in filters.items() if k != "status"}
+        return remaining if remaining else None
+
+    # If the caller has a specific status filter, leave it alone.
+    if filters is not None and "status" in filters:
+        return filters
+
+    # If the caller opted out of the default filter, do nothing.
+    if include_archived:
+        return filters
+
+    if filters is None:
+        filters = {}
+    filters["status"] = list(_DEFAULT_VISIBLE_STATUSES)
+    return filters
+
+
+def _looks_like_url(value: Any) -> bool:
+    """Return True when *value* is a str that starts with ``http://`` or ``https://``.
+
+    Used to detect when a caller has passed a feed URL into the ``source``
+    parameter of ``distillery_list`` — a common footgun where ``source`` is
+    the more discoverable name but only filters on the entry-origin column
+    (e.g. ``"import"``).  See :func:`_alias_source_url_to_feed_url`.
+    """
+    if not isinstance(value, str):
+        return False
+    return value.startswith("http://") or value.startswith("https://")
+
+
+def _alias_source_url_to_feed_url(
+    arguments: dict[str, Any],
+) -> dict[str, Any] | list[types.TextContent]:
+    """Transparently route ``source=<url>`` to the ``feed_url`` filter.
+
+    When the caller passes a URL-shaped value (``http://…`` or ``https://…``)
+    as the ``source`` argument, treat it as an alias for ``feed_url``.  This
+    removes a silent-zero footgun where users try ``source="https://…/feed"``
+    expecting to see feed items but get an empty result because the
+    ``source`` column stores ingest origin (``"import"``), not the feed URL.
+
+    Returns a possibly-mutated copy of *arguments* when aliasing is needed.
+    Returns the original dict when no aliasing applies.  Returns an MCP
+    error response list when both ``source`` (URL-shaped) and ``feed_url``
+    were provided with different values.
+
+    The non-URL ``source`` behaviour is unchanged — strings like
+    ``"import"`` / ``"claude-code"`` continue to filter on the ``source``
+    column as before.
+    """
+    source = arguments.get("source")
+    feed_url = arguments.get("feed_url")
+
+    if not _looks_like_url(source):
+        return arguments
+
+    if feed_url is not None and feed_url != source:
+        return error_response(
+            "INVALID_PARAMS",
+            "Field 'source' is a URL and 'feed_url' is also set to a different "
+            "URL. Pass only one, or set both to the same value. "
+            "(URL-shaped 'source' is aliased to 'feed_url'.)",
+            details={"source": source, "feed_url": feed_url},
+        )
+
+    # Route URL-shaped source to feed_url and drop the original source value
+    # so it isn't also translated to a (never-matching) source-column filter.
+    aliased = dict(arguments)
+    aliased["feed_url"] = source
+    aliased.pop("source", None)
+    return aliased
+
+
 def _build_filters_from_arguments(arguments: dict[str, Any]) -> dict[str, Any] | None:
     """Extract known filter keys from *arguments* into a filters dict.
 
     Keys extracted: ``entry_type``, ``author``, ``project``, ``tags``,
-    ``status``, ``verification``, ``source``, ``date_from``, ``date_to``.
+    ``status``, ``verification``, ``source``, ``date_from``, ``date_to``,
+    ``tag_prefix``, ``session_id``, ``feed_url``.
+
+    The ``feed_url`` key is translated to a ``metadata.source_url`` filter so
+    callers can retrieve entries ingested from a registered feed source
+    (poller writes ``metadata.source_url`` to match the registry URL, while
+    the entry's ``source`` column is set to ``import``).  URL-shaped
+    ``source`` values are routed to ``feed_url`` upstream by
+    :func:`_alias_source_url_to_feed_url`.
 
     Args:
         arguments: The tool argument dict.
@@ -752,6 +1533,12 @@ def _build_filters_from_arguments(arguments: dict[str, Any]) -> dict[str, Any] |
     for key in filter_keys:
         if key in arguments and arguments[key] is not None:
             filters[key] = arguments[key]
+
+    # Translate feed_url → metadata.source_url (the field poller records).
+    feed_url = arguments.get("feed_url")
+    if feed_url is not None:
+        filters["metadata.source_url"] = feed_url
+
     return filters if filters else None
 
 
@@ -800,9 +1587,9 @@ async def _handle_correct(
     # --- fetch original entry -----------------------------------------------
     try:
         original = await store.get(wrong_entry_id)
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         logger.exception("Error fetching entry id=%s for correction", wrong_entry_id)
-        return error_response("STORE_ERROR", f"Failed to retrieve original entry: {exc}")
+        return error_response("INTERNAL", "Failed to retrieve original entry")
 
     if original is None:
         return error_response(
@@ -813,7 +1600,7 @@ async def _handle_correct(
 
     if original.status == EntryStatus.ARCHIVED:
         return error_response(
-            "INVALID_STATE",
+            "INVALID_PARAMS",
             "Cannot correct an archived entry.",
             details={"wrong_entry_id": wrong_entry_id, "status": original.status.value},
         )
@@ -821,11 +1608,7 @@ async def _handle_correct(
     # --- resolve fields (inherit from original if not provided) -------------
     entry_type_str = arguments.get("entry_type", original.entry_type.value)
     if entry_type_str not in _VALID_ENTRY_TYPES:
-        return error_response(
-            "INVALID_PARAMS",
-            f"Invalid entry_type {entry_type_str!r}. "
-            f"Must be one of: {', '.join(sorted(_VALID_ENTRY_TYPES))}.",
-        )
+        return _invalid_entry_type_response(entry_type_str)
 
     author = arguments.get("author", original.author)
     project = arguments.get("project", original.project)
@@ -833,10 +1616,15 @@ async def _handle_correct(
     tags_err = validate_type(arguments, "tags", list, "list of strings")
     if tags_err:
         return error_response("INVALID_PARAMS", tags_err)
-    tags = list(arguments["tags"]) if "tags" in arguments else list(original.tags)
+    explicit_tags = "tags" in arguments
+    tags = list(arguments["tags"]) if explicit_tags else list(original.tags)
 
     # --- reserved prefix enforcement (match distillery_store guard) ---------
-    if cfg is not None and cfg.tags.reserved_prefixes:
+    # Only validate when the caller explicitly supplied ``tags``: inherited
+    # tags from the original entry (e.g. imported/internal sources carrying
+    # reserved-prefix tags) must not block legitimate corrections when the
+    # caller never touched the tag list.
+    if cfg is not None and cfg.tags.reserved_prefixes and explicit_tags:
         for tag in tags:
             if not isinstance(tag, str):
                 return error_response(
@@ -845,7 +1633,7 @@ async def _handle_correct(
             top = tag.split("/")[0]
             if top in cfg.tags.reserved_prefixes:
                 return error_response(
-                    "RESERVED_PREFIX",
+                    "INVALID_PARAMS",
                     f"Tag {tag!r} uses reserved prefix {top!r}. "
                     "Only internal sources may use this namespace.",
                 )
@@ -879,7 +1667,7 @@ async def _handle_correct(
                 size_mb = Path(db_path).stat().st_size / (1024 * 1024)
                 if size_mb >= cfg.rate_limit.max_db_size_mb:
                     return error_response(
-                        "DB_SIZE_EXCEEDED",
+                        "BUDGET_EXCEEDED",
                         f"Database size ({size_mb:.1f} MB) exceeds limit "
                         f"({cfg.rate_limit.max_db_size_mb} MB). "
                         "Delete old entries or increase rate_limit.max_db_size_mb.",
@@ -894,13 +1682,33 @@ async def _handle_correct(
             record_and_check(store.connection, cfg.rate_limit.embedding_budget_daily, count=1)
         except EmbeddingBudgetError as exc:
             return error_response("BUDGET_EXCEEDED", str(exc))
+        except Exception:  # noqa: BLE001
+            logger.exception("Embedding budget check failed (correct)")
+            rollback = getattr(store, "rollback", None)
+            if callable(rollback):
+                try:
+                    await rollback()
+                except Exception:  # noqa: BLE001
+                    logger.debug("post-budget rollback skipped", exc_info=True)
+            return error_response("INTERNAL", "Failed to check embedding budget")
 
     # --- atomically persist entry, relation, and archive original -----------
     try:
         new_entry_id = await store.apply_correction(new_entry, wrong_entry_id)
-    except Exception as exc:  # noqa: BLE001
+    except EmbeddingProviderError as exc:
+        logger.warning(
+            "Upstream embedding provider failed during apply_correction "
+            "(provider=%s endpoint=%s status=%s retry_after=%s): %s",
+            exc.provider,
+            exc.endpoint,
+            exc.status_code,
+            exc.retry_after,
+            exc,
+        )
+        return upstream_error_response(exc)
+    except Exception:  # noqa: BLE001
         logger.exception("Error applying correction for entry id=%s", wrong_entry_id)
-        return error_response("STORE_ERROR", f"Failed to apply correction: {exc}")
+        return error_response("INTERNAL", "Failed to apply correction")
 
     return success_response(
         {
@@ -912,12 +1720,18 @@ async def _handle_correct(
 
 __all__ = [
     "_handle_store",
+    "_handle_store_batch",
     "_handle_get",
     "_handle_update",
     "_handle_correct",
     "_handle_list",
     "_build_filters_from_arguments",
+    "_apply_default_status_filter",
+    "_DEFAULT_VISIBLE_STATUSES",
     "_VALID_ENTRY_TYPES",
+    "_ENTRY_TYPE_ALIASES",
+    "_suggest_entry_type",
+    "_invalid_entry_type_response",
     "_VALID_STATUSES",
     "_VALID_VERIFICATIONS",
     "_VALID_SOURCES",

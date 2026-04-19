@@ -22,10 +22,11 @@ import logging
 import os
 import re
 import uuid
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
-from urllib.parse import urlparse
+from typing import TYPE_CHECKING, Any, TypeVar, overload
+from urllib.parse import unquote, urlparse
 
 import duckdb
 
@@ -38,6 +39,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_T = TypeVar("_T")
+
 
 def _sql_escape(value: str) -> str:
     """Escape a string value for safe embedding in a SQL literal.
@@ -48,12 +51,44 @@ def _sql_escape(value: str) -> str:
     return value.replace("'", "''")
 
 
+def _sanitise_last_error(error: str | None, max_len: int) -> str | None:
+    """Collapse whitespace and truncate a feed-poll error string.
+
+    Returns ``None`` when *error* is ``None`` or empty after stripping so
+    successful polls clear any previous error.  Control characters
+    (including newlines and carriage returns) are collapsed to single
+    spaces so the payload is operator-friendly and less likely to leak
+    stack-trace fragments verbatim.  The resulting string is truncated
+    to *max_len* characters with an ellipsis suffix when truncation
+    occurs.
+
+    Raises:
+        ValueError: if *max_len* is not a positive integer. Without this
+            guard, ``collapsed[: max_len - 1] + "…"`` would return a value
+            longer than the caller-requested limit, which could persist
+            oversized ``last_error`` strings.
+    """
+    if max_len <= 0:
+        raise ValueError("max_len must be a positive integer")
+    if error is None:
+        return None
+    # Collapse runs of whitespace / control chars to single spaces.
+    collapsed = re.sub(r"\s+", " ", error).strip()
+    if not collapsed:
+        return None
+    if len(collapsed) <= max_len:
+        return collapsed
+    # Preserve total length of exactly *max_len* including ellipsis.
+    return collapsed[: max_len - 1] + "\u2026"
+
+
 _AGGREGATE_EXPR_MAP: dict[str, str] = {
     "entry_type": "entry_type",
     "status": "status",
     "author": "author",
     "project": "project",
     "source": "source",
+    "tags": "UNNEST(tags)",
     "metadata.source_url": "json_extract_string(metadata, '$.source_url')",
     "metadata.source_type": "json_extract_string(metadata, '$.source_type')",
 }
@@ -243,24 +278,83 @@ class DuckDBStore:
     def _rebuild_fts_index(self, conn: duckdb.DuckDBPyConnection) -> None:
         """Rebuild the full-text search index on ``entries.content``.
 
-        Explicitly drops the ``fts_main_entries`` schema with ``CASCADE``
-        before recreating via the FTS PRAGMA.  The drop+create is wrapped in
-        a single transaction so an interrupted rebuild cannot leave a partial
-        schema in the WAL.
+        Uses ``PRAGMA create_fts_index(..., overwrite=1)`` which atomically
+        drops and recreates the ``fts_main_entries`` schema inside the FTS
+        extension's own routine.  A ``CHECKPOINT`` is issued immediately
+        afterwards so the FTS DDL is flushed to the main database file rather
+        than lingering in the WAL.
+
+        This matters because DuckDB's WAL replay cannot always re-order FTS
+        schema drop/create DDL when the process is killed abruptly
+        (SIGKILL, OOM, Fly.io scale-to-zero hard-stop) before a checkpoint
+        runs.  Replay has been observed to fail with:
+
+            Cannot drop entry "fts_main_entries" because there are entries
+            that depend on it.
+
+        Checkpointing after each rebuild means the WAL never carries FTS
+        DDL across process boundaries, eliminating the replay hazard.  See
+        GitHub issue #349 for background.
         """
         if not self._fts_available:
             return
         try:
-            conn.execute("BEGIN TRANSACTION")
-            conn.execute("DROP SCHEMA IF EXISTS fts_main_entries CASCADE")
-            conn.execute("PRAGMA create_fts_index('entries', 'id', 'content')")
-            conn.execute("COMMIT")
+            # ``overwrite=1`` makes the PRAGMA idempotent — the FTS extension
+            # handles dropping any existing ``fts_main_entries`` schema
+            # internally, so we don't emit a separate DROP SCHEMA into the
+            # WAL.  Run outside an explicit BEGIN so the PRAGMA commits
+            # cleanly on its own; the immediate CHECKPOINT below flushes
+            # the resulting DDL out of the WAL.
+            conn.execute("PRAGMA create_fts_index('entries', 'id', 'content', overwrite=1)")
             logger.debug("FTS index rebuilt on entries.content")
         except duckdb.Error as exc:
-            with contextlib.suppress(duckdb.Error):
-                conn.execute("ROLLBACK")
             logger.warning("FTS index rebuild failed: %s", exc)
             self._fts_available = False
+            return
+
+        # Force a CHECKPOINT so the FTS schema DDL is persisted to the
+        # main database file.  If the process is killed before the next
+        # checkpoint, WAL replay will not have to re-apply FTS DDL —
+        # which is where we have seen ordering-related replay failures.
+        try:
+            conn.execute("CHECKPOINT")
+        except duckdb.Error as exc:  # pragma: no cover — best-effort
+            logger.debug("Post-FTS-rebuild CHECKPOINT skipped: %s", exc)
+
+    def _checkpoint_after_write(self, conn: duckdb.DuckDBPyConnection) -> None:
+        """Flush WAL to the main database file after a write operation.
+
+        DuckDB's implicit auto-commit writes each statement to the WAL, but
+        those writes only reach the main database file on the next
+        ``CHECKPOINT``.  Without periodic checkpoints the WAL can grow
+        unbounded and — more importantly — any ungraceful termination
+        (SIGKILL, OOM, crash, abrupt scale-to-zero) leaves user writes
+        stranded in the WAL.  On the next startup, DuckDB attempts to
+        replay the WAL; if that replay fails for any reason (e.g. a
+        partially-written FTS schema rebuild), the
+        :meth:`_sync_initialize` recovery path can discard the WAL
+        entirely — silently losing the writes.  This was the root cause of
+        issue #346: entries returned ``persisted: true`` then vanished
+        between creation and later mutation.
+
+        Calling ``CHECKPOINT`` after each successful write bounds the WAL
+        delta to a single entry's worth of data, making writes durable
+        even under ungraceful termination.  DuckDB's ``CHECKPOINT`` is a
+        no-op when the WAL is already empty, so the overhead on an idle
+        database is negligible.
+
+        Checkpoint failures are logged and swallowed — the write itself
+        has already been committed to the WAL, so returning success to
+        the caller is still correct.  A failed checkpoint just means the
+        WAL stays slightly larger than usual.
+        """
+        try:
+            conn.execute("CHECKPOINT")
+        except duckdb.Error as exc:
+            # Non-fatal: the row is already in the WAL.  Log so operators
+            # can see repeated failures, but don't raise — the caller has
+            # already observed a successful write.
+            logger.debug("CHECKPOINT after write failed (non-fatal): %s", exc)
 
     def _setup_httpfs(self, conn: duckdb.DuckDBPyConnection) -> None:
         """Install and load the httpfs extension, then configure S3 credentials.
@@ -426,6 +520,144 @@ class DuckDBStore:
                 f"incompatible embeddings."
             )
 
+    def _recover_from_wal_replay_failure(self, exc: duckdb.Error) -> duckdb.DuckDBPyConnection:
+        """Recover from a WAL replay failure caused by FTS schema DDL.
+
+        Replay is known to fail for FTS-related DDL when the process was
+        killed between an FTS index rebuild and the subsequent checkpoint
+        (see issue #349).  Recovery moves the WAL file aside to a
+        timestamped backup so any uncommitted data is preserved for manual
+        inspection, then retries the connection.
+
+        Only local file paths are eligible for recovery; in-memory,
+        S3, and MotherDuck URIs re-raise the original error.
+
+        Returns
+        -------
+        duckdb.DuckDBPyConnection
+            A fresh connection to the database (now opened without WAL).
+
+        Raises
+        ------
+        duckdb.Error
+            Re-raised when the error is not WAL/FTS-related, when the path
+            is not a recoverable local file, or when no ``.wal`` sidecar
+            exists on disk.
+        """
+        exc_msg = str(exc)
+        # Match only the specific replay-failure signature.  A broader
+        # substring match on "WAL" would also trigger on unrelated WAL
+        # open errors, silently moving user data aside.
+        is_fts_replay_failure = "Failure while replaying WAL file" in exc_msg and (
+            "fts_main_entries" in exc_msg or "Cannot drop entry" in exc_msg
+        )
+        if not is_fts_replay_failure:
+            raise exc
+
+        # Resolve _db_path to a real filesystem path.  urlparse treats
+        # Windows drive letters (``C:\...``) as URI schemes, and file://
+        # URIs need unquoting + path extraction rather than a raw
+        # ``Path(self._db_path + ".wal")`` concat.
+        db_file = self._resolve_local_db_path()
+        if db_file is None:
+            raise exc
+
+        wal_path = Path(str(db_file) + ".wal")
+        if not wal_path.exists():
+            raise exc
+
+        # Move the WAL aside with a timestamped suffix so operators can
+        # recover uncommitted data if needed.  Silently deleting the WAL
+        # (the previous behaviour) is unrecoverable and unfriendly.
+        timestamp = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%SZ")
+        backup_path = wal_path.with_suffix(f".wal.corrupt.{timestamp}")
+        try:
+            wal_path.rename(backup_path)
+        except OSError as rename_exc:
+            # Leave the WAL in place and propagate the failure.  The
+            # previous behaviour unlinked the WAL as a fallback, which
+            # reintroduced the exact data-loss path this recovery is
+            # meant to eliminate.
+            logger.error(
+                "Could not preserve WAL as %s; leaving the original WAL file "
+                "in place for manual recovery.  Original replay failure: %s",
+                backup_path,
+                exc,
+                exc_info=rename_exc,
+            )
+            raise exc from rename_exc
+
+        logger.warning(
+            "Database WAL appears corrupt (FTS-related): %s. "
+            "Moved WAL aside to %s and retrying — uncommitted data has "
+            "been preserved for manual recovery but will NOT be replayed. "
+            "The FTS index will be rebuilt from scratch during init.",
+            exc,
+            backup_path,
+        )
+        return self._open_connection()
+
+    def _resolve_local_db_path(self) -> Path | None:
+        """Return the filesystem path for ``self._db_path`` if it's local.
+
+        Handles four shapes:
+
+        * ``":memory:"`` — not local.
+        * S3 / MotherDuck URIs — not local.
+        * ``file://`` URIs — local; unquote the path component.
+        * Windows drive-letter paths (``C:\\...``) — local; ``urlparse``
+          would otherwise mistake ``C`` for a URI scheme.
+        * Plain POSIX or relative paths — local.
+
+        Returns ``None`` for non-local paths so the caller can skip
+        recovery rather than acting on a URI that has no meaningful
+        ``.wal`` sidecar on the local filesystem.
+        """
+        raw = self._db_path
+        if raw == ":memory:":
+            return None
+        if self._is_s3_path(raw) or self._is_motherduck_path(raw):
+            return None
+
+        parsed = urlparse(raw)
+        scheme = parsed.scheme.lower()
+
+        # Windows drive letter: scheme is a single ASCII letter and the
+        # "netloc" is empty; treat the raw string as a local path.
+        if len(scheme) == 1 and scheme.isalpha():
+            return Path(raw)
+
+        if scheme == "file":
+            # file:// URI: combine authority (UNC host) + path.  Two
+            # edge cases matter:
+            #   * file://server/share/path → UNC; re-attach "//server"
+            #     in front of the path so the resulting Path points at
+            #     \\server\share\path on Windows (and stays harmless on
+            #     POSIX, where UNC is not a thing).
+            #   * file:///C:/path → parsed.path is "/C:/path".  Strip
+            #     the leading slash so Path("C:/path") resolves to the
+            #     Windows drive-letter form instead of a relative
+            #     "/C:/..." that no filesystem understands.
+            path_part = unquote(parsed.path)
+            netloc = parsed.netloc
+            if netloc:
+                return Path("//" + netloc + path_part)
+            # Strip the synthetic leading slash in front of a Windows
+            # drive letter (e.g. "/C:/foo" → "C:/foo").
+            if (
+                len(path_part) >= 3
+                and path_part[0] == "/"
+                and path_part[1].isalpha()
+                and path_part[2] == ":"
+            ):
+                path_part = path_part[1:]
+            return Path(path_part)
+
+        if scheme == "":
+            return Path(raw)
+
+        return None
+
     def _sync_initialize(self) -> None:
         """Initialize the DuckDB connection and run pending schema migrations.
 
@@ -439,39 +671,28 @@ class DuckDBStore:
         initialization write path in a retry loop.
 
         If the database cannot be opened due to a corrupt WAL (e.g. from an
-        interrupted FTS index rebuild), the WAL file is deleted and the
-        connection is retried.  This is a last-resort recovery path —
-        uncommitted data in the WAL will be lost.
+        interrupted FTS index rebuild), the WAL is moved aside to a
+        ``.wal.corrupt.<timestamp>`` sidecar and the connection is retried
+        via :meth:`_recover_from_wal_replay_failure`.  The backup preserves
+        any uncommitted data for manual recovery — it is NOT automatically
+        replayed.
+
+        Historically this recovery path was the last link in the chain
+        that produced "ghost entry_ids" (issue #346): writes sitting in
+        a WAL on an ungraceful restart were silently discarded, causing
+        entries that returned ``persisted: true`` to disappear on a later
+        ``get`` / ``update``.  Writes now checkpoint eagerly (see
+        :meth:`_checkpoint_after_write`) so reaching this branch with
+        user data in the WAL should be rare; :meth:`_rebuild_fts_index`
+        aggressively checkpoints after each rebuild to further minimise
+        how often this path is exercised (see issue #349).
         """
         import time
 
         try:
             conn = self._open_connection()
         except duckdb.Error as exc:
-            exc_msg = str(exc)
-            if "fts_main_entries" in exc_msg or "WAL" in exc_msg:
-                # Only attempt WAL recovery for local file paths.
-                # Skip in-memory databases, S3, MotherDuck, and other URI schemes.
-                parsed = urlparse(self._db_path)
-                is_local_file = self._db_path != ":memory:" and parsed.scheme in ("", "file")
-                if is_local_file:
-                    wal_path = Path(self._db_path + ".wal")
-                    if wal_path.exists():
-                        logger.warning(
-                            "Database WAL appears corrupt (FTS-related): %s. "
-                            "Deleting WAL file %s and retrying — "
-                            "uncommitted data may be lost.",
-                            exc,
-                            wal_path,
-                        )
-                        wal_path.unlink()
-                        conn = self._open_connection()
-                    else:
-                        raise
-                else:
-                    raise
-            else:
-                raise
+            conn = self._recover_from_wal_replay_failure(exc)
 
         # httpfs must be loaded before vss when using S3 storage.
         if self._is_s3_path(self._db_path):
@@ -612,6 +833,106 @@ class DuckDBStore:
         return self._embedding_provider
 
     # ------------------------------------------------------------------
+    # Transaction safety (issue #363)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _rollback_quietly(conn: duckdb.DuckDBPyConnection) -> None:
+        """Best-effort ``ROLLBACK`` to clear an aborted transaction.
+
+        DuckDB leaves a connection in an aborted-transaction state when a
+        statement raises inside an implicit or explicit transaction — every
+        subsequent call on the same connection fails with
+        ``TransactionContext Error: Current transaction is aborted (please
+        ROLLBACK)``.  Issuing a ``ROLLBACK`` clears the aborted state and
+        restores the connection to a usable baseline.
+
+        Errors from ``ROLLBACK`` itself are logged at debug level and
+        swallowed — if rollback fails we are no worse off than if we had
+        never tried.  Callers must still propagate the original exception.
+        """
+        try:
+            conn.rollback()
+        except duckdb.Error as rollback_exc:
+            logger.debug("Post-error ROLLBACK skipped: %s", rollback_exc)
+
+    async def _run_sync(
+        self,
+        fn: Callable[..., _T],
+        /,
+        *args: Any,
+        **kwargs: Any,
+    ) -> _T:
+        """Run *fn* via :func:`asyncio.to_thread` with rollback on error.
+
+        Wraps every sync store operation so that any exception raised by
+        *fn* triggers a best-effort ``ROLLBACK`` on the shared DuckDB
+        connection **before** the exception propagates.  Without this,
+        a single failed write would leave the shared connection in an
+        aborted-transaction state and all subsequent reads and writes
+        would fail until the connection was recycled (issue #363).
+
+        Read-only operations (e.g. :meth:`_sync_get`) can also reach this
+        path when a prior uncaught exception poisoned the connection;
+        running ``ROLLBACK`` after the failed read restores the connection
+        so the next call succeeds rather than cascading the same error.
+        """
+        try:
+            return await asyncio.to_thread(fn, *args, **kwargs)
+        except Exception:
+            # Catching ``Exception`` — not ``BaseException`` — so that
+            # ``asyncio.CancelledError`` does not trigger rollback.  When a
+            # task is cancelled while awaiting ``asyncio.to_thread(fn, …)``
+            # the worker thread executing *fn* keeps running (Python has no
+            # safe way to forcibly stop a thread), so issuing
+            # ``conn.rollback()`` from a second worker thread would race
+            # against the still-live first one on the shared DuckDB
+            # connection — which is not thread-safe for concurrent use.
+            # On cancellation we simply re-raise; on ordinary exceptions
+            # *fn* has already returned control so the rollback is safe.
+            conn = self._conn
+            if conn is not None:
+                await asyncio.to_thread(self._rollback_quietly, conn)
+            raise
+
+    async def rollback(self) -> None:
+        """Public rollback hook for non-store code paths that touch the connection.
+
+        The MCP tool layer occasionally issues raw ``conn.execute`` calls
+        (e.g. the per-request embedding-budget counter in
+        :mod:`distillery.mcp.budget`) that bypass :meth:`_run_sync`.  Those
+        call sites can invoke ``await store.rollback()`` in their exception
+        handlers to clear an aborted transaction before the next request.
+        """
+        if self._conn is None:
+            return
+        await asyncio.to_thread(self._rollback_quietly, self._conn)
+
+    async def probe_readiness(self) -> tuple[bool, str | None]:
+        """Return ``(True, None)`` when the connection can answer a trivial query.
+
+        Exercised by the MCP status handler (``distillery_status``) and by
+        :meth:`initialize` immediately after schema setup so that a database
+        file which mounts but is not queryable (e.g. after a partial WAL
+        replay / volume snapshot inconsistency — see issue #363 follow-up)
+        surfaces as an explicit error instead of a silent null in the
+        status payload.
+
+        The probe runs ``SELECT COUNT(*) FROM entries`` via the normal
+        async path so transient aborted-transaction state is rolled back
+        by :meth:`_run_sync` before a second probe is attempted.
+        """
+        if self._conn is None:
+            return False, "store not initialized"
+        try:
+            await self._run_sync(
+                lambda: self._conn.execute("SELECT COUNT(*) FROM entries").fetchone()  # type: ignore[union-attr]
+            )
+        except Exception as exc:  # noqa: BLE001
+            return False, f"{type(exc).__name__}: {exc}"
+        return True, None
+
+    # ------------------------------------------------------------------
     # CRUD protocol methods (T02.3)
     # ------------------------------------------------------------------
 
@@ -673,6 +994,9 @@ class DuckDBStore:
         conn.execute(sql, params)
         # Rebuild FTS index so new content is searchable via BM25.
         self._rebuild_fts_index(conn)
+        # Flush WAL so the new row survives ungraceful termination.
+        # See :meth:`_checkpoint_after_write` for why this matters (issue #346).
+        self._checkpoint_after_write(conn)
         logger.debug("Stored entry id=%s", entry.id)
         return entry.id
 
@@ -685,7 +1009,80 @@ class DuckDBStore:
         Returns:
             The UUID string of the stored entry.
         """
-        return await asyncio.to_thread(self._sync_store, entry)
+        return await self._run_sync(self._sync_store, entry)
+
+    def _sync_store_batch(self, entries: Sequence[Entry]) -> list[str]:
+        """Synchronous batch-store implementation; called via asyncio.to_thread."""
+        if not entries:
+            return []
+
+        for entry in entries:
+            validate_metadata(entry.entry_type.value, entry.metadata)
+
+        conn = self.connection
+
+        # Batch embed all contents in one call.
+        embeddings = self._embedding_provider.embed_batch([e.content for e in entries])
+        if len(embeddings) != len(entries):
+            raise RuntimeError(
+                f"embed_batch returned {len(embeddings)} vectors for "
+                f"{len(entries)} entries — aborting to avoid partial inserts."
+            )
+
+        sql = (
+            "INSERT INTO entries "
+            "(id, content, entry_type, source, author, project, tags, status, "
+            " verification, metadata, created_at, updated_at, version, embedding, "
+            " created_by, last_modified_by, expires_at, session_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        )
+
+        conn.begin()
+        try:
+            for entry, embedding in zip(entries, embeddings, strict=True):
+                params = [
+                    entry.id,
+                    entry.content,
+                    entry.entry_type.value,
+                    entry.source.value,
+                    entry.author,
+                    entry.project,
+                    list(entry.tags),
+                    entry.status.value,
+                    entry.verification.value,
+                    json.dumps(entry.metadata),
+                    entry.created_at,
+                    entry.updated_at,
+                    entry.version,
+                    embedding,
+                    entry.created_by,
+                    entry.last_modified_by,
+                    entry.expires_at,
+                    entry.session_id,
+                ]
+                conn.execute(sql, params)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+        self._rebuild_fts_index(conn)
+        # Flush WAL so the new rows survive ungraceful termination.
+        # See :meth:`_checkpoint_after_write` for why this matters (issue #346).
+        self._checkpoint_after_write(conn)
+        logger.debug("Batch-stored %d entries", len(entries))
+        return [e.id for e in entries]
+
+    async def store_batch(self, entries: Sequence[Entry]) -> list[str]:
+        """Batch-store entries and return their IDs.
+
+        Embeds all contents in a single batch call and inserts all entries
+        in one transaction.  No dedup or conflict checks are performed.
+
+        Returns:
+            List of UUID strings for the stored entries.
+        """
+        return await self._run_sync(self._sync_store_batch, entries)
 
     def _sync_get(self, entry_id: str) -> Entry | None:
         """
@@ -723,7 +1120,7 @@ class DuckDBStore:
         Returns:
             The matching ``Entry``, or ``None`` if the ID does not exist.
         """
-        return await asyncio.to_thread(self._sync_get, entry_id)
+        return await self._run_sync(self._sync_get, entry_id)
 
     def _sync_update(self, entry_id: str, updates: dict[str, Any]) -> Entry:
         """
@@ -827,6 +1224,9 @@ class DuckDBStore:
         # Rebuild FTS index when content changes.
         if "content" in updates:
             self._rebuild_fts_index(conn)
+        # Flush WAL so the update survives ungraceful termination.
+        # See :meth:`_checkpoint_after_write` for why this matters (issue #346).
+        self._checkpoint_after_write(conn)
         logger.debug("Updated entry id=%s", entry_id)
 
         # Re-fetch to return the updated state.
@@ -854,7 +1254,7 @@ class DuckDBStore:
         Returns:
             The updated ``Entry``.
         """
-        return await asyncio.to_thread(self._sync_update, entry_id, updates)
+        return await self._run_sync(self._sync_update, entry_id, updates)
 
     def _sync_delete(self, entry_id: str) -> bool:
         """Synchronous implementation of delete(); called via asyncio.to_thread."""
@@ -872,6 +1272,9 @@ class DuckDBStore:
         count: int = count_row[0] if count_row is not None else 0
         found = count > 0
         if found:
+            # Flush WAL so the status change survives ungraceful termination.
+            # See :meth:`_checkpoint_after_write` for why this matters (issue #346).
+            self._checkpoint_after_write(conn)
             logger.debug("Soft-deleted (archived) entry id=%s", entry_id)
         else:
             logger.debug("delete() called for non-existent entry id=%s", entry_id)
@@ -883,7 +1286,7 @@ class DuckDBStore:
         Returns:
             ``True`` if the entry was found and archived, ``False`` otherwise.
         """
-        return await asyncio.to_thread(self._sync_delete, entry_id)
+        return await self._run_sync(self._sync_delete, entry_id)
 
     # ------------------------------------------------------------------
     # Filter helpers (shared by search, find_similar, list_entries)
@@ -944,8 +1347,16 @@ class DuckDBStore:
                 params.append(tag_list)
 
         if "status" in filters:
-            clauses.append("status = ?")
-            params.append(str(filters["status"]))
+            val = filters["status"]
+            if isinstance(val, list):
+                if not val:
+                    raise ValueError("status filter list must not be empty")
+                placeholders = ", ".join("?" for _ in val)
+                clauses.append(f"status IN ({placeholders})")
+                params.extend(str(v) for v in val)
+            else:
+                clauses.append("status = ?")
+                params.append(str(val))
 
         if "verification" in filters:
             clauses.append("verification = ?")
@@ -1247,7 +1658,7 @@ class DuckDBStore:
             self._touch_accessed(conn, returned_ids)
             return results
 
-        return await asyncio.to_thread(_sync)
+        return await self._run_sync(_sync)
 
     @staticmethod
     def _touch_accessed(conn: duckdb.DuckDBPyConnection, entry_ids: list[str]) -> None:
@@ -1308,30 +1719,99 @@ class DuckDBStore:
                 results.append(SearchResult(entry=entry, score=score))
             return results
 
-        return await asyncio.to_thread(_sync)
+        return await self._run_sync(_sync)
+
+    @overload
+    async def list_entries(
+        self,
+        filters: dict[str, Any] | None,
+        limit: int,
+        offset: int,
+        *,
+        stale_days: int | None = ...,
+        group_by: None = ...,
+        output: None = ...,
+    ) -> list[Entry]: ...
+
+    @overload
+    async def list_entries(
+        self,
+        filters: dict[str, Any] | None,
+        limit: int,
+        offset: int,
+        *,
+        stale_days: int | None = ...,
+        group_by: str | None = ...,
+        output: str | None = ...,
+    ) -> list[Entry] | dict[str, Any]: ...
 
     async def list_entries(
         self,
         filters: dict[str, Any] | None,
         limit: int,
         offset: int,
-    ) -> list[Entry]:
+        *,
+        stale_days: int | None = None,
+        group_by: str | None = None,
+        output: str | None = None,
+    ) -> list[Entry] | dict[str, Any]:
         """
         Retrieve entries matching optional filters, ordered by created_at descending.
 
+        When *group_by* is set, delegates to :meth:`aggregate_entries` and
+        returns grouped counts.  When *output="stats"*, returns aggregate
+        statistics.  Otherwise returns a paginated list of :class:`Entry`
+        objects.
+
         Parameters:
-            filters (dict[str, Any] | None): Filter criteria accepted by the store (see `_build_filter_clauses`). If None, no filtering is applied.
-            limit (int): Maximum number of entries to return.
-            offset (int): Number of entries to skip before returning results.
-
-        Returns:
-            list[Entry]: Entries matching the filters for the requested page, ordered newest first.
+            filters: Filter criteria accepted by the store (see
+                ``_build_filter_clauses``).  ``None`` means no filtering.
+            limit: Maximum number of entries (or groups) to return.
+            offset: Number of entries to skip before returning results
+                (ignored in group_by / stats modes).
+            stale_days: Restrict to entries whose last access
+                (``COALESCE(accessed_at, updated_at)``) is older than N days.
+            group_by: Return grouped counts instead of entries.
+            output: ``"stats"`` for aggregate statistics.
         """
+        # ----- validate stale_days -----
+        if stale_days is not None and stale_days < 0:
+            raise ValueError("stale_days must be non-negative")
 
+        # ----- reject mutually-exclusive modes -----
+        # ``group_by`` and ``output`` return different shapes
+        # (grouped counts vs. aggregate stats); combining them would silently
+        # drop one. Reject explicitly so callers get a clear error.
+        if group_by is not None and output is not None:
+            raise ValueError(
+                "group_by and output cannot be combined — pick one"
+            )
+
+        # ----- group_by mode: delegate to aggregate_entries -----
+        if group_by is not None:
+            return await self.aggregate_entries(
+                group_by=group_by,
+                filters=filters,
+                limit=limit,
+                stale_days=stale_days,
+            )
+
+        # ----- stats mode -----
+        if output == "stats":
+            return await self._get_entry_stats(filters, stale_days=stale_days)
+
+        # ----- default list mode -----
         def _sync() -> list[Entry]:
             conn = self.connection
 
             where_clauses, params = self._build_filter_clauses(filters)
+
+            if stale_days is not None:
+                where_clauses.append(
+                    "COALESCE(accessed_at, updated_at) < NOW() - INTERVAL (CAST(? AS INT)) DAYS"
+                )
+                params.append(stale_days)
+
             where_sql = ""
             if where_clauses:
                 where_sql = "WHERE " + " AND ".join(where_clauses)
@@ -1350,17 +1830,109 @@ class DuckDBStore:
             rows = result.fetchall()
             return [self._row_to_entry(row, col_names) for row in rows]
 
-        return await asyncio.to_thread(_sync)
+        return await self._run_sync(_sync)
+
+    async def _get_entry_stats(
+        self,
+        filters: dict[str, Any] | None,
+        *,
+        stale_days: int | None = None,
+    ) -> dict[str, Any]:
+        """Return aggregate statistics for entries matching *filters*.
+
+        Returns a dict with ``entries_by_type``, ``entries_by_status``,
+        ``total_entries``, and ``storage_bytes``.
+        """
+        if stale_days is not None and stale_days < 0:
+            raise ValueError("stale_days must be non-negative")
+
+        def _sync() -> dict[str, Any]:
+            conn = self.connection
+
+            where_clauses, params = self._build_filter_clauses(filters)
+
+            if stale_days is not None:
+                where_clauses.append(
+                    "COALESCE(accessed_at, updated_at) < NOW() - INTERVAL (CAST(? AS INT)) DAYS"
+                )
+                params.append(stale_days)
+
+            where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+            # Total count
+            total_row = conn.execute(
+                f"SELECT COUNT(*) FROM entries {where_sql}", list(params)
+            ).fetchone()
+            total_entries = int(total_row[0]) if total_row else 0
+
+            # Entries by type
+            type_rows = conn.execute(
+                f"SELECT entry_type, COUNT(*) AS cnt FROM entries {where_sql} "
+                f"GROUP BY entry_type ORDER BY cnt DESC",
+                list(params),
+            ).fetchall()
+            entries_by_type = {str(row[0]): int(row[1]) for row in type_rows}
+
+            # Entries by status
+            status_rows = conn.execute(
+                f"SELECT status, COUNT(*) AS cnt FROM entries {where_sql} "
+                f"GROUP BY status ORDER BY cnt DESC",
+                list(params),
+            ).fetchall()
+            entries_by_status = {str(row[0]): int(row[1]) for row in status_rows}
+
+            # Storage bytes: always reported as the sum of content byte lengths
+            # over the matching entries. ``strlen`` returns the UTF-8 byte
+            # count (``length`` counts characters), so non-ASCII content is
+            # measured correctly. Using a consistent SUM(strlen(content))
+            # metric regardless of scope ensures the field is comparable across
+            # filtered and unfiltered calls — mixing physical DB size with a
+            # filtered content sum would make the same field incomparable.
+            storage_bytes: int = 0
+            try:
+                byte_row = conn.execute(
+                    f"SELECT COALESCE(SUM(strlen(content)), 0) FROM entries {where_sql}",
+                    list(params),
+                ).fetchone()
+                storage_bytes = int(byte_row[0]) if byte_row else 0
+            except Exception:  # noqa: BLE001
+                storage_bytes = 0
+
+            return {
+                "entries_by_type": entries_by_type,
+                "entries_by_status": entries_by_status,
+                "total_entries": total_entries,
+                "storage_bytes": storage_bytes,
+            }
+
+        return await self._run_sync(_sync)
 
     async def count_entries(
         self,
         filters: dict[str, Any] | None,
+        *,
+        stale_days: int | None = None,
     ) -> int:
-        """Return the total number of entries matching *filters*."""
+        """Return the total number of entries matching *filters*.
+
+        Parameters:
+            filters: Filter criteria accepted by the store.
+            stale_days: When set, only count entries whose last access
+                (``COALESCE(accessed_at, updated_at)``) is older than N days.
+                Must be non-negative; negatives would invert the cutoff and
+                count almost every row.
+        """
+        if stale_days is not None and stale_days < 0:
+            raise ValueError("stale_days must be non-negative")
 
         def _sync() -> int:
             conn = self.connection
             where_clauses, params = self._build_filter_clauses(filters)
+            if stale_days is not None:
+                where_clauses.append(
+                    "COALESCE(accessed_at, updated_at) < NOW() - INTERVAL (CAST(? AS INT)) DAYS"
+                )
+                params.append(stale_days)
             where_sql = ""
             if where_clauses:
                 where_sql = "WHERE " + " AND ".join(where_clauses)
@@ -1368,53 +1940,113 @@ class DuckDBStore:
             row = conn.execute(sql, params).fetchone()
             return int(row[0]) if row else 0
 
-        return await asyncio.to_thread(_sync)
+        return await self._run_sync(_sync)
 
     async def aggregate_entries(
         self,
         group_by: str,
         filters: dict[str, Any] | None,
         limit: int,
+        *,
+        stale_days: int | None = None,
     ) -> dict[str, Any]:
         """Return entry counts grouped by *group_by*, sorted by count descending.
 
         Parameters:
             group_by: Logical field name.  Supported values:
                 ``"entry_type"``, ``"status"``, ``"author"``, ``"project"``,
-                ``"source"``, ``"metadata.source_url"``, ``"metadata.source_type"``.
-                The SQL expression is resolved here so that callers only ever pass
+                ``"source"``, ``"tags"``, ``"metadata.source_url"``,
+                ``"metadata.source_type"``.  For ``"tags"`` a two-step CTE
+                is used to UNNEST the array before aggregating.  The SQL
+                expression is resolved here so that callers only ever pass
                 the logical name (validated by the MCP layer against an allowlist).
             filters: Optional metadata constraints (see ``_build_filter_clauses``).
             limit: Maximum number of groups to return.
+            stale_days: When set, restricts to entries whose last access
+                (``COALESCE(accessed_at, updated_at)``) is older than N days.
 
         Returns:
             Dict with ``"groups"`` (limited list of ``{"value": ..., "count": ...}``
             dicts), ``"total_groups"`` (int), and ``"total_entries"`` (int).  The
             totals reflect the full result set before ``limit`` is applied.
         """
+        if stale_days is not None and stale_days < 0:
+            raise ValueError("stale_days must be non-negative")
         group_expr = _AGGREGATE_EXPR_MAP[group_by]
 
         def _sync() -> dict[str, Any]:
             conn = self.connection
             where_clauses, params = self._build_filter_clauses(filters)
+            if stale_days is not None:
+                where_clauses.append(
+                    "COALESCE(accessed_at, updated_at) < NOW() - INTERVAL (CAST(? AS INT)) DAYS"
+                )
+                params.append(stale_days)
             where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
-            # Single CTE query: window functions compute true totals over the
-            # full grouped result set, while LIMIT returns only the top-N rows.
-            sql = (
-                f"WITH grouped AS ("
-                f"SELECT {group_expr} AS value, COUNT(*) AS group_count "
-                f"FROM entries "
-                f"{where_sql} "
-                f"GROUP BY 1"
-                f") "
-                f"SELECT value, group_count, "
-                f"COUNT(*) OVER () AS total_groups, "
-                f"COALESCE(SUM(group_count) OVER (), 0) AS total_entries "
-                f"FROM grouped "
-                f"ORDER BY group_count DESC, value ASC NULLS LAST "
-                f"LIMIT ?"
-            )
+            # DuckDB does not support UNNEST() directly inside a CTE
+            # SELECT, so for array fields (tags) we use a two-step CTE:
+            # first explode rows, then aggregate.  Scalar fields use the
+            # original single-CTE path.
+            if group_by == "tags":
+                # When a tag_prefix filter is present we must apply the same
+                # filter to the exploded values, otherwise every tag on a
+                # matching row would still be counted (e.g. a row tagged
+                # ``["topic/ai", "status/draft"]`` with tag_prefix="topic"
+                # would contribute "status/draft" to the grouping). We also
+                # recompute ``total_entries`` as the number of distinct
+                # matched entries rather than the sum of per-group counts,
+                # so its semantics stay consistent with scalar group_by.
+                tag_prefix_val: str | None = None
+                if filters:
+                    raw_prefix = filters.get("tag_prefix")
+                    if isinstance(raw_prefix, str) and raw_prefix:
+                        tag_prefix_val = raw_prefix
+                if tag_prefix_val is not None:
+                    exploded_sql = (
+                        f"SELECT id AS entry_id, UNNEST(tags) AS value FROM entries {where_sql}"
+                    )
+                    tag_filter_sql = "WHERE value = ? OR starts_with(value, ?)"
+                    params_extra = [tag_prefix_val, tag_prefix_val + "/"]
+                else:
+                    exploded_sql = (
+                        f"SELECT id AS entry_id, UNNEST(tags) AS value FROM entries {where_sql}"
+                    )
+                    tag_filter_sql = ""
+                    params_extra = []
+                sql = (
+                    f"WITH exploded AS ({exploded_sql}), "
+                    f"filtered AS (SELECT entry_id, value FROM exploded {tag_filter_sql}), "
+                    f"grouped AS ("
+                    f"SELECT value, COUNT(*) AS group_count "
+                    f"FROM filtered "
+                    f"GROUP BY 1"
+                    f") "
+                    f"SELECT value, group_count, "
+                    f"COUNT(*) OVER () AS total_groups, "
+                    f"(SELECT COUNT(DISTINCT entry_id) FROM filtered) AS total_entries "
+                    f"FROM grouped "
+                    f"ORDER BY group_count DESC, value ASC NULLS LAST "
+                    f"LIMIT ?"
+                )
+                # Insert tag_prefix params after the row-level WHERE params so
+                # ordering matches placeholder positions.
+                params = params + params_extra
+            else:
+                sql = (
+                    f"WITH grouped AS ("
+                    f"SELECT {group_expr} AS value, COUNT(*) AS group_count "
+                    f"FROM entries "
+                    f"{where_sql} "
+                    f"GROUP BY 1"
+                    f") "
+                    f"SELECT value, group_count, "
+                    f"COUNT(*) OVER () AS total_groups, "
+                    f"COALESCE(SUM(group_count) OVER (), 0) AS total_entries "
+                    f"FROM grouped "
+                    f"ORDER BY group_count DESC, value ASC NULLS LAST "
+                    f"LIMIT ?"
+                )
             rows = conn.execute(sql, list(params) + [limit]).fetchall()
             total_groups = int(rows[0][2]) if rows else 0
             total_entries = int(rows[0][3]) if rows else 0
@@ -1425,7 +2057,7 @@ class DuckDBStore:
                 "total_entries": total_entries,
             }
 
-        return await asyncio.to_thread(_sync)
+        return await self._run_sync(_sync)
 
     # ------------------------------------------------------------------
     # Audit logging
@@ -1454,7 +2086,7 @@ class DuckDBStore:
             )
 
         try:
-            await asyncio.to_thread(_sync)
+            await self._run_sync(_sync)
         except Exception:  # noqa: BLE001
             logger.debug("audit_log write failed (ignored)", exc_info=True)
 
@@ -1568,7 +2200,7 @@ class DuckDBStore:
             ``user_id``, ``tool``, ``entry_id``, ``action``, ``outcome``.
             Ordered by descending timestamp.
         """
-        return await asyncio.to_thread(self._sync_query_audit_log, filters, limit)
+        return await self._run_sync(self._sync_query_audit_log, filters, limit)
 
     # ------------------------------------------------------------------
     # Feedback logging (T01.2)
@@ -1625,7 +2257,7 @@ class DuckDBStore:
         Returns:
             search_id (str): UUID string of the newly created `search_log` row.
         """
-        return await asyncio.to_thread(
+        return await self._run_sync(
             self._sync_log_search, query, result_entry_ids, result_scores, session_id
         )
 
@@ -1673,7 +2305,7 @@ class DuckDBStore:
         Returns:
             str: UUID string of the created `feedback_log` row.
         """
-        return await asyncio.to_thread(self._sync_log_feedback, search_id, entry_id, signal)
+        return await self._run_sync(self._sync_log_feedback, search_id, entry_id, signal)
 
     # ------------------------------------------------------------------
     # Search log queries for implicit feedback
@@ -1703,30 +2335,66 @@ class DuckDBStore:
         Returns:
             list[str]: Search IDs (UUIDs) of matching ``search_log`` rows.
         """
-        return await asyncio.to_thread(self._sync_get_searches_for_entry, entry_id, since)
+        return await self._run_sync(self._sync_get_searches_for_entry, entry_id, since)
 
     # ------------------------------------------------------------------
     # Feed source persistence
     # ------------------------------------------------------------------
 
     def _sync_list_feed_sources(self) -> list[dict[str, Any]]:
-        """Return all persisted feed sources as dicts."""
+        """Return all persisted feed sources as dicts.
+
+        Includes liveness fields (``last_polled_at``, ``last_item_count``,
+        ``last_error``, ``next_poll_at``) so operators can determine feed
+        health from a single query.  Timestamps are serialised to ISO 8601
+        strings.  ``next_poll_at`` is derived from ``last_polled_at +
+        poll_interval_minutes`` and is ``None`` when the source has never
+        been polled.
+        """
+        from datetime import timedelta
+
         assert self._conn is not None
         result = self._conn.execute(
-            "SELECT url, source_type, label, poll_interval_minutes, trust_weight "
+            "SELECT url, source_type, label, poll_interval_minutes, trust_weight, "
+            "last_polled_at, last_item_count, last_error "
             "FROM feed_sources ORDER BY created_at"
         )
         rows = result.fetchall()
-        return [
-            {
-                "url": row[0],
-                "source_type": row[1],
-                "label": row[2],
-                "poll_interval_minutes": row[3],
-                "trust_weight": row[4],
-            }
-            for row in rows
-        ]
+        sources: list[dict[str, Any]] = []
+        for row in rows:
+            last_polled_raw: datetime | None = row[5]
+            poll_interval_minutes: int = row[3]
+            # DuckDB TIMESTAMP is naive — assume UTC and attach tzinfo so the
+            # serialised value preserves the "+00:00" offset downstream.
+            last_polled_at: datetime | None = None
+            if last_polled_raw is not None:
+                last_polled_at = (
+                    last_polled_raw.replace(tzinfo=UTC)
+                    if last_polled_raw.tzinfo is None
+                    else last_polled_raw.astimezone(UTC)
+                )
+            last_polled_iso: str | None = (
+                last_polled_at.isoformat() if last_polled_at is not None else None
+            )
+            next_poll_at: str | None = (
+                (last_polled_at + timedelta(minutes=poll_interval_minutes)).isoformat()
+                if last_polled_at is not None
+                else None
+            )
+            sources.append(
+                {
+                    "url": row[0],
+                    "source_type": row[1],
+                    "label": row[2],
+                    "poll_interval_minutes": poll_interval_minutes,
+                    "trust_weight": row[4],
+                    "last_polled_at": last_polled_iso,
+                    "last_item_count": row[6] if row[6] is not None else 0,
+                    "last_error": row[7],
+                    "next_poll_at": next_poll_at,
+                }
+            )
+        return sources
 
     def _sync_add_feed_source(
         self,
@@ -1761,9 +2429,53 @@ class DuckDBStore:
         result = self._conn.execute("DELETE FROM feed_sources WHERE url = ? RETURNING url", [url])
         return len(result.fetchall()) > 0
 
+    # Maximum length of a persisted ``last_error`` string.  Longer errors are
+    # truncated to keep the liveness payload small and to avoid storing
+    # sensitive traceback fragments verbatim.
+    _LAST_ERROR_MAX_LEN = 200
+
+    def _sync_record_poll_status(
+        self,
+        url: str,
+        *,
+        polled_at: datetime,
+        item_count: int,
+        error: str | None,
+    ) -> bool:
+        """Persist the outcome of a poll against a feed source.
+
+        Stores *polled_at*, *item_count*, and a truncated+sanitised *error*
+        (or ``NULL``) on the matching ``feed_sources`` row.  Returns
+        ``True`` when a row was updated, ``False`` when no source with
+        *url* exists.
+        """
+        assert self._conn is not None
+        item_count_int = int(item_count)
+        if item_count_int < 0:
+            raise ValueError(f"item_count must be non-negative, got: {item_count_int}")
+        truncated = _sanitise_last_error(error, self._LAST_ERROR_MAX_LEN)
+        # DuckDB's ``TIMESTAMP`` column is timezone-naive — a tz-aware value
+        # can be silently coerced or rejected depending on the driver version,
+        # which in production surfaced as ``last_polled_at`` staying ``NULL``
+        # despite a successful poll (issue #334).  Normalise to naive UTC so
+        # the stored value matches what ``_sync_list_feed_sources`` expects
+        # (see the naive-UTC reattachment around line 2054).
+        polled_at_naive = (
+            polled_at.astimezone(UTC).replace(tzinfo=None)
+            if polled_at.tzinfo is not None
+            else polled_at
+        )
+        result = self._conn.execute(
+            "UPDATE feed_sources "
+            "SET last_polled_at = ?, last_item_count = ?, last_error = ? "
+            "WHERE url = ? RETURNING url",
+            [polled_at_naive, item_count_int, truncated, url],
+        )
+        return len(result.fetchall()) > 0
+
     async def list_feed_sources(self) -> list[dict[str, Any]]:
         """Return all persisted feed sources as dicts."""
-        return await asyncio.to_thread(self._sync_list_feed_sources)
+        return await self._run_sync(self._sync_list_feed_sources)
 
     async def add_feed_source(
         self,
@@ -1774,13 +2486,42 @@ class DuckDBStore:
         trust_weight: float = 1.0,
     ) -> dict[str, Any]:
         """Add a feed source. Raises ValueError if URL already exists."""
-        return await asyncio.to_thread(
+        return await self._run_sync(
             self._sync_add_feed_source, url, source_type, label, poll_interval_minutes, trust_weight
         )
 
     async def remove_feed_source(self, url: str) -> bool:
         """Remove a feed source by URL. Returns True if it existed."""
-        return await asyncio.to_thread(self._sync_remove_feed_source, url)
+        return await self._run_sync(self._sync_remove_feed_source, url)
+
+    async def record_poll_status(
+        self,
+        url: str,
+        *,
+        polled_at: datetime,
+        item_count: int,
+        error: str | None,
+    ) -> bool:
+        """Record the outcome of a poll against a feed source.
+
+        Args:
+            url: The feed source URL (primary key).
+            polled_at: UTC timestamp of the poll attempt.
+            item_count: Items successfully ingested during the poll.
+            error: Error message when the poll failed, or ``None`` on success.
+                The value is truncated and sanitised before persistence.
+
+        Returns:
+            ``True`` if a matching row was updated, ``False`` if no source
+            with *url* exists.
+        """
+        return await self._run_sync(
+            self._sync_record_poll_status,
+            url,
+            polled_at=polled_at,
+            item_count=item_count,
+            error=error,
+        )
 
     # ------------------------------------------------------------------
     # Metadata helpers
@@ -1804,11 +2545,44 @@ class DuckDBStore:
 
     async def get_metadata(self, key: str) -> str | None:
         """Read a value from the ``_meta`` key-value table."""
-        return await asyncio.to_thread(self._sync_get_metadata, key)
+        return await self._run_sync(self._sync_get_metadata, key)
 
     async def set_metadata(self, key: str, value: str) -> None:
         """Write a value to the ``_meta`` key-value table (upsert)."""
-        await asyncio.to_thread(self._sync_set_metadata, key, value)
+        await self._run_sync(self._sync_set_metadata, key, value)
+
+    def _sync_prune_search_log(self, retention_days: int) -> int:
+        """Delete ``search_log`` rows older than *retention_days*.
+
+        Raises
+        ------
+        ValueError
+            If *retention_days* is not a non-negative integer. Negative values
+            flip the interval sign and would match almost the entire table.
+
+        Returns
+        -------
+        int
+            The number of rows deleted.
+        """
+        assert self._conn is not None
+        if not isinstance(retention_days, int) or isinstance(retention_days, bool):
+            raise ValueError("retention_days must be a non-negative integer")
+        if retention_days < 0:
+            raise ValueError(
+                f"retention_days must be a non-negative integer, got: {retention_days}"
+            )
+        result = self._conn.execute(
+            "DELETE FROM search_log "
+            "WHERE timestamp < current_timestamp - INTERVAL (CAST(? AS INT)) DAYS "
+            "RETURNING id",
+            [retention_days],
+        ).fetchall()
+        return len(result)
+
+    async def prune_search_log(self, retention_days: int) -> int:
+        """Delete ``search_log`` rows older than *retention_days* (async wrapper)."""
+        return await self._run_sync(self._sync_prune_search_log, retention_days)
 
     # ------------------------------------------------------------------
     # Tag vocabulary
@@ -1845,7 +2619,7 @@ class DuckDBStore:
         Returns:
             Dict mapping each matching tag string to its occurrence count.
         """
-        return await asyncio.to_thread(self._sync_get_tag_vocabulary, prefix)
+        return await self._run_sync(self._sync_get_tag_vocabulary, prefix)
 
     # ------------------------------------------------------------------
     # Entry relations
@@ -1914,7 +2688,7 @@ class DuckDBStore:
             ValueError: If either ``from_id`` or ``to_id`` does not exist in
                 the store.
         """
-        return await asyncio.to_thread(self._sync_add_relation, from_id, to_id, relation_type)
+        return await self._run_sync(self._sync_add_relation, from_id, to_id, relation_type)
 
     def _sync_apply_correction(
         self,
@@ -2012,7 +2786,7 @@ class DuckDBStore:
 
         See :meth:`_sync_apply_correction` for details.
         """
-        return await asyncio.to_thread(self._sync_apply_correction, new_entry, wrong_entry_id)
+        return await self._run_sync(self._sync_apply_correction, new_entry, wrong_entry_id)
 
     def _sync_get_related(
         self,
@@ -2079,7 +2853,7 @@ class DuckDBStore:
             List of dicts with keys: ``id``, ``from_id``, ``to_id``,
             ``relation_type``, ``created_at`` (ISO 8601 str).
         """
-        return await asyncio.to_thread(self._sync_get_related, entry_id, direction, relation_type)
+        return await self._run_sync(self._sync_get_related, entry_id, direction, relation_type)
 
     def _sync_remove_relation(self, relation_id: str) -> bool:
         """Synchronous implementation of remove_relation(); called via asyncio.to_thread."""
@@ -2102,4 +2876,4 @@ class DuckDBStore:
         Returns:
             ``True`` if the row existed and was deleted, ``False`` otherwise.
         """
-        return await asyncio.to_thread(self._sync_remove_relation, relation_id)
+        return await self._run_sync(self._sync_remove_relation, relation_id)

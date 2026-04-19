@@ -141,6 +141,14 @@ def main(argv: list[str] | None = None) -> int:
                 _patch_cimd_localhost_redirect()
                 org_checker = build_org_checker(config)
                 auth = build_github_auth(config, org_checker=org_checker)
+
+                # Pre-register Claude Code so the server never needs to
+                # fetch the CIMD document from claude.ai at runtime (the
+                # fetch fails on Fly machines whose egress IP is
+                # Cloudflare-challenged).
+                from distillery.mcp.auth import pre_register_claude_code_client
+
+                asyncio.run(pre_register_claude_code_client(auth))
             elif provider_name == "none":
                 logger.warning(
                     "HTTP server running without authentication (server.auth.provider is 'none')",
@@ -157,6 +165,7 @@ def main(argv: list[str] | None = None) -> int:
             # reads the store from the server's shared state so it works
             # even though the store is only initialised at first request.
             _shared_ref = server._distillery_shared  # type: ignore[attr-defined]
+            _shared_ref["transport"] = "http"
 
             async def _auth_audit_cb(
                 user_id: str,
@@ -241,6 +250,7 @@ def main(argv: list[str] | None = None) -> int:
             uv_server.run()
         else:
             server = create_server(config=config)
+            server._distillery_shared["transport"] = "stdio"  # type: ignore[attr-defined]
             asyncio.run(server.run_stdio_async(show_banner=False))
 
         return 0

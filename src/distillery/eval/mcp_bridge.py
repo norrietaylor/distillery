@@ -32,30 +32,57 @@ from distillery.config import (
 from distillery.eval.models import SeedEntry
 from distillery.mcp._stub_embedding import HashEmbeddingProvider
 from distillery.mcp.server import (
-    _handle_aggregate,
     _handle_classify,
     _handle_find_similar,
     _handle_get,
-    _handle_interests,
     _handle_list,
-    _handle_metrics,
-    _handle_poll,
-    _handle_rescore,
     _handle_resolve_review,
     _handle_search,
-    _handle_stale,
     _handle_store,
-    _handle_tag_tree,
     _handle_type_schemas,
     _handle_update,
     _handle_watch,
 )
+from distillery.mcp.tools.analytics import (
+    _handle_interests,
+    _handle_metrics,
+    _handle_stale,
+    _handle_tag_tree,
+)
+from distillery.mcp.tools.configure import _handle_configure
+from distillery.mcp.tools.crud import (
+    _handle_correct,
+)
+from distillery.mcp.tools.crud import (
+    _handle_store_batch as _handle_crud_store_batch,
+)
+from distillery.mcp.tools.feeds import (
+    _handle_gh_sync,
+    _handle_poll,
+    _handle_rescore,
+    _handle_sync_status,
+)
+from distillery.mcp.tools.meta import _handle_status
+from distillery.mcp.tools.relations import _handle_relations
+from distillery.mcp.tools.search import _handle_aggregate
 from distillery.store.duckdb import DuckDBStore
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Anthropic-compatible tool schemas for all 17 distillery MCP tools
+# Anthropic-compatible tool schemas for the distillery MCP tools exercised by
+# the eval harness.
+#
+# This list tracks the server catalog in ``src/distillery/mcp/server.py`` but
+# intentionally retains a handful of pre-consolidation aliases
+# (``distillery_metrics``, ``distillery_interests``, ``distillery_type_schemas``,
+# ``distillery_stale``, ``distillery_tag_tree``, ``distillery_aggregate``,
+# ``distillery_poll``, ``distillery_rescore``) because eval scenarios in
+# ``tests/eval/scenarios/*.yaml`` still invoke those names directly. The
+# underlying handlers still exist as module-level helpers — the server only
+# dropped the ``@server.tool`` decorator — so routing against them is safe.
+# When eval scenarios migrate off those names, drop them from this list and
+# ``distillery_status`` will report the same 16-tool count as the server.
 # ---------------------------------------------------------------------------
 
 DISTILLERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
@@ -124,19 +151,41 @@ DISTILLERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
     {
         "name": "distillery_list",
-        "description": "List entries without semantic ranking (newest first).",
+        "description": (
+            "List entries without semantic ranking (newest first). "
+            "Archived entries are hidden by default; pass include_archived=true "
+            "or status='any' to include them, or status='archived' to list only them."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "entry_type": {"type": "string"},
                 "author": {"type": "string"},
                 "project": {"type": "string"},
-                "status": {"type": "string"},
+                "status": {
+                    "type": "string",
+                    "description": (
+                        "Filter by status. Defaults to active + pending_review. "
+                        "Pass 'archived' for archived only, or 'any' for all statuses."
+                    ),
+                },
+                "include_archived": {
+                    "type": "boolean",
+                    "description": (
+                        "When true, include archived entries alongside the default set."
+                    ),
+                },
                 "limit": {"type": "integer", "description": "Max results (default 10)."},
                 "offset": {"type": "integer"},
                 "output_mode": {
                     "type": "string",
-                    "description": "Output mode: 'full' (default), 'summary' (no content), 'ids'.",
+                    "description": (
+                        "Output mode: 'summary' (default — id/title/tags/project/author/"
+                        "created_at plus a ~200-char content_preview), 'full' (entire "
+                        "content body), 'ids' (id/entry_type/created_at only), 'review' "
+                        "(entries needing review/classification — filters to pending_review "
+                        "status and enriches with confidence/classification_reasoning)."
+                    ),
                 },
                 "content_max_length": {
                     "type": "integer",
@@ -386,6 +435,96 @@ DISTILLERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
             "required": [],
         },
     },
+    {
+        "name": "distillery_status",
+        "description": (
+            "Lightweight in-protocol health/metadata probe. Returns server "
+            "version, build SHA, transport, tool count, store stats, embedding "
+            "provider name, feed poll summary, and uptime."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    # Consolidated tools added in the api-hardening PR. Exposed here so eval
+    # callers can route against the same surface the server publishes.
+    {
+        "name": "distillery_store_batch",
+        "description": "Batch-store multiple knowledge entries in one call.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "entries": {"type": "array", "items": {"type": "object"}},
+                "project": {"type": "string"},
+            },
+            "required": ["entries"],
+        },
+    },
+    {
+        "name": "distillery_correct",
+        "description": "Supersede an existing entry with a corrected version.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "entry_id": {"type": "string"},
+                "content": {"type": "string"},
+                "author": {"type": "string"},
+            },
+            "required": ["entry_id", "content", "author"],
+        },
+    },
+    {
+        "name": "distillery_relations",
+        "description": "Manage entry relations (add, remove, list).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string"},
+                "from_id": {"type": "string"},
+                "to_id": {"type": "string"},
+                "relation_type": {"type": "string"},
+            },
+            "required": ["action"],
+        },
+    },
+    {
+        "name": "distillery_gh_sync",
+        "description": "Trigger a GitHub issue/PR sync for the configured repo.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "GitHub owner/repo slug or full repository URL.",
+                },
+                "background": {"type": "boolean"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "distillery_sync_status",
+        "description": "Return the status of the most recent background sync.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "job_id": {"type": "string"},
+                "source_url": {"type": "string"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "distillery_configure",
+        "description": "Read or write a runtime configuration value.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "section": {"type": "string"},
+                "key": {"type": "string"},
+                "value": {},
+            },
+            "required": ["section", "key"],
+        },
+    },
 ]
 
 
@@ -534,6 +673,27 @@ class MCPBridge:
             return await _handle_poll(store=store, config=config, arguments=args)
         if name == "distillery_rescore":
             return await _handle_rescore(store=store, config=config, arguments=args)
+        if name == "distillery_status":
+            return await _handle_status(
+                store=store,
+                config=config,
+                embedding_provider=ep,
+                tool_count=len(DISTILLERY_TOOL_SCHEMAS),
+                transport=None,
+                started_at=None,
+            )
+        if name == "distillery_store_batch":
+            return await _handle_crud_store_batch(store=store, arguments=args, cfg=config)
+        if name == "distillery_correct":
+            return await _handle_correct(store=store, arguments=args, cfg=config)
+        if name == "distillery_relations":
+            return await _handle_relations(store=store, arguments=args)
+        if name == "distillery_gh_sync":
+            return await _handle_gh_sync(store=store, arguments=args)
+        if name == "distillery_sync_status":
+            return await _handle_sync_status(arguments=args)
+        if name == "distillery_configure":
+            return await _handle_configure(config=config, arguments=args)
 
         logger.warning("Unknown tool requested: %s", name)
         return [

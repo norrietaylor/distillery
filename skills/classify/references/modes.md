@@ -8,13 +8,28 @@ Display:
 ## /classify — Classification & Review Queue
 
 Usage:
-  /classify <entry_id>    Classify a specific entry by its ID
-  /classify --inbox       Classify all unclassified inbox entries in batch
-  /classify --review      Triage the manual review queue
+  /classify <entry_id>          Classify a specific entry by its ID
+  /classify --inbox             Classify all unclassified inbox entries in batch
+  /classify --batch <filters>   Classify entries matching composable filters
+  /classify --review            Triage the manual review queue
+
+Batch Filters (--batch mode, AND semantics, at least one required):
+  --source <source>       Filter by entry source (claude-code, manual, import, etc.)
+  --entry-type <type>     Filter by entry type (inbox, github, feed, session, etc.)
+  --author <name>         Filter by author name
+  --tag-prefix <prefix>   Filter by tag namespace prefix
+  --project <name>        Filter by project name
+  --unclassified          Filter to entries with no tags and unverified status
+
+Global Flags:
+  --project <name>        Filter by project (available in all modes)
 
 Examples:
   /classify 550e8400-e29b-41d4-a716-446655440000
   /classify --inbox
+  /classify --batch --entry-type github
+  /classify --batch --source external --unclassified
+  /classify --batch --entry-type feed --project my-project
   /classify --review
 
 Confidence Levels:
@@ -33,4 +48,4 @@ Confidence Levels:
 
 Format: `<n%> (<level>)`.
 
-Valid entry types: `session`, `bookmark`, `minutes`, `meeting`, `reference`, `idea`, `inbox`.
+Valid entry types: `session`, `bookmark`, `minutes`, `meeting`, `reference`, `idea`, `inbox`, `person`, `project`, `digest`, `github`, `feed`.

@@ -53,6 +53,7 @@ def _make_scope(
     scope: dict[str, Any] = {
         "type": scope_type,
         "path": path,
+        "method": "POST",
         "headers": headers or [],
     }
     if client is not None:

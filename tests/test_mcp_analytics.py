@@ -1,13 +1,18 @@
-"""Tests for the Distillery MCP analytics tool handlers (T04.2).
+"""Tests for Distillery analytics handler functions (T04.2 / T02.3).
 
-Tests cover analytics handlers via direct handler calls with a mock
-store, deterministic embedding provider, and minimal config:
+Note: the analytics handlers tested here were decoupled from the MCP tool
+surface in T02.2.  They are no longer registered as MCP tools; instead they
+power webhook endpoints (POST /hooks/poll, POST /hooks/rescore,
+POST /api/maintenance) and internal helpers.  The distillery_type_schemas
+tool was replaced by the distillery://schemas/entry-types MCP resource.
 
-  - _handle_tag_tree
-  - _handle_type_schemas
-  - _handle_metrics (including scope=summary and scope=search_quality)
-  - _handle_stale
-  - _handle_interests
+These tests exercise the underlying handler functions directly:
+
+  - _handle_tag_tree       (now internal — used by /api/maintenance)
+  - _handle_type_schemas   (now drives the entry-types MCP resource)
+  - _handle_metrics        (now internal — used by /api/maintenance)
+  - _handle_stale          (now internal — used by /api/maintenance)
+  - _handle_interests      (now internal — used by /api/maintenance)
 
 The test harness exercises the handlers directly without requiring a running
 transport.  All handlers are async functions that accept a store object and
@@ -29,6 +34,7 @@ from distillery.mcp.tools.analytics import (
     _handle_tag_tree,
     _handle_type_schemas,
 )
+from distillery.mcp.tools.meta import _handle_status
 from distillery.models import EntryStatus, EntryType
 from distillery.store.duckdb import DuckDBStore
 from tests.conftest import DeterministicEmbeddingProvider, make_entry, parse_mcp_response
@@ -509,7 +515,7 @@ class TestInterests:
         response = await _handle_interests(store, config, {"recency_days": "bad"})
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "INVALID_FIELD"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_interests_negative_recency_days(
         self, store: DuckDBStore, config: DistilleryConfig
@@ -517,7 +523,7 @@ class TestInterests:
         response = await _handle_interests(store, config, {"recency_days": -1})
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "INVALID_FIELD"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_interests_invalid_top_n(
         self, store: DuckDBStore, config: DistilleryConfig
@@ -525,13 +531,13 @@ class TestInterests:
         response = await _handle_interests(store, config, {"top_n": "bad"})
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "INVALID_FIELD"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_interests_zero_top_n(self, store: DuckDBStore, config: DistilleryConfig) -> None:
         response = await _handle_interests(store, config, {"top_n": 0})
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "INVALID_FIELD"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_interests_extraction_error(
         self, store: DuckDBStore, config: DistilleryConfig
@@ -544,7 +550,7 @@ class TestInterests:
             data = parse_mcp_response(response)
 
         assert data["error"] is True
-        assert data["code"] == "EXTRACTION_ERROR"
+        assert data["code"] == "INTERNAL"
 
     @staticmethod
     def _make_mock_profile():
@@ -561,3 +567,56 @@ class TestInterests:
             generated_at=datetime(2026, 1, 1, tzinfo=UTC),
             entry_count=42,
         )
+
+
+# ---------------------------------------------------------------------------
+# _handle_status tests — exercises the distillery_status public MCP tool path
+# ---------------------------------------------------------------------------
+
+
+class TestStatus:
+    """Tests for the distillery_status tool handler.
+
+    These tests exercise _handle_status (the function that backs the live
+    distillery_status MCP tool) directly so any drift between the status
+    handler and _handle_metrics is caught early.
+    """
+
+    async def test_status_basic_shape(
+        self,
+        store: DuckDBStore,
+        config: DistilleryConfig,
+        embedding_provider: DeterministicEmbeddingProvider,
+    ) -> None:
+        response = await _handle_status(
+            store=store,
+            config=config,
+            embedding_provider=embedding_provider,
+            tool_count=16,
+            transport="stdio",
+            started_at=None,
+        )
+        data = parse_mcp_response(response)
+        assert data["status"] == "ok"
+        assert data["tool_count"] == 16
+        assert data["transport"] == "stdio"
+        assert "store" in data
+        assert data["store"]["entry_count"] == 0
+
+    async def test_status_with_entries(
+        self,
+        store: DuckDBStore,
+        config: DistilleryConfig,
+        embedding_provider: DeterministicEmbeddingProvider,
+    ) -> None:
+        await store.store(make_entry(content="Status test entry"))
+        response = await _handle_status(
+            store=store,
+            config=config,
+            embedding_provider=embedding_provider,
+            tool_count=16,
+            transport="http",
+            started_at=None,
+        )
+        data = parse_mcp_response(response)
+        assert data["store"]["entry_count"] == 1

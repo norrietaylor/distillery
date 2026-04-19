@@ -3,8 +3,6 @@ name: digest
 description: "Generate a structured summary of internal team activity over a time window"
 allowed-tools:
   - "mcp__*__distillery_list"
-  - "mcp__*__distillery_aggregate"
-  - "mcp__*__distillery_metrics"
   - "mcp__*__distillery_search"
   - "mcp__*__distillery_store"
   - "mcp__*__distillery_find_similar"
@@ -79,7 +77,7 @@ Stop here if no entries exist.
 **3b. Fetch per-author activity counts:**
 
 ```python
-distillery_aggregate(
+distillery_list(
     group_by="author",
     date_from=<date_from>,
     # project=<name>  # only if --project specified
@@ -89,20 +87,12 @@ distillery_aggregate(
 **3c. Fetch entry type distribution:**
 
 ```python
-distillery_aggregate(
+distillery_list(
     group_by="entry_type",
     date_from=<date_from>,
     # project=<name>  # only if --project specified
 )
 ```
-
-**3d. Fetch audit metrics (non-fatal):**
-
-```python
-distillery_metrics(scope="audit", date_from=<date_from>)
-```
-
-If this call returns an error or no data, continue without it — do not stop.
 
 ### Step 4: Synthesize Digest
 
@@ -122,7 +112,7 @@ Scan `minutes` and `session` entries for decision-related keywords: "decided", "
 
 **Entry Counts:**
 
-Tabulate entries by type using the `distillery_aggregate` response. Show counts per type and per author in compact tables.
+Tabulate entries by type using the `distillery_list(group_by=...)` responses from Steps 3b and 3c. Show counts per type and per author in compact tables.
 
 ### Step 5: Check for Duplicates (if --store specified)
 
@@ -249,6 +239,8 @@ Tags: digest, team-activity, internal
 
 ## Rules
 
+- NEVER use Bash, Python, or any tool not listed in allowed-tools
+- If a required MCP tool call fails, report the error to the user and STOP. Do not attempt workarounds. Exceptions that are explicitly non-fatal are listed below (e.g. `distillery_list(group_by=...)` grouped-breakdown failures): for those, omit the affected section and continue.
 - Default lookback is 7 days — respect `--days` override
 - Only include `session`, `bookmark`, `minutes`, `idea`, `reference` entry types — never `feed`, `github`, or `digest`
 - Display digest by default; store only with `--store` flag
@@ -261,4 +253,4 @@ Tags: digest, team-activity, internal
 - Follow shared dedup pattern from CONVENTIONS.md (create/skip/merge/link outcomes) when `--store` is specified
 - On MCP errors, see CONVENTIONS.md error handling — display and stop
 - No retry loops — report errors and stop
-- `distillery_metrics(scope="audit")` failure is non-fatal — continue without audit data
+- `distillery_list(group_by=...)` failures are non-fatal — omit the affected breakdown section and continue

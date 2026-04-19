@@ -365,14 +365,21 @@ class TestMCPStoreConflictDetection:
         store: DuckDBStore,
         embedding_provider: ControlledEmbeddingProvider,
     ) -> None:
-        """When an existing entry has cosine similarity above conflict_threshold,
-        distillery_store returns conflicts in the response."""
+        """When an existing entry has cosine similarity above conflict_threshold
+        but below the dedup skip threshold, distillery_store returns conflicts
+        in the response.
+
+        By default (issue #348) ``conflict_prompt`` is NOT included — callers
+        opt in via ``include_conflict_prompt=True``.
+        """
         existing_text = "Cats are nocturnal animals that hunt at night"
         new_text = "Cats are diurnal animals that are active during the day"
 
-        # Register identical vectors so similarity = 1.0 (well above threshold)
+        # Use an interpolated vector so similarity lands above conflict_threshold
+        # (0.60) but below the dedup skip threshold (0.95). t=0.4 yields
+        # cosine similarity ~0.83 with _UNIT_A — above conflict, below skip.
         embedding_provider.register(existing_text, _UNIT_A)
-        embedding_provider.register(new_text, _UNIT_A)
+        embedding_provider.register(new_text, _interpolated_vector(_UNIT_A, _UNIT_B, 0.4))
 
         existing_entry = make_entry(content=existing_text)
         await store.store(existing_entry)
@@ -390,6 +397,8 @@ class TestMCPStoreConflictDetection:
         data = parse_mcp_response(response)
 
         assert "entry_id" in data
+        # The entry must have been persisted — similarity is below skip.
+        assert data.get("persisted") is True
         assert "conflicts" in data
         assert len(data["conflicts"]) >= 1
         # Each conflict entry must have required fields
@@ -397,9 +406,101 @@ class TestMCPStoreConflictDetection:
         assert "entry_id" in conflict
         assert "content_preview" in conflict
         assert "similarity_score" in conflict
-        assert "conflict_prompt" in conflict
+        # Default behaviour: prompt omitted to keep responses small (#348).
+        assert "conflict_prompt" not in conflict
         # conflict_reasoning must NOT be present (it leaked the system prompt — #200)
         assert "conflict_reasoning" not in conflict
+
+    async def test_store_default_omits_conflict_prompt(
+        self,
+        store: DuckDBStore,
+        embedding_provider: ControlledEmbeddingProvider,
+    ) -> None:
+        """By default conflict candidates omit ``conflict_prompt`` (issue #348)."""
+        existing_text = "The sky is blue during daylight hours"
+        new_text = "The sky is green during daylight hours"
+        embedding_provider.register(existing_text, _UNIT_A)
+        embedding_provider.register(new_text, _interpolated_vector(_UNIT_A, _UNIT_B, 0.4))
+        await store.store(make_entry(content=existing_text))
+
+        config = _make_config(conflict_threshold=0.60)
+        response = await _handle_store(
+            store,
+            {
+                "content": new_text,
+                "entry_type": "inbox",
+                "author": "tester",
+            },
+            config,
+        )
+        data = parse_mcp_response(response)
+
+        assert data.get("conflicts"), "expected at least one conflict candidate"
+        for conflict in data["conflicts"]:
+            assert "conflict_prompt" not in conflict
+            assert set(conflict.keys()) == {
+                "entry_id",
+                "content_preview",
+                "similarity_score",
+            }
+
+    async def test_store_include_conflict_prompt_true_includes_prompt(
+        self,
+        store: DuckDBStore,
+        embedding_provider: ControlledEmbeddingProvider,
+    ) -> None:
+        """include_conflict_prompt=True preserves the conflict_prompt field."""
+        existing_text = "Coffee is grown only in South America"
+        new_text = "Coffee is grown only in Antarctica"
+        embedding_provider.register(existing_text, _UNIT_A)
+        embedding_provider.register(new_text, _interpolated_vector(_UNIT_A, _UNIT_B, 0.4))
+        await store.store(make_entry(content=existing_text))
+
+        config = _make_config(conflict_threshold=0.60)
+        response = await _handle_store(
+            store,
+            {
+                "content": new_text,
+                "entry_type": "inbox",
+                "author": "tester",
+                "include_conflict_prompt": True,
+            },
+            config,
+        )
+        data = parse_mcp_response(response)
+
+        assert data.get("conflicts"), "expected at least one conflict candidate"
+        for conflict in data["conflicts"]:
+            assert "conflict_prompt" in conflict
+            assert isinstance(conflict["conflict_prompt"], str)
+            assert len(conflict["conflict_prompt"]) > 0
+            assert "entry_id" in conflict
+            assert "content_preview" in conflict
+            assert "similarity_score" in conflict
+
+    async def test_store_invalid_include_conflict_prompt_rejected(
+        self,
+        store: DuckDBStore,
+        embedding_provider: ControlledEmbeddingProvider,
+    ) -> None:
+        """Non-bool include_conflict_prompt values return INVALID_PARAMS."""
+        new_text = "Some benign content"
+        embedding_provider.register(new_text, _UNIT_A)
+
+        config = _make_config(conflict_threshold=0.60)
+        response = await _handle_store(
+            store,
+            {
+                "content": new_text,
+                "entry_type": "inbox",
+                "author": "tester",
+                "include_conflict_prompt": "yes",  # not a bool
+            },
+            config,
+        )
+        data = parse_mcp_response(response)
+        assert data.get("error") is True
+        assert data.get("code") == "INVALID_PARAMS"
 
     async def test_store_no_conflicts_when_no_similar(
         self,

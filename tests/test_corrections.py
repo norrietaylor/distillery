@@ -133,7 +133,7 @@ async def test_correct_archived_entry(store: DuckDBStore, original_entry: str) -
     )
     data = parse_mcp_response(result)
     assert data["error"] is True
-    assert data["code"] == "INVALID_STATE"
+    assert data["code"] == "INVALID_PARAMS"
     assert "archived" in data["message"].lower()
 
 
@@ -203,6 +203,24 @@ async def test_correct_invalid_entry_type(store: DuckDBStore, original_entry: st
     data = parse_mcp_response(result)
     assert data["error"] is True
     assert data["code"] == "INVALID_PARAMS"
+
+
+async def test_correct_invalid_entry_type_note_suggests_inbox(
+    store: DuckDBStore, original_entry: str
+) -> None:
+    """Issue #345: 'note' alias surfaces 'inbox' suggestion on correction path too."""
+    result = await _handle_correct(
+        store=store,
+        arguments={
+            "wrong_entry_id": original_entry,
+            "content": "Fixed.",
+            "entry_type": "note",
+        },
+    )
+    data = parse_mcp_response(result)
+    assert data["error"] is True
+    assert data["code"] == "INVALID_PARAMS"
+    assert data["details"]["suggestion"] == "inbox"
 
 
 async def test_correct_empty_tags_clears(store: DuckDBStore, original_entry: str) -> None:

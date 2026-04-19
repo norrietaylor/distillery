@@ -290,6 +290,18 @@ def create_fts_index(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
         logger.info("Migration 7: FTS extension loaded and index created on entries.content")
     except duckdb.IOException as exc:
         # Extension install requires network access; gracefully degrade.
+        # ``INSTALL fts`` may leave the current transaction in an aborted state
+        # when it fails — rollback and begin a fresh transaction so the
+        # schema_version INSERT in run_pending_migrations can proceed.
+        with contextlib.suppress(duckdb.Error):
+            conn.execute("ROLLBACK")
+        try:
+            conn.execute("BEGIN TRANSACTION")
+        except duckdb.Error as begin_exc:
+            raise RuntimeError(
+                "Migration 7: failed to restart transaction after FTS rollback — "
+                "database may be in an inconsistent state"
+            ) from begin_exc
         kwargs["fts_available"] = False
         logger.warning("Migration 7: FTS extension install failed (offline?): %s", exc)
     except Exception:
@@ -330,6 +342,67 @@ def add_session_id(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
     logger.info("Migration 11: session_id column added")
 
 
+_ADD_FEED_SOURCE_LIVENESS_COLUMNS = [
+    "ALTER TABLE feed_sources ADD COLUMN IF NOT EXISTS last_polled_at TIMESTAMP;",
+    "ALTER TABLE feed_sources ADD COLUMN IF NOT EXISTS last_item_count INTEGER DEFAULT 0;",
+    "ALTER TABLE feed_sources ADD COLUMN IF NOT EXISTS last_error VARCHAR;",
+]
+
+
+def add_feed_source_liveness(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
+    """Migration 12: Add liveness columns to ``feed_sources``.
+
+    Adds three nullable columns used by operators to answer "is this feed
+    working?" without consulting a separate sync-status tool:
+
+    - ``last_polled_at`` (TIMESTAMP) — UTC instant of the most recent poll.
+    - ``last_item_count`` (INTEGER) — items ingested on the last poll.
+    - ``last_error`` (VARCHAR) — truncated error message from the last poll,
+      or ``NULL`` when the poll succeeded.
+    """
+    for stmt in _ADD_FEED_SOURCE_LIVENESS_COLUMNS:
+        conn.execute(stmt)
+    logger.info("Migration 12: feed_sources liveness columns added")
+
+
+_CREATE_SYNC_JOBS_TABLE = """
+CREATE TABLE IF NOT EXISTS sync_jobs (
+    job_id            VARCHAR PRIMARY KEY,
+    source_url        VARCHAR NOT NULL,
+    source_type       VARCHAR NOT NULL,
+    status            VARCHAR NOT NULL,
+    created_at        TIMESTAMPTZ NOT NULL,
+    started_at        TIMESTAMPTZ,
+    completed_at      TIMESTAMPTZ,
+    entries_created   INTEGER NOT NULL DEFAULT 0,
+    entries_updated   INTEGER NOT NULL DEFAULT 0,
+    relations_created INTEGER NOT NULL DEFAULT 0,
+    pages_processed   INTEGER NOT NULL DEFAULT 0,
+    errors            VARCHAR,
+    error_message     VARCHAR,
+    result            VARCHAR
+);
+"""
+
+_CREATE_SYNC_JOBS_CREATED_AT_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_sync_jobs_created_at
+ON sync_jobs (created_at);
+"""
+
+
+def create_sync_jobs(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
+    """Migration 13: Create the ``sync_jobs`` table.
+
+    Backs the :class:`distillery.feeds.sync_jobs.SyncJobTracker` so background
+    gh-sync / feed-history jobs survive server restarts. Fields mirror
+    :class:`distillery.feeds.sync_jobs.SyncJob`; ``errors`` and ``result``
+    are JSON-encoded strings.
+    """
+    conn.execute(_CREATE_SYNC_JOBS_TABLE)
+    conn.execute(_CREATE_SYNC_JOBS_CREATED_AT_INDEX)
+    logger.info("Migration 13: sync_jobs table created")
+
+
 # ---------------------------------------------------------------------------
 # Migration registry
 # ---------------------------------------------------------------------------
@@ -346,6 +419,8 @@ MIGRATIONS: dict[int, MigrationFunc] = {
     9: add_expires_at,
     10: add_verification,
     11: add_session_id,
+    12: add_feed_source_liveness,
+    13: create_sync_jobs,
 }
 """Ordered mapping of schema version to migration function.
 

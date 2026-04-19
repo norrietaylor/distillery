@@ -81,6 +81,8 @@ nav:
     - /gh-sync: skills/gh-sync.md
     - /investigate: skills/investigate.md
     - /briefing: skills/briefing.md
+  - Reference:
+    - CLI: reference/cli.md
   - Team Access:
     - Team Member Guide: team/team-setup.md
     - Operator Deployment: team/deployment.md

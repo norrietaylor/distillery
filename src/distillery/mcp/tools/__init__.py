@@ -7,9 +7,9 @@ Domain modules:
   - quality.py   — run_dedup_check, run_conflict_discovery, run_conflict_evaluation (helpers)
   - analytics.py — metrics, stale, tag_tree, interests (with optional
                    suggest_sources), type_schemas
-  - feeds.py     — watch, poll, rescore
+  - feeds.py     — watch, poll, rescore, gh_sync, sync_status
   - configure.py — distillery_configure runtime config tool
-  - meta.py      — reserved for future cross-cutting tool concerns
+  - meta.py      — distillery_status (server/health metadata probe)
   - _common.py   — shared helpers (error/success response, validation)
   - _errors.py   — standardized error code constants
 
@@ -32,13 +32,17 @@ from distillery.mcp.tools.crud import (
     _handle_get,
     _handle_list,
     _handle_store,
+    _handle_store_batch,
     _handle_update,
 )
 from distillery.mcp.tools.feeds import (
+    _handle_gh_sync,
     _handle_poll,
     _handle_rescore,
+    _handle_sync_status,
     _handle_watch,
 )
+from distillery.mcp.tools.meta import _handle_status
 from distillery.mcp.tools.quality import (
     run_conflict_discovery,
     run_conflict_evaluation,
@@ -52,6 +56,7 @@ from distillery.mcp.tools.search import (
 
 __all__ = [
     "_handle_configure",
+    "_handle_status",
     "_handle_classify",
     "_handle_resolve_review",
     "_handle_get",
@@ -64,8 +69,11 @@ __all__ = [
     "_handle_search",
     "_handle_find_similar",
     "_handle_aggregate",
+    "_handle_gh_sync",
     "_handle_poll",
     "_handle_rescore",
+    "_handle_store_batch",
+    "_handle_sync_status",
     "_handle_watch",
     "_handle_interests",
     "_handle_metrics",

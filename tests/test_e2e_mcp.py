@@ -379,7 +379,8 @@ class TestStatusReflectsEntries:
     """Scenario: status on empty DB then after storing entries."""
 
     async def test_status_empty_then_populated(self, e2e_store: DuckDBStore) -> None:
-        from distillery.mcp.server import _handle_metrics, _handle_store
+        from distillery.mcp.server import _handle_store
+        from distillery.mcp.tools.analytics import _handle_metrics
 
         provider = StubEmbeddingProvider(dimensions=4)
         config = _make_config()
@@ -470,7 +471,8 @@ class TestCallToolDispatcher:
 
     async def test_call_tool_dispatches_store_and_status(self, e2e_store: DuckDBStore) -> None:
         """Verify that the CallToolRequest handler routes to correct tool handlers."""
-        from distillery.mcp.server import _handle_metrics, _handle_store
+        from distillery.mcp.server import _handle_store
+        from distillery.mcp.tools.analytics import _handle_metrics
 
         config = _make_config()
         provider = StubEmbeddingProvider(dimensions=4)
@@ -498,26 +500,27 @@ class TestCallToolDispatcher:
         tools = await server.list_tools()
         tool_names = {t.name for t in tools}
 
+        # 16-tool consolidated API (12 from #196 + store_batch, gh_sync, sync_status, status).
+        # Analytics tools (aggregate, metrics, stale, tag_tree, interests)
+        # absorbed into distillery_list via group_by, output="stats", stale_days.
         expected = {
             "distillery_store",
+            "distillery_store_batch",
             "distillery_get",
             "distillery_update",
             "distillery_correct",
             "distillery_search",
             "distillery_find_similar",
             "distillery_list",
-            "distillery_aggregate",
             "distillery_classify",
             "distillery_resolve_review",
-            "distillery_metrics",
-            "distillery_stale",
-            "distillery_tag_tree",
-            "distillery_type_schemas",
-            "distillery_interests",
             "distillery_watch",
-            "distillery_poll",
-            "distillery_rescore",
             "distillery_configure",
             "distillery_relations",
+            "distillery_gh_sync",
+            "distillery_sync_status",
+            "distillery_status",
         }
-        assert expected == tool_names, f"Missing tools: {expected - tool_names}"
+        assert expected == tool_names, (
+            f"Tool mismatch — extra: {tool_names - expected}, missing: {expected - tool_names}"
+        )

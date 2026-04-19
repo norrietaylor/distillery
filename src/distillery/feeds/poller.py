@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 from distillery.feeds.scorer import RelevanceScorer
+from distillery.feeds.truncation import truncate_content
 
 if TYPE_CHECKING:
     from distillery.config import DistilleryConfig, FeedSourceConfig
@@ -97,14 +98,18 @@ class PollerSummary:
     finished_at: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
 
 
-def _item_text(item: FeedItem) -> str:
+def _item_text(item: FeedItem, *, apply_truncation: bool = True) -> str:
     """Build a single text string from a feed item for embedding.
 
     Concatenates title and content with a newline separator, falling back to
-    whichever field is available.
+    whichever field is available.  When *apply_truncation* is ``True``
+    (the default) the result is pre-truncated to stay within the Jina
+    embedding model's token limit.
 
     Args:
         item: The feed item to convert.
+        apply_truncation: Whether to truncate the result to
+            :data:`~distillery.feeds.truncation.MAX_CONTENT_CHARS`.
 
     Returns:
         A non-empty text string, or an empty string if both fields are absent.
@@ -114,7 +119,10 @@ def _item_text(item: FeedItem) -> str:
         parts.append(item.title)
     if item.content:
         parts.append(item.content)
-    return "\n".join(parts)
+    text = "\n".join(parts)
+    if apply_truncation:
+        text = truncate_content(text)
+    return text
 
 
 def _build_adapter(source: FeedSourceConfig) -> Any:
@@ -378,6 +386,7 @@ def _item_to_entry_kwargs(
         "source_type": item.source_type,
         "external_id": item.item_id,
         "relevance_score": relevance_score,
+        "imported_by": "distillery-poller",
     }
     if item.title:
         metadata["title"] = item.title
@@ -391,11 +400,20 @@ def _item_to_entry_kwargs(
     else:
         tags = _derive_source_tags(item, item.source_type)
 
+    # Use real author from source payload when available; fall back to tool name.
+    # Treat None, empty, and whitespace-only authors as missing (#302).
+    raw_author = item.author
+    author = (
+        raw_author.strip()
+        if isinstance(raw_author, str) and raw_author.strip()
+        else "distillery-poller"
+    )
+
     return {
         "content": text or item.source_url,
         "entry_type": EntryType.FEED,
         "source": EntrySource.IMPORT,
-        "author": "distillery-poller",
+        "author": author,
         "tags": tags,
         "metadata": metadata,
     }
@@ -466,7 +484,13 @@ class FeedPoller:
         db_sources = await self._store.list_feed_sources()
         if source_url is not None:
             db_sources = [s for s in db_sources if s["url"] == source_url]
-        sources = [FeedSourceConfig(**s) for s in db_sources]
+        # list_feed_sources returns liveness fields (last_polled_at, etc.)
+        # that are not part of FeedSourceConfig — filter to the constructor
+        # kwargs before instantiation.
+        _cfg_fields = {"url", "source_type", "label", "poll_interval_minutes", "trust_weight"}
+        sources = [
+            FeedSourceConfig(**{k: v for k, v in s.items() if k in _cfg_fields}) for s in db_sources
+        ]
         if not sources:
             logger.debug("FeedPoller: no sources configured — skipping poll")
             summary.finished_at = datetime.now(tz=UTC)
@@ -530,6 +554,7 @@ class FeedPoller:
                     sources[idx].url,
                     result,
                 )
+                await self._persist_poll_status(err_result)
             else:
                 summary.results.append(result)
                 summary.total_fetched += result.items_fetched
@@ -539,9 +564,56 @@ class FeedPoller:
                 summary.sources_polled += 1
                 if result.errors:
                     summary.sources_errored += 1
+                await self._persist_poll_status(result)
 
         summary.finished_at = datetime.now(tz=UTC)
         return summary
+
+    async def _persist_poll_status(self, result: PollResult) -> None:
+        """Persist liveness metadata for a single poll outcome.
+
+        The store is the source of truth for feed health — update the
+        ``last_polled_at``, ``last_item_count``, and ``last_error``
+        columns after each source poll so ``distillery_watch(action=
+        'list')`` can surface them without a separate status tool.
+
+        Any exception raised by ``record_poll_status`` is swallowed so
+        that persistence failures do not mask poll results, but we log at
+        ``WARNING`` with ``exc_info`` so operators can diagnose — a silent
+        failure here was the root cause of liveness fields staying ``NULL``
+        in production (issue #334).  Backends that predate the protocol
+        addition may not expose the method — in that case we simply skip
+        the update.
+        """
+        recorder = getattr(self._store, "record_poll_status", None)
+        if recorder is None:
+            return
+        # Normalise the first error string before persisting: collapse whitespace /
+        # control characters to single spaces and cap at 200 chars with an ellipsis
+        # so that raw backend exception text (including stack-trace fragments) is not
+        # stored verbatim and cannot be exfiltrated via distillery_watch(action='list').
+        raw_error = result.errors[0] if result.errors else None
+        if raw_error is not None:
+            sanitised = re.sub(r"\s+", " ", raw_error).strip()
+            error_msg: str | None = sanitised[:199] + "…" if len(sanitised) > 200 else sanitised or None
+        else:
+            error_msg = None
+        try:
+            # Record the fetched count for source-liveness: a feed that fetched
+            # 20 items but stored 0 due to dedup/thresholds still proves the
+            # source is alive, so ``items_fetched`` is the right liveness signal.
+            await recorder(
+                result.source_url,
+                polled_at=result.polled_at,
+                item_count=result.items_fetched,
+                error=error_msg,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "FeedPoller: failed to persist poll status for %s",
+                result.source_url,
+                exc_info=True,
+            )
 
     async def _poll_source(
         self,

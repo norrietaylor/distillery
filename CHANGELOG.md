@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Scheduling via Claude Code routines** — `/setup` and `/watch` skills now configure Claude Code routines instead of CronCreate jobs or GitHub Actions webhook scheduling. Three routines replace the previous approach: hourly feed poll, daily stale check, weekly maintenance (#272)
+- **`distillery_list` default `output_mode` is now `"summary"`** — previously `"full"`, which returned entire entry bodies and flooded agent context (e.g. ~6 KB per gh-sync entry × `limit=50` ≈ 300 KB). Summary mode returns `id`, `title` (derived from metadata or first line of content), `entry_type`, `tags`, `project`, `author`, `created_at`, `metadata`, `session_id`, and a `content_preview` truncated to ~200 chars. Pass `output_mode="full"` explicitly when the whole body is needed (#311).
+- **`distillery_store` `dedup_action` semantics tightened** — when a new row is persisted independently, `dedup_action` is now always `"stored"` (previously `"merged"` / `"linked"` when the top match crossed the merge or link threshold, even though a separate row was written). `"merged"` / `"linked"` are reserved for future behaviour where content is actually folded into an existing row or an explicit link is created without a new row. The similarity signal remains available via the informational `existing_entry_id` + `similarity` fields. Callers who want to avoid independent duplicates should call `distillery_find_similar(dedup_action=true)` before storing. (#332)
+
+### Deprecated
+
+- **Webhook scheduling endpoints** — `/hooks/poll`, `/hooks/rescore`, and `/hooks/classify-batch` are deprecated in favour of Claude Code routines. The `/api/maintenance` endpoint is retained for orchestrated operations. Deprecated endpoints log warnings on use. (#272)
+
 ---
 
 ## [v0.2.1] - 2026-04-07

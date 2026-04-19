@@ -2,12 +2,10 @@
 name: briefing
 description: "Produce a knowledge dashboard with recent entries, corrections, expiring soon, stale knowledge, and unresolved items. In team mode, also shows team activity, related entries from teammates, and the review queue."
 allowed-tools:
-  - "mcp__*__distillery_metrics"
   - "mcp__*__distillery_list"
-  - "mcp__*__distillery_stale"
   - "mcp__*__distillery_relations"
-  - "mcp__*__distillery_aggregate"
   - "mcp__*__distillery_search"
+  - "Bash(git rev-parse --show-toplevel)"
 context: fork
 effort: medium
 ---
@@ -85,10 +83,10 @@ From the entries returned in Step 4a, and the 50 fetched in Step 4b, post-filter
 **4d. Stale knowledge (non-fatal):**
 
 ```python
-distillery_stale(days=30, limit=5)
+distillery_list(stale_days=30, limit=5, project=<project>, output_mode="full")
 ```
 
-Record stale entries. If scoped to a project, filter results to entries matching `project=<project>`. If this call fails, omit the Stale Knowledge section.
+Record stale entries. If this call fails, omit the Stale Knowledge section.
 
 **4e. Unresolved (non-fatal):**
 
@@ -105,7 +103,7 @@ If `--team` was passed, set `team_mode = true` and skip the author count check.
 Otherwise, call:
 
 ```python
-distillery_aggregate(group_by="author", project=<project>)
+distillery_list(group_by="author", project=<project>)
 ```
 
 If the response contains more than one author group, set `team_mode = true`. If the call fails, set `team_mode = false` and continue (non-fatal).
@@ -330,7 +328,10 @@ Generated: 2026-04-08 09:15 UTC
 
 ## Rules
 
-- Always call `distillery_metrics(scope="summary")` first as the MCP health check; stop if it fails
+- NEVER use Bash, Python, or any tool not listed in allowed-tools
+- Always call `distillery_list(limit=1)` first as the MCP health check; stop if it fails.
+- If a required (non-optional) MCP tool call fails, report the error to the user and STOP. Do not attempt workarounds.
+- If a call is marked non-fatal below (corrections, stale knowledge, unresolved items, team-mode probes, and team sections 6/7/8), omit that section and continue.
 - Auto-detect project from `basename $(git rev-parse --show-toplevel)` when `--project` is not provided
 - Display-only — no `--store` flag, no storing of output
 - Omit any section that has no data — never show empty section headings
@@ -341,7 +342,7 @@ Generated: 2026-04-08 09:15 UTC
 - Corrections section uses `distillery_relations(action="get", relation_type="corrects")` — failure is non-fatal
 - Stale knowledge failure is non-fatal — omit the section and continue
 - Unresolved failure is non-fatal — omit the section and continue
-- Team mode is activated by `--team` flag or auto-detected: `distillery_aggregate(group_by="author")` returning >1 author
+- Team mode is activated by `--team` flag or auto-detected: `distillery_list(group_by="author", project=<project>)` returning >1 author group
 - Header shows `(solo)` or `(team)` based on detected mode
 - Team sections (6, 7, 8) are additive — solo sections are always rendered unchanged
 - Team activity groups entries by author from the past 7 days only — entries older than 7 days are excluded
@@ -349,5 +350,5 @@ Generated: 2026-04-08 09:15 UTC
 - Pending review uses `status="pending_review"` — limited to 5 entries
 - Team aggregate call failure is non-fatal — fall back to solo mode
 - Team activity, related from team, and pending review failures are non-fatal — omit each failed section
-- On MCP errors in fatal calls (summary metrics), see CONVENTIONS.md error handling — display and stop
+- On MCP errors in fatal calls (`distillery_list(limit=1)` health check), see CONVENTIONS.md error handling — display and stop
 - No retry loops — report errors and stop

@@ -452,7 +452,7 @@ class TestInterestExtractorExtract:
 
 class TestHandleInterests:
     async def test_returns_profile_fields(self) -> None:
-        from distillery.mcp.server import _handle_interests
+        from distillery.mcp.tools.analytics import _handle_interests
 
         store = _make_store([_make_entry(tags=["python", "testing"])])
         cfg = DistilleryConfig()
@@ -469,7 +469,7 @@ class TestHandleInterests:
         assert "generated_at" in data
 
     async def test_invalid_recency_days_returns_error(self) -> None:
-        from distillery.mcp.server import _handle_interests
+        from distillery.mcp.tools.analytics import _handle_interests
 
         cfg = DistilleryConfig()
         result = await _handle_interests(
@@ -479,7 +479,7 @@ class TestHandleInterests:
         assert data.get("error") is True
 
     async def test_invalid_top_n_returns_error(self) -> None:
-        from distillery.mcp.server import _handle_interests
+        from distillery.mcp.tools.analytics import _handle_interests
 
         cfg = DistilleryConfig()
         result = await _handle_interests(store=AsyncMock(), config=cfg, arguments={"top_n": -5})
@@ -487,7 +487,7 @@ class TestHandleInterests:
         assert data.get("error") is True
 
     async def test_top_tags_are_serialised_as_pairs(self) -> None:
-        from distillery.mcp.server import _handle_interests
+        from distillery.mcp.tools.analytics import _handle_interests
 
         store = _make_store([_make_entry(tags=["python"])])
         cfg = DistilleryConfig()
@@ -499,7 +499,7 @@ class TestHandleInterests:
             assert isinstance(pair[1], float)
 
     async def test_custom_recency_days(self) -> None:
-        from distillery.mcp.server import _handle_interests
+        from distillery.mcp.tools.analytics import _handle_interests
 
         store = _make_store([_make_entry(tags=["python"])])
         cfg = DistilleryConfig()
@@ -515,7 +515,7 @@ class TestHandleInterests:
 
 class TestHandleSuggestSources:
     async def test_returns_suggestions_field(self) -> None:
-        from distillery.mcp.server import _handle_interests
+        from distillery.mcp.tools.analytics import _handle_interests
 
         store = _make_store(
             [
@@ -536,7 +536,7 @@ class TestHandleSuggestSources:
         assert "entry_count" in data
 
     async def test_suggestions_have_expected_fields(self) -> None:
-        from distillery.mcp.server import _handle_interests
+        from distillery.mcp.tools.analytics import _handle_interests
 
         store = _make_store(
             [
@@ -558,7 +558,7 @@ class TestHandleSuggestSources:
             assert "rationale" in suggestion
 
     async def test_invalid_max_suggestions_returns_error(self) -> None:
-        from distillery.mcp.server import _handle_interests
+        from distillery.mcp.tools.analytics import _handle_interests
 
         cfg = DistilleryConfig()
         result = await _handle_interests(
@@ -570,7 +570,7 @@ class TestHandleSuggestSources:
     async def test_invalid_source_type_filter_returns_error(self) -> None:
         # source_types filter was removed from _handle_interests;
         # test that invalid suggest_sources type returns an error instead.
-        from distillery.mcp.server import _handle_interests
+        from distillery.mcp.tools.analytics import _handle_interests
 
         cfg = DistilleryConfig()
         result = await _handle_interests(
@@ -580,10 +580,10 @@ class TestHandleSuggestSources:
         )
         data = json.loads(result[0].text)
         assert data.get("error") is True
-        assert data["code"] == "INVALID_FIELD"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_watched_sources_excluded_from_suggestions(self) -> None:
-        from distillery.mcp.server import _handle_interests
+        from distillery.mcp.tools.analytics import _handle_interests
 
         store = _make_store(
             [
@@ -612,7 +612,7 @@ class TestHandleSuggestSources:
 
     async def test_github_filter_only_returns_github_suggestions(self) -> None:
         # source_types filter removed; test that github-only entries produce github suggestions.
-        from distillery.mcp.server import _handle_interests
+        from distillery.mcp.tools.analytics import _handle_interests
 
         store = _make_store(
             [
@@ -631,7 +631,7 @@ class TestHandleSuggestSources:
         assert len(github_suggestions) >= 1
 
     async def test_max_suggestions_limits_results(self) -> None:
-        from distillery.mcp.server import _handle_interests
+        from distillery.mcp.tools.analytics import _handle_interests
 
         # Create many github entries to generate many potential suggestions
         store = _make_store(

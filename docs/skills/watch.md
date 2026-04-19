@@ -42,14 +42,11 @@ Adds a new feed source and optionally configures auto-poll scheduling.
 | `--interval <minutes>` | Poll interval in minutes | 60 |
 | `--trust <weight>` | Trust weight 0.0-1.0 | 1.0 |
 
-After adding a source, the skill configures auto-poll scheduling:
-
-- **Local transport** — creates a recurring cron job via `CronCreate` (a Claude Code platform primitive)
-- **Hosted/team transport** — scheduling is handled by the GitHub Actions workflow (`.github/workflows/scheduler.yml`) which calls the `/api/poll` webhook endpoint hourly. No local cron needed.
+After adding a source, the skill checks whether a feed poll routine is configured and prompts you to run `/setup` if not.
 
 ### Remove
 
-Removes a source by URL. If no sources remain after removal and transport is local, the auto-poll cron schedule is paused.
+Removes a source by URL.
 
 ## Source Types
 
@@ -80,5 +77,4 @@ If `GITHUB_TOKEN` is not set, GitHub sources poll public repos only.
 
 - Use `/watch` regularly to review your monitored sources
 - Trust weight affects how relevance scores are weighted in the digest
-- Auto-poll checks for existing schedules before creating duplicates
-- Removing the last source automatically pauses the local poll schedule
+- Scheduling uses Claude Code routines — configure via `/setup`

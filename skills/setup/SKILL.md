@@ -1,10 +1,9 @@
 ---
 name: setup
-description: "Onboarding wizard — verify MCP connectivity, detect transport, and configure scheduled tasks"
+description: "Onboarding wizard — verify MCP connectivity, detect transport, and configure scheduled tasks via Claude Code routines"
 allowed-tools:
-  - "mcp__*__distillery_metrics"
-  - "CronCreate"
-  - "RemoteTrigger"
+  - "mcp__*__distillery_list"
+  - "mcp__*__distillery_watch"
   - "Bash(test:*)"
   - "Bash(cat:*)"
   - "Bash(find:*)"
@@ -20,7 +19,7 @@ effort: low
 
 # Setup — Distillery Onboarding
 
-Setup walks you through first-time Distillery configuration: verifying MCP connectivity, detecting your transport mode, and configuring scheduled tasks (hourly feed polling, daily relevance rescoring, weekly KB maintenance).
+Setup walks you through first-time Distillery configuration: verifying MCP connectivity, detecting your transport mode, and configuring scheduled tasks (hourly feed health status check, daily stale-entry checks, weekly KB maintenance).
 
 Run this once after installing the plugin. It is safe to run again at any time to verify or update your configuration.
 
@@ -43,7 +42,7 @@ Use `ToolSearch` to check whether any `distillery` MCP tools are available. Also
 
 **1b. Attempt connection:**
 
-Call `distillery_metrics(scope="summary")` to confirm the Distillery MCP server is running and authenticated.
+Call `distillery_list(limit=1)` to confirm the Distillery MCP server is running and authenticated.
 
 **1c. Determine state and respond:**
 
@@ -51,21 +50,22 @@ Evaluate the result based on what was found in 1a and 1b:
 
 ---
 
-**State: Connected** — `distillery_metrics(scope="summary")` returned successfully.
+**State: Connected** — `distillery_list(limit=1)` returned successfully.
 
-Display using the actual fields from `distillery_metrics(scope="summary")`:
-
+Display:
 
 ```text
 MCP server connected.
-  Entries:  <total_entries>
-  Model:    <embedding_model>
-  DB Size:  <database_size_bytes / 1048576> MB
+  Entries:  <total_count from distillery_list>
 ```
 
 Proceed to Step 2.
 
-**State: Needs Authentication** — Server entry found but `distillery_metrics(scope="summary")` is unavailable or fails (including auth-related failures). See `references/transport-detection.md` for display instructions. Skip to Step 6 with `MCP Server: needs authentication`.
+**State: Needs Authentication** — Server entry found and `distillery_list(limit=1)` fails with an authentication-specific error (e.g., 401/403 or an explicit auth-required response). See `references/transport-detection.md` for display instructions. Skip to Step 6 with `MCP Server: needs authentication`.
+
+---
+
+**State: Not Connected** — Server entry found but the Distillery MCP server is unreachable (process down, transport unreachable) or returns a non-auth error. Skip to Step 6 with `MCP Server: not connected`.
 
 ---
 
@@ -116,111 +116,45 @@ If sources exist, list them briefly (URL + label).
 
 ### Step 4: Scheduled Tasks Configuration
 
-Distillery uses three tiers of scheduled tasks: hourly feed polling, daily feed rescoring, and weekly knowledge base maintenance.
+Distillery uses three tiers of scheduled tasks, all configured as **Claude Code routines**:
 
-**Note for hosted/team transport:** Scheduling is managed by GitHub Actions at `.github/workflows/scheduler.yml`. No local cron configuration is needed. Skip to Step 5.
+| Tier | Frequency | Purpose |
+|------|-----------|---------|
+| Feed health check | Hourly | Check feed source status and newest entry age (status only — actual ingestion runs via `POST /hooks/poll` on hosted deployments) |
+| Stale entry check | Daily | Identify entries needing refresh or archival |
+| KB maintenance | Weekly | Stats, stale entries, feed activity, digest (reporting only — the poll → rescore → classify-batch pipeline runs via `POST /api/maintenance` on hosted deployments) |
 
-Read `references/cron-payloads.md` for the full cron payloads and display instructions for Steps 4a, 4b, and 4c.
+Read `references/routine-payloads.md` for the full routine definitions and display instructions for Steps 4a, 4b, and 4c.
 
-If transport is local, use `CronCreate` for local auto-polling.
-
-Check `CronList` for any existing poll jobs first — do not create duplicates.
-
-**If a poll job already exists:**
+**If no feed sources are configured (from Step 3):**
 
 ```text
-Auto-poll: active (cron job <job_id>, every hour at :<minute>)
+Scheduled tasks: feed health check and stale check skipped (no feed sources configured)
+  Weekly maintenance routine can still be configured for KB health tracking.
+  Add sources with /watch add <url> to enable feed health check and stale check routines.
 ```
 
-**If no poll job exists and feed sources are configured (from Step 3):**
+Offer only the weekly maintenance routine (4c) if the user wants scheduled tasks.
 
-Ask the user once about enabling scheduled tasks — their answer applies to all three tiers.
+**If feed sources are configured, ask the user once — their answer applies to all three tiers:**
 
 ```text
-Enable scheduled tasks? This includes:
-  • Feed polling — every hour
-  • Feed rescoring — daily (re-evaluates relevance after new knowledge)
-  • KB maintenance — weekly (metrics, quality, stale entries, source suggestions)
+Enable scheduled tasks via Claude Code routines? This creates:
+  • Feed health check routine — every hour (status only, no ingestion)
+  • Stale entry check routine — daily
+  • KB maintenance routine — weekly (stats, stale entries, digest)
+
+Routines run automatically in the background when Claude Code is active.
 (yes / no)
 ```
 
-If yes, create the cron job:
+If yes, display the routine configuration instructions from `references/routine-payloads.md`.
 
-```python
-CronCreate(
-  cron="<random off-peak minute> * * * *",
-  prompt="Use distillery_poll to poll all configured feed sources. Report a one-line summary of items fetched and stored.",
-  recurring=True,
-  durable=True
-)
-```
-
-Display:
+If no:
 
 ```text
-Auto-poll enabled: every hour at :<minute> (cron job <job_id>)
-```
-
-**If no feed sources are configured:**
-
-```text
-Auto-poll: skipped (no feed sources configured)
-  Add sources with /watch add <url> — auto-poll will be set up automatically.
-```
-
-**4b. Daily — Feed Rescoring**
-
-After new knowledge entries are added, previously-scored feed items may have stale relevance scores. A daily rescore pass re-evaluates them against the current interest profile.
-
-Skip this step if the user declined scheduled tasks or if no feed sources are configured.
-
-Check `CronList` for an existing rescore job. If none exists, create one:
-
-```python
-CronCreate(
-  cron="<random minute> 6 * * *",
-  prompt="Use distillery_rescore(limit=200) to re-score feed entries against the current knowledge base. Report: rescored, upgraded, downgraded, archived counts.",
-  recurring=True,
-  durable=True
-)
-```
-
-Display:
-
-```text
-Daily rescore enabled: 06:<minute> UTC (cron job <job_id>)
-```
-
-**4c. Weekly — Knowledge Base Maintenance**
-
-A weekly maintenance pass collects metrics, checks search quality, identifies stale entries, and refreshes source suggestions. Results are stored as a digest entry for longitudinal tracking.
-
-Skip this step if the user declined scheduled tasks.
-
-Check `CronList` for an existing maintenance job. If none exists, create one:
-
-```python
-CronCreate(
-  cron="<random minute> 7 * * 1",
-  prompt="""Run weekly Distillery maintenance:
-1. Call distillery_metrics(scope="summary", period_days=7) — note entry growth, search volume, storage usage.
-2. Call distillery_metrics(scope="search_quality") — note positive feedback rate and avg result count.
-3. Call distillery_stale(days=30, limit=10) — note count and oldest entries.
-4. Call distillery_interests(recency_days=30, top_n=10) — note top tags and domains.
-5. Call distillery_interests(suggest_sources=True, max_suggestions=3) — note any new recommendations.
-6. Store a digest: distillery_store(content=<one-paragraph summary of findings>, entry_type="session", author="distillery-maintenance", tags=["digest", "weekly", "maintenance"], metadata={"period_start": "<7 days ago ISO>", "period_end": "<today ISO>"}).
-Report: entry counts, search quality trend, stale entry count, top interests, suggested sources.""",
-  recurring=True,
-  durable=True
-)
-```
-
-Display:
-
-```text
-Weekly maintenance enabled: Mondays at 07:<minute> UTC (cron job <job_id>)
-  Collects: metrics, search quality, stale entries, interests, source suggestions
-  Stores: weekly digest entry for tracking trends
+Scheduled tasks: skipped
+  Enable later by running /setup again.
 ```
 
 ### Step 5: Configure Session Hooks
@@ -342,10 +276,10 @@ Distillery Setup Complete
   Entries:       <total_entries | N/A>
   Feed Sources:  <N> configured
 
-  Scheduled Tasks:
-    Feed poll:     <active (hourly) | inactive | managed by GitHub Actions>
-    Feed rescore:  <active (daily 06:XX UTC) | inactive | managed by GitHub Actions>
-    KB maintenance:<active (weekly Mon 07:XX UTC) | inactive | managed by GitHub Actions>
+  Scheduled Routines:
+    Feed health check: <active (hourly routine, status only) | inactive>
+    Stale check:       <active (daily routine) | inactive>
+    KB maintenance:    <active (weekly routine) | inactive>
 
   Session Hooks:   <SCOPE_LABEL> scope
     Memory nudge:  <active (every 30 prompts) | inactive | skipped>
@@ -367,19 +301,19 @@ The setup wizard uses a sequential, conversational format. Each step prints its 
 
 ## Rules
 
-- Always start by checking MCP availability — distinguish between "not configured", "needs authentication", and "connected"
-- When an MCP server entry exists but tools are unavailable, treat this as "needs authentication" — guide the user through the OAuth flow
+- Always start by checking MCP availability — distinguish between "not configured", "needs authentication", "not connected", and "connected" (see Step 1)
+- Only auth-specific failures (e.g., 401/403 or an explicit auth-required response) map to "needs authentication" and trigger the OAuth flow; unreachable servers or other non-auth errors map to "not connected"
 - Always show the Step 6 summary — even on early exits (MCP unavailable, auth needed)
 - Session hooks are installed to the same scope as the plugin (user or project) — detect via `enabledPlugins`
 - Merge hook config into the scope-appropriate settings file — never overwrite other settings
 - If hook scripts can't be found (not in repo or plugin cache), skip gracefully
 - The dispatcher uses `BASH_SOURCE[0]` to find sibling scripts — both files must be in the same directory
 - Use absolute paths to the dispatcher script in hook commands
-- For hosted/team transport, skip local cron creation — scheduling is handled by GitHub Actions
-- Never create duplicate cron jobs — always check `CronList` first for each job type (poll, rescore, maintenance)
-- Pick an off-peak cron minute (not :00 or :30) for all schedules; use different random minutes for each job
-- If the user has no feed sources, skip feed poll and rescore but still offer weekly maintenance
-- This skill is idempotent — running it multiple times should not create duplicates
-- Use actual field names from `distillery_metrics(scope="summary")` response (`total_entries`, `embedding_model`, `database_size_bytes`)
-- The weekly maintenance job stores its output as a digest entry — this creates a longitudinal record of KB health
-- Ask the user once about enabling scheduled tasks; their answer applies to all three tiers (poll, rescore, maintenance)
+- Scheduling uses Claude Code routines for all transport modes (local and hosted)
+- If the user has no feed sources, skip feed poll and stale check but still offer weekly maintenance
+- This skill is idempotent — before creating a routine, check if one with the same name already exists; if so, skip creation and report the existing routine
+- Use `distillery_list(limit=1)` for the MCP health check
+- Routine prompts use MCP tool calls — routines execute in Claude Code context with direct MCP access
+- The weekly maintenance routine stores its output as a digest entry — this creates a longitudinal record of KB health
+- Ask the user once about enabling scheduled tasks; their answer applies to all three tiers
+- Legacy CronCreate and webhook-based scheduling are deprecated — guide users to routines instead

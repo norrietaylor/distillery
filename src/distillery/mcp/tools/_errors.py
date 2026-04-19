@@ -11,7 +11,12 @@ to produce structured JSON error responses.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from mcp import types
+
+    from distillery.embedding.errors import EmbeddingProviderError
 
 
 class ToolErrorCode(StrEnum):
@@ -20,20 +25,45 @@ class ToolErrorCode(StrEnum):
     Attributes:
         INVALID_PARAMS: Request parameters fail validation (e.g., missing
             required fields, wrong types, values out of range). This replaces
-            both ``INVALID_INPUT`` and ``VALIDATION_ERROR`` to provide
-            consistency across all handlers.
+            ``INVALID_INPUT``, ``VALIDATION_ERROR``, ``MISSING_FIELD``,
+            ``INVALID_FIELD``, ``INVALID_ACTION``, ``INVALID_SOURCE_TYPE``,
+            ``INVALID_STATE``, and ``RESERVED_PREFIX`` to provide consistency
+            across all handlers.
         NOT_FOUND: The requested resource does not exist (e.g., entry ID not
             found, user not found).
         CONFLICT: The operation conflicts with existing state (e.g.,
-            deduplication detected, concurrent modification).
+            deduplication detected, duplicate feed source).
         INTERNAL: An unexpected server-side error occurred (e.g., database
-            connection failure, embedding service timeout).
+            connection failure, embedding service timeout). This replaces
+            ``STORE_ERROR``, ``SEARCH_ERROR``, ``FIND_SIMILAR_ERROR``,
+            ``WATCH_ERROR``, ``RELATIONS_ERROR``, ``LIST_ERROR``,
+            ``AGGREGATE_ERROR``, ``METRICS_ERROR``, ``TAG_TREE_ERROR``,
+            ``STALE_ERROR``, ``POLL_ERROR``, ``RESCORE_ERROR``,
+            ``DEDUP_ERROR``, ``CONFLICT_ERROR``, and ``EXTRACTION_ERROR``.
+        FORBIDDEN: The authenticated user is not allowed to perform the
+            operation (e.g., ownership violation).
+        BUDGET_EXCEEDED: A rate-limit or budget has been exhausted (e.g.,
+            daily embedding budget, database size limit).
+        RATE_LIMITED: The request was rejected due to rate limiting.
+        UPSTREAM_RATE_LIMITED: An upstream dependency (e.g. embedding
+            provider) rate-limited the request after internal retries were
+            exhausted.  Response ``details`` includes ``provider``,
+            ``status_code``, and ``retry_after`` (seconds) when available
+            so clients can back off appropriately.
+        UPSTREAM_ERROR: An upstream dependency returned an error (5xx,
+            transport failure) after internal retries were exhausted.
+            Response ``details`` mirrors ``UPSTREAM_RATE_LIMITED``.
     """
 
     INVALID_PARAMS = "INVALID_PARAMS"
     NOT_FOUND = "NOT_FOUND"
     CONFLICT = "CONFLICT"
     INTERNAL = "INTERNAL"
+    FORBIDDEN = "FORBIDDEN"
+    BUDGET_EXCEEDED = "BUDGET_EXCEEDED"
+    RATE_LIMITED = "RATE_LIMITED"
+    UPSTREAM_RATE_LIMITED = "UPSTREAM_RATE_LIMITED"
+    UPSTREAM_ERROR = "UPSTREAM_ERROR"
 
 
 def tool_error(code: ToolErrorCode | str, message: str) -> tuple[ToolErrorCode | str, str]:
@@ -110,3 +140,45 @@ def validate_limit(
         )
 
     return limit
+
+
+def upstream_error_response(exc: EmbeddingProviderError) -> list[types.TextContent]:
+    """Build a structured MCP error response from an :class:`EmbeddingProviderError`.
+
+    Chooses between :class:`ToolErrorCode.UPSTREAM_RATE_LIMITED` (HTTP
+    429) and :class:`ToolErrorCode.UPSTREAM_ERROR` (everything else) and
+    populates ``details`` with ``provider``, ``status_code``, and
+    ``retry_after`` so clients can react appropriately.
+
+    Args:
+        exc: The :class:`EmbeddingProviderError` raised by the provider
+            after retries were exhausted.
+
+    Returns:
+        A single-element list of :class:`~mcp.types.TextContent` suitable
+        for returning from an MCP tool handler.
+    """
+    from distillery.mcp.tools._common import error_response
+
+    code = (
+        ToolErrorCode.UPSTREAM_RATE_LIMITED
+        if exc.is_rate_limited
+        else ToolErrorCode.UPSTREAM_ERROR
+    )
+    details: dict[str, Any] = {"provider": exc.provider}
+    if exc.status_code is not None:
+        details["status_code"] = exc.status_code
+    if exc.retry_after is not None:
+        details["retry_after"] = exc.retry_after
+    if exc.endpoint is not None:
+        details["endpoint"] = exc.endpoint
+
+    message = (
+        f"Embedding provider {exc.provider!r} rate limit reached after retries."
+        if exc.is_rate_limited
+        else f"Embedding provider {exc.provider!r} failed after retries."
+    )
+    if exc.retry_after is not None:
+        message = f"{message} Retry after {exc.retry_after:g} seconds."
+
+    return error_response(code, message, details=details)

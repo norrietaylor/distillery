@@ -289,7 +289,7 @@ async def test_handle_relations_null_action() -> None:
     result = await _handle_relations(AsyncMock(), {"action": None})
     data = _parse(result)
     assert data["error"] is True
-    assert data["code"] == "INVALID_ACTION"
+    assert data["code"] == "INVALID_PARAMS"
 
 
 @pytest.mark.unit
@@ -298,7 +298,7 @@ async def test_handle_relations_unknown_action() -> None:
     result = await _handle_relations(AsyncMock(), {"action": "delete"})
     data = _parse(result)
     assert data["error"] is True
-    assert data["code"] == "INVALID_ACTION"
+    assert data["code"] == "INVALID_PARAMS"
     assert "delete" in data["message"]
 
 
@@ -334,7 +334,7 @@ async def test_handle_relations_add_missing_from_id() -> None:
     )
     data = _parse(result)
     assert data["error"] is True
-    assert data["code"] == "MISSING_FIELD"
+    assert data["code"] == "INVALID_PARAMS"
     assert "from_id" in data["message"]
 
 
@@ -347,7 +347,7 @@ async def test_handle_relations_add_missing_to_id() -> None:
     )
     data = _parse(result)
     assert data["error"] is True
-    assert data["code"] == "MISSING_FIELD"
+    assert data["code"] == "INVALID_PARAMS"
     assert "to_id" in data["message"]
 
 
@@ -360,7 +360,7 @@ async def test_handle_relations_add_missing_relation_type() -> None:
     )
     data = _parse(result)
     assert data["error"] is True
-    assert data["code"] == "MISSING_FIELD"
+    assert data["code"] == "INVALID_PARAMS"
     assert "relation_type" in data["message"]
 
 
@@ -390,7 +390,7 @@ async def test_handle_relations_add_unexpected_error() -> None:
     )
     data = _parse(result)
     assert data["error"] is True
-    assert data["code"] == "RELATIONS_ERROR"
+    assert data["code"] == "INTERNAL"
 
 
 # ---------------------------------------------------------------------------
@@ -423,7 +423,7 @@ async def test_handle_relations_get_missing_entry_id() -> None:
     result = await _handle_relations(AsyncMock(), {"action": "get"})
     data = _parse(result)
     assert data["error"] is True
-    assert data["code"] == "MISSING_FIELD"
+    assert data["code"] == "INVALID_PARAMS"
     assert "entry_id" in data["message"]
 
 
@@ -436,7 +436,7 @@ async def test_handle_relations_get_invalid_direction() -> None:
     )
     data = _parse(result)
     assert data["error"] is True
-    assert data["code"] == "INVALID_FIELD"
+    assert data["code"] == "INVALID_PARAMS"
     assert "direction" in data["message"]
 
 
@@ -501,7 +501,7 @@ async def test_handle_relations_get_unexpected_error() -> None:
     )
     data = _parse(result)
     assert data["error"] is True
-    assert data["code"] == "RELATIONS_ERROR"
+    assert data["code"] == "INTERNAL"
 
 
 # ---------------------------------------------------------------------------
@@ -544,7 +544,7 @@ async def test_handle_relations_remove_missing_relation_id() -> None:
     result = await _handle_relations(AsyncMock(), {"action": "remove"})
     data = _parse(result)
     assert data["error"] is True
-    assert data["code"] == "MISSING_FIELD"
+    assert data["code"] == "INVALID_PARAMS"
     assert "relation_id" in data["message"]
 
 
@@ -560,4 +560,4 @@ async def test_handle_relations_remove_unexpected_error() -> None:
     )
     data = _parse(result)
     assert data["error"] is True
-    assert data["code"] == "RELATIONS_ERROR"
+    assert data["code"] == "INTERNAL"

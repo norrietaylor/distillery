@@ -8,8 +8,11 @@ Provides the ``distillery`` entry point with the following subcommands:
   or code 1 on failure.
 - ``export``: Export all entries and feed sources to a JSON file.
 - ``import``: Import entries and feed sources from a JSON export file.
+- ``gh-backfill``: Populate ``project``/``tags``/``author``/``metadata``
+  on existing GitHub entries synced before #312 landed.
 - ``eval``: Run skill evaluation scenarios against Claude (requires
-  ``ANTHROPIC_API_KEY`` and ``pip install 'distillery[eval]'``).
+  ``ANTHROPIC_API_KEY`` and ``pip install 'distillery-mcp[eval]'``).
+- ``maintenance classify``: Classify pending entries using batch classification.
 
 Global options:
 - ``--version``: Print the package version and exit.
@@ -116,6 +119,18 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Retag all feed entries, not just those with empty tags",
     )
 
+    gh_backfill_parser = subparsers.add_parser(
+        "gh-backfill",
+        help="Backfill project/tags/author/metadata on existing GitHub entries (#312)",
+        parents=[shared],
+    )
+    gh_backfill_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help="Report how many entries would be updated without writing changes",
+    )
+
     export_parser = subparsers.add_parser(
         "export",
         help="Export all entries and feed sources to a JSON file",
@@ -192,6 +207,31 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="Compare current run cost against baseline (requires --baseline)",
+    )
+
+    maintenance_parser = subparsers.add_parser(
+        "maintenance",
+        help="Database maintenance operations",
+        parents=[shared],
+    )
+    maintenance_subparsers = maintenance_parser.add_subparsers(dest="maintenance_command")
+
+    classify_parser = maintenance_subparsers.add_parser(
+        "classify",
+        help="Classify pending inbox entries using batch classification",
+        parents=[shared],
+    )
+    classify_parser.add_argument(
+        "--type",
+        metavar="TYPE",
+        default="inbox",
+        help="Entry type filter for classification (default: inbox)",
+    )
+    classify_parser.add_argument(
+        "--mode",
+        choices=["llm", "heuristic"],
+        default=None,
+        help="Classification mode: llm (LLM-based) or heuristic (embedding-based). Defaults to config value.",
     )
 
     return parser
@@ -669,6 +709,69 @@ def _cmd_retag(
 
 
 # ---------------------------------------------------------------------------
+# gh-backfill subcommand (#312)
+# ---------------------------------------------------------------------------
+
+
+def _cmd_gh_backfill(
+    config_path: str | None,
+    fmt: str,
+    dry_run: bool,
+) -> int:
+    """Implement the ``gh-backfill`` subcommand.
+
+    Walks all ``entry_type=github`` entries and populates the ``project``,
+    ``tags``, ``author``, and ``metadata.gh_number`` / ``metadata.gh_url``
+    fields that may be missing on entries synced before #312 landed.
+
+    Returns:
+        Exit code (0 on success, 1 on error).
+    """
+    try:
+        cfg = load_config(config_path)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Error loading configuration: {exc}", file=sys.stderr)
+        return 1
+
+    async def _run() -> int:
+        from distillery.feeds.github_sync import backfill_github_metadata
+        from distillery.mcp.server import _create_embedding_provider, _normalize_db_path
+        from distillery.store.duckdb import DuckDBStore
+
+        embedding_provider = _create_embedding_provider(cfg)
+        db_path = _normalize_db_path(cfg.storage.database_path)
+
+        store = DuckDBStore(
+            db_path=db_path,
+            embedding_provider=embedding_provider,
+            s3_region=cfg.storage.s3_region,
+            s3_endpoint=cfg.storage.s3_endpoint,
+            hybrid_search=cfg.defaults.hybrid_search,
+            rrf_k=cfg.defaults.rrf_k,
+            recency_window_days=cfg.defaults.recency_window_days,
+            recency_min_weight=cfg.defaults.recency_min_weight,
+        )
+        await store.initialize()
+        try:
+            return await backfill_github_metadata(store, dry_run=dry_run)
+        finally:
+            await store.close()
+
+    try:
+        updated = asyncio.run(_run())
+    except Exception as exc:
+        print(f"Error during gh-backfill: {exc}", file=sys.stderr)
+        return 1
+
+    action = "would update" if dry_run else "updated"
+    if fmt == "json":
+        print(json.dumps({"dry_run": dry_run, "entries_updated": updated}))
+    else:
+        print(f"gh-backfill complete: {action} {updated} github entries")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Export subcommand
 # ---------------------------------------------------------------------------
 
@@ -742,7 +845,17 @@ def _cmd_export(config_path: str | None, fmt: str, output_path: str) -> int:
             for row in entry_rows:
                 entry: dict[str, Any] = {}
                 for col, val in zip(entry_cols, row, strict=True):
-                    if hasattr(val, "isoformat"):
+                    if isinstance(val, datetime.datetime):
+                        # DuckDB TIMESTAMP returns naive datetimes that already
+                        # represent UTC wall-clock time; attach tzinfo directly
+                        # rather than calling ``astimezone`` (which would treat
+                        # the value as local time and shift it by the host's
+                        # UTC offset). Mirrors the pattern used in the import
+                        # path around lines 1043–1045.
+                        if val.tzinfo is None:
+                            val = val.replace(tzinfo=datetime.UTC)
+                        entry[col] = val.isoformat()
+                    elif hasattr(val, "isoformat"):
                         entry[col] = val.isoformat()
                     elif col == "metadata" and isinstance(val, str):
                         entry[col] = json.loads(val) if val else {}
@@ -967,7 +1080,9 @@ def _cmd_import(
                     created_by=raw.get("created_by", ""),
                     last_modified_by=raw.get("last_modified_by", ""),
                     expires_at=(
-                        _parse_dt(raw["expires_at"]) if raw.get("expires_at") is not None else None
+                        _parse_dt(raw["expires_at"]).astimezone(datetime.UTC).replace(tzinfo=None)
+                        if raw.get("expires_at") is not None
+                        else None
                     ),
                     session_id=raw.get("session_id"),
                 )
@@ -1259,7 +1374,7 @@ def _cmd_eval(
         from distillery.eval.scenarios import load_scenarios_from_dir
     except ImportError as exc:
         print(
-            f"Error: eval dependencies not installed. Run: pip install 'distillery[eval]'\n{exc}",
+            f"Error: eval dependencies not installed. Run: pip install 'distillery-mcp[eval]'\n{exc}",
             file=sys.stderr,
         )
         return 1
@@ -1504,6 +1619,114 @@ def _cmd_eval(
 
 
 # ---------------------------------------------------------------------------
+# Maintenance subcommand
+# ---------------------------------------------------------------------------
+
+
+def _cmd_maintenance_classify(
+    config_path: str | None,
+    fmt: str,
+    entry_type: str = "inbox",
+    mode: str | None = None,
+) -> int:
+    """Implement the ``maintenance classify`` subcommand.
+
+    Classifies pending entries of a given type using either LLM-based or
+    heuristic classification.
+
+    Returns:
+        Exit code (0 on success, 1 on error).
+    """
+    try:
+        cfg = load_config(config_path)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Error loading configuration: {exc}", file=sys.stderr)
+        return 1
+
+    async def _run() -> dict[str, Any]:
+        from distillery.mcp.server import _create_embedding_provider, _normalize_db_path
+        from distillery.mcp.webhooks import _run_classify_batch
+        from distillery.store.duckdb import DuckDBStore
+
+        embedding_provider = _create_embedding_provider(cfg)
+        db_path = _normalize_db_path(cfg.storage.database_path)
+
+        store = DuckDBStore(
+            db_path=db_path,
+            embedding_provider=embedding_provider,
+            s3_region=cfg.storage.s3_region,
+            s3_endpoint=cfg.storage.s3_endpoint,
+            hybrid_search=cfg.defaults.hybrid_search,
+            rrf_k=cfg.defaults.rrf_k,
+            recency_window_days=cfg.defaults.recency_window_days,
+            recency_min_weight=cfg.defaults.recency_min_weight,
+        )
+        try:
+            await store.initialize()
+            # Build the shared state dict that _run_classify_batch expects.
+            state = {
+                "store": store,
+                "config": cfg,
+                "embedding_provider": embedding_provider,
+            }
+
+            # Call the webhook handler directly (not via HTTP).
+            response = await _run_classify_batch(state, entry_type=entry_type, mode=mode)
+
+            # Extract the JSON data from the JSONResponse.
+            import json as json_module
+
+            body = response.body
+            raw: dict[str, Any] = json_module.loads(
+                body.decode("utf-8") if isinstance(body, bytes) else str(body)
+            )
+            return raw
+        finally:
+            await store.close()
+
+    try:
+        result = asyncio.run(_run())
+    except Exception as exc:
+        print(f"Error during classification: {exc}", file=sys.stderr)
+        return 1
+
+    # Handle the response.
+    if not result.get("ok", False):
+        error_msg = result.get("error", "Unknown error")
+        print(f"Error: {error_msg}", file=sys.stderr)
+        return 1
+
+    data = result.get("data", {})
+    classified = data.get("classified", 0)
+    pending_review = data.get("pending_review", 0)
+    errors = data.get("errors", 0)
+    by_type = data.get("by_type", {})
+
+    if fmt == "json":
+        print(
+            json.dumps(
+                {
+                    "classified": classified,
+                    "pending_review": pending_review,
+                    "errors": errors,
+                    "by_type": by_type,
+                }
+            )
+        )
+    else:
+        print("Classification complete:")
+        print(f"  classified:     {classified}")
+        print(f"  pending_review: {pending_review}")
+        print(f"  errors:         {errors}")
+        if by_type:
+            print("  by_type:")
+            for type_name, count in by_type.items():
+                print(f"    {type_name}: {count}")
+
+    return 1 if errors > 0 else 0
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -1556,6 +1779,12 @@ def main(argv: list[str] | None = None) -> None:
             dry_run=getattr(args, "dry_run", False),
             force=getattr(args, "force", False),
         )
+    elif command == "gh-backfill":
+        exit_code = _cmd_gh_backfill(
+            config_path=config_path,
+            fmt=fmt,
+            dry_run=getattr(args, "dry_run", False),
+        )
     elif command == "eval":
         exit_code = _cmd_eval(
             scenarios_dir=getattr(args, "scenarios_dir", None),
@@ -1566,6 +1795,20 @@ def main(argv: list[str] | None = None) -> None:
             fmt=fmt,
             compare_cost=getattr(args, "compare_cost", False),
         )
+    elif command == "maintenance":
+        maintenance_command: str | None = getattr(args, "maintenance_command", None)
+        if maintenance_command == "classify":
+            # Do not call sys.exit() here — fall through to the shared epilogue
+            # below so stdout/stderr are flushed before the interpreter exits
+            # (matches the behaviour of every other subcommand).
+            exit_code = _cmd_maintenance_classify(
+                config_path=config_path,
+                fmt=fmt,
+                entry_type=getattr(args, "type", "inbox"),
+                mode=getattr(args, "mode", None),
+            )
+        else:
+            parser.error("Unknown maintenance subcommand (expected: classify)")
     else:  # pragma: no cover – argparse rejects unknown subcommands
         parser.error(f"Unknown command: {command}")
 

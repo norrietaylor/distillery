@@ -217,7 +217,7 @@ class TestFindSimilarDedupAction:
             )
         data = parse_mcp_response(response)
         assert "error" in data
-        assert data["code"] == "DEDUP_ERROR"
+        assert data["code"] == "INTERNAL"
 
 
 # ===========================================================================
@@ -332,7 +332,7 @@ class TestFindSimilarConflictCheckPass1:
             )
         data = parse_mcp_response(response)
         assert "error" in data
-        assert data["code"] == "CONFLICT_ERROR"
+        assert data["code"] == "INTERNAL"
 
 
 # ===========================================================================
@@ -521,7 +521,7 @@ class TestFindSimilarConflictCheckPass2:
             )
         data = parse_mcp_response(response)
         assert "error" in data
-        assert data["code"] == "CONFLICT_ERROR"
+        assert data["code"] == "INTERNAL"
 
 
 # ===========================================================================

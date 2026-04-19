@@ -6,11 +6,10 @@ allowed-tools:
   - "mcp__*__distillery_resolve_review"
   - "mcp__*__distillery_get"
   - "mcp__*__distillery_list"
-  - "mcp__*__distillery_metrics"
 effort: medium
 ---
 
-<!-- Trigger phrases: classify, classify entry, review queue, triage inbox, /classify [entry_id|--inbox|--review] -->
+<!-- Trigger phrases: classify, classify entry, review queue, triage inbox, /classify [entry_id|--inbox|--batch|--review] -->
 
 # Classify — Manual Classification & Review Queue
 
@@ -19,7 +18,8 @@ Classify runs the classification engine on knowledge entries and lets you triage
 ## When to Use
 
 - `/classify <entry_id>` — classify a specific entry by ID
-- `/classify --inbox` — classify all unclassified inbox entries in batch
+- `/classify --inbox` — classify all unclassified inbox entries in batch (alias for `--batch --entry-type inbox`)
+- `/classify --batch <filters>` — classify entries matching composable filters in batch
 - `/classify --review` — triage entries awaiting human review
 - `/classify` (no args) — show usage help
 
@@ -34,7 +34,8 @@ See CONVENTIONS.md — skip if already confirmed this conversation.
 | Invocation | Mode |
 |------------|------|
 | `/classify <entry_id>` | Classify by ID |
-| `/classify --inbox` | Batch inbox classification |
+| `/classify --inbox` | Batch inbox classification (alias for `--batch --entry-type inbox`) |
+| `/classify --batch <filters>` | Batch classification with composable filters |
 | `/classify --review` | Review queue triage |
 | `/classify` (no args) | Show help |
 
@@ -44,6 +45,19 @@ See CONVENTIONS.md — skip if already confirmed this conversation.
 |------|-----------|-------------|
 | `--project` | `<name>` | Filter by project name |
 
+**Batch filter flags (`--batch` mode only):**
+
+| Flag | Parameter | Description |
+|------|-----------|-------------|
+| `--source` | `<source>` | Filter by entry source (e.g. `claude-code`, `manual`, `import`, `inference`, `external`) |
+| `--entry-type` | `<type>` | Filter by entry type (e.g. `inbox`, `github`, `feed`, `session`, etc.) |
+| `--author` | `<name>` | Filter by author name |
+| `--tag-prefix` | `<prefix>` | Filter by tag namespace prefix (e.g. `project/billing`) |
+| `--project` | `<name>` | Filter by project name |
+| `--unclassified` | *(none)* | Filter to entries with no tags and verification=unverified |
+
+Filters are composable with AND semantics. At least one filter is required when using `--batch` (reject bare `--batch` with no filters).
+
 ---
 
 ## Mode A: Classify by ID
@@ -52,7 +66,7 @@ See CONVENTIONS.md — skip if already confirmed this conversation.
 
 1. Call `distillery_get` to retrieve the entry. If not found, tell the user to check the ID or use `/recall`.
 2. Analyse the content and determine:
-   - `entry_type`: best fit from `session`, `bookmark`, `minutes`, `meeting`, `reference`, `idea`, `inbox`
+   - `entry_type`: best fit from `session`, `bookmark`, `minutes`, `meeting`, `reference`, `idea`, `inbox`, `person`, `project`, `digest`, `github`, `feed`
    - `confidence`: 0.0–1.0 based on how clearly the content fits
    - `reasoning`: concise explanation
    - `suggested_tags`: 2–5 keywords
@@ -67,6 +81,8 @@ Show entry ID, type, confidence (as `<n%> (<level>)`), status, reasoning, and su
 ---
 
 ## Mode B: Batch Inbox Classification
+
+`--inbox` is a convenience alias for `--batch --entry-type inbox`. It follows the same process as Mode B2 below with `entry_type="inbox"` pre-set.
 
 ### Step B1: List Inbox Entries
 
@@ -89,6 +105,38 @@ Total: <N> processed — <classified> active, <review> review, <errors> errors
 ```
 
 If any sent to review, suggest `/classify --review`.
+
+---
+
+## Mode B2: Batch Classification with Filters
+
+### Step B2-1: Validate Filters
+
+1. At least one filter flag must be present. If the user passed bare `--batch` with no filters, display an error: "At least one filter is required for --batch mode. See `/classify` for available filters." and stop.
+2. Build the `distillery_list` arguments from the provided filters:
+
+| Flag | `distillery_list` parameter |
+|------|----------------------------|
+| `--source` | `source=<value>` |
+| `--entry-type` | `entry_type=<value>` |
+| `--author` | `author=<value>` |
+| `--tag-prefix` | `tag_prefix=<value>` |
+| `--project` | `project=<value>` |
+| `--unclassified` | `verification="unverified"` (the empty-tags constraint is checked post-fetch in Step B2-2) |
+
+### Step B2-2: List Matching Entries
+
+Call `distillery_list` with the composed filters, plus `limit=50, output_mode="full", content_max_length=300`. If empty, tell the user no entries matched the filters and stop.
+
+If `--unclassified` was specified, additionally filter the returned entries to only those with `tags=[]` (empty tags list). This is a post-fetch filter since the store does not support empty-tag queries directly.
+
+### Step B2-3: Classify Each Entry
+
+For each entry (max 50), compute classification as in Mode A and call `distillery_classify`. Track counts: `classified` (active), `review` (pending_review), `errors`.
+
+### Step B2-4: Display Batch Summary
+
+Use the same summary table format as Mode B Step B3.
 
 ---
 

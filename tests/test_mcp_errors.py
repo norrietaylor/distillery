@@ -39,14 +39,19 @@ class TestToolErrorCode:
         assert str(code) == "INVALID_PARAMS"
 
     def test_all_codes_listed(self) -> None:
-        """Verify there are exactly 4 codes (no accidental additions)."""
+        """Verify there are exactly 9 codes (no accidental additions)."""
         codes = list(ToolErrorCode)
-        assert len(codes) == 4
+        assert len(codes) == 9
         assert set(codes) == {
             ToolErrorCode.INVALID_PARAMS,
             ToolErrorCode.NOT_FOUND,
             ToolErrorCode.CONFLICT,
             ToolErrorCode.INTERNAL,
+            ToolErrorCode.FORBIDDEN,
+            ToolErrorCode.BUDGET_EXCEEDED,
+            ToolErrorCode.RATE_LIMITED,
+            ToolErrorCode.UPSTREAM_RATE_LIMITED,
+            ToolErrorCode.UPSTREAM_ERROR,
         }
 
 

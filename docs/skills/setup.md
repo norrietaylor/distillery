@@ -49,20 +49,26 @@ Lists any configured feed sources from `/watch`.
 
 ### Step 4: Scheduled Tasks
 
-Configures up to three tiers of recurring jobs:
+Configures up to three tiers of recurring tasks via **Claude Code routines**:
 
-| Schedule | Task | Purpose |
-|----------|------|---------|
-| **Hourly** | Feed polling | Fetch new items from all feed sources |
-| **Daily** | Feed rescoring | Re-score entries against updated interest profile |
-| **Weekly** | KB maintenance | Collect metrics, quality, stale entries, interests, suggestions |
+| Schedule | Routine | Purpose |
+|----------|---------|---------|
+| **Hourly** | `distillery-feed-health-check` | Check feed source health and age of most-recent feed entry |
+| **Daily** | `distillery-stale-check` | Identify entries not accessed in 30+ days |
+| **Weekly** | `distillery-weekly-maintenance` | Collect metrics, stale entries, feed activity, digest |
 
-Scheduling depends on your transport:
+Routines run automatically in the background when Claude Code is active. They work the same way for both local and hosted transport.
 
-- **Local transport** — creates cron jobs via `CronCreate` (a Claude Code platform primitive)
-- **Hosted/team transport** — scheduling is managed by the GitHub Actions workflow at `.github/workflows/scheduler.yml`, which calls the webhook endpoints (`/api/poll`, `/api/rescore`, `/api/maintenance`). No local cron configuration needed.
-- Checks for existing jobs before creating (no duplicates)
-- If no feed sources exist, poll/rescore are skipped but weekly maintenance is still offered
+!!! note "Feed polling vs. health check"
+    The hourly routine checks **feed health** (source reachability, age of latest entry) but does **not** fetch new items.
+    Actual feed ingestion (`POST /hooks/poll`) is driven by the `distill_ops` GitHub Actions schedule for hosted deployments,
+    or by the existing `CronCreate` / webhook schedule for local deployments.
+
+- If no feed sources exist, the hourly poll health check is skipped but daily stale check and weekly maintenance are still offered
+- The wizard provides the routine name, schedule, and prompt for each tier
+
+!!! note "Migration from CronCreate / Webhooks"
+    Previous versions used `CronCreate` (local) or GitHub Actions webhook scheduling (hosted). Both approaches are now deprecated in favour of Claude Code routines. Existing jobs continue to work but should be migrated.
 
 ### Step 5: Configure Session Hooks
 
@@ -96,9 +102,9 @@ Always displayed, even if the wizard exits early:
 | Transport | Hosted (distillery-mcp.fly.dev) |
 | Entries | 42 |
 | Feed Sources | 3 |
-| Hourly Poll | Managed by GitHub Actions |
-| Daily Rescore | Managed by GitHub Actions |
-| Weekly Maintenance | Managed by GitHub Actions |
+| Hourly Feed Health Check | Active (routine) |
+| Daily Stale Check | Active (routine) |
+| Weekly Maintenance | Active (routine) |
 
 ### Available Skills
 /distill, /recall, /pour, /bookmark, /minutes,
@@ -108,8 +114,9 @@ Always displayed, even if the wizard exits early:
 
 ## Tips
 
-- The wizard is **idempotent** — running it multiple times won't create duplicate jobs
-- Scheduled tasks use off-peak cron minutes (not `:00` or `:30`) to spread load
+- The wizard is **idempotent** — running it multiple times won't create duplicate routines
+- Scheduled work runs as **Claude Code routines** (hourly, daily, weekly) — the same flow for both local and hosted transport
 - Weekly maintenance stores a digest entry for longitudinal KB health tracking
 - You're asked once about enabling scheduled tasks, and the answer applies to all three tiers
-- For hosted deployments, the webhook endpoints provide audit records in DuckDB (see `webhook_audit:*` metadata keys)
+- Previous `CronCreate` jobs and GitHub Actions webhook schedules still run if present, but are deprecated in favour of routines — see the Migration note in Step 4
+- For hosted deployments, the `POST /api/maintenance` webhook still drives the actual poll → rescore → classify-batch pipeline (configured in the `distill_ops` repo); Distillery records an audit trail under `webhook_audit:*` metadata keys that the weekly routine can surface

@@ -243,7 +243,9 @@ class OrgMembershipChecker:
             headers["Authorization"] = f"Bearer {token}"
 
         try:
-            async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
+            async with httpx.AsyncClient(
+                timeout=10.0, follow_redirects=False, verify=True
+            ) as client:
                 resp = await client.get(
                     f"{GITHUB_API}/orgs/{org}/members/{username}",
                     headers=headers,
@@ -297,7 +299,7 @@ class OrgMembershipChecker:
         # Cap at 50 pages (5 000 orgs) to avoid infinite loops.
         max_pages = 50
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with httpx.AsyncClient(timeout=10.0, verify=True) as client:
                 for page in range(1, max_pages + 1):
                     resp = await client.get(
                         f"{GITHUB_API}/user/orgs",

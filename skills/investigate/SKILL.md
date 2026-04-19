@@ -5,9 +5,7 @@ allowed-tools:
   - "mcp__*__distillery_search"
   - "mcp__*__distillery_get"
   - "mcp__*__distillery_relations"
-  - "mcp__*__distillery_tag_tree"
   - "mcp__*__distillery_list"
-  - "mcp__*__distillery_metrics"
 context: fork
 effort: high
 ---
@@ -119,13 +117,13 @@ If no relations exist for any seed entry, note this in the Phase 2 report and co
 
 **Phase 3 — Tag Expansion:**
 
-Extract all tags from entries currently in the result set. Identify unique namespace prefixes (e.g., tags like `domain/authentication`, `domain/oauth` → prefix `domain`). For each relevant namespace, call:
+Extract all tags from entries currently in the result set. Identify unique namespace prefixes (e.g., tags like `domain/authentication`, `domain/oauth` → prefix `domain`). Call once and reuse the result across all namespaces:
 
 ```python
-distillery_tag_tree(prefix="<namespace>")
+distillery_list(group_by="tags")
 ```
 
-Traverse returned tree children, rank leaf tags by `count` field. Convert top-ranked leaf segments to search queries (replace hyphens with spaces: `domain/oauth` → `"oauth"`). Run up to 3 `distillery_search` calls from these ranked tag-derived queries:
+From the returned tag groups, rank tags by count. Filter to those matching the namespace prefixes extracted from the result set. Convert top-ranked tag segments to search queries (replace hyphens with spaces: `domain/oauth` → `"oauth"`). Run up to 3 `distillery_search` calls from these ranked tag-derived queries:
 
 ```python
 distillery_search(query="<tag-derived query>", limit=10, project="<project if specified>")
@@ -278,6 +276,8 @@ Investigated "<topic>": <N> entries across <phases> phases, <K> relationship edg
 
 ## Rules
 
+- NEVER use Bash, Python, or any tool not listed in allowed-tools
+- If an MCP tool call fails, report the error to the user and STOP. Do not attempt workarounds.
 - Always use `[Entry <short-id>]` citation format (short-id = first 8 chars of UUID)
 - Deduplicate the result set by entry ID across all phases — each entry counted once
 - Record which phase first discovered each entry

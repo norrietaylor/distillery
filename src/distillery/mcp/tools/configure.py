@@ -3,6 +3,9 @@
 Implements the ``distillery_configure`` tool that allows runtime
 configuration changes via MCP, writing updates atomically to the
 YAML config file on disk while also patching the in-memory config.
+
+When ``value`` is omitted (None), the tool operates in read-only mode
+and returns the current value for the given section+key.
 """
 
 from __future__ import annotations
@@ -67,6 +70,14 @@ _ALLOWED_KEYS: dict[tuple[str, str], dict[str, Any]] = {
     ("classification", "confidence_threshold"): {
         "type": float,
         "range": (0.0, 1.0),
+    },
+    ("classification", "mode"): {
+        "type": str,
+        "constraint": lambda _cfg, val: (
+            f"classification.mode must be 'llm' or 'heuristic', got {val!r}"
+            if val not in ("llm", "heuristic")
+            else None
+        ),
     },
 }
 
@@ -161,10 +172,31 @@ async def _handle_configure(
             "INVALID_PARAMS",
             "Parameter 'key' is required and must be a non-empty string.",
         )
+
+    # --- Read-only mode: value omitted ---
     if value is None:
-        return error_response(
-            "INVALID_PARAMS",
-            "Parameter 'value' is required.",
+        spec = _ALLOWED_KEYS.get((section, key))
+        if spec is None:
+            return error_response(
+                "INVALID_PARAMS",
+                f"Configuration key '{section}.{key}' is not a recognised configurable key. "
+                f"Allowed keys: "
+                f"{', '.join(f'{s}.{k}' for s, k in sorted(_ALLOWED_KEYS))}.",
+            )
+        try:
+            current = _get_nested(config, section, key)
+        except AttributeError:
+            return error_response(
+                "INTERNAL",
+                f"Unable to read current value for '{section}.{key}'.",
+            )
+        return success_response(
+            {
+                "section": section,
+                "key": key,
+                "value": current,
+                "message": f"Current value of {section}.{key} is {current}",
+            }
         )
 
     # --- Check allowlist ---

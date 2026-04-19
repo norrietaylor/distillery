@@ -12,7 +12,8 @@ from __future__ import annotations
 
 import pytest
 
-from distillery.mcp.server import _handle_aggregate, _handle_list
+from distillery.mcp.server import _handle_list
+from distillery.mcp.tools.search import _handle_aggregate
 from distillery.models import EntrySource, EntryType
 from tests.conftest import make_entry, parse_mcp_response
 
@@ -84,13 +85,21 @@ class TestListOutputModes:
         data = parse_mcp_response(result)
         assert data["output_mode"] == "summary"
         assert all("content" not in e for e in data["entries"])
-        # Other fields should still be present
+        # Summary shape — issue #311 — assert exact keyset so stray fields
+        # are caught as well as missing ones.
         for entry in data["entries"]:
-            assert "id" in entry
-            assert "entry_type" in entry
-            assert "created_at" in entry
-            assert "metadata" in entry
-            assert "tags" in entry
+            assert set(entry.keys()) == {
+                "id",
+                "title",
+                "entry_type",
+                "tags",
+                "project",
+                "author",
+                "created_at",
+                "content_preview",
+                "metadata",
+                "session_id",
+            }
 
     async def test_ids_mode_minimal_fields(self, populated_store) -> None:
         result = await _handle_list(
@@ -145,13 +154,14 @@ class TestListOutputModes:
         assert not data.get("error")
         assert all("content" not in e for e in data["entries"])
 
-    async def test_default_mode_is_full(self, store) -> None:
+    async def test_default_mode_is_summary(self, store) -> None:
         entry = make_entry(content="Hello world")
         await store.store(entry)
         result = await _handle_list(store=store, arguments={"limit": 5})
         data = parse_mcp_response(result)
-        assert data["output_mode"] == "full"
-        assert any("content" in e for e in data["entries"])
+        assert data["output_mode"] == "summary"
+        assert all("content" not in e for e in data["entries"])
+        assert any("content_preview" in e for e in data["entries"])
 
     async def test_content_max_length_invalid_type_returns_error(self, store) -> None:
         result = await _handle_list(
@@ -314,3 +324,200 @@ class TestAggregate:
         by_author = {g["value"]: g["count"] for g in data["groups"]}
         assert by_author.get("alice") == 3
         assert by_author.get("bob") == 2
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: feed_url filter (issue #309)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestListFeedUrlFilter:
+    """Verify distillery_list(feed_url=...) matches metadata.source_url.
+
+    Regression test for issue #309: the feed poller persists each ingested
+    item with ``metadata.source_url == <registry url>`` but leaves
+    ``Entry.source == "import"``.  Callers filtering by ``source=<url>``
+    therefore got zero results even when hundreds of items had been polled
+    from that feed.  The new ``feed_url`` parameter translates to a
+    ``metadata.source_url`` filter so callers can retrieve every ingested
+    item for a registered feed.
+    """
+
+    async def test_feed_url_filters_to_matching_entries(self, populated_store) -> None:
+        result = await _handle_list(
+            store=populated_store,
+            arguments={
+                "limit": 10,
+                "feed_url": "https://github.com/org/repo",
+            },
+        )
+        data = parse_mcp_response(result)
+        assert not data.get("error"), data
+        assert data["count"] == 2
+        assert data["total_count"] == 2
+        for entry in data["entries"]:
+            assert entry["metadata"]["source_url"] == "https://github.com/org/repo"
+
+    async def test_feed_url_different_url_returns_only_that_feed(self, populated_store) -> None:
+        result = await _handle_list(
+            store=populated_store,
+            arguments={
+                "limit": 10,
+                "feed_url": "https://example.com/rss",
+            },
+        )
+        data = parse_mcp_response(result)
+        assert data["count"] == 1
+        assert data["total_count"] == 1
+        assert data["entries"][0]["metadata"]["source_url"] == "https://example.com/rss"
+
+    async def test_feed_url_no_match_returns_empty(self, populated_store) -> None:
+        result = await _handle_list(
+            store=populated_store,
+            arguments={
+                "limit": 10,
+                "feed_url": "https://nowhere.example.com/feed",
+            },
+        )
+        data = parse_mcp_response(result)
+        assert data["count"] == 0
+        assert data["total_count"] == 0
+        assert data["entries"] == []
+
+    async def test_feed_url_combines_with_entry_type(self, populated_store) -> None:
+        # feed_url must be AND-combined with other filters, not replace them.
+        result = await _handle_list(
+            store=populated_store,
+            arguments={
+                "limit": 10,
+                "feed_url": "https://github.com/org/repo",
+                "entry_type": "feed",
+            },
+        )
+        data = parse_mcp_response(result)
+        assert data["count"] == 2
+        for entry in data["entries"]:
+            assert entry["entry_type"] == "feed"
+            assert entry["metadata"]["source_url"] == "https://github.com/org/repo"
+
+    async def test_source_non_url_filters_origin_column(self, populated_store) -> None:
+        # Non-URL source values still filter on the internal `source` column —
+        # e.g. "claude-code" matches the session entry ingested with
+        # EntrySource.CLAUDE_CODE, not any feed item.
+        result = await _handle_list(
+            store=populated_store,
+            arguments={
+                "limit": 10,
+                "source": "claude-code",
+            },
+        )
+        data = parse_mcp_response(result)
+        assert not data.get("error"), data
+        assert data["count"] == 1
+        assert data["entries"][0]["entry_type"] == "session"
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: source=<url> aliases to feed_url (issue #335)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestSourceUrlAliasesToFeedUrl:
+    """Verify source=<url> routes to the feed_url filter.
+
+    Issue #335: ``source`` is the more discoverable name and users instinctively
+    pass a feed URL to it.  The previous behaviour silently returned 0 entries
+    because the ``source`` column stores the ingest origin (``"import"``), not
+    the feed URL.  URL-shaped ``source`` values are now aliased to ``feed_url``
+    so the tool matches user intent.
+    """
+
+    async def test_source_url_matches_same_entries_as_feed_url(self, populated_store) -> None:
+        src_result = await _handle_list(
+            store=populated_store,
+            arguments={"limit": 10, "source": "https://github.com/org/repo"},
+        )
+        feed_result = await _handle_list(
+            store=populated_store,
+            arguments={"limit": 10, "feed_url": "https://github.com/org/repo"},
+        )
+        src_data = parse_mcp_response(src_result)
+        feed_data = parse_mcp_response(feed_result)
+
+        assert not src_data.get("error"), src_data
+        assert not feed_data.get("error"), feed_data
+        # source=<URL> must return the same entries as feed_url=<URL>.
+        assert src_data["count"] == feed_data["count"], (src_data, feed_data)
+        assert src_data["total_count"] == feed_data["total_count"]
+        assert feed_data["count"] == 2  # sanity check on fixture shape
+
+        src_ids = sorted(e["id"] for e in src_data["entries"])
+        feed_ids = sorted(e["id"] for e in feed_data["entries"])
+        assert src_ids == feed_ids
+
+    async def test_source_http_url_also_aliased(self, populated_store) -> None:
+        # http:// (not just https://) must also trigger the URL alias.  Add a
+        # dedicated http-scheme entry so the assertion is unambiguous.
+        http_feed_url = "http://example.com/rss"
+        await populated_store.store(
+            make_entry(
+                content="HTTP feed item",
+                entry_type=EntryType.FEED,
+                source=EntrySource.MANUAL,
+                author="bob",
+                metadata={"source_url": http_feed_url, "source_type": "rss"},
+            )
+        )
+        result = await _handle_list(
+            store=populated_store,
+            arguments={"limit": 10, "source": http_feed_url},
+        )
+        data = parse_mcp_response(result)
+        assert data["count"] == 1
+        assert data["entries"][0]["metadata"]["source_url"] == http_feed_url
+
+    async def test_source_internal_value_still_works(self, populated_store) -> None:
+        # "import" is a real EntrySource enum value and must keep filtering on
+        # the source column — not be treated as a URL.
+        result = await _handle_list(
+            store=populated_store,
+            arguments={"limit": 10, "source": "import"},
+        )
+        data = parse_mcp_response(result)
+        assert not data.get("error"), data
+        # The populated_store fixture uses EntrySource.MANUAL for the feed
+        # items and EntrySource.CLAUDE_CODE for the session, so "import"
+        # returns 0 — but the key assertion is that this did NOT error and
+        # the filter landed on the `source` column, not feed_url.
+        assert data["count"] == 0
+
+    async def test_both_source_url_and_feed_url_same_value(self, populated_store) -> None:
+        # When both are provided and agree, the call succeeds.
+        result = await _handle_list(
+            store=populated_store,
+            arguments={
+                "limit": 10,
+                "source": "https://github.com/org/repo",
+                "feed_url": "https://github.com/org/repo",
+            },
+        )
+        data = parse_mcp_response(result)
+        assert not data.get("error"), data
+        assert data["count"] == 2
+
+    async def test_both_source_url_and_feed_url_differ_errors(self, populated_store) -> None:
+        # Disagreement between URL-shaped `source` and explicit `feed_url`
+        # yields INVALID_PARAMS rather than silently picking one.
+        result = await _handle_list(
+            store=populated_store,
+            arguments={
+                "limit": 10,
+                "source": "https://github.com/org/repo",
+                "feed_url": "https://example.com/rss",
+            },
+        )
+        data = parse_mcp_response(result)
+        assert data["error"] is True
+        assert data["code"] == "INVALID_PARAMS"

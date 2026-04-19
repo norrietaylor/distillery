@@ -302,7 +302,7 @@ class TestHandleWatchAdd:
         )
         data = json.loads(result[0].text)
         assert data.get("error") is True
-        assert data["code"] == "MISSING_FIELD"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_add_missing_source_type_returns_error(self) -> None:
         from distillery.mcp.server import _handle_watch
@@ -314,7 +314,7 @@ class TestHandleWatchAdd:
         )
         data = json.loads(result[0].text)
         assert data.get("error") is True
-        assert data["code"] == "MISSING_FIELD"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_add_invalid_source_type_returns_error(self) -> None:
         from distillery.mcp.server import _handle_watch
@@ -330,7 +330,7 @@ class TestHandleWatchAdd:
         )
         data = json.loads(result[0].text)
         assert data.get("error") is True
-        assert data["code"] == "INVALID_SOURCE_TYPE"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_add_trust_weight_out_of_range_returns_error(self) -> None:
         from distillery.mcp.server import _handle_watch
@@ -378,7 +378,7 @@ class TestHandleWatchAdd:
         )
         data = json.loads(result[0].text)
         assert data.get("error") is True
-        assert data["code"] == "DUPLICATE_SOURCE"
+        assert data["code"] == "CONFLICT"
 
     async def test_add_response_has_no_yaml_note(self) -> None:
         from distillery.mcp.server import _handle_watch
@@ -449,7 +449,7 @@ class TestHandleWatchRemove:
         )
         data = json.loads(result[0].text)
         assert data.get("error") is True
-        assert data["code"] == "MISSING_FIELD"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_remove_response_includes_updated_sources(self) -> None:
         from distillery.mcp.server import _handle_watch
@@ -494,7 +494,7 @@ class TestHandleWatchInvalidAction:
         )
         data = json.loads(result[0].text)
         assert data.get("error") is True
-        assert data["code"] == "INVALID_ACTION"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_missing_action_returns_error(self) -> None:
         from distillery.mcp.server import _handle_watch
@@ -630,7 +630,7 @@ class TestHandleWatchBackendErrors:
         result = await _handle_watch(store=store, arguments={"action": "list"})
         data = json.loads(result[0].text)
         assert data["error"] is True
-        assert data["code"] == "WATCH_ERROR"
+        assert data["code"] == "INTERNAL"
 
     async def test_add_backend_error(self) -> None:
         from distillery.mcp.server import _handle_watch
@@ -646,7 +646,7 @@ class TestHandleWatchBackendErrors:
         )
         data = json.loads(result[0].text)
         assert data["error"] is True
-        assert data["code"] == "WATCH_ERROR"
+        assert data["code"] == "INTERNAL"
 
     async def test_remove_backend_error(self) -> None:
         from distillery.mcp.server import _handle_watch
@@ -658,4 +658,4 @@ class TestHandleWatchBackendErrors:
         )
         data = json.loads(result[0].text)
         assert data["error"] is True
-        assert data["code"] == "WATCH_ERROR"
+        assert data["code"] == "INTERNAL"

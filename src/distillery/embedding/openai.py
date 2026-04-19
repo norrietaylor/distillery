@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 import os
 import time
 from typing import Any
 
 import httpx
+
+from .errors import EmbeddingProviderError, extract_retry_after
+
+logger = logging.getLogger(__name__)
+
+_PROVIDER_NAME = "openai"
 
 
 class OpenAIEmbeddingProvider:
@@ -64,7 +71,7 @@ class OpenAIEmbeddingProvider:
         self._model = model
         self._dimensions = dimensions
         self._api_key = resolved_key
-        self._client = httpx.Client(timeout=30.0)
+        self._client = httpx.Client(timeout=30.0, verify=True)
 
     # ------------------------------------------------------------------
     # EmbeddingProvider protocol implementation
@@ -73,6 +80,14 @@ class OpenAIEmbeddingProvider:
     def embed(self, text: str) -> list[float]:
         """Embed a single text string.
 
+        Delegates to :meth:`embed_batch` so single-item calls go through
+        the same retry + structured-error contract as batch calls.
+        Previously ``embed`` called ``_request`` directly, which bypassed
+        the retry loop and surfaced rate-limit / server errors as bare
+        ``RuntimeError`` / ``_RateLimitError`` — MCP callers depend on
+        ``EmbeddingProviderError`` to render ``retry_after`` correctly
+        (see #351).
+
         Args:
             text: The text to embed.
 
@@ -80,16 +95,21 @@ class OpenAIEmbeddingProvider:
             A list of floats representing the embedding vector.
 
         Raises:
-            RuntimeError: If the API request fails.
+            EmbeddingProviderError: After exhausted retries against
+                upstream 429 / 5xx responses, carrying
+                ``provider`` / ``status_code`` / ``retry_after``.
+            RuntimeError: On malformed API responses.
         """
-        results = self._request([text])
+        results = self.embed_batch([text])
         return results[0]
 
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
         """Embed multiple texts with rate-limit retry and exponential backoff.
 
         Retries up to ``_MAX_RETRIES`` times on HTTP 429 or 5xx responses,
-        using exponential backoff starting at 1 second.
+        using exponential backoff starting at 1 second. When the upstream
+        sends a ``Retry-After`` header its value is preferred over the
+        exponential backoff for the next sleep.
 
         Args:
             texts: A list of texts to embed.
@@ -98,24 +118,61 @@ class OpenAIEmbeddingProvider:
             A list of embedding vectors, one per input text, in input order.
 
         Raises:
-            RuntimeError: If the API request fails after all retries.
+            EmbeddingProviderError: When all retries are exhausted after an
+                upstream rate limit (HTTP 429) or server error (HTTP 5xx).
+                Carries ``provider``, ``status_code``, and ``retry_after``
+                so callers can surface structured errors.
+            RuntimeError: On non-retryable errors (e.g. non-2xx/non-5xx
+                responses, network errors).
         """
-        last_error: Exception | None = None
+        last_error: _RetryableError | None = None
+        last_status: int | None = None
+        last_retry_after: float | None = None
         for attempt in range(self._MAX_RETRIES):
             try:
                 return self._request(texts)
-            except _RateLimitError as exc:
+            except _RetryableError as exc:
                 last_error = exc
-                wait = 2**attempt  # 1 s, 2 s, 4 s
-                time.sleep(wait)
-            except _ServerError as exc:
-                last_error = exc
-                wait = 2**attempt
-                time.sleep(wait)
+                last_status = exc.status_code
+                last_retry_after = exc.retry_after
+                wait = exc.retry_after if exc.retry_after is not None else 2**attempt
+                if attempt < self._MAX_RETRIES - 1:
+                    event = (
+                        "throttled request"
+                        if exc.status_code == 429
+                        else "returned retryable upstream error"
+                    )
+                    logger.warning(
+                        "Upstream embedding provider %s "
+                        "(provider=%s endpoint=%s status=%d attempt=%d/%d "
+                        "retry_after=%s). Retrying in %.1f seconds.",
+                        event,
+                        _PROVIDER_NAME,
+                        self._BASE_URL,
+                        exc.status_code,
+                        attempt + 1,
+                        self._MAX_RETRIES,
+                        exc.retry_after,
+                        wait,
+                    )
+                    time.sleep(wait)
 
-        raise RuntimeError(
-            f"OpenAI embed_batch failed after {self._MAX_RETRIES} retries: {last_error}"
+        logger.warning(
+            "Upstream embedding provider exhausted retries "
+            "(provider=%s endpoint=%s status=%s retry_after=%s attempts=%d).",
+            _PROVIDER_NAME,
+            self._BASE_URL,
+            last_status,
+            last_retry_after,
+            self._MAX_RETRIES,
         )
+        raise EmbeddingProviderError(
+            f"OpenAI embed_batch failed after {self._MAX_RETRIES} retries: {last_error}",
+            provider=_PROVIDER_NAME,
+            status_code=last_status,
+            retry_after=last_retry_after,
+            endpoint=self._BASE_URL,
+        ) from last_error
 
     @property
     def dimensions(self) -> int:
@@ -169,11 +226,17 @@ class OpenAIEmbeddingProvider:
             raise RuntimeError(f"OpenAI API request failed: {exc}") from exc
 
         if response.status_code == 429:
-            raise _RateLimitError(f"OpenAI rate limit exceeded (HTTP 429): {response.text}")
+            raise _RateLimitError(
+                f"OpenAI rate limit exceeded (HTTP 429): {response.text}",
+                status_code=429,
+                retry_after=extract_retry_after(response),
+            )
 
         if response.status_code >= 500:
             raise _ServerError(
-                f"OpenAI server error (HTTP {response.status_code}): {response.text}"
+                f"OpenAI server error (HTTP {response.status_code}): {response.text}",
+                status_code=response.status_code,
+                retry_after=extract_retry_after(response),
             )
 
         if response.status_code != 200:
@@ -191,9 +254,24 @@ class OpenAIEmbeddingProvider:
             self._client.close()
 
 
-class _RateLimitError(Exception):
+class _RetryableError(Exception):
+    """Base for internal retryable upstream failures (carries status/retry_after)."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int,
+        retry_after: float | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.retry_after = retry_after
+
+
+class _RateLimitError(_RetryableError):
     """Raised internally when the OpenAI API returns HTTP 429."""
 
 
-class _ServerError(Exception):
+class _ServerError(_RetryableError):
     """Raised internally when the OpenAI API returns an HTTP 5xx response."""

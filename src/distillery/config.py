@@ -135,6 +135,9 @@ class ClassificationConfig:
         conflict_threshold: Similarity score at or above which two entries in
             different projects are flagged as potential conflicts. Default
             ``0.60``.
+        mode: Classification mode — ``"llm"`` for LLM-based classification
+            or ``"heuristic"`` for embedding centroid-based classification.
+            Default ``"llm"``.
     """
 
     confidence_threshold: float = 0.6
@@ -145,6 +148,7 @@ class ClassificationConfig:
     feedback_window_minutes: int = 5
     stale_days: int = 30
     conflict_threshold: float = 0.60
+    mode: str = "llm"
 
 
 @dataclass
@@ -220,8 +224,16 @@ class RateLimitConfig:
     """Rate limiting and resource budget configuration.
 
     Attributes:
-        embedding_budget_daily: Maximum embedding API calls per calendar day.
-            Set to ``0`` to disable the budget (unlimited).  Default ``500``.
+        embedding_budget_daily: Optional opt-in daily ceiling on embedding
+            API calls per calendar day, intended as a cost ceiling rather
+            than a rate limiter.  Defaults to ``0`` (unlimited): we rely on
+            the embedding provider's own rate limiter (Jina, OpenAI) as the
+            source of truth, which already returns HTTP 429 with
+            ``Retry-After`` guidance.  Set to a positive integer to enforce
+            a hard cap that raises ``EmbeddingBudgetError`` when exceeded.
+            Historically defaulted to ``500`` which was far stricter than
+            any upstream free-tier limit and routinely blocked normal
+            ``/radar`` and backfill workloads.
         max_db_size_mb: Maximum database file size in megabytes before new
             writes are rejected.  Set to ``0`` to disable.  Default ``900``
             (leaves ~100 MB headroom on a 1 GB Fly volume).
@@ -229,9 +241,11 @@ class RateLimitConfig:
             surfaced in ``distillery_status``.  Default ``80``.
     """
 
-    embedding_budget_daily: int = 500
+    embedding_budget_daily: int = 0
     max_db_size_mb: int = 900
     warn_db_size_pct: int = 80
+    search_logging_enabled: bool = True
+    search_log_retention_days: int = 90
 
 
 @dataclass
@@ -283,6 +297,7 @@ class HttpRateLimitConfig:
     max_body_bytes: int = 1_048_576  # 1 MB
     trust_proxy: bool = False
     loopback_exempt: bool = True
+    cors_allowed_origins: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -568,6 +583,11 @@ def _parse_classification(raw: dict[str, Any]) -> ClassificationConfig:
         raw, "conflict_threshold", 0.60, "classification.conflict_threshold"
     )
 
+    mode_raw = raw.get("mode", "llm")
+    mode = str(mode_raw)
+    if mode not in ("llm", "heuristic"):
+        raise ValueError(f"classification.mode must be 'llm' or 'heuristic', got: {mode!r}")
+
     return ClassificationConfig(
         confidence_threshold=threshold,
         dedup_skip_threshold=skip,
@@ -577,6 +597,7 @@ def _parse_classification(raw: dict[str, Any]) -> ClassificationConfig:
         feedback_window_minutes=feedback_window_minutes,
         stale_days=stale_days,
         conflict_threshold=conflict_threshold,
+        mode=mode,
     )
 
 
@@ -730,9 +751,16 @@ def _parse_rate_limit(raw: dict[str, Any]) -> RateLimitConfig:
     if not isinstance(raw, dict):
         raise ValueError(f"rate_limit must be a YAML mapping, got: {type(raw).__name__}")
 
+    search_logging_enabled_raw = raw.get("search_logging_enabled", True)
+    if not isinstance(search_logging_enabled_raw, bool):
+        raise ValueError(
+            "rate_limit.search_logging_enabled must be a boolean, "
+            f"got: {search_logging_enabled_raw!r}"
+        )
+
     return RateLimitConfig(
         embedding_budget_daily=_parse_strict_int(
-            raw.get("embedding_budget_daily", 500),
+            raw.get("embedding_budget_daily", 0),
             "rate_limit.embedding_budget_daily",
         ),
         max_db_size_mb=_parse_strict_int(
@@ -742,6 +770,11 @@ def _parse_rate_limit(raw: dict[str, Any]) -> RateLimitConfig:
         warn_db_size_pct=_parse_strict_int(
             raw.get("warn_db_size_pct", 80),
             "rate_limit.warn_db_size_pct",
+        ),
+        search_logging_enabled=search_logging_enabled_raw,
+        search_log_retention_days=_parse_strict_int(
+            raw.get("search_log_retention_days", 90),
+            "rate_limit.search_log_retention_days",
         ),
     )
 
@@ -787,12 +820,21 @@ def _parse_http_rate_limit(rl_raw: dict[str, Any]) -> HttpRateLimitConfig:
             f"server.http_rate_limit.max_body_bytes must be > 0, got: {max_body_bytes}"
         )
 
+    cors_origins_raw = rl_raw.get("cors_allowed_origins")
+    if cors_origins_raw is None:
+        cors_allowed_origins: list[str] = []
+    elif not isinstance(cors_origins_raw, list):
+        raise ValueError("server.http_rate_limit.cors_allowed_origins must be a YAML list")
+    else:
+        cors_allowed_origins = [str(o).strip() for o in cors_origins_raw if str(o).strip()]
+
     return HttpRateLimitConfig(
         requests_per_minute=requests_per_minute,
         requests_per_hour=requests_per_hour,
         max_body_bytes=max_body_bytes,
         trust_proxy=trust_proxy_raw,
         loopback_exempt=loopback_exempt_raw,
+        cors_allowed_origins=cors_allowed_origins,
     )
 
 
@@ -1025,6 +1067,11 @@ def _validate(config: DistilleryConfig) -> None:
     if not (0 <= rl.warn_db_size_pct <= 100):
         raise ValueError(
             f"rate_limit.warn_db_size_pct must be between 0 and 100, got: {rl.warn_db_size_pct}"
+        )
+    if rl.search_log_retention_days <= 0:
+        raise ValueError(
+            "rate_limit.search_log_retention_days must be a positive integer, "
+            f"got: {rl.search_log_retention_days}"
         )
 
     # Validate server.auth.provider

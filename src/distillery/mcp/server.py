@@ -1,9 +1,12 @@
-"""MCP server for Distillery — 20 tools over stdio or HTTP.
+"""MCP server for Distillery — consolidated tool surface over stdio or HTTP.
 
 Handlers live in ``src/distillery/mcp/tools/`` (crud, search, classify, quality,
 analytics, feeds, configure, meta). This module owns: FastMCP app creation,
 lifespan, shared-state init, tool registration wrappers, and middleware
 composition.
+
+Feed-management tools (poll, rescore) have been moved to REST webhook
+endpoints. Type schemas are exposed as an MCP resource.
 """
 
 from __future__ import annotations
@@ -14,6 +17,7 @@ import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from fastmcp import Context, FastMCP  # noqa: F401
@@ -26,10 +30,6 @@ from distillery.mcp.tools._common import (
     success_response,  # noqa: F401 — re-exported for test_mcp_server.py
 )
 from distillery.mcp.tools.analytics import (
-    _handle_interests,
-    _handle_metrics,
-    _handle_stale,
-    _handle_tag_tree,
     _handle_type_schemas,
 )
 from distillery.mcp.tools.classify import (
@@ -45,11 +45,17 @@ from distillery.mcp.tools.crud import (
     _handle_update,
     _normalize_db_path,  # re-exported for webhooks.py backward compat
 )
+from distillery.mcp.tools.crud import (
+    _handle_store_batch as _handle_crud_store_batch,
+)
 from distillery.mcp.tools.feeds import (
+    _handle_gh_sync,
     _handle_poll,
     _handle_rescore,
+    _handle_sync_status,
     _handle_watch,
 )
+from distillery.mcp.tools.meta import _handle_status
 from distillery.mcp.tools.quality import (
     run_conflict_discovery,
     run_conflict_evaluation,
@@ -57,7 +63,6 @@ from distillery.mcp.tools.quality import (
 )
 from distillery.mcp.tools.relations import _handle_relations
 from distillery.mcp.tools.search import (
-    _handle_aggregate,
     _handle_find_similar,
     _handle_search,
 )
@@ -82,21 +87,20 @@ __all__ = [
     "_handle_list",
     "_handle_search",
     "_handle_find_similar",
-    "_handle_aggregate",
     "_handle_classify",
     "_handle_resolve_review",
     "run_dedup_check",
     "run_conflict_discovery",
     "run_conflict_evaluation",
-    "_handle_metrics",
-    "_handle_stale",
-    "_handle_tag_tree",
-    "_handle_interests",
     "_handle_type_schemas",
     "_handle_watch",
     "_handle_poll",
     "_handle_rescore",
+    "_handle_gh_sync",
+    "_handle_crud_store_batch",
+    "_handle_sync_status",
     "_handle_relations",
+    "_handle_status",
 ]
 
 
@@ -155,7 +159,12 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
 
     @asynccontextmanager
     async def lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
-        if not _shared:
+        # Reuse the store only if it is still live. The previous "not _shared"
+        # check fell through to the else branch when earlier lifespan exits had
+        # closed the DuckDBStore but left stub entries (e.g. "transport",
+        # "started_at") populated by ``__main__``, which would hand later
+        # stateless HTTP sessions a closed connection.
+        if "store" not in _shared:
             logger.info("Distillery MCP server starting up …")
             ep = _create_embedding_provider(config)
             raw = config.storage.database_path
@@ -189,7 +198,27 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                             trust_weight=src.trust_weight,
                         )
                 await store.set_metadata("feeds_seeded", "true")
+            # Wire the sync-job tracker to the store and reconcile any
+            # background jobs interrupted by a prior restart.
+            from distillery.feeds.sync_jobs import get_tracker
+
+            tracker = get_tracker()
+            tracker.attach_store(store)
+            try:
+                interrupted = await tracker.hydrate()
+                if interrupted:
+                    logger.info(
+                        "Marked %d sync jobs as interrupted during startup hydration",
+                        interrupted,
+                    )
+            except Exception:  # noqa: BLE001
+                logger.exception("Sync-job tracker hydration failed (non-fatal)")
             _shared.update(store=store, config=config, embedding_provider=ep)
+            # Record startup timestamp for distillery_status uptime reporting.
+            # Stored in shared state (not replaced on subsequent lifespan entries
+            # for stateless HTTP sessions).
+            if "started_at" not in _shared:
+                _shared["started_at"] = datetime.now(UTC)
             logger.info(
                 "Distillery MCP server ready (db=%s, embedding=%s)",
                 db,
@@ -205,6 +234,14 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 logger.info("Shutting down — closing DuckDB (WAL checkpoint) …")
                 await _store.close()
                 logger.info("DuckDB closed cleanly")
+            # Invalidate the store/embedding references so that a subsequent
+            # lifespan entry (e.g. the next stateless HTTP session) re-enters
+            # the initialisation branch above rather than reusing a closed
+            # DuckDBStore whose ``_conn`` has already been released. Other
+            # entries like "transport" / "started_at" / "config" are kept so
+            # that cross-session metadata (populated by ``__main__``) survives.
+            _shared.pop("store", None)
+            _shared.pop("embedding_provider", None)
 
     server = FastMCP("distillery", lifespan=lifespan, auth=auth)
     server._distillery_shared = _shared  # type: ignore[attr-defined]
@@ -232,9 +269,9 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             return None
         try:
             existing = await lc["store"].get(eid)
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             logger.exception("Ownership pre-check failed for entry %s", eid)
-            return error_response("STORE_ERROR", f"Failed to read entry: {exc}")
+            return error_response("INTERNAL", "Failed to read entry")
         if existing is None:
             await lc["store"].write_audit_log(user, op, eid, op, "not_found")
             return error_response("NOT_FOUND", f"No entry found with id={eid!r}.")
@@ -277,15 +314,46 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         dedup_limit: int | None = None,
         verification: str | None = None,
         expires_at: str | None = _UNSET,
+        output_mode: str | None = None,
+        include_conflict_prompt: bool = False,
     ) -> list[types.TextContent]:
         """Store a new knowledge entry and return its ID with dedup/conflict information.
 
-        entry_type must be one of: session, bookmark, minutes, meeting, reference,
-        idea, inbox. source: claude-code (default), manual, import, inference,
-        documentation, or external. session_id: opaque session identifier for grouping.
-        dedup_threshold (0–1) controls near-duplicate warnings.
-        verification: unverified, testing, or verified (default: unverified).
-        expires_at accepts ISO 8601 datetime; entries past expiry appear in stale results.
+        USE WHEN: capturing a new piece of knowledge (session notes, bookmarks,
+        meeting minutes, ideas, etc.) into the Distillery store.
+
+        PARAMS:
+          - content (str, required): The knowledge content to store.
+          - entry_type (str, required): Entry classification. Valid: [session, bookmark,
+            minutes, meeting, reference, idea, inbox, github, person, project, digest, feed].
+          - author (str, required): Who authored this entry.
+          - project (str, optional): Project scope for the entry.
+          - tags (list[str], optional): Tags for categorisation; supports namespaced tags (e.g. "topic/ai").
+          - metadata (dict, optional): Arbitrary key-value metadata.
+          - source (str, optional, default="claude-code"): Origin of the entry.
+            Valid: [claude-code, manual, import, inference, documentation, external].
+          - session_id (str, optional): Opaque session identifier for grouping related entries.
+          - dedup_threshold (float, optional, default=config): Cosine similarity threshold (0-1)
+            for near-duplicate warnings.
+          - dedup_limit (int, optional, default=config): Max duplicates to report.
+          - verification (str, optional, default="unverified"): Verification status.
+            Valid: [unverified, testing, verified].
+          - expires_at (str, optional): ISO 8601 datetime; entries past expiry appear in stale results.
+          - output_mode (str, optional, default="full"): Response verbosity.
+            Valid: [full, summary]. Use "summary" for bulk imports to skip dedup/conflict checks.
+          - include_conflict_prompt (bool, optional, default=False): When true,
+            each conflict candidate carries the ~1–2 KB ``conflict_prompt``
+            LLM template required to round-trip through
+            ``distillery_find_similar(conflict_check=true)``. Defaults to
+            false to keep store responses small (issue #348).
+
+        RETURNS (success): { entry_id: str, persisted: bool, dedup_action: str,
+            conflicts?: list[{entry_id, content_preview, similarity_score,
+            conflict_prompt?}], warnings?: list }
+        RETURNS (error): { error: true, code: "INVALID_PARAMS" | "BUDGET_EXCEEDED" | "INTERNAL", message: "..." }
+
+        RELATED: distillery_find_similar (for pre-store dedup checks),
+        distillery_correct (to supersede an existing entry)
         """
         c = _lc(ctx)
         user = _get_authenticated_user()
@@ -293,6 +361,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             content=content,
             entry_type=entry_type,
             author=author,
+            include_conflict_prompt=include_conflict_prompt,
             **_omit_none(
                 project=project,
                 tags=tags,
@@ -302,6 +371,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 dedup_threshold=dedup_threshold,
                 dedup_limit=dedup_limit,
                 verification=verification,
+                output_mode=output_mode,
             ),
         )
         if expires_at is not _UNSET:
@@ -314,8 +384,71 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         return result
 
     @server.tool
+    async def distillery_store_batch(
+        ctx: Context,
+        entries: list[dict[str, Any]],
+        project: str | None = None,
+    ) -> list[types.TextContent]:
+        """Batch-store multiple knowledge entries in one call (no dedup/conflict checks).
+
+        USE WHEN: bulk-importing entries (e.g. GitHub history sync, migration,
+        backfill) where per-entry dedup is unnecessary and throughput matters.
+
+        PARAMS:
+          - entries (list[dict], required): List of entry dicts. Each must have:
+              - content (str, required): The knowledge content.
+              - author (str, required): Who authored this entry.
+              - entry_type (str, optional, default="inbox"): Entry classification.
+                Valid: [session, bookmark, minutes, meeting, reference, idea,
+                inbox, github, person, project, digest, feed].
+              - tags (list[str], optional): Tags for categorisation.
+              - metadata (dict, optional): Arbitrary key-value metadata.
+              - source (str, optional, default="claude-code"): Origin of the entry.
+              - project (str, optional): Per-entry project override.
+          - project (str, optional): Default project applied to entries lacking one.
+
+        RETURNS (success): { entry_ids: list[str], count: int }
+        RETURNS (error): { error: true, code: "INVALID_PARAMS" | "BUDGET_EXCEEDED" | "INTERNAL", message: "..." }
+
+        RELATED: distillery_store (single entry with dedup/conflict checks),
+        distillery_watch (add feed sources with optional history sync)
+        """
+        c = _lc(ctx)
+        user = _get_authenticated_user()
+        args: dict[str, Any] = {"entries": entries}
+        if project is not None:
+            args["project"] = project
+        result = await _handle_crud_store_batch(
+            store=c["store"], arguments=args, cfg=c["config"], created_by=user
+        )
+        # Mirror the attribution/audit pattern used by other mutating wrappers
+        # (distillery_store, distillery_update, distillery_correct,
+        # distillery_resolve_review) so batch imports are not unaudited.
+        rd = json.loads(result[0].text) if result else {}
+        entry_ids = rd.get("entry_ids", []) or []
+        if entry_ids:
+            for entry_id in entry_ids:
+                await _audit(c, user, "distillery_store_batch", entry_id, "store", result)
+        else:
+            await _audit(c, user, "distillery_store_batch", "", "store", result)
+        return result
+
+    @server.tool
     async def distillery_get(ctx: Context, entry_id: str) -> list[types.TextContent]:
-        """Retrieve a knowledge entry by ID; returns NOT_FOUND error if missing."""
+        """Retrieve a single knowledge entry by its unique ID.
+
+        USE WHEN: fetching the full content and metadata of a specific entry
+        (e.g. after finding its ID via search or list).
+
+        PARAMS:
+          - entry_id (str, required): UUID of the entry to retrieve.
+
+        RETURNS (success): { id: str, content: str, entry_type: str, ... }
+        RETURNS (error): { error: true, code: "NOT_FOUND" | "INTERNAL", message: "..." }
+
+        RELATED: distillery_search (to find entries by content),
+        distillery_list (to browse entries by filters)
+        """
         c = _lc(ctx)
         return await _handle_get(
             store=c["store"], arguments={"entry_id": entry_id}, config=c["config"]
@@ -338,11 +471,28 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
     ) -> list[types.TextContent]:
         """Update one or more fields on an existing knowledge entry.
 
-        At least one field must be provided. status: active, pending_review, or
-        archived. entry_type: session, bookmark, minutes, meeting, reference,
-        idea, or inbox. verification: unverified, testing, or verified.
-        session_id: opaque session identifier for grouping.
-        expires_at accepts ISO 8601 datetime; pass null to clear.
+        USE WHEN: modifying an entry's content, type, tags, status, or other
+        mutable fields. At least one updatable field must be provided.
+
+        PARAMS:
+          - entry_id (str, required): UUID of the entry to update.
+          - content (str, optional): Replacement content.
+          - entry_type (str, optional): New type. Valid: [session, bookmark, minutes,
+            meeting, reference, idea, inbox, github, person, project, digest, feed].
+          - author (str, optional): New author.
+          - project (str, optional): New project scope.
+          - tags (list[str], optional): Replacement tag list.
+          - status (str, optional): New status. Valid: [active, pending_review, archived].
+          - verification (str, optional): New verification. Valid: [unverified, testing, verified].
+          - metadata (dict, optional): Replacement metadata dict.
+          - session_id (str, optional): Session identifier for grouping.
+          - expires_at (str, optional): ISO 8601 datetime; pass null to clear.
+
+        RETURNS (success): { id: str, content: str, entry_type: str, ... } (full updated entry)
+        RETURNS (error): { error: true, code: "NOT_FOUND" | "INVALID_PARAMS" | "FORBIDDEN" | "INTERNAL", message: "..." }
+
+        RELATED: distillery_correct (to supersede rather than edit),
+        distillery_get (to read before updating)
         """
         c = _lc(ctx)
         user = _get_authenticated_user()
@@ -382,9 +532,25 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
     ) -> list[types.TextContent]:
         """Store a correction that supersedes an existing entry.
 
-        The original entry is archived and a 'corrects' relation is created
-        linking the new entry to the original. Fields (entry_type, author,
-        project, tags) are inherited from the original when not provided.
+        USE WHEN: an existing entry contains wrong information and you want to
+        replace it with corrected content while preserving the audit trail.
+
+        PARAMS:
+          - wrong_entry_id (str, required): UUID of the entry being corrected.
+          - content (str, required): The corrected content.
+          - entry_type (str, optional): Override type; inherited from original if omitted.
+            Valid: [session, bookmark, minutes, meeting, reference, idea, inbox,
+            github, person, project, digest, feed].
+          - author (str, optional): Override author; inherited from original if omitted.
+          - project (str, optional): Override project; inherited from original if omitted.
+          - tags (list[str], optional): Override tags; inherited from original if omitted.
+          - metadata (dict, optional): Additional metadata for the correction entry.
+
+        RETURNS (success): { correction_entry_id: str, archived_entry_id: str }
+        RETURNS (error): { error: true, code: "NOT_FOUND" | "INVALID_PARAMS" | "FORBIDDEN" | "INTERNAL", message: "..." }
+
+        RELATED: distillery_update (for non-breaking edits),
+        distillery_relations (to view the 'corrects' relation)
         """
         c = _lc(ctx)
         user = _get_authenticated_user()
@@ -432,22 +598,75 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         limit: int = 20,
         offset: int = 0,
         tag_prefix: str | None = None,
-        output_mode: str = "full",
+        output_mode: str = "summary",
         content_max_length: int | None = None,
+        stale_days: int | None = None,
+        group_by: str | None = None,
+        output: str | None = None,
+        feed_url: str | None = None,
+        include_archived: bool = False,
     ) -> list[types.TextContent]:
         """List knowledge entries with optional filters and pagination (newest first).
 
-        date_from/date_to accept ISO 8601. verification: unverified, testing, or verified.
-        source: filter by entry source (claude-code, manual, import, inference, documentation, external).
-        session_id: filter by session identifier.
-        output_mode: "full" (default), "summary", "ids",
-        or "review" (filters to pending_review and enriches with confidence/classification_reasoning).
+        USE WHEN: browsing or filtering entries without a semantic query.
+        Use distillery_search instead when you have a natural-language question.
+
+        By default, only entries with status in (active, pending_review) are
+        returned — archived entries are hidden. Pass ``status="archived"`` to
+        list only archived entries, ``status="any"`` to include every status,
+        or ``include_archived=true`` to add archived entries to the default view.
+
+        PARAMS:
+          - entry_type (str, optional): Filter by type. Valid: [session, bookmark, minutes,
+            meeting, reference, idea, inbox, github, person, project, digest, feed].
+          - author (str, optional): Filter by author.
+          - project (str, optional): Filter by project scope.
+          - tags (list[str], optional): Filter by tags (AND match).
+          - status (str, optional): Filter by status. Valid: [active, pending_review,
+            archived, any]. Default hides archived; use "any" to include all.
+          - verification (str, optional): Filter by verification. Valid: [unverified, testing, verified].
+          - source (str, optional): Filter by origin. Valid: [claude-code, manual, import,
+            inference, documentation, external]. As a convenience, a URL-shaped value
+            (starting with "http://" or "https://") is aliased to ``feed_url`` so
+            ``source="https://hnrss.org/frontpage"`` matches feed items ingested from
+            that source (same semantics as passing ``feed_url=...``).
+          - session_id (str, optional): Filter by session identifier.
+          - date_from (str, optional): ISO 8601 lower bound on created_at.
+          - date_to (str, optional): ISO 8601 upper bound on created_at.
+          - limit (int, optional, default=20): Max entries to return (1-500).
+          - offset (int, optional, default=0): Pagination offset.
+          - tag_prefix (str, optional): Filter tags by namespace prefix.
+          - output_mode (str, optional, default="summary"): Response shape.
+            Valid: [full, summary, ids, review]. "summary" returns id/title/tags/project/
+            author/created_at plus a ~200-char content_preview (default — keeps responses
+            small to conserve context). "full" returns entire content body. "ids" returns
+            id/entry_type/created_at only. "review" filters to pending_review and enriches
+            with confidence/classification_reasoning.
+          - content_max_length (int, optional): Truncate content to N chars (full mode only).
+          - stale_days (int, optional): Restrict to entries not accessed in N days (>= 1).
+          - group_by (str, optional): Return grouped counts instead of entries.
+            Valid: [entry_type, status, author, project, source, tags].
+            Mutually exclusive with output="stats".
+          - output (str, optional): Set to "stats" for aggregate statistics.
+            Mutually exclusive with group_by.
+          - feed_url (str, optional): Filter to entries ingested from a registered feed
+            source URL (matches metadata.source_url written by the poller). Use this to
+            retrieve all items polled from e.g. "https://hnrss.org/frontpage".
+          - include_archived (bool, optional, default=False): Include archived entries
+            in the default view (same effect as status="any" when status is unset).
+
+        RETURNS (success): { entries: list, count: int, total_count: int, limit: int, offset: int }
+        RETURNS (error): { error: true, code: "INVALID_PARAMS" | "INTERNAL", message: "..." }
+
+        RELATED: distillery_search (for semantic search),
+        distillery_status (for lightweight server health/metadata)
         """
         c = _lc(ctx)
         args: dict[str, Any] = dict(
             limit=limit,
             offset=offset,
             output_mode=output_mode,
+            include_archived=include_archived,
             **_omit_none(
                 entry_type=entry_type,
                 author=author,
@@ -461,42 +680,13 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 date_to=date_to,
                 tag_prefix=tag_prefix,
                 content_max_length=content_max_length,
+                stale_days=stale_days,
+                group_by=group_by,
+                output=output,
+                feed_url=feed_url,
             ),
         )
         return await _handle_list(store=c["store"], arguments=args)
-
-    @server.tool
-    async def distillery_aggregate(  # noqa: PLR0913
-        ctx: Context,
-        group_by: str,
-        entry_type: str | None = None,
-        status: str | None = None,
-        source: str | None = None,
-        session_id: str | None = None,
-        date_from: str | None = None,
-        date_to: str | None = None,
-        tag_prefix: str | None = None,
-        limit: int = 50,
-    ) -> list[types.TextContent]:
-        """Aggregate entry counts grouped by a field (entry_type, status, author, project, source, etc.).
-
-        source and session_id filter the entries before aggregation.
-        """
-        c = _lc(ctx)
-        args: dict[str, Any] = dict(
-            group_by=group_by,
-            limit=limit,
-            **_omit_none(
-                entry_type=entry_type,
-                status=status,
-                source=source,
-                session_id=session_id,
-                date_from=date_from,
-                date_to=date_to,
-                tag_prefix=tag_prefix,
-            ),
-        )
-        return await _handle_aggregate(store=c["store"], arguments=args)
 
     @server.tool
     async def distillery_search(  # noqa: PLR0913
@@ -513,16 +703,46 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         date_to: str | None = None,
         limit: int = 10,
         tag_prefix: str | None = None,
+        include_archived: bool = False,
     ) -> list[types.TextContent]:
-        """Search the knowledge store using semantic similarity (cosine, ranked descending).
+        """Search knowledge entries using semantic similarity (cosine distance, ranked descending).
 
-        limit 1–200. date_from/date_to accept ISO 8601. tag_prefix filters by namespace.
-        source: filter by entry source. session_id: filter by session identifier.
+        USE WHEN: finding entries that match a natural-language question or topic.
+        Each result includes a similarity score (0-1, higher is more relevant).
+
+        By default, only entries with status in (active, pending_review) are
+        considered — archived entries are hidden. Pass ``status="archived"``
+        to search only archived entries, ``status="any"`` to include every
+        status, or ``include_archived=true`` to add archived entries to the
+        default candidate set.
+
+        PARAMS:
+          - query (str, required): Natural-language search query.
+          - entry_type (str, optional): Filter by type.
+          - author (str, optional): Filter by author.
+          - project (str, optional): Filter by project scope.
+          - tags (list[str], optional): Filter by tags (AND match).
+          - status (str, optional): Filter by status.
+          - source (str, optional): Filter by origin.
+          - session_id (str, optional): Filter by session identifier.
+          - date_from (str, optional): ISO 8601 lower bound.
+          - date_to (str, optional): ISO 8601 upper bound.
+          - limit (int, optional, default=10): Max results (1-200).
+          - tag_prefix (str, optional): Filter tags by namespace prefix.
+          - include_archived (bool, optional, default=False): Include archived entries
+            in the candidate set.
+
+        RETURNS (success): { results: [{ score: float, entry: {...} }], count: int }
+        RETURNS (error): { error: true, code: "INVALID_PARAMS" | "BUDGET_EXCEEDED" | "INTERNAL", message: "..." }
+
+        RELATED: distillery_list (for filter-based browsing without semantic ranking),
+        distillery_find_similar (to compare against arbitrary text)
         """
         c = _lc(ctx)
         args: dict[str, Any] = dict(
             query=query,
             limit=limit,
+            include_archived=include_archived,
             **_omit_none(
                 entry_type=entry_type,
                 author=author,
@@ -548,12 +768,29 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         conflict_check: bool = False,
         llm_responses: list[dict[str, Any]] | None = None,
     ) -> list[types.TextContent]:
-        """Find stored entries similar to the given text. threshold: cosine cutoff (0-1). limit 1-200.
+        """Find stored entries similar to the given text (cosine similarity).
 
-        Optional modes (progressive disclosure):
-          dedup_action: when true, includes dedup check with action (create/skip/merge/link).
-          conflict_check: when true, includes conflict candidates with LLM prompts.
-          llm_responses: with conflict_check=true, evaluates [{entry_id, is_conflict, reasoning}].
+        USE WHEN: checking for duplicates or conflicts before storing, or finding
+        entries related to arbitrary text. Supports progressive disclosure modes.
+
+        PARAMS:
+          - content (str, required): Text to compare against stored entries.
+          - threshold (float, optional, default=0.8): Cosine similarity cutoff (0-1).
+          - limit (int, optional, default=10): Max results (1-200).
+          - dedup_action (bool, optional, default=false): When true, includes dedup
+            check with recommended action (create/skip/merge/link).
+          - conflict_check (bool, optional, default=false): When true, includes
+            conflict candidates with LLM evaluation prompts.
+          - llm_responses (list[dict], optional): With conflict_check=true, evaluates
+            LLM conflict verdicts. Each item: { entry_id: str, is_conflict: bool, reasoning: str }.
+
+        RETURNS (success): { results: [{ score: float, entry: {...} }], count: int, threshold: float,
+          dedup?: { action: str, similar_entries: list },
+          conflict_candidates?: list, conflict_evaluation?: dict }
+        RETURNS (error): { error: true, code: "INVALID_PARAMS" | "BUDGET_EXCEEDED" | "INTERNAL", message: "..." }
+
+        RELATED: distillery_store (stores with automatic dedup/conflict checks),
+        distillery_search (for natural-language queries)
         """
         c = _lc(ctx)
         args: dict[str, Any] = dict(
@@ -578,10 +815,34 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
     ) -> list[types.TextContent]:
         """Apply a pre-computed classification to an existing entry.
 
-        entry_type: session, bookmark, minutes, meeting, reference, idea, or inbox.
-        confidence (0–1) determines the updated entry status.
+        USE WHEN: you have determined an entry's type and confidence via LLM
+        or heuristic analysis and want to persist the classification result.
+
+        PARAMS:
+          - entry_id (str, required): UUID of the entry to classify.
+          - entry_type (str, required): Assigned type. Valid: [session, bookmark, minutes,
+            meeting, reference, idea, inbox, github, person, project, digest, feed].
+            Common intuitive aliases like ``"note"`` are NOT accepted but the
+            error response includes a ``details.suggestion`` pointing to the
+            canonical type (e.g. ``"note"`` -> ``"inbox"``).
+          - confidence (float, required): Classification confidence (0-1). Entries below
+            the configured threshold (default 0.6) go to pending_review.
+          - reasoning (str, optional): Explanation of the classification decision.
+          - suggested_tags (list[str], optional): Tags to merge onto the entry.
+          - suggested_project (str, optional): Project to assign if entry has none.
+
+        RETURNS (success): { id: str, entry_type: str, status: str, ... } (full updated entry)
+        RETURNS (error): { error: true, code: "NOT_FOUND" | "INVALID_PARAMS" | "INTERNAL",
+        message: "...", details?: { field, provided, allowed, suggestion? } }
+
+        RELATED: distillery_resolve_review (to act on pending_review entries),
+        distillery_list (with output_mode="review" to see the review queue)
         """
         c = _lc(ctx)
+        user = _get_authenticated_user()
+        err = await _own(c, user, entry_id, "distillery_classify")
+        if err:
+            return err
         args: dict[str, Any] = dict(
             entry_id=entry_id,
             entry_type=entry_type,
@@ -602,9 +863,28 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         new_entry_type: str | None = None,
         reviewer: str | None = None,
     ) -> list[types.TextContent]:
-        """Resolve a pending-review entry: action is "approve", "reclassify", or "archive".
+        """Resolve a pending-review entry by approving, reclassifying, or archiving it.
 
-        new_entry_type required when action is "reclassify".
+        USE WHEN: acting on entries in the review queue (entries with
+        status=pending_review from low-confidence classifications).
+
+        PARAMS:
+          - entry_id (str, required): UUID of the pending-review entry.
+          - action (str, required): Resolution action. Valid: [approve, reclassify, archive].
+          - new_entry_type (str, optional): Required when action="reclassify".
+            Valid: [session, bookmark, minutes, meeting, reference, idea, inbox,
+            github, person, project, digest, feed].
+          - reviewer (str, optional): Reviewer identity for audit metadata.
+
+        RETURNS (success): { id: str, status: str, ... } (full updated entry).
+        When the requested action is a no-op (e.g. approve on an already-active
+        entry), the response also includes { already_in_state: true } and the
+        entry is returned unchanged (version is NOT bumped, reviewed_at /
+        archived_at are NOT rewritten).
+        RETURNS (error): { error: true, code: "NOT_FOUND" | "INVALID_PARAMS" | "FORBIDDEN" | "INTERNAL", message: "..." }
+
+        RELATED: distillery_classify (to classify entries),
+        distillery_list (with output_mode="review" to see the queue)
         """
         c = _lc(ctx)
         user = _get_authenticated_user()
@@ -614,73 +894,16 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         args: dict[str, Any] = dict(
             entry_id=entry_id, action=action, **_omit_none(new_entry_type=new_entry_type)
         )
-        eff_reviewer = user or reviewer
-        if eff_reviewer is not None:
-            args["reviewer"] = eff_reviewer
+        # Pass actor (server identity) and reviewer (client-supplied) as
+        # distinct fields so the handler can record both ``reviewed_by`` and
+        # ``on_behalf_of`` when they differ (issue #315).
+        if user:
+            args["actor"] = user
+        if reviewer is not None:
+            args["reviewer"] = reviewer
         result = await _handle_resolve_review(store=c["store"], arguments=args)
         await _audit(c, user, "distillery_resolve_review", entry_id, action, result)
         return result
-
-    @server.tool
-    async def distillery_metrics(
-        ctx: Context,
-        scope: str = "full",
-        period_days: int = 30,
-        entry_type: str | None = None,
-        date_from: str | None = None,
-        user: str | None = None,
-    ) -> list[types.TextContent]:
-        """Return usage metrics and statistics for the knowledge store.
-
-        scope controls the payload returned:
-          "full" (default): complete metrics — entries, activity, search, quality, staleness, storage.
-          "summary": entry counts by type/status, database size, embedding model info.
-          "search_quality": search totals, feedback rates, quality breakdown (entry_type optional).
-          "audit": login history, user activity, and recent operations.
-            Accepts optional date_from (ISO 8601 string) and user (string) filters.
-            Incompatible with entry_type.
-        period_days >= 1 (used for "full" scope only).
-        """
-        c = _lc(ctx)
-        args: dict[str, Any] = dict(
-            scope=scope,
-            period_days=period_days,
-            **_omit_none(entry_type=entry_type, date_from=date_from, user=user),
-        )
-        return await _handle_metrics(
-            store=c["store"],
-            config=c["config"],
-            embedding_provider=c["embedding_provider"],
-            arguments=args,
-        )
-
-    @server.tool
-    async def distillery_stale(
-        ctx: Context,
-        days: int | None = None,
-        limit: int = 20,
-        entry_type: str | None = None,
-    ) -> list[types.TextContent]:
-        """Return stale entries based on last-access time. days defaults to config stale_days."""
-        c = _lc(ctx)
-        return await _handle_stale(
-            store=c["store"],
-            config=c["config"],
-            arguments=dict(limit=limit, **_omit_none(days=days, entry_type=entry_type)),
-        )
-
-    @server.tool
-    async def distillery_tag_tree(
-        ctx: Context, prefix: str | None = None
-    ) -> list[types.TextContent]:
-        """Return a nested tag hierarchy with entry counts. prefix filters by namespace."""
-        c = _lc(ctx)
-        return await _handle_tag_tree(store=c["store"], arguments={"prefix": prefix})
-
-    @server.tool
-    async def distillery_type_schemas(ctx: Context) -> list[types.TextContent]:  # noqa: ARG001
-        """Return the metadata schemas for all structured entry types."""
-        return await _handle_type_schemas()
 
     @server.tool
     async def distillery_watch(  # noqa: PLR0913
@@ -691,67 +914,62 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         label: str | None = None,
         poll_interval_minutes: int | None = None,
         trust_weight: float | None = None,
+        sync_history: bool = False,
+        purge: bool = False,
+        probe: bool = True,
+        force: bool = False,
     ) -> list[types.TextContent]:
-        """Manage monitored feed sources: action is "list", "add", or "remove".
+        """Manage monitored feed sources for ambient intelligence.
 
-        add requires url and source_type (rss or github). remove requires url.
+        USE WHEN: listing, adding, or removing RSS/GitHub feed sources
+        that Distillery polls for new content.
+
+        PARAMS:
+          - action (str, required): Operation to perform. Valid: [list, add, remove].
+          - url (str, required for add/remove): Feed URL or GitHub owner/repo slug.
+          - source_type (str, required for add): Feed type. Valid: [rss, github].
+          - label (str, optional): Human-readable label for the source.
+          - poll_interval_minutes (int, optional, default=60): Polling frequency in minutes.
+          - trust_weight (float, optional, default=1.0): Source trust weight (0-1).
+          - sync_history (bool, optional, default=false): When true and source_type is
+            "github", kicks off an async background import of historical issues/PRs
+            (returns immediately with job_id; use distillery_sync_status to check progress).
+          - purge (bool, optional, default=false): When true and action is "remove",
+            archives all entries from the removed source (soft-delete). Returns the
+            count of archived entries in purged_entries.
+          - probe (bool, optional, default=true): When adding, lightly probe the URL
+            for reachability (HEAD with GET fallback, short timeout). Returns an
+            INVALID_PARAMS error (with details.probe_failed=true) if the probe fails.
+          - force (bool, optional, default=false): When adding, persist the source
+            even if the reachability probe fails (useful for sites that block HEAD
+            but work via the poller).
+
+        RETURNS (success): { sources: list, count: int } (list) or
+          { added: dict, sources: list, sync_job?: dict } (add) or
+          { removed_url: str, removed: bool, sources: list, purged_entries?: int } (remove)
+        RETURNS (error): { error: true, code: "INVALID_PARAMS" | "CONFLICT"
+          | "INTERNAL", message: "..." }
+
+        RELATED: distillery_configure (to adjust feed thresholds),
+        distillery_store_batch (for bulk entry ingestion)
         """
         c = _lc(ctx)
         return await _handle_watch(
             store=c["store"],
             arguments=dict(
                 action=action,
+                probe=probe,
+                force=force,
                 **_omit_none(
                     url=url,
                     source_type=source_type,
                     label=label,
                     poll_interval_minutes=poll_interval_minutes,
                     trust_weight=trust_weight,
+                    sync_history=sync_history or None,
+                    purge=purge or None,
                 ),
             ),
-        )
-
-    @server.tool
-    async def distillery_interests(  # noqa: PLR0913
-        ctx: Context,
-        recency_days: int = 90,
-        top_n: int = 20,
-        suggest_sources: bool = False,
-        max_suggestions: int = 5,
-    ) -> list[types.TextContent]:
-        """Extract an interest profile (top tags, bookmark domains, tracked repos) from the knowledge base.
-
-        When suggest_sources=True, also returns heuristic feed source suggestions
-        derived from tracked repos and bookmark domains (up to max_suggestions).
-        """
-        c = _lc(ctx)
-        return await _handle_interests(
-            store=c["store"],
-            config=c["config"],
-            arguments={
-                "recency_days": recency_days,
-                "top_n": top_n,
-                "suggest_sources": suggest_sources,
-                "max_suggestions": max_suggestions,
-            },
-        )
-
-    @server.tool
-    async def distillery_poll(
-        ctx: Context, source_url: str | None = None
-    ) -> list[types.TextContent]:
-        """Poll configured feed sources and store relevant items. source_url polls one; None polls all."""
-        c = _lc(ctx)
-        return await _handle_poll(
-            store=c["store"], config=c["config"], arguments=_omit_none(source_url=source_url)
-        )
-
-    @server.tool
-    async def distillery_rescore(ctx: Context, limit: int = 100) -> list[types.TextContent]:
-        """Re-score existing feed entries against the current knowledge base."""
-        c = _lc(ctx)
-        return await _handle_rescore(
-            store=c["store"], config=c["config"], arguments={"limit": limit}
         )
 
     @server.tool
@@ -765,11 +983,29 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         direction: str = "both",
         relation_id: str | None = None,
     ) -> list[types.TextContent]:
-        """Manage typed relations between knowledge entries: action is "add", "get", or "remove".
+        """Manage typed relations between knowledge entries.
 
-        add requires from_id, to_id, and relation_type (e.g. "link", "blocks", "related").
-        get requires entry_id; accepts optional relation_type and direction ("outgoing", "incoming", "both").
-        remove requires relation_id.
+        USE WHEN: linking entries together (e.g. marking one as blocking another,
+        citing a reference, or flagging duplicates).
+
+        PARAMS:
+          - action (str, required): Operation. Valid: [add, get, remove].
+          - from_id (str, required for add): Source entry UUID.
+          - to_id (str, required for add): Target entry UUID.
+          - relation_type (str, required for add, optional for get): Relation type.
+            Valid: [link, corrects, supersedes, related, blocks, depends_on, citation, duplicate].
+          - entry_id (str, required for get): Entry UUID to query relations for.
+          - direction (str, optional for get, default="both"): Filter direction.
+            Valid: [outgoing, incoming, both].
+          - relation_id (str, required for remove): UUID of the relation to delete.
+
+        RETURNS (success): { relation_id: str, from_id: str, to_id: str, relation_type: str } (add) or
+          { entry_id: str, relations: list, count: int } (get) or
+          { relation_id: str, removed: bool } (remove)
+        RETURNS (error): { error: true, code: "NOT_FOUND" | "INVALID_PARAMS" | "INTERNAL", message: "..." }
+
+        RELATED: distillery_correct (creates 'corrects' relations automatically),
+        distillery_find_similar (to discover related entries)
         """
         c = _lc(ctx)
         return await _handle_relations(
@@ -788,25 +1024,153 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         )
 
     @server.tool
+    async def distillery_gh_sync(
+        ctx: Context,
+        url: str,
+        author: str = "gh-sync",
+        project: str | None = None,
+        background: bool = False,
+    ) -> list[types.TextContent]:
+        """Sync GitHub issues and PRs into the knowledge base using a batched pipeline.
+
+        url: repository slug (owner/repo) or full GitHub URL.
+        author: author field for created entries (default: gh-sync).
+        project: optional project name to scope entries.
+        background: when true, runs async and returns a job_id immediately.
+        """
+        c = _lc(ctx)
+        # In stateless HTTP mode each request gets its own lifespan, so the
+        # shared ``store`` is closed as soon as the request returns. A
+        # background=True call would spawn a detached asyncio task that keeps
+        # a reference to the now-closing store, racing with ``_store.close()``
+        # and corrupting WAL/checkpoint state. Reject the combination up-front
+        # so callers see a clear error instead of a silent failure.
+        transport = _shared.get("transport") or c.get("transport")
+        if background and transport == "http":
+            return error_response(
+                "INVALID_PARAMS",
+                (
+                    "background=True is not supported when the server runs in "
+                    "stateless HTTP mode — the detached sync task would outlive "
+                    "the request lifespan and race with store shutdown. "
+                    "Retry with background=False, or run the server in stdio mode."
+                ),
+            )
+        return await _handle_gh_sync(
+            store=c["store"],
+            arguments=dict(
+                url=url, author=author, **_omit_none(project=project, background=background or None)
+            ),
+        )
+
+    @server.tool
+    async def distillery_sync_status(
+        ctx: Context,
+        job_id: str | None = None,
+        source_url: str | None = None,
+    ) -> list[types.TextContent]:
+        """Check the status of background sync jobs.
+
+        job_id: look up a specific job by ID.
+        source_url: list jobs for a specific source URL.
+        If neither is provided, lists all recent jobs.
+        """
+        return await _handle_sync_status(arguments=_omit_none(job_id=job_id, source_url=source_url))
+
+    @server.tool
     async def distillery_configure(
         ctx: Context,
         section: str,
         key: str,
-        value: str | int | float,
+        value: str | int | float | None = None,
     ) -> list[types.TextContent]:
-        """Update a runtime configuration value and persist it to distillery.yaml.
+        """Read or update a runtime configuration value.
 
-        Accepts an allowlisted (section, key) pair and validates ranges and
-        cross-field constraints before applying.  Returns previous and new values.
+        USE WHEN: reading current thresholds/settings, or adjusting them
+        at runtime without editing the config file directly.
 
-        section examples: "feeds.thresholds", "defaults", "classification".
-        key examples: "alert", "digest", "dedup_threshold", "confidence_threshold".
+        PARAMS:
+          - section (str, required): Config section path (dotted notation).
+            Valid: [feeds.thresholds, defaults, classification].
+          - key (str, required): Config key within the section.
+            Valid keys by section: feeds.thresholds: [alert, digest];
+            defaults: [dedup_threshold, dedup_limit, stale_days];
+            classification: [confidence_threshold, mode].
+          - value (str | int | float | None, optional): New value. Omit to read
+            the current value. When provided, must satisfy type and range
+            constraints for the given key.
+
+        RETURNS (read): { section: str, key: str, value: any, message: str }
+        RETURNS (write): { changed: bool, section: str, key: str, previous_value: any,
+          new_value: any, disk_written: bool, message: str }
+        RETURNS (error): { error: true, code: "INVALID_PARAMS" | "INTERNAL", message: "..." }
+
+        RELATED: distillery_watch (to manage feed sources),
+        distillery_status (to review current system state)
         """
         c = _lc(ctx)
         return await _handle_configure(
             config=c["config"],
             arguments={"section": section, "key": key, "value": value},
         )
+
+    @server.tool
+    async def distillery_status(ctx: Context) -> list[types.TextContent]:
+        """Return a lightweight in-protocol health/metadata probe.
+
+        USE WHEN: verifying MCP connectivity (e.g. from the ``/setup`` wizard)
+        without relying on the HTTP-only ``/health`` endpoint. Works uniformly
+        on stdio and HTTP transports.
+
+        PARAMS: (none)
+
+        RETURNS (success): {
+            status: "ok",
+            version: str,                 # distillery package version
+            build_sha: str,               # git SHA (or "dev")
+            transport: "stdio" | "http" | "unknown",
+            tool_count: int,              # number of registered MCP tools
+            store: { entry_count: int | null, db_size_bytes: int | null },
+            embedding_provider: str,      # model name or provider class name
+            last_feed_poll: { source_count: int, last_poll_at: str | null },
+            uptime_seconds?: int          # seconds since server startup
+        }
+
+        RELATED: distillery_list (for entry counts, filtering, and
+        per-group aggregates),
+        distillery_configure (to inspect/adjust runtime configuration)
+        """
+        c = _lc(ctx)
+        try:
+            tools = await server.list_tools()
+            tool_count = len(tools)
+        except Exception:  # noqa: BLE001
+            logger.debug("distillery_status: server.list_tools() failed", exc_info=True)
+            tool_count = 0
+        # Read transport from _shared (set by __main__.py post-construction);
+        # fall back to the lifespan-scoped copy if present.
+        transport = _shared.get("transport") or c.get("transport")
+        started_at = _shared.get("started_at") or c.get("started_at")
+        return await _handle_status(
+            store=c["store"],
+            config=c["config"],
+            embedding_provider=c["embedding_provider"],
+            tool_count=tool_count,
+            transport=transport,
+            started_at=started_at,
+        )
+
+    @server.resource("distillery://schemas/entry-types")
+    async def entry_type_schemas() -> str:
+        """Return the metadata schemas for all structured entry types as a JSON resource.
+
+        Replaces the former ``distillery_type_schemas`` tool.  Clients read this
+        resource to discover the required/optional metadata fields and constraints
+        for each entry type (session, bookmark, minutes, meeting, reference, idea,
+        inbox, plus any structured types with richer schemas).
+        """
+        result = await _handle_type_schemas()
+        return result[0].text if result else "{}"
 
     return server
 

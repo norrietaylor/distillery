@@ -15,14 +15,18 @@ from typing import Any
 from mcp import types
 
 from distillery.config import DistilleryConfig
+from distillery.embedding.errors import EmbeddingProviderError
 from distillery.mcp.tools._common import (
     error_response,
     success_response,
     validate_required,
     validate_type,
 )
-from distillery.mcp.tools._errors import validate_limit
-from distillery.mcp.tools.crud import _build_filters_from_arguments
+from distillery.mcp.tools._errors import upstream_error_response, validate_limit
+from distillery.mcp.tools.crud import (
+    _apply_default_status_filter,
+    _build_filters_from_arguments,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -77,17 +81,34 @@ async def _handle_search(
             return error_response("BUDGET_EXCEEDED", str(exc))
 
     filters = _build_filters_from_arguments(arguments)
+    filter_result = _apply_default_status_filter(filters, arguments)
+    if isinstance(filter_result, list):
+        # Error response from status-filter validation.
+        return filter_result
+    filters = filter_result
 
     try:
         search_results = await store.search(query=query, filters=filters, limit=limit)
-    except Exception as exc:  # noqa: BLE001
+    except EmbeddingProviderError as exc:
+        logger.warning(
+            "Upstream embedding provider failed during search "
+            "(provider=%s endpoint=%s status=%s retry_after=%s): %s",
+            exc.provider,
+            exc.endpoint,
+            exc.status_code,
+            exc.retry_after,
+            exc,
+        )
+        return upstream_error_response(exc)
+    except Exception:  # noqa: BLE001
         logger.exception("Error in distillery_search")
-        return error_response("SEARCH_ERROR", f"Search failed: {exc}")
+        return error_response("INTERNAL", "Search failed")
 
     results = [{"score": round(sr.score, 6), "entry": sr.entry.to_dict()} for sr in search_results]
 
     # Log the search event to search_log for later implicit-feedback correlation.
-    if search_results:
+    search_logging = cfg is None or cfg.rate_limit.search_logging_enabled
+    if search_results and search_logging:
         result_entry_ids = [sr.entry.id for sr in search_results]
         result_scores = [sr.score for sr in search_results]
         try:
@@ -185,9 +206,20 @@ async def _handle_find_similar(
 
     try:
         search_results = await store.find_similar(content=content, threshold=threshold, limit=limit)
-    except Exception as exc:  # noqa: BLE001
+    except EmbeddingProviderError as exc:
+        logger.warning(
+            "Upstream embedding provider failed during find_similar "
+            "(provider=%s endpoint=%s status=%s retry_after=%s): %s",
+            exc.provider,
+            exc.endpoint,
+            exc.status_code,
+            exc.retry_after,
+            exc,
+        )
+        return upstream_error_response(exc)
+    except Exception:  # noqa: BLE001
         logger.exception("Error in distillery_find_similar")
-        return error_response("FIND_SIMILAR_ERROR", f"find_similar failed: {exc}")
+        return error_response("INTERNAL", "find_similar failed")
 
     results = [{"score": round(sr.score, 6), "entry": sr.entry.to_dict()} for sr in search_results]
     payload: dict[str, Any] = {
@@ -208,9 +240,9 @@ async def _handle_find_similar(
 
             dedup_result = await run_dedup_check(store, cfg.classification, content)
             payload["dedup"] = dedup_result
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             logger.exception("Error running dedup check in find_similar")
-            return error_response("DEDUP_ERROR", f"Deduplication check failed: {exc}")
+            return error_response("INTERNAL", "Deduplication check failed")
 
     # --- conflict_check mode -------------------------------------------------
     if conflict_check:
@@ -253,9 +285,9 @@ async def _handle_find_similar(
                     store, conflict_threshold, content, parsed_responses
                 )
                 payload["conflict_evaluation"] = eval_result
-            except Exception as exc:  # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 logger.exception("Error running conflict evaluation in find_similar")
-                return error_response("CONFLICT_ERROR", f"Conflict evaluation failed: {exc}")
+                return error_response("INTERNAL", "Conflict evaluation failed")
         else:
             # --- first pass: discover conflict candidates ---
             try:
@@ -275,9 +307,9 @@ async def _handle_find_similar(
                 payload["conflict_candidates"] = discovery_result.get("conflict_candidates", [])
                 payload["conflict_candidates_count"] = len(payload["conflict_candidates"])
                 payload["conflict_message"] = discovery_result.get("message", "")
-            except Exception as exc:  # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 logger.exception("Error running conflict discovery in find_similar")
-                return error_response("CONFLICT_ERROR", f"Conflict check failed: {exc}")
+                return error_response("INTERNAL", "Conflict check failed")
 
     return success_response(payload)
 
@@ -292,6 +324,7 @@ _AGGREGATE_GROUP_BY_MAP: dict[str, str] = {
     "author": "author",
     "project": "project",
     "source": "source",
+    "tags": "UNNEST(tags)",
     "metadata.source_url": "json_extract_string(metadata, '$.source_url')",
     "metadata.source_type": "json_extract_string(metadata, '$.source_type')",
 }
@@ -338,9 +371,9 @@ async def _handle_aggregate(
             filters=filters,
             limit=limit,
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         logger.exception("Error in distillery_aggregate")
-        return error_response("AGGREGATE_ERROR", f"aggregate_entries failed: {exc}")
+        return error_response("INTERNAL", "aggregate_entries failed")
 
     return success_response(
         {

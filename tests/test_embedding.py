@@ -19,6 +19,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
+from distillery.embedding.errors import EmbeddingProviderError, parse_retry_after
 from distillery.embedding.jina import JinaEmbeddingProvider
 from distillery.embedding.openai import OpenAIEmbeddingProvider
 
@@ -265,11 +266,17 @@ class TestJinaRateLimitRetry:
         assert result == [0.1, 0.2, 0.3, 0.4]
         assert call_count["n"] == 2
 
-    def test_exhausted_retries_raise_runtime_error(self) -> None:
-        """After MAX_RETRIES consecutive 429 responses RuntimeError is raised."""
+    def test_exhausted_retries_raise_embedding_provider_error(self) -> None:
+        """After MAX_RETRIES consecutive 429 responses EmbeddingProviderError is raised.
+
+        Pins the new contract introduced in #351: MCP callers rely on
+        ``provider`` / ``status_code`` / ``retry_after`` carrying upstream
+        detail, not a bare ``RuntimeError``.
+        """
         rate_limit_response = MagicMock(spec=httpx.Response)
         rate_limit_response.status_code = 429
         rate_limit_response.text = "Rate limit exceeded"
+        rate_limit_response.headers = {"Retry-After": "5"}
         rate_limit_error = httpx.HTTPStatusError(
             "429 Too Many Requests",
             request=MagicMock(),
@@ -285,8 +292,13 @@ class TestJinaRateLimitRetry:
             mock_resp.raise_for_status.side_effect = rate_limit_error
             mock_client.post.return_value = mock_resp
 
-            with pytest.raises(RuntimeError, match="3 attempts"):
+            with pytest.raises(EmbeddingProviderError, match="3 attempts") as excinfo:
                 provider.embed("test text")
+
+        assert excinfo.value.provider == "jina"
+        assert excinfo.value.status_code == 429
+        assert excinfo.value.retry_after == 5.0
+        assert excinfo.value.is_rate_limited is True
 
     def test_embed_batch_empty_list_returns_empty(self) -> None:
         """embed_batch([]) must return [] without hitting the API."""
@@ -338,6 +350,136 @@ class TestJinaRateLimitRetry:
         assert len(result) == 2
         assert result[0] == [0.1, 0.2, 0.3, 0.4]
         assert result[1] == [0.5, 0.6, 0.7, 0.8]
+
+    def test_exhausted_5xx_raises_embedding_provider_error(self) -> None:
+        """Exhausted 5xx retries raise EmbeddingProviderError (not rate limited).
+
+        429 exhaustion for Jina is covered by the canonical
+        ``test_exhausted_retries_raise_embedding_provider_error`` above;
+        this case pins the non-rate-limited 5xx contract.
+        """
+        server_error_response = MagicMock(spec=httpx.Response)
+        server_error_response.status_code = 503
+        server_error_response.text = "Service Unavailable"
+        server_error_response.headers = {}
+        server_error = httpx.HTTPStatusError(
+            "503 Service Unavailable",
+            request=MagicMock(),
+            response=server_error_response,
+        )
+
+        provider = JinaEmbeddingProvider(api_key="test-key", dimensions=4)
+
+        with patch("httpx.Client") as mock_client_cls, patch("time.sleep"):
+            mock_client = MagicMock()
+            mock_client_cls.return_value.__enter__.return_value = mock_client
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status.side_effect = server_error
+            mock_client.post.return_value = mock_resp
+
+            with pytest.raises(EmbeddingProviderError) as exc_info:
+                provider.embed("test text")
+
+        assert not exc_info.value.is_rate_limited
+        assert exc_info.value.status_code == 503
+        assert exc_info.value.provider == "jina"
+        assert exc_info.value.retry_after is None
+
+    def test_retry_after_header_honored_in_sleep(self) -> None:
+        """Retry-After header value is preferred over exponential backoff."""
+        good_payload = _make_jina_response([[0.1, 0.2, 0.3, 0.4]])
+
+        rate_limit_response = MagicMock(spec=httpx.Response)
+        rate_limit_response.status_code = 429
+        rate_limit_response.text = "Rate limit exceeded"
+        rate_limit_response.headers = {"Retry-After": "7"}
+        rate_limit_error = httpx.HTTPStatusError(
+            "429 Too Many Requests",
+            request=MagicMock(),
+            response=rate_limit_response,
+        )
+
+        provider = JinaEmbeddingProvider(api_key="test-key", dimensions=4)
+
+        call_count = {"n": 0}
+        sleep_calls: list[float] = []
+
+        def side_effect(*args: object, **kwargs: object) -> MagicMock:
+            call_count["n"] += 1
+            mock_resp = MagicMock()
+            if call_count["n"] == 1:
+                mock_resp.raise_for_status.side_effect = rate_limit_error
+            else:
+                mock_resp.raise_for_status.return_value = None
+                mock_resp.json.return_value = good_payload
+                mock_resp.status_code = 200
+            return mock_resp
+
+        with (
+            patch("httpx.Client") as mock_client_cls,
+            patch("time.sleep", side_effect=lambda s: sleep_calls.append(s)),
+        ):
+            mock_client = MagicMock()
+            mock_client_cls.return_value.__enter__.return_value = mock_client
+            mock_client.post.side_effect = side_effect
+
+            provider.embed("test text")
+
+        # First sleep should honour Retry-After header (7s) instead of backoff.
+        assert sleep_calls[0] == 7.0
+
+
+# ---------------------------------------------------------------------------
+# EmbeddingProvider error module
+# ---------------------------------------------------------------------------
+
+
+class TestParseRetryAfter:
+    """Tests for the Retry-After header parser."""
+
+    def test_returns_none_for_missing(self) -> None:
+        assert parse_retry_after(None) is None
+        assert parse_retry_after("") is None
+
+    def test_parses_integer_seconds(self) -> None:
+        assert parse_retry_after("30") == 30.0
+
+    def test_parses_float_seconds(self) -> None:
+        assert parse_retry_after("2.5") == 2.5
+
+    def test_strips_whitespace(self) -> None:
+        assert parse_retry_after("  10  ") == 10.0
+
+    def test_returns_none_for_negative(self) -> None:
+        assert parse_retry_after("-5") is None
+
+    def test_clamps_past_http_date_to_zero(self) -> None:
+        # HTTP-date in the past clamps to 0.0 rather than returning a
+        # negative hint — keeps callers' "sleep(retry_after)" safe.
+        assert parse_retry_after("Wed, 21 Oct 2015 07:28:00 GMT") == 0.0
+
+    def test_parses_future_http_date_as_positive_seconds(self) -> None:
+        from datetime import UTC, datetime, timedelta
+        from email.utils import format_datetime
+
+        future = datetime.now(UTC) + timedelta(seconds=60)
+        header = format_datetime(future, usegmt=True)
+        result = parse_retry_after(header)
+        assert result is not None
+        # Allow a small fudge for wall-clock between format + parse.
+        assert 30.0 <= result <= 60.0
+
+    def test_returns_none_for_garbage(self) -> None:
+        assert parse_retry_after("not-a-number") is None
+
+    @pytest.mark.parametrize(
+        "header_value",
+        ["nan", "NaN", "inf", "+inf", "-inf", "Infinity", "-Infinity"],
+    )
+    def test_returns_none_for_non_finite(self, header_value: str) -> None:
+        """NaN / +Inf / -Inf would propagate as an unbounded sleep or
+        crash in the retry loop.  ``parse_retry_after`` must reject them."""
+        assert parse_retry_after(header_value) is None
 
 
 # ---------------------------------------------------------------------------
@@ -524,15 +666,50 @@ class TestOpenAIRateLimitRetry:
         assert result == [vector]
         assert call_count["n"] == 2
 
-    def test_exhausted_retries_raise_runtime_error(self) -> None:
-        """After MAX_RETRIES consecutive 429 responses RuntimeError is raised."""
+    def test_exhausted_retries_raise_embedding_provider_error(self) -> None:
+        """After MAX_RETRIES consecutive 429 responses EmbeddingProviderError is raised.
+
+        Pins the new contract introduced in #351 for the OpenAI path.
+        """
         rate_limit_response = _mock_httpx_response(429, {"error": "rate limit"})
+        rate_limit_response.headers = {"Retry-After": "7"}
         provider = OpenAIEmbeddingProvider(api_key="sk-test", dimensions=4)
 
         with patch.object(provider, "_client") as mock_client, patch("time.sleep"):
             mock_client.post.return_value = rate_limit_response
-            with pytest.raises(RuntimeError, match="retries"):
+            with pytest.raises(EmbeddingProviderError, match="retries") as excinfo:
                 provider.embed_batch(["test"])
+
+        assert excinfo.value.provider == "openai"
+        assert excinfo.value.status_code == 429
+        assert excinfo.value.retry_after == 7.0
+        assert excinfo.value.is_rate_limited is True
+
+    def test_single_embed_exhausts_to_embedding_provider_error(self) -> None:
+        """OpenAI.embed() routes through embed_batch() and honours the
+        structured-error contract on retry exhaustion.
+
+        Regression guard for #351 follow-up: before that fix, ``embed``
+        called ``_request`` directly, bypassed the retry loop, and surfaced
+        rate-limit failures as a bare ``RuntimeError`` / internal
+        ``_RateLimitError`` — which made single-entry MCP flows
+        (``distillery_store``, ``distillery_update``, ``distillery_correct``,
+        search/find_similar) fall through to ``INTERNAL`` instead of
+        ``UPSTREAM_RATE_LIMITED`` with ``retry_after``.
+        """
+        rate_limit_response = _mock_httpx_response(429, {"error": "rate limit"})
+        rate_limit_response.headers = {"Retry-After": "4"}
+        provider = OpenAIEmbeddingProvider(api_key="sk-test", dimensions=4)
+
+        with patch.object(provider, "_client") as mock_client, patch("time.sleep"):
+            mock_client.post.return_value = rate_limit_response
+            with pytest.raises(EmbeddingProviderError, match="retries") as excinfo:
+                provider.embed("single")
+
+        assert excinfo.value.provider == "openai"
+        assert excinfo.value.status_code == 429
+        assert excinfo.value.retry_after == 4.0
+        assert excinfo.value.is_rate_limited is True
 
     def test_exponential_backoff_called(self) -> None:
         """Sleep is called with exponential backoff values on retry."""
@@ -565,6 +742,57 @@ class TestOpenAIRateLimitRetry:
         # sleep must be called at least once with a positive backoff
         assert len(sleep_calls) >= 1
         assert all(s >= 0 for s in sleep_calls)
+
+    def test_exhausted_5xx_raises_embedding_provider_error(self) -> None:
+        """Exhausted 5xx retries raise EmbeddingProviderError (not rate limited).
+
+        429 exhaustion for OpenAI is covered by the canonical
+        ``test_exhausted_retries_raise_embedding_provider_error`` above
+        (and the single-item ``test_single_embed_exhausts_to_embedding_provider_error``
+        covers the ``embed()`` → ``embed_batch`` delegation path); this
+        case pins the non-rate-limited 5xx contract.
+        """
+        server_error_response = _mock_httpx_response(502, {"error": "bad gateway"})
+        server_error_response.headers = {}
+        provider = OpenAIEmbeddingProvider(api_key="sk-test", dimensions=4)
+
+        with patch.object(provider, "_client") as mock_client, patch("time.sleep"):
+            mock_client.post.return_value = server_error_response
+            with pytest.raises(EmbeddingProviderError) as exc_info:
+                provider.embed_batch(["test"])
+
+        assert not exc_info.value.is_rate_limited
+        assert exc_info.value.status_code == 502
+        assert exc_info.value.provider == "openai"
+        assert exc_info.value.retry_after is None
+
+    def test_retry_after_header_honored_in_sleep(self) -> None:
+        """Retry-After header value is preferred over exponential backoff."""
+        vector = [0.1, 0.2, 0.3, 0.4]
+        good_payload = _make_openai_response([vector])
+        good_response = _mock_httpx_response(200, good_payload)
+        rate_limit_response = _mock_httpx_response(429, {"error": "rate limit"})
+        rate_limit_response.headers = {"Retry-After": "9"}
+
+        call_count = {"n": 0}
+        sleep_calls: list[float] = []
+
+        provider = OpenAIEmbeddingProvider(api_key="sk-test", dimensions=4)
+
+        def side_effect(*args: object, **kwargs: object) -> MagicMock:
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return rate_limit_response
+            return good_response
+
+        with (
+            patch.object(provider, "_client") as mock_client,
+            patch("time.sleep", side_effect=lambda s: sleep_calls.append(s)),
+        ):
+            mock_client.post.side_effect = side_effect
+            provider.embed_batch(["test"])
+
+        assert sleep_calls[0] == 9.0
 
 
 # ---------------------------------------------------------------------------

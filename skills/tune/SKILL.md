@@ -2,8 +2,6 @@
 name: tune
 description: "Display and adjust feed relevance thresholds for alerts and digests"
 allowed-tools:
-  - "mcp__*__distillery_metrics"
-  - "mcp__*__distillery_update"
   - "mcp__*__distillery_configure"
 effort: low
 model: haiku
@@ -48,7 +46,15 @@ No flags = read-only mode (display current thresholds).
 
 ### Step 3: Retrieve Current Configuration
 
-Call `distillery_metrics(scope="summary")` and extract `feeds.thresholds.alert` (default: 0.85) and `feeds.thresholds.digest` (default: 0.60). If feeds config is absent, show defaults and note live values could not be confirmed.
+Read current thresholds by omitting the `value` parameter:
+
+- `distillery_configure(section="feeds.thresholds", key="alert")`
+- `distillery_configure(section="feeds.thresholds", key="digest")`
+
+Extract the `value` field from each response.
+
+- In read-only mode (no `--alert`, `--digest`, `--max`, or `--reset` flag provided), if either call returns an error, show defaults (alert=0.85, digest=0.60) and note that live values could not be confirmed.
+- If the user requested changes and either read returns an error, display the MCP error and STOP. Do not apply writes against assumed defaults — Step 4's `alert >= digest` check depends on the true current values.
 
 ### Step 4: Apply Changes (if flags provided)
 
@@ -117,7 +123,7 @@ Tuning Guide:
 
 ## Rules
 
-- Always call `distillery_metrics(scope="summary")` first to verify MCP availability
+- Always call `distillery_configure(section="feeds.thresholds", key="alert")` and `distillery_configure(section="feeds.thresholds", key="digest")` first to verify MCP availability and retrieve current thresholds
 - In read-only mode, display thresholds without confirmation
 - Validate `--alert` >= `--digest` before applying; reject invalid combinations
 - Always ask for confirmation before applying changes

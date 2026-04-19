@@ -3,11 +3,6 @@ name: watch
 description: "Add, remove, or list monitored feed sources (RSS and GitHub)"
 allowed-tools:
   - "mcp__*__distillery_watch"
-  - "mcp__*__distillery_metrics"
-  - "CronCreate"
-  - "CronList"
-  - "CronDelete"
-  - "RemoteTrigger"
 disable-model-invocation: true
 effort: medium
 ---
@@ -37,7 +32,7 @@ See CONVENTIONS.md — skip if already confirmed this conversation.
 |--------------------|--------|------------|
 | `/watch` or `/watch list` | `list` | none |
 | `/watch add <url> [--type TYPE] [--label LABEL]` | `add` | url, optional source_type, label |
-| `/watch remove <url>` | `remove` | url |
+| `/watch remove <url> [--purge]` | `remove` | url, optional purge (requires explicit confirmation before purge) |
 
 Default to `list` if no subcommand is recognizable.
 
@@ -56,28 +51,25 @@ Call `distillery_watch` with the parsed arguments:
 
 - **list**: `distillery_watch(action="list")`
 - **add**: `distillery_watch(action="add", url=..., source_type=..., label=..., poll_interval_minutes=..., trust_weight=...)`
-- **remove**: `distillery_watch(action="remove", url="<url>")`
+- **remove** (no purge): `distillery_watch(action="remove", url="<url>")`
+- **remove --purge** (requires explicit confirmation):
+  1. Explain to the user that `--purge` will archive **all historic entries** previously ingested from `<url>`. This skill's allowlist only includes `mcp__*__distillery_watch`, so the exact count cannot be fetched here — describe the impact in-prompt instead of issuing a `distillery_list` call.
+  2. Ask for explicit confirmation (e.g., "Archive all historic entries from `<url>`? This cannot be undone without re-ingesting. [yes/no]").
+  3. Only after the user replies with an unambiguous affirmative (e.g., `yes`), call `distillery_watch(action="remove", url="<url>", purge=true)`. Report the archived count returned by the tool when confirming to the user.
 
 - On MCP errors, see CONVENTIONS.md error handling — display and stop
 
 ### Step 4: Auto-Poll Schedule (after `add` only)
 
-After a successful `add`, ensure automatic polling is configured. Never create duplicate poll jobs.
+After a successful `add`, remind the user about routine-based polling.
 
-**4a. Determine scheduling mechanism:** Read `.mcp.json` in the project root:
-- URL contains `localhost`, `127.0.0.1`, or transport is `stdio` → **local** → use `CronCreate`
-- Remote host (e.g., `distillery-mcp.fly.dev`) → **deployed** → scheduling is handled by the GitHub Actions workflow at `.github/workflows/scheduler.yml`. Display: "Auto-poll managed by GitHub Actions (hourly at :23 UTC)." and skip to Step 5.
-
-**4b. Local schedule (CronCreate):**
-
-Check `CronList` for any job whose prompt contains `distillery_poll`. If found, skip to Step 5.
+If no feed poll routine is configured, display:
 
 ```text
-CronCreate(cron="23 * * * *", prompt="Use distillery_poll to poll all configured feed sources. Report a one-line summary of items fetched and stored.", recurring=true, durable=true)
+No feed poll routine found. Run /setup to configure scheduled routines.
 ```
-Pick an off-peak minute (not :00 or :30). Durable jobs survive restarts but auto-expire after 7 days.
 
-**4c. Cleanup on `remove`:** After a successful `remove`, if no sources remain, delete/pause the auto-poll schedule via `CronDelete` (local only). Display: "Auto-poll paused: no feed sources remaining."
+If the user already has routines configured (they confirm when asked), skip to Step 5.
 
 ### Step 5: Confirm
 
@@ -94,7 +86,8 @@ Feed Sources (N configured)
 If no sources: show "No feed sources configured." with usage hint.
 
 - **After `add`**: show added source details, updated table, and auto-poll status
-- **After `remove`**: confirm removal, show updated table
+- **After `remove`**: confirm removal, show updated table. If `--purge` was used, also report the number of archived entries
+- **After `remove --purge`**: "Removed source and archived N historic entries."
 
 Changes are persisted to the database automatically — no manual YAML editing required.
 
@@ -104,8 +97,7 @@ Changes are persisted to the database automatically — no manual YAML editing r
 - Validate `source_type` is one of: `rss`, `github`, `hackernews`, `webhook`
 - Do not proceed with `add` without a URL
 - Always show the updated source table after `add` or `remove`
-- After `add` on local transport, always check `CronList` before creating a schedule — no duplicates
-- After `remove` that leaves zero sources on local transport, pause/delete the auto-poll schedule
-- For hosted/team transport, scheduling is managed by GitHub Actions — do not create local cron jobs
+- After `add`, remind the user to run /setup if no feed poll routine is configured
+- Scheduling uses Claude Code routines for all transport modes — CronCreate and webhook scheduling are deprecated
 - On MCP errors, see CONVENTIONS.md error handling — display and stop
 - Trust weight: 0.0–1.0 (default 1.0); poll interval: positive integer minutes (default 60)

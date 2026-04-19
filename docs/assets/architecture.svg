@@ -44,7 +44,7 @@
   <!-- Layer 2: MCP Server -->
   <rect class="d-amber-bg" x="30" y="104" width="700" height="52" rx="10"/>
   <text class="d-white" x="380" y="128" text-anchor="middle">MCP Server</text>
-  <text class="d-white-sub" x="380" y="144" text-anchor="middle">FastMCP 2.x/3.x  ·  stdio + streamable-HTTP  ·  18 tools  ·  @server.tool decorators</text>
+  <text class="d-white-sub" x="380" y="144" text-anchor="middle">FastMCP 2.x/3.x  ·  stdio + streamable-HTTP  ·  16 tools  ·  @server.tool decorators</text>
 
   <line class="d-line" x1="380" y1="156" x2="380" y2="168"/>
   <line class="d-line" x1="190" y1="168" x2="570" y2="168"/>

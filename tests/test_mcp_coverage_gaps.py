@@ -63,6 +63,7 @@ from tests.conftest import make_entry, parse_mcp_response
 
 pytestmark = pytest.mark.integration
 
+
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------
@@ -129,7 +130,47 @@ class TestSearchBudgetAndErrors:
             response = await _handle_search(store, {"query": "test"})
             data = parse_mcp_response(response)
             assert data["error"] is True
-            assert data["code"] == "SEARCH_ERROR"
+            assert data["code"] == "INTERNAL"
+
+    async def test_search_upstream_rate_limited(self, store: DuckDBStore) -> None:
+        """Search surfaces UPSTREAM_RATE_LIMITED with retry_after when provider 429s."""
+        from distillery.embedding.errors import EmbeddingProviderError
+
+        exc = EmbeddingProviderError(
+            "rate limited",
+            provider="jina",
+            status_code=429,
+            retry_after=30.0,
+            endpoint="https://api.jina.ai/v1/embeddings",
+        )
+        with patch.object(store, "search", side_effect=exc):
+            response = await _handle_search(store, {"query": "test"})
+            data = parse_mcp_response(response)
+            assert data["error"] is True
+            assert data["code"] == "UPSTREAM_RATE_LIMITED"
+            assert data["details"]["provider"] == "jina"
+            assert data["details"]["endpoint"] == "https://api.jina.ai/v1/embeddings"
+            assert data["details"]["status_code"] == 429
+            assert data["details"]["retry_after"] == 30.0
+
+    async def test_search_upstream_error(self, store: DuckDBStore) -> None:
+        """Search surfaces UPSTREAM_ERROR for non-429 provider failures."""
+        from distillery.embedding.errors import EmbeddingProviderError
+
+        exc = EmbeddingProviderError(
+            "service unavailable",
+            provider="openai",
+            status_code=503,
+            retry_after=None,
+        )
+        with patch.object(store, "search", side_effect=exc):
+            response = await _handle_search(store, {"query": "test"})
+            data = parse_mcp_response(response)
+            assert data["error"] is True
+            assert data["code"] == "UPSTREAM_ERROR"
+            assert data["details"]["provider"] == "openai"
+            assert data["details"]["status_code"] == 503
+            assert "retry_after" not in data["details"]
 
     async def test_search_logs_search_event(self, store: DuckDBStore) -> None:
         """Successful search with results calls store.log_search."""
@@ -191,7 +232,7 @@ class TestFindSimilarGaps:
             response = await _handle_find_similar(store, {"content": "test"})
             data = parse_mcp_response(response)
             assert data["error"] is True
-            assert data["code"] == "FIND_SIMILAR_ERROR"
+            assert data["code"] == "INTERNAL"
 
 
 class TestAggregateGaps:
@@ -202,7 +243,7 @@ class TestAggregateGaps:
             response = await _handle_aggregate(store, {"group_by": "entry_type"})
             data = parse_mcp_response(response)
             assert data["error"] is True
-            assert data["code"] == "AGGREGATE_ERROR"
+            assert data["code"] == "INTERNAL"
 
     async def test_aggregate_invalid_limit(self, store: DuckDBStore) -> None:
         response = await _handle_aggregate(store, {"group_by": "entry_type", "limit": "bad"})
@@ -234,7 +275,7 @@ class TestStatusGaps:
             response = await _handle_metrics(store, cfg, None, {"scope": "summary"})
             data = parse_mcp_response(response)
             assert data["error"] is True
-            assert data["code"] == "METRICS_ERROR"
+            assert data["code"] == "INTERNAL"
 
     async def test_status_remote_db_path(self) -> None:
         """Remote db paths (md:, s3://) are not expanded."""
@@ -323,7 +364,7 @@ class TestStoreGaps:
         )
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "RESERVED_PREFIX"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_store_non_string_tag_in_reserved_check(self, store: DuckDBStore) -> None:
         """Non-string tag triggers INVALID_PARAMS during reserved prefix check."""
@@ -368,7 +409,7 @@ class TestStoreGaps:
             )
             data = parse_mcp_response(response)
             assert data["error"] is True
-            assert data["code"] == "STORE_ERROR"
+            assert data["code"] == "INTERNAL"
 
     async def test_store_invalid_source_rejected(self, store: DuckDBStore) -> None:
         """Invalid source value is rejected with INVALID_PARAMS error."""
@@ -421,7 +462,7 @@ class TestGetGaps:
             response = await _handle_get(store, {"entry_id": "any"})
             data = parse_mcp_response(response)
             assert data["error"] is True
-            assert data["code"] == "STORE_ERROR"
+            assert data["code"] == "INTERNAL"
 
     async def test_get_with_feedback_logging(
         self, store: DuckDBStore, config: DistilleryConfig
@@ -539,7 +580,7 @@ class TestUpdateGaps:
             response = await _handle_update(store, {"entry_id": entry_id, "content": "updated"})
             data = parse_mcp_response(response)
             assert data["error"] is True
-            assert data["code"] == "STORE_ERROR"
+            assert data["code"] == "INTERNAL"
 
     async def test_update_value_error(self, store: DuckDBStore) -> None:
         entry = make_entry(content="Value error test")
@@ -606,7 +647,9 @@ class TestListGaps:
         long_content = "x" * 500
         entry = make_entry(content=long_content)
         await store.store(entry)
-        response = await _handle_list(store, {"content_max_length": 10})
+        # content_max_length applies to output_mode="full"; pass it explicitly
+        # since the default is now "summary" (issue #311).
+        response = await _handle_list(store, {"content_max_length": 10, "output_mode": "full"})
         data = parse_mcp_response(response)
         assert data["count"] >= 1
         for e in data["entries"]:
@@ -638,7 +681,7 @@ class TestListGaps:
             response = await _handle_list(store, {})
             data = parse_mcp_response(response)
             assert data["error"] is True
-            assert data["code"] == "LIST_ERROR"
+            assert data["code"] == "INTERNAL"
 
 
 class TestBuildFilters:
@@ -692,7 +735,7 @@ class TestClassifyGaps:
             )
             data = parse_mcp_response(response)
             assert data["error"] is True
-            assert data["code"] == "STORE_ERROR"
+            assert data["code"] == "INTERNAL"
 
     async def test_classify_invalid_confidence_type(
         self, store: DuckDBStore, config: DistilleryConfig
@@ -826,7 +869,7 @@ class TestClassifyGaps:
             )
             data = parse_mcp_response(response)
             assert data["error"] is True
-            assert data["code"] == "STORE_ERROR"
+            assert data["code"] == "INTERNAL"
 
     async def test_classify_update_key_error(
         self, store: DuckDBStore, config: DistilleryConfig
@@ -875,7 +918,7 @@ class TestReviewQueueGaps:
             response = await _handle_list(store, {"output_mode": "review"})
             data = parse_mcp_response(response)
             assert data["error"] is True
-            assert data["code"] == "LIST_ERROR"
+            assert data["code"] == "INTERNAL"
 
 
 class TestResolveReviewGaps:
@@ -886,7 +929,7 @@ class TestResolveReviewGaps:
             response = await _handle_resolve_review(store, {"entry_id": "any", "action": "approve"})
             data = parse_mcp_response(response)
             assert data["error"] is True
-            assert data["code"] == "STORE_ERROR"
+            assert data["code"] == "INTERNAL"
 
     async def test_resolve_review_not_found(self, store: DuckDBStore) -> None:
         response = await _handle_resolve_review(
@@ -969,7 +1012,7 @@ class TestResolveReviewGaps:
             )
             data = parse_mcp_response(response)
             assert data["error"] is True
-            assert data["code"] == "STORE_ERROR"
+            assert data["code"] == "INTERNAL"
 
 
 # ===========================================================================
@@ -1003,7 +1046,7 @@ class TestMetricsGaps:
             response = await _handle_metrics(store, config, embedding_provider, {})
             data = parse_mcp_response(response)
             assert data["error"] is True
-            assert data["code"] == "METRICS_ERROR"
+            assert data["code"] == "INTERNAL"
 
 
 class TestQualityGaps:
@@ -1018,7 +1061,7 @@ class TestQualityGaps:
             response = await _handle_metrics(store, cfg, None, {"scope": "search_quality"})
             data = parse_mcp_response(response)
             assert data["error"] is True
-            assert data["code"] == "METRICS_ERROR"
+            assert data["code"] == "INTERNAL"
 
 
 class TestStaleGaps:
@@ -1032,7 +1075,7 @@ class TestStaleGaps:
             response = await _handle_stale(store, config, {})
             data = parse_mcp_response(response)
             assert data["error"] is True
-            assert data["code"] == "STALE_ERROR"
+            assert data["code"] == "INTERNAL"
 
 
 class TestTagTreeGaps:
@@ -1046,7 +1089,7 @@ class TestTagTreeGaps:
             response = await _handle_tag_tree(store, {})
             data = parse_mcp_response(response)
             assert data["error"] is True
-            assert data["code"] == "TAG_TREE_ERROR"
+            assert data["code"] == "INTERNAL"
 
 
 # ===========================================================================
@@ -1061,7 +1104,7 @@ class TestWatchGaps:
         response = await _handle_watch(store, {"action": "add", "url": 123, "source_type": "rss"})
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "INVALID_FIELD"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_watch_add_source_type_not_string(self, store: DuckDBStore) -> None:
         response = await _handle_watch(
@@ -1069,7 +1112,7 @@ class TestWatchGaps:
         )
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "INVALID_FIELD"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_watch_add_invalid_poll_interval(self, store: DuckDBStore) -> None:
         response = await _handle_watch(
@@ -1083,7 +1126,7 @@ class TestWatchGaps:
         )
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "INVALID_FIELD"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_watch_add_negative_poll_interval(self, store: DuckDBStore) -> None:
         response = await _handle_watch(
@@ -1136,14 +1179,14 @@ class TestWatchGaps:
             )
             data = parse_mcp_response(response)
             assert data["error"] is True
-            assert data["code"] == "WATCH_ERROR"
+            assert data["code"] == "INTERNAL"
 
     async def test_watch_list_store_error(self, store: DuckDBStore) -> None:
         with patch.object(store, "list_feed_sources", side_effect=RuntimeError("boom")):
             response = await _handle_watch(store, {"action": "list"})
             data = parse_mcp_response(response)
             assert data["error"] is True
-            assert data["code"] == "WATCH_ERROR"
+            assert data["code"] == "INTERNAL"
 
     async def test_watch_remove_store_error(self, store: DuckDBStore) -> None:
         with patch.object(store, "remove_feed_source", side_effect=RuntimeError("boom")):
@@ -1152,7 +1195,7 @@ class TestWatchGaps:
             )
             data = parse_mcp_response(response)
             assert data["error"] is True
-            assert data["code"] == "WATCH_ERROR"
+            assert data["code"] == "INTERNAL"
 
     async def test_watch_add_duplicate(self, store: DuckDBStore) -> None:
         with patch.object(store, "add_feed_source", side_effect=ValueError("duplicate")):
@@ -1166,7 +1209,7 @@ class TestWatchGaps:
             )
             data = parse_mcp_response(response)
             assert data["error"] is True
-            assert data["code"] == "DUPLICATE_SOURCE"
+            assert data["code"] == "CONFLICT"
 
 
 class TestPollGaps:
@@ -1188,7 +1231,7 @@ class TestPollGaps:
             response = await _handle_poll(store, config, {})
             data = parse_mcp_response(response)
             assert data["error"] is True
-            assert data["code"] == "POLL_ERROR"
+            assert data["code"] == "INTERNAL"
 
 
 class TestRescoreGaps:
@@ -1200,7 +1243,7 @@ class TestRescoreGaps:
         response = await _handle_rescore(store, config, {"limit": "bad"})
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "INVALID_FIELD"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_rescore_error(self, store: DuckDBStore, config: DistilleryConfig) -> None:
         with patch(
@@ -1210,7 +1253,7 @@ class TestRescoreGaps:
             response = await _handle_rescore(store, config, {})
             data = parse_mcp_response(response)
             assert data["error"] is True
-            assert data["code"] == "RESCORE_ERROR"
+            assert data["code"] == "INTERNAL"
 
 
 class TestSuggestSourcesGaps:
@@ -1224,7 +1267,7 @@ class TestSuggestSourcesGaps:
         )
         data = parse_mcp_response(response)
         assert data["error"] is True
-        assert data["code"] == "INVALID_FIELD"
+        assert data["code"] == "INVALID_PARAMS"
 
     async def test_suggest_zero_max_suggestions(
         self, store: DuckDBStore, config: DistilleryConfig
@@ -1273,7 +1316,7 @@ class TestSuggestSourcesGaps:
             response = await _handle_interests(store, config, {"suggest_sources": True})
             data = parse_mcp_response(response)
             assert data["error"] is True
-            assert data["code"] == "EXTRACTION_ERROR"
+            assert data["code"] == "INTERNAL"
 
 
 class TestNormaliseWatchedSet:
@@ -1709,7 +1752,7 @@ class TestStoreDbSizeCheck:
             )
             data = parse_mcp_response(response)
             assert data["error"] is True
-            assert data["code"] == "DB_SIZE_EXCEEDED"
+            assert data["code"] == "BUDGET_EXCEEDED"
         finally:
             import os
 
@@ -1888,31 +1931,6 @@ class TestWebhookRecordAudit:
         await _record_audit(store, "poll", response)
         raw = await store.get_metadata("webhook_audit:poll")
         assert raw is not None
-
-
-class TestWebhookParseMcpResponse:
-    """Cover _parse_mcp_response (webhooks.py lines 283-285)."""
-
-    def test_parse_mcp_response_valid(self) -> None:
-        from mcp import types
-
-        from distillery.mcp.webhooks import _parse_mcp_response
-
-        content = [types.TextContent(type="text", text='{"key": "value"}')]
-        result = _parse_mcp_response(content)
-        assert result == {"key": "value"}
-
-    def test_parse_mcp_response_bad_data(self) -> None:
-        from distillery.mcp.webhooks import _parse_mcp_response
-
-        result = _parse_mcp_response([])
-        assert result == {}
-
-    def test_parse_mcp_response_none(self) -> None:
-        from distillery.mcp.webhooks import _parse_mcp_response
-
-        result = _parse_mcp_response(None)
-        assert result == {}
 
 
 # ===========================================================================

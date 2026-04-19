@@ -29,6 +29,9 @@ logger = logging.getLogger(__name__)
 # Atom namespace URI.
 _ATOM_NS = "http://www.w3.org/2005/Atom"
 
+# Dublin Core namespace (used for <dc:creator> in RSS feeds).
+_DC_NS = "http://purl.org/dc/elements/1.1/"
+
 # Request timeout in seconds.
 _REQUEST_TIMEOUT = 30.0
 
@@ -189,6 +192,9 @@ def _parse_rss_item(item: Element, source_url: str) -> FeedItem:
     guid = _text(item, "guid")
     pub_date_raw = _text(item, "pubDate")
 
+    # Author: try <author>, then <dc:creator>.
+    author = _text(item, "author") or _text(item, "creator", _DC_NS)
+
     item_id = guid or _stable_id(source_url, f"{link or ''}{title or ''}")
     published_at = _parse_rfc822_date(pub_date_raw) if pub_date_raw else None
 
@@ -211,6 +217,7 @@ def _parse_rss_item(item: Element, source_url: str) -> FeedItem:
         title=title,
         url=link,
         content=description,
+        author=author,
         published_at=published_at,
         raw=item,
         extra=extra,
@@ -237,6 +244,12 @@ def _parse_atom_entry(entry: Element, source_url: str) -> FeedItem:
     atom_id = _text(entry, "id", ns)
     updated_raw = _text(entry, "updated", ns)
     published_raw = _text(entry, "published", ns)
+
+    # Atom <author><name>
+    author: str | None = None
+    author_el = entry.find(f"{{{ns}}}author")
+    if author_el is not None:
+        author = _text(author_el, "name", ns)
 
     # Atom <link rel="alternate"> or first <link>
     link: str | None = None
@@ -271,6 +284,7 @@ def _parse_atom_entry(entry: Element, source_url: str) -> FeedItem:
         title=title,
         url=link,
         content=content,
+        author=author,
         published_at=published_at,
         raw=entry,
     )
@@ -394,7 +408,7 @@ class RSSAdapter:
         headers = {"User-Agent": "Distillery/0.1 (RSS adapter)"}
         headers.update(self._extra_headers)
 
-        with httpx.Client(timeout=_REQUEST_TIMEOUT) as client:
+        with httpx.Client(timeout=_REQUEST_TIMEOUT, verify=True) as client:
             response = client.get(
                 self._fetch_url,
                 headers=headers,

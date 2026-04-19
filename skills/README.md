@@ -76,15 +76,17 @@ To create a new skill:
 
 ## MCP Tools Available
 
-The Distillery MCP server provides 19 tools:
+The Distillery MCP server provides 16 tools:
 
-**CRUD:** `distillery_store`, `distillery_get`, `distillery_update`, `distillery_list`
-**Discovery:** `distillery_search`, `distillery_find_similar`, `distillery_aggregate`, `distillery_stale`, `distillery_tag_tree`
+**CRUD:** `distillery_store`, `distillery_store_batch`, `distillery_get`, `distillery_update`, `distillery_correct`
+**Discovery:** `distillery_search`, `distillery_find_similar`, `distillery_list` (with `stale_days`, `group_by`, `output` extensions)
 **Classification:** `distillery_classify`, `distillery_resolve_review`
-**Observability:** `distillery_metrics` (scopes: `"summary"`, `"full"`, `"search_quality"`)
-**Feeds:** `distillery_watch`, `distillery_poll`, `distillery_rescore`, `distillery_interests`
-**Configuration:** `distillery_configure`, `distillery_type_schemas`
+**Feeds / GitHub sync:** `distillery_watch`, `distillery_gh_sync`, `distillery_sync_status`
+**Configuration / Health:** `distillery_configure`, `distillery_status`
 **Relations:** `distillery_relations` (actions: `"add"`, `"get"`, `"remove"`)
+
+**Webhook-only endpoints** (not MCP tools): `POST /hooks/poll`, `POST /hooks/rescore`, `POST /hooks/classify-batch`, `POST /api/maintenance`
+**MCP resource:** `distillery://schemas/entry-types` (entry type schemas)
 
 See `/docs/getting-started/mcp-setup.md` for full tool documentation.
 
@@ -93,7 +95,7 @@ See `/docs/getting-started/mcp-setup.md` for full tool documentation.
 If a skill doesn't work:
 
 1. **Verify MCP server is configured:** Check your Claude Code settings file (`.claude/settings.json`)
-2. **Verify MCP server is running:** Try calling `distillery_metrics(scope="summary")` directly
+2. **Verify MCP server is running:** Try calling `distillery_list(limit=1)` directly
 3. **Check skill format:** Ensure the SKILL.md has valid YAML frontmatter and proper structure
 4. **Check error messages:** MCP errors appear in the skill output
 

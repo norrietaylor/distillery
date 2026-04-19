@@ -25,7 +25,8 @@ from distillery.config import (
     EmbeddingConfig,
     StorageConfig,
 )
-from distillery.mcp.server import _handle_get, _handle_metrics, _handle_search
+from distillery.mcp.server import _handle_get, _handle_search
+from distillery.mcp.tools.analytics import _handle_metrics
 from distillery.models import EntryType
 from distillery.store.duckdb import DuckDBStore
 from tests.conftest import MockEmbeddingProvider, make_entry, parse_mcp_response
