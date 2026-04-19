@@ -762,6 +762,348 @@ class TestFeedSourceLiveness:
 
 
 # ---------------------------------------------------------------------------
+# WAL / FTS replay hardening (issue #349)
+# ---------------------------------------------------------------------------
+
+
+class TestWalFtsReplayHardening:
+    """Regression coverage for the FTS WAL-replay failure described in #349.
+
+    DuckDB's WAL replay has been observed to fail with
+    ``Cannot drop entry "fts_main_entries"`` when a process is killed
+    between an FTS index rebuild and the next checkpoint (e.g. Fly.io
+    scale-to-zero with SIGKILL).  The mitigations exercised here are:
+
+    1. ``_rebuild_fts_index`` issues a ``CHECKPOINT`` after each rebuild
+       so FTS DDL never lingers in the WAL across process boundaries.
+    2. The WAL recovery path preserves (rather than deletes) the WAL so
+       operators can manually inspect uncommitted data.
+    3. The rebuild PRAGMA uses ``overwrite=1`` — the FTS extension's own
+       atomic drop/create — instead of emitting a separate DROP SCHEMA.
+    """
+
+    async def test_wal_checkpointed_after_store(
+        self, deterministic_embedding_provider: object
+    ) -> None:
+        """After a write + FTS rebuild, the WAL file should be empty/absent.
+
+        The fix forces a ``CHECKPOINT`` after every FTS rebuild so the
+        rebuild's DDL is persisted to the main DB file rather than the WAL.
+        If the process is hard-killed between writes, there is no FTS DDL
+        in the WAL to mis-replay.
+        """
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "wal_check.db")
+            store = DuckDBStore(
+                db_path=db_path,
+                embedding_provider=deterministic_embedding_provider,
+                hybrid_search=True,
+            )
+            await store.initialize()
+            assert store._fts_available is True  # noqa: SLF001
+            await store.store(make_entry(content="hello world from distillery"))
+
+            wal_path = Path(db_path + ".wal")
+            # DuckDB may or may not delete the sidecar after CHECKPOINT,
+            # but it must not still contain unflushed FTS DDL.  An empty
+            # file or absent file satisfies the invariant.
+            if wal_path.exists():
+                assert wal_path.stat().st_size == 0, (
+                    f"WAL still has {wal_path.stat().st_size} bytes after "
+                    "CHECKPOINT; FTS DDL may linger across process death."
+                )
+            await store.close()
+
+    async def test_rebuild_fts_uses_overwrite_pragma(self, hybrid_store: DuckDBStore) -> None:
+        """The rebuild should use the FTS extension's atomic overwrite path.
+
+        Instead of emitting a manual ``DROP SCHEMA ... CASCADE`` +
+        ``PRAGMA create_fts_index`` (which puts ordering-sensitive DDL into
+        the WAL), the rebuild delegates the drop to the FTS extension via
+        ``overwrite=1``.  Verified here by passing a fake connection to
+        ``_rebuild_fts_index`` and capturing the SQL statements it emits.
+        """
+
+        class RecordingConn:
+            def __init__(self) -> None:
+                self.queries: list[str] = []
+
+            def execute(self, query: str, *args: object, **kwargs: object) -> object:
+                self.queries.append(query)
+                return self
+
+            def fetchone(self) -> tuple[object, ...] | None:
+                return None
+
+        spy_conn = RecordingConn()
+        hybrid_store._rebuild_fts_index(spy_conn)  # type: ignore[arg-type]  # noqa: SLF001
+        joined = "\n".join(spy_conn.queries)
+
+        assert "DROP SCHEMA" not in joined, (
+            "_rebuild_fts_index must not execute a manual DROP SCHEMA — #349."
+        )
+        assert "overwrite=1" in joined, (
+            "PRAGMA create_fts_index must use overwrite=1 so the drop/create "
+            "is handled atomically inside the FTS extension"
+        )
+        assert "CHECKPOINT" in joined, (
+            "_rebuild_fts_index must CHECKPOINT to flush FTS DDL out of the WAL"
+        )
+
+    async def test_recovery_preserves_wal_as_backup(
+        self, deterministic_embedding_provider: object
+    ) -> None:
+        """On FTS WAL replay failure, the WAL must be preserved (not deleted).
+
+        Simulates the failure by constructing a fake WAL file, then calls
+        the recovery helper directly with a synthetic FTS-related error.
+        The recovery must rename the WAL to a ``.corrupt.<ts>`` sidecar so
+        operators can inspect uncommitted data.
+        """
+        import tempfile
+        from pathlib import Path
+
+        import duckdb
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "recover.db")
+            # Create a live DB file so _open_connection can succeed after
+            # the WAL is moved aside.
+            conn = duckdb.connect(db_path)
+            conn.close()
+
+            # Plant a fake WAL file (content does not matter — the recovery
+            # helper only moves the file aside).
+            wal_path = Path(db_path + ".wal")
+            wal_path.write_bytes(b"pretend-wal-data")
+            assert wal_path.exists()
+
+            store = DuckDBStore(
+                db_path=db_path,
+                embedding_provider=deterministic_embedding_provider,
+                hybrid_search=False,  # FTS not required for recovery path itself
+            )
+            fake_error = duckdb.Error(
+                "Dependency Error: Failure while replaying WAL file: Cannot drop "
+                'entry "fts_main_entries" because there are entries that depend on it.'
+            )
+            recovered = store._recover_from_wal_replay_failure(fake_error)  # noqa: SLF001
+            try:
+                # Original WAL should no longer exist.
+                assert not wal_path.exists(), "WAL should have been moved aside"
+                # Exactly one backup sibling should exist.
+                backups = list(wal_path.parent.glob("*.wal.corrupt.*"))
+                assert len(backups) == 1, f"expected 1 backup, got {backups}"
+                # And the backup should contain the original WAL bytes.
+                assert backups[0].read_bytes() == b"pretend-wal-data"
+            finally:
+                recovered.close()
+
+    async def test_recovery_ignores_unrelated_errors(
+        self, deterministic_embedding_provider: object
+    ) -> None:
+        """Non-WAL/FTS errors should re-raise, not silently move WAL aside."""
+        import tempfile
+        from pathlib import Path
+
+        import duckdb
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "unrelated.db")
+            store = DuckDBStore(
+                db_path=db_path,
+                embedding_provider=deterministic_embedding_provider,
+            )
+            unrelated = duckdb.Error("some totally unrelated failure")
+            with pytest.raises(duckdb.Error, match="unrelated"):
+                store._recover_from_wal_replay_failure(unrelated)  # noqa: SLF001
+
+    async def test_reopen_after_many_writes_survives(
+        self, deterministic_embedding_provider: object
+    ) -> None:
+        """Reopening a file-backed DB after many FTS rebuilds must succeed.
+
+        Writes trigger ``_rebuild_fts_index`` on every call.  Before the
+        fix this left a trail of FTS DDL in the WAL; a subsequent open
+        could fail replay.  With the post-rebuild CHECKPOINT the WAL
+        stays clean and reopen is a simple read of the main file.
+        """
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "reopen.db")
+
+            # Session 1 — write a handful of entries, close cleanly.
+            s1 = DuckDBStore(
+                db_path=db_path,
+                embedding_provider=deterministic_embedding_provider,
+                hybrid_search=True,
+            )
+            await s1.initialize()
+            for i in range(5):
+                await s1.store(make_entry(content=f"entry number {i} talks about duckdb"))
+            await s1.close()
+
+            # Session 2 — same file, must open without WAL replay issues
+            # and find the previously-stored rows.
+            s2 = DuckDBStore(
+                db_path=db_path,
+                embedding_provider=deterministic_embedding_provider,
+                hybrid_search=True,
+            )
+            await s2.initialize()
+            try:
+                count = s2.connection.execute("SELECT COUNT(*) FROM entries").fetchone()
+                assert count is not None
+                assert count[0] == 5
+                # And FTS must still function after reopen.
+                results = s2._bm25_search("duckdb", limit=10)  # noqa: SLF001
+                assert len(results) >= 1
+            finally:
+                await s2.close()
+
+    def test_ungraceful_shutdown_survives_fts_replay(self) -> None:
+        """SIGKILL mid-write must NOT leave the DB unopenable.
+
+        This is the exact Fly.io scale-to-zero scenario from issue #349:
+        a producer process writes entries and is killed hard before any
+        close-time CHECKPOINT runs.  A subsequent open must succeed
+        without the ``Cannot drop entry "fts_main_entries"`` replay
+        error.
+
+        Implemented via subprocess so the hard-kill (``os.kill(..., SIGKILL)``)
+        does not affect the test runner.  Runs synchronously — subprocess
+        APIs are blocking — but the subprocess itself drives asyncio.
+        """
+        import os
+        import signal
+        import subprocess
+        import sys
+        import tempfile
+        import textwrap
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "sigkill.db")
+
+            # Writer subprocess: init store, write one entry, then SIGKILL
+            # itself before the normal close()/CHECKPOINT can run.
+            writer = textwrap.dedent(
+                f"""
+                import asyncio, os, signal, sys
+                from distillery.store.duckdb import DuckDBStore
+
+                class DetEmb:
+                    model_name = "test"
+                    dimensions = 4
+                    def embed(self, text):
+                        return [0.1, 0.2, 0.3, 0.4]
+                    def embed_batch(self, texts):
+                        return [self.embed(t) for t in texts]
+
+                async def main():
+                    store = DuckDBStore(
+                        db_path={db_path!r},
+                        embedding_provider=DetEmb(),
+                        hybrid_search=True,
+                    )
+                    await store.initialize()
+                    from distillery.models import (
+                        Entry, EntrySource, EntryStatus, EntryType,
+                    )
+                    import uuid
+                    from datetime import datetime, UTC
+                    entry = Entry(
+                        id=str(uuid.uuid4()),
+                        content="sigkill survivor entry",
+                        entry_type=EntryType.REFERENCE,
+                        source=EntrySource.CLAUDE_CODE,
+                        author="test",
+                        project=None,
+                        tags=[],
+                        status=EntryStatus.ACTIVE,
+                        metadata={{}},
+                        created_at=datetime.now(tz=UTC),
+                        updated_at=datetime.now(tz=UTC),
+                        version=1,
+                    )
+                    await store.store(entry)
+                    # DO NOT close.  SIGKILL ourselves — Fly.io scale-to-zero
+                    # hard-stop simulation.
+                    os.kill(os.getpid(), signal.SIGKILL)
+
+                asyncio.run(main())
+                """
+            )
+            # Use PYTHONPATH so the subprocess uses the same source tree.
+            env = os.environ.copy()
+            src_root = str(Path(__file__).resolve().parent.parent / "src")
+            env["PYTHONPATH"] = src_root + os.pathsep + env.get("PYTHONPATH", "")
+
+            proc = subprocess.run(
+                [sys.executable, "-c", writer],
+                env=env,
+                capture_output=True,
+                timeout=60,
+            )
+            # The writer should have been terminated by SIGKILL (exit code -9).
+            assert proc.returncode == -signal.SIGKILL or proc.returncode < 0, (
+                f"writer did not SIGKILL itself (rc={proc.returncode}); "
+                f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+            )
+
+            # Reader subprocess: open the same file; must not raise.
+            reader = textwrap.dedent(
+                f"""
+                import asyncio
+                from distillery.store.duckdb import DuckDBStore
+
+                class DetEmb:
+                    model_name = "test"
+                    dimensions = 4
+                    def embed(self, text):
+                        return [0.1, 0.2, 0.3, 0.4]
+                    def embed_batch(self, texts):
+                        return [self.embed(t) for t in texts]
+
+                async def main():
+                    store = DuckDBStore(
+                        db_path={db_path!r},
+                        embedding_provider=DetEmb(),
+                        hybrid_search=True,
+                    )
+                    await store.initialize()
+                    row = store.connection.execute(
+                        "SELECT COUNT(*) FROM entries"
+                    ).fetchone()
+                    print("COUNT=" + str(row[0]))
+                    await store.close()
+
+                asyncio.run(main())
+                """
+            )
+            r_proc = subprocess.run(
+                [sys.executable, "-c", reader],
+                env=env,
+                capture_output=True,
+                timeout=60,
+                check=False,
+            )
+            assert r_proc.returncode == 0, (
+                f"reader failed to open DB after SIGKILL: rc={r_proc.returncode} "
+                f"stdout={r_proc.stdout!r} stderr={r_proc.stderr!r}"
+            )
+            # Count may be 0 (if write wasn't checkpointed) or 1 (if it was).
+            # Either outcome is acceptable; what matters is that the DB is
+            # openable at all — before the fix, it was not.
+            assert b"COUNT=" in r_proc.stdout
+
+
+# ---------------------------------------------------------------------------
 # Hybrid search (BM25 + vector RRF fusion with recency decay)
 # ---------------------------------------------------------------------------
 
