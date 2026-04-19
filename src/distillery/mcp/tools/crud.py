@@ -128,7 +128,7 @@ async def _handle_store(
     Create and persist a new Entry from the provided arguments, run deduplication and a non-fatal conflict check, and return the stored entry id along with any warnings or conflict candidates.
 
     Parameters:
-        arguments (dict): MCP tool arguments. Required keys: `content`, `entry_type`, `author`. Optional keys: `project`, `tags` (list), `metadata` (dict), `dedup_threshold` (number), `dedup_limit` (int).
+        arguments (dict): MCP tool arguments. Required keys: `content`, `entry_type`, `author`. Optional keys: `project`, `tags` (list), `metadata` (dict), `dedup_threshold` (number), `dedup_limit` (int), `include_conflict_prompt` (bool — default False; when True each conflict candidate carries the ~1–2 KB `conflict_prompt` template required to round-trip through `distillery_find_similar(conflict_check=true)`).
         cfg (DistilleryConfig | None): Optional configuration used to derive classification/conflict thresholds; when omitted a default conflict threshold of 0.60 is used.
 
     Returns:
@@ -162,7 +162,12 @@ async def _handle_store(
         May also include:
           - `warnings`: list of similar-entry summaries (id, score, content_preview) when near-duplicates were found,
           - `warning_message`: human-readable summary of warnings,
-          - `conflicts`: list of conflict candidate objects (entry_id, content_preview, similarity_score, conflict_reasoning),
+          - `conflicts`: list of conflict candidate objects. Every item carries
+            ``entry_id``, ``content_preview``, and ``similarity_score``. When
+            ``include_conflict_prompt=True`` each item additionally carries
+            ``conflict_prompt`` (the ~1–2 KB LLM template used by
+            ``distillery_find_similar(conflict_check=true)``). The prompt is
+            omitted by default to keep store responses small; see issue #348.
           - `conflict_message`: guidance message when conflict candidates are returned.
     """
     from distillery.mcp.budget import EmbeddingBudgetError, record_and_check
@@ -180,6 +185,16 @@ async def _handle_store(
         return error_response(
             "INVALID_PARAMS",
             "Field 'output_mode' must be one of: 'full', 'ids', 'review', 'summary'.",
+        )
+
+    # include_conflict_prompt opts the caller into receiving the per-candidate
+    # LLM prompt template (~1–2 KB each). Default False keeps responses small
+    # (see issue #348); callers that actually round-trip via
+    # distillery_find_similar(conflict_check=true) pass True explicitly.
+    include_conflict_prompt = arguments.get("include_conflict_prompt", False)
+    if not isinstance(include_conflict_prompt, bool):
+        return error_response(
+            "INVALID_PARAMS", "Field 'include_conflict_prompt' must be a boolean."
         )
 
     entry_type_str = arguments["entry_type"]
@@ -439,15 +454,19 @@ async def _handle_store(
                     continue
                 lines = result.entry.content.splitlines()
                 preview = lines[0][:120] if lines else result.entry.content[:120]
-                prompt = conflict_checker.build_prompt(entry.content, result.entry.content)
-                conflicts.append(
-                    {
-                        "entry_id": result.entry.id,
-                        "content_preview": preview,
-                        "similarity_score": round(result.score, 4),
-                        "conflict_prompt": prompt,
-                    }
-                )
+                candidate: dict[str, Any] = {
+                    "entry_id": result.entry.id,
+                    "content_preview": preview,
+                    "similarity_score": round(result.score, 4),
+                }
+                # conflict_prompt is opt-in (issue #348); the full template is
+                # only useful to callers who will round-trip it through
+                # distillery_find_similar(conflict_check=true).
+                if include_conflict_prompt:
+                    candidate["conflict_prompt"] = conflict_checker.build_prompt(
+                        entry.content, result.entry.content
+                    )
+                conflicts.append(candidate)
             if conflicts:
                 response_data: dict[str, Any] = {
                     "entry_id": entry_id,
