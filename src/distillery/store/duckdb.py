@@ -879,7 +879,17 @@ class DuckDBStore:
         """
         try:
             return await asyncio.to_thread(fn, *args, **kwargs)
-        except BaseException:
+        except Exception:
+            # Catching ``Exception`` — not ``BaseException`` — so that
+            # ``asyncio.CancelledError`` does not trigger rollback.  When a
+            # task is cancelled while awaiting ``asyncio.to_thread(fn, …)``
+            # the worker thread executing *fn* keeps running (Python has no
+            # safe way to forcibly stop a thread), so issuing
+            # ``conn.rollback()`` from a second worker thread would race
+            # against the still-live first one on the shared DuckDB
+            # connection — which is not thread-safe for concurrent use.
+            # On cancellation we simply re-raise; on ordinary exceptions
+            # *fn* has already returned control so the rollback is safe.
             conn = self._conn
             if conn is not None:
                 await asyncio.to_thread(self._rollback_quietly, conn)

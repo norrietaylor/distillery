@@ -137,30 +137,53 @@ class TestStatusDegraded:
     """``distillery_status`` must surface query failures (issue #363 follow-up)."""
 
     async def test_status_marks_degraded_when_count_entries_raises(
-        self, store: DuckDBStore, mock_embedding_provider: object
+        self,
+        store: DuckDBStore,
+        mock_embedding_provider: object,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """When ``count_entries`` raises, status must report ``degraded`` with the error."""
+        """When ``count_entries`` raises, status must report ``degraded`` with a stable code.
+
+        The client-facing payload must NOT contain raw exception text
+        (e.g. ``DuckDB``/``RuntimeError``/paths) — only a stable generic
+        code that callers can branch on.  The full exception is logged
+        server-side.
+        """
+        import logging
+
         from distillery.config import DistilleryConfig
         from distillery.mcp.tools.meta import _handle_status
 
         from .conftest import parse_mcp_response
 
         async def broken_count_entries(filters: object = None, **kwargs: object) -> int:
-            raise RuntimeError("DB unreadable")
+            raise RuntimeError("DB unreadable at /private/path.db")
 
         store.count_entries = broken_count_entries  # type: ignore[method-assign]
 
-        result = await _handle_status(
-            store=store,
-            config=DistilleryConfig(),
-            embedding_provider=mock_embedding_provider,
-            tool_count=16,
-            transport="http",
-            started_at=None,
-        )
+        with caplog.at_level(logging.WARNING, logger="distillery.mcp.tools.meta"):
+            result = await _handle_status(
+                store=store,
+                config=DistilleryConfig(),
+                embedding_provider=mock_embedding_provider,
+                tool_count=16,
+                transport="http",
+                started_at=None,
+            )
         payload = parse_mcp_response(result)
 
         assert payload["status"] == "degraded"
         assert payload["store"]["entry_count"] is None
-        assert "DB unreadable" in payload["store"]["entry_count_error"]
-        assert any("count_entries" in r for r in payload["degraded_reasons"])
+        assert payload["store"]["entry_count_error"] == "entry_count_unavailable"
+        assert "entry_count_unavailable" in payload["degraded_reasons"]
+        # The raw exception text must stay server-side (in logs) and never
+        # reach the client-visible payload.
+        serialised = result[0].text
+        assert "DB unreadable" not in serialised
+        assert "/private/path.db" not in serialised
+        assert "RuntimeError" not in serialised
+        # But it must still appear in the server-side log for operators —
+        # ``logger.exception`` attaches the traceback to the record's
+        # ``exc_info``; ``caplog.text`` renders it so the raw message is
+        # searchable there.
+        assert "DB unreadable" in caplog.text
