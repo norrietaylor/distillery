@@ -70,6 +70,8 @@ async def _handle_status(
     """
     from distillery import __build_sha__, __version__
 
+    degraded_reasons: list[str] = []
+
     payload: dict[str, Any] = {
         "status": "ok",
         "version": __version__,
@@ -83,16 +85,24 @@ async def _handle_status(
     # ``store.connection`` — keeps this handler backend-agnostic and prevents
     # synchronous DB I/O on the async request path.
     entry_count: int | None = None
+    count_error: str | None = None
     try:
         entry_count = await store.count_entries(filters=None)
-    except Exception:  # noqa: BLE001
-        logger.debug("distillery_status: count_entries failed", exc_info=True)
+    except Exception as exc:  # noqa: BLE001
+        # Surface the failure: a durable unqueryable-DB state (see issue #363
+        # follow-up) otherwise shows up as a silent ``null`` entry_count,
+        # masking the outage behind an ``"ok"`` status.
+        count_error = f"{type(exc).__name__}: {exc}"
+        degraded_reasons.append(f"count_entries: {count_error}")
+        logger.warning("distillery_status: count_entries failed: %s", count_error)
 
     db_size = _db_size_bytes(config)
     store_info: dict[str, Any] = {
         "entry_count": entry_count,
         "db_size_bytes": db_size,
     }
+    if count_error is not None:
+        store_info["entry_count_error"] = count_error
     payload["store"] = store_info
 
     # --- embedding provider --------------------------------------------------
@@ -102,11 +112,15 @@ async def _handle_status(
 
     # --- feed poll summary (optional, best-effort) ---------------------------
     feed_summary: dict[str, Any] = {"source_count": 0, "last_poll_at": None}
+    feed_error: str | None = None
     try:
         sources = await store.list_feed_sources()
         feed_summary["source_count"] = len(sources)
-    except Exception:  # noqa: BLE001
-        logger.debug("distillery_status: list_feed_sources failed", exc_info=True)
+    except Exception as exc:  # noqa: BLE001
+        feed_error = f"{type(exc).__name__}: {exc}"
+        feed_summary["error"] = feed_error
+        degraded_reasons.append(f"list_feed_sources: {feed_error}")
+        logger.warning("distillery_status: list_feed_sources failed: %s", feed_error)
 
     with contextlib.suppress(Exception):
         raw_audit = await store.get_metadata("webhook_audit:poll")
@@ -118,6 +132,26 @@ async def _handle_status(
             except (TypeError, ValueError):
                 pass
     payload["last_feed_poll"] = feed_summary
+
+    # --- readiness probe (issue #363 follow-up) -----------------------------
+    # Actively probe that the store can answer a trivial query so operators
+    # see durable "DB file mounts but queries fail" states instead of an
+    # ``"ok"`` status with silently-null counts.
+    probe_fn = getattr(store, "probe_readiness", None)
+    if callable(probe_fn):
+        try:
+            ready, ready_error = await probe_fn()
+        except Exception as exc:  # noqa: BLE001
+            ready, ready_error = False, f"{type(exc).__name__}: {exc}"
+        payload["store_ready"] = ready
+        if not ready:
+            payload["store_ready_error"] = ready_error
+            if ready_error:
+                degraded_reasons.append(f"readiness_probe: {ready_error}")
+
+    if degraded_reasons:
+        payload["status"] = "degraded"
+        payload["degraded_reasons"] = degraded_reasons
 
     # --- uptime --------------------------------------------------------------
     if started_at is not None:
