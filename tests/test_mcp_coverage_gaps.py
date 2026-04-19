@@ -132,6 +132,45 @@ class TestSearchBudgetAndErrors:
             assert data["error"] is True
             assert data["code"] == "INTERNAL"
 
+    async def test_search_upstream_rate_limited(self, store: DuckDBStore) -> None:
+        """Search surfaces UPSTREAM_RATE_LIMITED with retry_after when provider 429s."""
+        from distillery.embedding.errors import EmbeddingProviderError
+
+        exc = EmbeddingProviderError(
+            "rate limited",
+            provider="jina",
+            status_code=429,
+            retry_after=30.0,
+            endpoint="https://api.jina.ai/v1/embeddings",
+        )
+        with patch.object(store, "search", side_effect=exc):
+            response = await _handle_search(store, {"query": "test"})
+            data = parse_mcp_response(response)
+            assert data["error"] is True
+            assert data["code"] == "UPSTREAM_RATE_LIMITED"
+            assert data["details"]["provider"] == "jina"
+            assert data["details"]["status_code"] == 429
+            assert data["details"]["retry_after"] == 30.0
+
+    async def test_search_upstream_error(self, store: DuckDBStore) -> None:
+        """Search surfaces UPSTREAM_ERROR for non-429 provider failures."""
+        from distillery.embedding.errors import EmbeddingProviderError
+
+        exc = EmbeddingProviderError(
+            "service unavailable",
+            provider="openai",
+            status_code=503,
+            retry_after=None,
+        )
+        with patch.object(store, "search", side_effect=exc):
+            response = await _handle_search(store, {"query": "test"})
+            data = parse_mcp_response(response)
+            assert data["error"] is True
+            assert data["code"] == "UPSTREAM_ERROR"
+            assert data["details"]["provider"] == "openai"
+            assert data["details"]["status_code"] == 503
+            assert "retry_after" not in data["details"]
+
     async def test_search_logs_search_event(self, store: DuckDBStore) -> None:
         """Successful search with results calls store.log_search."""
         entry = make_entry(content="Searchable content")

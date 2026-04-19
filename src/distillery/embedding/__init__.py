@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+from .errors import EmbeddingProviderError, parse_retry_after
 from .jina import JinaEmbeddingProvider
 from .openai import OpenAIEmbeddingProvider
 from .protocol import EmbeddingProvider
 
 __all__ = [
     "EmbeddingProvider",
+    "EmbeddingProviderError",
     "JinaEmbeddingProvider",
     "OpenAIEmbeddingProvider",
     "create_provider",
+    "parse_retry_after",
 ]
 
 

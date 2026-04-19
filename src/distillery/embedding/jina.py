@@ -14,7 +14,11 @@ from typing import Any
 
 import httpx
 
+from .errors import EmbeddingProviderError, extract_retry_after
+
 logger = logging.getLogger(__name__)
+
+_PROVIDER_NAME = "jina"
 
 # Jina AI Embeddings API endpoint
 _JINA_API_URL = "https://api.jina.ai/v1/embeddings"
@@ -125,9 +129,13 @@ class JinaEmbeddingProvider:
             A list of embedding vectors, one per input text, in the same order.
 
         Raises:
-            httpx.HTTPStatusError: If all retries are exhausted or on a
-                non-retryable error.
-            RuntimeError: If the API response is malformed.
+            EmbeddingProviderError: If all retries are exhausted against a
+                retryable upstream failure (HTTP 429 / 5xx / transport error).
+                Carries ``provider``, ``status_code``, and ``retry_after`` so
+                callers (e.g. MCP tool handlers) can surface actionable
+                errors to the user.
+            RuntimeError: On non-retryable client errors (4xx other than
+                429) or malformed responses.
         """
         if not texts:
             return []
@@ -146,6 +154,8 @@ class JinaEmbeddingProvider:
         }
 
         last_error: Exception | None = None
+        last_status: int | None = None
+        last_retry_after: float | None = None
         backoff = _INITIAL_BACKOFF
 
         for attempt in range(_MAX_RETRIES):
@@ -161,16 +171,24 @@ class JinaEmbeddingProvider:
                 status = exc.response.status_code
                 if status == 429 or status >= 500:
                     last_error = exc
+                    last_status = status
+                    retry_after = extract_retry_after(exc.response)
+                    last_retry_after = retry_after
                     if attempt < _MAX_RETRIES - 1:
+                        wait = retry_after if retry_after is not None else backoff
                         logger.warning(
-                            "Jina API request failed with status %d (attempt %d/%d). "
-                            "Retrying in %.1f seconds.",
+                            "Upstream embedding provider throttled request "
+                            "(provider=%s endpoint=%s status=%d attempt=%d/%d "
+                            "retry_after=%s). Retrying in %.1f seconds.",
+                            _PROVIDER_NAME,
+                            _JINA_API_URL,
                             status,
                             attempt + 1,
                             _MAX_RETRIES,
-                            backoff,
+                            retry_after,
+                            wait,
                         )
-                        time.sleep(backoff)
+                        time.sleep(wait)
                         backoff *= 2
                     continue
                 else:
@@ -181,9 +199,14 @@ class JinaEmbeddingProvider:
 
             except httpx.RequestError as exc:
                 last_error = exc
+                last_status = None
                 if attempt < _MAX_RETRIES - 1:
                     logger.warning(
-                        "Jina API network error (attempt %d/%d): %s. Retrying in %.1f seconds.",
+                        "Upstream embedding provider network error "
+                        "(provider=%s endpoint=%s attempt=%d/%d): %s. "
+                        "Retrying in %.1f seconds.",
+                        _PROVIDER_NAME,
+                        _JINA_API_URL,
                         attempt + 1,
                         _MAX_RETRIES,
                         str(exc),
@@ -193,8 +216,21 @@ class JinaEmbeddingProvider:
                     backoff *= 2
                 continue
 
-        raise RuntimeError(
-            f"Jina API request failed after {_MAX_RETRIES} attempts. Last error: {last_error}"
+        logger.warning(
+            "Upstream embedding provider exhausted retries "
+            "(provider=%s endpoint=%s status=%s retry_after=%s attempts=%d).",
+            _PROVIDER_NAME,
+            _JINA_API_URL,
+            last_status,
+            last_retry_after,
+            _MAX_RETRIES,
+        )
+        raise EmbeddingProviderError(
+            f"Jina API request failed after {_MAX_RETRIES} attempts. Last error: {last_error}",
+            provider=_PROVIDER_NAME,
+            status_code=last_status,
+            retry_after=last_retry_after,
+            endpoint=_JINA_API_URL,
         ) from last_error
 
     # ------------------------------------------------------------------

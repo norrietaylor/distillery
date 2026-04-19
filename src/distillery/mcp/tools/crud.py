@@ -19,13 +19,14 @@ from typing import Any
 from mcp import types
 
 from distillery.config import DistilleryConfig
+from distillery.embedding.errors import EmbeddingProviderError
 from distillery.mcp.tools._common import (
     error_response,
     success_response,
     validate_required,
     validate_type,
 )
-from distillery.mcp.tools._errors import validate_limit
+from distillery.mcp.tools._errors import upstream_error_response, validate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -384,6 +385,16 @@ async def _handle_store(
     # --- persist ------------------------------------------------------------
     try:
         entry_id = await store.store(entry)
+    except EmbeddingProviderError as exc:
+        logger.warning(
+            "Upstream embedding provider failed during store "
+            "(provider=%s status=%s retry_after=%s): %s",
+            exc.provider,
+            exc.status_code,
+            exc.retry_after,
+            exc,
+        )
+        return upstream_error_response(exc)
     except Exception:  # noqa: BLE001
         logger.exception("Error storing entry")
         return error_response("INTERNAL", "Failed to store entry")
@@ -874,6 +885,16 @@ async def _handle_update(
         )
     except ValueError as exc:
         return error_response("INVALID_PARAMS", str(exc))
+    except EmbeddingProviderError as exc:
+        logger.warning(
+            "Upstream embedding provider failed during update "
+            "(provider=%s status=%s retry_after=%s): %s",
+            exc.provider,
+            exc.status_code,
+            exc.retry_after,
+            exc,
+        )
+        return upstream_error_response(exc)
     except Exception:  # noqa: BLE001
         logger.exception("Error updating entry id=%s", entry_id)
         return error_response("INTERNAL", "Failed to update entry")
@@ -1495,6 +1516,16 @@ async def _handle_correct(
     # --- atomically persist entry, relation, and archive original -----------
     try:
         new_entry_id = await store.apply_correction(new_entry, wrong_entry_id)
+    except EmbeddingProviderError as exc:
+        logger.warning(
+            "Upstream embedding provider failed during apply_correction "
+            "(provider=%s status=%s retry_after=%s): %s",
+            exc.provider,
+            exc.status_code,
+            exc.retry_after,
+            exc,
+        )
+        return upstream_error_response(exc)
     except Exception:  # noqa: BLE001
         logger.exception("Error applying correction for entry id=%s", wrong_entry_id)
         return error_response("INTERNAL", "Failed to apply correction")
