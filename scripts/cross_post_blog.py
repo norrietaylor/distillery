@@ -23,6 +23,7 @@ import yaml
 FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n(.*)$", re.DOTALL)
 DEVTO_TAG_LIMIT = 4
 HTTP_TIMEOUT_SECONDS = 30
+USER_AGENT = "distillery-cross-post/1.0 (+https://github.com/norrietaylor/distillery)"
 
 
 def parse(path: str) -> tuple[dict, str]:
@@ -56,7 +57,9 @@ def _normalize_tags(raw: object) -> list[str]:
 
 def _get_json(url: str, headers: dict, allow_statuses: tuple[int, ...] = ()) -> dict | None:
     """GET url and return parsed JSON; return None for statuses in allow_statuses; exit otherwise."""
-    req = urllib.request.Request(url, headers=headers, method="GET")
+    req = urllib.request.Request(
+        url, headers={"user-agent": USER_AGENT, **headers}, method="GET"
+    )
     try:
         with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_SECONDS) as r:
             return json.loads(r.read())
@@ -136,7 +139,7 @@ def _post_json(url: str, payload: dict, headers: dict) -> dict:
     req = urllib.request.Request(
         url,
         data=json.dumps(payload).encode(),
-        headers={"content-type": "application/json", **headers},
+        headers={"content-type": "application/json", "user-agent": USER_AGENT, **headers},
         method="POST",
     )
     try:
