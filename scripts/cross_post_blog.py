@@ -37,6 +37,9 @@ def parse(path: str) -> tuple[dict, str]:
     body = m.group(2).lstrip()
     if not fm.get("title"):
         raise SystemExit(f"{path}: frontmatter missing 'title'")
+    canonical = fm.get("canonical_url")
+    if not isinstance(canonical, str) or not canonical.strip():
+        raise SystemExit(f"{path}: frontmatter missing 'canonical_url'")
     return fm, body
 
 
@@ -49,6 +52,69 @@ def _normalize_tags(raw: object) -> list[str]:
     if isinstance(raw, list):
         return [str(t).strip() for t in raw if str(t).strip()]
     raise SystemExit("frontmatter 'tags' must be a list or comma-separated string")
+
+
+def _get_json(url: str, headers: dict) -> dict:
+    """GET url and return parsed JSON; exits on network/HTTP error."""
+    req = urllib.request.Request(url, headers=headers, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_SECONDS) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors="replace")
+        raise SystemExit(f"{url} -> HTTP {e.code}: {body}") from e
+    except urllib.error.URLError as e:
+        raise SystemExit(f"{url} -> network error: {e.reason}") from e
+
+
+def _devto_existing_url(canonical: str, api_key: str) -> str | None:
+    """Return the dev.to URL of any existing article whose canonical_url matches, else None."""
+    page = 1
+    while True:
+        articles = _get_json(
+            f"https://dev.to/api/articles/me/all?per_page=1000&page={page}",
+            {"api-key": api_key, "accept": "application/json"},
+        )
+        if not isinstance(articles, list) or not articles:
+            return None
+        for a in articles:
+            if a.get("canonical_url") == canonical:
+                return a.get("url")
+        if len(articles) < 1000:
+            return None
+        page += 1
+
+
+def _hashnode_existing_url(canonical: str, pat: str, pub_id: str) -> str | None:
+    """Return the Hashnode URL of any existing post whose canonicalUrl matches, else None."""
+    query = (
+        "query Pub($id: ObjectId!, $after: String) {"
+        "  publication(id: $id) {"
+        "    posts(first: 50, after: $after) {"
+        "      edges { node { url canonicalUrl } }"
+        "      pageInfo { hasNextPage endCursor }"
+        "    }"
+        "  }"
+        "}"
+    )
+    after: str | None = None
+    while True:
+        data = _post_json(
+            "https://gql.hashnode.com/",
+            {"query": query, "variables": {"id": pub_id, "after": after}},
+            {"Authorization": pat},
+        )
+        if data.get("errors"):
+            raise SystemExit(f"Hashnode lookup errors: {json.dumps(data['errors'], indent=2)}")
+        conn = (data.get("data") or {}).get("publication", {}).get("posts") or {}
+        for edge in conn.get("edges") or []:
+            node = edge.get("node") or {}
+            if node.get("canonicalUrl") == canonical:
+                return node.get("url")
+        page_info = conn.get("pageInfo") or {}
+        if not page_info.get("hasNextPage"):
+            return None
+        after = page_info.get("endCursor")
 
 
 def _post_json(url: str, payload: dict, headers: dict) -> dict:
@@ -132,15 +198,25 @@ def main() -> int:
     hn_pat = os.environ.get("HASHNODE_PAT")
     hn_pub = os.environ.get("HASHNODE_PUBLICATION_ID")
 
+    canonical = fm["canonical_url"]
+
     if dev_key:
-        r = post_devto(fm, body, cover, dev_key)
-        print(f"dev.to: {r.get('url') or r}")
+        existing = _devto_existing_url(canonical, dev_key)
+        if existing:
+            print(f"dev.to: already posted ({existing}); skipping")
+        else:
+            r = post_devto(fm, body, cover, dev_key)
+            print(f"dev.to: {r.get('url') or r}")
     else:
         print("DEV_API_KEY missing; skipping dev.to", file=sys.stderr)
 
     if hn_pat and hn_pub:
-        r = post_hashnode(fm, body, cover, hn_pat, hn_pub)
-        print(f"hashnode: {r.get('url') or r}")
+        existing = _hashnode_existing_url(canonical, hn_pat, hn_pub)
+        if existing:
+            print(f"hashnode: already posted ({existing}); skipping")
+        else:
+            r = post_hashnode(fm, body, cover, hn_pat, hn_pub)
+            print(f"hashnode: {r.get('url') or r}")
     else:
         print(
             "HASHNODE_PAT or HASHNODE_PUBLICATION_ID missing; skipping hashnode",
