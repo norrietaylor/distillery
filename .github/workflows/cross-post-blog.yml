@@ -29,6 +29,10 @@ jobs:
           set -euo pipefail
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             files="${{ github.event.inputs.file }}"
+            if ! printf '%s\n' "${files}" | grep -Eq '^docs/blog/.+\.md$'; then
+              echo "workflow_dispatch input must match docs/blog/**/*.md" >&2
+              exit 1
+            fi
           else
             before="${{ github.event.before }}"
             # Zero SHA on initial branch push — fall back to HEAD~1 (or empty if no parent)
@@ -68,6 +72,21 @@ jobs:
           COVER_IMAGE_URL: https://raw.githubusercontent.com/${{ github.repository }}/main/docs/assets/social-card.png
         run: |
           set -euo pipefail
+
+          has_dev=0
+          has_hn=0
+          [ -n "${DEV_API_KEY:-}" ] && has_dev=1
+          if [ -n "${HASHNODE_PAT:-}" ] && [ -n "${HASHNODE_PUBLICATION_ID:-}" ]; then
+            has_hn=1
+          elif [ -n "${HASHNODE_PAT:-}" ] || [ -n "${HASHNODE_PUBLICATION_ID:-}" ]; then
+            echo "HASHNODE_PAT and HASHNODE_PUBLICATION_ID must be set together." >&2
+            exit 1
+          fi
+          if [ "$has_dev" -eq 0 ] && [ "$has_hn" -eq 0 ]; then
+            echo "No publish target configured. Set DEV_API_KEY and/or both HASHNODE_* secrets." >&2
+            exit 1
+          fi
+
           for f in ${{ steps.files.outputs.files }}; do
             echo "::group::Posting $f"
             python scripts/cross_post_blog.py "$f"

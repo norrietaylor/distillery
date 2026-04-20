@@ -32,10 +32,23 @@ def parse(path: str) -> tuple[dict, str]:
     if not m:
         raise SystemExit(f"{path}: no YAML frontmatter")
     fm = yaml.safe_load(m.group(1)) or {}
+    if not isinstance(fm, dict):
+        raise SystemExit(f"{path}: YAML frontmatter must be a mapping")
     body = m.group(2).lstrip()
     if not fm.get("title"):
         raise SystemExit(f"{path}: frontmatter missing 'title'")
     return fm, body
+
+
+def _normalize_tags(raw: object) -> list[str]:
+    """Coerce frontmatter `tags` (list, scalar, or None) into a list of non-empty strings."""
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        return [t.strip() for t in raw.split(",") if t.strip()]
+    if isinstance(raw, list):
+        return [str(t).strip() for t in raw if str(t).strip()]
+    raise SystemExit("frontmatter 'tags' must be a list or comma-separated string")
 
 
 def _post_json(url: str, payload: dict, headers: dict) -> dict:
@@ -58,7 +71,7 @@ def _post_json(url: str, payload: dict, headers: dict) -> dict:
 
 def post_devto(fm: dict, body: str, cover_url: str, api_key: str) -> dict:
     """Publish the post to dev.to and return the API response."""
-    tags = [str(t) for t in (fm.get("tags") or [])][:DEVTO_TAG_LIMIT]
+    tags = _normalize_tags(fm.get("tags"))[:DEVTO_TAG_LIMIT]
     payload = {
         "article": {
             "title": fm["title"],
@@ -75,7 +88,7 @@ def post_devto(fm: dict, body: str, cover_url: str, api_key: str) -> dict:
 
 def post_hashnode(fm: dict, body: str, cover_url: str, pat: str, pub_id: str) -> dict:
     """Publish the post to Hashnode via GraphQL and return the post object."""
-    tags = [{"slug": str(t).lower(), "name": str(t)} for t in (fm.get("tags") or [])]
+    tags = [{"slug": t.lower(), "name": t} for t in _normalize_tags(fm.get("tags"))]
     query = (
         "mutation PublishPost($input: PublishPostInput!) {"
         "  publishPost(input: $input) { post { id slug url } }"
