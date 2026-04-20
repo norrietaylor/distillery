@@ -27,44 +27,56 @@ jobs:
         id: files
         run: |
           set -euo pipefail
+          list_file="${RUNNER_TEMP}/cross_post_files.txt"
+          : > "${list_file}"
+
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            files="${{ github.event.inputs.file }}"
-            if ! printf '%s\n' "${files}" | grep -Eq '^docs/blog/.+\.md$'; then
+            input_path="${{ github.event.inputs.file }}"
+            if ! printf '%s' "${input_path}" | grep -Eq '^docs/blog/[[:alnum:]_./-]+\.md$'; then
               echo "workflow_dispatch input must match docs/blog/**/*.md" >&2
               exit 1
             fi
+            if printf '%s' "${input_path}" | grep -Eq '(^|/)\.\.(/|$)'; then
+              echo "workflow_dispatch input must not contain '..'" >&2
+              exit 1
+            fi
+            if [ ! -f "${input_path}" ]; then
+              echo "file not found: ${input_path}" >&2
+              exit 1
+            fi
+            printf '%s\n' "${input_path}" > "${list_file}"
           else
             before="${{ github.event.before }}"
             # Zero SHA on initial branch push — fall back to HEAD~1 (or empty if no parent)
             if [ "${before}" = "0000000000000000000000000000000000000000" ]; then
               before=$(git rev-parse --verify "${{ github.sha }}^" 2>/dev/null || echo "")
             fi
-            if [ -z "${before}" ]; then
-              files=""
-            else
-              files=$(git diff --name-only --diff-filter=A \
+            if [ -n "${before}" ]; then
+              git diff --name-only --diff-filter=A \
                 "${before}" "${{ github.sha }}" \
-                -- 'docs/blog/**/*.md' | tr '\n' ' ')
+                -- 'docs/blog/**/*.md' > "${list_file}"
             fi
           fi
-          echo "files=${files}" >> "$GITHUB_OUTPUT"
-          echo "Files to post: ${files:-<none>}"
 
-      - name: Skip if nothing new
-        if: steps.files.outputs.files == ''
-        run: echo "No newly added blog posts — nothing to cross-post."
+          if [ -s "${list_file}" ]; then
+            echo "has_files=1" >> "$GITHUB_OUTPUT"
+            echo "Files to post:"
+            cat "${list_file}"
+          else
+            echo "No newly added blog posts — nothing to cross-post."
+          fi
 
       - uses: actions/setup-python@v5
-        if: steps.files.outputs.files != ''
+        if: steps.files.outputs.has_files == '1'
         with:
           python-version: '3.12'
 
       - name: Install deps
-        if: steps.files.outputs.files != ''
+        if: steps.files.outputs.has_files == '1'
         run: pip install --quiet pyyaml
 
       - name: Cross-post each file
-        if: steps.files.outputs.files != ''
+        if: steps.files.outputs.has_files == '1'
         env:
           DEV_API_KEY: ${{ secrets.DEV_API_KEY }}
           HASHNODE_PAT: ${{ secrets.HASHNODE_PAT }}
@@ -87,8 +99,9 @@ jobs:
             exit 1
           fi
 
-          for f in ${{ steps.files.outputs.files }}; do
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
             echo "::group::Posting $f"
             python scripts/cross_post_blog.py "$f"
             echo "::endgroup::"
-          done
+          done < "${RUNNER_TEMP}/cross_post_files.txt"
