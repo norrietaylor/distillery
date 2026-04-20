@@ -15,6 +15,7 @@ on:
 jobs:
   cross-post:
     runs-on: ubuntu-latest
+    environment: blog-cross-post
     permissions:
       contents: read
     steps:
