@@ -5,14 +5,20 @@ build-backend = "hatchling.build"
 [project]
 name = "distillery-mcp"
 version = "0.4.0"
-description = "A configurable embedding system with DuckDB storage and MCP server integration"
+description = "Persistent shared memory for Claude Code — MCP server with DuckDB vector search, semantic dedup, and ambient intelligence for team knowledge"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [
     {name = "Distillery Contributors"}
 ]
 license = {text = "Apache-2.0"}
-keywords = ["knowledge-base", "second-brain", "embeddings", "mcp", "claude-code", "vector-search", "duckdb"]
+keywords = [
+    "claude-code", "mcp", "mcp-server", "fastmcp",
+    "agent-memory", "long-term-memory", "llm-wiki",
+    "knowledge-base", "second-brain", "team-knowledge",
+    "embeddings", "semantic-search", "vector-search",
+    "duckdb", "hnsw", "ambient-intelligence",
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
