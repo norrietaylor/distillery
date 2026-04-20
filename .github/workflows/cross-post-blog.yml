@@ -1,0 +1,65 @@
+name: Cross-post blog to dev.to and Hashnode
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/blog/**.md'
+  workflow_dispatch:
+    inputs:
+      file:
+        description: 'Path to blog markdown (e.g. docs/blog/my-post.md)'
+        required: true
+        type: string
+
+jobs:
+  cross-post:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Determine blog files to post
+        id: files
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            files="${{ github.event.inputs.file }}"
+          else
+            files=$(git diff --name-only --diff-filter=A \
+              "${{ github.event.before }}" "${{ github.sha }}" \
+              -- 'docs/blog/*.md' | tr '\n' ' ')
+          fi
+          echo "files=${files}" >> "$GITHUB_OUTPUT"
+          echo "Files to post: ${files:-<none>}"
+
+      - name: Skip if nothing new
+        if: steps.files.outputs.files == ''
+        run: echo "No newly added blog posts — nothing to cross-post."
+
+      - uses: actions/setup-python@v5
+        if: steps.files.outputs.files != ''
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        if: steps.files.outputs.files != ''
+        run: pip install --quiet pyyaml
+
+      - name: Cross-post each file
+        if: steps.files.outputs.files != ''
+        env:
+          DEV_API_KEY: ${{ secrets.DEV_API_KEY }}
+          HASHNODE_PAT: ${{ secrets.HASHNODE_PAT }}
+          HASHNODE_PUBLICATION_ID: ${{ secrets.HASHNODE_PUBLICATION_ID }}
+          COVER_IMAGE_URL: https://raw.githubusercontent.com/${{ github.repository }}/main/docs/assets/social-card.png
+        run: |
+          set -euo pipefail
+          for f in ${{ steps.files.outputs.files }}; do
+            echo "::group::Posting $f"
+            python scripts/cross_post_blog.py "$f"
+            echo "::endgroup::"
+          done
