@@ -1,6 +1,6 @@
 site_name: Distillery
 site_url: https://norrietaylor.github.io/distillery/
-site_description: Team Knowledge, Distilled — A team knowledge base powered by Claude Code
+site_description: Persistent shared memory for Claude Code — MCP server with DuckDB vector search, semantic dedup, and ambient intelligence for team knowledge. Agent memory, LLM wiki, long-term context for AI coding sessions.
 repo_url: https://github.com/norrietaylor/distillery
 repo_name: norrietaylor/distillery
 

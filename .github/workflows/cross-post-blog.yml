@@ -1,0 +1,107 @@
+name: Cross-post blog to dev.to and Hashnode
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/blog/**/*.md'
+  workflow_dispatch:
+    inputs:
+      file:
+        description: 'Path to blog markdown (e.g. docs/blog/my-post.md)'
+        required: true
+        type: string
+
+jobs:
+  cross-post:
+    runs-on: ubuntu-latest
+    environment: blog-cross-post
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine blog files to post
+        id: files
+        run: |
+          set -euo pipefail
+          list_file="${RUNNER_TEMP}/cross_post_files.txt"
+          : > "${list_file}"
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            input_path="${{ github.event.inputs.file }}"
+            if ! printf '%s' "${input_path}" | grep -Eq '^docs/blog/[[:alnum:]_./-]+\.md$'; then
+              echo "workflow_dispatch input must match docs/blog/**/*.md" >&2
+              exit 1
+            fi
+            if printf '%s' "${input_path}" | grep -Eq '(^|/)\.\.(/|$)'; then
+              echo "workflow_dispatch input must not contain '..'" >&2
+              exit 1
+            fi
+            if [ ! -f "${input_path}" ]; then
+              echo "file not found: ${input_path}" >&2
+              exit 1
+            fi
+            printf '%s\n' "${input_path}" > "${list_file}"
+          else
+            before="${{ github.event.before }}"
+            # Zero SHA on initial branch push — fall back to HEAD~1 (or empty if no parent)
+            if [ "${before}" = "0000000000000000000000000000000000000000" ]; then
+              before=$(git rev-parse --verify "${{ github.sha }}^" 2>/dev/null || echo "")
+            fi
+            if [ -n "${before}" ]; then
+              git diff --name-only --diff-filter=A \
+                "${before}" "${{ github.sha }}" \
+                -- 'docs/blog/**/*.md' > "${list_file}"
+            fi
+          fi
+
+          if [ -s "${list_file}" ]; then
+            echo "has_files=1" >> "$GITHUB_OUTPUT"
+            echo "Files to post:"
+            cat "${list_file}"
+          else
+            echo "No newly added blog posts — nothing to cross-post."
+          fi
+
+      - uses: actions/setup-python@v5
+        if: steps.files.outputs.has_files == '1'
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        if: steps.files.outputs.has_files == '1'
+        run: pip install --quiet pyyaml
+
+      - name: Cross-post each file
+        if: steps.files.outputs.has_files == '1'
+        env:
+          DEV_API_KEY: ${{ secrets.DEV_API_KEY }}
+          HASHNODE_PAT: ${{ secrets.HASHNODE_PAT }}
+          HASHNODE_PUBLICATION_ID: ${{ secrets.HASHNODE_PUBLICATION_ID }}
+          COVER_IMAGE_URL: https://raw.githubusercontent.com/${{ github.repository }}/main/docs/assets/social-card.png
+        run: |
+          set -euo pipefail
+
+          has_dev=0
+          has_hn=0
+          [ -n "${DEV_API_KEY:-}" ] && has_dev=1
+          if [ -n "${HASHNODE_PAT:-}" ] && [ -n "${HASHNODE_PUBLICATION_ID:-}" ]; then
+            has_hn=1
+          elif [ -n "${HASHNODE_PAT:-}" ] || [ -n "${HASHNODE_PUBLICATION_ID:-}" ]; then
+            echo "HASHNODE_PAT and HASHNODE_PUBLICATION_ID must be set together." >&2
+            exit 1
+          fi
+          if [ "$has_dev" -eq 0 ] && [ "$has_hn" -eq 0 ]; then
+            echo "No publish target configured. Set DEV_API_KEY and/or both HASHNODE_* secrets." >&2
+            exit 1
+          fi
+
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            echo "::group::Posting $f"
+            python scripts/cross_post_blog.py "$f"
+            echo "::endgroup::"
+          done < "${RUNNER_TEMP}/cross_post_files.txt"
