@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'docs/blog/**.md'
+      - 'docs/blog/**/*.md'
   workflow_dispatch:
     inputs:
       file:
@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
       - name: Determine blog files to post
         id: files
@@ -29,9 +29,18 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             files="${{ github.event.inputs.file }}"
           else
-            files=$(git diff --name-only --diff-filter=A \
-              "${{ github.event.before }}" "${{ github.sha }}" \
-              -- 'docs/blog/*.md' | tr '\n' ' ')
+            before="${{ github.event.before }}"
+            # Zero SHA on initial branch push — fall back to HEAD~1 (or empty if no parent)
+            if [ "${before}" = "0000000000000000000000000000000000000000" ]; then
+              before=$(git rev-parse --verify "${{ github.sha }}^" 2>/dev/null || echo "")
+            fi
+            if [ -z "${before}" ]; then
+              files=""
+            else
+              files=$(git diff --name-only --diff-filter=A \
+                "${before}" "${{ github.sha }}" \
+                -- 'docs/blog/**/*.md' | tr '\n' ' ')
+            fi
           fi
           echo "files=${files}" >> "$GITHUB_OUTPUT"
           echo "Files to post: ${files:-<none>}"

@@ -22,9 +22,11 @@ import yaml
 
 FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n(.*)$", re.DOTALL)
 DEVTO_TAG_LIMIT = 4
+HTTP_TIMEOUT_SECONDS = 30
 
 
 def parse(path: str) -> tuple[dict, str]:
+    """Return (frontmatter_dict, body_markdown) parsed from a .md file."""
     text = Path(path).read_text()
     m = FRONTMATTER_RE.match(text)
     if not m:
@@ -37,6 +39,7 @@ def parse(path: str) -> tuple[dict, str]:
 
 
 def _post_json(url: str, payload: dict, headers: dict) -> dict:
+    """POST JSON to url and return the parsed JSON response; exits on network/HTTP error."""
     req = urllib.request.Request(
         url,
         data=json.dumps(payload).encode(),
@@ -44,14 +47,17 @@ def _post_json(url: str, payload: dict, headers: dict) -> dict:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req) as r:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_SECONDS) as r:
             return json.loads(r.read())
     except urllib.error.HTTPError as e:
         body = e.read().decode(errors="replace")
         raise SystemExit(f"{url} -> HTTP {e.code}: {body}") from e
+    except urllib.error.URLError as e:
+        raise SystemExit(f"{url} -> network error: {e.reason}") from e
 
 
 def post_devto(fm: dict, body: str, cover_url: str, api_key: str) -> dict:
+    """Publish the post to dev.to and return the API response."""
     tags = [str(t) for t in (fm.get("tags") or [])][:DEVTO_TAG_LIMIT]
     payload = {
         "article": {
@@ -68,6 +74,7 @@ def post_devto(fm: dict, body: str, cover_url: str, api_key: str) -> dict:
 
 
 def post_hashnode(fm: dict, body: str, cover_url: str, pat: str, pub_id: str) -> dict:
+    """Publish the post to Hashnode via GraphQL and return the post object."""
     tags = [{"slug": str(t).lower(), "name": str(t)} for t in (fm.get("tags") or [])]
     query = (
         "mutation PublishPost($input: PublishPostInput!) {"
@@ -96,6 +103,7 @@ def post_hashnode(fm: dict, body: str, cover_url: str, pat: str, pub_id: str) ->
 
 
 def main() -> int:
+    """CLI entry point: publish a single markdown file to dev.to and Hashnode."""
     if len(sys.argv) != 2:
         print("usage: cross_post_blog.py <path-to-markdown>", file=sys.stderr)
         return 2
