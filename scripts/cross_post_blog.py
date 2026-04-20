@@ -54,13 +54,15 @@ def _normalize_tags(raw: object) -> list[str]:
     raise SystemExit("frontmatter 'tags' must be a list or comma-separated string")
 
 
-def _get_json(url: str, headers: dict) -> dict:
-    """GET url and return parsed JSON; exits on network/HTTP error."""
+def _get_json(url: str, headers: dict, allow_statuses: tuple[int, ...] = ()) -> dict | None:
+    """GET url and return parsed JSON; return None for statuses in allow_statuses; exit otherwise."""
     req = urllib.request.Request(url, headers=headers, method="GET")
     try:
         with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_SECONDS) as r:
             return json.loads(r.read())
     except urllib.error.HTTPError as e:
+        if e.code in allow_statuses:
+            return None
         body = e.read().decode(errors="replace")
         raise SystemExit(f"{url} -> HTTP {e.code}: {body}") from e
     except urllib.error.URLError as e:
@@ -68,13 +70,25 @@ def _get_json(url: str, headers: dict) -> dict:
 
 
 def _devto_existing_url(canonical: str, api_key: str) -> str | None:
-    """Return the dev.to URL of any existing article whose canonical_url matches, else None."""
+    """Return the dev.to URL of any existing article whose canonical_url matches, else None.
+
+    Best-effort: if the API key lacks read scope (401/403) we skip the dedup check
+    and return None so publishing can proceed.
+    """
     page = 1
     while True:
         articles = _get_json(
             f"https://dev.to/api/articles/me/all?per_page=1000&page={page}",
             {"api-key": api_key, "accept": "application/json"},
+            allow_statuses=(401, 403),
         )
+        if articles is None:
+            print(
+                "dev.to dedup skipped: API key lacks read scope (401/403). "
+                "Generate a key with read_articles scope to enable dedup.",
+                file=sys.stderr,
+            )
+            return None
         if not isinstance(articles, list) or not articles:
             return None
         for a in articles:
