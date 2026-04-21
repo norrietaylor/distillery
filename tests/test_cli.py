@@ -247,7 +247,6 @@ class TestStatusCommand:
             main(["status", "--config", missing])
         assert exc.value.code == 1
 
-
 # ---------------------------------------------------------------------------
 # --config flag
 # ---------------------------------------------------------------------------
@@ -1090,3 +1089,77 @@ class TestMaintenanceClassifyCommand:
         assert "usage" in captured.out.lower()
         assert "--type" in captured.out
         assert "--mode" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# eval subcommand — JSON error-path contract (issue #376)
+# ---------------------------------------------------------------------------
+
+
+class TestEvalJsonErrorPaths:
+    """``distillery eval --format json`` must emit valid JSON on every exit path.
+
+    Consumers pipe the output to ``jq``; a plain-text error breaks the pipeline.
+    """
+
+    def test_eval_json_missing_scenarios_dir(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """A nonexistent --scenarios-dir emits a JSON envelope on stdout."""
+        missing = tmp_path / "does-not-exist"
+        with pytest.raises(SystemExit) as exc:
+            main(["eval", "--format", "json", "--scenarios-dir", str(missing)])
+        assert exc.value.code == 1
+        captured = capsys.readouterr()
+        # stdout must be valid JSON — json.loads should not raise.
+        data = json.loads(captured.out)
+        assert data["status"] == "error"
+        assert data["code"] == "scenarios_dir_not_found"
+        assert str(missing) in data["message"]
+        assert data["scenarios_dir"] == str(missing)
+
+    def test_eval_json_unknown_skill_filter(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """An unknown --skill filter yields an empty selection and JSON error envelope."""
+        # Create an empty scenarios directory so the dir-exists check passes
+        # but the skill filter produces zero matches.
+        scenarios_dir = tmp_path / "scenarios"
+        scenarios_dir.mkdir()
+        with pytest.raises(SystemExit) as exc:
+            main(
+                [
+                    "eval",
+                    "--format",
+                    "json",
+                    "--scenarios-dir",
+                    str(scenarios_dir),
+                    "--skill",
+                    "totally-not-a-skill",
+                ]
+            )
+        assert exc.value.code == 1
+        captured = capsys.readouterr()
+        data = json.loads(captured.out)
+        assert data["status"] == "error"
+        assert data["code"] == "no_scenarios_found"
+        assert data["skill_filter"] == "totally-not-a-skill"
+
+    def test_eval_text_missing_scenarios_dir_unchanged(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Text format retains the existing ``Error:`` stderr message."""
+        missing = tmp_path / "does-not-exist"
+        with pytest.raises(SystemExit) as exc:
+            main(["eval", "--format", "text", "--scenarios-dir", str(missing)])
+        assert exc.value.code == 1
+        captured = capsys.readouterr()
+        # Text path writes to stderr, not stdout.
+        assert captured.out == ""
+        assert "scenarios directory not found" in captured.err
