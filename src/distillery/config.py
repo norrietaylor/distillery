@@ -1119,8 +1119,8 @@ def load_config(config_path: str | None = None) -> DistilleryConfig:
     Raises:
         FileNotFoundError: If *config_path* is given explicitly but the file
             does not exist.
-        ValueError: If the configuration contains invalid values.
-        yaml.YAMLError: If the YAML file cannot be parsed.
+        ValueError: If the configuration contains invalid values or the YAML
+            file cannot be parsed.
     """
     # If caller supplied an explicit path, it MUST exist.
     if config_path is not None:
@@ -1138,7 +1138,12 @@ def load_config(config_path: str | None = None) -> DistilleryConfig:
         return config
 
     with open(resolved, encoding="utf-8") as fh:
-        raw = yaml.safe_load(fh)
+        try:
+            raw = yaml.safe_load(fh)
+        except yaml.YAMLError as exc:
+            raise ValueError(
+                f"Invalid YAML syntax in configuration file {resolved}: {exc}"
+            ) from exc
 
     if raw is None:
         raw = {}

@@ -379,6 +379,13 @@ class TestValidationErrors:
         with pytest.raises(ValueError, match="mapping"):
             load_config(str(p))
 
+    def test_malformed_yaml_raises_value_error(self, tmp_path: Path) -> None:
+        """Malformed YAML surfaces as ValueError (not a raw yaml.YAMLError)."""
+        p = tmp_path / "distillery.yaml"
+        p.write_text("storage:\n  database_path: [unterminated\n")
+        with pytest.raises(ValueError, match="Invalid YAML syntax"):
+            load_config(str(p))
+
 
 # ---------------------------------------------------------------------------
 # Config path override via environment variable
