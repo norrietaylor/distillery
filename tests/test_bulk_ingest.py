@@ -82,35 +82,39 @@ async def test_handle_store_batch_per_entry_project_override() -> None:
 
 @pytest.mark.unit
 async def test_handle_store_batch_missing_content() -> None:
-    """Missing content should return INVALID_PARAMS."""
+    """Missing content should surface as a per-item error (issue #364)."""
     store = _make_mock_store()
     result = await _handle_store_batch(
         store=store,
         arguments={"entries": [{"author": "alice"}]},
     )
     data = parse_mcp_response(result)
-    assert data["error"] is True
-    assert data["code"] == "INVALID_PARAMS"
-    assert "content" in data["message"]
+    assert "error" not in data or data["error"] is False
+    assert data["count"] == 0
+    item_err = data["results"][0]["error"]
+    assert item_err["code"] == "INVALID_PARAMS"
+    assert "content" in item_err["message"]
 
 
 @pytest.mark.unit
 async def test_handle_store_batch_missing_author() -> None:
-    """Missing author should return INVALID_PARAMS."""
+    """Missing author should surface as a per-item error (issue #364)."""
     store = _make_mock_store()
     result = await _handle_store_batch(
         store=store,
         arguments={"entries": [{"content": "text"}]},
     )
     data = parse_mcp_response(result)
-    assert data["error"] is True
-    assert data["code"] == "INVALID_PARAMS"
-    assert "author" in data["message"]
+    assert "error" not in data or data["error"] is False
+    assert data["count"] == 0
+    item_err = data["results"][0]["error"]
+    assert item_err["code"] == "INVALID_PARAMS"
+    assert "author" in item_err["message"]
 
 
 @pytest.mark.unit
 async def test_handle_store_batch_invalid_entry_type() -> None:
-    """Invalid entry_type should return INVALID_PARAMS."""
+    """Invalid entry_type for an only-item batch: top-level success, per-item error."""
     store = _make_mock_store()
     result = await _handle_store_batch(
         store=store,
@@ -121,9 +125,17 @@ async def test_handle_store_batch_invalid_entry_type() -> None:
         },
     )
     data = parse_mcp_response(result)
-    assert data["error"] is True
-    assert data["code"] == "INVALID_PARAMS"
-    assert "bogus" in data["message"]
+    # Top-level is success (no ``error: true``) — per-item failures now
+    # surface via the ``results`` array (issue #364).
+    assert "error" not in data or data["error"] is False
+    assert data["count"] == 0
+    assert data["entry_ids"] == [None]
+    assert len(data["results"]) == 1
+    item_err = data["results"][0]["error"]
+    assert item_err["code"] == "INVALID_PARAMS"
+    assert "bogus" in item_err["message"]
+    # store.store_batch is never awaited when no valid entries remain.
+    store.store_batch.assert_not_awaited()
 
 
 @pytest.mark.unit
@@ -139,11 +151,64 @@ async def test_handle_store_batch_entry_type_note_suggests_inbox() -> None:
         },
     )
     data = parse_mcp_response(result)
-    assert data["error"] is True
-    assert data["code"] == "INVALID_PARAMS"
-    assert data["details"]["suggestion"] == "inbox"
+    # Per-item failure, not a top-level error (issue #364).
+    assert "error" not in data or data["error"] is False
+    assert data["count"] == 0
+    item_err = data["results"][0]["error"]
+    assert item_err["code"] == "INVALID_PARAMS"
+    assert item_err["details"]["suggestion"] == "inbox"
     # The prefixed message keeps per-entry context.
-    assert "entries[0]" in data["message"]
+    assert "entries[0]" in item_err["message"]
+
+
+@pytest.mark.unit
+async def test_handle_store_batch_partial_success_invalid_middle_item() -> None:
+    """Issue #364: a batch of 3 with item 2 invalid should persist items 0 and 2.
+
+    Items 0 and 2 are valid; item 1 has an invalid ``entry_type``.  The call
+    should succeed at the top level, persist the two valid entries, and
+    report the invalid item as a per-item failure with ``entry_id=None``.
+    """
+    store = _make_mock_store(["id-0", "id-2"])
+    result = await _handle_store_batch(
+        store=store,
+        arguments={
+            "entries": [
+                {"content": "first", "author": "alice"},
+                {"content": "second (bad)", "author": "bob", "entry_type": "bogus"},
+                {"content": "third", "author": "carol"},
+            ],
+        },
+    )
+    data = parse_mcp_response(result)
+    # Top level is a success response.
+    assert "error" not in data or data["error"] is False
+    assert data["count"] == 2
+    # ``entry_ids`` preserves input order with ``None`` for the failed item.
+    assert data["entry_ids"] == ["id-0", None, "id-2"]
+
+    results = data["results"]
+    assert len(results) == 3
+
+    # Item 0: persisted successfully.
+    assert results[0] == {"entry_id": "id-0", "persisted": True, "dedup_action": "stored"}
+
+    # Item 1: validation failure surfaced per-item, not at the top level.
+    assert results[1]["entry_id"] is None
+    assert results[1]["persisted"] is False
+    assert results[1]["error"]["code"] == "INVALID_PARAMS"
+    assert "entries[1]" in results[1]["error"]["message"]
+    assert "bogus" in results[1]["error"]["message"]
+
+    # Item 2: persisted successfully.
+    assert results[2] == {"entry_id": "id-2", "persisted": True, "dedup_action": "stored"}
+
+    # store_batch was called with only the two valid entries (in input order).
+    store.store_batch.assert_awaited_once()
+    passed = store.store_batch.call_args[0][0]
+    assert len(passed) == 2
+    assert passed[0].content == "first"
+    assert passed[1].content == "third"
 
 
 @pytest.mark.unit

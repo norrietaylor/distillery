@@ -640,6 +640,163 @@ async def _handle_store(
 # ---------------------------------------------------------------------------
 
 
+def _build_invalid_entry_type_error(value: Any, *, prefix: str = "") -> dict[str, Any]:
+    """Build the per-item error payload for an invalid *entry_type*.
+
+    Mirrors :func:`_invalid_entry_type_response` but returns just the
+    ``{code, message, details}`` dict so per-item errors in
+    :func:`_handle_store_batch` can surface the same structured suggestion
+    (e.g. ``"note"`` → ``"inbox"``) that callers receive from single-entry
+    validation.
+    """
+    allowed = ", ".join(sorted(_VALID_ENTRY_TYPES))
+    message = f"{prefix}Invalid entry_type {value!r}. Must be one of: {allowed}."
+    details: dict[str, Any] = {
+        "field": "entry_type",
+        "provided": value,
+        "allowed": sorted(_VALID_ENTRY_TYPES),
+    }
+    suggestion = _suggest_entry_type(value)
+    if suggestion is not None:
+        message += f" Did you mean {suggestion!r}?"
+        details["suggestion"] = suggestion
+    return {"code": "INVALID_PARAMS", "message": message, "details": details}
+
+
+def _validate_batch_item(
+    idx: int,
+    item: Any,
+    *,
+    project_default: Any,
+    created_by: str,
+    cfg: DistilleryConfig | None,
+) -> tuple[Any, dict[str, Any] | None]:
+    """Validate a single ``distillery_store_batch`` entry dict.
+
+    Returns a ``(entry, error)`` tuple where exactly one of the two is
+    non-``None``.  When validation succeeds, ``entry`` is a fully constructed
+    :class:`~distillery.models.Entry`; otherwise ``error`` is a
+    ``{code, message, details?}`` dict ready to embed in the per-item
+    ``results`` list.
+    """
+    from distillery.models import Entry, EntrySource, EntryType
+
+    if not isinstance(item, dict):
+        return None, {
+            "code": "INVALID_PARAMS",
+            "message": f"entries[{idx}] must be a dict, got {type(item).__name__}.",
+        }
+    if "content" not in item:
+        return None, {
+            "code": "INVALID_PARAMS",
+            "message": f"entries[{idx}] is missing required 'content'.",
+        }
+    if "author" not in item:
+        return None, {
+            "code": "INVALID_PARAMS",
+            "message": f"entries[{idx}] is missing required 'author'.",
+        }
+
+    entry_type_str = item.get("entry_type", "inbox")
+    if entry_type_str not in _VALID_ENTRY_TYPES:
+        return None, _build_invalid_entry_type_error(entry_type_str, prefix=f"entries[{idx}] has ")
+
+    source_str = str(item.get("source", EntrySource.CLAUDE_CODE.value))
+    if source_str not in _VALID_SOURCES:
+        return None, {
+            "code": "INVALID_PARAMS",
+            "message": (
+                f"entries[{idx}] has invalid source {source_str!r}. "
+                f"Must be one of: {', '.join(sorted(_VALID_SOURCES))}."
+            ),
+        }
+
+    # --- normalize tags (mirror _handle_store logic) ---
+    tags_raw = item.get("tags")
+    if tags_raw is None:
+        tags_normalized: list[Any] = []
+    elif isinstance(tags_raw, str):
+        tags_normalized = [tags_raw]
+    elif isinstance(tags_raw, list):
+        tags_normalized = tags_raw
+    else:
+        return None, {
+            "code": "INVALID_PARAMS",
+            "message": (
+                f"entries[{idx}] has invalid tags: must be a list or string, "
+                f"got {type(tags_raw).__name__}."
+            ),
+        }
+
+    # Validate each tag is a non-empty string
+    final_tags: list[str] = []
+    for tag in tags_normalized:
+        if not isinstance(tag, str):
+            return None, {
+                "code": "INVALID_PARAMS",
+                "message": (
+                    f"entries[{idx}]: each tag must be a string, got {type(tag).__name__}."
+                ),
+            }
+        tag_stripped = tag.strip()
+        if tag_stripped:
+            final_tags.append(tag_stripped)
+
+    # --- reserved prefix enforcement (mirror _handle_store logic) ---
+    _reserved_allowed_sources: set[str] = {EntrySource.IMPORT.value}
+    if (
+        cfg is not None
+        and cfg.tags.reserved_prefixes
+        and source_str not in _reserved_allowed_sources
+    ):
+        for tag in final_tags:
+            top = tag.split("/")[0]
+            if top in cfg.tags.reserved_prefixes:
+                return None, {
+                    "code": "INVALID_PARAMS",
+                    "message": (
+                        f"entries[{idx}]: tag {tag!r} uses reserved prefix {top!r}. "
+                        "Only internal sources may use this namespace."
+                    ),
+                }
+
+    # Validate metadata shape before coercion. ``dict(x)`` accepts
+    # lists-of-pairs and other iterables, so bare coercion would let
+    # malformed payloads slip through (or raise TypeError opaquely).
+    raw_meta = item.get("metadata")
+    if raw_meta is None:
+        metadata: dict[str, Any] = {}
+    elif isinstance(raw_meta, Mapping):
+        metadata = dict(raw_meta)
+    else:
+        return None, {
+            "code": "INVALID_PARAMS",
+            "message": f"entries[{idx}].metadata must be an object",
+        }
+
+    try:
+        entry = Entry(
+            content=item["content"],
+            entry_type=EntryType(entry_type_str),
+            source=EntrySource(source_str),
+            author=item["author"],
+            project=item.get("project", project_default),
+            tags=final_tags,
+            metadata=metadata,
+            created_by=created_by,
+        )
+    except Exception:  # noqa: BLE001
+        # Log the full traceback server-side so operators can diagnose,
+        # but return a generic client-facing message — raw exception text
+        # may include unsanitised payload fragments or internal details.
+        logger.exception("distillery_store_batch: Entry() rejected item %d", idx)
+        return None, {
+            "code": "INVALID_PARAMS",
+            "message": f"entries[{idx}]: failed to construct entry",
+        }
+    return entry, None
+
+
 async def _handle_store_batch(
     store: Any,
     arguments: dict[str, Any],
@@ -647,6 +804,15 @@ async def _handle_store_batch(
     created_by: str = "",
 ) -> list[types.TextContent]:
     """Batch-store multiple entries without dedup or conflict checks.
+
+    Per-item validation isolates failures: invalid items do not block the
+    rest of the batch.  Valid entries are persisted; each invalid entry is
+    reported as ``{entry_id: null, persisted: false, error: {...}}`` in the
+    per-item ``results`` list so callers can iterate failures without
+    retrying the whole page (issue #364).  Top-level ``error`` is still
+    returned for schema-level problems (``entries`` not a list, budget
+    exhaustion, persistence failure) that prevent the batch from running
+    at all.
 
     Args:
         store: An initialised storage backend.
@@ -658,14 +824,17 @@ async def _handle_store_batch(
 
     Returns:
         A structured MCP success or error response.  On success the payload
-        contains ``entry_ids`` (list[str], preserved for backward
-        compatibility), ``count`` (int), and ``results`` — a per-entry list
-        of ``{"entry_id", "persisted", "dedup_action"}`` dicts.  Because the
-        batch path never runs deduplication, every entry is reported as
-        ``persisted=True`` with ``dedup_action="stored"``.
+        contains:
+          - ``entry_ids`` (list[str | None]): per-item ids preserving input
+            order; ``None`` for items that failed validation.
+          - ``count`` (int): number of entries actually persisted.
+          - ``results`` (list[dict]): per-item status.  Successful items
+            carry ``{"entry_id", "persisted": true, "dedup_action":
+            "stored"}``.  Failed items carry ``{"entry_id": null,
+            "persisted": false, "error": {"code", "message", "details"?}}``.
     """
     from distillery.mcp.budget import EmbeddingBudgetError, record_and_check
-    from distillery.models import Entry, EntrySource, EntryType
+    from distillery.models import Entry
 
     entries_raw = arguments.get("entries")
     if not isinstance(entries_raw, list):
@@ -674,109 +843,39 @@ async def _handle_store_batch(
     project_default = arguments.get("project")
 
     # --- validate each entry dict -------------------------------------------
-    built: list[Entry] = []
+    # Per-item validation: invalid items are recorded but do not abort the
+    # batch.  ``valid_entries`` tracks only the items that will be persisted,
+    # along with their original index so the ``results`` list preserves input
+    # ordering.
+    valid_entries: list[tuple[int, Entry]] = []
+    item_errors: dict[int, dict[str, Any]] = {}
     for idx, item in enumerate(entries_raw):
-        if not isinstance(item, dict):
-            return error_response(
-                "INVALID_PARAMS", f"entries[{idx}] must be a dict, got {type(item).__name__}."
-            )
-        if "content" not in item:
-            return error_response(
-                "INVALID_PARAMS", f"entries[{idx}] is missing required 'content'."
-            )
-        if "author" not in item:
-            return error_response("INVALID_PARAMS", f"entries[{idx}] is missing required 'author'.")
-
-        entry_type_str = item.get("entry_type", "inbox")
-        if entry_type_str not in _VALID_ENTRY_TYPES:
-            return _invalid_entry_type_response(entry_type_str, prefix=f"entries[{idx}] has ")
-
-        source_str = str(item.get("source", EntrySource.CLAUDE_CODE.value))
-        if source_str not in _VALID_SOURCES:
-            return error_response(
-                "INVALID_PARAMS",
-                f"entries[{idx}] has invalid source {source_str!r}. "
-                f"Must be one of: {', '.join(sorted(_VALID_SOURCES))}.",
-            )
-
-        # --- normalize tags (mirror _handle_store logic) ---
-        tags_raw = item.get("tags")
-        if tags_raw is None:
-            tags_normalized = []
-        elif isinstance(tags_raw, str):
-            tags_normalized = [tags_raw]
-        elif isinstance(tags_raw, list):
-            tags_normalized = tags_raw
+        entry, err = _validate_batch_item(
+            idx,
+            item,
+            project_default=project_default,
+            created_by=created_by,
+            cfg=cfg,
+        )
+        if err is not None:
+            item_errors[idx] = err
         else:
-            return error_response(
-                "INVALID_PARAMS",
-                f"entries[{idx}] has invalid tags: must be a list or string, got {type(tags_raw).__name__}.",
-            )
+            assert entry is not None  # for mypy
+            valid_entries.append((idx, entry))
 
-        # Validate each tag is a non-empty string
-        final_tags: list[str] = []
-        for tag in tags_normalized:
-            if not isinstance(tag, str):
-                return error_response(
-                    "INVALID_PARAMS",
-                    f"entries[{idx}]: each tag must be a string, got {type(tag).__name__}.",
-                )
-            tag_stripped = tag.strip()
-            if tag_stripped:
-                final_tags.append(tag_stripped)
+    # Empty input or all-invalid input: no persistence required, but still
+    # return the per-item ``results`` (with any validation errors) so callers
+    # get actionable feedback.
+    if not valid_entries:
+        results: list[dict[str, Any]] = []
+        entry_ids_out: list[str | None] = []
+        for idx in range(len(entries_raw)):
+            err = item_errors[idx]
+            results.append({"entry_id": None, "persisted": False, "error": err})
+            entry_ids_out.append(None)
+        return success_response({"entry_ids": entry_ids_out, "results": results, "count": 0})
 
-        # --- reserved prefix enforcement (mirror _handle_store logic) ---
-        _reserved_allowed_sources: set[str] = {EntrySource.IMPORT.value}
-        if (
-            cfg is not None
-            and cfg.tags.reserved_prefixes
-            and source_str not in _reserved_allowed_sources
-        ):
-            for tag in final_tags:
-                top = tag.split("/")[0]
-                if top in cfg.tags.reserved_prefixes:
-                    return error_response(
-                        "INVALID_PARAMS",
-                        f"entries[{idx}]: tag {tag!r} uses reserved prefix {top!r}. "
-                        "Only internal sources may use this namespace.",
-                    )
-
-        # Validate metadata shape before coercion. ``dict(x)`` accepts
-        # lists-of-pairs and other iterables, so bare coercion would let
-        # malformed payloads slip through (or raise TypeError opaquely).
-        raw_meta = item.get("metadata")
-        if raw_meta is None:
-            metadata: dict[str, Any] = {}
-        elif isinstance(raw_meta, Mapping):
-            metadata = dict(raw_meta)
-        else:
-            return error_response(
-                "INVALID_PARAMS",
-                f"entries[{idx}].metadata must be an object",
-            )
-        try:
-            entry = Entry(
-                content=item["content"],
-                entry_type=EntryType(entry_type_str),
-                source=EntrySource(source_str),
-                author=item["author"],
-                project=item.get("project", project_default),
-                tags=final_tags,
-                metadata=metadata,
-                created_by=created_by,
-            )
-        except Exception:  # noqa: BLE001
-            # Log the full traceback server-side so operators can diagnose,
-            # but return a generic client-facing message — raw exception text
-            # may include unsanitised payload fragments or internal details.
-            logger.exception("distillery_store_batch: Entry() rejected item %d", idx)
-            return error_response(
-                "INVALID_PARAMS", f"entries[{idx}]: failed to construct entry"
-            )
-        built.append(entry)
-
-    if not built:
-        return success_response({"entry_ids": [], "results": [], "count": 0})
+    built = [entry for _, entry in valid_entries]
 
     # --- db size check (same guard as _handle_store) -------------------------
     if cfg is not None and cfg.rate_limit.max_db_size_mb > 0:
@@ -795,6 +894,8 @@ async def _handle_store_batch(
                 pass  # can't stat, skip check
 
     # --- embedding budget check (1 embed per entry, no dedup) ---------------
+    # Only the valid subset will be embedded / persisted, so count that
+    # rather than the raw input length.
     if cfg is not None:
         try:
             record_and_check(
@@ -814,7 +915,7 @@ async def _handle_store_batch(
 
     # --- persist ------------------------------------------------------------
     try:
-        entry_ids = await store.store_batch(built)
+        persisted_ids = await store.store_batch(built)
     except EmbeddingProviderError as exc:
         logger.warning(
             "Upstream embedding provider failed during store_batch "
@@ -830,12 +931,30 @@ async def _handle_store_batch(
         logger.exception("Error in store_batch")
         return error_response("INTERNAL", "Failed to batch-store entries")
 
+    # --- assemble per-item results ------------------------------------------
     # Batch-store does not run deduplication; every persisted entry is
     # reported with ``persisted=True`` and ``dedup_action="stored"``.  This
     # keeps the batch response shape aligned with the single-entry
     # ``distillery_store`` response so callers can rely on the same keys.
-    results = [{"entry_id": eid, "persisted": True, "dedup_action": "stored"} for eid in entry_ids]
-    return success_response({"entry_ids": entry_ids, "results": results, "count": len(entry_ids)})
+    # Invalid items (recorded in ``item_errors``) are emitted at their
+    # original position with ``entry_id=null`` so ``results`` length always
+    # matches the input length.
+    id_by_index = {
+        orig_idx: pid for (orig_idx, _), pid in zip(valid_entries, persisted_ids, strict=True)
+    }
+    results = []
+    entry_ids_out = []
+    for idx in range(len(entries_raw)):
+        if idx in item_errors:
+            results.append({"entry_id": None, "persisted": False, "error": item_errors[idx]})
+            entry_ids_out.append(None)
+        else:
+            pid = id_by_index[idx]
+            results.append({"entry_id": pid, "persisted": True, "dedup_action": "stored"})
+            entry_ids_out.append(pid)
+    return success_response(
+        {"entry_ids": entry_ids_out, "results": results, "count": len(persisted_ids)}
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1265,9 +1384,7 @@ async def _handle_list(
     # Validate the type first so truthy non-bool values (e.g. ``1``, ``"true"``)
     # can't slip past the ``is True`` check below and skip the guard entirely.
     if "batch_mode" in arguments and not isinstance(arguments["batch_mode"], bool):
-        return error_response(
-            "INVALID_PARAMS", "Field 'batch_mode' must be a boolean (true/false)"
-        )
+        return error_response("INVALID_PARAMS", "Field 'batch_mode' must be a boolean (true/false)")
     if arguments.get("batch_mode") is True:
         real_filter_keys = {
             "source",

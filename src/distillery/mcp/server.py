@@ -407,8 +407,19 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
               - project (str, optional): Per-entry project override.
           - project (str, optional): Default project applied to entries lacking one.
 
-        RETURNS (success): { entry_ids: list[str], count: int }
+        RETURNS (success): {
+            entry_ids: list[str | None],   # per-item ids; null for failed items
+            count: int,                    # number actually persisted
+            results: list[dict],           # per-item status preserving input order
+        }
+          - Successful items: { entry_id, persisted: true, dedup_action: "stored" }
+          - Failed items:     { entry_id: null, persisted: false, error: { code, message, details? } }
+        Validation failures on individual items no longer abort the batch —
+        valid entries are persisted and failures are reported per item in
+        ``results`` (issue #364).  Iterate ``results`` to discover failures.
         RETURNS (error): { error: true, code: "INVALID_PARAMS" | "BUDGET_EXCEEDED" | "INTERNAL", message: "..." }
+          Top-level error is returned only for schema-level problems
+          (``entries`` not a list, budget exhaustion, persistence failure).
 
         RELATED: distillery_store (single entry with dedup/conflict checks),
         distillery_watch (add feed sources with optional history sync)
