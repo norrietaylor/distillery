@@ -97,7 +97,7 @@ When a retrieval skill has a known current focus (an entry being synthesized abo
 
 Without this filter, the model tends to "discover" its own current focus as the top related prior entry and cites it as such, which is always nonsensical.
 
-### Rule 2 — Mandatory visible classification step (recommended)
+### Rule 2 — Visible classification step (recommended)
 
 **Status:** Recommended. Validated on the single benchmark below. Adopt in new retrieval skills where citation noise is a concern; do not retrofit across all skills until another skill replicates the effect.
 
@@ -123,7 +123,7 @@ When constructing a semantic search query from a known current focus, exclude:
 - The focus's title verbatim
 - Any other near-unique-token string that identifies the focus
 
-```
+```python
 # Bad — biases retrieval toward the focus's own KB entry
 query = "issue #116 EOL dependencies detected"
 
@@ -158,7 +158,7 @@ Skills depend on the Distillery MCP server. Call `distillery_status()` at the st
 
 If the check fails, display:
 
-```
+```text
 Warning: Distillery MCP Server Not Available
 
 The Distillery MCP server is not configured or not running.
@@ -277,7 +277,7 @@ All write skills (`/distill`, `/bookmark`, `/minutes`, `/radar`) must follow a u
 
 **Standard Confirmation Template:**
 
-```
+```text
 [<entry_type>] Stored: <entry-id>
 Project: <project> | Author: <author>
 Summary: <first 200 chars>...
@@ -295,7 +295,7 @@ Tags: tag1, tag2, tag3
 
 **Example confirmations:**
 
-```
+```text
 [SESSION] Stored: a1b2c3d4-e5f6-47g8-9h0i-j1k2l3m4n5o6
 Project: distillery | Author: Alice
 Summary: This session covered the dedup flow refactor, which consolidates four outcomes (create, skip, merge, link) into a...
@@ -371,7 +371,7 @@ Skills with `context: fork` run in an isolated agent context with a restricted `
 
 If any MCP tool returns an error, display it and stop (no retry loops):
 
-```
+```text
 Error: <error message>
 
 Actions:
