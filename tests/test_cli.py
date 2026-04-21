@@ -10,6 +10,7 @@ import pytest
 
 from distillery import __version__
 from distillery.cli import (
+    _build_parser,
     _check_health,
     _cmd_export,
     _cmd_health,
@@ -272,6 +273,84 @@ class TestConfigFlag:
         with pytest.raises(SystemExit) as exc:
             main(["status", "--config", missing])
         assert exc.value.code == 1
+
+    # --- Regression: #373 — top-level flags must survive the subparser -------
+
+    def test_top_level_config_flag_before_subcommand_reaches_handler(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """``distillery --config X status`` must honour the top-level --config.
+
+        Regression test for #373 — argparse used to let the subparser's default
+        clobber the parent-parsed value, silently dropping the user's --config.
+        """
+        cfg_path = write_config(tmp_path, ":memory:")
+        with pytest.raises(SystemExit) as exc:
+            main(["--config", str(cfg_path), "status"])
+        assert exc.value.code == 0
+
+    def test_top_level_format_flag_before_subcommand_reaches_handler(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """``distillery --format json status`` must emit JSON (regression for #373)."""
+        cfg_path = write_config(tmp_path, ":memory:")
+        with pytest.raises(SystemExit) as exc:
+            main(["--config", str(cfg_path), "--format", "json", "status"])
+        assert exc.value.code == 0
+        captured = capsys.readouterr()
+        # JSON output is a parseable object; text output is not.
+        json.loads(captured.out)
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            # Both orderings of --config: before and after the subcommand.
+            ["--config", "/tmp/X.yaml", "status"],
+            ["status", "--config", "/tmp/X.yaml"],
+            # Both orderings of --format.
+            ["--format", "json", "status"],
+            ["status", "--format", "json"],
+            # Combined — all flags before the subcommand.
+            ["--config", "/tmp/X.yaml", "--format", "json", "status"],
+            # Combined — all flags after the subcommand.
+            ["status", "--config", "/tmp/X.yaml", "--format", "json"],
+        ],
+    )
+    def test_flags_yield_same_namespace_regardless_of_position(
+        self,
+        argv: list[str],
+    ) -> None:
+        """The Namespace's ``config`` / ``format`` values must not depend on flag position.
+
+        This is the core invariant #373 violated: argparse's subparser was
+        overwriting parent-parsed values with its own default (None / "text").
+        """
+        parser = _build_parser()
+        ns = parser.parse_args(argv)
+        if "--config" in argv:
+            assert ns.config == "/tmp/X.yaml"
+        else:
+            assert ns.config is None
+        if "--format" in argv:
+            assert ns.format == "json"
+        else:
+            assert ns.format == "text"
+
+    def test_flags_on_nested_subcommand_work_in_every_position(self) -> None:
+        """Regression for #373 extended to nested ``maintenance classify``."""
+        parser = _build_parser()
+        for argv in [
+            ["--config", "X", "maintenance", "classify"],
+            ["maintenance", "--config", "X", "classify"],
+            ["maintenance", "classify", "--config", "X"],
+        ]:
+            ns = parser.parse_args(argv)
+            assert ns.config == "X", f"--config dropped for argv={argv!r}"
+            assert ns.command == "maintenance"
+            assert ns.maintenance_command == "classify"
 
 
 # ---------------------------------------------------------------------------
