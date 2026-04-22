@@ -93,7 +93,7 @@ Always create a pull request for changes — never push directly to `main`. Crea
 
 - Fixtures in `tests/conftest.py`: `make_entry()`, `mock_embedding_provider`, `deterministic_embedding_provider`, `store` (async in-memory DuckDB)
 - The `deterministic_embedding_provider` uses an 8-dimensional registry for controlled similarity testing
-- CI matrix: Python 3.11, 3.12, 3.13
+- CI matrix: Python 3.11, 3.12, 3.13, 3.14
 
 ## Skills
 
