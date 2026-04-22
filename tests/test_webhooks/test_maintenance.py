@@ -1,15 +1,18 @@
-"""Tests for POST /maintenance webhook endpoint (rewired orchestrator).
+"""Tests for POST /maintenance webhook endpoint (rewired as async orchestrator).
 
 Covers:
 - Auth requirement (401 without bearer token)
-- Orchestrator calls poll → rescore → classify-batch in sequence
-- Combined response format: {poll: {...}, rescore: {...}, classify_batch: {...}}
-- Error in one sub-operation is reported but does not block the others
+- POST returns 202 + job_id; orchestrator runs poll → rescore → classify-batch
+  on a background task and reports completion via GET /jobs/{id}
+- Combined result format: {poll: {...}, rescore: {...}, classify_batch: {...}}
+- Error in one sub-operation is reported in the job result but does not
+  block the other sub-operations
 - Cooldown enforcement (429 on second immediate request)
 """
 
 from __future__ import annotations
 
+import time
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -91,6 +94,37 @@ def _make_poller_mock(
     return mock
 
 
+def _wait_for_job(
+    client: TestClient,
+    job_id: str,
+    *,
+    timeout_s: float = 5.0,
+    poll_interval_s: float = 0.01,
+) -> dict[str, Any]:
+    """Poll ``GET /jobs/{job_id}`` until the job is terminal; return the dict."""
+    deadline = time.monotonic() + timeout_s
+    last: dict[str, Any] | None = None
+    while time.monotonic() < deadline:
+        resp = client.get(f"/jobs/{job_id}", headers=_AUTH_HEADER)
+        assert resp.status_code == 200, f"GET /jobs/{job_id} → {resp.status_code}: {resp.text}"
+        body = resp.json()
+        assert body["ok"] is True, body
+        last = body["data"]
+        if last["state"] in ("succeeded", "failed"):
+            return last
+        time.sleep(poll_interval_s)
+    raise AssertionError(f"job {job_id} did not terminate within {timeout_s}s; last={last!r}")
+
+
+def _submit_and_await(
+    client: TestClient,
+) -> dict[str, Any]:
+    """POST /maintenance, assert 202, wait for completion, return job snapshot."""
+    resp = client.post("/maintenance", headers=_AUTH_HEADER)
+    assert resp.status_code == 202, f"Expected 202, got {resp.status_code}: {resp.text}"
+    return _wait_for_job(client, resp.json()["job_id"])
+
+
 # ---------------------------------------------------------------------------
 # Auth tests
 # ---------------------------------------------------------------------------
@@ -129,16 +163,17 @@ async def test_maintenance_rejects_wrong_token(
 
 
 # ---------------------------------------------------------------------------
-# Combined response format
+# Combined result format
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
-async def test_maintenance_combined_response_format(
+async def test_maintenance_combined_result_format(
     store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """POST /maintenance returns {ok: true, data: {poll: {...}, rescore: {...},
-    classify_batch: {...}}} — all three sub-operation keys are present."""
+    """POST /maintenance returns 202 + job id; the job result contains
+    {poll: {...}, rescore: {...}, classify_batch: {...}} — all three
+    sub-operation keys are present."""
     monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
     shared = _make_shared_state(store)
 
@@ -148,18 +183,14 @@ async def test_maintenance_combined_response_format(
 
     with patch("distillery.mcp.webhooks.FeedPoller", return_value=mock_poller):
         app = create_webhook_app(shared, _make_config())
-        client = TestClient(app, raise_server_exceptions=False)
-        resp = client.post("/maintenance", headers=_AUTH_HEADER)
+        with TestClient(app, raise_server_exceptions=False) as client:
+            final = _submit_and_await(client)
 
-    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
-    body = resp.json()
-    assert body["ok"] is True
-    data = body["data"]
-
-    # All three sub-operation keys must be present.
-    assert "poll" in data, "Missing 'poll' key in maintenance response"
-    assert "rescore" in data, "Missing 'rescore' key in maintenance response"
-    assert "classify_batch" in data, "Missing 'classify_batch' key in maintenance response"
+    assert final["state"] == "succeeded", final
+    data = final["result"]
+    assert "poll" in data, "Missing 'poll' key in maintenance result"
+    assert "rescore" in data, "Missing 'rescore' key in maintenance result"
+    assert "classify_batch" in data, "Missing 'classify_batch' key in maintenance result"
 
 
 @pytest.mark.unit
@@ -174,10 +205,10 @@ async def test_maintenance_poll_sub_operation_values(
 
     with patch("distillery.mcp.webhooks.FeedPoller", return_value=mock_poller):
         app = create_webhook_app(shared, _make_config())
-        client = TestClient(app, raise_server_exceptions=False)
-        resp = client.post("/maintenance", headers=_AUTH_HEADER)
+        with TestClient(app, raise_server_exceptions=False) as client:
+            final = _submit_and_await(client)
 
-    data = resp.json()["data"]
+    data = final["result"]
     poll = data["poll"]
     assert poll["sources_polled"] == 3
     assert poll["items_fetched"] == 12
@@ -197,10 +228,10 @@ async def test_maintenance_rescore_sub_operation_values(
 
     with patch("distillery.mcp.webhooks.FeedPoller", return_value=mock_poller):
         app = create_webhook_app(shared, _make_config())
-        client = TestClient(app, raise_server_exceptions=False)
-        resp = client.post("/maintenance", headers=_AUTH_HEADER)
+        with TestClient(app, raise_server_exceptions=False) as client:
+            final = _submit_and_await(client)
 
-    data = resp.json()["data"]
+    data = final["result"]
     rescore = data["rescore"]
     assert rescore["rescored"] == 25
     assert rescore["upgraded"] == 7
@@ -220,16 +251,15 @@ async def test_maintenance_classify_batch_sub_operation_present(
 
     with patch("distillery.mcp.webhooks.FeedPoller", return_value=mock_poller):
         app = create_webhook_app(shared, _make_config())
-        client = TestClient(app, raise_server_exceptions=False)
-        resp = client.post("/maintenance", headers=_AUTH_HEADER)
+        with TestClient(app, raise_server_exceptions=False) as client:
+            final = _submit_and_await(client)
 
-    data = resp.json()["data"]
+    data = final["result"]
     classify = data["classify_batch"]
     assert "classified" in classify
     assert "pending_review" in classify
     assert "errors" in classify
     assert "by_type" in classify
-    # Fresh store has no pending entries.
     assert classify["classified"] == 0
     assert classify["pending_review"] == 0
     assert classify["errors"] == 0
@@ -244,26 +274,25 @@ async def test_maintenance_classify_batch_sub_operation_present(
 async def test_maintenance_calls_poll_then_rescore(
     store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Both FeedPoller.poll() and FeedPoller.rescore() are called during maintenance."""
+    """Both FeedPoller.poll() and FeedPoller.rescore() are called during maintenance,
+    and poll is invoked before rescore."""
     monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
     shared = _make_shared_state(store)
 
     mock_poller = _make_poller_mock()
 
-    with patch("distillery.mcp.webhooks.FeedPoller", return_value=mock_poller) as mock_cls:
+    with patch("distillery.mcp.webhooks.FeedPoller", return_value=mock_poller):
         app = create_webhook_app(shared, _make_config())
-        client = TestClient(app, raise_server_exceptions=False)
-        resp = client.post("/maintenance", headers=_AUTH_HEADER)
+        with TestClient(app, raise_server_exceptions=False) as client:
+            final = _submit_and_await(client)
 
-    assert resp.status_code == 200
-    # Both methods must be awaited, and poll must precede rescore.
+    assert final["state"] == "succeeded"
     mock_poller.poll.assert_awaited()
     mock_poller.rescore.assert_awaited()
     call_names = [c[0] for c in mock_poller.mock_calls]
     assert call_names.index("poll") < call_names.index("rescore"), (
         "poll() must be called before rescore() in the maintenance pipeline"
     )
-    _ = mock_cls  # referenced to suppress unused-variable lint
 
 
 # ---------------------------------------------------------------------------
@@ -277,7 +306,8 @@ async def test_maintenance_poll_failure_does_not_block_rescore_or_classify(
 ) -> None:
     """When poll sub-operation fails, rescore and classify-batch still run.
 
-    The top-level ok is still true; poll reports its error inline."""
+    The overall job still terminates as ``succeeded`` because maintenance is
+    best-effort; the poll error is captured in the poll sub-result."""
     monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
     shared = _make_shared_state(store)
 
@@ -285,15 +315,13 @@ async def test_maintenance_poll_failure_does_not_block_rescore_or_classify(
 
     with patch("distillery.mcp.webhooks.FeedPoller", return_value=mock_poller):
         app = create_webhook_app(shared, _make_config())
-        client = TestClient(app, raise_server_exceptions=False)
-        resp = client.post("/maintenance", headers=_AUTH_HEADER)
+        with TestClient(app, raise_server_exceptions=False) as client:
+            final = _submit_and_await(client)
 
-    assert resp.status_code == 200, (
-        f"Maintenance should return 200 even when poll fails; got {resp.status_code}"
+    assert final["state"] == "succeeded", (
+        f"Maintenance should still succeed as a whole when poll fails; got {final!r}"
     )
-    body = resp.json()
-    assert body["ok"] is True
-    data = body["data"]
+    data = final["result"]
 
     # poll sub-result reports failure.
     assert data["poll"].get("ok") is False or "error" in data["poll"], (
@@ -311,7 +339,8 @@ async def test_maintenance_rescore_failure_does_not_block_classify(
 ) -> None:
     """When rescore sub-operation fails, classify-batch still runs.
 
-    The top-level ok is still true; rescore reports its error inline."""
+    The overall job still terminates as ``succeeded``; rescore reports its
+    error inline."""
     monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
     shared = _make_shared_state(store)
 
@@ -319,22 +348,17 @@ async def test_maintenance_rescore_failure_does_not_block_classify(
 
     with patch("distillery.mcp.webhooks.FeedPoller", return_value=mock_poller):
         app = create_webhook_app(shared, _make_config())
-        client = TestClient(app, raise_server_exceptions=False)
-        resp = client.post("/maintenance", headers=_AUTH_HEADER)
+        with TestClient(app, raise_server_exceptions=False) as client:
+            final = _submit_and_await(client)
 
-    assert resp.status_code == 200, (
-        f"Maintenance should return 200 even when rescore fails; got {resp.status_code}"
+    assert final["state"] == "succeeded", (
+        f"Maintenance should still succeed as a whole when rescore fails; got {final!r}"
     )
-    body = resp.json()
-    assert body["ok"] is True
-    data = body["data"]
+    data = final["result"]
 
-    # rescore sub-result reports failure.
     assert data["rescore"].get("ok") is False or "error" in data["rescore"], (
         "rescore failure should be reflected in the rescore sub-result"
     )
-
-    # classify_batch is still present.
     assert "classify_batch" in data
 
 
@@ -347,7 +371,11 @@ async def test_maintenance_rescore_failure_does_not_block_classify(
 async def test_maintenance_cooldown_enforced(
     store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """First POST /maintenance succeeds; immediate second returns 429 with Retry-After."""
+    """First POST /maintenance returns 202; immediate second returns 429 with Retry-After.
+
+    Cooldown is reserved synchronously inside the dispatcher before the 202
+    is returned, so the second POST sees the cooldown regardless of whether
+    the first job has completed."""
     monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
     shared = _make_shared_state(store)
 
@@ -355,19 +383,22 @@ async def test_maintenance_cooldown_enforced(
 
     with patch("distillery.mcp.webhooks.FeedPoller", return_value=mock_poller):
         app = create_webhook_app(shared, _make_config())
-        client = TestClient(app, raise_server_exceptions=False)
+        with TestClient(app, raise_server_exceptions=False) as client:
+            first = client.post("/maintenance", headers=_AUTH_HEADER)
+            assert first.status_code == 202, (
+                f"First request should be accepted, got {first.status_code}"
+            )
 
-        first = client.post("/maintenance", headers=_AUTH_HEADER)
-        assert first.status_code == 200, f"First request should succeed, got {first.status_code}"
+            second = client.post("/maintenance", headers=_AUTH_HEADER)
+            assert second.status_code == 429, (
+                f"Second immediate request should be rate-limited, got {second.status_code}"
+            )
+            body = second.json()
+            assert body["ok"] is False
+            assert body["error"] == "too_early"
+            assert isinstance(body.get("retry_after"), int)
+            assert body["retry_after"] > 0
+            assert "retry-after" in second.headers
 
-        second = client.post("/maintenance", headers=_AUTH_HEADER)
-
-    assert second.status_code == 429, (
-        f"Second immediate request should be rate-limited, got {second.status_code}"
-    )
-    body = second.json()
-    assert body["ok"] is False
-    assert body["error"] == "too_early"
-    assert isinstance(body.get("retry_after"), int)
-    assert body["retry_after"] > 0
-    assert "retry-after" in second.headers
+            # Let the first job finish cleanly.
+            _wait_for_job(client, first.json()["job_id"])
