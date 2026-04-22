@@ -1126,10 +1126,15 @@ class TestEvalJsonErrorPaths:
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         """An unknown --skill filter yields an empty selection and JSON error envelope."""
-        # Create an empty scenarios directory so the dir-exists check passes
-        # but the skill filter produces zero matches.
+        # Create a scenarios directory with one scenario for a *different* known
+        # skill so the skill filter produces zero matches — rather than relying
+        # on the empty-dir short-circuit to trigger no_scenarios_found.
         scenarios_dir = tmp_path / "scenarios"
         scenarios_dir.mkdir()
+        (scenarios_dir / "sample.yaml").write_text(
+            "name: sample\nskill: recall\nprompt: test\n",
+            encoding="utf-8",
+        )
         with pytest.raises(SystemExit) as exc:
             main(
                 [

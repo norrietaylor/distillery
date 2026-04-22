@@ -33,6 +33,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from distillery import __version__
 from distillery.config import CONFIG_ENV_VAR, load_config
 
@@ -1421,7 +1423,7 @@ def _cmd_eval(
 
     try:
         scenarios = load_scenarios_from_dir(resolved_dir)
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, yaml.YAMLError, KeyError) as exc:
         _emit_eval_error(
             fmt,
             message=f"failed to load scenarios from {resolved_dir}: {exc}",
