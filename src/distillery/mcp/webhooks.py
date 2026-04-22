@@ -92,7 +92,7 @@ class _JobStatus:
     task: asyncio.Task[Any] | None = field(default=None, repr=False, compare=False)
 
 
-_jobs: "OrderedDict[str, _JobStatus]" = OrderedDict()
+_jobs: OrderedDict[str, _JobStatus] = OrderedDict()
 _active_job_by_endpoint: dict[str, str] = {}
 _jobs_lock = asyncio.Lock()
 
@@ -183,6 +183,16 @@ async def _execute_job(
     Any exception escaping *runner* is caught and recorded as a failure so it
     surfaces through :func:`jobs_route`.  Audit records are written
     best-effort after completion.
+
+    After the runner finishes — success or failure — this helper calls
+    ``store.rollback()`` (when the store exposes one) to clear any aborted
+    DuckDB transaction state that may have leaked through a code path that
+    bypasses :meth:`DuckDBStore._run_sync`.  Issue #396 documents an
+    aborted-transaction cascade observed during poll runs: without this
+    best-effort rollback, the *next* webhook job on the same process can
+    inherit a poisoned connection and fail every query with
+    ``TransactionContext Error: Current transaction is aborted (please
+    ROLLBACK)``.  Errors from rollback itself are logged and swallowed.
     """
     await _mark_job_running(job)
     try:
@@ -190,6 +200,7 @@ async def _execute_job(
     except Exception as exc:  # noqa: BLE001
         logger.exception("Webhook %s (job=%s): background runner raised", job.endpoint, job.id)
         await _finish_job(job, error=str(exc) or "unexpected error")
+        await _try_rollback(state.get("store"), job)
         return
 
     try:
@@ -202,11 +213,32 @@ async def _execute_job(
     else:
         await _finish_job(job, error=body.get("error", "unknown error"))
 
+    # Runners catch their own exceptions and return 500 JSON on failure, so
+    # reaching here with ``ok=False`` still means the runner handled an
+    # exception internally — roll back defensively in that case too.
+    if not body.get("ok"):
+        await _try_rollback(state.get("store"), job)
+
     try:
         await _record_audit(state["store"], job.endpoint, response)
     except Exception:  # noqa: BLE001
         logger.exception(
             "Webhook %s (job=%s): failed to persist audit record", job.endpoint, job.id
+        )
+
+
+async def _try_rollback(store: Any, job: _JobStatus) -> None:
+    """Call ``store.rollback()`` best-effort; never raise."""
+    rollback = getattr(store, "rollback", None) if store is not None else None
+    if rollback is None:
+        return
+    try:
+        await rollback()
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "Webhook %s (job=%s): post-failure store.rollback() raised",
+            job.endpoint,
+            job.id,
         )
 
 # ---------------------------------------------------------------------------

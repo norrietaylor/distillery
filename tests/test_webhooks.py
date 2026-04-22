@@ -504,6 +504,52 @@ async def test_handler_error_surfaces_in_job(
     assert final["error"] == "poll cycle failed"
 
 
+@pytest.mark.unit
+async def test_failed_job_triggers_store_rollback(
+    store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the bg runner fails, _execute_job calls store.rollback() so any
+    aborted DuckDB transaction state cannot leak into the next webhook job.
+
+    This is the defensive safety-net described in issue #396: a prior
+    rollback regression let a poisoned connection cascade every subsequent
+    find_similar/store call in the same poll run.  Rollback at the webhook
+    boundary is redundant with ``DuckDBStore._run_sync`` on the happy path
+    but catches regressions in paths that bypass it.
+    """
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+    config = _make_config()
+
+    # Wrap the real store with a spy on rollback() to observe calls without
+    # disturbing the rest of the interface.
+    rollback_spy = AsyncMock(wraps=store.rollback)
+    spy_store = MagicMock(wraps=store)
+    spy_store.rollback = rollback_spy
+    shared: dict[str, Any] = {
+        "store": spy_store,
+        "config": _make_config(),
+        "embedding_provider": None,
+    }
+
+    mock_poller = MagicMock()
+    mock_poller.poll = AsyncMock(side_effect=RuntimeError("feed source unavailable"))
+
+    with patch("distillery.mcp.webhooks.FeedPoller", return_value=mock_poller):
+        app = create_webhook_app(shared, config)
+        with TestClient(app, raise_server_exceptions=False) as client:
+            resp = client.post("/poll", headers=_AUTH_HEADER)
+            assert resp.status_code == 202
+            final = _wait_for_job(client, resp.json()["job_id"])
+
+    assert final["state"] == "failed", final
+    assert rollback_spy.await_count >= 1, (
+        "store.rollback() must be called when the bg runner fails "
+        "(defensive guard against issue #396 cascade)"
+    )
+
+
 # ---------------------------------------------------------------------------
 # /hooks/poll and /hooks/rescore endpoint tests (deprecated async aliases)
 # ---------------------------------------------------------------------------
