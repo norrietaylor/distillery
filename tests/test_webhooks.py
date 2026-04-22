@@ -28,27 +28,9 @@ from distillery.mcp import webhooks as webhooks_module
 from distillery.mcp.webhooks import create_webhook_app
 from distillery.store.duckdb import DuckDBStore
 
-
-@pytest.fixture(autouse=True)
-def _reset_webhook_module_state() -> Any:
-    """Clear the module-level async-job registries and endpoint locks.
-
-    Module-level dicts (``_jobs``, ``_active_job_by_endpoint``, and
-    ``_endpoint_locks``) persist across tests in the same pytest session.
-    Without this reset, a stale active-job pointer from a prior test can
-    cause a fresh test's first POST to return 409 (``job_in_progress``)
-    instead of 202.  Cooldown state is keyed in DuckDB and is isolated by
-    the fresh ``store`` fixture, so no cleanup is needed there.
-    """
-    webhooks_module._jobs.clear()
-    webhooks_module._active_job_by_endpoint.clear()
-    webhooks_module._endpoint_locks.clear()
-    webhooks_module._cooldown_ts.clear()
-    yield
-    webhooks_module._jobs.clear()
-    webhooks_module._active_job_by_endpoint.clear()
-    webhooks_module._endpoint_locks.clear()
-    webhooks_module._cooldown_ts.clear()
+# The autouse fixture that clears ``_jobs``, ``_active_job_by_endpoint``,
+# ``_endpoint_locks``, and ``_cooldown_ts`` between tests lives in the root
+# ``tests/conftest.py`` so all webhook test files share it.
 
 # ---------------------------------------------------------------------------
 # Helpers
