@@ -1345,6 +1345,11 @@ def create_webhook_app(
                 RateLimitMiddleware,
                 requests_per_minute=10,
                 requests_per_hour=100,
+                # GET /jobs/{id} is a read-only status poll; schedulers poll
+                # it every few seconds while a background job runs and would
+                # trivially exhaust the 10/min mutating-endpoint budget.
+                # The POST routes above keep their normal rate limit.
+                skip_get_path_prefixes=("/jobs/",),
             ),
         ],
     )

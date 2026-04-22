@@ -129,6 +129,14 @@ class RateLimitMiddleware:
         loopback_exempt: When ``True`` (default), skip rate limiting for
             requests originating from loopback addresses (``127.0.0.1``,
             ``::1``, ``localhost``).
+        skip_get_path_prefixes: ``GET`` requests whose path starts with any of
+            these prefixes bypass the rate limit.  Use for read-only status
+            endpoints that legitimate callers need to poll (e.g. the
+            ``GET /jobs/{id}`` endpoint in the webhook app — schedulers poll
+            it every few seconds to observe background job completion and
+            would otherwise trivially exceed the mutating-endpoint budget).
+            Non-GET methods are always checked against the limit regardless
+            of path.
     """
 
     _LOOPBACK_ADDRS: frozenset[str] = frozenset({"127.0.0.1", "::1", "localhost"})
@@ -140,12 +148,14 @@ class RateLimitMiddleware:
         requests_per_hour: int = 600,
         trust_proxy: bool = False,
         loopback_exempt: bool = True,
+        skip_get_path_prefixes: tuple[str, ...] = (),
     ) -> None:
         self.app = app
         self.requests_per_minute = requests_per_minute
         self.requests_per_hour = requests_per_hour
         self.trust_proxy = trust_proxy
         self.loopback_exempt = loopback_exempt
+        self.skip_get_path_prefixes = skip_get_path_prefixes
         # ip -> _IPWindow.  In-memory state; resets on process restart.
         self._windows: dict[str, _IPWindow] = {}
 
@@ -153,6 +163,15 @@ class RateLimitMiddleware:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
+
+        # GET-path exemption for configured read-only endpoints (e.g. job
+        # status polling).  Must be evaluated before IP extraction so it
+        # applies regardless of proxy headers.
+        if self.skip_get_path_prefixes and scope.get("method") == "GET":
+            path = scope.get("path", "")
+            if any(path.startswith(p) for p in self.skip_get_path_prefixes):
+                await self.app(scope, receive, send)
+                return
 
         # Loopback exemption: use the raw ASGI peer address (scope["client"])
         # directly — never trust _client_ip() here, because it may fall back

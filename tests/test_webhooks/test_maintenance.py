@@ -21,8 +21,26 @@ from starlette.testclient import TestClient
 
 from distillery.config import DistilleryConfig, ServerConfig, WebhookConfig
 from distillery.feeds.poller import PollerSummary, PollResult
+from distillery.mcp import webhooks as webhooks_module
 from distillery.mcp.webhooks import create_webhook_app
 from distillery.store.duckdb import DuckDBStore
+
+
+@pytest.fixture(autouse=True)
+def _reset_webhook_module_state() -> Any:
+    """Clear module-level async-job registries between tests.
+
+    See the matching fixture in ``tests/test_webhooks.py`` for rationale:
+    the ``_jobs`` + ``_active_job_by_endpoint`` dicts leak across tests and
+    cause a fresh POST to return 409 (stale active pointer) instead of 202.
+    """
+    webhooks_module._jobs.clear()
+    webhooks_module._active_job_by_endpoint.clear()
+    webhooks_module._endpoint_locks.clear()
+    yield
+    webhooks_module._jobs.clear()
+    webhooks_module._active_job_by_endpoint.clear()
+    webhooks_module._endpoint_locks.clear()
 
 # ---------------------------------------------------------------------------
 # Helpers
