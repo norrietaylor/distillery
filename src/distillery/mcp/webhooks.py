@@ -199,19 +199,18 @@ async def _execute_job(
         response = await runner(state, **kwargs)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Webhook %s (job=%s): background runner raised", job.endpoint, job.id)
-        await _finish_job(job, error=str(exc) or "unexpected error")
         await _try_rollback(state.get("store"), job)
+        # Transition terminal last so callers polling GET /jobs/{id} only see
+        # "failed" once every side effect (store rollback here; audit below
+        # on the success path) has landed.  Otherwise tests that poll until
+        # terminal and then exit the TestClient can race a dangling bg write.
+        await _finish_job(job, error=str(exc) or "unexpected error")
         return
 
     try:
         body: dict[str, Any] = json.loads(bytes(response.body).decode())
     except Exception:  # noqa: BLE001
         body = {}
-
-    if body.get("ok"):
-        await _finish_job(job, result=body.get("data", {}))
-    else:
-        await _finish_job(job, error=body.get("error", "unknown error"))
 
     # Runners catch their own exceptions and return 500 JSON on failure, so
     # reaching here with ``ok=False`` still means the runner handled an
@@ -225,6 +224,16 @@ async def _execute_job(
         logger.exception(
             "Webhook %s (job=%s): failed to persist audit record", job.endpoint, job.id
         )
+
+    # Finish last: the job's terminal state is the "all work complete"
+    # signal callers poll for.  Flipping it before the audit / rollback
+    # finishes lets a test's ``_wait_for_job`` return, the TestClient
+    # teardown cancel the task, and a dangling store write race the next
+    # test's fresh store.
+    if body.get("ok"):
+        await _finish_job(job, result=body.get("data", {}))
+    else:
+        await _finish_job(job, error=body.get("error", "unknown error"))
 
 
 async def _try_rollback(store: Any, job: _JobStatus) -> None:
