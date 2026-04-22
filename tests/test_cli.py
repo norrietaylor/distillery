@@ -247,6 +247,29 @@ class TestStatusCommand:
             main(["status", "--config", missing])
         assert exc.value.code == 1
 
+    def test_status_fresh_db_file_reports_empty_state(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Regression for #375: status on a never-created DB file exits 0 with empty state.
+
+        Mirrors ``health``'s tolerance — an operator running ``status`` on a
+        fresh install/container should see a friendly empty-state summary
+        rather than "database does not exist" with exit 1.
+        """
+        db_path = tmp_path / "fresh.db"
+        cfg_path = write_config(tmp_path, str(db_path))
+        with pytest.raises(SystemExit) as exc:
+            main(["status", "--config", str(cfg_path), "--format", "json"])
+        assert exc.value.code == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data["total_entries"] == 0
+        assert data["entries_by_type"] == {}
+        assert data["entries_by_status"] == {}
+        # Status must not create the DB file as a side effect (parity with health).
+        assert not db_path.exists()
+
 
 # ---------------------------------------------------------------------------
 # --config flag
@@ -345,6 +368,20 @@ class TestQueryStatus:
         with pytest.raises(RuntimeError):
             _query_status(bad)
 
+    def test_missing_db_file_with_existing_parent_reports_empty(
+        self, tmp_path: Path
+    ) -> None:
+        """A fresh/uninitialised DB file (parent dir exists) reports empty state (issue #375)."""
+        db_path = str(tmp_path / "never-initialized.db")
+        result = _query_status(db_path)
+        assert result["total_entries"] == 0
+        assert result["entries_by_type"] == {}
+        assert result["entries_by_status"] == {}
+        assert result["schema_version"] is None
+        assert result["duckdb_version"] is None
+        # The DB file must NOT have been created as a side effect.
+        assert not Path(db_path).exists()
+
 
 # ---------------------------------------------------------------------------
 # _cmd_status / _cmd_health unit tests
@@ -363,6 +400,17 @@ class TestCmdStatusUnit:
         missing = str(tmp_path / "missing.yaml")
         rc = _cmd_status(missing, "text")
         assert rc == 1
+
+    def test_cmd_status_returns_zero_for_missing_db_file(
+        self, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        """Regression for #375: matches _cmd_health tolerance for uninitialised DB files."""
+        db_path = tmp_path / "never-created.db"
+        cfg_path = write_config(tmp_path, str(db_path))
+        rc = _cmd_status(str(cfg_path), "text")
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "total_entries:    0" in out
 
     def test_cmd_status_json_includes_version_keys(
         self, capsys: pytest.CaptureFixture[str], tmp_path: Path
