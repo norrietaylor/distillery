@@ -268,6 +268,20 @@ def _query_status(db_path: str) -> dict[str, Any]:
     except ImportError as exc:  # pragma: no cover
         raise RuntimeError("duckdb is not installed") from exc
 
+    # If the database file has not been created yet, report an empty state
+    # instead of surfacing a "database does not exist" error from DuckDB.
+    # Mirrors :func:`_check_health`'s tolerance for fresh/uninitialised setups.
+    if db_path != ":memory:":
+        resolved = Path(db_path).expanduser()
+        if not resolved.exists() and resolved.parent.exists():
+            return {
+                "total_entries": 0,
+                "entries_by_type": {},
+                "entries_by_status": {},
+                "schema_version": None,
+                "duckdb_version": None,
+            }
+
     try:
         read_only = db_path != ":memory:"
         conn = duckdb.connect(db_path, read_only=read_only)
