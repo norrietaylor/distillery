@@ -61,17 +61,24 @@ def _wait_for_job(
     *,
     timeout_s: float = 5.0,
     poll_interval_s: float = 0.01,
+    path_prefix: str = "",
 ) -> dict[str, Any]:
-    """Poll ``GET /jobs/{job_id}`` until the job reaches a terminal state.
+    """Poll ``GET {path_prefix}/jobs/{job_id}`` until the job reaches a terminal state.
+
+    ``path_prefix`` supports the parent-mount composition case (e.g.
+    ``"/api"`` when the webhook app is mounted behind Starlette's ``Mount``)
+    — the default empty string works for tests that hit the webhook app
+    directly.
 
     Raises :class:`AssertionError` on timeout so tests fail with a readable
     message rather than flaking.  Returns the serialised job dict.
     """
     deadline = time.monotonic() + timeout_s
+    url = f"{path_prefix}/jobs/{job_id}"
     last: dict[str, Any] | None = None
     while time.monotonic() < deadline:
-        resp = client.get(f"/jobs/{job_id}", headers=_AUTH_HEADER)
-        assert resp.status_code == 200, f"GET /jobs/{job_id} → {resp.status_code}: {resp.text}"
+        resp = client.get(url, headers=_AUTH_HEADER)
+        assert resp.status_code == 200, f"GET {url} → {resp.status_code}: {resp.text}"
         body = resp.json()
         assert body["ok"] is True, body
         last = body["data"]
@@ -901,8 +908,9 @@ async def test_status_url_respects_mount_prefix(
             second_body = second.json()
             assert second_body["status_url"] == f"/api/jobs/{second_body['job_id']}"
 
-        # Let the job finish cleanly.
-        _wait_for_job(client, job_id)
+        # Let the job finish cleanly — mount-aware URL required since the
+        # webhook app is behind /api in this test.
+        _wait_for_job(client, job_id, path_prefix="/api")
 
 
 @pytest.mark.unit
