@@ -43,10 +43,12 @@ def _reset_webhook_module_state() -> Any:
     webhooks_module._jobs.clear()
     webhooks_module._active_job_by_endpoint.clear()
     webhooks_module._endpoint_locks.clear()
+    webhooks_module._cooldown_ts.clear()
     yield
     webhooks_module._jobs.clear()
     webhooks_module._active_job_by_endpoint.clear()
     webhooks_module._endpoint_locks.clear()
+    webhooks_module._cooldown_ts.clear()
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -863,7 +865,9 @@ async def test_second_poll_while_in_flight_returns_409(
 
             # Pin the cooldown to a far-past time so the 429 path does not
             # mask the 409 path.  Any parseable ISO timestamp older than the
-            # cooldown window works.
+            # cooldown window works.  Must clear the in-memory cache too —
+            # _check_cooldown prefers it over the DuckDB row.
+            webhooks_module._cooldown_ts.pop("poll", None)
             await store.set_metadata(
                 "webhook_cooldown:poll", "1970-01-01T00:00:00+00:00"
             )

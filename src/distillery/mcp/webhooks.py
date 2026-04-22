@@ -367,6 +367,25 @@ def _verify_bearer_token(request: Request, secret: str) -> bool:
 # ---------------------------------------------------------------------------
 # Cooldown helpers
 # ---------------------------------------------------------------------------
+#
+# In-memory cache (``_cooldown_ts``) keyed by endpoint name is the
+# authoritative *in-process* source of truth for cooldowns.  DuckDB
+# metadata is still written through so cooldowns survive process restarts
+# (see :func:`test_cooldown_persisted`), but reads prefer the cache.
+#
+# Rationale: the bg task spawned by a successful POST (e.g. audit writes,
+# feed-poll work) shares the single DuckDB connection with the dispatcher
+# handling the *next* request.  DuckDB's Python binding serialises
+# statements on a single connection only when called from the same thread;
+# ``asyncio.to_thread`` dispatches to the default threadpool and can run
+# two store coroutines on different workers concurrently.  In practice
+# that produces flaky ``get_metadata`` reads that miss a just-committed
+# ``set_metadata`` write — which presented as "second POST returned 409
+# (job_in_progress) instead of 429 (too_early)" across Python 3.11-3.14
+# on CI.  The in-memory cache sidesteps the race entirely for the common
+# single-process case; DuckDB retains its persistence role untouched.
+
+_cooldown_ts: dict[str, datetime] = {}
 
 
 async def _check_cooldown(
@@ -374,6 +393,11 @@ async def _check_cooldown(
     endpoint: str,
 ) -> int | None:
     """Check whether *endpoint* is within its cooldown window.
+
+    Consults :data:`_cooldown_ts` first (in-process cache, immune to the
+    DuckDB-across-threadpool race described above).  Falls back to
+    ``store.get_metadata`` on cache miss so a freshly-started process
+    picks up cooldowns persisted by a previous run.
 
     Args:
         store: A :class:`~distillery.store.protocol.DistilleryStore` instance.
@@ -384,15 +408,18 @@ async def _check_cooldown(
         The number of seconds remaining until the cooldown expires, or
         ``None`` if the endpoint is not in cooldown.
     """
-    key = f"webhook_cooldown:{endpoint}"
-    raw = await store.get_metadata(key)
-    if raw is None:
-        return None
-
-    try:
-        last_run = datetime.fromisoformat(raw)
-    except (ValueError, TypeError):
-        return None
+    last_run = _cooldown_ts.get(endpoint)
+    if last_run is None:
+        key = f"webhook_cooldown:{endpoint}"
+        raw = await store.get_metadata(key)
+        if raw is None:
+            return None
+        try:
+            last_run = datetime.fromisoformat(raw)
+        except (ValueError, TypeError):
+            return None
+        # Populate the cache for subsequent checks in this process.
+        _cooldown_ts[endpoint] = last_run
 
     cooldown = _COOLDOWN_SECONDS.get(endpoint, 300)
     now = datetime.now(UTC)
@@ -406,13 +433,18 @@ async def _check_cooldown(
 async def _set_cooldown(store: Any, endpoint: str) -> None:
     """Record the current time as the cooldown timestamp for *endpoint*.
 
+    Writes to :data:`_cooldown_ts` and to DuckDB.  The in-memory write is
+    what subsequent same-process :func:`_check_cooldown` calls read; the
+    DuckDB write is only consulted after a restart.
+
     Args:
         store: A :class:`~distillery.store.protocol.DistilleryStore` instance.
         endpoint: The endpoint name.
     """
+    now = datetime.now(UTC)
+    _cooldown_ts[endpoint] = now
     key = f"webhook_cooldown:{endpoint}"
-    now = datetime.now(UTC).isoformat()
-    await store.set_metadata(key, now)
+    await store.set_metadata(key, now.isoformat())
 
 
 # ---------------------------------------------------------------------------

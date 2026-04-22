@@ -37,10 +37,12 @@ def _reset_webhook_module_state() -> Any:
     webhooks_module._jobs.clear()
     webhooks_module._active_job_by_endpoint.clear()
     webhooks_module._endpoint_locks.clear()
+    webhooks_module._cooldown_ts.clear()
     yield
     webhooks_module._jobs.clear()
     webhooks_module._active_job_by_endpoint.clear()
     webhooks_module._endpoint_locks.clear()
+    webhooks_module._cooldown_ts.clear()
 
 # ---------------------------------------------------------------------------
 # Helpers
