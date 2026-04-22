@@ -393,9 +393,16 @@ async def test_maintenance_cooldown_enforced(
                 f"First request should be accepted, got {first.status_code}"
             )
 
+            # Wait for the first job to finish — the dispatcher's idempotency
+            # check (409) runs BEFORE the cooldown check (429).  A second
+            # POST while the first job is in flight correctly returns 409,
+            # which would mask the 429 behavior this test exists to cover.
+            _wait_for_job(client, first.json()["job_id"])
+
             second = client.post("/maintenance", headers=_AUTH_HEADER)
             assert second.status_code == 429, (
-                f"Second immediate request should be rate-limited, got {second.status_code}"
+                f"Second request after first finished should be rate-limited, "
+                f"got {second.status_code}"
             )
             body = second.json()
             assert body["ok"] is False
@@ -403,6 +410,3 @@ async def test_maintenance_cooldown_enforced(
             assert isinstance(body.get("retry_after"), int)
             assert body["retry_after"] > 0
             assert "retry-after" in second.headers
-
-            # Let the first job finish cleanly.
-            _wait_for_job(client, first.json()["job_id"])

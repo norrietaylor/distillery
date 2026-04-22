@@ -199,12 +199,33 @@ async def _execute_job(
         response = await runner(state, **kwargs)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Webhook %s (job=%s): background runner raised", job.endpoint, job.id)
+        error_message = str(exc) or "unexpected error"
         await _try_rollback(state.get("store"), job)
+
+        # Persist an audit record for the failure too — the happy path
+        # writes one below; skipping it on the except branch left the
+        # most-interesting failure mode invisible in the ``webhook_audit:*``
+        # metadata row.  Manufacture a response shape that matches the
+        # runner's own 500 JSON so ``_record_audit`` sees a consistent
+        # ``{"ok": false, "error": "..."}`` payload.
+        failure_response = JSONResponse(
+            {"ok": False, "error": error_message},
+            status_code=500,
+        )
+        try:
+            await _record_audit(state["store"], job.endpoint, failure_response)
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "Webhook %s (job=%s): failed to persist audit record on exception path",
+                job.endpoint,
+                job.id,
+            )
+
         # Transition terminal last so callers polling GET /jobs/{id} only see
-        # "failed" once every side effect (store rollback here; audit below
+        # "failed" once every side effect (rollback + audit here; audit below
         # on the success path) has landed.  Otherwise tests that poll until
         # terminal and then exit the TestClient can race a dangling bg write.
-        await _finish_job(job, error=str(exc) or "unexpected error")
+        await _finish_job(job, error=error_message)
         return
 
     try:
@@ -1177,21 +1198,20 @@ def create_webhook_app(
         if isinstance(parsed, JSONResponse):
             return parsed
 
+        # ``root_path`` is set by Starlette's ``Mount`` to the prefix the
+        # webhook app is mounted at (e.g. ``"/api"``).  Using it in
+        # ``status_url`` lets callers poll the job directly without knowing
+        # the mount layout — essential for the scheduler in distill_ops.
+        root_path = request.scope.get("root_path", "")
+
         lock = _endpoint_locks.setdefault(endpoint, asyncio.Lock())
         async with lock:
-            # Cooldown enforcement is preserved — scheduler cooldowns are the
-            # primary debounce against runaway workflow re-triggers.
-            retry_after = await _check_cooldown(store, endpoint)
-            if retry_after is not None:
-                return JSONResponse(
-                    {"ok": False, "error": "too_early", "retry_after": retry_after},
-                    status_code=429,
-                    headers={"Retry-After": str(retry_after)},
-                )
-
-            # Idempotency: if a job is already running for this endpoint,
-            # return 409 with the existing job id so the caller re-attaches
-            # rather than racing two bg tasks.
+            # Idempotency first: if a job is already running for this
+            # endpoint, return 409 with the existing job id so the caller
+            # re-attaches rather than racing a duplicate or backing off on a
+            # cooldown that merely reflects its own in-flight work.  A 429
+            # here would misdirect the scheduler into "try later" when the
+            # correct action is "poll /jobs/{id} for completion".
             existing_job_id = await _active_job_id(endpoint)
             if existing_job_id is not None:
                 return JSONResponse(
@@ -1199,9 +1219,20 @@ def create_webhook_app(
                         "ok": False,
                         "error": "job_in_progress",
                         "job_id": existing_job_id,
-                        "status_url": f"/jobs/{existing_job_id}",
+                        "status_url": f"{root_path}/jobs/{existing_job_id}",
                     },
                     status_code=409,
+                )
+
+            # Cooldown enforcement is preserved — scheduler cooldowns are the
+            # primary debounce against runaway workflow re-triggers from a
+            # caller that is NOT currently mid-job.
+            retry_after = await _check_cooldown(store, endpoint)
+            if retry_after is not None:
+                return JSONResponse(
+                    {"ok": False, "error": "too_early", "retry_after": retry_after},
+                    status_code=429,
+                    headers={"Retry-After": str(retry_after)},
                 )
 
             # Reserve cooldown + allocate a job record before releasing the
@@ -1222,7 +1253,7 @@ def create_webhook_app(
                 "ok": True,
                 "job_id": job.id,
                 "state": "queued",
-                "status_url": f"/jobs/{job.id}",
+                "status_url": f"{root_path}/jobs/{job.id}",
             },
             status_code=202,
         )

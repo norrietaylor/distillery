@@ -24,7 +24,6 @@ from starlette.routing import Mount, Route
 from starlette.testclient import TestClient
 
 from distillery.config import DistilleryConfig, ServerConfig, WebhookConfig
-from distillery.mcp import webhooks as webhooks_module
 from distillery.mcp.webhooks import create_webhook_app
 from distillery.store.duckdb import DuckDBStore
 
@@ -158,11 +157,19 @@ async def test_cooldown_enforced(store: DuckDBStore, monkeypatch: pytest.MonkeyP
 
     with TestClient(app, raise_server_exceptions=False) as client:
         # First request: enqueues job, returns 202.  Cooldown is reserved
-        # synchronously before 202 returns, so the second call sees it.
+        # synchronously before 202 returns.
         first = client.post("/poll", headers=_AUTH_HEADER)
         assert first.status_code == 202, f"Expected 202 on first request, got {first.status_code}"
 
-        # Immediate second request: must be rejected with 429.
+        # Wait for the first job to terminate before the second POST.  The
+        # dispatcher checks idempotency (409) before cooldown (429); while
+        # the first job is in flight the second call correctly returns 409.
+        # To test cooldown enforcement in isolation we need the first job
+        # out of the active-job registry first.
+        _wait_for_job(client, first.json()["job_id"])
+
+        # Second request after the first finished: now it hits the cooldown
+        # path and must be rejected with 429.
         second = client.post("/poll", headers=_AUTH_HEADER)
         assert second.status_code == 429, (
             f"Expected 429 on second request, got {second.status_code}"
@@ -178,9 +185,6 @@ async def test_cooldown_enforced(store: DuckDBStore, monkeypatch: pytest.MonkeyP
         # Retry-After header must also be present.
         assert "retry-after" in second.headers
         assert int(second.headers["retry-after"]) > 0
-
-        # Let the first job finish so the test exits cleanly.
-        _wait_for_job(client, first.json()["job_id"])
 
 
 @pytest.mark.integration
@@ -807,12 +811,12 @@ async def test_second_poll_while_in_flight_returns_409(
     store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """While a poll job is running, a second POST /poll returns 409 with the
-    existing job_id so the caller re-attaches rather than racing.
+    existing job_id (including a mount-aware ``status_url``) so the caller
+    re-attaches rather than racing a duplicate.
 
-    This guards the idempotency contract independently of the cooldown —
-    we overwrite the cooldown key with a far-past timestamp between the
-    two requests so the only reason the second call can fail is the
-    in-flight lock.
+    The dispatcher checks idempotency BEFORE cooldown, so the 409 is the
+    authoritative signal even though the first POST also reserved a
+    cooldown.  This test therefore needs no cooldown manipulation.
     """
     import asyncio
     from unittest.mock import AsyncMock, MagicMock, patch
@@ -824,10 +828,9 @@ async def test_second_poll_while_in_flight_returns_409(
     shared = _make_shared_state(store)
 
     # Slow poll: keep the bg task alive long enough that the second request
-    # sees the job mid-flight.  We use asyncio.sleep (not a cross-loop Event)
-    # because the bg task and the second dispatch run in the TestClient's
-    # portal loop — but the test function itself runs in pytest-asyncio's
-    # loop, and asyncio.Event is loop-bound.
+    # sees the job mid-flight.  asyncio.sleep is safe across portal loops
+    # (unlike asyncio.Event which is loop-bound) because the bg task and
+    # the second dispatch run in the same TestClient portal.
     result = PollResult(source_url="https://x/feed", source_type="rss")
     summary = PollerSummary(results=[result])
 
@@ -845,15 +848,6 @@ async def test_second_poll_while_in_flight_returns_409(
             assert first.status_code == 202
             first_job_id = first.json()["job_id"]
 
-            # Pin the cooldown to a far-past time so the 429 path does not
-            # mask the 409 path.  Any parseable ISO timestamp older than the
-            # cooldown window works.  Must clear the in-memory cache too —
-            # _check_cooldown prefers it over the DuckDB row.
-            webhooks_module._cooldown_ts.pop("poll", None)
-            await store.set_metadata(
-                "webhook_cooldown:poll", "1970-01-01T00:00:00+00:00"
-            )
-
             second = client.post("/poll", headers=_AUTH_HEADER)
             assert second.status_code == 409, (
                 f"Expected 409 while first job in-flight, got {second.status_code}: {second.text}"
@@ -862,6 +856,143 @@ async def test_second_poll_while_in_flight_returns_409(
             assert body["ok"] is False
             assert body["error"] == "job_in_progress"
             assert body["job_id"] == first_job_id
+            # Unmounted app: status_url has no prefix.
+            assert body["status_url"] == f"/jobs/{first_job_id}"
 
             # Wait for the first job to finish cleanly.
             _wait_for_job(client, first_job_id, timeout_s=3.0)
+
+
+@pytest.mark.unit
+async def test_status_url_respects_mount_prefix(
+    store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the webhook app is mounted at ``/api``, the ``status_url`` in
+    both the 202 and 409 responses must include the mount prefix so the
+    scheduler can GET it directly without knowing the mount layout.
+    """
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+    config = _make_config()
+    shared = _make_shared_state(store)
+    webhook_app = create_webhook_app(shared, config)
+
+    parent = Starlette(routes=[Mount("/api", app=webhook_app)])
+
+    with TestClient(parent, raise_server_exceptions=False) as client:
+        first = client.post("/api/poll", headers=_AUTH_HEADER)
+        assert first.status_code == 202, f"Expected 202, got {first.status_code}"
+        first_body = first.json()
+        job_id = first_body["job_id"]
+
+        # 202 response: status_url must include /api prefix.
+        assert first_body["status_url"] == f"/api/jobs/{job_id}", (
+            f"status_url should be mount-aware; got {first_body['status_url']!r}"
+        )
+
+        # GET /api/jobs/{id} must actually work (sanity that the URL is usable).
+        status_resp = client.get(first_body["status_url"], headers=_AUTH_HEADER)
+        assert status_resp.status_code == 200, (
+            f"Reported status_url must be GETtable; got {status_resp.status_code}"
+        )
+
+        # 409 response (while in flight): same mount-aware shape.
+        second = client.post("/api/poll", headers=_AUTH_HEADER)
+        if second.status_code == 409:
+            second_body = second.json()
+            assert second_body["status_url"] == f"/api/jobs/{second_body['job_id']}"
+
+        # Let the job finish cleanly.
+        _wait_for_job(client, job_id)
+
+
+@pytest.mark.unit
+async def test_failed_job_records_audit(
+    store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the bg runner raises, _execute_job must still write
+    ``webhook_audit:{endpoint}`` with the error so the failure mode isn't
+    invisible to operators inspecting the DB.
+    """
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+    config = _make_config()
+    shared = _make_shared_state(store)
+
+    mock_poller = MagicMock()
+    mock_poller.poll = AsyncMock(side_effect=RuntimeError("feed blew up"))
+
+    with patch("distillery.mcp.webhooks.FeedPoller", return_value=mock_poller):
+        app = create_webhook_app(shared, config)
+        with TestClient(app, raise_server_exceptions=False) as client:
+            resp = client.post("/poll", headers=_AUTH_HEADER)
+            assert resp.status_code == 202
+            final = _wait_for_job(client, resp.json()["job_id"])
+
+    assert final["state"] == "failed"
+
+    # Audit record must exist for the failure — previously the except
+    # branch exited without writing one, leaving the DB silent on the
+    # most-interesting path.
+    audit_raw = await store.get_metadata("webhook_audit:poll")
+    assert audit_raw is not None, (
+        "webhook_audit:poll must be written even when the runner raises"
+    )
+    import json as _json
+
+    record = _json.loads(audit_raw)
+    assert record["ok"] is False
+    assert record["status"] == 500
+    assert "feed blew up" in record.get("error", "") or record.get("error")
+
+
+@pytest.mark.unit
+async def test_409_preferred_over_429_when_both_apply(
+    store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When a job is in flight AND the cooldown would fire, the dispatcher
+    must return 409 (job_in_progress), not 429 (too_early).
+
+    Guards the ordering requested by CodeRabbit review on PR #397:
+    schedulers that retry on 429 would back off on a cooldown that merely
+    reflects their own in-flight work; the correct action is to poll
+    ``/jobs/{id}`` for completion, which 409 signals with ``job_id`` and
+    ``status_url``.
+    """
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from distillery.feeds.poller import PollerSummary, PollResult
+
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+    config = _make_config()
+    shared = _make_shared_state(store)
+
+    result = PollResult(source_url="https://x/feed", source_type="rss")
+    summary = PollerSummary(results=[result])
+
+    async def _slow_poll(*args: Any, **kwargs: Any) -> PollerSummary:
+        await asyncio.sleep(0.5)
+        return summary
+
+    mock_poller = MagicMock()
+    mock_poller.poll = AsyncMock(side_effect=_slow_poll)
+
+    with patch("distillery.mcp.webhooks.FeedPoller", return_value=mock_poller):
+        app = create_webhook_app(shared, config)
+        with TestClient(app, raise_server_exceptions=False) as client:
+            # First POST sets cooldown AND starts a slow bg job.  When the
+            # second POST arrives the cooldown is live (set synchronously
+            # before 202 returns) and the job is in flight.  Both gates
+            # would fire — we must see 409, not 429.
+            first = client.post("/poll", headers=_AUTH_HEADER)
+            assert first.status_code == 202
+
+            second = client.post("/poll", headers=_AUTH_HEADER)
+            assert second.status_code == 409, (
+                f"Expected 409 (job_in_progress wins over cooldown), "
+                f"got {second.status_code}: {second.text}"
+            )
+            assert second.json()["error"] == "job_in_progress"
+
+            _wait_for_job(client, first.json()["job_id"], timeout_s=3.0)
