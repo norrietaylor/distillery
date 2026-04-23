@@ -29,6 +29,12 @@ ignore:
   - vulnerability: CVE-2026-4046
     reason: "glibc 2.43 (Wolfi) — no upstream fix available"
 
+  - vulnerability: CVE-2026-5358
+    reason: "glibc 2.43 (Wolfi) — CVSS 9.1 (Critical); buffer overflow in nis_local_principal. Not exploitable in our deployment: NIS/YP support has been obsolete since glibc 2.26 and Distillery performs no NIS lookups — identity is handled via GitHub OAuth over HTTPS. Sourceware bug 34067; no upstream fix released yet. Reviewed: 2026-04-23"
+
+  - vulnerability: CVE-2026-5928
+    reason: "glibc 2.43 (Wolfi) — CVSS 7.5 (High); ungetwc wide-character pushback reads before allocated buffer. Not exploitable in our deployment: the bug requires calling ungetwc() with a non-Unicode multibyte charset that has single-byte/multi-byte encoding overlaps. Distillery is Unicode/UTF-8 end-to-end (JSON HTTP, DuckDB, Python source) and makes no ungetwc calls anywhere in its code paths. Sourceware bug 33998; no upstream fix released yet. Reviewed: 2026-04-23"
+
   # --- Go stdlib CVEs from Wolfi base image ---
   # Distillery is a pure Python application. Go stdlib is present in the
   # base image's tooling but no Go code is compiled or executed by Distillery.
