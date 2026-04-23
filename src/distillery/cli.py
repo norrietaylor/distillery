@@ -33,6 +33,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from distillery import __version__
 from distillery.config import CONFIG_ENV_VAR, load_config
 
@@ -1394,6 +1396,26 @@ def _format_retrieval_metrics_text(result: Any) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+def _emit_eval_error(
+    fmt: str,
+    message: str,
+    code: str,
+    **extra: Any,
+) -> None:
+    """Emit an eval error in the requested format.
+
+    When ``fmt == "json"``, print a JSON envelope on stdout so consumers
+    piping to ``jq`` always receive valid JSON. Otherwise, print a plain
+    ``Error:`` line on stderr to match the pre-existing text behaviour.
+    """
+    if fmt == "json":
+        payload: dict[str, Any] = {"status": "error", "message": message, "code": code}
+        payload.update(extra)
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"Error: {message}", file=sys.stderr)
+
+
 def _cmd_eval(
     scenarios_dir: str | None,
     skill_filter: str | None,
@@ -1415,9 +1437,13 @@ def _cmd_eval(
         from distillery.eval.runner import ClaudeEvalRunner
         from distillery.eval.scenarios import load_scenarios_from_dir
     except ImportError as exc:
-        print(
-            f"Error: eval dependencies not installed. Run: pip install 'distillery-mcp[eval]'\n{exc}",
-            file=sys.stderr,
+        _emit_eval_error(
+            fmt,
+            message=(
+                f"eval dependencies not installed. Run: "
+                f"pip install 'distillery-mcp[eval]'. {exc}"
+            ),
+            code="eval_dependencies_missing",
         )
         return 1
 
@@ -1429,15 +1455,36 @@ def _cmd_eval(
         resolved_dir = Path(scenarios_dir)
 
     if not resolved_dir.exists():
-        print(f"Error: scenarios directory not found: {resolved_dir}", file=sys.stderr)
+        _emit_eval_error(
+            fmt,
+            message=f"scenarios directory not found: {resolved_dir}",
+            code="scenarios_dir_not_found",
+            scenarios_dir=str(resolved_dir),
+        )
         return 1
 
-    scenarios = load_scenarios_from_dir(resolved_dir)
+    try:
+        scenarios = load_scenarios_from_dir(resolved_dir)
+    except (OSError, ValueError, yaml.YAMLError, KeyError) as exc:
+        _emit_eval_error(
+            fmt,
+            message=f"failed to load scenarios from {resolved_dir}: {exc}",
+            code="scenarios_load_failed",
+            scenarios_dir=str(resolved_dir),
+        )
+        return 1
+
     if skill_filter:
         scenarios = [s for s in scenarios if s.skill == skill_filter]
 
     if not scenarios:
-        print(f"No scenarios found (skill filter: {skill_filter!r})", file=sys.stderr)
+        _emit_eval_error(
+            fmt,
+            message=f"no scenarios found (skill filter: {skill_filter!r})",
+            code="no_scenarios_found",
+            skill_filter=skill_filter,
+            scenarios_dir=str(resolved_dir),
+        )
         return 1
 
     # Override model on all scenarios.
@@ -1447,7 +1494,11 @@ def _cmd_eval(
     try:
         runner = ClaudeEvalRunner()
     except (ImportError, ValueError) as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        _emit_eval_error(
+            fmt,
+            message=str(exc),
+            code="eval_runner_init_failed",
+        )
         return 1
 
     async def _run_all() -> list[Any]:
