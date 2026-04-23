@@ -503,6 +503,27 @@ class TestSearchTool:
         data = parse_mcp_response(response)
         assert data["error"] is True
         assert data["code"] == "INVALID_PARAMS"
+        assert "Missing required fields" in data["message"]
+
+    async def test_search_empty_query_reports_non_empty_required(self, store: DuckDBStore) -> None:
+        """Issue #371: empty string is present, not missing — agents retrying
+        with the same empty payload would loop forever on the old message."""
+        response = await _handle_search(store, {"query": ""})
+        data = parse_mcp_response(response)
+        assert data["error"] is True
+        assert data["code"] == "INVALID_PARAMS"
+        assert "must be a non-empty string" in data["message"]
+        assert "Missing required fields" not in data["message"]
+
+    async def test_search_whitespace_query_reports_non_empty_required(
+        self, store: DuckDBStore
+    ) -> None:
+        """Issue #371: whitespace-only queries are functionally empty."""
+        response = await _handle_search(store, {"query": "   "})
+        data = parse_mcp_response(response)
+        assert data["error"] is True
+        assert data["code"] == "INVALID_PARAMS"
+        assert "must be a non-empty string" in data["message"]
 
     async def test_search_respects_limit(self, store: DuckDBStore) -> None:
         for i in range(10):
