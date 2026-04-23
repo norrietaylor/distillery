@@ -5,10 +5,13 @@ Uses mock HTTP responses to avoid hitting the real GitHub API.
 
 from __future__ import annotations
 
+import ast
 import re
+from pathlib import Path
 
 import pytest
 
+import distillery.feeds.github_sync as github_sync_module
 from distillery.feeds.github_sync import (
     _MAX_RETRIES,
     GitHubSyncAdapter,
@@ -794,3 +797,49 @@ class TestBackfillGithubMetadataIntegration:
         second = await backfill_github_metadata(store)
         assert first == 1
         assert second == 0
+
+
+# ---------------------------------------------------------------------------
+# Static audit — defense-in-depth per PR #112: every httpx.AsyncClient site
+# must pin verify=True explicitly so a future default change cannot silently
+# disable TLS verification (regression guard for #368).
+# ---------------------------------------------------------------------------
+
+
+class TestAsyncClientVerifyPinned:
+    """AST audit: every httpx.AsyncClient(...) in github_sync.py has verify=True."""
+
+    @pytest.mark.unit
+    def test_every_async_client_pins_verify_true(self) -> None:
+        source_path = Path(github_sync_module.__file__)
+        tree = ast.parse(source_path.read_text())
+
+        offending: list[int] = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            # Match both ``httpx.AsyncClient(...)`` and a bare ``AsyncClient(...)``.
+            is_async_client = (
+                isinstance(func, ast.Attribute)
+                and func.attr == "AsyncClient"
+                and isinstance(func.value, ast.Name)
+                and func.value.id == "httpx"
+            ) or (isinstance(func, ast.Name) and func.id == "AsyncClient")
+            if not is_async_client:
+                continue
+
+            verify_kw = next((kw for kw in node.keywords if kw.arg == "verify"), None)
+            if (
+                verify_kw is None
+                or not isinstance(verify_kw.value, ast.Constant)
+                or verify_kw.value.value is not True
+            ):
+                offending.append(node.lineno)
+
+        assert not offending, (
+            "httpx.AsyncClient constructions missing explicit verify=True at "
+            f"{source_path.name} lines {offending}. Every AsyncClient site must "
+            "pin verify=True per PR #112 (defense-in-depth against a future "
+            "httpx default flip)."
+        )
