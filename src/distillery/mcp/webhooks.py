@@ -24,6 +24,10 @@ import hmac
 import json
 import logging
 import os
+import uuid
+from collections import OrderedDict
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
@@ -57,6 +61,215 @@ _endpoint_locks: dict[str, asyncio.Lock] = {}
 # first-hit requests (e.g. workflow_dispatch "all") don't each create a
 # separate DuckDBStore.
 _init_lock = asyncio.Lock()
+
+
+# ---------------------------------------------------------------------------
+# Async job registry (in-process)
+# ---------------------------------------------------------------------------
+#
+# The /poll, /rescore, and /maintenance endpoints return 202 immediately and
+# run the actual work on a background asyncio task.  Callers poll
+# GET /jobs/{id} to observe progress.  Records are kept in a bounded FIFO
+# buffer per process; state is NOT persisted across restarts (scheduler loss
+# is acceptable — cron will re-trigger).
+
+# Maximum number of job records to retain in memory.
+_JOBS_MAX = 100
+
+
+@dataclass
+class _JobStatus:
+    """In-process record of an async webhook job."""
+
+    id: str
+    endpoint: str
+    state: str  # "queued" | "running" | "succeeded" | "failed"
+    submitted_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    result: dict[str, Any] | None = None
+    error: str | None = None
+    task: asyncio.Task[Any] | None = field(default=None, repr=False, compare=False)
+
+
+_jobs: OrderedDict[str, _JobStatus] = OrderedDict()
+_active_job_by_endpoint: dict[str, str] = {}
+_jobs_lock = asyncio.Lock()
+
+
+async def _register_job(endpoint: str) -> _JobStatus:
+    """Allocate a new job id and mark it active for *endpoint*.
+
+    Evicts the oldest job record once :data:`_JOBS_MAX` is exceeded.  Callers
+    must have already verified (under the endpoint lock) that no other job is
+    active for *endpoint* — this function does not re-check.
+    """
+    async with _jobs_lock:
+        job = _JobStatus(
+            id=uuid.uuid4().hex[:16],
+            endpoint=endpoint,
+            state="queued",
+            submitted_at=datetime.now(UTC),
+        )
+        _jobs[job.id] = job
+        while len(_jobs) > _JOBS_MAX:
+            _jobs.popitem(last=False)
+        _active_job_by_endpoint[endpoint] = job.id
+        return job
+
+
+async def _active_job_id(endpoint: str) -> str | None:
+    """Return the current active job id for *endpoint*, if any is in flight.
+
+    Stale pointers (job record evicted or already terminal) are cleaned up so
+    subsequent requests aren't blocked by a pointer to a completed job.
+    """
+    async with _jobs_lock:
+        job_id = _active_job_by_endpoint.get(endpoint)
+        if job_id is None:
+            return None
+        job = _jobs.get(job_id)
+        if job is None or job.state in ("succeeded", "failed"):
+            _active_job_by_endpoint.pop(endpoint, None)
+            return None
+        return job_id
+
+
+async def _finish_job(
+    job: _JobStatus,
+    *,
+    result: dict[str, Any] | None = None,
+    error: str | None = None,
+) -> None:
+    """Mark *job* terminal and clear the active-job pointer."""
+    async with _jobs_lock:
+        job.state = "failed" if error is not None else "succeeded"
+        job.finished_at = datetime.now(UTC)
+        job.result = result
+        job.error = error
+        if _active_job_by_endpoint.get(job.endpoint) == job.id:
+            del _active_job_by_endpoint[job.endpoint]
+
+
+async def _mark_job_running(job: _JobStatus) -> None:
+    """Transition *job* from queued to running."""
+    async with _jobs_lock:
+        job.state = "running"
+        job.started_at = datetime.now(UTC)
+
+
+def _job_to_dict(job: _JobStatus) -> dict[str, Any]:
+    """Serialise a :class:`_JobStatus` for the GET /jobs/{id} response."""
+    return {
+        "job_id": job.id,
+        "endpoint": job.endpoint,
+        "state": job.state,
+        "submitted_at": job.submitted_at.isoformat(),
+        "started_at": job.started_at.isoformat() if job.started_at else None,
+        "finished_at": job.finished_at.isoformat() if job.finished_at else None,
+        "result": job.result,
+        "error": job.error,
+    }
+
+
+async def _execute_job(
+    job: _JobStatus,
+    state: dict[str, Any],
+    runner: Callable[..., Awaitable[JSONResponse]],
+    kwargs: dict[str, Any],
+) -> None:
+    """Background driver: run *runner* and store the outcome on *job*.
+
+    Any exception escaping *runner* is caught and recorded as a failure so it
+    surfaces through :func:`jobs_route`.  Audit records are written
+    best-effort after completion.
+
+    After the runner finishes — success or failure — this helper calls
+    ``store.rollback()`` (when the store exposes one) to clear any aborted
+    DuckDB transaction state that may have leaked through a code path that
+    bypasses :meth:`DuckDBStore._run_sync`.  Issue #396 documents an
+    aborted-transaction cascade observed during poll runs: without this
+    best-effort rollback, the *next* webhook job on the same process can
+    inherit a poisoned connection and fail every query with
+    ``TransactionContext Error: Current transaction is aborted (please
+    ROLLBACK)``.  Errors from rollback itself are logged and swallowed.
+    """
+    await _mark_job_running(job)
+    try:
+        response = await runner(state, **kwargs)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Webhook %s (job=%s): background runner raised", job.endpoint, job.id)
+        error_message = str(exc) or "unexpected error"
+        await _try_rollback(state.get("store"), job)
+
+        # Persist an audit record for the failure too — the happy path
+        # writes one below; skipping it on the except branch left the
+        # most-interesting failure mode invisible in the ``webhook_audit:*``
+        # metadata row.  Manufacture a response shape that matches the
+        # runner's own 500 JSON so ``_record_audit`` sees a consistent
+        # ``{"ok": false, "error": "..."}`` payload.
+        failure_response = JSONResponse(
+            {"ok": False, "error": error_message},
+            status_code=500,
+        )
+        try:
+            await _record_audit(state["store"], job.endpoint, failure_response)
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "Webhook %s (job=%s): failed to persist audit record on exception path",
+                job.endpoint,
+                job.id,
+            )
+
+        # Transition terminal last so callers polling GET /jobs/{id} only see
+        # "failed" once every side effect (rollback + audit here; audit below
+        # on the success path) has landed.  Otherwise tests that poll until
+        # terminal and then exit the TestClient can race a dangling bg write.
+        await _finish_job(job, error=error_message)
+        return
+
+    try:
+        body: dict[str, Any] = json.loads(bytes(response.body).decode())
+    except Exception:  # noqa: BLE001
+        body = {}
+
+    # Runners catch their own exceptions and return 500 JSON on failure, so
+    # reaching here with ``ok=False`` still means the runner handled an
+    # exception internally — roll back defensively in that case too.
+    if not body.get("ok"):
+        await _try_rollback(state.get("store"), job)
+
+    try:
+        await _record_audit(state["store"], job.endpoint, response)
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "Webhook %s (job=%s): failed to persist audit record", job.endpoint, job.id
+        )
+
+    # Finish last: the job's terminal state is the "all work complete"
+    # signal callers poll for.  Flipping it before the audit / rollback
+    # finishes lets a test's ``_wait_for_job`` return, the TestClient
+    # teardown cancel the task, and a dangling store write race the next
+    # test's fresh store.
+    if body.get("ok"):
+        await _finish_job(job, result=body.get("data", {}))
+    else:
+        await _finish_job(job, error=body.get("error", "unknown error"))
+
+
+async def _try_rollback(store: Any, job: _JobStatus) -> None:
+    """Call ``store.rollback()`` best-effort; never raise."""
+    rollback = getattr(store, "rollback", None) if store is not None else None
+    if rollback is None:
+        return
+    try:
+        await rollback()
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "Webhook %s (job=%s): post-failure store.rollback() raised",
+            job.endpoint,
+            job.id,
+        )
 
 # ---------------------------------------------------------------------------
 # Store initialisation helper
@@ -175,6 +388,25 @@ def _verify_bearer_token(request: Request, secret: str) -> bool:
 # ---------------------------------------------------------------------------
 # Cooldown helpers
 # ---------------------------------------------------------------------------
+#
+# In-memory cache (``_cooldown_ts``) keyed by endpoint name is the
+# authoritative *in-process* source of truth for cooldowns.  DuckDB
+# metadata is still written through so cooldowns survive process restarts
+# (see :func:`test_cooldown_persisted`), but reads prefer the cache.
+#
+# Rationale: the bg task spawned by a successful POST (e.g. audit writes,
+# feed-poll work) shares the single DuckDB connection with the dispatcher
+# handling the *next* request.  DuckDB's Python binding serialises
+# statements on a single connection only when called from the same thread;
+# ``asyncio.to_thread`` dispatches to the default threadpool and can run
+# two store coroutines on different workers concurrently.  In practice
+# that produces flaky ``get_metadata`` reads that miss a just-committed
+# ``set_metadata`` write — which presented as "second POST returned 409
+# (job_in_progress) instead of 429 (too_early)" across Python 3.11-3.14
+# on CI.  The in-memory cache sidesteps the race entirely for the common
+# single-process case; DuckDB retains its persistence role untouched.
+
+_cooldown_ts: dict[str, datetime] = {}
 
 
 async def _check_cooldown(
@@ -182,6 +414,11 @@ async def _check_cooldown(
     endpoint: str,
 ) -> int | None:
     """Check whether *endpoint* is within its cooldown window.
+
+    Consults :data:`_cooldown_ts` first (in-process cache, immune to the
+    DuckDB-across-threadpool race described above).  Falls back to
+    ``store.get_metadata`` on cache miss so a freshly-started process
+    picks up cooldowns persisted by a previous run.
 
     Args:
         store: A :class:`~distillery.store.protocol.DistilleryStore` instance.
@@ -192,15 +429,18 @@ async def _check_cooldown(
         The number of seconds remaining until the cooldown expires, or
         ``None`` if the endpoint is not in cooldown.
     """
-    key = f"webhook_cooldown:{endpoint}"
-    raw = await store.get_metadata(key)
-    if raw is None:
-        return None
-
-    try:
-        last_run = datetime.fromisoformat(raw)
-    except (ValueError, TypeError):
-        return None
+    last_run = _cooldown_ts.get(endpoint)
+    if last_run is None:
+        key = f"webhook_cooldown:{endpoint}"
+        raw = await store.get_metadata(key)
+        if raw is None:
+            return None
+        try:
+            last_run = datetime.fromisoformat(raw)
+        except (ValueError, TypeError):
+            return None
+        # Populate the cache for subsequent checks in this process.
+        _cooldown_ts[endpoint] = last_run
 
     cooldown = _COOLDOWN_SECONDS.get(endpoint, 300)
     now = datetime.now(UTC)
@@ -214,13 +454,18 @@ async def _check_cooldown(
 async def _set_cooldown(store: Any, endpoint: str) -> None:
     """Record the current time as the cooldown timestamp for *endpoint*.
 
+    Writes to :data:`_cooldown_ts` and to DuckDB.  The in-memory write is
+    what subsequent same-process :func:`_check_cooldown` calls read; the
+    DuckDB write is only consulted after a restart.
+
     Args:
         store: A :class:`~distillery.store.protocol.DistilleryStore` instance.
         endpoint: The endpoint name.
     """
+    now = datetime.now(UTC)
+    _cooldown_ts[endpoint] = now
     key = f"webhook_cooldown:{endpoint}"
-    now = datetime.now(UTC).isoformat()
-    await store.set_metadata(key, now)
+    await store.set_metadata(key, now.isoformat())
 
 
 # ---------------------------------------------------------------------------
@@ -331,19 +576,18 @@ async def _run_poll(
     )
 
 
-async def _handle_poll(request: Request, state: dict[str, Any]) -> JSONResponse:
-    """Handler for ``POST /poll``.
+async def _parse_poll_params(
+    request: Request,
+) -> dict[str, Any] | JSONResponse:
+    """Parse ``source_url`` from query string or JSON body.
 
-    Delegates to :func:`_run_poll`.  The optional ``source_url`` parameter
-    may be supplied as a query string parameter (``?source_url=<url>``) or
-    via a JSON request body (``{"source_url": "<url>"}``).
+    Returns a kwargs dict ``{"source_url": str | None}`` on success, or a
+    ``JSONResponse`` with status 400 describing the problem.  Parsing happens
+    synchronously before the request returns 202 so that malformed requests
+    fail fast rather than through the async job status.
 
     Args:
         request: The incoming Starlette request.
-        state: The populated shared-state dict.
-
-    Returns:
-        A :class:`~starlette.responses.JSONResponse` from :func:`_run_poll`.
     """
     source_url: str | None = request.query_params.get("source_url")
     if source_url is None:
@@ -379,7 +623,7 @@ async def _handle_poll(request: Request, state: dict[str, Any]) -> JSONResponse:
                     status_code=400,
                 )
             source_url = val
-    return await _run_poll(state, source_url=source_url)
+    return {"source_url": source_url}
 
 
 async def _run_rescore(
@@ -430,23 +674,17 @@ async def _run_rescore(
     )
 
 
-async def _handle_rescore(request: Request, state: dict[str, Any]) -> JSONResponse:
-    """Handler for ``POST /rescore``.
+async def _parse_rescore_params(
+    request: Request,
+) -> dict[str, Any] | JSONResponse:
+    """Parse ``limit`` from query string or JSON body.
 
-    Delegates to :func:`_run_rescore`.  The optional ``limit`` parameter may
-    be supplied as a query string parameter (``?limit=<N>``) or via a JSON
-    request body (``{"limit": N}``).  Query string takes precedence.
+    Query string takes precedence over the body.  Returns a kwargs dict
+    ``{"limit": int}`` on success, or a ``JSONResponse`` with status 400.
 
     Args:
         request: The incoming Starlette request.
-        state: The populated shared-state dict containing ``"store"`` and
-            ``"config"`` keys.
-
-    Returns:
-        A :class:`~starlette.responses.JSONResponse` from :func:`_run_rescore`,
-        or an error response with status 400 for a malformed body/parameter.
     """
-    # Query string takes precedence over body.
     qs_limit: str | None = request.query_params.get("limit")
     if isinstance(qs_limit, str):
         try:
@@ -491,11 +729,11 @@ async def _handle_rescore(request: Request, state: dict[str, Any]) -> JSONRespon
                     )
                 limit = raw_limit
 
-    return await _run_rescore(state, limit=limit)
+    return {"limit": limit}
 
 
-async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONResponse:
-    """Handler for ``POST /maintenance``.
+async def _run_maintenance(state: dict[str, Any]) -> JSONResponse:
+    """Core maintenance logic invoked by the background job runner.
 
     Sequentially orchestrates three sub-operations:
 
@@ -510,13 +748,17 @@ async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONRe
     all three are merged into the combined response under ``poll``,
     ``rescore``, and ``classify_batch`` keys.
 
+    Sub-phase cooldowns are reserved briefly (under the phase endpoint lock)
+    BEFORE the long-running phase work runs, so a direct ``POST /hooks/poll``
+    arriving mid-maintenance sees the cooldown and returns 429 rather than
+    running a duplicate fetch.  The phase work itself runs outside the lock so
+    it doesn't block the fast-path of unrelated webhook requests.
+
     If a sub-operation fails, its result is recorded as
     ``{"ok": false, "error": "<message>"}`` and the remaining sub-operations
     still run — maintenance is best-effort.
 
     Args:
-        request: The incoming Starlette request (unused beyond signature
-            compatibility with the dispatcher).
         state: The populated shared-state dict containing ``"store"``,
             ``"config"``, and ``"embedding_provider"`` keys.
 
@@ -530,7 +772,6 @@ async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONRe
     """
     logger.info("Webhook maintenance: starting maintenance cycle (poll → rescore → classify-batch)")
 
-    # Helper to extract the data payload from a JSONResponse produced by _run_* helpers.
     def _extract(response: JSONResponse) -> dict[str, Any]:
         try:
             body: dict[str, Any] = json.loads(bytes(response.body).decode())
@@ -540,14 +781,13 @@ async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONRe
 
     store = state["store"]
 
-    # 1. Poll — fetch new feed items (acquire poll lock to serialize with direct /hooks/poll calls).
-    # Reserve the child endpoint cooldown inside the locked section so a direct
-    # POST /hooks/poll that queues behind poll_lock does not run immediately
-    # after this phase finishes, which would cause duplicate fetch work.
+    # 1. Poll — fetch new feed items.  Reserve the poll cooldown before
+    # running the phase so a concurrent direct POST /hooks/poll sees the
+    # reservation and returns 429 rather than duplicating the fetch work.
     poll_lock = _endpoint_locks.setdefault("poll", asyncio.Lock())
     async with poll_lock:
         await _set_cooldown(store, "poll")
-        poll_response = await _run_poll(state)
+    poll_response = await _run_poll(state)
     poll_body = _extract(poll_response)
     poll_result: dict[str, Any] = (
         {"ok": True, **poll_body.get("data", {})}
@@ -555,11 +795,11 @@ async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONRe
         else {"ok": False, "error": poll_body.get("error", "poll failed")}
     )
 
-    # 2. Rescore — re-score existing entries (acquire rescore lock to serialize).
+    # 2. Rescore — re-score existing entries.
     rescore_lock = _endpoint_locks.setdefault("rescore", asyncio.Lock())
     async with rescore_lock:
         await _set_cooldown(store, "rescore")
-        rescore_response = await _run_rescore(state)
+    rescore_response = await _run_rescore(state)
     rescore_body = _extract(rescore_response)
     rescore_result: dict[str, Any] = (
         {"ok": True, **rescore_body.get("data", {})}
@@ -567,11 +807,11 @@ async def _handle_maintenance(request: Request, state: dict[str, Any]) -> JSONRe
         else {"ok": False, "error": rescore_body.get("error", "rescore failed")}
     )
 
-    # 3. Classify-batch — classify pending inbox entries (acquire classify-batch lock to serialize).
+    # 3. Classify-batch — classify pending inbox entries.
     classify_lock = _endpoint_locks.setdefault("classify-batch", asyncio.Lock())
     async with classify_lock:
         await _set_cooldown(store, "classify-batch")
-        classify_response = await _run_classify_batch(state)
+    classify_response = await _run_classify_batch(state)
     classify_body = _extract(classify_response)
     classify_result: dict[str, Any] = (
         {"ok": True, **classify_body.get("data", {})}
@@ -846,13 +1086,38 @@ async def _handle_classify_batch(request: Request, state: dict[str, Any]) -> JSO
     return await _run_classify_batch(state, entry_type=entry_type, mode=mode, limit=limit)
 
 
-# Mapping of endpoint names to their handler callables.
-# Each handler receives (request, state) where state is the populated
-# shared-state dict containing "store", "config", and "embedding_provider".
-_HANDLERS: dict[str, Any] = {
-    "poll": _handle_poll,
-    "rescore": _handle_rescore,
-    "maintenance": _handle_maintenance,
+# ---------------------------------------------------------------------------
+# Async endpoint dispatch table
+# ---------------------------------------------------------------------------
+#
+# Each async endpoint defines a parser (validates the request synchronously
+# and returns kwargs or a 400 error response) and a runner (the work to do
+# in the background).  The dispatcher in :func:`create_webhook_app`
+# synchronously auths → parses → reserves cooldown → registers the job →
+# returns 202 with a job id.  The runner executes via :func:`_execute_job`
+# on a detached asyncio task.
+
+_AsyncParser = Callable[[Request], Awaitable["dict[str, Any] | JSONResponse"]]
+_AsyncRunner = Callable[..., Awaitable[JSONResponse]]
+
+
+async def _parse_maintenance_params(
+    request: Request,
+) -> dict[str, Any] | JSONResponse:
+    """``/maintenance`` takes no request-level parameters."""
+    return {}
+
+
+_ASYNC_ENDPOINTS: dict[str, tuple[_AsyncParser, _AsyncRunner]] = {
+    "poll": (_parse_poll_params, _run_poll),
+    "rescore": (_parse_rescore_params, _run_rescore),
+    "maintenance": (_parse_maintenance_params, _run_maintenance),
+}
+
+
+# Synchronous dispatch table — retained for ``/hooks/classify-batch`` which
+# remains synchronous (its deprecation path is out of issue #396 scope).
+_SYNC_HANDLERS: dict[str, Callable[[Request, dict[str, Any]], Awaitable[JSONResponse]]] = {
     "classify-batch": _handle_classify_batch,
 }
 
@@ -868,9 +1133,20 @@ def create_webhook_app(
 ) -> Starlette:
     """Build a Starlette application serving the webhook REST endpoints.
 
-    The returned app provides three ``POST`` routes (``/poll``,
-    ``/rescore``, ``/maintenance``) protected by bearer-token
-    authentication and per-endpoint cooldown enforcement.
+    The returned app provides:
+
+    - ``POST /poll``, ``/rescore``, ``/maintenance`` — async endpoints that
+      enqueue a background job and return ``202 Accepted`` with a ``job_id``.
+      Callers poll ``GET /jobs/{job_id}`` to observe progress.
+    - ``POST /hooks/poll``, ``/hooks/rescore`` — deprecated aliases sharing
+      the async contract of their canonical counterparts.
+    - ``POST /hooks/classify-batch`` — deprecated synchronous endpoint.
+    - ``GET /jobs/{job_id}`` — status endpoint for async jobs.
+
+    All endpoints require bearer-token authentication.  Per-endpoint
+    cooldowns are enforced against DuckDB metadata.  A second request while
+    a job is in flight returns ``409 Conflict`` with the existing ``job_id``
+    so the scheduler can re-attach to the existing job rather than racing.
 
     Rate limiting is applied via
     :class:`~distillery.mcp.middleware.RateLimitMiddleware` with tighter
@@ -890,37 +1166,67 @@ def create_webhook_app(
     """
     secret_env = config.server.webhooks.secret_env
 
-    async def _authenticated_endpoint(
-        request: Request,
-        endpoint: str,
-    ) -> JSONResponse:
-        """Dispatch a webhook request after auth and cooldown checks.
-
-        Args:
-            request: The incoming Starlette request.
-            endpoint: The endpoint name (``"poll"``, ``"rescore"``, or
-                ``"maintenance"``).
-
-        Returns:
-            A JSON response from the endpoint handler, or an error
-            response for auth/cooldown failures.
-        """
-        # --- Auth -----------------------------------------------------------
+    async def _authenticate(request: Request) -> JSONResponse | None:
+        """Return a 401 response if auth fails, else ``None``."""
         secret = os.environ.get(secret_env, "")
         if not secret or not _verify_bearer_token(request, secret):
             return JSONResponse(
                 {"ok": False, "error": "unauthorized"},
                 status_code=401,
             )
+        return None
 
-        # --- Store init -----------------------------------------------------
+    async def _dispatch_async(
+        request: Request,
+        endpoint: str,
+    ) -> JSONResponse:
+        """Validate + reserve cooldown + schedule background job.
+
+        Returns ``202`` with ``{"ok": true, "job_id": "...", "state":
+        "queued", "status_url": "/jobs/..."}`` when the job is enqueued.
+        Returns ``429``/``409``/``401``/``400`` for rejected requests.
+        """
+        auth_err = await _authenticate(request)
+        if auth_err is not None:
+            return auth_err
+
         state = await _ensure_store(shared_state, config)
         store = state["store"]
 
-        # --- Per-endpoint lock (serialise cooldown check + handler) ---------
+        parser, runner = _ASYNC_ENDPOINTS[endpoint]
+        parsed = await parser(request)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+
+        # ``root_path`` is set by Starlette's ``Mount`` to the prefix the
+        # webhook app is mounted at (e.g. ``"/api"``).  Using it in
+        # ``status_url`` lets callers poll the job directly without knowing
+        # the mount layout — essential for the scheduler in distill_ops.
+        root_path = request.scope.get("root_path", "")
+
         lock = _endpoint_locks.setdefault(endpoint, asyncio.Lock())
         async with lock:
-            # --- Cooldown ---------------------------------------------------
+            # Idempotency first: if a job is already running for this
+            # endpoint, return 409 with the existing job id so the caller
+            # re-attaches rather than racing a duplicate or backing off on a
+            # cooldown that merely reflects its own in-flight work.  A 429
+            # here would misdirect the scheduler into "try later" when the
+            # correct action is "poll /jobs/{id} for completion".
+            existing_job_id = await _active_job_id(endpoint)
+            if existing_job_id is not None:
+                return JSONResponse(
+                    {
+                        "ok": False,
+                        "error": "job_in_progress",
+                        "job_id": existing_job_id,
+                        "status_url": f"{root_path}/jobs/{existing_job_id}",
+                    },
+                    status_code=409,
+                )
+
+            # Cooldown enforcement is preserved — scheduler cooldowns are the
+            # primary debounce against runaway workflow re-triggers from a
+            # caller that is NOT currently mid-job.
             retry_after = await _check_cooldown(store, endpoint)
             if retry_after is not None:
                 return JSONResponse(
@@ -929,15 +1235,55 @@ def create_webhook_app(
                     headers={"Retry-After": str(retry_after)},
                 )
 
-            # Reserve the cooldown slot before running the handler so that
-            # a second request arriving during execution sees the reservation.
+            # Reserve cooldown + allocate a job record before releasing the
+            # endpoint lock so subsequent requests see both signals.
             await _set_cooldown(store, endpoint)
+            job = await _register_job(endpoint)
 
-            # --- Dispatch ---------------------------------------------------
-            handler = _HANDLERS[endpoint]
-            response: JSONResponse = await handler(request, state)
+        # Detach the work.  The returned Task is retained on the job record
+        # to avoid "Task was destroyed while pending" warnings when the event
+        # loop's weak references drop it.
+        job.task = asyncio.create_task(
+            _execute_job(job, state, runner, parsed),
+            name=f"webhook-{endpoint}-{job.id}",
+        )
 
-            # --- Audit record (best-effort) ---------------------------------
+        return JSONResponse(
+            {
+                "ok": True,
+                "job_id": job.id,
+                "state": "queued",
+                "status_url": f"{root_path}/jobs/{job.id}",
+            },
+            status_code=202,
+        )
+
+    async def _dispatch_sync(
+        request: Request,
+        endpoint: str,
+    ) -> JSONResponse:
+        """Synchronous dispatcher retained for ``/hooks/classify-batch``."""
+        auth_err = await _authenticate(request)
+        if auth_err is not None:
+            return auth_err
+
+        state = await _ensure_store(shared_state, config)
+        store = state["store"]
+
+        lock = _endpoint_locks.setdefault(endpoint, asyncio.Lock())
+        async with lock:
+            retry_after = await _check_cooldown(store, endpoint)
+            if retry_after is not None:
+                return JSONResponse(
+                    {"ok": False, "error": "too_early", "retry_after": retry_after},
+                    status_code=429,
+                    headers={"Retry-After": str(retry_after)},
+                )
+
+            await _set_cooldown(store, endpoint)
+            handler = _SYNC_HANDLERS[endpoint]
+            response = await handler(request, state)
+
             try:
                 await _record_audit(store, endpoint, response)
             except Exception:  # noqa: BLE001
@@ -946,16 +1292,16 @@ def create_webhook_app(
             return response
 
     async def poll_route(request: Request) -> JSONResponse:
-        """Route handler for ``POST /poll``."""
-        return await _authenticated_endpoint(request, "poll")
+        """Route handler for ``POST /poll`` (async)."""
+        return await _dispatch_async(request, "poll")
 
     async def rescore_route(request: Request) -> JSONResponse:
-        """Route handler for ``POST /rescore``."""
-        return await _authenticated_endpoint(request, "rescore")
+        """Route handler for ``POST /rescore`` (async)."""
+        return await _dispatch_async(request, "rescore")
 
     async def maintenance_route(request: Request) -> JSONResponse:
-        """Route handler for ``POST /maintenance``."""
-        return await _authenticated_endpoint(request, "maintenance")
+        """Route handler for ``POST /maintenance`` (async)."""
+        return await _dispatch_async(request, "maintenance")
 
     async def hooks_poll_route(request: Request) -> JSONResponse:
         """Route handler for ``POST /hooks/poll``.
@@ -967,8 +1313,9 @@ def create_webhook_app(
         Canonical path for the poll webhook; shares cooldown with ``/poll``.
         Accepts an optional ``source_url`` query parameter to poll a single
         source (e.g. ``POST /hooks/poll?source_url=https://example.com/feed``).
+        Returns ``202`` with a job id like the canonical ``/poll`` route.
         """
-        response = await _authenticated_endpoint(request, "poll")
+        response = await _dispatch_async(request, "poll")
         if response.status_code != 401:
             logger.warning(
                 "Webhook /hooks/poll is deprecated — migrate to Claude Code routines (see #272)"
@@ -985,8 +1332,9 @@ def create_webhook_app(
         Canonical path for the rescore webhook; shares cooldown with ``/rescore``.
         Accepts an optional ``limit`` query parameter controlling how many
         entries are rescored (e.g. ``POST /hooks/rescore?limit=50``).
+        Returns ``202`` with a job id like the canonical ``/rescore`` route.
         """
-        response = await _authenticated_endpoint(request, "rescore")
+        response = await _dispatch_async(request, "rescore")
         if response.status_code != 401:
             logger.warning(
                 "Webhook /hooks/rescore is deprecated — migrate to Claude Code routines (see #272)"
@@ -1005,14 +1353,47 @@ def create_webhook_app(
 
         - ``entry_type`` (default ``"inbox"``): filter entries by type.
         - ``mode``: ``"llm"`` or ``"heuristic"`` (defaults to config value).
+
+        Unlike the three async endpoints, this one remains synchronous — the
+        issue #396 scope was limited to ``/poll``, ``/rescore``, and
+        ``/maintenance``.
         """
-        response = await _authenticated_endpoint(request, "classify-batch")
+        response = await _dispatch_sync(request, "classify-batch")
         if response.status_code != 401:
             logger.warning(
                 "Webhook /hooks/classify-batch is deprecated"
                 " — migrate to Claude Code routines (see #272)"
             )
         return response
+
+    async def jobs_route(request: Request) -> JSONResponse:
+        """Route handler for ``GET /jobs/{job_id}``.
+
+        Returns the current state of a background job allocated by one of
+        the async endpoints.  Requires the same bearer token as the POST
+        endpoints.  Terminal states (``succeeded``, ``failed``) expose the
+        full result or error so the scheduler can log the outcome without
+        parsing server logs.
+
+        Returns 404 when the job id is unknown (for example because the
+        FIFO buffer has evicted it or the server restarted after the job
+        was submitted).
+        """
+        auth_err = await _authenticate(request)
+        if auth_err is not None:
+            return auth_err
+
+        job_id = request.path_params["job_id"]
+        async with _jobs_lock:
+            job = _jobs.get(job_id)
+            snapshot = _job_to_dict(job) if job is not None else None
+
+        if snapshot is None:
+            return JSONResponse(
+                {"ok": False, "error": "job not found"},
+                status_code=404,
+            )
+        return JSONResponse({"ok": True, "data": snapshot})
 
     routes: list[Route] = [
         Route("/poll", poll_route, methods=["POST"]),
@@ -1021,6 +1402,7 @@ def create_webhook_app(
         Route("/hooks/poll", hooks_poll_route, methods=["POST"]),
         Route("/hooks/rescore", hooks_rescore_route, methods=["POST"]),
         Route("/hooks/classify-batch", hooks_classify_batch_route, methods=["POST"]),
+        Route("/jobs/{job_id}", jobs_route, methods=["GET"]),
     ]
 
     # Apply rate limiting with tighter webhook-specific limits via
@@ -1035,6 +1417,11 @@ def create_webhook_app(
                 RateLimitMiddleware,
                 requests_per_minute=10,
                 requests_per_hour=100,
+                # GET /jobs/{id} is a read-only status poll; schedulers poll
+                # it every few seconds while a background job runs and would
+                # trivially exhaust the 10/min mutating-endpoint budget.
+                # The POST routes above keep their normal rate limit.
+                skip_get_path_prefixes=("/jobs/",),
             ),
         ],
     )

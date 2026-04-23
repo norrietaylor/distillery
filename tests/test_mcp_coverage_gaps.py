@@ -1801,61 +1801,68 @@ class TestTagTreeExactPrefix:
 
 
 class TestWebhookRescoreBodyParsing:
-    """Cover _handle_rescore body parsing (webhooks.py lines 374-391)."""
+    """Cover rescore request parsing + run error paths in the webhook layer.
+
+    After issue #396 the webhook handler was split:
+
+    - ``_parse_rescore_params(request)`` validates the request body/query
+      and returns either a kwargs dict or a 400 ``JSONResponse``.
+    - ``_run_rescore(state, limit=...)`` is the async job runner and
+      returns a 500 ``JSONResponse`` when ``FeedPoller.rescore`` raises.
+
+    These tests cover both halves.
+    """
 
     async def test_rescore_malformed_json_body(self) -> None:
-
-        from distillery.mcp.webhooks import _handle_rescore
+        from distillery.mcp.webhooks import _parse_rescore_params
 
         request = MagicMock()
+        request.query_params = {}
         request.body = AsyncMock(return_value=b"not json")
-        state = {"store": MagicMock(), "config": MagicMock()}
 
-        response = await _handle_rescore(request, state)
+        response = await _parse_rescore_params(request)
         assert response.status_code == 400
 
     async def test_rescore_body_not_dict(self) -> None:
-        from distillery.mcp.webhooks import _handle_rescore
+        from distillery.mcp.webhooks import _parse_rescore_params
 
         request = MagicMock()
+        request.query_params = {}
         request.body = AsyncMock(return_value=b'"just a string"')
-        state = {"store": MagicMock(), "config": MagicMock()}
 
-        response = await _handle_rescore(request, state)
+        response = await _parse_rescore_params(request)
         assert response.status_code == 400
 
     async def test_rescore_body_limit_not_int(self) -> None:
-        from distillery.mcp.webhooks import _handle_rescore
+        from distillery.mcp.webhooks import _parse_rescore_params
 
         request = MagicMock()
+        request.query_params = {}
         request.body = AsyncMock(return_value=b'{"limit": "bad"}')
-        state = {"store": MagicMock(), "config": MagicMock()}
 
-        response = await _handle_rescore(request, state)
+        response = await _parse_rescore_params(request)
         assert response.status_code == 400
 
     async def test_rescore_body_limit_bool(self) -> None:
-        from distillery.mcp.webhooks import _handle_rescore
+        from distillery.mcp.webhooks import _parse_rescore_params
 
         request = MagicMock()
+        request.query_params = {}
         request.body = AsyncMock(return_value=b'{"limit": true}')
-        state = {"store": MagicMock(), "config": MagicMock()}
 
-        response = await _handle_rescore(request, state)
+        response = await _parse_rescore_params(request)
         assert response.status_code == 400
 
     async def test_rescore_handler_error(self) -> None:
-        from distillery.mcp.webhooks import _handle_rescore
+        from distillery.mcp.webhooks import _run_rescore
 
-        request = MagicMock()
-        request.body = AsyncMock(return_value=b"{}")
         state = {"store": MagicMock(), "config": MagicMock()}
 
         with patch(
             "distillery.feeds.poller.FeedPoller.rescore",
             side_effect=RuntimeError("fail"),
         ):
-            response = await _handle_rescore(request, state)
+            response = await _run_rescore(state, limit=200)
             assert response.status_code == 500
 
 

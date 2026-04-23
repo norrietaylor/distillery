@@ -231,6 +231,35 @@ from collections.abc import Iterator  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
+def _reset_webhook_module_state() -> Iterator[None]:
+    """Clear module-level webhook state between tests.
+
+    ``distillery.mcp.webhooks`` keeps several module-level dicts (async job
+    registry, in-memory cooldown cache, per-endpoint asyncio locks).  These
+    persist across tests in the same pytest session and cause false 409s
+    (stale active-job pointer) or false 429s (cooldown timestamp from a
+    prior test) when the next test makes its first POST.  Cooldown state
+    stored in the DuckDB ``_meta`` table is isolated by the per-function
+    ``store`` fixture, so no cleanup is needed there.
+
+    Lives in the root conftest so it covers both ``tests/test_webhooks.py``
+    and ``tests/test_webhooks/*`` without duplication; a no-op for tests
+    that don't touch the webhook module.
+    """
+    from distillery.mcp import webhooks as _webhooks
+
+    _webhooks._jobs.clear()
+    _webhooks._active_job_by_endpoint.clear()
+    _webhooks._endpoint_locks.clear()
+    _webhooks._cooldown_ts.clear()
+    yield
+    _webhooks._jobs.clear()
+    _webhooks._active_job_by_endpoint.clear()
+    _webhooks._endpoint_locks.clear()
+    _webhooks._cooldown_ts.clear()
+
+
+@pytest.fixture(autouse=True)
 def _disable_watch_probe(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
 ) -> Iterator[None]:
