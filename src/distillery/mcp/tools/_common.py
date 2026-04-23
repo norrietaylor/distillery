@@ -138,7 +138,7 @@ def validate_required(arguments: dict[str, Any], *fields: str) -> str | None:
     if empty:
         if len(empty) == 1:
             return f"Field {empty[0]!r} must be a non-empty string"
-        return f"Fields must be non-empty strings: {', '.join(empty)}"
+        return f"Fields must be non-empty strings: {', '.join(repr(f) for f in empty)}"
     return None
 
 

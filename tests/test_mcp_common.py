@@ -51,7 +51,7 @@ class TestValidateRequired:
 
     def test_multiple_empty_fields(self) -> None:
         msg = validate_required({"a": "", "b": ""}, "a", "b")
-        assert msg == "Fields must be non-empty strings: a, b"
+        assert msg == "Fields must be non-empty strings: 'a', 'b'"
 
     def test_missing_takes_precedence_over_empty(self) -> None:
         """When both categories fail, report missing first so clients fix the
