@@ -87,13 +87,78 @@ Determine author and project once per conversation, then cache for subsequent sk
 
 If already resolved earlier in the conversation, reuse the cached values without re-running commands.
 
+## Retrieval Hygiene for Skills with a Known Current Focus
+
+Skills that call `distillery_search` or `distillery_find_similar` for context about a specific entry the user is working on (`/pour`, `/recall`, `/investigate`, triage-style workflows) should follow these patterns to avoid noise, self-references, and decorative citations.
+
+### Rule 1 — Self-filter before citing (mandatory)
+
+When a retrieval skill has a known current focus (an entry being synthesized about, an issue being triaged, a bookmark being annotated), filter out any returned entry whose id matches the focus before presenting results to the model. With real semantic embeddings (Jina v5, OpenAI `text-embedding-3`, or any OpenAI-compatible embedding endpoint), the search will rank the current entry at or near the top of every call against its own content — it is closer to itself than anything else in the KB, typically scoring 0.98–1.00 versus 0.85–0.95 for the next-most-relevant entries.
+
+Without this filter, the model tends to "discover" its own current focus as the top related prior entry and cites it as such, which is always nonsensical.
+
+### Rule 2 — Visible classification step (recommended)
+
+**Status:** Recommended. Validated on the single benchmark below. Adopt in new retrieval skills where citation noise is a concern; do not retrofit across all skills until another skill replicates the effect.
+
+When a skill's primary task is generation (writing a triage comment, a synthesis, a reply, a review) and retrieval is a supporting step, force the model to produce a visible classification of each retrieved entry as a required output section *before* it writes the main output. Good tags to emit inline per entry:
+
+- `skip-self` — filtered per Rule 1
+- `cite-as-duplicate` — materially the same problem or feature as the current focus
+- `cite-as-precedent` — prior PR or fix that implements the pattern this focus asks for
+- `cite-as-decision` — prior design decision or rejection relevant to how this focus should be approached
+- `skip-decorative` — semantically related (same subsystem, file, topic) but does not change the recommendation
+
+The section must emit one line per returned entry — no silent omissions.
+
+Progressively stricter "only cite if…" rules produced *fewer* citations in the benchmark below, dropping from round 1's ~12 to round 3's 1. Round 4 replaced the rules with a mandatory visible classification step and citation count jumped to 29 across 11/13 focuses with all 4 high-value recoveries. The diagnosis is instruction dilution — background rules layered onto a generation task get silently dropped; a required output line is a visible contract the model cannot omit.
+
+**Does not apply to `/pour`.** `/pour`'s SKILL.md requires citing every factual claim as an audit trail, which is cite-everywhere by design. Rule 2's cite-only-when-it-matters guidance is for decision-support skills (`/recall`, `/investigate`, triage-style workflows) where decorative citations bury real precedents. Skills whose citations serve as an audit trail (`/pour`, `/digest`) should disregard Rule 2; the other rules still apply.
+
+### Rule 3 — Query hygiene: no identifiers or titles verbatim (mandatory)
+
+When constructing a semantic search query from a known current focus, exclude:
+
+- The focus's unique numeric identifier (e.g. `#116`, `issue-9999`)
+- The focus's title verbatim
+- Any other near-unique-token string that identifies the focus
+
+```python
+# Bad — biases retrieval toward the focus's own KB entry
+query = "issue #116 EOL dependencies detected"
+
+# Good — symbols, concepts, affected paths
+query = "ansible-core 2.18 Debian 12 EOL CI test matrix"
+```
+
+Unique numbers and titles are near-unique tokens that dominate semantic similarity at the embedding layer. Including them anchors the self-match at the top of results and crowds out actually-relevant prior entries. Use subsystem concepts, file paths, variable names, task names, and error messages instead.
+
+### Rule 4 — Fabricated examples, never real test data (mandatory)
+
+When a skill's prompt includes a worked example of correct output, the example must use fabricated data — hypothetical IDs (`#issue-9999`), made-up short-ids (`aaaaaaaa`), invented scenarios — never a real entry that could realistically show up in the wild.
+
+In one round of the benchmark below a prompt's worked example used `#issue-116` (a real issue in the test set) with real citations (`#pr-93`, `#pr-114`) showing correct `cite-as-*` tags. When the model subsequently ran the triage for the real `#116`, its output was nearly identical to the example — copying the specific short-ids, justifications, and phrasing verbatim. That is pattern-matching against an answer key, not independent reasoning. Rewriting the example to use a fabricated `#issue-9999` and invented short-ids made the real output stop being identical to the example, and it continued to recover the correct citations via actual semantic search.
+
+### Benchmark that produced these findings
+
+Four-round benchmark comparing prompt variants for a triage workflow that uses `distillery_search` to retrieve prior issues and PRs as context, run on a separate repo's 13-issue test set against a 123-entry `jina-embeddings-v5-text-small` KB. Same issues, same model, same KB throughout — only the prompt changed between rounds.
+
+| Round | Prompt pattern | Total citations | High-value recoveries | Self-refs | Format compliance |
+|---|---|---|---|---|---|
+| 1 | Loose rules, "cite what's relevant" | ~12 | 4/4 | 5/13 | 2/13 |
+| 2 | Strict rule: "only cite if removing changes recommendation" | 6 | 0/4 | 0/13 | 13/13 |
+| 3 | Enumerated cases: duplicate / precedent / decision | 1 | 1/4 | 0/13 | 13/13 |
+| 4 | Mandatory visible KB analysis section + fabricated example | 29 | 4/4 | 0/13 | 13/13 |
+
+Rounds 2 and 3 tightened rule language to reduce noise; they reduced noise but also reduced signal to the point where high-value citations disappeared. Round 4 replaced filter rules with a mandatory visible classification step and a fabricated example — signal recovered fully without reintroducing noise.
+
 ## MCP Health Check
 
 Skills depend on the Distillery MCP server. Call `distillery_status()` at the start of the first skill invoked in a conversation. **If this check has already succeeded earlier in the same conversation, skip and proceed directly.**
 
 If the check fails, display:
 
-```
+```text
 Warning: Distillery MCP Server Not Available
 
 The Distillery MCP server is not configured or not running.
@@ -212,7 +277,7 @@ All write skills (`/distill`, `/bookmark`, `/minutes`, `/radar`) must follow a u
 
 **Standard Confirmation Template:**
 
-```
+```text
 [<entry_type>] Stored: <entry-id>
 Project: <project> | Author: <author>
 Summary: <first 200 chars>...
@@ -230,7 +295,7 @@ Tags: tag1, tag2, tag3
 
 **Example confirmations:**
 
-```
+```text
 [SESSION] Stored: a1b2c3d4-e5f6-47g8-9h0i-j1k2l3m4n5o6
 Project: distillery | Author: Alice
 Summary: This session covered the dedup flow refactor, which consolidates four outcomes (create, skip, merge, link) into a...
@@ -306,7 +371,7 @@ Skills with `context: fork` run in an isolated agent context with a restricted `
 
 If any MCP tool returns an error, display it and stop (no retry loops):
 
-```
+```text
 Error: <error message>
 
 Actions:
@@ -379,5 +444,5 @@ The `distillery-researcher` agent (`.claude/agents/distillery-researcher.md`) is
 
 ---
 
-**Document Version:** 2.4
-**Last Updated:** 2026-04-08
+**Document Version:** 2.5
+**Last Updated:** 2026-04-21
