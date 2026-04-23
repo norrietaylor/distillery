@@ -407,8 +407,19 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
               - project (str, optional): Per-entry project override.
           - project (str, optional): Default project applied to entries lacking one.
 
-        RETURNS (success): { entry_ids: list[str], count: int }
+        RETURNS (success): {
+            entry_ids: list[str | None],   # per-item ids; null for failed items
+            count: int,                    # number actually persisted
+            results: list[dict],           # per-item status preserving input order
+        }
+          - Successful items: { entry_id, persisted: true, dedup_action: "stored" }
+          - Failed items:     { entry_id: null, persisted: false, error: { code, message, details? } }
+        Validation failures on individual items no longer abort the batch —
+        valid entries are persisted and failures are reported per item in
+        ``results`` (issue #364).  Iterate ``results`` to discover failures.
         RETURNS (error): { error: true, code: "INVALID_PARAMS" | "BUDGET_EXCEEDED" | "INTERNAL", message: "..." }
+          Top-level error is returned only for schema-level problems
+          (``entries`` not a list, budget exhaustion, persistence failure).
 
         RELATED: distillery_store (single entry with dedup/conflict checks),
         distillery_watch (add feed sources with optional history sync)
@@ -424,13 +435,56 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         # Mirror the attribution/audit pattern used by other mutating wrappers
         # (distillery_store, distillery_update, distillery_correct,
         # distillery_resolve_review) so batch imports are not unaudited.
+        # Drive auditing off the per-item ``results`` list so invalid items
+        # (whose ``entry_id`` is ``None``) are recorded as failures rather
+        # than logged as successes with a null id (issue #364 follow-up).
         rd = json.loads(result[0].text) if result else {}
-        entry_ids = rd.get("entry_ids", []) or []
-        if entry_ids:
-            for entry_id in entry_ids:
-                await _audit(c, user, "distillery_store_batch", entry_id, "store", result)
-        else:
+        if rd.get("error"):
+            # Top-level failure (schema/budget/persistence) — record a single
+            # failure row so the audit trail reflects the aborted call.
             await _audit(c, user, "distillery_store_batch", "", "store", result)
+        else:
+            per_item = rd.get("results") or []
+            if not per_item:
+                # Empty batch — still emit a single audit row for traceability.
+                await _audit(c, user, "distillery_store_batch", "", "store", result)
+            else:
+                for item in per_item:
+                    if item.get("persisted"):
+                        eid = item.get("entry_id") or ""
+                        try:
+                            await c["store"].write_audit_log(
+                                user,
+                                "distillery_store_batch",
+                                eid,
+                                "store",
+                                "success",
+                            )
+                        except Exception:  # noqa: BLE001
+                            logger.debug(
+                                "audit_log write failed for "
+                                "distillery_store_batch (ignored)",
+                                exc_info=True,
+                            )
+                    else:
+                        # Invalid item — surface as "store_failed" so the
+                        # audit trail distinguishes validation rejects from
+                        # persisted rows (matches the "not_found"/"forbidden"
+                        # convention used by ``_own``).
+                        try:
+                            await c["store"].write_audit_log(
+                                user,
+                                "distillery_store_batch",
+                                "",
+                                "store_failed",
+                                "error",
+                            )
+                        except Exception:  # noqa: BLE001
+                            logger.debug(
+                                "audit_log write failed for "
+                                "distillery_store_batch (ignored)",
+                                exc_info=True,
+                            )
         return result
 
     @server.tool

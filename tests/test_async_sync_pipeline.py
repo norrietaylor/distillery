@@ -688,14 +688,17 @@ class TestHandleStoreBatch:
 
     @pytest.mark.unit
     async def test_batch_store_missing_author(self, store) -> None:  # type: ignore[no-untyped-def]
-        # crud._handle_store_batch requires 'author' for each entry; missing
-        # author returns an INVALID_PARAMS error response immediately.
+        # crud._handle_store_batch validates per-item (issue #364); missing
+        # author surfaces as a per-item error in ``results`` rather than a
+        # top-level failure that aborts the batch.
         entries = [
             {"content": "Valid entry", "entry_type": "reference"},  # missing author
         ]
         result = await _handle_store_batch(store=store, arguments={"entries": entries})
         data = _parse_response(result)
-        assert "error" in data or data.get("error_code")
+        assert data.get("count") == 0
+        assert data["results"][0]["persisted"] is False
+        assert data["results"][0]["error"]["code"] == "INVALID_PARAMS"
 
     @pytest.mark.unit
     async def test_batch_store_empty_list(self, store) -> None:  # type: ignore[no-untyped-def]
