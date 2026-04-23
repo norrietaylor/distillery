@@ -44,9 +44,16 @@ def _build_parser() -> argparse.ArgumentParser:
     inherited by each subcommand.  Subcommands define their own copies so
     that they appear in per-subcommand ``--help`` output; the parent
     values act as defaults when the subcommand does not override them.
+
+    To prevent the subparser's default from clobbering a value passed at the
+    top level (argparse populates ``args`` first from the parent, then lets
+    the subparser overwrite every dest it declares), the subparser-side
+    copies use ``default=argparse.SUPPRESS``.  SUPPRESS tells argparse to
+    leave the namespace untouched when the flag is absent, so
+    ``distillery --config X status`` and ``distillery status --config X``
+    both yield ``args.config == 'X'``.
     """
-    # Shared options defined on a parent parser so they appear both at the
-    # top level and inside each subcommand's --help.
+    # Shared options defined on a parent parser so they appear at the top level.
     shared = argparse.ArgumentParser(add_help=False)
     shared.add_argument(
         "--config",
@@ -61,6 +68,27 @@ def _build_parser() -> argparse.ArgumentParser:
         "--format",
         choices=["text", "json"],
         default="text",
+        help="Output format (default: text)",
+    )
+
+    # Subparser-side copy with SUPPRESS defaults.  This makes the flags
+    # visible in per-subcommand ``--help`` output without clobbering the
+    # top-level parent's parsed values when the flag is omitted after the
+    # subcommand.
+    sub_shared = argparse.ArgumentParser(add_help=False)
+    sub_shared.add_argument(
+        "--config",
+        metavar="PATH",
+        default=argparse.SUPPRESS,
+        help=(
+            f"Path to configuration file (overrides {CONFIG_ENV_VAR} env var "
+            "and the default distillery.yaml search)"
+        ),
+    )
+    sub_shared.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default=argparse.SUPPRESS,
         help="Output format (default: text)",
     )
 
@@ -80,19 +108,19 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser(
         "status",
         help="Display database statistics",
-        parents=[shared],
+        parents=[sub_shared],
     )
 
     subparsers.add_parser(
         "health",
         help="Verify database connectivity",
-        parents=[shared],
+        parents=[sub_shared],
     )
 
     poll_parser = subparsers.add_parser(
         "poll",
         help="Poll configured feed sources and store relevant items",
-        parents=[shared],
+        parents=[sub_shared],
     )
     poll_parser.add_argument(
         "--source",
@@ -104,7 +132,7 @@ def _build_parser() -> argparse.ArgumentParser:
     retag_parser = subparsers.add_parser(
         "retag",
         help="Backfill topic tags on existing feed entries",
-        parents=[shared],
+        parents=[sub_shared],
     )
     retag_parser.add_argument(
         "--dry-run",
@@ -122,7 +150,7 @@ def _build_parser() -> argparse.ArgumentParser:
     gh_backfill_parser = subparsers.add_parser(
         "gh-backfill",
         help="Backfill project/tags/author/metadata on existing GitHub entries (#312)",
-        parents=[shared],
+        parents=[sub_shared],
     )
     gh_backfill_parser.add_argument(
         "--dry-run",
@@ -134,7 +162,7 @@ def _build_parser() -> argparse.ArgumentParser:
     export_parser = subparsers.add_parser(
         "export",
         help="Export all entries and feed sources to a JSON file",
-        parents=[shared],
+        parents=[sub_shared],
     )
     export_parser.add_argument(
         "--output",
@@ -146,7 +174,7 @@ def _build_parser() -> argparse.ArgumentParser:
     import_parser = subparsers.add_parser(
         "import",
         help="Import entries and feed sources from a JSON export file",
-        parents=[shared],
+        parents=[sub_shared],
     )
     import_parser.add_argument(
         "--input",
@@ -170,7 +198,7 @@ def _build_parser() -> argparse.ArgumentParser:
     eval_parser = subparsers.add_parser(
         "eval",
         help="Run skill evaluation scenarios against Claude",
-        parents=[shared],
+        parents=[sub_shared],
     )
     eval_parser.add_argument(
         "--skill",
@@ -212,14 +240,14 @@ def _build_parser() -> argparse.ArgumentParser:
     maintenance_parser = subparsers.add_parser(
         "maintenance",
         help="Database maintenance operations",
-        parents=[shared],
+        parents=[sub_shared],
     )
     maintenance_subparsers = maintenance_parser.add_subparsers(dest="maintenance_command")
 
     classify_parser = maintenance_subparsers.add_parser(
         "classify",
         help="Classify pending inbox entries using batch classification",
-        parents=[shared],
+        parents=[sub_shared],
     )
     classify_parser.add_argument(
         "--type",
@@ -267,6 +295,20 @@ def _query_status(db_path: str) -> dict[str, Any]:
         import duckdb
     except ImportError as exc:  # pragma: no cover
         raise RuntimeError("duckdb is not installed") from exc
+
+    # If the database file has not been created yet, report an empty state
+    # instead of surfacing a "database does not exist" error from DuckDB.
+    # Mirrors :func:`_check_health`'s tolerance for fresh/uninitialised setups.
+    if db_path != ":memory:":
+        resolved = Path(db_path).expanduser()
+        if not resolved.exists() and resolved.parent.exists():
+            return {
+                "total_entries": 0,
+                "entries_by_type": {},
+                "entries_by_status": {},
+                "schema_version": None,
+                "duckdb_version": None,
+            }
 
     try:
         read_only = db_path != ":memory:"

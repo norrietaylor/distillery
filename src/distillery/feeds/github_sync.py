@@ -733,7 +733,7 @@ class GitHubSyncAdapter:
 
         should_close = client is None
         if client is None:
-            client = httpx.AsyncClient(timeout=_REQUEST_TIMEOUT, follow_redirects=True)
+            client = httpx.AsyncClient(timeout=_REQUEST_TIMEOUT, follow_redirects=True, verify=True)
         try:
             response = await self._request_with_retry(client, api_url, params)
             batch: list[dict[str, Any]] = response.json()
@@ -851,7 +851,7 @@ class GitHubSyncAdapter:
 
         should_close = client is None
         if client is None:
-            client = httpx.AsyncClient(timeout=_REQUEST_TIMEOUT, follow_redirects=True)
+            client = httpx.AsyncClient(timeout=_REQUEST_TIMEOUT, follow_redirects=True, verify=True)
 
         try:
             page = 1

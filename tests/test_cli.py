@@ -10,6 +10,7 @@ import pytest
 
 from distillery import __version__
 from distillery.cli import (
+    _build_parser,
     _check_health,
     _cmd_export,
     _cmd_health,
@@ -247,6 +248,29 @@ class TestStatusCommand:
             main(["status", "--config", missing])
         assert exc.value.code == 1
 
+    def test_status_fresh_db_file_reports_empty_state(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Regression for #375: status on a never-created DB file exits 0 with empty state.
+
+        Mirrors ``health``'s tolerance — an operator running ``status`` on a
+        fresh install/container should see a friendly empty-state summary
+        rather than "database does not exist" with exit 1.
+        """
+        db_path = tmp_path / "fresh.db"
+        cfg_path = write_config(tmp_path, str(db_path))
+        with pytest.raises(SystemExit) as exc:
+            main(["status", "--config", str(cfg_path), "--format", "json"])
+        assert exc.value.code == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data["total_entries"] == 0
+        assert data["entries_by_type"] == {}
+        assert data["entries_by_status"] == {}
+        # Status must not create the DB file as a side effect (parity with health).
+        assert not db_path.exists()
+
 
 # ---------------------------------------------------------------------------
 # --config flag
@@ -272,6 +296,84 @@ class TestConfigFlag:
         with pytest.raises(SystemExit) as exc:
             main(["status", "--config", missing])
         assert exc.value.code == 1
+
+    # --- Regression: #373 — top-level flags must survive the subparser -------
+
+    def test_top_level_config_flag_before_subcommand_reaches_handler(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """``distillery --config X status`` must honour the top-level --config.
+
+        Regression test for #373 — argparse used to let the subparser's default
+        clobber the parent-parsed value, silently dropping the user's --config.
+        """
+        cfg_path = write_config(tmp_path, ":memory:")
+        with pytest.raises(SystemExit) as exc:
+            main(["--config", str(cfg_path), "status"])
+        assert exc.value.code == 0
+
+    def test_top_level_format_flag_before_subcommand_reaches_handler(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """``distillery --format json status`` must emit JSON (regression for #373)."""
+        cfg_path = write_config(tmp_path, ":memory:")
+        with pytest.raises(SystemExit) as exc:
+            main(["--config", str(cfg_path), "--format", "json", "status"])
+        assert exc.value.code == 0
+        captured = capsys.readouterr()
+        # JSON output is a parseable object; text output is not.
+        json.loads(captured.out)
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            # Both orderings of --config: before and after the subcommand.
+            ["--config", "/tmp/X.yaml", "status"],
+            ["status", "--config", "/tmp/X.yaml"],
+            # Both orderings of --format.
+            ["--format", "json", "status"],
+            ["status", "--format", "json"],
+            # Combined — all flags before the subcommand.
+            ["--config", "/tmp/X.yaml", "--format", "json", "status"],
+            # Combined — all flags after the subcommand.
+            ["status", "--config", "/tmp/X.yaml", "--format", "json"],
+        ],
+    )
+    def test_flags_yield_same_namespace_regardless_of_position(
+        self,
+        argv: list[str],
+    ) -> None:
+        """The Namespace's ``config`` / ``format`` values must not depend on flag position.
+
+        This is the core invariant #373 violated: argparse's subparser was
+        overwriting parent-parsed values with its own default (None / "text").
+        """
+        parser = _build_parser()
+        ns = parser.parse_args(argv)
+        if "--config" in argv:
+            assert ns.config == "/tmp/X.yaml"
+        else:
+            assert ns.config is None
+        if "--format" in argv:
+            assert ns.format == "json"
+        else:
+            assert ns.format == "text"
+
+    def test_flags_on_nested_subcommand_work_in_every_position(self) -> None:
+        """Regression for #373 extended to nested ``maintenance classify``."""
+        parser = _build_parser()
+        for argv in [
+            ["--config", "X", "maintenance", "classify"],
+            ["maintenance", "--config", "X", "classify"],
+            ["maintenance", "classify", "--config", "X"],
+        ]:
+            ns = parser.parse_args(argv)
+            assert ns.config == "X", f"--config dropped for argv={argv!r}"
+            assert ns.command == "maintenance"
+            assert ns.maintenance_command == "classify"
 
 
 # ---------------------------------------------------------------------------
@@ -345,6 +447,20 @@ class TestQueryStatus:
         with pytest.raises(RuntimeError):
             _query_status(bad)
 
+    def test_missing_db_file_with_existing_parent_reports_empty(
+        self, tmp_path: Path
+    ) -> None:
+        """A fresh/uninitialised DB file (parent dir exists) reports empty state (issue #375)."""
+        db_path = str(tmp_path / "never-initialized.db")
+        result = _query_status(db_path)
+        assert result["total_entries"] == 0
+        assert result["entries_by_type"] == {}
+        assert result["entries_by_status"] == {}
+        assert result["schema_version"] is None
+        assert result["duckdb_version"] is None
+        # The DB file must NOT have been created as a side effect.
+        assert not Path(db_path).exists()
+
 
 # ---------------------------------------------------------------------------
 # _cmd_status / _cmd_health unit tests
@@ -363,6 +479,17 @@ class TestCmdStatusUnit:
         missing = str(tmp_path / "missing.yaml")
         rc = _cmd_status(missing, "text")
         assert rc == 1
+
+    def test_cmd_status_returns_zero_for_missing_db_file(
+        self, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        """Regression for #375: matches _cmd_health tolerance for uninitialised DB files."""
+        db_path = tmp_path / "never-created.db"
+        cfg_path = write_config(tmp_path, str(db_path))
+        rc = _cmd_status(str(cfg_path), "text")
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "total_entries:    0" in out
 
     def test_cmd_status_json_includes_version_keys(
         self, capsys: pytest.CaptureFixture[str], tmp_path: Path
