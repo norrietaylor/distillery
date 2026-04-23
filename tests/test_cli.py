@@ -248,6 +248,26 @@ class TestStatusCommand:
             main(["status", "--config", missing])
         assert exc.value.code == 1
 
+    def test_status_malformed_yaml_prints_friendly_error(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Malformed YAML should surface as a one-line error, not a traceback."""
+        bad = tmp_path / "bad.yaml"
+        bad.write_text("storage:\n  database_path: [unterminated\n")
+        with pytest.raises(SystemExit) as exc:
+            main(["status", "--config", str(bad)])
+        assert exc.value.code == 1
+        captured = capsys.readouterr()
+        err = captured.err
+        assert "Error loading configuration" in err
+        assert "Invalid YAML syntax" in err
+        # No Python traceback lines should leak to stderr.
+        assert "Traceback" not in err
+        assert "yaml.parser" not in err
+        assert "yaml.scanner" not in err
+
     def test_status_fresh_db_file_reports_empty_state(
         self,
         tmp_path: Path,
