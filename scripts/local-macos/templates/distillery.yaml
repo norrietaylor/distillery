@@ -1,0 +1,40 @@
+# Distillery config for the local macOS launchd install.
+# Mounted into the container at /data/distillery.yaml (DISTILLERY_CONFIG).
+
+storage:
+  backend: duckdb
+  database_path: /data/distillery.db
+
+embedding:
+  provider: jina
+  model: jina-embeddings-v3
+  dimensions: 1024
+  api_key_env: JINA_API_KEY
+
+team:
+  name: distillery-local
+
+server:
+  # The container is bound to 127.0.0.1 on the host; no external exposure.
+  auth:
+    provider: none
+  webhooks:
+    enabled: true
+    secret_env: DISTILLERY_WEBHOOK_SECRET
+
+classification:
+  confidence_threshold: 0.6
+  dedup_skip_threshold: 0.95
+  dedup_merge_threshold: 0.80
+  dedup_link_threshold: 0.60
+  dedup_limit: 5
+
+feeds:
+  thresholds:
+    alert: 0.85
+    digest: 0.60
+  sources: []
+
+tags:
+  enforce_namespaces: false
+  reserved_prefixes: []
