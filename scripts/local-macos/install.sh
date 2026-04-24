@@ -29,7 +29,14 @@ DO_KICKSTART=1
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --jina-key)       JINA_KEY_CLI="$2"; shift 2 ;;
+    --jina-key)
+      if [ $# -lt 2 ] || [[ "$2" == -* ]]; then
+        echo "--jina-key requires a value" >&2
+        exit 2
+      fi
+      JINA_KEY_CLI="$2"
+      shift 2
+      ;;
     --no-kickstart)   DO_KICKSTART=0; shift ;;
     -h|--help)
       sed -n '2,20p' "$0"
