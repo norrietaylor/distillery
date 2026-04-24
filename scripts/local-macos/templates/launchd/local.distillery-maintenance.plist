@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>local.distillery-maintenance</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HOME__/.distillery/maintenance.sh</string>
+    </array>
+
+    <!-- Mondays at 05:00 local time — runs before the 09:00 image-update
+         agent so pipeline work completes against the current image. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>1</integer>
+        <key>Hour</key>
+        <integer>5</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>StartCalendarIntervalRunOnMissed</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/.distillery/maintenance.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.distillery/maintenance.err.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+</dict>
+</plist>
