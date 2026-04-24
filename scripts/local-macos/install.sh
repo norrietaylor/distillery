@@ -64,6 +64,11 @@ if [ "$(uname -s)" != "Darwin" ]; then
   echo "this installer is macOS-only (uname=$(uname -s))" >&2
   exit 1
 fi
+if [ "$(id -u)" -eq 0 ] || [ -n "${SUDO_USER:-}" ]; then
+  echo "run this installer as the logged-in macOS user, not with sudo/root" >&2
+  echo "  (LaunchAgents and login-Keychain items are per-user; sudo routes them to root)" >&2
+  exit 1
+fi
 log "macOS detected"
 
 require security
@@ -97,7 +102,20 @@ if ! "$DOCKER" info >/dev/null 2>&1; then
   echo "docker daemon is not running — start OrbStack/Docker Desktop and re-run" >&2
   exit 1
 fi
-log "docker daemon reachable"
+
+# Reject remote docker contexts (ssh://, tcp://) — the install binds the
+# server to 127.0.0.1:8000 on the docker host, so a remote daemon would
+# produce a "successful" install that the LaunchAgent workers can't reach.
+DOCKER_CONTEXT=$("$DOCKER" context show 2>/dev/null || true)
+DOCKER_HOST_URI=$("$DOCKER" context inspect "$DOCKER_CONTEXT" \
+  --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)
+if [ -n "$DOCKER_HOST_URI" ] && [[ "$DOCKER_HOST_URI" != unix://* ]]; then
+  echo "docker context '$DOCKER_CONTEXT' points to '$DOCKER_HOST_URI'" >&2
+  echo "  this installer needs a local daemon (unix://) — switch contexts and re-run" >&2
+  echo "  e.g. 'docker context use orbstack' or 'docker context use desktop-linux'" >&2
+  exit 1
+fi
+log "docker daemon reachable (context=${DOCKER_CONTEXT:-default})"
 
 # ---- secrets ----------------------------------------------------------------
 
