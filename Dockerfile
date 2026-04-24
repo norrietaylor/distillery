@@ -5,8 +5,8 @@ WORKDIR /app
 ARG BUILD_SHA=unknown
 ENV DISTILLERY_BUILD_SHA=${BUILD_SHA}
 
-# Install Python 3.13
-RUN apk add --no-cache python-3.13
+# Install Python 3.14
+RUN apk add --no-cache python-3.14
 
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:0.11.3 /uv /usr/local/bin/uv
