@@ -100,10 +100,22 @@ def success_response(data: dict[str, Any]) -> list[types.TextContent]:
 
 
 def validate_required(arguments: dict[str, Any], *fields: str) -> str | None:
-    """Return an error message if any required field is missing from *arguments*.
+    """Return an error message if any required field is absent, empty, or blank.
 
-    A field is considered missing if it is absent, ``None``, or (for strings)
-    empty.  Values such as ``0`` and ``False`` are **not** treated as missing.
+    Distinguishes two failure modes so that agents parsing the error message
+    can recover without retrying with the same payload:
+
+    * **Missing** — field is absent from ``arguments`` or set to ``None``.
+      Reported as ``"Missing required fields: ..."``.
+    * **Empty** — field is present as a string that is empty or whitespace-only.
+      Reported as ``"Field '...' must be a non-empty string"`` (or the plural
+      form for multiple fields).
+
+    Non-string falsy values (``0``, ``False``, ``[]``, ``{}``) are **not**
+    treated as missing or empty — those are valid inputs for fields that
+    accept them.
+
+    When both categories fail in the same call, missing is reported first.
 
     Args:
         arguments: The tool argument dict.
@@ -111,15 +123,22 @@ def validate_required(arguments: dict[str, Any], *fields: str) -> str | None:
 
     Returns:
         An error message string if validation fails, or ``None`` if all fields
-        are present.
+        are present and non-empty.
     """
-    missing = [
-        f
-        for f in fields
-        if arguments.get(f) is None or (isinstance(arguments.get(f), str) and not arguments.get(f))
-    ]
+    missing: list[str] = []
+    empty: list[str] = []
+    for f in fields:
+        value = arguments.get(f)
+        if value is None:
+            missing.append(f)
+        elif isinstance(value, str) and not value.strip():
+            empty.append(f)
     if missing:
         return f"Missing required fields: {', '.join(missing)}"
+    if empty:
+        if len(empty) == 1:
+            return f"Field {empty[0]!r} must be a non-empty string"
+        return f"Fields must be non-empty strings: {', '.join(repr(f) for f in empty)}"
     return None
 
 

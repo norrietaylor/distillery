@@ -346,12 +346,13 @@ async def _handle_aggregate(
         MCP content list with a JSON payload containing ``group_by``,
         ``groups``, ``total_entries``, and ``total_groups``.
     """
-    group_by = arguments.get("group_by", "")
     err_group_by = validate_type(arguments, "group_by", str, "string")
     if err_group_by:
         return error_response("INVALID_PARAMS", err_group_by)
-    if not group_by:
-        return error_response("INVALID_PARAMS", "Missing required field: group_by")
+    err = validate_required(arguments, "group_by")
+    if err:
+        return error_response("INVALID_PARAMS", err)
+    group_by: str = arguments["group_by"]
     if group_by not in _AGGREGATE_GROUP_BY_MAP:
         return error_response(
             "INVALID_PARAMS",
