@@ -243,6 +243,24 @@ class TestCreateAction:
 
 
 # ---------------------------------------------------------------------------
+# Empty content in similar entry
+# ---------------------------------------------------------------------------
+
+
+class TestEmptyContentSimilarEntry:
+    """Similar entries with empty content do not crash the checker."""
+
+    async def test_empty_content_does_not_raise(self) -> None:
+        store = _make_mock_store([_make_search_result(0.97, content="")])
+        checker = _make_checker(store)
+
+        result = await checker.check("Some content")
+
+        assert result.action == DeduplicationAction.SKIP
+        assert '""' in result.reasoning
+
+
+# ---------------------------------------------------------------------------
 # dedup_limit respected
 # ---------------------------------------------------------------------------
 
