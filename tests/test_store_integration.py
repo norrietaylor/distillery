@@ -442,6 +442,106 @@ class TestMetaTableIntegration:
             with pytest.raises(RuntimeError, match="mismatch"):
                 await store_b.initialize()
 
+    async def test_model_mismatch_raises_typed_error(self) -> None:
+        """The mismatch error is the typed EmbeddingModelMismatchError subclass."""
+        import os
+        import tempfile
+
+        from distillery.store.duckdb import EmbeddingModelMismatchError
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "test_typed_mismatch.db")
+
+            provider_a = DeterministicEmbeddingProvider()
+            store_a = DuckDBStore(db_path=db_path, embedding_provider=provider_a)
+            await store_a.initialize()
+            await store_a.close()
+
+            class _DifferentProvider(DeterministicEmbeddingProvider):
+                @property
+                def model_name(self) -> str:
+                    return "different-model-name"
+
+            provider_b = _DifferentProvider()
+            store_b = DuckDBStore(db_path=db_path, embedding_provider=provider_b)
+            with pytest.raises(EmbeddingModelMismatchError) as excinfo:
+                await store_b.initialize()
+            assert excinfo.value.stored_model == "deterministic-4d"
+            assert excinfo.value.configured_model == "different-model-name"
+            assert excinfo.value.db_path == db_path
+
+    async def test_auto_reset_on_mismatch_when_env_set(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With the reset env var set, a mismatched local DB is wiped and re-initialised."""
+        import os
+        import tempfile
+
+        from distillery.store.duckdb import RESET_STORE_ON_MISMATCH_ENV
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "test_auto_reset.db")
+
+            provider_a = DeterministicEmbeddingProvider()
+            store_a = DuckDBStore(db_path=db_path, embedding_provider=provider_a)
+            await store_a.initialize()
+            # Seed an entry so we can verify the store really was wiped.
+            await store_a.store(make_entry(content="will be wiped on reset"))
+            await store_a.close()
+
+            class _DifferentProvider(DeterministicEmbeddingProvider):
+                @property
+                def model_name(self) -> str:
+                    return "different-model-name"
+
+            monkeypatch.setenv(RESET_STORE_ON_MISMATCH_ENV, "1")
+
+            provider_b = _DifferentProvider()
+            store_b = DuckDBStore(db_path=db_path, embedding_provider=provider_b)
+            await store_b.initialize()  # Should not raise.
+
+            # The new store starts empty -- the previously seeded entry is gone.
+            entries = await store_b.list_entries(filters=None, limit=10, offset=0)
+            assert entries == []
+
+            # The metadata now reflects the new provider.
+            conn = store_b.connection
+            row = conn.execute("SELECT value FROM _meta WHERE key = 'embedding_model'").fetchone()
+            assert row is not None
+            assert row[0] == "different-model-name"
+            await store_b.close()
+
+    async def test_auto_reset_disabled_when_env_unset(self) -> None:
+        """Without the env var the mismatch is fatal even on a local file path."""
+        import os
+        import tempfile
+
+        from distillery.store.duckdb import (
+            RESET_STORE_ON_MISMATCH_ENV,
+            EmbeddingModelMismatchError,
+        )
+
+        # Make sure the env var is not leaking from another test.
+        assert os.environ.get(RESET_STORE_ON_MISMATCH_ENV) in (None, "")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "test_no_reset.db")
+
+            provider_a = DeterministicEmbeddingProvider()
+            store_a = DuckDBStore(db_path=db_path, embedding_provider=provider_a)
+            await store_a.initialize()
+            await store_a.close()
+
+            class _DifferentProvider(DeterministicEmbeddingProvider):
+                @property
+                def model_name(self) -> str:
+                    return "different-model-name"
+
+            provider_b = _DifferentProvider()
+            store_b = DuckDBStore(db_path=db_path, embedding_provider=provider_b)
+            with pytest.raises(EmbeddingModelMismatchError):
+                await store_b.initialize()
+
 
 # ---------------------------------------------------------------------------
 # Tag vocabulary

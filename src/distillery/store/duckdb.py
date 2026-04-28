@@ -41,6 +41,47 @@ logger = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
 
+#: Environment variable that, when set to a truthy value, instructs
+#: :meth:`DuckDBStore.initialize` to delete a local database file whose
+#: recorded embedding model/dimensions differ from the configured provider
+#: and re-initialise from scratch.  Intended for ephemeral test/CI stores
+#: only — never enable this against a database that holds user data.
+RESET_STORE_ON_MISMATCH_ENV = "DISTILLERY_RESET_STORE_ON_EMBEDDING_MISMATCH"
+
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+
+def _should_reset_on_mismatch() -> bool:
+    """Return True when the auto-reset env var is set to a truthy value."""
+    return os.environ.get(RESET_STORE_ON_MISMATCH_ENV, "").strip().lower() in _TRUTHY
+
+
+class EmbeddingModelMismatchError(RuntimeError):
+    """Raised when a DuckDB store was populated with a different embedding model.
+
+    Subclasses :class:`RuntimeError` so existing handlers and tests that
+    catch the broader type continue to work; callers that want to recover
+    automatically (for example, by deleting the store and re-initialising)
+    can catch this specific subclass.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        stored_model: str | None = None,
+        configured_model: str | None = None,
+        stored_dimensions: str | None = None,
+        configured_dimensions: str | None = None,
+        db_path: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.stored_model = stored_model
+        self.configured_model = configured_model
+        self.stored_dimensions = stored_dimensions
+        self.configured_dimensions = configured_dimensions
+        self.db_path = db_path
+
 
 def _sql_escape(value: str) -> str:
     """Escape a string value for safe embedding in a SQL literal.
@@ -505,19 +546,29 @@ class DuckDBStore:
         stored_dims = rows.get("embedding_dimensions")
 
         if stored_model is not None and stored_model != model:
-            raise RuntimeError(
+            raise EmbeddingModelMismatchError(
                 f"Embedding model mismatch: database was populated with "
                 f"{stored_model!r} but the configured provider uses "
                 f"{model!r}. Using different models would produce "
-                f"incompatible embeddings."
+                f"incompatible embeddings.",
+                stored_model=stored_model,
+                configured_model=model,
+                stored_dimensions=stored_dims,
+                configured_dimensions=dims,
+                db_path=self._db_path,
             )
 
         if stored_dims is not None and stored_dims != dims:
-            raise RuntimeError(
+            raise EmbeddingModelMismatchError(
                 f"Embedding dimensions mismatch: database was populated with "
                 f"{stored_dims} dimensions but the configured provider uses "
                 f"{dims}. Using different dimensions would produce "
-                f"incompatible embeddings."
+                f"incompatible embeddings.",
+                stored_model=stored_model,
+                configured_model=model,
+                stored_dimensions=stored_dims,
+                configured_dimensions=dims,
+                db_path=self._db_path,
             )
 
     def _recover_from_wal_replay_failure(self, exc: duckdb.Error) -> duckdb.DuckDBPyConnection:
@@ -721,8 +772,16 @@ class DuckDBStore:
                     vss_available=self._vss_available,
                 )
 
-                # 3. Validate or record embedding model metadata.
-                self._validate_or_record_meta(conn)
+                # 3. Validate or record embedding model metadata.  Close the
+                #    local connection on mismatch so the file is not held
+                #    open if the caller wants to delete and recreate it
+                #    (see DuckDBStore.initialize auto-reset path).
+                try:
+                    self._validate_or_record_meta(conn)
+                except EmbeddingModelMismatchError:
+                    with contextlib.suppress(duckdb.Error):
+                        conn.close()
+                    raise
 
                 # 4. Ensure HNSW index exists.  Migration 6 may have been
                 #    applied when VSS was unavailable; this backfills the
@@ -795,10 +854,56 @@ class DuckDBStore:
 
         This must be called once before any other method.  It is safe to
         call multiple times -- subsequent calls are no-ops.
+
+        When the configured embedding provider does not match the model
+        recorded in the database metadata, an
+        :class:`EmbeddingModelMismatchError` is raised.  If the
+        ``DISTILLERY_RESET_STORE_ON_EMBEDDING_MISMATCH`` environment
+        variable is set to a truthy value AND the database is a local
+        file path (not ``:memory:``, S3, or MotherDuck), the file is
+        deleted and initialisation is retried once with a fresh schema.
+        This is intended for ephemeral test/CI stores; it must NOT be
+        enabled against a database that holds user data.
         """
         if self._initialized:
             return
-        await asyncio.to_thread(self._sync_initialize)
+        try:
+            await asyncio.to_thread(self._sync_initialize)
+        except EmbeddingModelMismatchError as exc:
+            if not _should_reset_on_mismatch():
+                raise
+            local_path = self._resolve_local_db_path()
+            if local_path is None:
+                # In-memory, S3, and MotherDuck stores are never auto-deleted.
+                raise
+            logger.warning(
+                "Embedding model mismatch (stored=%r dims=%s, configured=%r dims=%s); "
+                "%s is set -- deleting %s and re-initialising.",
+                exc.stored_model,
+                exc.stored_dimensions,
+                exc.configured_model,
+                exc.configured_dimensions,
+                RESET_STORE_ON_MISMATCH_ENV,
+                local_path,
+            )
+            await asyncio.to_thread(self._reset_local_db, local_path)
+            await asyncio.to_thread(self._sync_initialize)
+
+    def _reset_local_db(self, local_path: Path) -> None:
+        """Close any open connection and delete the local DB file plus its WAL.
+
+        Only called from the auto-reset path in :meth:`initialize` after a
+        confirmed :class:`EmbeddingModelMismatchError`.  Safe to invoke when
+        the connection or files do not exist.
+        """
+        if self._conn is not None:
+            with contextlib.suppress(duckdb.Error):
+                self._conn.close()
+            self._conn = None
+            self._initialized = False
+        for path in (local_path, Path(str(local_path) + ".wal")):
+            with contextlib.suppress(FileNotFoundError, OSError):
+                path.unlink()
 
     async def close(self) -> None:
         """Checkpoint the WAL and close the database connection."""
@@ -1783,9 +1888,7 @@ class DuckDBStore:
         # (grouped counts vs. aggregate stats); combining them would silently
         # drop one. Reject explicitly so callers get a clear error.
         if group_by is not None and output is not None:
-            raise ValueError(
-                "group_by and output cannot be combined — pick one"
-            )
+            raise ValueError("group_by and output cannot be combined — pick one")
 
         # ----- group_by mode: delegate to aggregate_entries -----
         if group_by is not None:
