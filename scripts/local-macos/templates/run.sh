@@ -12,9 +12,10 @@ NAME=distillery
 DATA_DIR=$HOME/.distillery
 PORT=8000
 
-# OrbStack / Docker Desktop auto-start on demand; give the daemon a moment
-# to come up on cold boot before we bail.
-for _ in 1 2 3 4 5 6 7 8 9 10; do
+# Wait up to 60s for the docker daemon. OrbStack and Docker Desktop both
+# auto-start on demand, but a cold-from-shutdown start (or a login before
+# autostart kicks in) can take 20-40s before the socket is ready.
+for _ in $(seq 1 30); do
   if "$DOCKER" info >/dev/null 2>&1; then break; fi
   sleep 2
 done

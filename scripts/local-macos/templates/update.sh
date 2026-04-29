@@ -10,7 +10,8 @@ IMAGE=ghcr.io/norrietaylor/distillery:latest
 PLATFORM=linux/amd64
 LOG=$HOME/.distillery/update.log
 
-for _ in 1 2 3 4 5 6 7 8 9 10; do
+# Wait up to 60s for the docker daemon to come up.
+for _ in $(seq 1 30); do
   if "$DOCKER" info >/dev/null 2>&1; then break; fi
   sleep 2
 done
