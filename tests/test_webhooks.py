@@ -403,6 +403,62 @@ async def test_poll_handler(store: DuckDBStore, monkeypatch: pytest.MonkeyPatch)
 
 
 @pytest.mark.unit
+async def test_poll_advances_last_polled_at_in_store(
+    store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #404: ``POST /poll`` must advance ``feed_sources.last_polled_at``
+    on the store, regardless of whether the webhook background task lives
+    long enough to write ``webhook_audit:poll``.
+
+    Drives the real :class:`FeedPoller` against an in-memory DuckDBStore
+    with a stubbed adapter so the test exercises the production code path:
+    parse → 202 → bg task → ``_poll_source`` → ``_persist_poll_status``.
+    """
+    from datetime import UTC, datetime
+    from unittest.mock import MagicMock, patch
+
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+    config = _make_config()
+
+    # Seed a real feed source so list_feed_sources() returns something
+    # for the poller to iterate over.
+    await store.add_feed_source(
+        url="https://example.com/rss",
+        source_type="rss",
+        poll_interval_minutes=60,
+    )
+
+    shared = _make_shared_state(store)
+
+    # Capture t0 BEFORE the webhook fires so the assertion is robust to
+    # event-loop scheduling skew.
+    t0 = datetime.now(tz=UTC)
+
+    with patch("distillery.feeds.poller._build_adapter") as mock_build:
+        mock_adapter = MagicMock()
+        mock_adapter.fetch.return_value = []  # no items → fast poll
+        mock_build.return_value = mock_adapter
+
+        app = create_webhook_app(shared, config)
+        with TestClient(app, raise_server_exceptions=False) as client:
+            resp = client.post("/poll", headers=_AUTH_HEADER)
+            assert resp.status_code == 202, resp.text
+            _wait_for_job(client, resp.json()["job_id"])
+
+    sources = await store.list_feed_sources()
+    assert len(sources) == 1
+    last = sources[0]["last_polled_at"]
+    assert isinstance(last, str), (
+        "POST /poll must update feed_sources.last_polled_at via the "
+        "real FeedPoller (#404 — was stuck at NULL after async refactor)"
+    )
+    assert datetime.fromisoformat(last) >= t0
+    # next_poll_at is derived from last_polled_at + interval — also
+    # asserted because the issue notes it was always null.
+    assert sources[0]["next_poll_at"] is not None
+
+
+@pytest.mark.unit
 async def test_rescore_handler(store: DuckDBStore, monkeypatch: pytest.MonkeyPatch) -> None:
     """POST /rescore with body {limit: 50} returns 202; the background job
     forwards limit=50 to FeedPoller.rescore() and the job result carries the stats."""
@@ -943,9 +999,7 @@ async def test_failed_job_records_audit(
     # branch exited without writing one, leaving the DB silent on the
     # most-interesting path.
     audit_raw = await store.get_metadata("webhook_audit:poll")
-    assert audit_raw is not None, (
-        "webhook_audit:poll must be written even when the runner raises"
-    )
+    assert audit_raw is not None, "webhook_audit:poll must be written even when the runner raises"
     import json as _json
 
     record = _json.loads(audit_raw)

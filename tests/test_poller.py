@@ -876,6 +876,178 @@ class TestPersistPollStatus:
         assert summary.sources_polled == 1
 
 
+class TestPersistOnPartialCycle:
+    """Issue #404: per-source liveness must be persisted even when the
+    surrounding poll cycle does not run to completion (e.g. the webhook
+    background task is cancelled mid-gather, an unhandled exception
+    escapes the inner work, or only the inner ``_do_poll_source`` call
+    finishes for a single source).
+
+    These tests guard the ``try/finally`` placement inside
+    ``FeedPoller._poll_source`` — moving the persist back to a
+    post-``gather`` loop in ``poll()`` (the pre-#404 behaviour) would
+    regress all of these.
+    """
+
+    async def test_persist_runs_even_when_inner_raises(self) -> None:
+        """An unhandled exception inside the per-item loop must not bypass
+        the ``finally``-clause persist of liveness.
+        """
+        src = FeedSourceConfig(url="https://example.com/rss", source_type="rss")
+        store = _make_store(feed_sources=[_source_to_dict(src)])
+        cfg = _make_config(sources=[src], digest_threshold=0.0)
+
+        # Force the inner ``_do_poll_source`` to raise after the adapter
+        # has fetched items but before the post-gather loop would run.
+        # ``_has_external_id`` is awaited deep in the per-item loop, so
+        # raising there exercises the ``finally`` path under realistic
+        # ordering.
+        items = [_make_feed_item(item_id="id1", title="T", content="B")]
+
+        with patch("distillery.feeds.poller._build_adapter") as mock_build:
+            mock_adapter = MagicMock()
+            mock_adapter.fetch.return_value = items
+            mock_build.return_value = mock_adapter
+
+            poller = FeedPoller(store=store, config=cfg)
+
+            async def _boom(_item_id: str) -> bool:
+                raise RuntimeError("boom")
+
+            with patch.object(poller, "_has_external_id", side_effect=_boom):
+                # The exception escapes _poll_source and surfaces as a
+                # gather() result; ``poll()`` wraps it as an err_result.
+                summary = await poller.poll()
+
+        # Exactly one persist — from ``_poll_source``'s ``finally`` —
+        # plus one more from the err_result branch in ``poll()`` for the
+        # excepted gather entry.  Both target the same URL.
+        urls = [c.args[0] for c in store.record_poll_status.call_args_list]
+        assert "https://example.com/rss" in urls
+        # The summary records the source as polled+errored (via err_result).
+        assert summary.sources_polled == 1
+        assert summary.sources_errored == 1
+
+    async def test_persist_runs_when_inner_call_cancelled(self) -> None:
+        """If a per-item await inside ``_do_poll_source`` is cancelled
+        (simulating a host kill mid-fetch), the ``finally`` clause in
+        ``_poll_source`` still persists liveness — protected from a
+        cascading cancellation by ``asyncio.shield`` on the persist call.
+
+        This is the production failure mode in issue #404: the webhook
+        background task is cancelled by the host between item-store and
+        the post-gather loop, leaving ``last_polled_at`` stuck at its
+        prior value.  Without the ``finally`` + ``shield`` belt-and-
+        braces in ``_poll_source``, the persist call never reaches the
+        store.
+        """
+        import asyncio
+
+        src = FeedSourceConfig(url="https://example.com/rss", source_type="rss")
+        store = _make_store(feed_sources=[_source_to_dict(src)])
+        cfg = _make_config(sources=[src], digest_threshold=0.0)
+
+        # Have ``_has_external_id`` raise CancelledError on first call to
+        # simulate a host-driven cancellation reaching the per-item loop
+        # while the surrounding task is still otherwise valid.  This
+        # avoids the more complex full-task-cancel scenario whose pytest
+        # cleanup races the shielded persist task.
+        items = [_make_feed_item(item_id="id1", title="T", content="B")]
+
+        with patch("distillery.feeds.poller._build_adapter") as mock_build:
+            mock_adapter = MagicMock()
+            mock_adapter.fetch.return_value = items
+            mock_build.return_value = mock_adapter
+
+            poller = FeedPoller(store=store, config=cfg)
+
+            async def _cancel(_item_id: str) -> bool:
+                raise asyncio.CancelledError("simulated host cancel")
+
+            with patch.object(poller, "_has_external_id", side_effect=_cancel):
+                # The CancelledError escapes _poll_source.  ``poll()``
+                # surfaces it as an err_result via ``return_exceptions=True``
+                # to gather, but the ``finally`` clause inside
+                # ``_poll_source`` runs first and records liveness.
+                summary = await poller.poll()
+
+        urls = [c.args[0] for c in store.record_poll_status.call_args_list]
+        assert "https://example.com/rss" in urls, (
+            "last_polled_at must be persisted even when the per-item loop "
+            "is cancelled mid-flight (#404)"
+        )
+        # gather's err_result branch ALSO calls _persist_poll_status, so
+        # we accept >=1 calls.  The important guarantee is that AT LEAST
+        # one persist made it to the store before the cycle terminated.
+        assert summary.sources_polled == 1
+
+
+class TestLastPolledAtAdvancesPerSource:
+    """Issue #404 regression: ``feed_sources.last_polled_at`` must be
+    written by every successful per-source poll so that
+    ``distillery_status.last_feed_poll.last_poll_at`` and
+    ``distillery_watch(action='list').next_poll_at`` advance even when
+    the surrounding webhook background task does not reach its audit
+    write (e.g. host auto-stop after returning 202).
+    """
+
+    async def test_real_store_last_polled_at_updates(self) -> None:
+        """End-to-end: a real DuckDBStore observes ``last_polled_at``
+        advance on every poll.
+        """
+        from datetime import UTC, datetime
+
+        from distillery.embedding.protocol import EmbeddingProvider
+        from distillery.store.duckdb import DuckDBStore
+
+        class _StubEmbedding:
+            model_name = "stub"
+            dimensions = 4
+
+            async def embed(self, text: str) -> list[float]:
+                return [0.1, 0.1, 0.1, 0.1]
+
+            async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+                return [[0.1, 0.1, 0.1, 0.1] for _ in texts]
+
+        embedder: EmbeddingProvider = _StubEmbedding()  # type: ignore[assignment]
+        store = DuckDBStore(db_path=":memory:", embedding_provider=embedder)
+        await store.initialize()
+        try:
+            await store.add_feed_source(
+                url="https://example.com/rss",
+                source_type="rss",
+                poll_interval_minutes=60,
+            )
+
+            t0 = datetime.now(tz=UTC)
+
+            cfg = _make_config(
+                sources=[FeedSourceConfig(url="https://example.com/rss", source_type="rss")],
+                digest_threshold=0.0,
+            )
+            with patch("distillery.feeds.poller._build_adapter") as mock_build:
+                mock_adapter = MagicMock()
+                mock_adapter.fetch.return_value = []
+                mock_build.return_value = mock_adapter
+
+                poller = FeedPoller(store=store, config=cfg)
+                await poller.poll()
+
+            sources = await store.list_feed_sources()
+            assert len(sources) == 1
+            ts_iso = sources[0]["last_polled_at"]
+            assert isinstance(ts_iso, str), (
+                "last_polled_at must be set after a successful poll cycle (#404)"
+            )
+            ts = datetime.fromisoformat(ts_iso)
+            assert ts >= t0, f"last_polled_at {ts!r} should be >= t0 {t0!r}"
+
+            # next_poll_at is derived from last_polled_at + interval and
+            # should also be non-null now.
+            assert sources[0]["next_poll_at"] is not None
+        finally:
+            await store.close()
 # ---------------------------------------------------------------------------
 # Reader enrichment integration (#403)
 # ---------------------------------------------------------------------------

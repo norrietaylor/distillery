@@ -42,6 +42,32 @@ def _db_size_bytes(config: DistilleryConfig) -> int | None:
         return None
 
 
+def _max_last_polled_at(sources: list[dict[str, Any]]) -> str | None:
+    """Return the most recent ``last_polled_at`` ISO timestamp across *sources*.
+
+    ``sources`` is the list returned by
+    :meth:`~distillery.store.protocol.DistilleryStore.list_feed_sources`,
+    where each entry has a ``last_polled_at`` value that is either an ISO
+    8601 string or ``None``.  Returns the lexicographically-greatest valid
+    string (which is also the chronological maximum because every poll
+    persists timestamps in the same UTC offset, ``+00:00``), or ``None``
+    when no source has ever been polled.
+
+    Used by :func:`_handle_status` so ``last_feed_poll.last_poll_at``
+    reflects the per-source liveness column, which is updated synchronously
+    by each :class:`~distillery.feeds.poller.FeedPoller` source poll —
+    rather than the ``webhook_audit:poll`` metadata row, which is only
+    written at the end of a webhook background task and can be lost when
+    the host auto-stops mid-cycle (issue #404).
+    """
+    candidates: list[str] = [
+        s["last_polled_at"] for s in sources if isinstance(s.get("last_polled_at"), str)
+    ]
+    if not candidates:
+        return None
+    return max(candidates)
+
+
 async def _handle_status(
     *,
     store: DistilleryStore,
@@ -115,6 +141,7 @@ async def _handle_status(
     # --- feed poll summary (optional, best-effort) ---------------------------
     feed_summary: dict[str, Any] = {"source_count": 0, "last_poll_at": None}
     feed_error: str | None = None
+    sources: list[dict[str, Any]] = []
     try:
         sources = await store.list_feed_sources()
         feed_summary["source_count"] = len(sources)
@@ -124,15 +151,27 @@ async def _handle_status(
         degraded_reasons.append(feed_error)
         logger.exception("distillery_status: list_feed_sources failed")
 
-    with contextlib.suppress(Exception):
-        raw_audit = await store.get_metadata("webhook_audit:poll")
-        if raw_audit:
-            try:
-                audit = json.loads(raw_audit)
-                if isinstance(audit, dict) and isinstance(audit.get("timestamp"), str):
-                    feed_summary["last_poll_at"] = audit["timestamp"]
-            except (TypeError, ValueError):
-                pass
+    # Prefer ``MAX(feed_sources.last_polled_at)`` over the webhook audit
+    # record: per-source liveness is updated synchronously by each
+    # ``_poll_source`` call (see :class:`distillery.feeds.poller.FeedPoller`),
+    # so it advances even when the webhook background task is cancelled
+    # before it can write ``webhook_audit:poll`` (issue #404).  Fall back
+    # to the audit record only when no source has ever been polled — this
+    # preserves the previous behaviour for fresh installs whose first
+    # poll may have logged an audit but failed to update any source.
+    max_last_polled: str | None = _max_last_polled_at(sources)
+    if max_last_polled is not None:
+        feed_summary["last_poll_at"] = max_last_polled
+    else:
+        with contextlib.suppress(Exception):
+            raw_audit = await store.get_metadata("webhook_audit:poll")
+            if raw_audit:
+                try:
+                    audit = json.loads(raw_audit)
+                    if isinstance(audit, dict) and isinstance(audit.get("timestamp"), str):
+                        feed_summary["last_poll_at"] = audit["timestamp"]
+                except (TypeError, ValueError):
+                    pass
     payload["last_feed_poll"] = feed_summary
 
     # --- readiness probe (issue #363 follow-up) -----------------------------
@@ -152,9 +191,7 @@ async def _handle_status(
             # Log the raw probe error server-side; expose only the stable
             # generic code to clients.
             if raw_ready_error:
-                logger.warning(
-                    "distillery_status: readiness probe failed: %s", raw_ready_error
-                )
+                logger.warning("distillery_status: readiness probe failed: %s", raw_ready_error)
             stable_code = "readiness_probe_failed"
             payload["store_ready_error"] = stable_code
             degraded_reasons.append(stable_code)

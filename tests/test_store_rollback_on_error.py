@@ -187,3 +187,97 @@ class TestStatusDegraded:
         # ``exc_info``; ``caplog.text`` renders it so the raw message is
         # searchable there.
         assert "DB unreadable" in caplog.text
+
+
+class TestStatusLastPollAt:
+    """Issue #404: ``distillery_status.last_feed_poll.last_poll_at`` must
+    reflect the most recent ``feed_sources.last_polled_at`` value, not the
+    ``webhook_audit:poll`` metadata row whose write was lost when the
+    background task was cancelled.
+    """
+
+    async def test_last_poll_at_uses_max_feed_sources_last_polled_at(
+        self, store: DuckDBStore, mock_embedding_provider: object
+    ) -> None:
+        """When a feed source has been polled, status reports its timestamp
+        even if no ``webhook_audit:poll`` metadata row exists.
+        """
+        from datetime import UTC, datetime, timedelta
+
+        from distillery.config import DistilleryConfig
+        from distillery.mcp.tools.meta import _handle_status
+
+        from .conftest import parse_mcp_response
+
+        await store.add_feed_source(
+            url="https://example.com/rss",
+            source_type="rss",
+            poll_interval_minutes=60,
+        )
+        # Persist a fresh poll outcome — this is the production code
+        # path (``FeedPoller._persist_poll_status`` calls this directly).
+        polled_at = datetime.now(tz=UTC) - timedelta(minutes=1)
+        await store.record_poll_status(
+            "https://example.com/rss",
+            polled_at=polled_at,
+            item_count=3,
+            error=None,
+        )
+
+        # Deliberately do NOT write ``webhook_audit:poll`` — this is the
+        # production scenario where the bg task was cancelled before
+        # ``_record_audit`` could run.
+
+        result = await _handle_status(
+            store=store,
+            config=DistilleryConfig(),
+            embedding_provider=mock_embedding_provider,
+            tool_count=16,
+            transport="http",
+            started_at=None,
+        )
+        payload = parse_mcp_response(result)
+
+        last_poll_at = payload["last_feed_poll"]["last_poll_at"]
+        assert isinstance(last_poll_at, str), payload
+        # Tolerate sub-second formatting differences — the assertion
+        # that matters is that the timestamp is fresh (within the last
+        # 5 minutes) rather than ``None``.
+        from datetime import datetime as _dt
+
+        parsed = _dt.fromisoformat(last_poll_at)
+        assert (datetime.now(tz=UTC) - parsed).total_seconds() < 300
+
+    async def test_last_poll_at_falls_back_to_audit_when_no_sources_polled(
+        self, store: DuckDBStore, mock_embedding_provider: object
+    ) -> None:
+        """When no feed source has been polled, status falls back to the
+        ``webhook_audit:poll`` row (preserves the previous behaviour for
+        fresh installs whose first poll-cycle write may have failed).
+        """
+        import json
+
+        from distillery.config import DistilleryConfig
+        from distillery.mcp.tools.meta import _handle_status
+
+        from .conftest import parse_mcp_response
+
+        # No feed sources, no last_polled_at anywhere — but a webhook
+        # audit row was written (the deprecated path).
+        audit_ts = "2026-04-23T14:16:34.768785+00:00"
+        await store.set_metadata(
+            "webhook_audit:poll",
+            json.dumps({"timestamp": audit_ts, "status": 200, "ok": True}),
+        )
+
+        result = await _handle_status(
+            store=store,
+            config=DistilleryConfig(),
+            embedding_provider=mock_embedding_provider,
+            tool_count=16,
+            transport="http",
+            started_at=None,
+        )
+        payload = parse_mcp_response(result)
+
+        assert payload["last_feed_poll"]["last_poll_at"] == audit_ts
