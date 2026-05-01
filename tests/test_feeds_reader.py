@@ -147,8 +147,13 @@ class TestJinaReaderClientFetch:
         request = transport.calls[0]
         assert request.headers["Authorization"] == "Bearer test-key"
         assert request.headers["Accept"] == "text/plain"
-        # Verify the URL is appended (URL-encoded)
-        assert "example.com" in str(request.url)
+        # Verify the request was routed through r.jina.ai with the target
+        # URL appended.  Compare the parsed components rather than doing a
+        # substring match so a malicious Reader URL like
+        # ``https://r.jina.ai.evil.com/...`` could not pass an
+        # ``"example.com" in url`` check (CodeQL: py/incomplete-url-substring-sanitization).
+        assert request.url.host == "r.jina.ai"
+        assert "example.com/post" in request.url.path
 
     async def test_empty_body_returns_none(self) -> None:
         transport = _RecordingTransport([httpx.Response(200, text="")])
