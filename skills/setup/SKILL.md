@@ -78,7 +78,12 @@ Distillery MCP Server Not Available
 
 The Distillery MCP server is not configured or not running.
 
-Quickest setup — add to ~/.claude/settings.json:
+Quickest setup — install the plugin (configures local stdio by default):
+
+  claude plugin marketplace add norrietaylor/distillery
+  claude plugin install distillery
+
+Or add manually to ~/.claude.json:
 
   {
     "mcpServers": {
@@ -94,6 +99,10 @@ Quickest setup — add to ~/.claude/settings.json:
 
 Get a free Jina API key at https://jina.ai
 Then restart Claude Code and run /setup again.
+
+Prefer the hosted demo (evaluation only, no sensitive data)?
+  claude mcp add distillery --scope user --transport http \
+    --url https://distillery-mcp.fly.dev/mcp
 
 Full guide: https://norrietaylor.github.io/distillery/getting-started/local-setup/
 ```
