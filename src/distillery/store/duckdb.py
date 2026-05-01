@@ -163,6 +163,21 @@ class DuckDBStore:
         self._rrf_k: int = rrf_k
         self._recency_window_days: int = recency_window_days
         self._recency_min_weight: float = recency_min_weight
+        # Serializes access to the shared ``DuckDBPyConnection``.  DuckDB
+        # connections are **not** thread-safe for concurrent use, but every
+        # store operation funnels through ``asyncio.to_thread`` which runs
+        # ``fn`` on the default thread-pool executor — so concurrent
+        # coroutines (e.g. ``asyncio.gather`` across feed sources in
+        # ``FeedPoller.poll``) end up touching ``self._conn`` from multiple
+        # worker threads at once.  That race surfaced as glibc heap
+        # corruption (``corrupted double-linked list``) wedging the server
+        # process, and as the ``Invalid Input Error: Attempting to execute
+        # an unsuccessful or closed pending query result`` upstream of the
+        # FTS-rebuild failure that triggered issue #414.  ``_conn_lock``
+        # is created lazily on first ``_run_sync`` call so the store can
+        # be instantiated outside an event loop (e.g. construction at
+        # module import in tests); see ``_get_conn_lock``.
+        self._conn_lock: asyncio.Lock | None = None
 
     # ------------------------------------------------------------------
     # Cloud path helpers
@@ -801,8 +816,16 @@ class DuckDBStore:
         await asyncio.to_thread(self._sync_initialize)
 
     async def close(self) -> None:
-        """Checkpoint the WAL and close the database connection."""
-        if self._conn is not None:
+        """Checkpoint the WAL and close the database connection.
+
+        Holds ``_conn_lock`` so the close cannot race an in-flight
+        ``_run_sync`` worker still mutating the connection (issue #416).
+        """
+        if self._conn is None:
+            return
+        async with self._get_conn_lock():
+            if self._conn is None:  # double-checked under the lock
+                return
             try:
                 await asyncio.to_thread(self._conn.execute, "CHECKPOINT")
             except duckdb.Error as exc:  # pragma: no cover
@@ -856,6 +879,19 @@ class DuckDBStore:
         except duckdb.Error as rollback_exc:
             logger.debug("Post-error ROLLBACK skipped: %s", rollback_exc)
 
+    def _get_conn_lock(self) -> asyncio.Lock:
+        """Return the connection-serialization lock, creating it lazily.
+
+        ``asyncio.Lock`` binds to the running event loop, but ``DuckDBStore``
+        may be instantiated outside one (e.g. at module import in tests).
+        Creating the lock here, on the first call from inside an async
+        method, guarantees it lives on the same loop the store is being
+        used from.
+        """
+        if self._conn_lock is None:
+            self._conn_lock = asyncio.Lock()
+        return self._conn_lock
+
     async def _run_sync(
         self,
         fn: Callable[..., _T],
@@ -872,28 +908,43 @@ class DuckDBStore:
         aborted-transaction state and all subsequent reads and writes
         would fail until the connection was recycled (issue #363).
 
+        Holds ``_conn_lock`` for the duration of the to-thread call so
+        only one worker thread touches the shared ``DuckDBPyConnection``
+        at a time.  DuckDB connections are not thread-safe for concurrent
+        use; without this lock, parallel callers (notably ``FeedPoller``'s
+        per-source ``asyncio.gather``) would race inside DuckDB's C++
+        buffer manager and intermittently corrupt the glibc heap, wedging
+        the process with ``corrupted double-linked list`` (issue #416).
+        Throughput on parallel store operations is reduced to one-at-a-time;
+        a future optimisation could narrow the lock to the SQL portion of
+        each ``_sync_*`` method (releasing it across the embedding network
+        call) but correctness comes first.
+
         Read-only operations (e.g. :meth:`_sync_get`) can also reach this
         path when a prior uncaught exception poisoned the connection;
         running ``ROLLBACK`` after the failed read restores the connection
         so the next call succeeds rather than cascading the same error.
         """
-        try:
-            return await asyncio.to_thread(fn, *args, **kwargs)
-        except Exception:
-            # Catching ``Exception`` — not ``BaseException`` — so that
-            # ``asyncio.CancelledError`` does not trigger rollback.  When a
-            # task is cancelled while awaiting ``asyncio.to_thread(fn, …)``
-            # the worker thread executing *fn* keeps running (Python has no
-            # safe way to forcibly stop a thread), so issuing
-            # ``conn.rollback()`` from a second worker thread would race
-            # against the still-live first one on the shared DuckDB
-            # connection — which is not thread-safe for concurrent use.
-            # On cancellation we simply re-raise; on ordinary exceptions
-            # *fn* has already returned control so the rollback is safe.
-            conn = self._conn
-            if conn is not None:
-                await asyncio.to_thread(self._rollback_quietly, conn)
-            raise
+        async with self._get_conn_lock():
+            try:
+                return await asyncio.to_thread(fn, *args, **kwargs)
+            except Exception:
+                # Catching ``Exception`` — not ``BaseException`` — so that
+                # ``asyncio.CancelledError`` does not trigger rollback.
+                # When a task is cancelled while awaiting
+                # ``asyncio.to_thread(fn, …)`` the worker thread executing
+                # *fn* keeps running (Python has no safe way to forcibly
+                # stop a thread), so issuing ``conn.rollback()`` from a
+                # second worker thread would race against the still-live
+                # first one on the shared DuckDB connection.  On
+                # cancellation we simply re-raise; on ordinary exceptions
+                # *fn* has already returned control so the rollback is
+                # safe.  The rollback runs while we still hold the lock
+                # so the connection is single-threaded throughout.
+                conn = self._conn
+                if conn is not None:
+                    await asyncio.to_thread(self._rollback_quietly, conn)
+                raise
 
     async def rollback(self) -> None:
         """Public rollback hook for non-store code paths that touch the connection.
@@ -903,10 +954,14 @@ class DuckDBStore:
         :mod:`distillery.mcp.budget`) that bypass :meth:`_run_sync`.  Those
         call sites can invoke ``await store.rollback()`` in their exception
         handlers to clear an aborted transaction before the next request.
+
+        Holds ``_conn_lock`` so the rollback cannot race a concurrent
+        ``_run_sync`` worker still mutating the connection (issue #416).
         """
         if self._conn is None:
             return
-        await asyncio.to_thread(self._rollback_quietly, self._conn)
+        async with self._get_conn_lock():
+            await asyncio.to_thread(self._rollback_quietly, self._conn)
 
     async def probe_readiness(self) -> tuple[bool, str | None]:
         """Return ``(True, None)`` when the connection can answer a trivial query.

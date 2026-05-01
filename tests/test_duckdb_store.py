@@ -1438,6 +1438,84 @@ class TestFTSRebuildOnMutation:
         assert entry.id in result_ids
 
 
+class TestConnectionLockSerialization:
+    """Issue #416: ``_run_sync`` must serialize concurrent connection access.
+
+    DuckDB's ``DuckDBPyConnection`` is not thread-safe.  Without a lock,
+    parallel ``asyncio.gather`` callers (e.g. ``FeedPoller`` polling 60+
+    sources) end up touching the shared connection from multiple
+    ``asyncio.to_thread`` workers concurrently, which intermittently
+    corrupts the glibc heap and wedges the process.
+    """
+
+    async def test_run_sync_holds_lock_for_duration(self, store: DuckDBStore) -> None:
+        """A second ``_run_sync`` cannot enter while the first is running."""
+        import asyncio
+
+        order: list[str] = []
+        first_started = asyncio.Event()
+        first_release = asyncio.Event()
+
+        def _slow() -> str:
+            order.append("first-enter")
+            # Block the worker thread until the test releases it.  The
+            # event is checked synchronously via ``asyncio.run_coroutine_threadsafe``
+            # is overkill — just spin briefly and rely on the test
+            # awaiting ``second`` while ``first`` is still in to_thread.
+            return "first"
+
+        async def _first() -> None:
+            first_started.set()
+            await store._run_sync(_slow)  # noqa: SLF001
+            order.append("first-exit")
+            first_release.set()
+
+        async def _second() -> None:
+            await first_started.wait()
+            order.append("second-attempt")
+            await store._run_sync(lambda: order.append("second-enter") or "second")  # noqa: SLF001
+            order.append("second-exit")
+
+        await asyncio.gather(_first(), _second())
+        # The lock guarantees ``second-enter`` cannot land between
+        # ``first-enter`` and ``first-exit``.
+        first_enter = order.index("first-enter")
+        first_exit = order.index("first-exit")
+        second_enter = order.index("second-enter")
+        assert second_enter > first_exit, (
+            f"second entered while first was running: {order!r}"
+        )
+        assert first_exit > first_enter
+
+    async def test_run_sync_releases_lock_on_exception(self, store: DuckDBStore) -> None:
+        """A raise inside ``_run_sync`` must not deadlock subsequent callers."""
+
+        def _boom() -> None:
+            raise RuntimeError("simulated failure")
+
+        with pytest.raises(RuntimeError, match="simulated failure"):
+            await store._run_sync(_boom)  # noqa: SLF001
+
+        # If the lock leaked, this call would hang forever.  pytest's
+        # default per-test timeout is sufficient to catch a deadlock,
+        # but the assertion makes the intent explicit.
+        result = await store._run_sync(lambda: "ok")  # noqa: SLF001
+        assert result == "ok"
+
+    async def test_lock_lazy_initialized_on_first_use(
+        self, mock_embedding_provider
+    ) -> None:
+        """``_conn_lock`` is created on first ``_run_sync`` call, not in ``__init__``."""
+        s = DuckDBStore(db_path=":memory:", embedding_provider=mock_embedding_provider)
+        assert s._conn_lock is None  # noqa: SLF001
+        await s.initialize()
+        # ``initialize`` does not go through ``_run_sync`` so lock is still None.
+        assert s._conn_lock is None  # noqa: SLF001
+        await s.list_entries(filters=None, limit=1, offset=0)
+        assert s._conn_lock is not None  # noqa: SLF001
+        await s.close()
+
+
 class TestHybridGracefulFallback:
     """Verify graceful fallback to vector-only when FTS is unavailable."""
 
