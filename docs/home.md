@@ -46,36 +46,31 @@ claude plugin marketplace add norrietaylor/distillery
 claude plugin install distillery
 ```
 
-This installs all 14 skills. The plugin defaults to a hosted demo server — you can start using Distillery immediately.
+This installs all 14 skills and configures the MCP server to run **locally** via `uvx distillery-mcp` — a private, self-contained knowledge base on your machine. Requires Python 3.11+ and [`uv`](https://docs.astral.sh/uv/).
 
-!!! warning "Demo Server"
-    The plugin defaults to `distillery-mcp.fly.dev`, which is a **demo server** for evaluation only. Do not store sensitive or confidential data.
+!!! tip "Install uv"
+    `curl -LsSf https://astral.sh/uv/install.sh | sh`
 
-### Step 2: Switch to Local with uvx (Recommended)
-
-For a private knowledge base, run the MCP server locally — no persistent install needed:
+### Step 2: Set Your Embedding API Key (Optional but Recommended)
 
 ```bash
 export JINA_API_KEY=jina_...   # free at jina.ai
 ```
 
-Add to `~/.claude/settings.json` (overrides the plugin's demo server):
-
-```json
-{
-  "mcpServers": {
-    "distillery": {
-      "command": "uvx",
-      "args": ["distillery-mcp"],
-      "env": {
-        "JINA_API_KEY": "${JINA_API_KEY}"
-      }
-    }
-  }
-}
-```
+`uvx` inherits this from your shell environment. Without a key, Distillery falls back to a stub embedding provider (search quality degraded).
 
 Restart Claude Code and run `/setup` to complete onboarding.
+
+### Try the Hosted Demo (Opt-In)
+
+Want to evaluate without installing locally? Override the plugin default with the hosted demo at `distillery-mcp.fly.dev`:
+
+```bash
+claude mcp add distillery --scope user --transport http --url https://distillery-mcp.fly.dev/mcp
+```
+
+!!! warning "Demo Server"
+    `distillery-mcp.fly.dev` is a **demo server** for evaluation only. Do not store sensitive or confidential data.
 
 See [Local Setup](getting-started/local-setup.md) for full configuration (embedding providers, cloud storage, etc.) or [deploy your own instance](team/deployment.md) for team use.
 

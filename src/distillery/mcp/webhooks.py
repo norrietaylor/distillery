@@ -39,8 +39,28 @@ from starlette.routing import Route
 
 from distillery.config import DistilleryConfig
 from distillery.feeds.poller import FeedPoller
+from distillery.feeds.reader import JinaReaderClient, build_reader_client
 
 logger = logging.getLogger(__name__)
+
+
+def _build_reader(config: DistilleryConfig) -> JinaReaderClient | None:
+    """Build a :class:`JinaReaderClient` from *config* when Reader is enabled.
+
+    Returns ``None`` when ``feeds.reader.enabled`` is ``False`` or the
+    configured API key environment variable is unset, so the poller
+    silently falls back to today's behaviour.
+    """
+    reader_cfg = config.feeds.reader
+    if not reader_cfg.enabled:
+        return None
+    return build_reader_client(
+        api_key_env=reader_cfg.api_key_env,
+        timeout_seconds=reader_cfg.timeout_seconds,
+        max_retries=reader_cfg.max_retries,
+        concurrency=reader_cfg.concurrency,
+    )
+
 
 # ---------------------------------------------------------------------------
 # Default cooldown intervals (seconds)
@@ -270,6 +290,7 @@ async def _try_rollback(store: Any, job: _JobStatus) -> None:
             job.endpoint,
             job.id,
         )
+
 
 # ---------------------------------------------------------------------------
 # Store initialisation helper
@@ -543,7 +564,7 @@ async def _run_poll(
 
     logger.info("Webhook poll: starting poll cycle (source_url=%r)", source_url)
     try:
-        poller = FeedPoller(store=store, config=config)
+        poller = FeedPoller(store=store, config=config, reader=_build_reader(config))
         summary = await poller.poll(source_url=source_url)
     except Exception:  # noqa: BLE001
         # Keep the full traceback in logs; return a stable generic message to
@@ -877,11 +898,21 @@ async def _run_classify_batch(
     ``status=pending_review``. For ``mode="heuristic"`` each entry is
     classified in-process using the embedding-centroid-based
     :class:`~distillery.classification.heuristic.HeuristicClassifier` and
-    persisted. For ``mode="llm"`` the webhook is **intentionally headless for
-    v1** — it counts the backlog and returns all entries as
-    ``pending_review`` so a human can triage via ``/classify --review``. It
-    will not dispatch an LLM call even if ``state["llm_client"]`` is
-    populated; that responsibility belongs to the skill side.
+    persisted. For ``mode="llm"`` the webhook now drives a real LLM call
+    when ``state["llm_client"]`` is populated (issue #268): each pending
+    entry is classified, then transitioned to ``ACTIVE`` (confidence at or
+    above ``ClassificationConfig.confidence_threshold``) or kept as
+    ``pending_review``. When no ``llm_client`` is wired into shared state
+    the webhook falls back to the previous v1 headless behaviour — every
+    pending entry is written back as ``pending_review`` and a warning is
+    logged so operators know to provision a client.
+
+    The expected ``llm_client`` contract is a single async coroutine
+    method ``classify(content: str) -> ClassificationResult`` whose return
+    value already carries the engine-applied status and confidence. This
+    matches the shape of ``ClassificationEngine.parse_response`` so a thin
+    adapter (``build_prompt`` → call API → ``parse_response``) is enough
+    to bind any provider.
 
     Args:
         state: The populated shared-state dict containing ``"store"``,
@@ -905,6 +936,7 @@ async def _run_classify_batch(
     store = state["store"]
     config = state["config"]
     embedding_provider = state.get("embedding_provider")
+    llm_client = state.get("llm_client")
 
     # Resolve effective mode.
     effective_mode = mode
@@ -983,16 +1015,67 @@ async def _run_classify_batch(
                         exc,
                     )
                     error_count += 1
+        elif effective_mode == "llm" and entries and llm_client is not None:
+            # LLM mode (#268): drive the injected llm_client per entry and
+            # apply the engine-resolved status. The client is expected to
+            # return a fully-resolved ClassificationResult (status already
+            # mapped from confidence via the engine's threshold). Per-entry
+            # failures are caught and counted so a single malformed LLM
+            # response doesn't abort the batch.
+            threshold = config.classification.confidence_threshold
+            for entry in entries:
+                try:
+                    classification = await llm_client.classify(entry.content)
+                    # Defensive re-derivation of status: callers that wrap a
+                    # non-engine LLM API may forget to apply the threshold.
+                    # Trust ``confidence`` as the source of truth and recompute
+                    # ``status`` so this webhook's contract holds regardless of
+                    # which adapter populated the result.
+                    if classification.confidence >= threshold:
+                        new_status = EntryStatus.ACTIVE
+                    else:
+                        new_status = EntryStatus.PENDING_REVIEW
+
+                    merged_metadata = {
+                        **(entry.metadata or {}),
+                        "confidence": classification.confidence,
+                        "classification_reasoning": classification.reasoning,
+                    }
+                    await store.update(
+                        entry.id,
+                        {
+                            "entry_type": classification.entry_type.value,
+                            "status": new_status.value,
+                            "metadata": merged_metadata,
+                        },
+                    )
+                    if new_status == EntryStatus.ACTIVE:
+                        classified_count += 1
+                        type_key = classification.entry_type.value
+                        by_type[type_key] = by_type.get(type_key, 0) + 1
+                    else:
+                        pending_review_count += 1
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "Webhook classify-batch: llm classification failed for %s: %s",
+                        entry.id,
+                        exc,
+                    )
+                    error_count += 1
         else:
-            # LLM mode (v1): intentionally headless. The webhook is meant to
-            # surface backlog to human reviewers via ``/classify --review``
-            # rather than drive expensive LLM calls from the cron path. Every
-            # pending inbox entry is therefore written back as
-            # ``pending_review`` regardless of any ``llm_client`` that happens
-            # to be present in shared state. If a future release moves LLM
-            # classification into the webhook, bump the contract with a new
-            # ``mode`` (e.g. ``"llm-sync"``) rather than changing this branch
-            # in place.
+            # LLM mode without an llm_client wired into shared state — fall
+            # back to the v1 headless contract: queue all entries as
+            # ``pending_review`` so the human triage path (``/classify
+            # --review``) still surfaces them. Logged at WARNING so operators
+            # notice that LLM classification is silently disabled.
+            if effective_mode == "llm" and entries and llm_client is None:
+                logger.warning(
+                    "Webhook classify-batch: mode=llm but no llm_client wired into "
+                    "shared state — queuing %d entries as pending_review (legacy "
+                    "headless behaviour). Provision shared_state['llm_client'] to "
+                    "enable in-webhook LLM classification.",
+                    len(entries),
+                )
             pending_review_count += len(entries)
 
     except Exception:  # noqa: BLE001

@@ -74,40 +74,32 @@ claude plugin marketplace add norrietaylor/distillery
 claude plugin install distillery
 ```
 
-This installs all 14 skills. The plugin defaults to a hosted demo server — you can start using Distillery immediately.
+This installs all 14 skills and configures the MCP server to run **locally** via `uvx distillery-mcp` — a private, self-contained knowledge base on your machine. Requires Python 3.11+ and [`uv`](https://docs.astral.sh/uv/) (install: `curl -LsSf https://astral.sh/uv/install.sh | sh`).
 
-> **Demo Server:** `distillery-mcp.fly.dev` is for evaluation only. Do not store sensitive or confidential data.
-
-### Step 2: Switch to Local with uvx (Recommended)
-
-For a private knowledge base, run the MCP server locally with `uvx` — no persistent install needed:
+### Step 2: Set Your Embedding API Key (Optional but Recommended)
 
 ```bash
-# Get a free API key from jina.ai, then:
+# Get a free API key from jina.ai
 export JINA_API_KEY=jina_...
 ```
 
-Add to `~/.claude/settings.json` (overrides the plugin's demo server):
-
-```json
-{
-  "mcpServers": {
-    "distillery": {
-      "command": "uvx",
-      "args": ["distillery-mcp"],
-      "env": {
-        "JINA_API_KEY": "${JINA_API_KEY}"
-      }
-    }
-  }
-}
-```
+`uvx` inherits this from your shell environment. Without a key, Distillery falls back to a stub embedding provider (search quality degraded).
 
 Restart Claude Code and run the onboarding wizard:
 
-```
+```text
 /setup
 ```
+
+### Try the Hosted Demo (Opt-In)
+
+Want to evaluate without installing anything locally? Override the plugin default with the hosted demo at `distillery-mcp.fly.dev`:
+
+```bash
+claude mcp add distillery --scope user --transport http --url https://distillery-mcp.fly.dev/mcp
+```
+
+> **Demo Server:** `distillery-mcp.fly.dev` is for evaluation only. Do not store sensitive or confidential data.
 
 See the [Local Setup Guide](https://norrietaylor.github.io/distillery/getting-started/local-setup/) for full configuration options, or [deploy your own instance](https://norrietaylor.github.io/distillery/team/deployment/) for team use.
 

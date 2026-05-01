@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>local.distillery-classify</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HOME__/.distillery/classify.sh</string>
+    </array>
+
+    <!-- Every 2 hours. -->
+    <key>StartInterval</key>
+    <integer>7200</integer>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/.distillery/classify.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.distillery/classify.err.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+</dict>
+</plist>

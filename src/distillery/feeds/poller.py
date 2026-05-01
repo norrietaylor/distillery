@@ -26,6 +26,7 @@ from distillery.feeds.truncation import truncate_content
 if TYPE_CHECKING:
     from distillery.config import DistilleryConfig, FeedSourceConfig
     from distillery.feeds.models import FeedItem
+    from distillery.feeds.reader import JinaReaderClient
     from distillery.store.protocol import DistilleryStore
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,11 @@ class PollResult:
             near-duplicates of existing entries.
         items_below_threshold: Number of items skipped because their
             relevance score was below the minimum threshold.
+        items_enriched: Number of items whose content was successfully
+            enriched via the Jina Reader API (RSS only).
+        enrichment_errors: Number of items where Reader enrichment was
+            attempted but failed; the original RSS content was used as
+            a fallback so the item is not lost.
         errors: List of error messages encountered during this poll.
         polled_at: UTC timestamp when the poll ran.
     """
@@ -67,6 +73,8 @@ class PollResult:
     items_stored: int = 0
     items_skipped_dedup: int = 0
     items_below_threshold: int = 0
+    items_enriched: int = 0
+    enrichment_errors: int = 0
     errors: list[str] = field(default_factory=list)
     polled_at: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
 
@@ -81,6 +89,8 @@ class PollerSummary:
         total_stored: Sum of ``items_stored`` across all sources.
         total_skipped_dedup: Sum of ``items_skipped_dedup`` across all sources.
         total_below_threshold: Sum of ``items_below_threshold`` across all sources.
+        total_items_enriched: Sum of ``items_enriched`` across all sources.
+        total_enrichment_errors: Sum of ``enrichment_errors`` across all sources.
         sources_polled: Number of sources polled.
         sources_errored: Number of sources that produced at least one error.
         started_at: UTC timestamp when the poll cycle began.
@@ -92,6 +102,8 @@ class PollerSummary:
     total_stored: int = 0
     total_skipped_dedup: int = 0
     total_below_threshold: int = 0
+    total_items_enriched: int = 0
+    total_enrichment_errors: int = 0
     sources_polled: int = 0
     sources_errored: int = 0
     started_at: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
@@ -123,6 +135,30 @@ def _item_text(item: FeedItem, *, apply_truncation: bool = True) -> str:
     if apply_truncation:
         text = truncate_content(text)
     return text
+
+
+def _enriched_item_text(item: FeedItem, enriched_content: str | None) -> str:
+    """Build embed text using *enriched_content* when present, else fall back.
+
+    When *enriched_content* is provided it replaces ``item.content`` (the
+    short RSS description) so the embedding reflects the full article body.
+    The title is preserved as a prefix because RSS titles often carry
+    high-signal terms not repeated in the body.
+
+    Args:
+        item: The feed item being processed.
+        enriched_content: Optional Reader-fetched markdown body.
+
+    Returns:
+        A truncated text string suitable for embedding / scoring.
+    """
+    if enriched_content is None:
+        return _item_text(item)
+    parts: list[str] = []
+    if item.title:
+        parts.append(item.title)
+    parts.append(enriched_content)
+    return truncate_content("\n".join(parts))
 
 
 def _build_adapter(source: FeedSourceConfig) -> Any:
@@ -361,6 +397,8 @@ def _item_to_entry_kwargs(
     item: FeedItem,
     relevance_score: float,
     keyword_map: dict[str, str] | None = None,
+    *,
+    enriched_content: str | None = None,
 ) -> dict[str, Any]:
     """Convert a :class:`~distillery.feeds.models.FeedItem` to Entry constructor kwargs.
 
@@ -368,19 +406,24 @@ def _item_to_entry_kwargs(
     to source tags (Tier 1) via :func:`derive_all_tags`.  When absent, only
     source tags are derived.
 
+    When *enriched_content* is provided (typically markdown returned from the
+    Jina Reader API), it replaces ``item.content`` for the embedded text and
+    the original RSS description is preserved in ``metadata.original_content``.
+
     Args:
         item: The normalised feed item.
         relevance_score: The computed cosine similarity score.
         keyword_map: Optional keyword-to-tag-path mapping produced by
             :func:`build_keyword_map` for the current poll cycle.  When
             ``None`` only Tier-1 source tags are applied.
+        enriched_content: Optional Reader-fetched markdown to use in place
+            of ``item.content``.  Provenance is recorded in metadata.
 
     Returns:
         A dict of keyword arguments for :class:`~distillery.models.Entry`.
     """
     from distillery.models import EntrySource, EntryType
 
-    text = _item_text(item)
     metadata: dict[str, Any] = {
         "source_url": item.source_url,
         "source_type": item.source_type,
@@ -394,6 +437,16 @@ def _item_to_entry_kwargs(
         metadata["item_url"] = item.url
     if item.published_at:
         metadata["published_at"] = item.published_at.isoformat()
+
+    if enriched_content is not None:
+        # Replace the body with Reader-fetched markdown but keep the title
+        # prefix so the embedding still benefits from the headline.
+        metadata["original_content"] = item.content or ""
+        metadata["enriched_by"] = "jina-reader"
+        metadata["enriched_at"] = datetime.now(tz=UTC).isoformat()
+        text = _enriched_item_text(item, enriched_content)
+    else:
+        text = _item_text(item)
 
     if keyword_map is not None:
         tags = derive_all_tags(item, item.source_type, keyword_map)
@@ -444,6 +497,11 @@ class FeedPoller:
     relevance_threshold:
         Minimum relevance score required to store an item.  When ``None``
         the value from ``config.feeds.thresholds.digest`` is used.
+    reader:
+        Optional :class:`~distillery.feeds.reader.JinaReaderClient` used to
+        enrich short RSS items with full article markdown.  When ``None``
+        (the default) Reader enrichment is disabled and the poller behaves
+        exactly as it did before issue #403.
 
     Example::
 
@@ -459,6 +517,7 @@ class FeedPoller:
         config: DistilleryConfig,
         *,
         relevance_threshold: float | None = None,
+        reader: JinaReaderClient | None = None,
     ) -> None:
         self._store = store
         self._config = config
@@ -467,6 +526,7 @@ class FeedPoller:
             if relevance_threshold is not None
             else config.feeds.thresholds.digest
         )
+        self._reader = reader
 
     async def poll(self, *, source_url: str | None = None) -> PollerSummary:
         """Execute a full poll cycle across configured sources.
@@ -568,6 +628,8 @@ class FeedPoller:
                 summary.total_stored += result.items_stored
                 summary.total_skipped_dedup += result.items_skipped_dedup
                 summary.total_below_threshold += result.items_below_threshold
+                summary.total_items_enriched += result.items_enriched
+                summary.total_enrichment_errors += result.enrichment_errors
                 summary.sources_polled += 1
                 if result.errors:
                     summary.sources_errored += 1
@@ -710,13 +772,21 @@ class FeedPoller:
         result.items_fetched = len(items)
         logger.debug("FeedPoller: fetched %d items from %s", result.items_fetched, source.url)
 
+        # Reader enrichment (RSS-only): fetch full article markdown for items
+        # whose <description> is below the configured threshold so embeddings
+        # and semantic search reflect the real article body rather than a
+        # short blurb.  Failures are recorded as enrichment_errors but never
+        # abort the surrounding poll cycle.
+        enrichments: dict[str, str] = await self._maybe_enrich_with_reader(source, items, result)
+
         # Track entry IDs stored during this batch so we can exclude them
         # from semantic dedup — prevents same-batch items from blocking
         # each other.
         batch_entry_ids: set[str] = set()
 
         for item in items:
-            text = _item_text(item)
+            enriched = enrichments.get(item.item_id)
+            text = _enriched_item_text(item, enriched)
             if not text.strip():
                 result.items_below_threshold += 1
                 continue
@@ -765,7 +835,12 @@ class FeedPoller:
             try:
                 from distillery.models import Entry
 
-                kwargs = _item_to_entry_kwargs(item, adjusted_score, keyword_map)
+                kwargs = _item_to_entry_kwargs(
+                    item,
+                    adjusted_score,
+                    keyword_map,
+                    enriched_content=enriched,
+                )
                 entry = Entry(**kwargs)
                 await self._store.store(entry)
                 batch_entry_ids.add(str(entry.id))
@@ -781,6 +856,87 @@ class FeedPoller:
                     source.url,
                     exc,
                 )
+
+    async def _maybe_enrich_with_reader(
+        self,
+        source: FeedSourceConfig,
+        items: list[FeedItem],
+        result: PollResult,
+    ) -> dict[str, str]:
+        """Fetch full article markdown for short RSS items via the Jina Reader API.
+
+        Returns a mapping of ``item.item_id -> markdown`` for items whose
+        Reader fetch succeeded.  Items with sufficient content, missing
+        URLs, or non-RSS source types are silently skipped.  When the
+        configured Reader client is ``None`` (Reader disabled or API key
+        missing) this is a no-op.
+
+        Failures increment ``result.enrichment_errors`` but never propagate —
+        callers fall back to the original RSS content so the item is still
+        eligible for storage.
+
+        Args:
+            source: The current feed source being polled.
+            items: The list of items returned by the adapter.
+            result: The :class:`PollResult` being built; mutated in place
+                to record ``items_enriched`` / ``enrichment_errors``.
+
+        Returns:
+            Dict mapping ``item_id`` to the Reader markdown body for
+            successfully enriched items.  Empty dict when Reader is
+            disabled or no items qualified.
+        """
+        if self._reader is None:
+            return {}
+        # Issue #403 scope: RSS-only.  GitHub events & gh-sync are out of scope.
+        if source.source_type != "rss":
+            return {}
+
+        threshold = self._config.feeds.reader.min_content_chars
+        candidates: list[FeedItem] = [
+            item for item in items if item.url and len(item.content or "") < threshold
+        ]
+        if not candidates:
+            return {}
+
+        logger.debug(
+            "FeedPoller: enriching %d/%d items via Jina Reader (source=%s threshold=%d)",
+            len(candidates),
+            len(items),
+            source.url,
+            threshold,
+        )
+
+        # Capture the reader locally so type checkers can narrow the
+        # ``Optional`` away inside the inner coroutine.
+        reader = self._reader
+
+        async def _fetch(item: FeedItem) -> tuple[str, str | None]:
+            assert item.url is not None  # guarded by candidates filter
+            return item.item_id, await reader.fetch(item.url)
+
+        gathered = await asyncio.gather(
+            *(_fetch(item) for item in candidates),
+            return_exceptions=True,
+        )
+
+        enrichments: dict[str, str] = {}
+        for outcome in gathered:
+            if isinstance(outcome, BaseException):
+                # ``JinaReaderClient.fetch`` is contractually no-raise — but
+                # guard against unexpected programmer errors so a broken
+                # client never aborts the poll.
+                result.enrichment_errors += 1
+                logger.warning("FeedPoller: Reader enrichment raised unexpectedly: %s", outcome)
+                continue
+            item_id, markdown = outcome
+            if markdown is None:
+                result.enrichment_errors += 1
+                continue
+            enrichments[item_id] = markdown
+            result.items_enriched += 1
+
+        return enrichments
 
     async def rescore(self, *, limit: int = 100) -> dict[str, Any]:
         """Re-score existing feed entries against the current store state.

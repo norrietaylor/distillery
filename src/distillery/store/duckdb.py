@@ -1527,8 +1527,11 @@ class DuckDBStore:
             limit: Maximum number of results to return.
 
         Returns:
-            list[SearchResult]: Matches ordered by decreasing fused score;
-            each result contains the matched Entry and a ``score`` in [0, 1].
+            list[SearchResult]: Matches ordered by decreasing fused rank
+            (RRF in hybrid mode, raw cosine similarity otherwise).  Each
+            ``score`` is the entry's raw cosine similarity to the query
+            mapped to ``[0, 1]`` — it is NOT rescaled per-scope, so values
+            stay comparable across metadata filters (issue #370).
         """
         from distillery.store.protocol import SearchResult
 
@@ -1559,13 +1562,14 @@ class DuckDBStore:
             col_names = [desc[0] for desc in result.description]
             rows = result.fetchall()
 
-            # Build entry lookup and vector ranks.
+            # Build entry lookup, vector ranks, and per-entry cosine similarity.
             entry_map: dict[str, Entry] = {}
             vector_ranks: dict[str, int] = {}
             entry_created: dict[str, datetime] = {}
+            cosine_score: dict[str, float] = {}
             for rank, row in enumerate(rows, start=1):
                 row_dict = dict(zip(col_names, row, strict=True))
-                row_dict.pop("score")
+                raw_cosine = float(row_dict.pop("score"))
                 entry = self._row_to_entry(
                     tuple(row_dict.values()),
                     list(row_dict.keys()),
@@ -1573,17 +1577,20 @@ class DuckDBStore:
                 entry_map[entry.id] = entry
                 vector_ranks[entry.id] = rank
                 entry_created[entry.id] = entry.created_at
+                # Map raw cosine similarity in [-1, 1] to a displayed score in [0, 1].
+                cosine_score[entry.id] = (raw_cosine + 1.0) / 2.0
 
             if not use_hybrid:
-                # Vector-only: normalise cosine similarity to [0, 1].
+                # Vector-only: return raw cosine similarity (mapped to [0, 1]).
+                # No min-max rescaling — score represents true similarity to the
+                # query, identical regardless of any metadata filter (issue #370).
                 results: list[SearchResult] = []
                 returned_ids: list[str] = []
-                for _rank, row in enumerate(rows[:limit], start=1):
+                for row in rows[:limit]:
                     row_dict = dict(zip(col_names, row, strict=True))
-                    raw_score = float(row_dict.pop("score"))
-                    score = (raw_score + 1.0) / 2.0
+                    row_dict.pop("score")
                     eid = row_dict["id"]
-                    results.append(SearchResult(entry=entry_map[eid], score=score))
+                    results.append(SearchResult(entry=entry_map[eid], score=cosine_score[eid]))
                     returned_ids.append(eid)
                 self._touch_accessed(conn, returned_ids)
                 return results
@@ -1595,6 +1602,8 @@ class DuckDBStore:
             # Fetch entries found by BM25 but not by the vector search so we
             # have a complete entry_map for RRF scoring.  Apply the same
             # filters so BM25-only entries that don't match are excluded.
+            # Also compute cosine similarity for these entries so the displayed
+            # score remains a true similarity measure (not a per-scope rescale).
             missing_ids = [eid for eid in bm25_ranks if eid not in entry_map]
             if missing_ids:
                 placeholders = ", ".join("?" for _ in missing_ids)
@@ -1602,24 +1611,33 @@ class DuckDBStore:
                 extra_where = ""
                 if filter_clauses:
                     extra_where = " AND " + " AND ".join(filter_clauses)
+                dims = self._embedding_provider.dimensions
                 fetch_sql = (
-                    f"SELECT {self._ENTRY_COLUMNS} FROM entries "
+                    f"SELECT {self._ENTRY_COLUMNS}, "
+                    f"array_cosine_similarity(embedding, ?::FLOAT[{dims}]) AS score "
+                    f"FROM entries "
                     f"WHERE id IN ({placeholders}){extra_where}"
                 )
-                fetch_result = conn.execute(fetch_sql, missing_ids + filter_params)
+                fetch_result = conn.execute(fetch_sql, [embedding, *missing_ids, *filter_params])
                 fetch_cols = [desc[0] for desc in fetch_result.description]
                 fetched_ids: set[str] = set()
                 for row in fetch_result.fetchall():
-                    entry = self._row_to_entry(row, fetch_cols)
+                    row_dict = dict(zip(fetch_cols, row, strict=True))
+                    raw_cosine = float(row_dict.pop("score"))
+                    entry = self._row_to_entry(
+                        tuple(row_dict.values()),
+                        list(row_dict.keys()),
+                    )
                     entry_map[entry.id] = entry
                     entry_created[entry.id] = entry.created_at
+                    cosine_score[entry.id] = (raw_cosine + 1.0) / 2.0
                     fetched_ids.add(entry.id)
                 # Remove BM25-only entries that were excluded by filters.
                 for eid in missing_ids:
                     if eid not in fetched_ids:
                         del bm25_ranks[eid]
 
-            # --- RRF fusion with recency decay ---
+            # --- RRF fusion with recency decay (used for ORDERING only) ---
             k = self._rrf_k
             all_ids = set(vector_ranks.keys()) | set(bm25_ranks.keys())
             scored: list[tuple[str, float]] = []
@@ -1636,23 +1654,15 @@ class DuckDBStore:
 
             scored.sort(key=lambda x: x[1], reverse=True)
 
-            # Normalise scores to [0, 1] using min-max across the full
-            # candidate set.  This gives a meaningful spread instead of
-            # clustering near 1.0 (which happens when dividing by max
-            # alone, since RRF raw scores occupy a tiny range).
-            if len(scored) < 2:
-                max_score = scored[0][1] if scored else 1.0
-                min_score = 0.0
-            else:
-                max_score = scored[0][1]
-                min_score = scored[-1][1]
-
-            score_range = max_score - min_score
+            # The displayed ``score`` is the raw cosine similarity (mapped to
+            # [0, 1]), NOT the RRF rank.  RRF only determines result ordering;
+            # rescaling the RRF score (e.g. min-max within the candidate set)
+            # would make the value meaningless under metadata filters because
+            # the per-scope min/max changes with the filter (issue #370).
             results = []
             returned_ids = []
-            for eid, raw in scored[:limit]:
-                norm = (raw - min_score) / score_range if score_range > 0 else 1.0
-                results.append(SearchResult(entry=entry_map[eid], score=norm))
+            for eid, _rrf in scored[:limit]:
+                results.append(SearchResult(entry=entry_map[eid], score=cosine_score.get(eid, 0.0)))
                 returned_ids.append(eid)
 
             self._touch_accessed(conn, returned_ids)
@@ -1783,9 +1793,7 @@ class DuckDBStore:
         # (grouped counts vs. aggregate stats); combining them would silently
         # drop one. Reject explicitly so callers get a clear error.
         if group_by is not None and output is not None:
-            raise ValueError(
-                "group_by and output cannot be combined — pick one"
-            )
+            raise ValueError("group_by and output cannot be combined — pick one")
 
         # ----- group_by mode: delegate to aggregate_entries -----
         if group_by is not None:

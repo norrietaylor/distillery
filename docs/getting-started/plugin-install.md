@@ -12,7 +12,10 @@ claude plugin marketplace add norrietaylor/distillery
 claude plugin install distillery
 ```
 
-This installs the skill definitions globally and configures the MCP server connection to the hosted Distillery instance.
+This installs the skill definitions globally and configures the MCP server to run **locally** via `uvx distillery-mcp` — a private, self-contained knowledge base on your machine. Requires Python 3.11+ and [`uv`](https://docs.astral.sh/uv/) on your `PATH`.
+
+!!! tip "Install uv"
+    `curl -LsSf https://astral.sh/uv/install.sh | sh` — or use `pip install distillery-mcp` and override the plugin's default `command` to `distillery-mcp` (see [Troubleshooting](mcp-setup.md#troubleshooting)).
 
 After installation, restart Claude Code and run the onboarding wizard:
 
@@ -22,8 +25,8 @@ After installation, restart Claude Code and run the onboarding wizard:
 
 This verifies MCP connectivity, detects your transport, and configures auto-poll for ambient intelligence.
 
-!!! warning "Demo Server"
-    The plugin defaults to the hosted instance at `distillery-mcp.fly.dev`, which is a **demo server** for evaluation only. Do not store sensitive or confidential data. For production use, [deploy your own instance](../team/deployment.md) or use [local setup](local-setup.md).
+!!! note "Hosted demo (opt-in)"
+    Want a zero-install evaluation? You can opt into the hosted demo at `distillery-mcp.fly.dev` instead — see [MCP Configuration](#mcp-configuration) below. The demo server is for **evaluation only**; do not store sensitive or confidential data.
 
 !!! note "Claude Desktop"
     The Claude Desktop app does not support Claude Code skills or the plugin install system. Desktop users can connect the MCP server directly (all 16 tools are available) but slash commands like `/distill` and `/recall` are CLI-only features.
@@ -59,47 +62,60 @@ ln -s ~/.claude/distillery/skills/setup     ~/.claude/skills/setup
 
 ## MCP Configuration
 
-The skills require the Distillery MCP server. The recommended approach is to run it locally via `uvx` for a private knowledge base. The plugin also bundles a demo server connection for quick evaluation.
+The skills require the Distillery MCP server. The plugin's **default** is local stdio via `uvx distillery-mcp`. Hosted demo and self-hosted HTTP are opt-in alternatives.
 
-### Recommended — Local stdio with uvx
+### Default — Local stdio with uvx
 
-Run the MCP server locally for a private, self-contained knowledge base. Requires Python 3.11+.
-
-```bash
-# No install needed
-uvx distillery-mcp
-
-# Or install persistently
-pip install distillery-mcp
-```
-
-Add to `~/.claude/settings.json`:
+`claude plugin install distillery` registers this configuration automatically. The plugin manifest declares:
 
 ```json
 {
   "mcpServers": {
     "distillery": {
       "command": "uvx",
-      "args": ["distillery-mcp"],
-      "env": {
-        "JINA_API_KEY": "${JINA_API_KEY}",
-        "DISTILLERY_CONFIG": "${DISTILLERY_CONFIG}"
-      }
+      "args": ["distillery-mcp"]
     }
   }
 }
 ```
 
-This overrides the plugin's default demo server connection. See [Local Setup](local-setup.md) for full configuration (embedding providers, cloud storage, etc.).
+`uvx` inherits the Claude Code process environment, so set `JINA_API_KEY` (and any other Distillery config vars) in your shell before launching Claude Code:
 
-### Alternative — Demo server (no setup)
+```bash
+export JINA_API_KEY=jina_...   # free at jina.ai
+# Optional:
+export DISTILLERY_CONFIG=/path/to/distillery.yaml
+```
 
-The plugin manifest configures a connection to the hosted demo at `https://distillery-mcp.fly.dev/mcp` with GitHub OAuth authentication. On first use, Claude Code opens a browser for GitHub OAuth login.
+Without a `JINA_API_KEY`, Distillery falls back to the stub embedding provider (search quality degraded). See [Local Setup](local-setup.md) for full configuration (embedding providers, cloud storage, etc.).
+
+If you prefer to manage the configuration yourself in `~/.claude.json`, you can shadow the plugin registration with the same stdio block. `uvx` inherits the Claude Code process environment, so set `JINA_API_KEY` (and any other Distillery config vars) in your shell before launching Claude Code rather than relying on `${VAR}` interpolation here:
+
+```json
+{
+  "mcpServers": {
+    "distillery": {
+      "command": "uvx",
+      "args": ["distillery-mcp"]
+    }
+  }
+}
+```
+
+### Opt-in — Hosted demo
+
+Distillery operates a hosted demo at `https://distillery-mcp.fly.dev/mcp` for zero-install evaluation. Authentication is via GitHub OAuth (Claude Code opens a browser on first use).
 
 !!! warning "Demo Server"
-    The demo server is for **evaluation only**. Do not store sensitive or confidential data. For production use, run locally with `uvx` (above) or deploy your own instance.
+    The demo server is for **evaluation only**. Do not store sensitive or confidential data. For production use, stick with the default local stdio setup or deploy your own instance.
 
-To configure manually, add to `~/.claude/settings.json`:
+Register the demo at user scope (shadows the plugin's local default):
+
+```bash
+claude mcp add distillery --scope user --transport http --url https://distillery-mcp.fly.dev/mcp
+```
+
+Or add the equivalent block to `~/.claude.json`:
 
 ```json
 {
@@ -112,11 +128,11 @@ To configure manually, add to `~/.claude/settings.json`:
 }
 ```
 
-### Alternative — Self-hosted HTTP
+### Opt-in — Self-hosted HTTP
 
 Deploy your own Distillery server with GitHub OAuth. See [Operator Deployment](../team/deployment.md) for setup and the [distill_ops](https://github.com/norrietaylor/distill_ops) repo for platform-specific guides (Fly.io, Prefect Horizon).
 
-To override the plugin's default demo URL, register your own MCP server at user scope. This shadows the plugin registration:
+To shadow the plugin default with your own instance, register at user scope:
 
 ```bash
 claude mcp add distillery --scope user --transport http --url https://your-instance.example.com/mcp
@@ -125,6 +141,9 @@ claude mcp add distillery --scope user --transport http --url https://your-insta
 ## Remote Auto-Poll Setup
 
 Enable remote auto-polling so feed sources are polled automatically even when Claude Code is not running. This uses Claude Code's scheduled remote agents (triggers).
+
+!!! note "HTTP transport required"
+    Remote auto-poll requires an HTTP-reachable MCP endpoint (Hosted Demo or Self-hosted HTTP). The default local stdio transport (`uvx distillery-mcp`) only runs on your machine and is not reachable by remote triggers.
 
 ### Step 1 — Register the MCP Connector
 
