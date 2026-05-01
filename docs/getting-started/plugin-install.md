@@ -89,7 +89,7 @@ export DISTILLERY_CONFIG=/path/to/distillery.yaml
 
 Without a `JINA_API_KEY`, Distillery falls back to the stub embedding provider (search quality degraded). See [Local Setup](local-setup.md) for full configuration (embedding providers, cloud storage, etc.).
 
-If you prefer to manage the configuration yourself in `~/.claude/settings.json` (for example to set `env` explicitly), you can shadow the plugin registration with the same stdio block:
+If you prefer to manage the configuration yourself in `~/.claude.json` (for example to set `env` explicitly), you can shadow the plugin registration with the same stdio block:
 
 ```json
 {
@@ -119,7 +119,7 @@ Register the demo at user scope (shadows the plugin's local default):
 claude mcp add distillery --scope user --transport http --url https://distillery-mcp.fly.dev/mcp
 ```
 
-Or add the equivalent block to `~/.claude/settings.json`:
+Or add the equivalent block to `~/.claude.json`:
 
 ```json
 {

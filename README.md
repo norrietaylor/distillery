@@ -87,7 +87,7 @@ export JINA_API_KEY=jina_...
 
 Restart Claude Code and run the onboarding wizard:
 
-```
+```text
 /setup
 ```
 

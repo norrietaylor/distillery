@@ -83,7 +83,7 @@ Quickest setup — install the plugin (configures local stdio by default):
   claude plugin marketplace add norrietaylor/distillery
   claude plugin install distillery
 
-Or add manually to ~/.claude/settings.json:
+Or add manually to ~/.claude.json:
 
   {
     "mcpServers": {
