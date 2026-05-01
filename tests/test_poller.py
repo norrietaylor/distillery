@@ -850,7 +850,13 @@ class TestPersistPollStatus:
         # Use MagicMock (not AsyncMock) so getattr(store, "record_poll_status", None)
         # returns the default None for missing attrs.  spec limits attribute access.
         store = MagicMock(
-            spec=["find_similar", "list_entries", "store", "list_feed_sources", "get_tag_vocabulary"]
+            spec=[
+                "find_similar",
+                "list_entries",
+                "store",
+                "list_feed_sources",
+                "get_tag_vocabulary",
+            ]
         )
         store.find_similar = AsyncMock(return_value=[])
         store.list_entries = AsyncMock(return_value=[])
@@ -868,3 +874,241 @@ class TestPersistPollStatus:
             summary = await poller.poll()
 
         assert summary.sources_polled == 1
+
+
+# ---------------------------------------------------------------------------
+# Reader enrichment integration (#403)
+# ---------------------------------------------------------------------------
+
+
+class _FakeReader:
+    """Minimal reader stub used to assert poller wiring without httpx."""
+
+    def __init__(self, responses: dict[str, str | None]) -> None:
+        self.responses = responses
+        self.calls: list[str] = []
+
+    async def fetch(self, url: str) -> str | None:
+        self.calls.append(url)
+        return self.responses.get(url)
+
+
+def _rss_source(url: str = "https://example.com/rss") -> FeedSourceConfig:
+    return FeedSourceConfig(url=url, source_type="rss", trust_weight=1.0)
+
+
+def _github_source(url: str = "https://github.com/foo/bar") -> FeedSourceConfig:
+    return FeedSourceConfig(url=url, source_type="github", trust_weight=1.0)
+
+
+def _make_reader_config(
+    sources: list[FeedSourceConfig],
+    *,
+    enabled: bool = True,
+    min_content_chars: int = 500,
+    digest_threshold: float = 0.0,
+) -> DistilleryConfig:
+    from distillery.config import ReaderConfig
+
+    cfg = DistilleryConfig()
+    cfg.feeds = FeedsConfig(
+        sources=sources,
+        thresholds=FeedsThresholdsConfig(alert=0.85, digest=digest_threshold),
+        reader=ReaderConfig(enabled=enabled, min_content_chars=min_content_chars),
+    )
+    return cfg
+
+
+class TestReaderEnrichment:
+    async def test_short_rss_item_is_enriched(self) -> None:
+        item = _make_feed_item(
+            item_id="id1",
+            title="Short blurb",
+            content="too short",
+        )
+        item.url = "https://example.com/article"
+        src = _rss_source()
+        cfg = _make_reader_config([src], min_content_chars=500)
+        store = _make_store(feed_sources=[_source_to_dict(src)])
+
+        async def _find_similar(content: str, threshold: float, limit: int) -> list:
+            if threshold == 0.95:
+                return []  # not a duplicate
+            return [_make_search_result(score=0.9)]
+
+        store.find_similar.side_effect = _find_similar
+
+        reader = _FakeReader({"https://example.com/article": "# Full article body"})
+
+        with patch("distillery.feeds.poller._build_adapter") as mock_build:
+            mock_adapter = MagicMock()
+            mock_adapter.fetch.return_value = [item]
+            mock_build.return_value = mock_adapter
+
+            poller = FeedPoller(store=store, config=cfg, reader=reader)  # type: ignore[arg-type]
+            summary = await poller.poll()
+
+        assert summary.total_items_enriched == 1
+        assert summary.total_enrichment_errors == 0
+        assert summary.total_stored == 1
+        assert reader.calls == ["https://example.com/article"]
+        # The store call should have received the enriched content + metadata.
+        stored_entry = store.store.call_args.args[0]
+        assert "Full article body" in stored_entry.content
+        assert stored_entry.metadata["original_content"] == "too short"
+        assert stored_entry.metadata["enriched_by"] == "jina-reader"
+        assert "enriched_at" in stored_entry.metadata
+
+    async def test_long_rss_item_is_not_enriched(self) -> None:
+        long_content = "x" * 600
+        item = _make_feed_item(item_id="id1", title="Long item", content=long_content)
+        item.url = "https://example.com/article"
+        src = _rss_source()
+        cfg = _make_reader_config([src], min_content_chars=500)
+        store = _make_store(feed_sources=[_source_to_dict(src)])
+
+        async def _find_similar(content: str, threshold: float, limit: int) -> list:
+            if threshold == 0.95:
+                return []
+            return [_make_search_result(score=0.9)]
+
+        store.find_similar.side_effect = _find_similar
+
+        reader = _FakeReader({})
+
+        with patch("distillery.feeds.poller._build_adapter") as mock_build:
+            mock_adapter = MagicMock()
+            mock_adapter.fetch.return_value = [item]
+            mock_build.return_value = mock_adapter
+
+            poller = FeedPoller(store=store, config=cfg, reader=reader)  # type: ignore[arg-type]
+            summary = await poller.poll()
+
+        assert summary.total_items_enriched == 0
+        assert summary.total_enrichment_errors == 0
+        assert summary.total_stored == 1
+        assert reader.calls == []
+        stored_entry = store.store.call_args.args[0]
+        # Original content is preserved as-is — no enrichment metadata.
+        assert "original_content" not in stored_entry.metadata
+        assert "enriched_by" not in stored_entry.metadata
+
+    async def test_reader_failure_falls_back_to_original_content(self) -> None:
+        item = _make_feed_item(item_id="id1", title="Short", content="short")
+        item.url = "https://example.com/article"
+        src = _rss_source()
+        cfg = _make_reader_config([src], min_content_chars=500)
+        store = _make_store(feed_sources=[_source_to_dict(src)])
+
+        async def _find_similar(content: str, threshold: float, limit: int) -> list:
+            if threshold == 0.95:
+                return []
+            return [_make_search_result(score=0.9)]
+
+        store.find_similar.side_effect = _find_similar
+
+        # Reader returns None — simulating a failure.
+        reader = _FakeReader({"https://example.com/article": None})
+
+        with patch("distillery.feeds.poller._build_adapter") as mock_build:
+            mock_adapter = MagicMock()
+            mock_adapter.fetch.return_value = [item]
+            mock_build.return_value = mock_adapter
+
+            poller = FeedPoller(store=store, config=cfg, reader=reader)  # type: ignore[arg-type]
+            summary = await poller.poll()
+
+        assert summary.total_items_enriched == 0
+        assert summary.total_enrichment_errors == 1
+        # Item is still stored using the fallback original content.
+        assert summary.total_stored == 1
+        stored_entry = store.store.call_args.args[0]
+        assert "short" in stored_entry.content
+        assert "original_content" not in stored_entry.metadata
+
+    async def test_github_source_is_never_enriched(self) -> None:
+        item = _make_feed_item(
+            item_id="evt1",
+            source_type="github",
+            source_url="https://github.com/foo/bar",
+            title="PR opened",
+            content="short",
+        )
+        item.url = "https://github.com/foo/bar/pull/1"
+        src = _github_source()
+        cfg = _make_reader_config([src], min_content_chars=500)
+        store = _make_store(feed_sources=[_source_to_dict(src)])
+
+        async def _find_similar(content: str, threshold: float, limit: int) -> list:
+            if threshold == 0.95:
+                return []
+            return [_make_search_result(score=0.9)]
+
+        store.find_similar.side_effect = _find_similar
+
+        reader = _FakeReader({"https://github.com/foo/bar/pull/1": "should not be used"})
+
+        with patch("distillery.feeds.poller._build_adapter") as mock_build:
+            mock_adapter = MagicMock()
+            mock_adapter.fetch.return_value = [item]
+            mock_build.return_value = mock_adapter
+
+            poller = FeedPoller(store=store, config=cfg, reader=reader)  # type: ignore[arg-type]
+            summary = await poller.poll()
+
+        assert summary.total_items_enriched == 0
+        assert reader.calls == []  # never invoked for non-RSS sources
+
+    async def test_reader_disabled_when_client_is_none(self) -> None:
+        item = _make_feed_item(item_id="id1", title="Short", content="short")
+        item.url = "https://example.com/article"
+        src = _rss_source()
+        cfg = _make_reader_config([src], enabled=False, min_content_chars=500)
+        store = _make_store(feed_sources=[_source_to_dict(src)])
+
+        async def _find_similar(content: str, threshold: float, limit: int) -> list:
+            if threshold == 0.95:
+                return []
+            return [_make_search_result(score=0.9)]
+
+        store.find_similar.side_effect = _find_similar
+
+        with patch("distillery.feeds.poller._build_adapter") as mock_build:
+            mock_adapter = MagicMock()
+            mock_adapter.fetch.return_value = [item]
+            mock_build.return_value = mock_adapter
+
+            # reader=None mirrors the production wiring when feeds.reader.enabled=False.
+            poller = FeedPoller(store=store, config=cfg, reader=None)
+            summary = await poller.poll()
+
+        assert summary.total_items_enriched == 0
+        assert summary.total_enrichment_errors == 0
+        assert summary.total_stored == 1
+
+    async def test_item_without_url_skips_enrichment(self) -> None:
+        item = _make_feed_item(item_id="id1", title="Short", content="short")
+        item.url = None  # explicit: no URL
+        src = _rss_source()
+        cfg = _make_reader_config([src], min_content_chars=500)
+        store = _make_store(feed_sources=[_source_to_dict(src)])
+
+        async def _find_similar(content: str, threshold: float, limit: int) -> list:
+            if threshold == 0.95:
+                return []
+            return [_make_search_result(score=0.9)]
+
+        store.find_similar.side_effect = _find_similar
+
+        reader = _FakeReader({})
+
+        with patch("distillery.feeds.poller._build_adapter") as mock_build:
+            mock_adapter = MagicMock()
+            mock_adapter.fetch.return_value = [item]
+            mock_build.return_value = mock_adapter
+
+            poller = FeedPoller(store=store, config=cfg, reader=reader)  # type: ignore[arg-type]
+            summary = await poller.poll()
+
+        assert summary.total_items_enriched == 0
+        assert reader.calls == []  # filtered out by candidate predicate

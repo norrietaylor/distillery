@@ -494,6 +494,8 @@ def _poll_result_to_dict(result: Any) -> dict[str, Any]:
         "items_stored": result.items_stored,
         "items_skipped_dedup": result.items_skipped_dedup,
         "items_below_threshold": result.items_below_threshold,
+        "items_enriched": result.items_enriched,
+        "enrichment_errors": result.enrichment_errors,
         "errors": result.errors,
         "polled_at": result.polled_at.isoformat(),
     }
@@ -518,6 +520,7 @@ async def _handle_poll(
         A structured MCP success or error response.
     """
     from distillery.feeds.poller import FeedPoller
+    from distillery.feeds.reader import build_reader_client
 
     source_url: str | None = arguments.get("source_url")
 
@@ -533,7 +536,18 @@ async def _handle_poll(
                     "Use distillery_watch(action='list') to see available sources.",
                 )
 
-        poller = FeedPoller(store=store, config=config)
+        reader_cfg = config.feeds.reader
+        reader = (
+            build_reader_client(
+                api_key_env=reader_cfg.api_key_env,
+                timeout_seconds=reader_cfg.timeout_seconds,
+                max_retries=reader_cfg.max_retries,
+                concurrency=reader_cfg.concurrency,
+            )
+            if reader_cfg.enabled
+            else None
+        )
+        poller = FeedPoller(store=store, config=config, reader=reader)
         summary = await poller.poll(source_url=source_url)
     except Exception:  # noqa: BLE001
         logger.exception("distillery_poll: unexpected error during poll cycle")
@@ -547,6 +561,8 @@ async def _handle_poll(
             "total_stored": summary.total_stored,
             "total_skipped_dedup": summary.total_skipped_dedup,
             "total_below_threshold": summary.total_below_threshold,
+            "total_items_enriched": summary.total_items_enriched,
+            "total_enrichment_errors": summary.total_enrichment_errors,
             "results": [_poll_result_to_dict(r) for r in summary.results],
             "started_at": summary.started_at.isoformat(),
             "finished_at": summary.finished_at.isoformat(),

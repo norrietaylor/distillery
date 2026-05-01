@@ -690,6 +690,94 @@ class TestFeedsConfigYAML:
         with pytest.raises(ValueError, match="source_type"):
             load_config(str(p))
 
+    def test_reader_config_defaults(self, tmp_path: Path) -> None:
+        """ReaderConfig defaults are applied when no feeds.reader block exists."""
+        yaml_content = """\
+            feeds: {}
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.feeds.reader.enabled is False
+        assert cfg.feeds.reader.api_key_env == "JINA_API_KEY"
+        assert cfg.feeds.reader.min_content_chars == 500
+        assert cfg.feeds.reader.timeout_seconds == pytest.approx(30.0)
+        assert cfg.feeds.reader.max_retries == 2
+        assert cfg.feeds.reader.concurrency == 5
+
+    def test_reader_config_loaded(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            feeds:
+              reader:
+                enabled: true
+                api_key_env: MY_JINA_KEY
+                min_content_chars: 200
+                timeout_seconds: 10
+                max_retries: 3
+                concurrency: 8
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.feeds.reader.enabled is True
+        assert cfg.feeds.reader.api_key_env == "MY_JINA_KEY"
+        assert cfg.feeds.reader.min_content_chars == 200
+        assert cfg.feeds.reader.timeout_seconds == pytest.approx(10.0)
+        assert cfg.feeds.reader.max_retries == 3
+        assert cfg.feeds.reader.concurrency == 8
+
+    def test_reader_config_negative_min_chars_raises(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            feeds:
+              reader:
+                enabled: true
+                min_content_chars: -1
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="min_content_chars"):
+            load_config(str(p))
+
+    def test_reader_config_zero_concurrency_raises(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            feeds:
+              reader:
+                enabled: true
+                concurrency: 0
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="concurrency"):
+            load_config(str(p))
+
+    def test_reader_config_zero_timeout_raises(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            feeds:
+              reader:
+                enabled: true
+                timeout_seconds: 0
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="timeout_seconds"):
+            load_config(str(p))
+
+    def test_reader_config_negative_max_retries_raises(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            feeds:
+              reader:
+                enabled: true
+                max_retries: -1
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="max_retries"):
+            load_config(str(p))
+
+    def test_reader_config_non_bool_enabled_raises(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            feeds:
+              reader:
+                enabled: "yes"
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="enabled"):
+            load_config(str(p))
+
     def test_missing_url_raises(self, tmp_path: Path) -> None:
         yaml_content = """\
             feeds:
