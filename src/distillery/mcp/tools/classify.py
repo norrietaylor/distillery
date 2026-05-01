@@ -31,6 +31,97 @@ _VALID_REVIEW_ACTIONS = {"approve", "reclassify", "archive"}
 
 
 # ---------------------------------------------------------------------------
+# Schema-only validators (run before any DB lookup)
+# ---------------------------------------------------------------------------
+#
+# These helpers exist so the MCP tool wrappers in ``server.py`` can surface
+# enum/action failures *before* the ownership pre-check (``_own``) issues a
+# ``store.get(entry_id)`` and short-circuits with NOT_FOUND.  Without this,
+# a single call carrying both a bad ``entry_id`` and a bad ``entry_type`` /
+# ``action`` would only surface NOT_FOUND, forcing the caller to retry once
+# per invalid parameter (issue #372).
+#
+# The handlers (``_handle_classify`` / ``_handle_resolve_review``) re-run the
+# same checks defensively, keeping them safe to call directly from tests or
+# webhook entrypoints that bypass the server wrappers.
+
+
+def validate_classify_schema(arguments: dict[str, Any]) -> list[types.TextContent] | None:
+    """Validate ``distillery_classify`` schema-level params before any DB lookup.
+
+    Surfaces ``INVALID_PARAMS`` for missing required fields, an unknown
+    ``entry_type`` (with alias suggestion when applicable), a non-numeric
+    ``confidence``, an out-of-range ``confidence``, or a malformed
+    ``suggested_tags`` list.
+
+    Args:
+        arguments: Raw MCP tool arguments dict.
+
+    Returns:
+        An MCP error response if any schema-level validation fails, else
+        ``None`` so the caller can proceed to DB lookup / handler dispatch.
+    """
+    err = validate_required(arguments, "entry_id", "entry_type", "confidence")
+    if err:
+        return error_response("INVALID_PARAMS", err)
+
+    entry_type_str = arguments["entry_type"]
+    if entry_type_str not in _VALID_ENTRY_TYPES:
+        return _invalid_entry_type_response(entry_type_str)
+
+    confidence_raw = arguments["confidence"]
+    if isinstance(confidence_raw, bool) or not isinstance(confidence_raw, (int, float)):
+        return error_response("INVALID_PARAMS", "Field 'confidence' must be a number")
+    if not (0.0 <= float(confidence_raw) <= 1.0):
+        return error_response("INVALID_PARAMS", "Field 'confidence' must be in [0.0, 1.0]")
+
+    tags_err = validate_type(arguments, "suggested_tags", list, "list of strings")
+    if tags_err:
+        return error_response("INVALID_PARAMS", tags_err)
+
+    return None
+
+
+def validate_resolve_review_schema(arguments: dict[str, Any]) -> list[types.TextContent] | None:
+    """Validate ``distillery_resolve_review`` schema-level params before DB lookup.
+
+    Surfaces ``INVALID_PARAMS`` for missing required fields, an unknown
+    ``action``, a missing ``new_entry_type`` when ``action="reclassify"``,
+    or an unknown ``new_entry_type``.
+
+    Args:
+        arguments: Raw MCP tool arguments dict.
+
+    Returns:
+        An MCP error response if any schema-level validation fails, else
+        ``None`` so the caller can proceed to DB lookup / handler dispatch.
+    """
+    err = validate_required(arguments, "entry_id", "action")
+    if err:
+        return error_response("INVALID_PARAMS", err)
+
+    action = arguments["action"]
+    if action not in _VALID_REVIEW_ACTIONS:
+        return error_response(
+            "INVALID_PARAMS",
+            f"Invalid action {action!r}. Must be one of: "
+            f"{', '.join(sorted(_VALID_REVIEW_ACTIONS))}.",
+        )
+
+    if action == "reclassify":
+        new_type_str = arguments.get("new_entry_type")
+        if not new_type_str:
+            return error_response(
+                "INVALID_PARAMS",
+                "Field 'new_entry_type' is required when action='reclassify'.",
+            )
+        if new_type_str not in _VALID_ENTRY_TYPES:
+            return _invalid_entry_type_response(new_type_str, field="new_entry_type")
+
+    return None
+
+
+# ---------------------------------------------------------------------------
 # _handle_classify
 # ---------------------------------------------------------------------------
 
@@ -58,26 +149,16 @@ async def _handle_classify(
     from distillery.models import EntryStatus, EntryType, validate_tag
 
     # --- input validation ---------------------------------------------------
-    err = validate_required(arguments, "entry_id", "entry_type", "confidence")
-    if err:
-        return error_response("INVALID_PARAMS", err)
+    # Schema-only checks (enum membership, ranges, types) run first so a
+    # response surfaces param errors *before* a DB round-trip — see
+    # ``validate_classify_schema`` for rationale (issue #372).
+    schema_err = validate_classify_schema(arguments)
+    if schema_err:
+        return schema_err
 
     entry_id: str = arguments["entry_id"]
     entry_type_str: str = arguments["entry_type"]
-    confidence_raw = arguments["confidence"]
-
-    if entry_type_str not in _VALID_ENTRY_TYPES:
-        return _invalid_entry_type_response(entry_type_str)
-
-    if not isinstance(confidence_raw, (int, float)):
-        return error_response("INVALID_PARAMS", "Field 'confidence' must be a number")
-    confidence = float(confidence_raw)
-    if not (0.0 <= confidence <= 1.0):
-        return error_response("INVALID_PARAMS", "Field 'confidence' must be in [0.0, 1.0]")
-
-    tags_err = validate_type(arguments, "suggested_tags", list, "list of strings")
-    if tags_err:
-        return error_response("INVALID_PARAMS", tags_err)
+    confidence = float(arguments["confidence"])
 
     # --- retrieve existing entry --------------------------------------------
     try:
@@ -201,18 +282,15 @@ async def _handle_resolve_review(
     from distillery.models import EntryStatus, EntryType
 
     # --- input validation ---------------------------------------------------
-    err = validate_required(arguments, "entry_id", "action")
-    if err:
-        return error_response("INVALID_PARAMS", err)
+    # Schema-only checks (action enum, new_entry_type when reclassifying) run
+    # first so a response surfaces param errors *before* a DB round-trip —
+    # see ``validate_resolve_review_schema`` for rationale (issue #372).
+    schema_err = validate_resolve_review_schema(arguments)
+    if schema_err:
+        return schema_err
 
     entry_id: str = arguments["entry_id"]
     action: str = arguments["action"]
-
-    if action not in _VALID_REVIEW_ACTIONS:
-        return error_response(
-            "INVALID_PARAMS",
-            f"Invalid action {action!r}. Must be one of: {', '.join(sorted(_VALID_REVIEW_ACTIONS))}.",
-        )
 
     # --- retrieve existing entry --------------------------------------------
     try:
@@ -301,14 +379,9 @@ async def _handle_resolve_review(
         updates["metadata"] = new_metadata
 
     elif action == "reclassify":
-        new_type_str: str | None = arguments.get("new_entry_type")
-        if not new_type_str:
-            return error_response(
-                "INVALID_PARAMS",
-                "Field 'new_entry_type' is required when action='reclassify'.",
-            )
-        if new_type_str not in _VALID_ENTRY_TYPES:
-            return _invalid_entry_type_response(new_type_str, field="new_entry_type")
+        # ``new_entry_type`` presence + enum are validated by
+        # ``validate_resolve_review_schema`` at the top of the handler.
+        new_type_str: str = arguments["new_entry_type"]
         _clear_stale_delegation_keys(new_metadata)
         new_metadata["reclassified_from"] = entry.entry_type.value
         new_metadata["reviewed_at"] = now
@@ -364,4 +437,6 @@ __all__ = [
     "_handle_classify",
     "_handle_resolve_review",
     "_VALID_REVIEW_ACTIONS",
+    "validate_classify_schema",
+    "validate_resolve_review_schema",
 ]
