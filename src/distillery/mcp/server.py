@@ -35,6 +35,8 @@ from distillery.mcp.tools.analytics import (
 from distillery.mcp.tools.classify import (
     _handle_classify,
     _handle_resolve_review,
+    validate_classify_schema,
+    validate_resolve_review_schema,
 )
 from distillery.mcp.tools.configure import _handle_configure
 from distillery.mcp.tools.crud import (
@@ -462,8 +464,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                             )
                         except Exception:  # noqa: BLE001
                             logger.debug(
-                                "audit_log write failed for "
-                                "distillery_store_batch (ignored)",
+                                "audit_log write failed for distillery_store_batch (ignored)",
                                 exc_info=True,
                             )
                     else:
@@ -481,8 +482,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                             )
                         except Exception:  # noqa: BLE001
                             logger.debug(
-                                "audit_log write failed for "
-                                "distillery_store_batch (ignored)",
+                                "audit_log write failed for distillery_store_batch (ignored)",
                                 exc_info=True,
                             )
         return result
@@ -894,9 +894,6 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         """
         c = _lc(ctx)
         user = _get_authenticated_user()
-        err = await _own(c, user, entry_id, "distillery_classify")
-        if err:
-            return err
         args: dict[str, Any] = dict(
             entry_id=entry_id,
             entry_type=entry_type,
@@ -907,6 +904,16 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 suggested_project=suggested_project,
             ),
         )
+        # Validate schema-level params (entry_type, confidence range) BEFORE
+        # the ownership pre-check so a single round-trip surfaces all bad
+        # params — otherwise ``_own``'s NOT_FOUND short-circuits invalid
+        # enum values (issue #372).
+        schema_err = validate_classify_schema(args)
+        if schema_err:
+            return schema_err
+        err = await _own(c, user, entry_id, "distillery_classify")
+        if err:
+            return err
         return await _handle_classify(store=c["store"], config=c["config"], arguments=args)
 
     @server.tool
@@ -942,9 +949,6 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         """
         c = _lc(ctx)
         user = _get_authenticated_user()
-        err = await _own(c, user, entry_id, "distillery_resolve_review")
-        if err:
-            return err
         args: dict[str, Any] = dict(
             entry_id=entry_id, action=action, **_omit_none(new_entry_type=new_entry_type)
         )
@@ -955,6 +959,16 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             args["actor"] = user
         if reviewer is not None:
             args["reviewer"] = reviewer
+        # Validate schema-level params (action enum, new_entry_type) BEFORE
+        # the ownership pre-check so a single round-trip surfaces all bad
+        # params — otherwise ``_own``'s NOT_FOUND short-circuits invalid
+        # actions (issue #372).
+        schema_err = validate_resolve_review_schema(args)
+        if schema_err:
+            return schema_err
+        err = await _own(c, user, entry_id, "distillery_resolve_review")
+        if err:
+            return err
         result = await _handle_resolve_review(store=c["store"], arguments=args)
         await _audit(c, user, "distillery_resolve_review", entry_id, action, result)
         return result
