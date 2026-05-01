@@ -14,7 +14,6 @@ CHANGELOG.md
 CONTRIBUTING.md
 CLAUDE.md
 LICENSE
-uv.lock
 Makefile
 .gitignore
 .dockerignore

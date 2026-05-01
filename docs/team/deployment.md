@@ -170,6 +170,14 @@ docker build -t distillery .
 docker run -p 8000:8000 -e JINA_API_KEY=... distillery
 ```
 
+The Dockerfile is a multi-stage build: a `builder` stage that uses [`uv`](https://docs.astral.sh/uv/) to resolve dependencies from `uv.lock` into a self-contained virtualenv, and a slim runtime stage based on `cgr.dev/chainguard/wolfi-base` with only Python 3.14 and the prebuilt `.venv`. No `uv` binary, compilers, or build cache are shipped to production.
+
+Pin a specific `uv` version via the `UV_VERSION` build arg if you need reproducibility:
+
+```bash
+docker build --build-arg UV_VERSION=0.11.3 -t distillery .
+```
+
 ## Database Migrations
 
 Distillery uses a forward-only schema migration system. Migrations run automatically on startup — no manual steps are needed for additive changes (new columns, new tables).
