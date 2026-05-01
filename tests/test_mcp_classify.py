@@ -287,6 +287,26 @@ class TestClassifyTool:
         assert data["error"] is True
         assert data["code"] == "INVALID_PARAMS"
 
+    async def test_classify_reports_invalid_entry_type_before_id_lookup(
+        self, store: DuckDBStore, config: DistilleryConfig
+    ) -> None:
+        """Issue #372: when both entry_id and entry_type are bad, schema
+        validation must fire before the DB lookup so the agent sees the full
+        set of errors and does not burn a retry fixing one at a time."""
+        response = await _handle_classify(
+            store,
+            config,
+            {
+                "entry_id": "00000000-0000-0000-0000-000000000000",
+                "entry_type": "invalid_type_xyz",
+                "confidence": 0.5,
+            },
+        )
+        data = parse_mcp_response(response)
+        assert data["error"] is True
+        assert data["code"] == "INVALID_PARAMS"
+        assert data["details"]["field"] == "entry_type"
+
 
 # ---------------------------------------------------------------------------
 # distillery_review_queue tests
@@ -571,6 +591,23 @@ class TestResolveReviewTool:
         data = parse_mcp_response(response)
         assert data["error"] is True
         assert data["code"] == "INVALID_PARAMS"
+
+    async def test_resolve_reports_invalid_action_before_id_lookup(
+        self, store: DuckDBStore
+    ) -> None:
+        """Issue #372: bad id + bad action should surface the action error
+        rather than short-circuiting on NOT_FOUND for the phantom id."""
+        response = await _handle_resolve_review(
+            store,
+            {
+                "entry_id": "00000000-0000-0000-0000-000000000000",
+                "action": "nuke_from_orbit",
+            },
+        )
+        data = parse_mcp_response(response)
+        assert data["error"] is True
+        assert data["code"] == "INVALID_PARAMS"
+        assert "nuke_from_orbit" in data["message"]
 
     async def test_resolve_approve_without_reviewer(self, store: DuckDBStore) -> None:
         """Reviewer field is optional."""

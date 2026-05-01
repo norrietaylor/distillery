@@ -64,6 +64,7 @@ nav:
   - Getting Started:
     - Plugin Install: getting-started/plugin-install.md
     - Local Setup: getting-started/local-setup.md
+    - Local macOS (launchd): getting-started/local-macos.md
     - MCP Server Reference: getting-started/mcp-setup.md
   - Skills Reference:
     - Overview: skills/index.md

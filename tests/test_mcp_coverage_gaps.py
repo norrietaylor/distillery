@@ -256,6 +256,21 @@ class TestAggregateGaps:
         assert data["error"] is True
         assert data["code"] == "INVALID_PARAMS"
 
+    async def test_aggregate_group_by_missing(self, store: DuckDBStore) -> None:
+        response = await _handle_aggregate(store, {})
+        data = parse_mcp_response(response)
+        assert data["error"] is True
+        assert data["code"] == "INVALID_PARAMS"
+        assert "Missing required fields" in data["message"]
+
+    async def test_aggregate_group_by_empty_string(self, store: DuckDBStore) -> None:
+        """Issue #371: empty string is present, not missing."""
+        response = await _handle_aggregate(store, {"group_by": ""})
+        data = parse_mcp_response(response)
+        assert data["error"] is True
+        assert data["code"] == "INVALID_PARAMS"
+        assert "must be a non-empty string" in data["message"]
+
 
 # ===========================================================================
 # tools/crud.py gap coverage

@@ -2,11 +2,11 @@
 #
 # Multi-stage build for the Distillery MCP server.
 #
-# Stage 1 (builder): Wolfi base + Python 3.13 + the `uv` static binary
+# Stage 1 (builder): Wolfi base + Python 3.14 + the `uv` static binary
 # (copied from the official Astral image). Resolves dependencies from
 # `uv.lock` and produces a self-contained `/app/.venv`.
 #
-# Stage 2 (runtime): the same Wolfi + Python 3.13 base — but only the
+# Stage 2 (runtime): the same Wolfi + Python 3.14 base — but only the
 # prebuilt virtualenv is copied in. No `uv` (~48 MB), no compilers, no
 # pip cache, and no source tree shipped to production.
 
@@ -22,9 +22,9 @@ FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
 # ─────────────────────────────────────────────────────────────────────
 FROM cgr.dev/chainguard/wolfi-base:${WOLFI_TAG} AS builder
 
-# Python 3.13 + uv. Wolfi's `python-3.13` package ships the interpreter
+# Python 3.14 + uv. Wolfi's `python-3.14` package ships the interpreter
 # only; we layer `uv` on top from the pinned Astral image.
-RUN apk add --no-cache python-3.13
+RUN apk add --no-cache python-3.14
 COPY --from=uv /uv /usr/local/bin/uv
 
 # Speed/size knobs for uv:
@@ -34,7 +34,7 @@ COPY --from=uv /uv /usr/local/bin/uv
 ENV UV_LINK_MODE=copy \
     UV_COMPILE_BYTECODE=1 \
     UV_PYTHON_DOWNLOADS=never \
-    UV_PYTHON=/usr/bin/python3.13 \
+    UV_PYTHON=/usr/bin/python3.14 \
     UV_PROJECT_ENVIRONMENT=/app/.venv
 
 WORKDIR /app
@@ -69,7 +69,7 @@ LABEL org.opencontainers.image.source="https://github.com/norrietaylor/distiller
       org.opencontainers.image.licenses="Apache-2.0"
 
 # Install only the runtime Python; no compilers, no `uv`, no build tools.
-RUN apk add --no-cache python-3.13
+RUN apk add --no-cache python-3.14
 
 # Create a non-root user with a writable home so DuckDB can install its
 # VSS extension under ~/.duckdb at build time.
