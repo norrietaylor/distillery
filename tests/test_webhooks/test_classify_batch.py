@@ -3,7 +3,8 @@
 Covers:
 - Bearer auth requirement (401 without token)
 - Heuristic mode classification
-- LLM mode classification (headless: entries queued as pending_review)
+- LLM mode classification with injected client — confidence-based transitions
+- LLM mode fallback when no llm_client is wired into shared state
 - Empty inbox (no entries to classify)
 - Invalid mode parameter returns 400
 - Error handling when classification raises
@@ -273,36 +274,60 @@ async def test_classify_batch_heuristic_requires_embedding_provider(
 
 
 @pytest.mark.unit
-async def test_classify_batch_llm_mode_queues_as_pending_review(
+async def test_classify_batch_llm_mode_applies_confidence_threshold(
     store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """POST /hooks/classify-batch?mode=llm is intentionally headless for v1.
+    """POST /hooks/classify-batch?mode=llm with an injected llm_client (#268).
 
-    Per the file header and the `/hooks/classify-batch` contract, the webhook
-    enqueues every pending inbox entry as ``pending_review`` so a human can
-    triage via ``/classify --review``. The endpoint must NOT invoke an LLM,
-    even when an ``llm_client`` is injected into shared state — the webhook
-    body itself is cheap and headless; any real classification must be driven
-    by the skill side.
+    The webhook now drives a real LLM call per pending entry when an
+    ``llm_client`` is wired into shared state. Each call returns a
+    ``ClassificationResult``; entries whose confidence meets or exceeds
+    ``ClassificationConfig.confidence_threshold`` (default 0.6) transition
+    to ACTIVE, while lower-confidence entries are kept as ``pending_review``
+    so a human can triage via ``/classify --review``.
     """
+    from distillery.classification.models import ClassificationResult
+
     monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
 
-    # Create real entries in the store
-    entry_a = _make_entry("Session content A")
-    entry_b = _make_entry("Meeting notes B")
-    await store.store(entry_a)
-    await store.store(entry_b)
+    # Two pending inbox entries — one will classify with high confidence
+    # (transitions to ACTIVE), one with low confidence (stays pending_review).
+    entry_high = _make_entry("Session content A")
+    entry_low = _make_entry("Ambiguous content B")
 
-    # An LLM client is injected — but the v1 webhook must NOT use it.
     mock_llm_client = MagicMock()
     mock_llm_client.classify = AsyncMock(
-        side_effect=AssertionError(
-            "POST /hooks/classify-batch?mode=llm must be headless for v1 — "
-            "it must not invoke the injected llm_client."
-        )
+        side_effect=[
+            ClassificationResult(
+                entry_type=EntryType.SESSION,
+                confidence=0.92,
+                # Status carried by the result is informational; the webhook
+                # re-derives status from confidence + the configured threshold
+                # so a misbehaving adapter cannot bypass the contract.
+                status=EntryStatus.ACTIVE,
+                reasoning="LLM: confident session classification.",
+                suggested_tags=[],
+                suggested_project=None,
+            ),
+            ClassificationResult(
+                entry_type=EntryType.INBOX,
+                confidence=0.42,
+                status=EntryStatus.PENDING_REVIEW,
+                reasoning="LLM: low confidence, defer to human review.",
+                suggested_tags=[],
+                suggested_project=None,
+            ),
+        ]
     )
 
+    mock_store = MagicMock()
+    mock_store.list_entries = AsyncMock(return_value=[entry_high, entry_low])
+    mock_store.update = AsyncMock(return_value=entry_high)
+    mock_store.get_metadata = AsyncMock(return_value=None)
+    mock_store.set_metadata = AsyncMock()
+
     shared = _make_shared_state(store)
+    shared["store"] = mock_store
     shared["llm_client"] = mock_llm_client
 
     app = create_webhook_app(shared, _make_config())
@@ -314,15 +339,125 @@ async def test_classify_batch_llm_mode_queues_as_pending_review(
     assert body["ok"] is True
     data = body["data"]
 
-    # v1 contract: all inbox entries queued as pending_review, regardless of
-    # the injected llm_client.
+    # High-confidence entry → ACTIVE; low-confidence entry → pending_review.
+    assert data["classified"] == 1
+    assert data["pending_review"] == 1
+    assert data["errors"] == 0
+    assert data["by_type"] == {"session": 1}
+
+    # The webhook dispatched one LLM call per entry.
+    assert mock_llm_client.classify.await_count == 2
+
+    # Verify both store updates carried the right status + entry_type.
+    assert mock_store.update.await_count == 2
+    first_update = mock_store.update.call_args_list[0][0][1]
+    second_update = mock_store.update.call_args_list[1][0][1]
+    assert first_update["entry_type"] == "session"
+    assert first_update["status"] == "active"
+    assert second_update["entry_type"] == "inbox"
+    assert second_update["status"] == "pending_review"
+
+
+@pytest.mark.unit
+async def test_classify_batch_llm_mode_falls_back_to_pending_when_no_client(
+    store: DuckDBStore, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """POST /hooks/classify-batch?mode=llm without an injected llm_client (#268).
+
+    When no ``llm_client`` is wired into shared state, the webhook preserves
+    the prior v1 contract: every pending inbox entry is queued as
+    ``pending_review`` for human triage. A WARNING is logged so operators
+    can notice that LLM classification is silently disabled.
+    """
+    import logging
+
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+
+    entry_a = _make_entry("Session content A")
+    entry_b = _make_entry("Meeting notes B")
+    await store.store(entry_a)
+    await store.store(entry_b)
+
+    # No llm_client is injected.
+    shared = _make_shared_state(store)
+    assert "llm_client" not in shared
+
+    app = create_webhook_app(shared, _make_config())
+    client = TestClient(app, raise_server_exceptions=False)
+    with caplog.at_level(logging.WARNING, logger="distillery.mcp.webhooks"):
+        resp = client.post("/hooks/classify-batch?mode=llm", headers=_AUTH_HEADER)
+
+    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+    body = resp.json()
+    assert body["ok"] is True
+    data = body["data"]
+
     assert data["classified"] == 0
     assert data["pending_review"] == 2
     assert data["errors"] == 0
-    assert "session" not in data["by_type"]
+    assert data["by_type"] == {}
 
-    # The webhook must not have dispatched any LLM call.
-    assert mock_llm_client.classify.call_count == 0
+    # The fallback path emits a warning so operators can wire a client.
+    assert any("no llm_client wired" in record.message for record in caplog.records)
+
+
+@pytest.mark.unit
+async def test_classify_batch_llm_mode_per_entry_error_isolation(
+    store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A single failing LLM classify call should not abort the whole batch.
+
+    The webhook catches per-entry exceptions, increments the ``errors``
+    counter, and continues processing remaining entries.
+    """
+    from distillery.classification.models import ClassificationResult
+
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+
+    entry_a = _make_entry("Content A")
+    entry_b = _make_entry("Content B")
+
+    mock_llm_client = MagicMock()
+    mock_llm_client.classify = AsyncMock(
+        side_effect=[
+            RuntimeError("LLM provider 502"),
+            ClassificationResult(
+                entry_type=EntryType.REFERENCE,
+                confidence=0.81,
+                status=EntryStatus.ACTIVE,
+                reasoning="LLM classified as reference.",
+                suggested_tags=[],
+                suggested_project=None,
+            ),
+        ]
+    )
+
+    mock_store = MagicMock()
+    mock_store.list_entries = AsyncMock(return_value=[entry_a, entry_b])
+    mock_store.update = AsyncMock(return_value=entry_b)
+    mock_store.get_metadata = AsyncMock(return_value=None)
+    mock_store.set_metadata = AsyncMock()
+
+    shared = _make_shared_state(store)
+    shared["store"] = mock_store
+    shared["llm_client"] = mock_llm_client
+
+    app = create_webhook_app(shared, _make_config())
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.post("/hooks/classify-batch?mode=llm", headers=_AUTH_HEADER)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    data = body["data"]
+    assert data["classified"] == 1
+    assert data["pending_review"] == 0
+    assert data["errors"] == 1
+    assert data["by_type"] == {"reference": 1}
+
+    # Only the second entry's update should have landed; the first failed
+    # before the store call.
+    assert mock_store.update.await_count == 1
 
 
 # ---------------------------------------------------------------------------
