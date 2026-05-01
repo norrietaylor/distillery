@@ -423,7 +423,7 @@ class TestPluginDocumentationContent:
         assert "distillery-mcp.fly.dev" in content
 
     def test_mcp_servers_settings_json_snippet_present(self) -> None:
-        """Plugin doc must show a mcpServers settings.json configuration snippet."""
+        """Plugin doc must show a manual mcpServers configuration snippet for ~/.claude.json."""
         content = load_plugin_doc()
         assert "mcpServers" in content
-        assert "settings.json" in content
+        assert "~/.claude.json" in content
