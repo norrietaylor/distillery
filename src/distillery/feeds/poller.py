@@ -532,7 +532,11 @@ class FeedPoller:
         except Exception:  # noqa: BLE001
             logger.debug("FeedPoller: keyword map build failed — topic tagging disabled")
 
-        # Poll all sources concurrently — each _poll_source is independent.
+        # Poll all sources concurrently — each ``_poll_source`` persists its
+        # own liveness (``last_polled_at``) before returning so a partial
+        # cycle (e.g. the webhook background task is cancelled mid-gather)
+        # still advances the per-source timestamps for sources that did
+        # complete (issue #404).
         results = await asyncio.gather(
             *(self._poll_source(source, scorer, keyword_map=keyword_map) for source in sources),
             return_exceptions=True,
@@ -540,7 +544,10 @@ class FeedPoller:
 
         for idx, result in enumerate(results):
             if isinstance(result, BaseException):
-                # Unexpected exception from _poll_source — record as errored.
+                # Unexpected exception escaping ``_poll_source`` — its own
+                # ``finally`` clause did not get to run (e.g. raised before
+                # the wrapping ``try``), so record liveness one more time
+                # here so the source isn't left as "never polled".
                 err_result = PollResult(
                     source_url=sources[idx].url,
                     source_type=sources[idx].source_type,
@@ -564,7 +571,7 @@ class FeedPoller:
                 summary.sources_polled += 1
                 if result.errors:
                     summary.sources_errored += 1
-                await self._persist_poll_status(result)
+                # Liveness is already persisted inside ``_poll_source``.
 
         summary.finished_at = datetime.now(tz=UTC)
         return summary
@@ -595,7 +602,9 @@ class FeedPoller:
         raw_error = result.errors[0] if result.errors else None
         if raw_error is not None:
             sanitised = re.sub(r"\s+", " ", raw_error).strip()
-            error_msg: str | None = sanitised[:199] + "…" if len(sanitised) > 200 else sanitised or None
+            error_msg: str | None = (
+                sanitised[:199] + "…" if len(sanitised) > 200 else sanitised or None
+            )
         else:
             error_msg = None
         try:
@@ -624,6 +633,18 @@ class FeedPoller:
     ) -> PollResult:
         """Poll a single source and return a :class:`PollResult`.
 
+        Liveness metadata (``last_polled_at``/``last_item_count``/
+        ``last_error``) is persisted **inside this method** — in a
+        ``finally`` clause — so that ``feed_sources.last_polled_at``
+        advances even when the surrounding poll cycle is cancelled
+        mid-gather (e.g. the webhook background task is killed by an
+        auto-stopping host before the post-gather loop runs).  Without
+        this, items could be ingested but the per-source liveness
+        fields would stay ``NULL``, leaving
+        ``distillery_status.last_feed_poll`` and
+        ``distillery_watch(action='list').next_poll_at`` stuck at their
+        prior values (issue #404).
+
         Args:
             source: The configured feed source.
             scorer: The :class:`~distillery.feeds.scorer.RelevanceScorer` to use.
@@ -638,13 +659,45 @@ class FeedPoller:
             source_type=source.source_type,
         )
 
+        try:
+            await self._do_poll_source(source, scorer, result, keyword_map=keyword_map)
+        finally:
+            # Persist liveness on every exit — success, handled error,
+            # or cancellation — so a partial cycle still advances
+            # ``last_polled_at`` for this source.  ``asyncio.shield``
+            # protects the persist call when the surrounding task is
+            # being cancelled: a bare ``await`` inside ``finally`` would
+            # re-raise CancelledError immediately and the persist would
+            # never reach the DB.  ``shield`` lets the inner coroutine
+            # run to completion in the background while the outer task
+            # cancellation still propagates after the shield returns.
+            # Failures inside ``_persist_poll_status`` are logged and
+            # swallowed there.
+            await asyncio.shield(self._persist_poll_status(result))
+        return result
+
+    async def _do_poll_source(
+        self,
+        source: FeedSourceConfig,
+        scorer: RelevanceScorer,
+        result: PollResult,
+        *,
+        keyword_map: dict[str, str] | None = None,
+    ) -> None:
+        """Inner poll loop; mutates *result* in place.
+
+        Split out from :meth:`_poll_source` so the wrapper can persist
+        liveness exactly once via a ``try/finally`` regardless of which
+        early-return branch (or unhandled exception) the inner work
+        takes.
+        """
         # Build adapter
         try:
             adapter = _build_adapter(source)
         except ValueError as exc:
             result.errors.append(f"Failed to build adapter: {exc}")
             logger.warning("FeedPoller: %s", exc)
-            return result
+            return
 
         # Fetch items (synchronous I/O — run in a thread)
         try:
@@ -652,7 +705,7 @@ class FeedPoller:
         except Exception as exc:  # noqa: BLE001
             result.errors.append(f"Adapter fetch failed: {exc}")
             logger.warning("FeedPoller: fetch failed for %s: %s", source.url, exc)
-            return result
+            return
 
         result.items_fetched = len(items)
         logger.debug("FeedPoller: fetched %d items from %s", result.items_fetched, source.url)
@@ -728,8 +781,6 @@ class FeedPoller:
                     source.url,
                     exc,
                 )
-
-        return result
 
     async def rescore(self, *, limit: int = 100) -> dict[str, Any]:
         """Re-score existing feed entries against the current store state.
