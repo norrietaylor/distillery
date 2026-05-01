@@ -314,6 +314,38 @@ class TestFeedPollerRSS:
         assert summary.total_stored == 0
         store.store.assert_not_called()
 
+    async def test_external_id_lookup_failure_treated_as_duplicate(self) -> None:
+        """Issue #414: ``_has_external_id`` failing must skip the item, not store it.
+
+        When the shared DuckDB connection is in an aborted-transaction state
+        (e.g. after a failed FTS rebuild), every ``list_entries`` call raises
+        ``TransactionContext Error``.  Returning ``False`` from
+        ``_has_external_id`` in that path silently disabled dedup and caused
+        every item the previous cycle had stored to be re-stored as a
+        duplicate.  The fix is fail-closed: treat lookup failure as a
+        possible duplicate and skip storage for this cycle.
+        """
+        items = [_make_feed_item(item_id="id1", title="Dup", content="Body")]
+        src = self._rss_source()
+        store = _make_store(feed_sources=[_source_to_dict(src)])
+        cfg = _make_config(sources=[src], digest_threshold=0.0)
+
+        store.list_entries.side_effect = RuntimeError(
+            "TransactionContext Error: Current transaction is aborted (please ROLLBACK)"
+        )
+
+        with patch("distillery.feeds.poller._build_adapter") as mock_build:
+            mock_adapter = MagicMock()
+            mock_adapter.fetch.return_value = items
+            mock_build.return_value = mock_adapter
+
+            poller = FeedPoller(store=store, config=cfg)
+            summary = await poller.poll()
+
+        assert summary.total_skipped_dedup == 1
+        assert summary.total_stored == 0
+        store.store.assert_not_called()
+
     async def test_adapter_fetch_error_recorded(self) -> None:
         src = self._rss_source()
         store = _make_store(feed_sources=[_source_to_dict(src)])
