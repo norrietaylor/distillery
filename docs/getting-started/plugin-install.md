@@ -89,18 +89,14 @@ export DISTILLERY_CONFIG=/path/to/distillery.yaml
 
 Without a `JINA_API_KEY`, Distillery falls back to the stub embedding provider (search quality degraded). See [Local Setup](local-setup.md) for full configuration (embedding providers, cloud storage, etc.).
 
-If you prefer to manage the configuration yourself in `~/.claude.json` (for example to set `env` explicitly), you can shadow the plugin registration with the same stdio block:
+If you prefer to manage the configuration yourself in `~/.claude.json`, you can shadow the plugin registration with the same stdio block. `uvx` inherits the Claude Code process environment, so set `JINA_API_KEY` (and any other Distillery config vars) in your shell before launching Claude Code rather than relying on `${VAR}` interpolation here:
 
 ```json
 {
   "mcpServers": {
     "distillery": {
       "command": "uvx",
-      "args": ["distillery-mcp"],
-      "env": {
-        "JINA_API_KEY": "${JINA_API_KEY}",
-        "DISTILLERY_CONFIG": "${DISTILLERY_CONFIG}"
-      }
+      "args": ["distillery-mcp"]
     }
   }
 }
@@ -145,6 +141,9 @@ claude mcp add distillery --scope user --transport http --url https://your-insta
 ## Remote Auto-Poll Setup
 
 Enable remote auto-polling so feed sources are polled automatically even when Claude Code is not running. This uses Claude Code's scheduled remote agents (triggers).
+
+!!! note "HTTP transport required"
+    Remote auto-poll requires an HTTP-reachable MCP endpoint (Hosted Demo or Self-hosted HTTP). The default local stdio transport (`uvx distillery-mcp`) only runs on your machine and is not reachable by remote triggers.
 
 ### Step 1 — Register the MCP Connector
 
