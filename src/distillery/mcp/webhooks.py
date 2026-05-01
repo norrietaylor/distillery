@@ -39,8 +39,28 @@ from starlette.routing import Route
 
 from distillery.config import DistilleryConfig
 from distillery.feeds.poller import FeedPoller
+from distillery.feeds.reader import JinaReaderClient, build_reader_client
 
 logger = logging.getLogger(__name__)
+
+
+def _build_reader(config: DistilleryConfig) -> JinaReaderClient | None:
+    """Build a :class:`JinaReaderClient` from *config* when Reader is enabled.
+
+    Returns ``None`` when ``feeds.reader.enabled`` is ``False`` or the
+    configured API key environment variable is unset, so the poller
+    silently falls back to today's behaviour.
+    """
+    reader_cfg = config.feeds.reader
+    if not reader_cfg.enabled:
+        return None
+    return build_reader_client(
+        api_key_env=reader_cfg.api_key_env,
+        timeout_seconds=reader_cfg.timeout_seconds,
+        max_retries=reader_cfg.max_retries,
+        concurrency=reader_cfg.concurrency,
+    )
+
 
 # ---------------------------------------------------------------------------
 # Default cooldown intervals (seconds)
@@ -270,6 +290,7 @@ async def _try_rollback(store: Any, job: _JobStatus) -> None:
             job.endpoint,
             job.id,
         )
+
 
 # ---------------------------------------------------------------------------
 # Store initialisation helper
@@ -543,7 +564,7 @@ async def _run_poll(
 
     logger.info("Webhook poll: starting poll cycle (source_url=%r)", source_url)
     try:
-        poller = FeedPoller(store=store, config=config)
+        poller = FeedPoller(store=store, config=config, reader=_build_reader(config))
         summary = await poller.poll(source_url=source_url)
     except Exception:  # noqa: BLE001
         # Keep the full traceback in logs; return a stable generic message to

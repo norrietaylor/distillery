@@ -207,16 +207,53 @@ class FeedsThresholdsConfig:
 
 
 @dataclass
+class ReaderConfig:
+    """Jina Reader API enrichment configuration for the RSS poller.
+
+    When :attr:`enabled` is ``True`` and the API key resolves, the RSS poller
+    fetches full article markdown via ``https://r.jina.ai/<url>`` for items
+    whose ``<description>`` is shorter than :attr:`min_content_chars`.  When
+    disabled (the default) or the key is missing, the poller falls back to
+    the original RSS description, preserving today's behaviour.
+
+    Attributes:
+        enabled: Whether to call the Jina Reader API for short RSS items.
+            Defaults to ``False``.
+        api_key_env: Name of the environment variable holding the Jina API
+            key.  Reuses the same secret as
+            :class:`~distillery.embedding.jina.JinaEmbeddingProvider`.
+            Defaults to ``"JINA_API_KEY"``.
+        min_content_chars: Trigger threshold — Reader is only called when
+            ``len(item.content)`` is below this value.  Defaults to ``500``.
+        timeout_seconds: Per-request HTTP timeout in seconds.  Defaults
+            to ``30.0``.
+        max_retries: Maximum retry attempts on 429 / 5xx / transport errors.
+            Defaults to ``2`` (so up to 3 total HTTP requests per item).
+        concurrency: Maximum number of concurrent Reader requests across
+            all sources during a single poll cycle.  Defaults to ``5``.
+    """
+
+    enabled: bool = False
+    api_key_env: str = "JINA_API_KEY"
+    min_content_chars: int = 500
+    timeout_seconds: float = 30.0
+    max_retries: int = 2
+    concurrency: int = 5
+
+
+@dataclass
 class FeedsConfig:
     """Ambient feed monitoring configuration.
 
     Attributes:
         sources: Ordered list of feed sources to monitor.
         thresholds: Relevance score thresholds for alert vs. digest inclusion.
+        reader: Jina Reader API enrichment settings for the RSS poller.
     """
 
     sources: list[FeedSourceConfig] = field(default_factory=list)
     thresholds: FeedsThresholdsConfig = field(default_factory=FeedsThresholdsConfig)
+    reader: ReaderConfig = field(default_factory=ReaderConfig)
 
 
 @dataclass
@@ -732,9 +769,65 @@ def _parse_feeds(raw: dict[str, Any]) -> FeedsConfig:
     alert = _parse_float_field(thresholds_raw, "alert", 0.85, "feeds.thresholds.alert")
     digest = _parse_float_field(thresholds_raw, "digest", 0.60, "feeds.thresholds.digest")
 
+    reader_raw = raw.get("reader", {}) or {}
+    if not isinstance(reader_raw, dict):
+        raise ValueError(f"feeds.reader must be a YAML mapping, got: {type(reader_raw).__name__}")
+    reader = _parse_reader(reader_raw)
+
     return FeedsConfig(
         sources=sources,
         thresholds=FeedsThresholdsConfig(alert=alert, digest=digest),
+        reader=reader,
+    )
+
+
+def _parse_reader(raw: dict[str, Any]) -> ReaderConfig:
+    """Parse the ``feeds.reader`` section from a raw YAML mapping.
+
+    Args:
+        raw: Mapping (typically from YAML) with optional keys ``enabled``,
+            ``api_key_env``, ``min_content_chars``, ``timeout_seconds``,
+            ``max_retries``, ``concurrency``.
+
+    Returns:
+        A populated :class:`ReaderConfig` instance.
+
+    Raises:
+        ValueError: If any field has the wrong type or value range.
+    """
+    enabled_raw = raw.get("enabled", False)
+    if not isinstance(enabled_raw, bool):
+        raise ValueError(f"feeds.reader.enabled must be a boolean, got: {enabled_raw!r}")
+
+    api_key_env = str(raw.get("api_key_env", "JINA_API_KEY"))
+
+    min_content_chars = _parse_strict_int(
+        raw.get("min_content_chars", 500), "feeds.reader.min_content_chars"
+    )
+    if min_content_chars < 0:
+        raise ValueError(f"feeds.reader.min_content_chars must be >= 0, got: {min_content_chars}")
+
+    timeout_seconds = _parse_float_field(
+        raw, "timeout_seconds", 30.0, "feeds.reader.timeout_seconds"
+    )
+    if timeout_seconds <= 0:
+        raise ValueError(f"feeds.reader.timeout_seconds must be > 0, got: {timeout_seconds}")
+
+    max_retries = _parse_strict_int(raw.get("max_retries", 2), "feeds.reader.max_retries")
+    if max_retries < 0:
+        raise ValueError(f"feeds.reader.max_retries must be >= 0, got: {max_retries}")
+
+    concurrency = _parse_strict_int(raw.get("concurrency", 5), "feeds.reader.concurrency")
+    if concurrency < 1:
+        raise ValueError(f"feeds.reader.concurrency must be >= 1, got: {concurrency}")
+
+    return ReaderConfig(
+        enabled=enabled_raw,
+        api_key_env=api_key_env,
+        min_content_chars=min_content_chars,
+        timeout_seconds=timeout_seconds,
+        max_retries=max_retries,
+        concurrency=concurrency,
     )
 
 

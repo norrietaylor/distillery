@@ -19,6 +19,20 @@ embedding:
 team:
   name: distillery-dev
 
+# Optional: Jina Reader API enrichment for RSS feeds (issue #403).
+# When enabled, the poller fetches full article markdown via
+# https://r.jina.ai/<url> for RSS items whose <description> is shorter
+# than ``min_content_chars``. The original RSS description is preserved
+# in ``metadata.original_content``. Disabled by default.
+# feeds:
+#   reader:
+#     enabled: true
+#     api_key_env: JINA_API_KEY     # reused from embedding provider
+#     min_content_chars: 500
+#     timeout_seconds: 30.0
+#     max_retries: 2
+#     concurrency: 5
+
 server:
   auth:
     provider: none            # open access for dev testing
