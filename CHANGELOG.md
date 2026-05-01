@@ -1,6 +1,23 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+
+## [Unreleased]
+
+### Changed
+
+- **BREAKING (default behavior):** `claude plugin install distillery` now configures a **local stdio** MCP server (`uvx distillery-mcp`) instead of the hosted demo at `distillery-mcp.fly.dev`. The hosted demo becomes explicit opt-in. (#381) *(skills)*
+
+### Migration
+
+Existing users who relied on the hosted demo and want to keep using it after `claude plugin update` should register it explicitly at user scope (this shadows the plugin's local default):
+
+```bash
+claude mcp add distillery --scope user --transport http --url https://distillery-mcp.fly.dev/mcp
+```
+
+The hosted demo is intended for evaluation only — do not store sensitive data on it.
+
 ## [0.4.0] - 2026-04-19
 
 ### Bug Fixes

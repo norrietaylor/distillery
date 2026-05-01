@@ -30,8 +30,8 @@
   },
   "mcpServers": {
     "distillery": {
-      "type": "http",
-      "url": "https://distillery-mcp.fly.dev/mcp"
+      "command": "uvx",
+      "args": ["distillery-mcp"]
     }
   },
   "hooks": {

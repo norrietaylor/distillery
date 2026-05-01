@@ -221,27 +221,30 @@ class TestPluginMCPServers:
         manifest = load_plugin_manifest()
         assert "distillery" in manifest["mcpServers"]
 
-    def test_distillery_server_has_type_http(self) -> None:
-        """The distillery server must use HTTP transport."""
+    def test_distillery_server_uses_stdio_transport(self) -> None:
+        """The distillery server must use stdio transport (command, no url)."""
         manifest = load_plugin_manifest()
         server = manifest["mcpServers"]["distillery"]
-        assert server.get("type") == "http"
+        assert "command" in server, "stdio transport requires a 'command' field"
+        assert "url" not in server, "stdio transport must not include a 'url' field"
 
-    def test_distillery_server_has_url(self) -> None:
-        """The distillery server must have a 'url' field."""
+    def test_distillery_server_command_is_uvx(self) -> None:
+        """The distillery server must launch via 'uvx distillery-mcp'."""
         manifest = load_plugin_manifest()
         server = manifest["mcpServers"]["distillery"]
-        assert "url" in server
+        assert server["command"] == "uvx"
+        assert "distillery-mcp" in server.get("args", [])
 
-    def test_distillery_server_url_is_hardcoded_fly_url(self) -> None:
-        """The distillery server URL must be the hardcoded Fly.io hosted URL.
+    def test_distillery_server_no_url_field(self) -> None:
+        """The distillery server must not declare a hosted URL.
 
-        Note: ${user_config.<key>} interpolation is NOT supported in mcpServers.url.
-        Self-hosters should override via: claude mcp add distillery --scope user
+        The plugin default is local stdio. Hosted demo is opt-in via:
+        claude mcp add distillery --scope user --transport http \
+            --url https://distillery-mcp.fly.dev/mcp
         """
         manifest = load_plugin_manifest()
         server = manifest["mcpServers"]["distillery"]
-        assert server["url"] == "https://distillery-mcp.fly.dev/mcp"
+        assert "url" not in server
 
     def test_distillery_server_no_unsupported_fields(self) -> None:
         """The distillery server must not contain fields unsupported by the plugin schema."""
