@@ -1219,8 +1219,13 @@ class TestHybridSearch:
         for r in results:
             assert 0.0 <= r.score <= 1.0
 
-    async def test_hybrid_search_top_score_is_one(self, hybrid_store: DuckDBStore) -> None:
-        """The top result in hybrid search should have a normalised score of 1.0."""
+    async def test_hybrid_search_top_score_reflects_cosine(self, hybrid_store: DuckDBStore) -> None:
+        """The top result's score should reflect raw cosine similarity in [0, 1].
+
+        After issue #370 the displayed score is no longer min-max rescaled to
+        1.0 within the candidate set; it is the raw cosine similarity (mapped
+        to [0, 1]) so values remain comparable across metadata filters.
+        """
         await hybrid_store.store(
             make_entry(content="Artificial intelligence and machine learning overview")
         )
@@ -1228,7 +1233,7 @@ class TestHybridSearch:
             "artificial intelligence machine learning", filters=None, limit=10
         )
         assert len(results) >= 1
-        assert results[0].score == 1.0
+        assert 0.0 <= results[0].score <= 1.0
 
     async def test_hybrid_search_respects_limit(self, hybrid_store: DuckDBStore) -> None:
         """Hybrid search should respect the limit parameter."""
@@ -1287,6 +1292,85 @@ class TestVectorOnlySearch:
         results = await vector_only_store.search("entry", filters={"author": "alice"}, limit=10)
         for r in results:
             assert r.entry.author == "alice"
+
+
+class TestProjectFilterDoesNotRescaleScore:
+    """Regression tests for issue #370.
+
+    When a metadata filter (e.g. ``project``) shrinks the candidate set, the
+    returned ``score`` must remain raw cosine similarity — not rescaled to
+    1.0 for the per-scope top hit.  Otherwise callers that threshold on
+    relevance accept irrelevant results inside a project filter.
+    """
+
+    @pytest.fixture
+    async def projects_store(self, deterministic_embedding_provider):  # type: ignore[no-untyped-def]
+        """Hybrid-mode store with two disjoint projects seeded with controlled
+        embeddings.  ``alpha`` and projA entries share a near-identical vector;
+        projB entries point in an orthogonal direction so cosine similarity to
+        ``alpha`` is roughly 0 (mapped to ~0.5 in [0, 1]).
+        """
+        provider = deterministic_embedding_provider
+        # Two near-orthogonal directions in 4D.
+        provider.register("alpha", [1.0, 0.0, 0.0, 0.0])
+        provider.register("projA entry 1: alpha", [1.0, 0.0, 0.0, 0.0])
+        provider.register("projA entry 2: beta", [0.95, 0.05, 0.0, 0.0])
+        provider.register("projA entry 3: gamma", [0.9, 0.1, 0.0, 0.0])
+        provider.register("projB entry 1: delta", [0.0, 1.0, 0.0, 0.0])
+        provider.register("projB entry 2: epsilon", [0.0, 0.95, 0.05, 0.0])
+        provider.register("projB entry 3: zeta", [0.0, 0.9, 0.1, 0.0])
+
+        s = DuckDBStore(
+            db_path=":memory:",
+            embedding_provider=provider,
+            hybrid_search=True,
+        )
+        await s.initialize()
+        for content, project in [
+            ("projA entry 1: alpha", "projA"),
+            ("projA entry 2: beta", "projA"),
+            ("projA entry 3: gamma", "projA"),
+            ("projB entry 1: delta", "projB"),
+            ("projB entry 2: epsilon", "projB"),
+            ("projB entry 3: zeta", "projB"),
+        ]:
+            await s.store(make_entry(content=content, project=project))
+        yield s
+        await s.close()
+
+    async def test_project_filtered_top_score_is_not_rescaled(
+        self, projects_store: DuckDBStore
+    ) -> None:
+        """Top hit inside a project that is unrelated to the query must not
+        be rescaled to 1.0.  ``projB`` entries are orthogonal to ``alpha``,
+        so cosine similarity is ~0 and the displayed score must reflect that
+        (well below 0.6, the dedup ``link`` threshold).
+        """
+        results = await projects_store.search("alpha", filters={"project": "projB"}, limit=10)
+        assert len(results) >= 1
+        # Issue #370: top score must NOT be rescaled to 1.0 just because it
+        # is the in-scope best.  The actual cosine similarity is ~0, mapped
+        # to ~0.5 in [0, 1] by the (cos+1)/2 transform.
+        assert results[0].score < 0.6
+        # All scores stay in [0, 1].
+        for r in results:
+            assert 0.0 <= r.score <= 1.0
+
+    async def test_project_filtered_score_matches_unfiltered(
+        self, projects_store: DuckDBStore
+    ) -> None:
+        """For an entry that is in the unfiltered top-K, its score should be
+        identical whether or not a project filter narrows the candidate set.
+        """
+        unfiltered = await projects_store.search("alpha", filters=None, limit=20)
+        filtered = await projects_store.search("alpha", filters={"project": "projB"}, limit=10)
+        # Build a {id: score} map from the unfiltered result for comparison.
+        unfiltered_scores = {r.entry.id: r.score for r in unfiltered}
+        for r in filtered:
+            assert r.entry.id in unfiltered_scores, (
+                "filtered result should also appear in the unfiltered top-K"
+            )
+            assert r.score == pytest.approx(unfiltered_scores[r.entry.id], abs=1e-6)
 
 
 class TestRecencyWeight:
