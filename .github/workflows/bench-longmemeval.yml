@@ -14,7 +14,8 @@
 #      pull-requests: write).
 #   2. A `verify-paths` step in the aggregator job that fails the build
 #      if the auto-PR diff touches anything outside `bench/results/**`
-#      and `bench/badge.json`.
+#      and `bench/badge_*.json` (r5/r10/ndcg10 — emitted by the W2
+#      aggregator via --output-dir).
 # A reviewer-side check (the `benchmark` label) is the third defence.
 #
 # Dependencies (subsequent slices, not yet landed):
@@ -136,6 +137,14 @@ jobs:
         env:
           DISTILLERY_BENCH_GIT_SHA: ${{ github.sha }}
         run: |
+          # CLI presence guard: the `distillery bench longmemeval` subcommand
+          # lands in a follow-up PR (#440). Until that merges to main, every
+          # nightly run would otherwise fail red. Cleanly skip with a workflow
+          # warning so the matrix exits 0 and the aggregator can proceed.
+          if ! distillery bench longmemeval --help >/dev/null 2>&1; then
+            echo "::warning::distillery bench longmemeval CLI not yet present on main. Skipping bench cell. Merge PR #440 to enable."
+            exit 0
+          fi
           distillery bench longmemeval \
             --retrieval ${{ matrix.retrieval }} \
             --granularity ${{ matrix.granularity }} \
@@ -148,6 +157,10 @@ jobs:
         env:
           DISTILLERY_BENCH_GIT_SHA: ${{ github.sha }}
         run: |
+          if ! distillery bench longmemeval --help >/dev/null 2>&1; then
+            echo "::warning::distillery bench longmemeval CLI not yet present on main. Skipping bench cell. Merge PR #440 to enable."
+            exit 0
+          fi
           distillery bench longmemeval \
             --retrieval ${{ matrix.retrieval }} \
             --granularity ${{ matrix.granularity }} \
@@ -160,6 +173,10 @@ jobs:
         env:
           DISTILLERY_BENCH_GIT_SHA: ${{ github.sha }}
         run: |
+          if ! distillery bench longmemeval --help >/dev/null 2>&1; then
+            echo "::warning::distillery bench longmemeval CLI not yet present on main. Skipping bench cell. Merge PR #440 to enable."
+            exit 0
+          fi
           distillery bench longmemeval \
             --retrieval ${{ matrix.retrieval }} \
             --granularity ${{ matrix.granularity }} \
@@ -178,6 +195,10 @@ jobs:
         run: |
           if [ -z "${JINA_API_KEY}" ]; then
             echo "JINA_API_KEY not set in repository secrets — skipping Jina cell"
+            exit 0
+          fi
+          if ! distillery bench longmemeval --help >/dev/null 2>&1; then
+            echo "::warning::distillery bench longmemeval CLI not yet present on main. Skipping bench cell. Merge PR #440 to enable."
             exit 0
           fi
           distillery bench longmemeval \
@@ -251,11 +272,17 @@ jobs:
 
       - name: Run aggregator
         run: |
+          # Guard: when bench cells skip (CLI not yet on main, see #440),
+          # bench/results/ may be empty. Emit a warning and exit 0 so the
+          # auto-PR step has nothing to commit but the job still succeeds.
+          if ! ls bench/results/*.json* >/dev/null 2>&1; then
+            echo "::warning::No bench results produced; aggregator skipped."
+            exit 0
+          fi
           if [ -f scripts/bench/aggregate_results.py ]; then
             python scripts/bench/aggregate_results.py \
-              --results-dir bench/results \
-              --badge bench/badge.json \
-              --summary bench/results/SUMMARY.md
+              --results-dir bench/results/ \
+              --output-dir bench/
           else
             # TODO: created by W2-bench-runner or follow-up.
             # Until the aggregator script lands, we surface the bench
@@ -266,12 +293,12 @@ jobs:
 
       # Path-restriction enforcement. GitHub does not allow path-scoped
       # GITHUB_TOKEN, so we verify the staged diff manually. Anything
-      # outside the allowlist (bench/results/**, bench/badge.json) fails
+      # outside the allowlist (bench/results/**, bench/badge_*.json) fails
       # the job before the auto-PR is opened.
       - name: Verify paths (allowlist enforcement)
         run: |
           set -euo pipefail
-          ALLOW='^(bench/results/|bench/badge\.json$)'
+          ALLOW='^(bench/results/|bench/badge_(r5|r10|ndcg10)\.json$)'
           # Stage everything that would be committed and inspect the
           # paths against the allowlist.
           git add -A
@@ -284,7 +311,7 @@ jobs:
           echo "${CHANGED}"
           BAD=$(echo "${CHANGED}" | grep -Ev "${ALLOW}" || true)
           if [ -n "${BAD}" ]; then
-            echo "ERROR: changes outside allowlist (bench/results/**, bench/badge.json):"
+            echo "ERROR: changes outside allowlist (bench/results/**, bench/badge_*.json):"
             echo "${BAD}"
             exit 1
           fi
@@ -327,9 +354,11 @@ jobs:
             - JSONL receipts in this commit: ${{ steps.commit-set.outputs.include_jsonl }}
 
             All paths in this PR are restricted to `bench/results/**` and
-            `bench/badge.json` by the verify-paths step.
+            `bench/badge_*.json` by the verify-paths step.
           labels: benchmark
           add-paths: |
             bench/results/**
-            bench/badge.json
+            bench/badge_r5.json
+            bench/badge_r10.json
+            bench/badge_ndcg10.json
           delete-branch: true
