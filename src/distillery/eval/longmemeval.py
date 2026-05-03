@@ -55,8 +55,11 @@ comparisons are technically prevented at the filesystem level
 Discipline rules enforced here
 ------------------------------
 
-* PRNG seeds are reset *before* every store rebuild
-  (``random.seed`` + ``numpy.random.seed`` if numpy is importable).
+* PRNG seeds are reset *before* every store rebuild via
+  ``random.seed``.  DuckDB's VSS extension uses its own RNG for HNSW,
+  unaffected by Python's ``random`` module, but seeding ``random``
+  bounds any host-side non-determinism (e.g. dict-order shuffles) on
+  a per-question basis.
 * No expected scores are baked into the runner or its docstrings.
 * No competitor comparison is constructed.
 * Each JSONL record carries the full SHA panel (seven fields).
@@ -70,7 +73,6 @@ for the broader context (Wave 2, deliverable 2).
 from __future__ import annotations
 
 import json
-import logging
 import random
 import re
 import subprocess
@@ -90,9 +92,6 @@ from distillery.eval.longmemeval_dataset import (
 from distillery.eval.scoring import evaluate_retrieval
 from distillery.models import Entry, EntrySource, EntryType
 from distillery.store.duckdb import DuckDBStore
-
-logger = logging.getLogger(__name__)
-
 
 # ---------------------------------------------------------------------------
 # Type aliases for the public API axes
@@ -422,20 +421,15 @@ def _expected_id_set(
 
 
 def _seed_prng(seed: int) -> None:
-    """Set ``random`` and (best-effort) ``numpy.random`` seeds.
+    """Set the stdlib ``random`` seed.
 
-    Called *before* every store rebuild so HNSW insertion-order
-    non-determinism is neutralised on a per-question basis.  numpy is
-    optional — fastembed pulls it transitively but the runner doesn't
-    require it, so we degrade gracefully if it isn't importable.
+    Called *before* every store rebuild so any host-side
+    non-determinism (dict-order shuffles, sample selection, etc.) is
+    bounded on a per-question basis.  DuckDB's VSS extension uses its
+    own RNG for HNSW insertion order and is not affected by Python's
+    ``random`` module, so no further seeding is required here.
     """
     random.seed(seed)
-    try:
-        import numpy as np  # local import: numpy is optional at module level
-
-        np.random.seed(seed)
-    except ImportError:  # pragma: no cover - numpy absent
-        logger.debug("numpy not importable; skipping numpy.random.seed")
 
 
 # ---------------------------------------------------------------------------
