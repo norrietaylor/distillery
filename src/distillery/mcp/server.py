@@ -659,6 +659,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         output: str | None = None,
         feed_url: str | None = None,
         include_archived: bool = False,
+        structural: list[str] | None = None,
     ) -> list[types.TextContent]:
         """List knowledge entries with optional filters and pagination (newest first).
 
@@ -708,8 +709,18 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             retrieve all items polled from e.g. "https://hnrss.org/frontpage".
           - include_archived (bool, optional, default=False): Include archived entries
             in the default view (same effect as status="any" when status is unset).
+          - structural (list[str], optional): Surface entries with specific graph
+            anomalies relative to ``entry_relations``. Accepted values:
+            ["orphans"] — entries that do not appear as either endpoint of any
+            relation row. Unknown values yield INVALID_PARAMS. Combines (AND) with
+            every other filter (project, tags, status, date range, stale_days,
+            etc.) — orphans are first restricted by those filters, then the
+            no-relations predicate is applied.
 
-        RETURNS (success): { entries: list, count: int, total_count: int, limit: int, offset: int }
+        RETURNS (success): { entries: list, count: int, total_count: int, limit: int,
+          offset: int, output_mode: str } — when ``structural`` is set, the payload
+          additionally includes ``structural_filter`` (comma-joined applied filters,
+          e.g. "orphans"). Existing fields are unchanged.
         RETURNS (error): { error: true, code: "INVALID_PARAMS" | "INTERNAL", message: "..." }
 
         RELATED: distillery_search (for semantic search),
@@ -738,6 +749,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 group_by=group_by,
                 output=output,
                 feed_url=feed_url,
+                structural=structural,
             ),
         )
         return await _handle_list(store=c["store"], arguments=args)

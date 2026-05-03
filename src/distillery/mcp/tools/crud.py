@@ -1187,6 +1187,21 @@ async def _handle_update(
 _VALID_OUTPUT_MODES = frozenset({"full", "summary", "ids", "review"})
 _VALID_GROUP_BY_VALUES = frozenset({"entry_type", "status", "author", "project", "source", "tags"})
 
+# Structural filters surface entries with anomalous graph properties relative
+# to ``entry_relations``.  ``"orphans"`` returns entries that do not appear as
+# either endpoint of any relation row.  Future values may include
+# ``"isolated_clusters"`` etc.; the set is intentionally small so that unknown
+# values fail loudly with INVALID_PARAMS rather than silently no-op.
+_VALID_STRUCTURAL_FILTERS = frozenset({"orphans"})
+
+# Safety cap on the entry batch fetched when a structural filter is active.
+# Structural filters are post-applied at the handler layer (option (b) in the
+# Phase 3 plan: keep store.list_entries unchanged), so we must fetch enough
+# rows up front to apply the filter and then slice with offset/limit.  10k
+# entries comfortably exceeds typical knowledge-base sizes while keeping the
+# filter cost bounded.
+_STRUCTURAL_FETCH_CAP = 10_000
+
 # Summary-mode content preview length (characters).  Chosen to keep each
 # entry ~300-500 bytes so a full ``distillery_list(limit=50)`` fits in a
 # few tens of KB rather than hundreds.
@@ -1343,6 +1358,43 @@ async def _handle_list(
             return error_response("INVALID_PARAMS", "Field 'output' only accepts 'stats'")
         output = output_raw
 
+    # --- validate structural -------------------------------------------------
+    # Structural filters AND with the existing project/tags/status/date filters
+    # to narrow results to entries with specific graph anomalies (see
+    # ``_VALID_STRUCTURAL_FILTERS``).  Issue #141: surface orphans (entries
+    # with zero rows in ``entry_relations``).
+    structural_raw = arguments.get("structural")
+    structural: list[str] | None = None
+    if structural_raw is not None:
+        if not isinstance(structural_raw, list):
+            return error_response("INVALID_PARAMS", "Field 'structural' must be a list of strings")
+        if not all(isinstance(item, str) for item in structural_raw):
+            return error_response("INVALID_PARAMS", "Field 'structural' must be a list of strings")
+        unknown = [v for v in structural_raw if v not in _VALID_STRUCTURAL_FILTERS]
+        if unknown:
+            return error_response(
+                "INVALID_PARAMS",
+                f"Unknown structural filter value(s): {', '.join(repr(v) for v in unknown)}. "
+                f"Valid values: {', '.join(sorted(_VALID_STRUCTURAL_FILTERS))}.",
+            )
+        # Preserve caller order (and dedupe) for deterministic envelope output.
+        seen: set[str] = set()
+        structural = []
+        for v in structural_raw:
+            if v not in seen:
+                seen.add(v)
+                structural.append(v)
+
+        # Structural is post-applied after the wide fetch and is incompatible
+        # with the aggregate code paths.  Reject the combo loudly instead of
+        # silently dropping the structural filter and returning unfiltered
+        # aggregates.
+        if structural and (group_by_raw is not None or output_raw == "stats"):
+            return error_response(
+                "INVALID_PARAMS",
+                "Field 'structural' cannot be combined with 'group_by' or output='stats'",
+            )
+
     # --- mutual exclusivity: group_by and output="stats" ---------------------
     if group_by is not None and output == "stats":
         return error_response(
@@ -1446,22 +1498,66 @@ async def _handle_list(
         return success_response(result)
 
     # --- default list mode ---------------------------------------------------
-    try:
-        entries = await store.list_entries(
-            filters=filters,
-            limit=limit,
-            offset=offset,
-            stale_days=stale_days,
-        )
-    except Exception:  # noqa: BLE001
-        logger.exception("Error in distillery_list")
-        return error_response("INTERNAL", "list_entries failed")
+    # Structural filters (e.g. ``orphans``) are applied at the handler layer
+    # rather than pushed into ``store.list_entries`` so that the store's list
+    # surface stays unchanged (Phase 3 plan, option (b)).  We fetch a wider
+    # window using a safety cap, post-filter, then re-slice for offset/limit.
+    if structural is not None:
+        # Fail fast if the candidate set already exceeds the safety cap —
+        # otherwise pagination + total_count would silently lie about anything
+        # beyond ``_STRUCTURAL_FETCH_CAP`` rows.  Probe the count up front and
+        # ask the caller to narrow filters instead.
+        try:
+            candidate_count = await store.count_entries(filters=filters, stale_days=stale_days)
+        except Exception:  # noqa: BLE001
+            logger.exception("Error in distillery_list (structural count)")
+            return error_response("INTERNAL", "count_entries failed")
+        if candidate_count > _STRUCTURAL_FETCH_CAP:
+            return error_response(
+                "INVALID_PARAMS",
+                f"Structural filter on {candidate_count} candidate rows exceeds "
+                f"{_STRUCTURAL_FETCH_CAP} cap; tighten filters "
+                f"(project, tags, status, date_from/date_to, stale_days).",
+            )
 
-    try:
-        total_count = await store.count_entries(filters=filters, stale_days=stale_days)
-    except Exception:  # noqa: BLE001
-        logger.debug("count_entries failed, falling back to len(entries)", exc_info=True)
-        total_count = len(entries)
+        try:
+            wide_entries = await store.list_entries(
+                filters=filters,
+                limit=_STRUCTURAL_FETCH_CAP,
+                offset=0,
+                stale_days=stale_days,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("Error in distillery_list (structural fetch)")
+            return error_response("INTERNAL", "list_entries failed")
+
+        if "orphans" in structural:
+            try:
+                related_ids = await store.get_all_related_entry_ids()
+            except Exception:  # noqa: BLE001
+                logger.exception("Error in distillery_list (get_all_related_entry_ids)")
+                return error_response("INTERNAL", "get_all_related_entry_ids failed")
+            wide_entries = [e for e in wide_entries if e.id not in related_ids]
+
+        total_count = len(wide_entries)
+        entries = wide_entries[offset : offset + limit]
+    else:
+        try:
+            entries = await store.list_entries(
+                filters=filters,
+                limit=limit,
+                offset=offset,
+                stale_days=stale_days,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("Error in distillery_list")
+            return error_response("INTERNAL", "list_entries failed")
+
+        try:
+            total_count = await store.count_entries(filters=filters, stale_days=stale_days)
+        except Exception:  # noqa: BLE001
+            logger.debug("count_entries failed, falling back to len(entries)", exc_info=True)
+            total_count = len(entries)
 
     if output_mode == "summary":
         serialised = [_entry_to_summary_dict(e) for e in entries]
@@ -1494,16 +1590,19 @@ async def _handle_list(
         else:
             serialised = [e.to_dict() for e in entries]
 
-    return success_response(
-        {
-            "entries": serialised,
-            "count": len(entries),
-            "total_count": total_count,
-            "limit": limit,
-            "offset": offset,
-            "output_mode": output_mode,
-        }
-    )
+    payload: dict[str, Any] = {
+        "entries": serialised,
+        "count": len(entries),
+        "total_count": total_count,
+        "limit": limit,
+        "offset": offset,
+        "output_mode": output_mode,
+    }
+    if structural is not None:
+        # Comma-joined for forward compatibility with multi-value structural
+        # filters; today only "orphans" is recognised.
+        payload["structural_filter"] = ",".join(structural)
+    return success_response(payload)
 
 
 # ---------------------------------------------------------------------------
