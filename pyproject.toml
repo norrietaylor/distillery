@@ -85,6 +85,7 @@ markers = [
     "unit: unit tests",
     "integration: integration tests",
     "eval: Claude-powered skill evaluation tests (requires claude CLI)",
+    "bench: long-running retrieval-quality benchmarks (LongMemEval, etc.) — opt-in",
     "live_probe: opt out of the autouse feed-probe stub (tests exercise real _probe_url)",
 ]
 
