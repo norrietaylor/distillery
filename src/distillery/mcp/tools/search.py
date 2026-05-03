@@ -153,9 +153,15 @@ async def _handle_search(
     # ------------------------------------------------------------------
     # Graph expansion path (additive — only when expand_graph=True).
     # ------------------------------------------------------------------
+    # Derive the status visibility contract that was applied to the seed
+    # search so we can apply the same contract to BFS-expanded neighbours.
+    # ``filters`` here is the post-``_apply_default_status_filter`` dict —
+    # if it carries a ``status`` key, that is the allow-list (string or
+    # list of strings).  Absence of ``status`` means "any status is ok".
+    allowed_statuses: set[str] | None = _allowed_statuses_from_filters(filters)
     try:
         merged_results, seed_count, expanded_count = await _expand_search_with_graph(
-            store, search_results, expand_hops, limit
+            store, search_results, expand_hops, limit, allowed_statuses
         )
     except Exception:  # noqa: BLE001
         logger.exception("Error during graph expansion in distillery_search")
@@ -187,11 +193,32 @@ async def _handle_search(
     )
 
 
+def _allowed_statuses_from_filters(
+    filters: dict[str, Any] | None,
+) -> set[str] | None:
+    """Return the set of status strings allowed by the seed search filter.
+
+    Returns ``None`` when no status filter is present (i.e. all statuses are
+    allowed — the caller passed ``include_archived=True`` or
+    ``status="any"``).  Otherwise returns a set of status strings (e.g.
+    ``{"active", "pending_review"}``) that the seed search would have
+    surfaced; expanded BFS neighbours must be filtered to this set so graph
+    expansion does not leak entries the seed search would have hidden.
+    """
+    if filters is None or "status" not in filters:
+        return None
+    status_value = filters["status"]
+    if isinstance(status_value, list):
+        return {str(v) for v in status_value}
+    return {str(status_value)}
+
+
 async def _expand_search_with_graph(
     store: Any,
     search_results: list[Any],
     expand_hops: int,
     limit: int,
+    allowed_statuses: set[str] | None = None,
 ) -> tuple[list[dict[str, Any]], int, int]:
     """BFS-expand the seed search results via ``store.get_related``.
 
@@ -199,6 +226,13 @@ async def _expand_search_with_graph(
     ``merged_results`` is a list of result dicts already sorted by descending
     score and truncated to ``limit``.  Each dict carries a ``provenance``
     field; graph-only entries also carry ``depth`` and ``parent_id``.
+
+    ``allowed_statuses`` mirrors the status-visibility contract that the
+    seed ``store.search`` call applied.  When provided, BFS-expanded
+    neighbours whose ``status`` is not in this set are dropped before the
+    merge — preventing archived (or otherwise-filtered) entries from
+    leaking into the result via graph expansion.  When ``None`` no
+    status-based filtering is applied to expanded entries.
     """
     seed_ids: set[str] = {sr.entry.id for sr in search_results}
     seed_score_by_id: dict[str, float] = {sr.entry.id: float(sr.score) for sr in search_results}
@@ -240,11 +274,17 @@ async def _expand_search_with_graph(
                     "_parent_id": parent_id,
                 }
 
-    # Fetch entries for all expanded ids; skip any that have been deleted.
+    # Fetch entries for all expanded ids; skip any that have been deleted
+    # or whose status would have been filtered out by the seed search.
     expanded_results: list[dict[str, Any]] = []
     for entry_id, info in expanded.items():
         entry = await store.get(entry_id)
         if entry is None:
+            continue
+        if allowed_statuses is not None and str(entry.status) not in allowed_statuses:
+            # The seed search would have hidden this status; honour the same
+            # contract for graph-expanded neighbours so archived (or other
+            # filtered) entries never leak in via BFS.
             continue
         expanded_results.append(
             {

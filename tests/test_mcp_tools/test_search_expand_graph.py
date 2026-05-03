@@ -17,7 +17,7 @@ import pytest
 
 from distillery.config import DistilleryConfig, load_config
 from distillery.mcp.tools.search import _handle_search
-from distillery.models import EntryType
+from distillery.models import EntryStatus, EntryType
 from distillery.store.duckdb import DuckDBStore
 from tests.conftest import ControlledEmbeddingProvider, make_entry, parse_mcp_response
 
@@ -447,3 +447,109 @@ async def test_expand_graph_handles_seed_with_no_relations(
     assert data["graph_expansion"]["expanded_count"] == 0
     assert data["graph_expansion"]["seed_count"] >= 1
     assert _ids_with_provenance(data["results"], "graph") == set()
+
+
+# ===========================================================================
+# Status-visibility contract: archived neighbours are filtered out by default
+# (CodeRabbit finding on PR #425).  Graph expansion must honour the same
+# archived-visibility contract that the seed ``store.search`` call applied —
+# otherwise ``expand_graph=true`` silently leaks ARCHIVED entries that the
+# default search contract hides.
+# ===========================================================================
+
+
+async def test_expand_graph_excludes_archived_neighbours_by_default(
+    store: DuckDBStore,
+    embedding_provider: ControlledEmbeddingProvider,
+    cfg: DistilleryConfig,
+) -> None:
+    """A (active) matches the search; B (archived) is related to A.
+
+    Default search hides archived entries, so graph expansion must not leak
+    B into the result list.  Asserts: A present, B absent.
+    """
+    embedding_provider.register("archived seed a", _UNIT_A)
+    embedding_provider.register("archived query", _UNIT_A)
+    embedding_provider.register("archived neighbour b", _UNIT_B)
+
+    a = make_entry(
+        content="archived seed a",
+        entry_type=EntryType.INBOX,
+        tags=["seed"],
+        status=EntryStatus.ACTIVE,
+    )
+    await store.store(a)
+    b = make_entry(
+        content="archived neighbour b",
+        entry_type=EntryType.INBOX,
+        tags=["neighbour"],
+        status=EntryStatus.ARCHIVED,
+    )
+    await store.store(b)
+    await store.add_relation(a.id, b.id, "link")
+
+    response = await _handle_search(
+        store,
+        {
+            "query": "archived query",
+            "tags": ["seed"],
+            "expand_graph": True,
+            "expand_hops": 1,
+        },
+        cfg=cfg,
+    )
+    data = parse_mcp_response(response)
+
+    result_ids = {r["entry"]["id"] for r in data["results"]}
+    assert a.id in result_ids
+    assert b.id not in result_ids
+    # The archived neighbour must not show up under graph provenance either.
+    assert b.id not in _ids_with_provenance(data["results"], "graph")
+    # ``expanded_count`` reflects entries actually included after the
+    # status filter, not raw BFS visitation count.
+    assert data["graph_expansion"]["expanded_count"] == 0
+
+
+async def test_expand_graph_includes_archived_when_include_archived_true(
+    store: DuckDBStore,
+    embedding_provider: ControlledEmbeddingProvider,
+    cfg: DistilleryConfig,
+) -> None:
+    """Inverse of the above: when the caller explicitly passes
+    ``include_archived=True`` the seed search returns archived entries, so
+    graph expansion must also include archived neighbours."""
+    embedding_provider.register("ia seed a", _UNIT_A)
+    embedding_provider.register("ia query", _UNIT_A)
+    embedding_provider.register("ia neighbour b", _UNIT_B)
+
+    a = make_entry(
+        content="ia seed a",
+        entry_type=EntryType.INBOX,
+        tags=["seed"],
+        status=EntryStatus.ACTIVE,
+    )
+    await store.store(a)
+    b = make_entry(
+        content="ia neighbour b",
+        entry_type=EntryType.INBOX,
+        tags=["neighbour"],
+        status=EntryStatus.ARCHIVED,
+    )
+    await store.store(b)
+    await store.add_relation(a.id, b.id, "link")
+
+    response = await _handle_search(
+        store,
+        {
+            "query": "ia query",
+            "tags": ["seed"],
+            "expand_graph": True,
+            "expand_hops": 1,
+            "include_archived": True,
+        },
+        cfg=cfg,
+    )
+    data = parse_mcp_response(response)
+
+    graph_ids = _ids_with_provenance(data["results"], "graph")
+    assert b.id in graph_ids
