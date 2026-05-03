@@ -4,89 +4,58 @@
 # False-positive suppressions go in the 'ignore' list below.
 # Each entry must include a reason explaining why the CVE is safe to ignore.
 #
+# Scoping policy: every ignore entry MUST be bound to the exact package
+# (name + version, with type when known) that grype emits.  This prevents
+# the suppression from silently matching a future occurrence of the same
+# CVE-ID in a different package and weakening the fail-on-severity gate.
+# The package.name / package.version / package.type strings come straight
+# from the SBOM (artifact.name / artifact.version / artifact.type fields
+# in the grype JSON report) — for Wolfi apk packages that means values
+# like "python-3.14" (not "CPython") and "glibc".
+#
+# Audit policy: every entry is reviewed against the current scan output
+# (see issue #418).  Entries are removed when grype no longer matches them
+# in the latest CI scan — either because the affected package was upgraded
+# in Wolfi, removed from the runtime image, or the upstream backport landed
+# in a recent base-image rebuild.  This keeps the file aligned with what
+# grype actually emits and prevents drift between rationale and reality.
+#
 # Example:
 #   ignore:
 #     - vulnerability: CVE-2024-XXXXX
+#       package:
+#         name: example-pkg
+#         version: 1.2.3-r0
+#         type: apk
 #       reason: "Not exploitable in our context — we don't use the affected API"
 
 ignore:
-  # --- Upstream CVEs with no fix available anywhere ---
-  # These affect glibc and CPython across all distros (Debian, Wolfi, Alpine).
-  # Reviewed: 2026-03-30
+  # ---------------------------------------------------------------------
+  # Active suppressions — confirmed against the CI scan of the python-3.14
+  # runtime image (SBOM: python-3.14.4-r3 + glibc 2.43-r7, Wolfi base).
+  # Reviewed: 2026-05-03 (issue #418).
+  # ---------------------------------------------------------------------
 
-  - vulnerability: CVE-2026-4437
-    reason: "glibc 2.40 — CVSS 7.8 (High); memory corruption in printf family functions. Requires local access with ability to pass malformed format strings. Not exploitable in our deployment: Distillery MCP server processes structured JSON/HTTP requests, does not accept arbitrary user-controlled format strings, and runs in a containerized environment with limited local access. No upstream fix available in any distro. Reviewed: 2026-04-03"
+  - vulnerability: CVE-2026-3298
+    package:
+      name: python-3.14
+      version: 3.14.4-r3
+      type: apk
+    reason: "CPython 3.14.4-r3 — CVSS High; affects the interpreter's startup path under specific PYTHONHOME / site-packages override conditions on multi-user systems.  Not exploitable in our deployment: Distillery runs as the unprivileged 'appuser' (uid 10001) inside an immutable container with a fixed PYTHONHOME and no shared-tenant site-packages directory.  No upstream fix released by CPython upstream or Wolfi.  Reviewed: 2026-05-03"
 
-  - vulnerability: CVE-2026-4519
-    reason: "CPython 3.13 — CVSS 8.1 (High); arbitrary code execution via crafted pickle data deserialization. Not exploitable in our deployment: Distillery does not deserialize pickle data — all data persistence uses DuckDB with parameterized SQL, all API inputs are JSON-validated via FastMCP/Pydantic schemas. No upstream fix available in any distro. Reviewed: 2026-04-03"
-
-  - vulnerability: CVE-2026-2673
-    reason: "openssl 3.5.5 — upstream fix commits (85977e0, 2157c9d) exist but not yet in a released 3.5.x version. CVSS 7.5 (High); network-exploitable but requires specific TLS handshake conditions not present in our deployment. Reviewed: 2026-04-03"
-
-  - vulnerability: CVE-2025-69720
-    reason: "ncurses 6.5 — CVSS 3.3 (Low); local attack vector only, not exploitable in our non-interactive container deployment. Action plan: upgrade to ncurses 6.6 when available in Wolfi/Alpine. Reviewed: 2026-04-03"
-
-  - vulnerability: CVE-2026-4046
-    reason: "glibc 2.43 (Wolfi) — no upstream fix available"
-
-  - vulnerability: CVE-2026-5358
-    reason: "glibc 2.43 (Wolfi) — CVSS 9.1 (Critical); buffer overflow in nis_local_principal. Not exploitable in our deployment: NIS/YP support has been obsolete since glibc 2.26 and Distillery performs no NIS lookups — identity is handled via GitHub OAuth over HTTPS. Sourceware bug 34067; no upstream fix released yet. Reviewed: 2026-04-23"
+  - vulnerability: CVE-2026-5435
+    package:
+      name: glibc
+      version: 2.43-r7
+      type: apk
+    reason: "glibc 2.43-r7 (Wolfi) — CVSS High; locale/charset boundary handling.  Not exploitable in our deployment: container runs with the C.UTF-8 locale, all I/O is UTF-8 end-to-end (HTTP/JSON, DuckDB, Python source), and no user-controlled locale strings reach glibc.  Sourceware tracking issue open; no fix released yet.  Reviewed: 2026-05-03"
 
   - vulnerability: CVE-2026-5928
-    reason: "glibc 2.43 (Wolfi) — CVSS 7.5 (High); ungetwc wide-character pushback reads before allocated buffer. Not exploitable in our deployment: the bug requires calling ungetwc() with a non-Unicode multibyte charset that has single-byte/multi-byte encoding overlaps. Distillery is Unicode/UTF-8 end-to-end (JSON HTTP, DuckDB, Python source) and makes no ungetwc calls anywhere in its code paths. Sourceware bug 33998; no upstream fix released yet. Reviewed: 2026-04-23"
-
-  # --- Go stdlib CVEs from Wolfi base image ---
-  # Distillery is a pure Python application. Go stdlib is present in the
-  # base image's tooling but no Go code is compiled or executed by Distillery.
-  # Rules use global (vulnerability-only) scoping to avoid brittleness when
-  # Wolfi rebuilds update the stdlib package identifier (name/version/type
-  # fields vary across image rebuilds and would silently fail to suppress).
-  # Reviewed: 2026-04-15
-
-  - vulnerability: CVE-2025-68121
-    reason: "Go stdlib (Critical) — arbitrary code execution. Not exploitable: Distillery is pure Python, no Go code executed. From Wolfi base image tooling."
-
-  - vulnerability: CVE-2026-25679
-    reason: "Go stdlib (High) — not exploitable: no Go code executed in Distillery."
-
-  - vulnerability: CVE-2025-61729
-    reason: "Go stdlib (High) — not exploitable: no Go code executed in Distillery."
-
-  - vulnerability: CVE-2026-27140
-    reason: "Go stdlib (High) — not exploitable: no Go code executed in Distillery."
-
-  - vulnerability: CVE-2026-32283
-    reason: "Go stdlib (High) — not exploitable: no Go code executed in Distillery."
-
-  - vulnerability: CVE-2026-32280
-    reason: "Go stdlib (High) — not exploitable: no Go code executed in Distillery."
-
-  - vulnerability: CVE-2026-32281
-    reason: "Go stdlib (High) — not exploitable: no Go code executed in Distillery."
-
-  - vulnerability: CVE-2025-58187
-    reason: "Go stdlib (High) — not exploitable: no Go code executed in Distillery."
-
-  - vulnerability: CVE-2025-61731
-    reason: "Go stdlib (High) — not exploitable: no Go code executed in Distillery."
-
-  - vulnerability: CVE-2025-61732
-    reason: "Go stdlib (High) — not exploitable: no Go code executed in Distillery."
-
-  - vulnerability: CVE-2025-58188
-    reason: "Go stdlib (High) — not exploitable: no Go code executed in Distillery."
-
-  # --- Python 3.13 CVE ---
-  # Reviewed: 2026-04-15
-
-  - vulnerability: CVE-2026-6100
-    reason: "CPython 3.13.13 — CVSS Critical; use-after-free in lzma.LZMADecompressor, bz2.BZ2Decompressor, gzip.GzipFile when MemoryError occurs and instance is reused. Not exploitable in our deployment: Distillery does not use lzma/bz2/gzip decompression in any code path — data is stored in DuckDB and API payloads are JSON. No upstream fix available. Reviewed: 2026-04-15"
-
-  - vulnerability: CVE-2026-4786
-    reason: "CPython 3.13.13 — CVSS High; incomplete mitigation of CVE-2026-4519 in webbrowser.open() allowing command injection via %action in URLs. Not exploitable in our deployment: Distillery is a headless MCP server — webbrowser module is never imported or used. No upstream fix available. Reviewed: 2026-04-15"
-
-  - vulnerability: CVE-2026-31790
-    reason: "openssl 3.6.1 (libcrypto3/libssl3, Wolfi base image) — CVSS High; affects TLS certificate verification. Not exploitable in our deployment: Distillery MCP server validates upstream TLS connections to Jina/OpenAI embedding APIs using system CA bundles; no user-supplied certificates are processed. The vulnerability requires a maliciously crafted certificate chain which our server never encounters in normal operation. No fix available in Wolfi yet. Reviewed: 2026-04-10"
+    package:
+      name: glibc
+      version: 2.43-r7
+      type: apk
+    reason: "glibc 2.43-r7 (Wolfi) — CVSS 7.5 (High); ungetwc wide-character pushback reads before allocated buffer.  Not exploitable in our deployment: the bug requires calling ungetwc() with a non-Unicode multibyte charset that has single-byte / multi-byte encoding overlaps.  Distillery is Unicode/UTF-8 end-to-end and makes no ungetwc calls anywhere in its code paths.  Sourceware bug 33998; no upstream fix released yet.  Reviewed: 2026-05-03"
 
 
 # Fail on critical and high severity vulnerabilities.
