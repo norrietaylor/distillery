@@ -815,20 +815,26 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
     @server.tool
     async def distillery_find_similar(  # noqa: PLR0913
         ctx: Context,
-        content: str,
+        content: str | None = None,
         threshold: float = 0.8,
         limit: int = 10,
         dedup_action: bool = False,
         conflict_check: bool = False,
         llm_responses: list[dict[str, Any]] | None = None,
+        source_entry_id: str | None = None,
+        exclude_linked: bool = False,
     ) -> list[types.TextContent]:
         """Find stored entries similar to the given text (cosine similarity).
 
-        USE WHEN: checking for duplicates or conflicts before storing, or finding
-        entries related to arbitrary text. Supports progressive disclosure modes.
+        USE WHEN: checking for duplicates or conflicts before storing, finding
+        entries related to arbitrary text, or surfacing hidden connections to a
+        known entry (entries that are similar but not yet linked via relations).
+        Supports progressive disclosure modes.
 
         PARAMS:
-          - content (str, required): Text to compare against stored entries.
+          - content (str, optional): Text to compare against stored entries.
+            Required unless source_entry_id is provided. When both are set,
+            content wins as the similarity probe.
           - threshold (float, optional, default=0.8): Cosine similarity cutoff (0-1).
           - limit (int, optional, default=10): Max results (1-200).
           - dedup_action (bool, optional, default=false): When true, includes dedup
@@ -837,23 +843,35 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             conflict candidates with LLM evaluation prompts.
           - llm_responses (list[dict], optional): With conflict_check=true, evaluates
             LLM conflict verdicts. Each item: { entry_id: str, is_conflict: bool, reasoning: str }.
+          - source_entry_id (str, optional): Anchor entry whose content is used
+            as the similarity probe when content is omitted, and whose id is
+            self-excluded from results. Required when exclude_linked=true.
+          - exclude_linked (bool, optional, default=false): When true, filters out
+            entries already linked to source_entry_id via entry_relations
+            (any direction, any relation_type). Surfaces hidden connections.
 
         RETURNS (success): { results: [{ score: float, entry: {...} }], count: int, threshold: float,
           dedup?: { action: str, similar_entries: list },
-          conflict_candidates?: list, conflict_evaluation?: dict }
-        RETURNS (error): { error: true, code: "INVALID_PARAMS" | "BUDGET_EXCEEDED" | "INTERNAL", message: "..." }
+          conflict_candidates?: list, conflict_evaluation?: dict,
+          excluded_linked_count?: int }
+        RETURNS (error): { error: true, code: "INVALID_PARAMS" | "NOT_FOUND" | "BUDGET_EXCEEDED" | "INTERNAL", message: "..." }
 
         RELATED: distillery_store (stores with automatic dedup/conflict checks),
-        distillery_search (for natural-language queries)
+        distillery_search (for natural-language queries),
+        distillery_relations (to inspect existing links between entries)
         """
         c = _lc(ctx)
         args: dict[str, Any] = dict(
-            content=content,
             threshold=threshold,
             limit=limit,
             dedup_action=dedup_action,
             conflict_check=conflict_check,
-            **_omit_none(llm_responses=llm_responses),
+            exclude_linked=exclude_linked,
+            **_omit_none(
+                content=content,
+                llm_responses=llm_responses,
+                source_entry_id=source_entry_id,
+            ),
         )
         return await _handle_find_similar(store=c["store"], cfg=c["config"], arguments=args)
 
