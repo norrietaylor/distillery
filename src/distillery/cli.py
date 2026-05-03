@@ -264,6 +264,79 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Classification mode: llm (LLM-based) or heuristic (embedding-based). Defaults to config value.",
     )
 
+    # ------------------------------------------------------------------
+    # bench subcommand — public reproduction benchmarks (LongMemEval, ...)
+    # ------------------------------------------------------------------
+    bench_parser = subparsers.add_parser(
+        "bench",
+        help="Run public reproduction benchmarks",
+        parents=[sub_shared],
+    )
+    bench_subparsers = bench_parser.add_subparsers(dest="bench_command")
+
+    longmemeval_parser = bench_subparsers.add_parser(
+        "longmemeval",
+        help="Run the LongMemEval retrieval bench (fastembed by default)",
+        parents=[sub_shared],
+        description=(
+            "Run the LongMemEval retrieval bench. Emits a timestamped JSONL "
+            "file (one line per question, with the SHA provenance panel) and "
+            "a summary.json into the output directory. See bench/README.md "
+            "and bench/LIMITATIONS.md before publishing any number from this "
+            "tool."
+        ),
+    )
+    longmemeval_parser.add_argument(
+        "--retrieval",
+        choices=["raw", "hybrid"],
+        default="hybrid",
+        help="Retrieval mode: raw (vector-only) or hybrid (BM25+RRF, default)",
+    )
+    longmemeval_parser.add_argument(
+        "--granularity",
+        choices=["session", "turn"],
+        default="session",
+        help="Corpus granularity: one entry per session (default) or per user turn",
+    )
+    longmemeval_parser.add_argument(
+        "--recency",
+        choices=["on", "off"],
+        default="on",
+        help="Toggle the 90-day recency decay (on by default; ignored for raw)",
+    )
+    longmemeval_parser.add_argument(
+        "--embed-model",
+        choices=["bge-small", "bge-base", "bge-large", "jina"],
+        default="bge-small",
+        help="Embedding model (default: bge-small via fastembed)",
+    )
+    longmemeval_parser.add_argument(
+        "--limit",
+        metavar="N",
+        type=int,
+        default=None,
+        help="Cap the number of questions evaluated (default: full set)",
+    )
+    longmemeval_parser.add_argument(
+        "--seeds",
+        metavar="N",
+        type=int,
+        default=1,
+        help="Number of seeds to sweep per question (default: 1)",
+    )
+    longmemeval_parser.add_argument(
+        "--output-dir",
+        metavar="PATH",
+        default=None,
+        help="Directory for JSONL + summary outputs (default: bench/results/)",
+    )
+    longmemeval_parser.add_argument(
+        "--quiet",
+        action="store_true",
+        default=False,
+        help="Suppress per-question progress output",
+    )
+
     return parser
 
 
@@ -1440,8 +1513,7 @@ def _cmd_eval(
         _emit_eval_error(
             fmt,
             message=(
-                f"eval dependencies not installed. Run: "
-                f"pip install 'distillery-mcp[eval]'. {exc}"
+                f"eval dependencies not installed. Run: pip install 'distillery-mcp[eval]'. {exc}"
             ),
             code="eval_dependencies_missing",
         )
@@ -1820,6 +1892,126 @@ def _cmd_maintenance_classify(
 
 
 # ---------------------------------------------------------------------------
+# Bench subcommand
+# ---------------------------------------------------------------------------
+
+
+def _cmd_bench_longmemeval(
+    *,
+    retrieval: str,
+    granularity: str,
+    recency: str,
+    embed_model: str,
+    limit: int | None,
+    seeds: int,
+    output_dir: str | None,
+    quiet: bool,
+    fmt: str,
+) -> int:
+    """Implement the ``bench longmemeval`` subcommand.
+
+    Wires the CLI flags into :func:`distillery.eval.longmemeval.run_longmemeval_bench`
+    and prints a one-line headline summary on completion. Exits non-zero if
+    the runner raises.
+
+    Returns:
+        Exit code (0 on success, 1 on error).
+    """
+    # Import lazily so `distillery --help` does not pay the cost of pulling
+    # in fastembed/onnxruntime when the user is not running a bench.
+    try:
+        from distillery.eval.longmemeval import (
+            BenchReport,
+            EmbedModel,
+            GranularityMode,
+            RecencyMode,
+            RetrievalMode,
+            run_longmemeval_bench,
+        )
+    except ImportError as exc:
+        print(
+            f"Error: bench dependencies are not installed ({exc}). "
+            "Install with: pip install 'distillery-mcp[fastembed]'",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Resolve and create the output directory. Default to ``bench/results/``
+    # under the current working directory so users can invoke the CLI from a
+    # checkout without extra flags.
+    resolved_output_dir = Path(output_dir) if output_dir else Path("bench/results")
+    try:
+        resolved_output_dir = resolved_output_dir.expanduser().resolve()
+        resolved_output_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        print(
+            f"Error: cannot create output directory {resolved_output_dir!s}: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+
+    if not quiet:
+        print(
+            f"Running LongMemEval bench: retrieval={retrieval} "
+            f"granularity={granularity} recency={recency} "
+            f"embed_model={embed_model} limit={limit} seeds={seeds}",
+            file=sys.stderr,
+        )
+        print(f"Output directory: {resolved_output_dir}", file=sys.stderr)
+
+    # The argparse choices guarantee these are valid Literal values; the
+    # cast is only for mypy --strict to see the narrowed type.
+    retrieval_mode: RetrievalMode = retrieval  # type: ignore[assignment]
+    granularity_mode: GranularityMode = granularity  # type: ignore[assignment]
+    recency_mode: RecencyMode = recency  # type: ignore[assignment]
+    embed_model_typed: EmbedModel = embed_model  # type: ignore[assignment]
+
+    async def _run() -> BenchReport:
+        return await run_longmemeval_bench(
+            retrieval=retrieval_mode,
+            granularity=granularity_mode,
+            recency=recency_mode,
+            embed_model=embed_model_typed,
+            limit=limit,
+            seeds=seeds,
+            output_dir=resolved_output_dir,
+        )
+
+    try:
+        report = asyncio.run(_run())
+    except Exception as exc:
+        print(f"Error running LongMemEval bench: {exc}", file=sys.stderr)
+        return 1
+
+    overall = report.summary.get("overall", {})
+    r5 = float(overall.get("recall_at_5", 0.0))
+    r10 = float(overall.get("recall_at_10", 0.0))
+    ndcg10 = float(overall.get("ndcg_at_10", 0.0))
+    n_questions = int(report.summary.get("n_questions", 0))
+    jsonl_path = report.jsonl_path
+
+    if fmt == "json":
+        print(
+            json.dumps(
+                {
+                    "n_questions": n_questions,
+                    "recall_at_5": r5,
+                    "recall_at_10": r10,
+                    "ndcg_at_10": ndcg10,
+                    "jsonl_path": str(jsonl_path) if jsonl_path is not None else None,
+                    "summary_path": (
+                        str(report.summary_path) if report.summary_path is not None else None
+                    ),
+                }
+            )
+        )
+    else:
+        print(f"R@5={r5:.3f} R@10={r10:.3f} NDCG@10={ndcg10:.3f} (n={n_questions}) -> {jsonl_path}")
+
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -1902,6 +2094,22 @@ def main(argv: list[str] | None = None) -> None:
             )
         else:
             parser.error("Unknown maintenance subcommand (expected: classify)")
+    elif command == "bench":
+        bench_command: str | None = getattr(args, "bench_command", None)
+        if bench_command == "longmemeval":
+            exit_code = _cmd_bench_longmemeval(
+                retrieval=getattr(args, "retrieval", "hybrid"),
+                granularity=getattr(args, "granularity", "session"),
+                recency=getattr(args, "recency", "on"),
+                embed_model=getattr(args, "embed_model", "bge-small"),
+                limit=getattr(args, "limit", None),
+                seeds=getattr(args, "seeds", 1),
+                output_dir=getattr(args, "output_dir", None),
+                quiet=getattr(args, "quiet", False),
+                fmt=fmt,
+            )
+        else:
+            parser.error("Unknown bench subcommand (expected: longmemeval)")
     else:  # pragma: no cover – argparse rejects unknown subcommands
         parser.error(f"Unknown command: {command}")
 
