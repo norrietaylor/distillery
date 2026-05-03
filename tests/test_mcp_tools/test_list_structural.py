@@ -147,3 +147,64 @@ async def test_structural_must_be_list(store) -> None:  # type: ignore[no-untype
     assert data.get("error") is True
     assert data.get("code") == "INVALID_PARAMS"
     assert "structural" in data.get("message", "")
+
+
+async def test_structural_with_group_by_returns_invalid_params(store) -> None:  # type: ignore[no-untyped-def]
+    """Combining structural + group_by must fail loudly, not silently ignore.
+
+    Aggregate code paths skip the post-filter wide fetch, so silently
+    accepting the combo would return UNFILTERED group counts with a success
+    response.
+    """
+    result = await _handle_list(
+        store=store,
+        arguments={
+            "limit": 10,
+            "structural": ["orphans"],
+            "group_by": "entry_type",
+        },
+    )
+    data = parse_mcp_response(result)
+    assert data.get("error") is True
+    assert data.get("code") == "INVALID_PARAMS"
+    assert "group_by" in data.get("message", "")
+
+
+async def test_structural_with_output_stats_returns_invalid_params(store) -> None:  # type: ignore[no-untyped-def]
+    """Combining structural + output='stats' must fail loudly, not silently ignore."""
+    result = await _handle_list(
+        store=store,
+        arguments={
+            "limit": 10,
+            "structural": ["orphans"],
+            "output": "stats",
+        },
+    )
+    data = parse_mcp_response(result)
+    assert data.get("error") is True
+    assert data.get("code") == "INVALID_PARAMS"
+    assert "stats" in data.get("message", "")
+
+
+async def test_structural_fetch_cap_exceeded_fails_fast(store, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """When candidate rows exceed ``_STRUCTURAL_FETCH_CAP`` we must fail fast
+    instead of returning truncated pagination/total_count.
+    """
+    from distillery.mcp.tools import crud as crud_module
+
+    # Shrink the cap so we don't have to seed 10k rows.
+    monkeypatch.setattr(crud_module, "_STRUCTURAL_FETCH_CAP", 2)
+
+    # Three candidate rows with no relations — exceeds the (patched) cap.
+    await _store_entry(store, content="entry 1")
+    await _store_entry(store, content="entry 2")
+    await _store_entry(store, content="entry 3")
+
+    result = await _handle_list(
+        store=store,
+        arguments={"limit": 10, "structural": ["orphans"], "output_mode": "ids"},
+    )
+    data = parse_mcp_response(result)
+    assert data.get("error") is True
+    assert data.get("code") == "INVALID_PARAMS"
+    assert "cap" in data.get("message", "").lower()

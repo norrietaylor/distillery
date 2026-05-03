@@ -1385,6 +1385,16 @@ async def _handle_list(
                 seen.add(v)
                 structural.append(v)
 
+        # Structural is post-applied after the wide fetch and is incompatible
+        # with the aggregate code paths.  Reject the combo loudly instead of
+        # silently dropping the structural filter and returning unfiltered
+        # aggregates.
+        if structural and (group_by_raw is not None or output_raw == "stats"):
+            return error_response(
+                "INVALID_PARAMS",
+                "Field 'structural' cannot be combined with 'group_by' or output='stats'",
+            )
+
     # --- mutual exclusivity: group_by and output="stats" ---------------------
     if group_by is not None and output == "stats":
         return error_response(
@@ -1493,6 +1503,23 @@ async def _handle_list(
     # surface stays unchanged (Phase 3 plan, option (b)).  We fetch a wider
     # window using a safety cap, post-filter, then re-slice for offset/limit.
     if structural is not None:
+        # Fail fast if the candidate set already exceeds the safety cap —
+        # otherwise pagination + total_count would silently lie about anything
+        # beyond ``_STRUCTURAL_FETCH_CAP`` rows.  Probe the count up front and
+        # ask the caller to narrow filters instead.
+        try:
+            candidate_count = await store.count_entries(filters=filters, stale_days=stale_days)
+        except Exception:  # noqa: BLE001
+            logger.exception("Error in distillery_list (structural count)")
+            return error_response("INTERNAL", "count_entries failed")
+        if candidate_count > _STRUCTURAL_FETCH_CAP:
+            return error_response(
+                "INVALID_PARAMS",
+                f"Structural filter on {candidate_count} candidate rows exceeds "
+                f"{_STRUCTURAL_FETCH_CAP} cap; tighten filters "
+                f"(project, tags, status, date_from/date_to, stale_days).",
+            )
+
         try:
             wide_entries = await store.list_entries(
                 filters=filters,
