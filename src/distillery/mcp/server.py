@@ -1050,26 +1050,34 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         entry_id: str | None = None,
         direction: str = "both",
         relation_id: str | None = None,
+        hops: int = 2,
     ) -> list[types.TextContent]:
         """Manage typed relations between knowledge entries.
 
         USE WHEN: linking entries together (e.g. marking one as blocking another,
-        citing a reference, or flagging duplicates).
+        citing a reference, or flagging duplicates), or walking the relation
+        graph from a seed entry to surface multi-hop neighbours.
 
         PARAMS:
-          - action (str, required): Operation. Valid: [add, get, remove].
+          - action (str, required): Operation. Valid: [add, get, remove, traverse].
           - from_id (str, required for add): Source entry UUID.
           - to_id (str, required for add): Target entry UUID.
-          - relation_type (str, required for add, optional for get): Relation type.
-            Valid: [link, corrects, supersedes, related, blocks, depends_on, citation, duplicate].
-          - entry_id (str, required for get): Entry UUID to query relations for.
-          - direction (str, optional for get, default="both"): Filter direction.
+          - relation_type (str, required for add, optional for get/traverse): Relation type.
+            Valid: [link, corrects, supersedes, related, blocks, depends_on, citation,
+            duplicate, merge_source, sync_source].
+          - entry_id (str, required for get/traverse): Entry UUID to query relations for
+            (BFS root for traverse).
+          - direction (str, optional for get/traverse, default="both"): Filter direction.
             Valid: [outgoing, incoming, both].
           - relation_id (str, required for remove): UUID of the relation to delete.
+          - hops (int, optional for traverse, default=2): BFS depth, capped at [1, 3].
 
         RETURNS (success): { relation_id: str, from_id: str, to_id: str, relation_type: str } (add) or
           { entry_id: str, relations: list, count: int } (get) or
-          { relation_id: str, removed: bool } (remove)
+          { relation_id: str, removed: bool } (remove) or
+          { action: "traverse", root: str, hops: int, direction: str, relation_type: str | null,
+            nodes: [{id: str, depth: int}], edges: [{from_id, to_id, relation_type}],
+            node_count: int, edge_count: int } (traverse).
         RETURNS (error): { error: true, code: "NOT_FOUND" | "INVALID_PARAMS" | "INTERNAL", message: "..." }
 
         RELATED: distillery_correct (creates 'corrects' relations automatically),
@@ -1087,6 +1095,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                     entry_id=entry_id,
                     direction=direction,
                     relation_id=relation_id,
+                    hops=hops,
                 ),
             ),
         )
