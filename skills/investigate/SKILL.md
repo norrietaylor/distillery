@@ -5,6 +5,7 @@ allowed-tools:
   - "mcp__*__distillery_search"
   - "mcp__*__distillery_get"
   - "mcp__*__distillery_relations"
+  - "mcp__*__distillery_find_similar"
   - "mcp__*__distillery_list"
 context: fork
 effort: high
@@ -14,7 +15,10 @@ effort: high
 
 # Investigate — Deep Context Builder
 
-Investigate compiles comprehensive context on a topic by executing a 4-phase retrieval: seed search, relationship expansion, tag expansion, and gap filling. It combines semantic search with explicit relationship traversal to surface context that keyword search alone misses.
+Investigate compiles comprehensive context on a topic by executing a 4-phase retrieval: seed search, relationship expansion (with hidden-connection gap fill), tag expansion, and gap filling. It combines semantic search with explicit relationship traversal to surface context that keyword search alone misses.
+
+<!-- Recent changes: Phase 2 now uses distillery_relations(action="traverse", hops=2) once per seed instead of one action="get" call per seed (richer subgraphs in fewer round-trips). Added Phase 2b — Hidden Connections, which calls distillery_find_similar(source_entry_id=..., exclude_linked=true, threshold=0.7) per seed to surface unlinked-but-semantically-related entries; these are cited as "potentially related" in synthesis. -->
+
 
 ## When to Use
 
@@ -91,27 +95,52 @@ Stop here if Phase 1 returns zero entries.
 
 ---
 
-**Phase 2 — Expand Relationships:**
+**Phase 2 — Expand Relationships (multi-hop traverse):**
 
-For each seed entry from Phase 1 (do not recurse into entries added during Phase 2), call:
-
-```python
-distillery_relations(action="get", entry_id="<id>")
-```
-
-Collect all related entry IDs from the response (both `from_id` and `to_id` fields, in all directions). Record each unique relation edge as `<entry_a> —[<relation_type>]→ <entry_b>`.
-
-For each related entry ID not already in the result set, fetch it:
+For each seed entry from Phase 1 (do not recurse into entries added during Phase 2), make a single multi-hop traverse call:
 
 ```python
-distillery_get(entry_id="<related_id>")
+distillery_relations(
+    action="traverse",
+    entry_id="<id>",
+    hops=2,
+    direction="both",
+    relation_type=None,
+)
 ```
 
-Add fetched entries to the result set, tagged as discovered in Phase 2.
+The response envelope contains `{nodes: [{id, depth}, ...], edges: [...], node_count, edge_count}`. Pure-Python BFS, depth ≤ 3. One round-trip per seed replaces the previous per-seed `action="get"` + per-related-id `distillery_get` fan-out.
 
-Report: `Phase 2 (Relationships): <N> new entries via <K> relation edges.`
+Collect every node `id` from `nodes` and add unseen ones to the result set, tagged as discovered in Phase 2 (record the BFS `depth` alongside the entry — depth 1 = directly linked to the seed, depth 2 = reached via one intermediate). Record each `edges` entry as `<from_id> —[<relation_type>]→ <to_id>`.
 
-If no relations exist for any seed entry, note this in the Phase 2 report and continue.
+For each newly discovered node id (not already fetched in Phase 1), call `distillery_get(entry_id="<id>")` to load its full content for synthesis. Skip this fetch if the traverse response already includes the entry's full content (depends on server version — if `nodes` only carries `{id, depth}`, hydration is required).
+
+Report: `Phase 2 (Relationships): <N> new entries via <K> relation edges across <M> seed traversals (hops=2).`
+
+If a seed's traverse returns zero nodes beyond itself, record 0 edges for that seed and continue. If no relations exist for any seed entry, note this in the Phase 2 report and continue.
+
+---
+
+**Phase 2b — Hidden Connections (gap fill via similarity):**
+
+For each seed entry from Phase 1, surface entries that are semantically similar to the seed but are NOT already linked to it via any relation (i.e., absent from `entry_relations` in either direction):
+
+```python
+distillery_find_similar(
+    source_entry_id="<seed_id>",
+    exclude_linked=True,
+    threshold=0.7,
+    limit=5,
+)
+```
+
+The response envelope includes `excluded_linked_count` (number of linked entries filtered out before scoring). The remaining hits are unlinked-but-semantically-related candidates.
+
+Add each returned entry id (not already in the result set) tagged as discovered in Phase 2b ("potentially related"). Do NOT add these to the Relationship Map — they have no recorded edge. Cite them in the Context Summary and the Sources table with a `potentially related` marker so the user knows the connection is inferred from embeddings, not stored as a relation.
+
+Report: `Phase 2b (Hidden Connections): <N> potentially related entries across <S> seeds (excluded_linked total: <X>).`
+
+If `distillery_find_similar` returns zero entries for every seed, note this in the Phase 2b report and continue. Skip Phase 2b entirely if Phase 1 returned more than 20 seeds (cap to avoid quadratic API cost — process the top 20 by Phase 1 score).
 
 ---
 
@@ -159,7 +188,7 @@ Report: `Phase 4 (Gap Fill): <N> new entries from <G> targeted gap searches.`
 **Summary line:**
 
 ```text
-Investigated "<topic>": <total_N> entries across <phases_with_results> phases, <K> relationship edges traversed.
+Investigated "<topic>": <total_N> entries across <phases_with_results> phases, <K> relationship edges traversed (hops=2), <P> potentially related via similarity.
 ```
 
 ### Step 5: Synthesize Output
@@ -168,9 +197,9 @@ You (the executing Claude instance) produce the synthesis. Do not dump raw entri
 
 **a. Context Summary (always include):**
 
-A 2–4 paragraph narrative weaving findings together. Use `[Entry <short-id>]` inline citations (short-id = first 8 chars of UUID). Describe what the knowledge base knows about the topic, how entries connect, and what the overall picture reveals.
+A 2–4 paragraph narrative weaving findings together. Use `[Entry <short-id>]` inline citations (short-id = first 8 chars of UUID). For Phase 2b candidates, use `[Entry <short-id>, potentially related]` to flag that the connection is inferred from embedding similarity rather than a stored relation. Describe what the knowledge base knows about the topic, how entries connect, and what the overall picture reveals.
 
-Example: `The team evaluated DuckDB as the storage backend in early 2026 [Entry 550e8400], driven by requirements for embedded analytical queries [Entry 7c9e6679]. A sync with GitHub issues confirms the decision was tracked formally [Entry a1b2c3d4].`
+Example: `The team evaluated DuckDB as the storage backend in early 2026 [Entry 550e8400], driven by requirements for embedded analytical queries [Entry 7c9e6679]. A sync with GitHub issues confirms the decision was tracked formally [Entry a1b2c3d4]. A SQLite benchmark from a different project [Entry b9c0d1e2, potentially related] surfaces similar trade-offs but is not formally linked.`
 
 **b. Relationship Map (omit if no relations found):**
 
@@ -219,11 +248,12 @@ Table of all entries in the result set:
 |-------|----------|------|--------|------|---------------|---------|
 | 1 | 550e8400 | [session] | Alice Smith | 2026-01-15 | 2 | We decided to use DuckDB for... |
 | 2 | 7c9e6679 | [reference] | Bob Jones | 2026-01-20 | 1 | Analytical query requirements... |
+| 2b | b9c0d1e2 | [session] | Carol Lim | 2026-02-03 | 0 (potentially related) | SQLite vs DuckDB benchmark... |
 | 3 | a1b2c3d4 | [github] | — | 2026-01-22 | 1 | Issue #42: storage backend deci... |
 
-- **Phase**: discovery phase number (1–4)
+- **Phase**: discovery phase (`1`, `2`, `2b`, `3`, `4`)
 - **Short ID**: first 8 chars of UUID
-- **Relation Edges**: number of relation edges this entry participates in
+- **Relation Edges**: number of relation edges this entry participates in. For Phase 2b entries this is `0 (potentially related)` — they are similarity-only candidates with no stored relation.
 - **Preview**: first 40 chars of content, or `title` metadata field if present
 
 ## Output Format
@@ -281,13 +311,16 @@ Investigated "<topic>": <N> entries across <phases> phases, <K> relationship edg
 - Always use `[Entry <short-id>]` citation format (short-id = first 8 chars of UUID)
 - Deduplicate the result set by entry ID across all phases — each entry counted once
 - Record which phase first discovered each entry
-- Phase 2 relationship traversal is single-hop only (v1 — `--depth` flag is a future enhancement)
+- Phase 2 relationship traversal uses `distillery_relations(action="traverse", hops=2, direction="both")` — one call per Phase 1 seed (do not recurse into nodes returned by traverse)
+- Phase 2b uses `distillery_find_similar(source_entry_id=<seed>, exclude_linked=true, threshold=0.7, limit=5)` — one call per Phase 1 seed, capped to the top 20 seeds when Phase 1 returns more
+- Phase 2b candidates are tagged `potentially related` — never include them in the Relationship Map (they have no stored edge); cite them with `[Entry <short-id>, potentially related]` in the Context Summary
 - Loop limits: up to 3 `distillery_search` calls in Phase 3, up to 3 targeted searches in Phase 4
 - Track relation edges separately from the result set entry count
 - Omit sections with no content — never display empty sections
 - If `--entry <uuid>` is provided and `distillery_get` returns not found, report the error and stop
 - Apply `--project` filter to all `distillery_search` calls in Phase 1 and Phase 4 when provided
-- `distillery_relations` returning empty for an entry is not an error — record 0 edges and continue
+- `distillery_relations` returning empty `nodes`/`edges` for an entry is not an error — record 0 edges and continue
+- `distillery_find_similar` returning zero entries (after `exclude_linked` filtering) is not an error — record 0 candidates for that seed and continue
 - On MCP errors, see CONVENTIONS.md error handling — display and stop
 - No retry loops — report errors and stop
 - Display-only — this skill never stores output
