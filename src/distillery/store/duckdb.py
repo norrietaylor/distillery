@@ -2952,3 +2952,38 @@ class DuckDBStore:
             ``True`` if the row existed and was deleted, ``False`` otherwise.
         """
         return await self._run_sync(self._sync_remove_relation, relation_id)
+
+    def _sync_list_relations(self) -> list[dict[str, Any]]:
+        """Synchronous implementation of list_relations(); called via asyncio.to_thread."""
+        assert self._conn is not None
+        rows = self._conn.execute(
+            "SELECT id, from_id, to_id, relation_type, "
+            "strftime(created_at, '%Y-%m-%dT%H:%M:%S') || 'Z' "
+            "FROM entry_relations ORDER BY created_at ASC"
+        ).fetchall()
+        return [
+            {
+                "id": row[0],
+                "from_id": row[1],
+                "to_id": row[2],
+                "relation_type": row[3],
+                "created_at": row[4],
+            }
+            for row in rows
+        ]
+
+    async def list_relations(self) -> list[dict[str, Any]]:
+        """Return every row from ``entry_relations`` as a list of dicts.
+
+        Used by graph metrics (``distillery_relations`` action="metrics") to
+        assemble the full subgraph for global-scope analysis. Goes through
+        :meth:`_run_sync` so the async event loop is never blocked by sync
+        DuckDB I/O and the shared connection is serialised under the same
+        lock as every other store operation.
+
+        Returns:
+            List of dicts with keys: ``id``, ``from_id``, ``to_id``,
+            ``relation_type``, ``created_at`` (ISO 8601 str).  Ordered by
+            ascending ``created_at``.
+        """
+        return await self._run_sync(self._sync_list_relations)

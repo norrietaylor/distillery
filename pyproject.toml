@@ -56,6 +56,9 @@ docs = [
     "mkdocs-material>=9.5",
 ]
 eval = []
+graph = [
+    "networkx>=3.2,<4.0",
+]
 ragas = [
     "ragas>=0.2.0",
     "datasets>=2.14.0",
@@ -105,6 +108,16 @@ module = [
     "ragas.*",
     "datasets",
     "datasets.*",
+]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# NetworkX is gated behind the optional [graph] extra and ships without
+# bundled stubs in the supported version range. Treat its imports as
+# untyped — the graph package keeps a typed surface around them.
+module = [
+    "networkx",
+    "networkx.*",
 ]
 ignore_missing_imports = true
 

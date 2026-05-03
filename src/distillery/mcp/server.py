@@ -1051,33 +1051,52 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         direction: str = "both",
         relation_id: str | None = None,
         hops: int = 2,
+        metric: str | None = None,
+        scope: str = "global",
+        limit: int = 10,
+        project: str | None = None,
+        tags: list[str] | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
     ) -> list[types.TextContent]:
         """Manage typed relations between knowledge entries.
 
         USE WHEN: linking entries together (e.g. marking one as blocking another,
-        citing a reference, or flagging duplicates), or walking the relation
-        graph from a seed entry to surface multi-hop neighbours.
+        citing a reference, or flagging duplicates), walking the relation
+        graph from a seed entry to surface multi-hop neighbours, or computing
+        graph metrics (bridges, communities) on the relations subgraph.
 
         PARAMS:
-          - action (str, required): Operation. Valid: [add, get, remove, traverse].
+          - action (str, required): Operation. Valid: [add, get, remove, traverse, metrics].
           - from_id (str, required for add): Source entry UUID.
           - to_id (str, required for add): Target entry UUID.
           - relation_type (str, required for add, optional for get/traverse): Relation type.
             Valid: [link, corrects, supersedes, related, blocks, depends_on, citation,
             duplicate, merge_source, sync_source].
-          - entry_id (str, required for get/traverse): Entry UUID to query relations for
-            (BFS root for traverse).
+          - entry_id (str, required for get/traverse, required for metrics scope='ego'):
+            Entry UUID to query relations for (BFS root for traverse / ego-graph).
           - direction (str, optional for get/traverse, default="both"): Filter direction.
             Valid: [outgoing, incoming, both].
           - relation_id (str, required for remove): UUID of the relation to delete.
           - hops (int, optional for traverse, default=2): BFS depth, capped at [1, 3].
+          - metric (str, required for metrics): Graph metric to compute.
+            Valid: [bridges, communities]. Requires the [graph] optional extra.
+          - scope (str, optional for metrics, default="global"): Subgraph scope.
+            Valid: [global, ego]. ``"ego"`` requires ``entry_id``.
+          - limit (int, optional for metrics, default=10): For ``metric="bridges"``
+            returns the top-k entries by betweenness centrality; for
+            ``metric="communities"`` returns the K largest communities.
+          - project / tags / date_from / date_to (optional, metrics global scope):
+            restrict the entries whose relations participate in the graph.
 
         RETURNS (success): { relation_id: str, from_id: str, to_id: str, relation_type: str } (add) or
           { entry_id: str, relations: list, count: int } (get) or
           { relation_id: str, removed: bool } (remove) or
           { action: "traverse", root: str, hops: int, direction: str, relation_type: str | null,
             nodes: [{id: str, depth: int}], edges: [{from_id, to_id, relation_type}],
-            node_count: int, edge_count: int } (traverse).
+            node_count: int, edge_count: int } (traverse) or
+          { action: "metrics", metric: str, scope: str, node_count: int, edge_count: int,
+            results: list, count: int, computed_at: str, cache_hit: bool } (metrics).
         RETURNS (error): { error: true, code: "NOT_FOUND" | "INVALID_PARAMS" | "INTERNAL", message: "..." }
 
         RELATED: distillery_correct (creates 'corrects' relations automatically),
@@ -1096,6 +1115,13 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                     direction=direction,
                     relation_id=relation_id,
                     hops=hops,
+                    metric=metric,
+                    scope=scope,
+                    limit=limit,
+                    project=project,
+                    tags=tags,
+                    date_from=date_from,
+                    date_to=date_to,
                 ),
             ),
         )
