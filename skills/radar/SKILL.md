@@ -7,6 +7,7 @@ allowed-tools:
   - "mcp__*__distillery_store"
   - "mcp__*__distillery_update"
   - "mcp__*__distillery_find_similar"
+  - "mcp__*__distillery_relations"
 context: fork
 effort: high
 ---
@@ -15,7 +16,7 @@ effort: high
 
 # Radar — Ambient Intelligence Digest
 
-Radar surfaces recent feed entries, synthesizes them into a grouped digest, and suggests new sources to watch.
+Radar surfaces recent feed entries, synthesizes them into a grouped digest, and suggests new sources to watch. Pass `--structure` to also append a Knowledge Structure section (orphans, bridges, communities) computed from the entry-relations graph.
 
 ## When to Use
 
@@ -38,6 +39,7 @@ See CONVENTIONS.md — skip if already confirmed this conversation.
 | `--limit N` | Maximum number of feed entries to include (default: 20) |
 | `--project <name>` | Scope feed entries to a specific project |
 | `--suggest` | Include source suggestions at end of digest |
+| `--structure` | Append a Knowledge Structure section (orphans + bridges + communities). Default: off |
 | `--store` | Store digest as a knowledge entry (default: display-only) |
 
 ### Step 3: Retrieve Recent Feed Entries
@@ -102,13 +104,39 @@ You (the executing Claude instance) produce the synthesis — do not dump raw en
 
 When `--suggest` is specified, use the interest tags identified in Step 3a to suggest new sources. Based on the top interest topics, recommend 3–5 relevant RSS feeds or GitHub repos the user might want to add via `/watch add <url>`. Omit this section silently if Step 3a returned no tags or if `--suggest` was not specified.
 
-### Step 6: Check for Duplicates (if --store specified)
+### Step 6: Knowledge Structure (if --structure specified)
+
+When `--structure` is specified, append a "Knowledge Structure" section to the digest. Compose it from three subsections in this order. Skip the entire step silently if `--structure` was not specified.
+
+**6a. Orphans:**
+
+Call `distillery_list(structural=["orphans"], limit=10)`. If `--project` was specified, also pass `project=<name>`. The envelope returns matching entries and a `structural_filter` field for confirmation. Render up to 10 orphan titles as a short bullet list (entry id + first line of content or title). If the list is empty, render: `No orphan entries — every entry has at least one relation.`
+
+**6b. Bridges:**
+
+Call `distillery_relations(action="metrics", metric="bridges", scope="global", limit=5)`. If `--project` was specified, also pass `project=<name>`.
+
+If the call returns an `INTERNAL` error whose message contains `"NetworkX not installed"`, skip subsections 6b and 6c entirely and emit a single one-line note in the section: `Run \`pip install distillery-mcp[graph]\` to enable bridges/communities.` Then continue to Step 7.
+
+On success, render the top-5 bridging entries as a numbered list with their betweenness score formatted to 3 decimals (e.g. `0.412`). Resolve each id to a short title using its data already retrieved during digest synthesis if possible; otherwise show the id. If `results` is empty, render `No bridges found (graph too small or disconnected).`
+
+**6c. Communities:**
+
+Call `distillery_relations(action="metrics", metric="communities", scope="global", limit=5)`. If `--project` was specified, also pass `project=<name>`.
+
+If the same `"NetworkX not installed"` `INTERNAL` error is returned (and 6b did not already emit the note), emit the one-line note from 6b and continue to Step 7. If 6b already emitted the note, skip silently.
+
+On success, for each community in `results`, list its top-3 members **by member count of the community** (i.e. communities with more total members are listed first; within a community, list the first 3 ids from the `members` array). Render as `Community <n> (<total_members> entries): <id1>, <id2>, <id3>`. Document this ordering inline in the rendered output via the heading.
+
+**Optional stale flag:** For each community, if `updated_at` is available on every member and EVERY member has `updated_at < now - 60 days`, mark the community with a `[stale]` tag in its line. Skip the stale check silently if `updated_at` is not available without an extra fetch.
+
+### Step 7: Check for Duplicates (if --store specified)
 
 If `--store` was specified, check for duplicate digests before storing.
 
 Call `distillery_find_similar(content="<digest summary>", dedup_action=True)`. Handle by `action` field:
 
-**`"create"`:** No similar entries. Proceed to Step 7.
+**`"create"`:** No similar entries. Proceed to Step 8.
 
 **`"skip"`:** Near-exact duplicate. Show similarity table and offer: (1) Store anyway, (2) Skip.
 
@@ -116,7 +144,7 @@ Call `distillery_find_similar(content="<digest summary>", dedup_action=True)`. H
 
 For merge: combine new digest with the most similar entry's content, call `distillery_update` with the entry ID and merged content, confirm and stop.
 
-**`"link"`:** Related but distinct. Show similarity table, note new entry will be linked. Ask to proceed or skip. If proceeding, include `"related_entries": ["<id1>", ...]` in metadata at Step 7.
+**`"link"`:** Related but distinct. Show similarity table, note new entry will be linked. Ask to proceed or skip. If proceeding, include `"related_entries": ["<id1>", ...]` in metadata at Step 8.
 
 ```
 Similar entries found:
@@ -128,7 +156,7 @@ Similar entries found:
 
 On skip in any case: "Skipped. No new entry was stored." and stop.
 
-### Step 7: Store Digest
+### Step 8: Store Digest
 
 If `--store` was specified, store the digest. Determine author & project per CONVENTIONS.md.
 
@@ -136,7 +164,7 @@ Call `distillery_store(content="<full digest markdown>", entry_type="digest", au
 
 On MCP errors, see CONVENTIONS.md error handling — display and stop.
 
-### Step 8: Confirm
+### Step 9: Confirm
 
 Display the digest. If `--store` was specified, append:
 
@@ -179,6 +207,25 @@ To add a source: /watch add <url> [--type rss|github]
 
 ---
 
+## Knowledge Structure
+
+### Orphans
+- <id> — <title or first line>
+- ...
+
+### Bridges (top by betweenness centrality)
+1. <id> — <title> (score: 0.412)
+2. ...
+
+### Communities (ordered by total member count; top 3 members shown per community)
+- Community 1 (12 entries): <id1>, <id2>, <id3>
+- Community 2 (8 entries) [stale]: <id1>, <id2>, <id3>
+- ...
+
+> Note (only when nx is missing): Run `pip install distillery-mcp[graph]` to enable bridges/communities.
+
+---
+
 [digest] Stored: <entry_id>
 Project: <project> | Author: <author>
 Summary: <first 200 chars>...
@@ -199,3 +246,6 @@ Tags: digest, radar, ambient
 - On MCP errors, see CONVENTIONS.md error handling — display and stop
 - No retry loops — report errors and stop
 - Omit Suggested Sources section entirely if no results or error
+- Knowledge Structure section is appended only when `--structure` is set; default is off
+- When `distillery_relations(action="metrics")` returns an `INTERNAL` error containing `"NetworkX not installed"`, treat it as a graceful degradation (not a hard error) — emit the one-line `pip install distillery-mcp[graph]` note and continue. Treat any other relations error per CONVENTIONS.md error handling
+- Bridge scores are rendered to 3 decimals; communities are ordered by total member count and show top-3 member ids each
