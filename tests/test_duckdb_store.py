@@ -1534,6 +1534,44 @@ class TestConnectionLockSerialization:
         await s.close()
 
 
+class TestFTSRebuildRollback:
+    """Issue #414: a failed FTS rebuild must leave the connection usable.
+
+    Before the fix, ``_rebuild_fts_index`` swallowed the ``duckdb.Error``
+    from a failing ``PRAGMA create_fts_index`` and returned without
+    rolling back, leaving the connection in an aborted-transaction state.
+    Subsequent statements then failed with ``TransactionContext Error:
+    Current transaction is aborted (please ROLLBACK)``, which silently
+    disabled ``FeedPoller._has_external_id`` (it caught the error and
+    returned ``False``) and caused duplicate feed entries to accumulate.
+    """
+
+    async def test_fts_rebuild_failure_invokes_rollback(
+        self, hybrid_store: DuckDBStore
+    ) -> None:
+        """A failed PRAGMA must trigger ``conn.rollback()`` before returning.
+
+        DuckDB ``DuckDBPyConnection.execute`` is a read-only attribute on
+        the real object, so we simulate the PRAGMA failure with a mock
+        connection that mimics the surface area used by
+        ``_rebuild_fts_index``.  The assertion is that ``rollback()`` is
+        invoked on the failure path — which is what restores the shared
+        connection to a usable state in production.
+        """
+        from unittest.mock import MagicMock
+
+        import duckdb
+
+        mock_conn = MagicMock()
+        mock_conn.execute.side_effect = duckdb.Error("simulated PRAGMA failure")
+
+        hybrid_store._fts_available = True  # noqa: SLF001 — force the rebuild path
+        hybrid_store._rebuild_fts_index(mock_conn)  # noqa: SLF001
+
+        assert hybrid_store._fts_available is False  # noqa: SLF001 — failure recorded
+        mock_conn.rollback.assert_called_once()
+
+
 class TestHybridGracefulFallback:
     """Verify graceful fallback to vector-only when FTS is unavailable."""
 

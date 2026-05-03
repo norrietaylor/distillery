@@ -1045,11 +1045,23 @@ class FeedPoller:
         Uses ``list_entries`` with a metadata filter rather than a full
         similarity search, making this a cheap pre-check before scoring.
 
+        Fails closed: when the lookup raises (e.g. the shared DuckDB
+        connection is in an aborted-transaction state from an unrelated
+        prior failure), this returns ``True`` so the caller skips the
+        item rather than storing a potential duplicate.  Returning
+        ``False`` here was the root cause of issue #414 — a transient
+        store error silently disabled dedup and re-stored every item
+        the previous cycle had already persisted.
+
         Args:
             external_id: The feed-item identifier to look for.
 
         Returns:
-            ``True`` if a matching entry exists.
+            ``True`` if a matching entry exists OR if the lookup itself
+            failed.  Returning ``True`` on failure trades a small amount
+            of false-skip risk (one polling cycle) for guaranteed
+            duplicate prevention — items the next healthy poll will
+            re-fetch and re-store correctly.
         """
         try:
             results = await self._store.list_entries(
@@ -1058,12 +1070,14 @@ class FeedPoller:
                 offset=0,
             )
             return bool(results)
-        except Exception:  # noqa: BLE001
-            logger.debug(
-                "FeedPoller: external_id lookup failed for %r — falling through",
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "FeedPoller: external_id lookup failed for %r — treating as duplicate "
+                "to prevent dupes (issue #414): %s",
                 external_id,
+                exc,
             )
-            return False
+            return True
 
     async def _is_duplicate(
         self,

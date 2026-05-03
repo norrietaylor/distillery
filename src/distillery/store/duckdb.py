@@ -325,6 +325,15 @@ class DuckDBStore:
         except duckdb.Error as exc:
             logger.warning("FTS index rebuild failed: %s", exc)
             self._fts_available = False
+            # ROLLBACK the aborted transaction so the connection is usable
+            # for the next caller.  Without this, the PRAGMA failure leaves
+            # the connection in an aborted-transaction state that propagates
+            # to every subsequent statement as ``TransactionContext Error:
+            # Current transaction is aborted (please ROLLBACK)``.  That
+            # cascade silently disables ``FeedPoller._has_external_id``
+            # (issue #414), which fails closed but still represents a
+            # temporary loss of dedup until the next healthy lookup.
+            self._rollback_quietly(conn)
             return
 
         # Force a CHECKPOINT so the FTS schema DDL is persisted to the
