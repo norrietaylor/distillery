@@ -60,6 +60,12 @@ ragas = [
     "ragas>=0.2.0",
     "datasets>=2.14.0",
 ]
+fastembed = [
+    # Pinned exactly for benchmark reproducibility — anyone reruns the bench
+    # offline and gets byte-identical embeddings.  Bump only with a SHA panel
+    # update in bench/results/.
+    "fastembed==0.8.0",
+]
 
 [project.scripts]
 distillery = "distillery.cli:main"
@@ -106,6 +112,14 @@ module = [
     "datasets",
     "datasets.*",
 ]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# fastembed is an optional dependency exposed via the [fastembed] dep group.
+# The provider module imports it lazily, but mypy needs to resolve the type
+# import in the TYPE_CHECKING block — silence missing-import noise when the
+# package is not installed in the dev environment.
+module = ["fastembed", "fastembed.*"]
 ignore_missing_imports = true
 
 [tool.ruff]
