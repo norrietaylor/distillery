@@ -140,7 +140,7 @@ Add each returned entry id (not already in the result set) tagged as discovered 
 
 Report: `Phase 2b (Hidden Connections): <N> potentially related entries across <S> seeds (excluded_linked total: <X>).`
 
-If `distillery_find_similar` returns zero entries for every seed, note this in the Phase 2b report and continue. Skip Phase 2b entirely if Phase 1 returned more than 20 seeds (cap to avoid quadratic API cost — process the top 20 by Phase 1 score).
+If `distillery_find_similar` returns zero entries for every seed, note this in the Phase 2b report and continue. Cap Phase 2b at the top 20 seeds by Phase 1 relevance score to avoid quadratic API cost; for any seeds beyond the top 20, skip them but continue Phase 2b with the rest.
 
 ---
 
