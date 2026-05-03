@@ -26,6 +26,7 @@ a clear ``ImportError`` if the dep group has not been installed.
 from __future__ import annotations
 
 import logging
+import threading
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -122,6 +123,10 @@ class FastembedProvider:
         # Lazy-loaded TextEmbedding instance.  Typed as Any so this module
         # imports cleanly when fastembed is not installed.
         self._embedder: Any | None = None
+        # Guards lazy initialization in :meth:`_load` so concurrent first
+        # callers (e.g. from FastMCP's worker pool) cannot construct multiple
+        # ``TextEmbedding`` instances and race on the assignment.
+        self._load_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Lazy loader
@@ -133,37 +138,48 @@ class FastembedProvider:
         Imports ``fastembed`` lazily so the module remains importable
         without the optional dep group installed.  Caches the embedder so
         the model is loaded at most once per provider instance.
+
+        Uses double-checked locking on :attr:`_load_lock` so that concurrent
+        first callers (FastMCP runs tools on a worker pool) cannot construct
+        multiple :class:`fastembed.TextEmbedding` instances and race on the
+        cache assignment, which would leak ONNX sessions and file handles.
         """
         if self._embedder is not None:
             return self._embedder
 
-        try:
-            from fastembed import TextEmbedding
-        except ImportError as exc:  # pragma: no cover - exercised manually
-            raise ImportError(
-                "The 'fastembed' package is required for FastembedProvider. "
-                "Install it with: pip install distillery-mcp[fastembed]"
-            ) from exc
+        with self._load_lock:
+            # Re-check inside the lock: another thread may have completed the
+            # load while we were waiting to acquire it.
+            if self._embedder is not None:
+                return self._embedder
 
-        logger.info(
-            "Loading fastembed model %s (cache_dir=%s, threads=%s)",
-            self._model_name,
-            self._cache_dir,
-            self._threads,
-        )
-        embedder: TextEmbedding = TextEmbedding(
-            model_name=self._model_name,
-            cache_dir=self._cache_dir,
-            threads=self._threads,
-        )
+            try:
+                from fastembed import TextEmbedding
+            except ImportError as exc:  # pragma: no cover - exercised manually
+                raise ImportError(
+                    "The 'fastembed' package is required for FastembedProvider. "
+                    "Install it with: pip install distillery-mcp[fastembed]"
+                ) from exc
 
-        # Update cached dimensions from the embedder when not pre-known
-        # (e.g. a custom model registered at runtime).
-        if self._dimensions is None:
-            self._dimensions = int(embedder.embedding_size)
+            logger.info(
+                "Loading fastembed model %s (cache_dir=%s, threads=%s)",
+                self._model_name,
+                self._cache_dir,
+                self._threads,
+            )
+            embedder: TextEmbedding = TextEmbedding(
+                model_name=self._model_name,
+                cache_dir=self._cache_dir,
+                threads=self._threads,
+            )
 
-        self._embedder = embedder
-        return embedder
+            # Update cached dimensions from the embedder when not pre-known
+            # (e.g. a custom model registered at runtime).
+            if self._dimensions is None:
+                self._dimensions = int(embedder.embedding_size)
+
+            self._embedder = embedder
+            return embedder
 
     # ------------------------------------------------------------------
     # EmbeddingProvider protocol
