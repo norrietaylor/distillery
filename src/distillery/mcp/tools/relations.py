@@ -29,6 +29,13 @@ _TRAVERSE_MAX_HOPS = 3
 # Fixed BFS depth used to assemble the ego-graph for action="metrics" / scope="ego".
 _METRICS_EGO_HOPS = 2
 
+# Pagination page size and hard cap when filtering the entries corpus down to
+# the set whose IDs anchor a global-scope relations graph.  A single
+# ``list_entries`` call could truncate IDs on large corpora; we paginate until
+# the corpus is exhausted or the cap is hit (CodeRabbit, PR #426).
+_GRAPH_METRICS_PAGE_SIZE = 1000
+_GRAPH_METRICS_MAX_IDS = 100_000
+
 _VALID_METRICS = {"bridges", "communities"}
 _VALID_SCOPES = {"global", "ego"}
 
@@ -389,24 +396,11 @@ async def _collect_global_relations(
 ) -> list[dict[str, Any]]:
     """Fetch all entry_relations rows, optionally filtered by entry-side filters.
 
-    For v1 we query DuckDB directly via ``store.connection`` to keep the surface
-    minimal — extending the store protocol with a bulk relations reader can come
-    later if other call sites need it.
+    Goes through ``store.list_relations`` (an async store method) so all DB I/O
+    runs off the event loop via the shared ``_run_sync`` lock — no direct sync
+    ``conn.execute()`` from this async handler (CodeRabbit, PR #426).
     """
-    conn = store.connection
-    rows = conn.execute(
-        "SELECT id, from_id, to_id, relation_type, created_at FROM entry_relations"
-    ).fetchall()
-    relations: list[dict[str, Any]] = [
-        {
-            "id": r[0],
-            "from_id": r[1],
-            "to_id": r[2],
-            "relation_type": r[3],
-            "created_at": r[4],
-        }
-        for r in rows
-    ]
+    relations: list[dict[str, Any]] = await store.list_relations()
 
     if not (project or tags or date_from or date_to):
         return relations
@@ -423,10 +417,30 @@ async def _collect_global_relations(
     if date_to is not None:
         filters["date_to"] = date_to
 
-    # Pull a generous slice; v1 does not paginate the metrics scope. A future
-    # improvement could stream in batches if the corpus is very large.
-    matching = await store.list_entries(filters=filters, limit=10_000, offset=0)
-    matching_ids = {entry.id for entry in matching}
+    # Paginate so corpora larger than a single page are not silently truncated.
+    matching_ids: set[str] = set()
+    offset = 0
+    while True:
+        page = await store.list_entries(
+            filters=filters,
+            limit=_GRAPH_METRICS_PAGE_SIZE,
+            offset=offset,
+        )
+        if not page:
+            break
+        for entry in page:
+            matching_ids.add(entry.id)
+        if len(page) < _GRAPH_METRICS_PAGE_SIZE:
+            break
+        offset += _GRAPH_METRICS_PAGE_SIZE
+        # Safety bound — refuse to materialise an unbounded id set in memory.
+        if len(matching_ids) >= _GRAPH_METRICS_MAX_IDS:
+            logger.warning(
+                "graph metrics: matching_ids exceeds %d cap; truncating",
+                _GRAPH_METRICS_MAX_IDS,
+            )
+            break
+
     return [r for r in relations if r["from_id"] in matching_ids and r["to_id"] in matching_ids]
 
 
@@ -583,10 +597,12 @@ async def _handle_metrics(  # noqa: PLR0911, PLR0912
             cache.set(cache_key, g)
         else:
             g = cached_graph
-    except RuntimeError as exc:
+    except RuntimeError:
         # build_relations_graph raises this when nx is missing — but we already
         # gated on is_available() above, so this is purely a defensive path.
-        return error_response("INTERNAL", str(exc))
+        # Log the raw exception server-side; never leak it to the client.
+        logger.exception("distillery_relations metrics: runtime error during graph build")
+        return error_response("INTERNAL", "Failed to build relations graph")
     except Exception:  # noqa: BLE001
         logger.exception("distillery_relations metrics: failed to build graph")
         return error_response("INTERNAL", "Failed to build relations graph")
