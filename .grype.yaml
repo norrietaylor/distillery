@@ -51,13 +51,6 @@ ignore:
       type: apk
     reason: "glibc 2.43-r7 (Wolfi) — CVSS High; locale/charset boundary handling.  Not exploitable in our deployment: container runs with the C.UTF-8 locale, all I/O is UTF-8 end-to-end (HTTP/JSON, DuckDB, Python source), and no user-controlled locale strings reach glibc.  Sourceware tracking issue open; no fix released yet.  Reviewed: 2026-05-03"
 
-  - vulnerability: CVE-2026-5928
-    package:
-      name: glibc
-      version: 2.43-r7
-      type: apk
-    reason: "glibc 2.43-r7 (Wolfi) — CVSS 7.5 (High); ungetwc wide-character pushback reads before allocated buffer.  Not exploitable in our deployment: the bug requires calling ungetwc() with a non-Unicode multibyte charset that has single-byte / multi-byte encoding overlaps.  Distillery is Unicode/UTF-8 end-to-end and makes no ungetwc calls anywhere in its code paths.  Sourceware bug 33998; no upstream fix released yet.  Reviewed: 2026-05-03"
-
 
 # Fail on critical and high severity vulnerabilities.
 # This is also enforced in the CI workflow via --severity-cutoff=high,
