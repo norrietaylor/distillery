@@ -961,7 +961,10 @@ class DuckDBStore:
         if self._conn is None:
             return
         async with self._get_conn_lock():
-            await asyncio.to_thread(self._rollback_quietly, self._conn)
+            conn = self._conn
+            if conn is None:  # double-checked under the lock
+                return
+            await asyncio.to_thread(self._rollback_quietly, conn)
 
     async def probe_readiness(self) -> tuple[bool, str | None]:
         """Return ``(True, None)`` when the connection can answer a trivial query.
