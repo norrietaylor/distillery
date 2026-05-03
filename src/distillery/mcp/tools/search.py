@@ -48,17 +48,29 @@ async def _handle_search(
     logs the search to ``search_log`` for later implicit-feedback correlation via
     ``_handle_get``; failures to log do not affect the returned results.
 
+    When ``expand_graph=True`` is passed, after the semantic-search seed set is computed
+    a BFS expansion via ``store.get_related`` collects 1- or 2-hop neighbours, fetches
+    their entries, scores them with a ``0.5 ** depth`` discount of the parent score, and
+    merges them into a single result list sorted by descending score and capped at
+    ``limit``.  Each result then carries a ``provenance`` flag (``"search"`` or
+    ``"graph"``) and graph entries additionally carry ``depth`` and ``parent_id``.  The
+    response envelope gains a ``graph_expansion`` summary (``seed_count``,
+    ``expanded_count``).  When ``expand_graph=False`` (default) the existing behaviour
+    and envelope are unchanged.
+
     Parameters:
         store: Initialised :class:`~distillery.store.duckdb.DuckDBStore`.
         arguments: Dictionary containing at minimum the key `query` (str). May include
             optional filter keys (e.g., `entry_type`, `author`, `project`, `tags`,
-            `status`, `date_from`, `date_to`) and `limit` (int).
+            `status`, `date_from`, `date_to`), `limit` (int), and the additive
+            graph-expansion params `expand_graph` (bool) and `expand_hops` (int, 1 or 2).
         cfg: Optional configuration used to enforce embedding budget.
 
     Returns:
         MCP content list containing a single JSON object with `results` (list of objects
         each with `score` and `entry`) and `count` (int) describing the number of results
-        returned.
+        returned.  When ``expand_graph=True`` results also include ``provenance`` and the
+        envelope includes a ``graph_expansion`` field.
     """
     from distillery.mcp.budget import EmbeddingBudgetError, record_and_check
 
@@ -72,6 +84,19 @@ async def _handle_search(
     if isinstance(limit_result, tuple):
         return error_response(*limit_result)
     limit = limit_result
+
+    # --- graph expansion params (validated BEFORE embedding budget) ---------
+    expand_graph: bool = bool(arguments.get("expand_graph", False))
+    expand_hops_raw: Any = arguments.get("expand_hops", 1)
+    # Reject bool explicitly: ``bool`` is a subclass of ``int`` in Python and we
+    # want to surface a clear error rather than silently coercing True/False.
+    if isinstance(expand_hops_raw, bool):
+        return error_response("INVALID_PARAMS", "expand_hops must be an integer")
+    if not isinstance(expand_hops_raw, int):
+        return error_response("INVALID_PARAMS", "expand_hops must be an integer")
+    expand_hops: int = expand_hops_raw
+    if expand_hops not in (1, 2):
+        return error_response("INVALID_PARAMS", "expand_hops must be 1 or 2")
 
     # --- embedding budget check (1 embed call per search) -------------------
     if cfg is not None:
@@ -104,9 +129,39 @@ async def _handle_search(
         logger.exception("Error in distillery_search")
         return error_response("INTERNAL", "Search failed")
 
-    results = [{"score": round(sr.score, 6), "entry": sr.entry.to_dict()} for sr in search_results]
+    if not expand_graph:
+        results = [
+            {"score": round(sr.score, 6), "entry": sr.entry.to_dict()} for sr in search_results
+        ]
 
-    # Log the search event to search_log for later implicit-feedback correlation.
+        # Log the search event to search_log for later implicit-feedback correlation.
+        search_logging = cfg is None or cfg.rate_limit.search_logging_enabled
+        if search_results and search_logging:
+            result_entry_ids = [sr.entry.id for sr in search_results]
+            result_scores = [sr.score for sr in search_results]
+            try:
+                await store.log_search(
+                    query=query,
+                    result_entry_ids=result_entry_ids,
+                    result_scores=result_scores,
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("Failed to log search event; continuing without feedback tracking")
+
+        return success_response({"results": results, "count": len(results)})
+
+    # ------------------------------------------------------------------
+    # Graph expansion path (additive — only when expand_graph=True).
+    # ------------------------------------------------------------------
+    try:
+        merged_results, seed_count, expanded_count = await _expand_search_with_graph(
+            store, search_results, expand_hops, limit
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("Error during graph expansion in distillery_search")
+        return error_response("INTERNAL", "Graph expansion failed")
+
+    # Log the seed search event (mirrors non-expand path).
     search_logging = cfg is None or cfg.rate_limit.search_logging_enabled
     if search_results and search_logging:
         result_entry_ids = [sr.entry.id for sr in search_results]
@@ -120,7 +175,101 @@ async def _handle_search(
         except Exception:  # noqa: BLE001
             logger.exception("Failed to log search event; continuing without feedback tracking")
 
-    return success_response({"results": results, "count": len(results)})
+    return success_response(
+        {
+            "results": merged_results,
+            "count": len(merged_results),
+            "graph_expansion": {
+                "seed_count": seed_count,
+                "expanded_count": expanded_count,
+            },
+        }
+    )
+
+
+async def _expand_search_with_graph(
+    store: Any,
+    search_results: list[Any],
+    expand_hops: int,
+    limit: int,
+) -> tuple[list[dict[str, Any]], int, int]:
+    """BFS-expand the seed search results via ``store.get_related``.
+
+    Returns ``(merged_results, seed_count, expanded_count)`` where
+    ``merged_results`` is a list of result dicts already sorted by descending
+    score and truncated to ``limit``.  Each dict carries a ``provenance``
+    field; graph-only entries also carry ``depth`` and ``parent_id``.
+    """
+    seed_ids: set[str] = {sr.entry.id for sr in search_results}
+    seed_score_by_id: dict[str, float] = {sr.entry.id: float(sr.score) for sr in search_results}
+
+    # Collected expansion entries keyed by id so we never duplicate one entry
+    # across hops (closer hops always win because we visit depth=1 before
+    # depth=2).
+    expanded: dict[str, dict[str, Any]] = {}
+
+    # depth-1 neighbours
+    depth1_score_by_id: dict[str, float] = {}
+    for sr in search_results:
+        seed_id = sr.entry.id
+        relations = await store.get_related(seed_id, direction="both")
+        for rel in relations:
+            other_id = rel["to_id"] if rel["from_id"] == seed_id else rel["from_id"]
+            if other_id in seed_ids or other_id in expanded:
+                continue
+            score = seed_score_by_id[seed_id] * 0.5
+            expanded[other_id] = {
+                "_score": score,
+                "_depth": 1,
+                "_parent_id": seed_id,
+            }
+            depth1_score_by_id[other_id] = score
+
+    # depth-2 neighbours (only when requested)
+    if expand_hops == 2:
+        for parent_id, parent_score in list(depth1_score_by_id.items()):
+            relations = await store.get_related(parent_id, direction="both")
+            for rel in relations:
+                other_id = rel["to_id"] if rel["from_id"] == parent_id else rel["from_id"]
+                if other_id in seed_ids or other_id in expanded:
+                    continue
+                score = parent_score * 0.5
+                expanded[other_id] = {
+                    "_score": score,
+                    "_depth": 2,
+                    "_parent_id": parent_id,
+                }
+
+    # Fetch entries for all expanded ids; skip any that have been deleted.
+    expanded_results: list[dict[str, Any]] = []
+    for entry_id, info in expanded.items():
+        entry = await store.get(entry_id)
+        if entry is None:
+            continue
+        expanded_results.append(
+            {
+                "score": round(info["_score"], 6),
+                "entry": entry.to_dict(),
+                "provenance": "graph",
+                "depth": info["_depth"],
+                "parent_id": info["_parent_id"],
+            }
+        )
+
+    seed_dicts: list[dict[str, Any]] = [
+        {
+            "score": round(sr.score, 6),
+            "entry": sr.entry.to_dict(),
+            "provenance": "search",
+        }
+        for sr in search_results
+    ]
+
+    merged: list[dict[str, Any]] = sorted(
+        seed_dicts + expanded_results, key=lambda r: r["score"], reverse=True
+    )[:limit]
+
+    return merged, len(seed_dicts), len(expanded_results)
 
 
 # ---------------------------------------------------------------------------
