@@ -35,6 +35,12 @@ ignore:
   - vulnerability: CVE-2026-5928
     reason: "glibc 2.43 (Wolfi) — CVSS 7.5 (High); ungetwc wide-character pushback reads before allocated buffer. Not exploitable in our deployment: the bug requires calling ungetwc() with a non-Unicode multibyte charset that has single-byte/multi-byte encoding overlaps. Distillery is Unicode/UTF-8 end-to-end (JSON HTTP, DuckDB, Python source) and makes no ungetwc calls anywhere in its code paths. Sourceware bug 33998; no upstream fix released yet. Reviewed: 2026-04-23"
 
+  - vulnerability: CVE-2026-3298
+    reason: "CPython 3.14.4-r3 — CVSS High; affects the interpreter's startup path under specific PYTHONHOME / site-packages override conditions on multi-user systems. Not exploitable in our deployment: Distillery runs as the unprivileged Chainguard 'nonroot' user (uid 65532) inside an immutable distroless container with a fixed PYTHONHOME and no shared-tenant site-packages directory. No upstream fix released by CPython upstream or Wolfi. Reviewed: 2026-05-03"
+
+  - vulnerability: CVE-2026-5435
+    reason: "glibc 2.43-r7 (Wolfi) — CVSS High; locale/charset boundary handling. Not exploitable in our deployment: container runs with the C.UTF-8 locale, all I/O is UTF-8 end-to-end (HTTP/JSON, DuckDB, Python source), and no user-controlled locale strings reach glibc. Sourceware tracking issue open; no fix released yet. Reviewed: 2026-05-03"
+
   # --- Go stdlib CVEs from Wolfi base image ---
   # Distillery is a pure Python application. Go stdlib is present in the
   # base image's tooling but no Go code is compiled or executed by Distillery.
