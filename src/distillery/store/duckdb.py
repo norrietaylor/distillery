@@ -2885,3 +2885,27 @@ class DuckDBStore:
             ``True`` if the row existed and was deleted, ``False`` otherwise.
         """
         return await self._run_sync(self._sync_remove_relation, relation_id)
+
+    def _sync_get_all_related_entry_ids(self) -> set[str]:
+        """Synchronous implementation of get_all_related_entry_ids()."""
+        assert self._conn is not None
+        # Single scan over entry_relations to collect every entry id that
+        # appears as either endpoint of any relation. Used by the orphan
+        # filter on distillery_list to identify entries with no relations.
+        rows = self._conn.execute(
+            "SELECT from_id FROM entry_relations UNION SELECT to_id FROM entry_relations"
+        ).fetchall()
+        return {row[0] for row in rows}
+
+    async def get_all_related_entry_ids(self) -> set[str]:
+        """Return the set of entry IDs that appear in any ``entry_relations`` row.
+
+        Used by structural filters (e.g. orphan detection) on
+        ``distillery_list``: the complement set is the orphan set. Returns
+        an empty set when no relations exist.
+
+        Returns:
+            Set of entry UUID strings appearing as either ``from_id`` or
+            ``to_id`` in at least one row of ``entry_relations``.
+        """
+        return await self._run_sync(self._sync_get_all_related_entry_ids)
