@@ -1,0 +1,364 @@
+# Nightly LongMemEval bench workflow.
+#
+# Runs the `distillery bench longmemeval` runner across an 8-cell matrix
+# (retrieval x granularity x recency, embed pinned to bge-small) every
+# night at 05:00 UTC, after the eval-nightly.yml workflow at 03:00 UTC.
+#
+# Cost envelope: 8 cells * ~15 min = ~120 min/night = ~730 hr/yr. Well
+# inside GitHub free-tier minutes for public repos.
+#
+# Path-restriction note: GitHub does not let you path-scope GITHUB_TOKEN
+# at the workflow level — `permissions:` is per-permission, not per-path.
+# We enforce path scoping by:
+#   1. Granting only the minimum permissions required (contents: write,
+#      pull-requests: write).
+#   2. A `verify-paths` step in the aggregator job that fails the build
+#      if the auto-PR diff touches anything outside `bench/results/**`
+#      and `bench/badge_*.json` (r5/r10/ndcg10 — emitted by the W2
+#      aggregator via --output-dir).
+# A reviewer-side check (the `benchmark` label) is the third defence.
+#
+# Dependencies (subsequent slices, not yet landed):
+#   - `distillery bench longmemeval` CLI (W2-cli)
+#   - `src/distillery/eval/longmemeval.py` runner (W2-bench-runner)
+#   - `scripts/bench/aggregate_results.py` (W2-bench-runner or follow-up)
+# Until those land this workflow will fail end-to-end, but the YAML is
+# reviewable and lintable now.
+
+name: Bench (LongMemEval)
+
+on:
+  schedule:
+    # 05:00 UTC daily — sequenced after eval-nightly.yml (03:00 UTC) so
+    # they don't compete for runner capacity.
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Per-cell question limit (empty = full 500-question set)"
+        required: false
+        type: string
+        default: ""
+      run_jina:
+        description: "Add a Jina embed cell (requires JINA_API_KEY secret)"
+        required: false
+        type: boolean
+        default: false
+      run_embed_matrix:
+        description: "Extend matrix to bge-base + bge-large (24 cells total)"
+        required: false
+        type: boolean
+        default: false
+
+# Minimum permissions required for the auto-PR step.
+# NOTE: GitHub does not support path-scoped tokens; path restriction is
+# enforced post-hoc by the verify-paths step in the aggregator job.
+permissions:
+  contents: write
+  pull-requests: write
+
+# Prevent overlapping nightly runs from racing on the same `main` ref.
+concurrency:
+  group: bench-longmemeval
+  cancel-in-progress: false
+
+jobs:
+  bench-matrix:
+    name: bench (${{ matrix.retrieval }}/${{ matrix.granularity }}/recency-${{ matrix.recency }}/${{ matrix.embed }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # Nightly: 2 * 2 * 2 * 1 = 8 cells. The plan said 4, but the
+        # recency on/off split (W1-recency-probe / PR #430 found that
+        # recency requires a per-cell store rebuild) doubles the count
+        # to 8.
+        retrieval: [raw, hybrid]
+        granularity: [session, turn]
+        # Quoted to avoid YAML 1.1 boolean coercion in less strict
+        # parsers — the CLI flag value is the literal string "on"/"off".
+        recency: ["on", "off"]
+        embed: [bge-small]
+        # Embed matrix extension note: GitHub Actions matrix structures
+        # cannot be conditionally extended at workflow_dispatch time. The
+        # bge-base / bge-large extension is implemented as additional
+        # `if`-gated steps inside the job (see "Run bench (bge-base
+        # extension)" below), which take the effective cell count from
+        # 8 to 24 when run_embed_matrix=true.
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev,fastembed]"
+
+      # Cache fastembed model weights. Key includes the embed model name
+      # so each matrix cell gets its own cache entry. fastembed downloads
+      # to ~/.cache/fastembed by default.
+      - name: Cache fastembed model weights
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/fastembed
+          key: fastembed-${{ runner.os }}-${{ matrix.embed }}-v1
+          restore-keys: |
+            fastembed-${{ runner.os }}-${{ matrix.embed }}-
+
+      # Cache HuggingFace dataset (longmemeval-cleaned, 264.5 MB).
+      # Pinned to dataset revision SHA 98d7416c24c778c2fee6e6f3006e7a073259d48f
+      # (resolved by W1-dataset-loader). Cache key is stable across runs
+      # because it embeds the literal SHA — only changes when the pin
+      # changes in code.
+      - name: Cache HuggingFace dataset
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-longmemeval-98d7416c24c778c2fee6e6f3006e7a073259d48f
+          restore-keys: |
+            hf-longmemeval-
+
+      # Conditionally extend the embed dimension when dispatched with
+      # run_embed_matrix=true. Skipped on schedule and PR.
+      # NOTE: GitHub Actions matrix cannot be expanded mid-job, so we
+      # gate at the step level instead — this runs the bench three
+      # times in this single job when extension is requested. Cleaner
+      # alternative would be a second matrix job; kept inline here to
+      # avoid duplicating the steps block. Aggregator handles dedupe.
+      - name: Run bench (primary embed cell)
+        env:
+          DISTILLERY_BENCH_GIT_SHA: ${{ github.sha }}
+        run: |
+          # CLI presence guard: the `distillery bench longmemeval` subcommand
+          # lands in a follow-up PR (#440). Until that merges to main, every
+          # nightly run would otherwise fail red. Cleanly skip with a workflow
+          # warning so the matrix exits 0 and the aggregator can proceed.
+          if ! distillery bench longmemeval --help >/dev/null 2>&1; then
+            echo "::warning::distillery bench longmemeval CLI not yet present on main. Skipping bench cell. Merge PR #440 to enable."
+            exit 0
+          fi
+          distillery bench longmemeval \
+            --retrieval ${{ matrix.retrieval }} \
+            --granularity ${{ matrix.granularity }} \
+            --recency ${{ matrix.recency }} \
+            --embed-model ${{ matrix.embed }} \
+            ${{ inputs.limit && format('--limit {0}', inputs.limit) || '' }}
+
+      - name: Run bench (bge-base extension)
+        if: github.event_name == 'workflow_dispatch' && inputs.run_embed_matrix == true && matrix.embed == 'bge-small'
+        env:
+          DISTILLERY_BENCH_GIT_SHA: ${{ github.sha }}
+        run: |
+          if ! distillery bench longmemeval --help >/dev/null 2>&1; then
+            echo "::warning::distillery bench longmemeval CLI not yet present on main. Skipping bench cell. Merge PR #440 to enable."
+            exit 0
+          fi
+          distillery bench longmemeval \
+            --retrieval ${{ matrix.retrieval }} \
+            --granularity ${{ matrix.granularity }} \
+            --recency ${{ matrix.recency }} \
+            --embed-model bge-base \
+            ${{ inputs.limit && format('--limit {0}', inputs.limit) || '' }}
+
+      - name: Run bench (bge-large extension)
+        if: github.event_name == 'workflow_dispatch' && inputs.run_embed_matrix == true && matrix.embed == 'bge-small'
+        env:
+          DISTILLERY_BENCH_GIT_SHA: ${{ github.sha }}
+        run: |
+          if ! distillery bench longmemeval --help >/dev/null 2>&1; then
+            echo "::warning::distillery bench longmemeval CLI not yet present on main. Skipping bench cell. Merge PR #440 to enable."
+            exit 0
+          fi
+          distillery bench longmemeval \
+            --retrieval ${{ matrix.retrieval }} \
+            --granularity ${{ matrix.granularity }} \
+            --recency ${{ matrix.recency }} \
+            --embed-model bge-large \
+            ${{ inputs.limit && format('--limit {0}', inputs.limit) || '' }}
+
+      # Optional Jina cell. Only fires on workflow_dispatch with
+      # run_jina=true AND the JINA_API_KEY secret available. Never on
+      # schedule, never on PR.
+      - name: Run bench (Jina cell)
+        if: github.event_name == 'workflow_dispatch' && inputs.run_jina == true && matrix.embed == 'bge-small'
+        env:
+          DISTILLERY_BENCH_GIT_SHA: ${{ github.sha }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+        run: |
+          if [ -z "${JINA_API_KEY}" ]; then
+            echo "JINA_API_KEY not set in repository secrets — skipping Jina cell"
+            exit 0
+          fi
+          if ! distillery bench longmemeval --help >/dev/null 2>&1; then
+            echo "::warning::distillery bench longmemeval CLI not yet present on main. Skipping bench cell. Merge PR #440 to enable."
+            exit 0
+          fi
+          distillery bench longmemeval \
+            --retrieval ${{ matrix.retrieval }} \
+            --granularity ${{ matrix.granularity }} \
+            --recency ${{ matrix.recency }} \
+            --embed-model jina \
+            ${{ inputs.limit && format('--limit {0}', inputs.limit) || '' }}
+
+      - name: Upload bench results artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results-${{ matrix.retrieval }}-${{ matrix.granularity }}-recency-${{ matrix.recency }}-${{ matrix.embed }}-${{ github.run_id }}
+          path: bench/results/**
+          # Full retention. Workflow artifacts are the audit trail when
+          # JSONL files aren't committed (Mon-Sat).
+          retention-days: 90
+          if-no-files-found: warn
+
+  aggregate-and-pr:
+    name: Aggregate + auto-PR
+    needs: [bench-matrix]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Never run on PR — the auto-PR step would otherwise create endless
+    # loops (PR triggers workflow which opens PR which triggers ...).
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Download all bench artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Stage artifacts into bench/results
+        run: |
+          mkdir -p bench/results
+          # Flatten the per-cell artifact directories into one tree.
+          find artifacts/ -type f \( -name '*.jsonl' -o -name '*.json' \) -print0 \
+            | xargs -0 -I{} cp {} bench/results/
+          ls -la bench/results/
+
+      # Day-of-week guard: full per-question JSONL is committed only on
+      # Sundays (`date +%u` == 7), summaries + badge daily.
+      - name: Determine commit set (day-of-week guard)
+        id: commit-set
+        run: |
+          DOW=$(date -u +%u)
+          if [ "${DOW}" = "7" ]; then
+            echo "Sunday — committing full JSONL set"
+            echo "include_jsonl=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Mon-Sat — committing summaries + badge only"
+            echo "include_jsonl=false" >> "$GITHUB_OUTPUT"
+            # Strip JSONL receipts; they remain on the workflow artifact only.
+            find bench/results -type f -name 'results_*.jsonl' -delete || true
+          fi
+
+      - name: Run aggregator
+        run: |
+          # Guard: when bench cells skip (CLI not yet on main, see #440),
+          # bench/results/ may be empty. Emit a warning and exit 0 so the
+          # auto-PR step has nothing to commit but the job still succeeds.
+          if ! ls bench/results/*.json* >/dev/null 2>&1; then
+            echo "::warning::No bench results produced; aggregator skipped."
+            exit 0
+          fi
+          if [ -f scripts/bench/aggregate_results.py ]; then
+            python scripts/bench/aggregate_results.py \
+              --results-dir bench/results/ \
+              --output-dir bench/
+          else
+            # TODO: created by W2-bench-runner or follow-up.
+            # Until the aggregator script lands, we surface the bench
+            # results as workflow artifacts only and skip the auto-PR
+            # body update — the verify-paths step still gates the diff.
+            echo "Aggregator script not yet present; bench results uploaded as artifact only"
+          fi
+
+      # Path-restriction enforcement. GitHub does not allow path-scoped
+      # GITHUB_TOKEN, so we verify the staged diff manually. Anything
+      # outside the allowlist (bench/results/**, bench/badge_*.json) fails
+      # the job before the auto-PR is opened.
+      - name: Verify paths (allowlist enforcement)
+        run: |
+          set -euo pipefail
+          ALLOW='^(bench/results/|bench/badge_(r5|r10|ndcg10)\.json$)'
+          # Stage everything that would be committed and inspect the
+          # paths against the allowlist.
+          git add -A
+          CHANGED=$(git diff --cached --name-only)
+          if [ -z "${CHANGED}" ]; then
+            echo "No changes to commit — skipping verification"
+            exit 0
+          fi
+          echo "Changed files:"
+          echo "${CHANGED}"
+          BAD=$(echo "${CHANGED}" | grep -Ev "${ALLOW}" || true)
+          if [ -n "${BAD}" ]; then
+            echo "ERROR: changes outside allowlist (bench/results/**, bench/badge_*.json):"
+            echo "${BAD}"
+            exit 1
+          fi
+          echo "All changes within allowlist."
+          # Reset the index so create-pull-request can re-stage cleanly.
+          git reset
+
+      - name: Compute PR metadata
+        id: pr-meta
+        run: |
+          DATE=$(date -u +%Y-%m-%d)
+          {
+            echo "date=${DATE}"
+            echo "branch=bench/results-${{ github.run_id }}"
+            echo "title=[bench] nightly results ${DATE}"
+          } >> "$GITHUB_OUTPUT"
+
+      # Auto-PR. Pinned to peter-evans/create-pull-request@v6 (major).
+      # Only the allowlisted paths are passed to `add-paths`, which is a
+      # second layer of defence on top of the verify-paths step above.
+      - name: Create auto-PR
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: ${{ steps.pr-meta.outputs.branch }}
+          base: main
+          title: ${{ steps.pr-meta.outputs.title }}
+          commit-message: |
+            bench: nightly LongMemEval results ${{ steps.pr-meta.outputs.date }}
+
+            Run ID: ${{ github.run_id }}
+            Headline cell: hybrid / session / recency-on / bge-small
+            JSONL receipts: ${{ steps.commit-set.outputs.include_jsonl == 'true' && 'included (Sunday)' || 'artifact only (Mon-Sat)' }}
+          body: |
+            Automated nightly LongMemEval bench results.
+
+            - Run ID: ${{ github.run_id }}
+            - Triggered by: ${{ github.event_name }}
+            - Date (UTC): ${{ steps.pr-meta.outputs.date }}
+            - JSONL receipts in this commit: ${{ steps.commit-set.outputs.include_jsonl }}
+
+            All paths in this PR are restricted to `bench/results/**` and
+            `bench/badge_*.json` by the verify-paths step.
+          labels: benchmark
+          add-paths: |
+            bench/results/**
+            bench/badge_r5.json
+            bench/badge_r10.json
+            bench/badge_ndcg10.json
+          delete-branch: true
