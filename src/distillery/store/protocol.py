@@ -511,6 +511,20 @@ class DistilleryStore(Protocol):
         """
         ...
 
+    async def list_relations(self) -> list[dict[str, Any]]:
+        """Return every row from ``entry_relations`` as a list of dicts.
+
+        Intended for graph metrics computation that needs the entire relations
+        subgraph in one shot.  Implementations must run any underlying sync
+        I/O off the event loop so async callers are not blocked.
+
+        Returns:
+            List of dicts with keys: ``id``, ``from_id``, ``to_id``,
+            ``relation_type``, ``created_at`` (ISO 8601 str).  Ordered by
+            ascending ``created_at``.
+        """
+        ...
+
     async def get_metadata(self, key: str) -> str | None:
         """Read a value from the ``_meta`` key-value table.
 

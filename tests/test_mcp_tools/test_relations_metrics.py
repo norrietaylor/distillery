@@ -252,3 +252,72 @@ async def test_metrics_returns_internal_when_nx_missing(  # type: ignore[no-unty
     assert data["error"] is True
     assert data["code"] == "INTERNAL"
     assert "NetworkX not installed" in data["message"]
+
+
+# ---------------------------------------------------------------------------
+# Pagination + error-handling regressions (CodeRabbit, PR #426).
+# ---------------------------------------------------------------------------
+
+
+async def test_metrics_paginates_large_corpus(store, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Global-scope metrics must paginate ``list_entries`` so large corpora are
+    not silently truncated by a single 10k-row page (CodeRabbit, PR #426).
+    """
+    pytest.importorskip("networkx")
+
+    # Force a tiny page size so pagination is exercised even with a few entries.
+    monkeypatch.setattr(
+        "distillery.mcp.tools.relations._GRAPH_METRICS_PAGE_SIZE",
+        2,
+    )
+
+    # Seed five entries on a single project, fully connected in a star pattern.
+    project = "paginate-me"
+    ids: list[str] = []
+    for i in range(5):
+        ids.append(await _store_entry(store, content=f"node {i}", project=project))
+    for j in range(1, 5):
+        await store.add_relation(ids[0], ids[j], "link")
+
+    result = await _handle_relations(
+        store,
+        {
+            "action": "metrics",
+            "metric": "bridges",
+            "scope": "global",
+            "project": project,
+        },
+    )
+    data = _parse(result)
+    assert data.get("error") is not True
+    # All 5 nodes must appear in the graph despite the page size of 2 — that
+    # only happens if pagination loops past the first page.
+    assert data["node_count"] == 5
+    assert data["edge_count"] == 4
+
+
+async def test_metrics_runtime_error_returns_generic_message(  # type: ignore[no-untyped-def]
+    store, monkeypatch
+) -> None:
+    """A RuntimeError raised during graph build must NOT leak its message text
+    to the client; the handler logs it server-side and returns a generic
+    INTERNAL response (CodeRabbit, PR #426).
+    """
+    pytest.importorskip("networkx")
+
+    secret = "super secret internal detail xyzzy"
+
+    def _boom(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        raise RuntimeError(secret)
+
+    # Patch the symbol referenced inside ``_handle_metrics`` (it does a local
+    # import, so we patch it on the source module).
+    monkeypatch.setattr("distillery.graph.builders.build_relations_graph", _boom)
+
+    result = await _handle_relations(
+        store, {"action": "metrics", "metric": "bridges", "scope": "global"}
+    )
+    data = _parse(result)
+    assert data["error"] is True
+    assert data["code"] == "INTERNAL"
+    assert secret not in data["message"], "raw exception text must not leak"
