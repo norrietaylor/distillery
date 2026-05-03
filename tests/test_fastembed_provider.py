@@ -130,6 +130,7 @@ def test_concurrent_load_constructs_single_embedder(monkeypatch: pytest.MonkeyPa
     proceed.set()
     for t in threads:
         t.join(timeout=5.0)
+    assert all(not t.is_alive() for t in threads), "Worker thread hung during lazy-load race test"
 
     assert errors == []
     assert call_count == 1, f"Expected single TextEmbedding construction, got {call_count}"
