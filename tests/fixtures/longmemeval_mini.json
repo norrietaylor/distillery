@@ -1,0 +1,60 @@
+[
+  {
+    "question_id": "fixture_q1",
+    "question_type": "single-session-user",
+    "question": "What city did the user mention they were moving to?",
+    "question_date": "2024/06/15 (Sat) 10:00",
+    "answer": "Lisbon",
+    "answer_session_ids": ["answer_session_alpha"],
+    "haystack_dates": [
+      "2024/06/01 (Sat) 09:00",
+      "2024/06/05 (Wed) 14:30",
+      "2024/06/10 (Mon) 18:00"
+    ],
+    "haystack_session_ids": [
+      "session_alpha_001",
+      "answer_session_alpha",
+      "session_alpha_003"
+    ],
+    "haystack_sessions": [
+      [
+        {"role": "user", "content": "Hi, I'm planning a vacation."},
+        {"role": "assistant", "content": "Where are you thinking of going?"}
+      ],
+      [
+        {"role": "user", "content": "Actually, I'm moving to Lisbon next month for work."},
+        {"role": "assistant", "content": "That sounds exciting! What kind of work?"}
+      ],
+      [
+        {"role": "user", "content": "I just need help with my packing list."},
+        {"role": "assistant", "content": "Happy to help — what items are you considering?"}
+      ]
+    ]
+  },
+  {
+    "question_id": "fixture_q2",
+    "question_type": "multi-session",
+    "question": "How many cats does the user own?",
+    "question_date": "2024/07/20 (Sat) 09:00",
+    "answer": "Three",
+    "answer_session_ids": ["answer_session_beta_1", "answer_session_beta_2"],
+    "haystack_dates": [
+      "2024/07/01 (Mon) 08:00",
+      "2024/07/05 (Fri) 11:00"
+    ],
+    "haystack_session_ids": [
+      "answer_session_beta_1",
+      "answer_session_beta_2"
+    ],
+    "haystack_sessions": [
+      [
+        {"role": "user", "content": "I just adopted two cats — Mochi and Yuzu."},
+        {"role": "assistant", "content": "Congrats! Two cats is great company."}
+      ],
+      [
+        {"role": "user", "content": "I added a third cat today, named Soba."},
+        {"role": "assistant", "content": "Three is a lovely number for a feline household."}
+      ]
+    ]
+  }
+]
