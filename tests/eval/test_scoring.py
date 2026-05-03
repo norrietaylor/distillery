@@ -163,6 +163,26 @@ SCORING_TABLE: list[tuple[str, list[int], set[str], list[str], int, float, float
         1.0,
         1.0 / math.log2(11),
     ),
+    # 13. correct_ids contains labels NOT in the corpus slice. IDCG must be
+    #     sized from the *intersection* of correct_ids and corpus_ids — not
+    #     from len(correct_ids) — otherwise NDCG is artificially depressed.
+    #     Here corpus = ["x"], correct = {"x", "y"}: only "x" is reachable.
+    #     rankings=[0] → relevance "x" found at rank 0 → DCG = 1.0.
+    #     IDCG (post-fix) = 1.0 (one reachable correct doc), so NDCG = 1.0.
+    #     Pre-fix this would have used n_correct=2 → IDCG = 1 + 1/log2(3),
+    #     yielding NDCG ≈ 0.6131 instead of 1.0.
+    #     recall_any=1.0 because "x" appears in top-k; recall_all=0.0 because
+    #     "y" is required by ``evaluate_retrieval`` but absent from corpus.
+    (
+        "correct_id_outside_corpus_k1",
+        [0],
+        {"x", "y"},
+        ["x"],
+        1,
+        1.0,
+        0.0,
+        1.0,
+    ),
 ]
 
 
@@ -215,10 +235,15 @@ class TestNdcgBoundary:
         assert ndcg([0, 1], {"a"}, ["a", "b"], 0) == 0.0
 
     def test_ndcg_negative_index_treated_as_irrelevant(self) -> None:
-        """Out-of-range indices contribute 0.0 and do not raise."""
-        # Index -1 / 99 should be treated as "not in correct_ids" and
-        # contribute zero relevance, not an IndexError.
-        result = ndcg([99, 0], {"a"}, ["a"], 2)
+        """Out-of-range indices contribute 0.0 and do not raise.
+
+        Python list indexing accepts negative integers (``corpus_ids[-1]`` is
+        the last element), so the bounds guard ``0 <= idx < len(corpus_ids)``
+        in ``ndcg`` is what prevents a negative index from silently sneaking
+        through. Pass ``-1`` here (not the previous ``99``) to actually
+        exercise the negative branch of that guard.
+        """
+        result = ndcg([-1, 0], {"a"}, ["a"], 2)
         # rel = [0.0, 1.0] → DCG = 0 + 1/log2(3); IDCG = 1/log2(2) = 1.0
         assert result == pytest.approx(1.0 / math.log2(3))
 

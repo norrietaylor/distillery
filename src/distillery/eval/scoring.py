@@ -95,16 +95,24 @@ def ndcg(
     if k <= 0 or not rankings:
         return 0.0
 
+    # Restrict relevant ids to those actually reachable in this corpus slice.
+    # If ``correct_ids`` includes labels not present in ``corpus_ids`` (e.g. answer
+    # sessions outside the haystack subset for this question), counting them in
+    # IDCG would inflate the ideal and artificially depress NDCG.
+    corpus_id_set = set(corpus_ids)
+    effective_correct_ids = correct_ids & corpus_id_set
+
     # Build per-rank binary relevance for the predicted ranking.
     relevances: list[float] = []
     for idx in rankings:
-        if 0 <= idx < len(corpus_ids) and corpus_ids[idx] in correct_ids:
+        if 0 <= idx < len(corpus_ids) and corpus_ids[idx] in effective_correct_ids:
             relevances.append(1.0)
         else:
             relevances.append(0.0)
 
-    # Ideal ranking: as many 1.0s up front as there are correct docs (capped at k).
-    n_correct = min(len(correct_ids), k)
+    # Ideal ranking: as many 1.0s up front as there are corpus-reachable correct
+    # docs (capped at k).
+    n_correct = min(len(effective_correct_ids), k)
     ideal = [1.0] * n_correct
 
     idcg = dcg(ideal, k)
