@@ -1438,6 +1438,140 @@ class TestFTSRebuildOnMutation:
         assert entry.id in result_ids
 
 
+class TestConnectionLockSerialization:
+    """Issue #416: ``_run_sync`` must serialize concurrent connection access.
+
+    DuckDB's ``DuckDBPyConnection`` is not thread-safe.  Without a lock,
+    parallel ``asyncio.gather`` callers (e.g. ``FeedPoller`` polling 60+
+    sources) end up touching the shared connection from multiple
+    ``asyncio.to_thread`` workers concurrently, which intermittently
+    corrupts the glibc heap and wedges the process.
+    """
+
+    async def test_run_sync_holds_lock_for_duration(self, store: DuckDBStore) -> None:
+        """A second ``_run_sync`` cannot enter while the first is running.
+
+        Forces real contention by blocking inside the first ``_run_sync``'s
+        worker thread on a ``threading.Event`` until after the second
+        ``_run_sync`` call has been queued.  Without the lock, the second
+        call's ``asyncio.to_thread`` would race the first worker thread
+        and ``second-enter`` could land before ``first-mid``.  With the
+        lock, the second call must wait for the first to return.
+        """
+        import asyncio
+        import threading
+
+        order: list[str] = []
+        thread_inside = threading.Event()
+        thread_release = threading.Event()
+
+        def _slow() -> str:
+            order.append("first-enter")
+            # Signal the test that the worker holds ``_conn_lock``.
+            thread_inside.set()
+            # Block the worker thread until the test releases it, after
+            # the second ``_run_sync`` has been queued behind the lock.
+            thread_release.wait(timeout=5)
+            order.append("first-mid")
+            return "first"
+
+        async def _first() -> None:
+            await store._run_sync(_slow)  # noqa: SLF001
+            order.append("first-exit")
+
+        async def _second() -> None:
+            # Wait until the worker is inside ``_slow`` (lock held) before
+            # attempting the second call so contention is guaranteed.
+            await asyncio.to_thread(thread_inside.wait, 5)
+            order.append("second-attempt")
+            # Without the lock, ``_run_sync`` would race ``_slow``.
+            # With the lock, this awaits until ``_slow`` returns.
+            await store._run_sync(  # noqa: SLF001
+                lambda: order.append("second-enter") or "second"
+            )
+            order.append("second-exit")
+
+        async def _release_after_second_queued() -> None:
+            await asyncio.to_thread(thread_inside.wait, 5)
+            # Yield long enough for ``_second``'s ``_run_sync`` to queue
+            # behind ``_conn_lock`` before releasing the worker.
+            await asyncio.sleep(0.1)
+            thread_release.set()
+
+        await asyncio.gather(_first(), _second(), _release_after_second_queued())
+        # The lock guarantees ``second-enter`` cannot land before
+        # ``first-mid`` (which is reached only after the worker holding
+        # the lock unblocks).
+        assert order.index("second-enter") > order.index("first-mid"), (
+            f"second entered while first was running: {order!r}"
+        )
+        assert order.index("first-mid") > order.index("first-enter")
+
+    async def test_run_sync_releases_lock_on_exception(self, store: DuckDBStore) -> None:
+        """A raise inside ``_run_sync`` must not deadlock subsequent callers."""
+
+        def _boom() -> None:
+            raise RuntimeError("simulated failure")
+
+        with pytest.raises(RuntimeError, match="simulated failure"):
+            await store._run_sync(_boom)  # noqa: SLF001
+
+        # If the lock leaked, this call would hang forever.  pytest's
+        # default per-test timeout is sufficient to catch a deadlock,
+        # but the assertion makes the intent explicit.
+        result = await store._run_sync(lambda: "ok")  # noqa: SLF001
+        assert result == "ok"
+
+    async def test_lock_lazy_initialized_on_first_use(self, mock_embedding_provider) -> None:
+        """``_conn_lock`` is created on first ``_run_sync`` call, not in ``__init__``."""
+        s = DuckDBStore(db_path=":memory:", embedding_provider=mock_embedding_provider)
+        assert s._conn_lock is None  # noqa: SLF001
+        await s.initialize()
+        # ``initialize`` does not go through ``_run_sync`` so lock is still None.
+        assert s._conn_lock is None  # noqa: SLF001
+        await s.list_entries(filters=None, limit=1, offset=0)
+        assert s._conn_lock is not None  # noqa: SLF001
+        await s.close()
+
+
+class TestFTSRebuildRollback:
+    """Issue #414: a failed FTS rebuild must leave the connection usable.
+
+    Before the fix, ``_rebuild_fts_index`` swallowed the ``duckdb.Error``
+    from a failing ``PRAGMA create_fts_index`` and returned without
+    rolling back, leaving the connection in an aborted-transaction state.
+    Subsequent statements then failed with ``TransactionContext Error:
+    Current transaction is aborted (please ROLLBACK)``, which silently
+    disabled ``FeedPoller._has_external_id`` (it caught the error and
+    returned ``False``) and caused duplicate feed entries to accumulate.
+    """
+
+    async def test_fts_rebuild_failure_invokes_rollback(
+        self, hybrid_store: DuckDBStore
+    ) -> None:
+        """A failed PRAGMA must trigger ``conn.rollback()`` before returning.
+
+        DuckDB ``DuckDBPyConnection.execute`` is a read-only attribute on
+        the real object, so we simulate the PRAGMA failure with a mock
+        connection that mimics the surface area used by
+        ``_rebuild_fts_index``.  The assertion is that ``rollback()`` is
+        invoked on the failure path — which is what restores the shared
+        connection to a usable state in production.
+        """
+        from unittest.mock import MagicMock
+
+        import duckdb
+
+        mock_conn = MagicMock()
+        mock_conn.execute.side_effect = duckdb.Error("simulated PRAGMA failure")
+
+        hybrid_store._fts_available = True  # noqa: SLF001 — force the rebuild path
+        hybrid_store._rebuild_fts_index(mock_conn)  # noqa: SLF001
+
+        assert hybrid_store._fts_available is False  # noqa: SLF001 — failure recorded
+        mock_conn.rollback.assert_called_once()
+
+
 class TestHybridGracefulFallback:
     """Verify graceful fallback to vector-only when FTS is unavailable."""
 
