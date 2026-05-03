@@ -80,7 +80,7 @@ If earlier passes reveal references to specific projects, decisions, or events n
 
 **Deduplication:** By entry ID across all passes. Each entry counted once; track which pass discovered it. When `--graph` is set, also track per entry the final `provenance` (search vs graph) for use in Step 5 synthesis.
 
-Report: `Retrieved X unique entries across Y search passes.` When `--graph` is set, append: ` (graph expansion: <seed_count> seed → <expanded_count> after 1-hop neighbours)` using totals summed from the `graph_expansion` envelope across all calls.
+Report: `Retrieved X unique entries across Y search passes.` When `--graph` is set, append `(graph expansion: <seed_count> seed → <expanded_count> after 1-hop neighbours)` using totals summed from the `graph_expansion` envelope across all calls.
 
 ### Step 4: Edge Case Check
 
