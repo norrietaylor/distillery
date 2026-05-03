@@ -758,6 +758,8 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         limit: int = 10,
         tag_prefix: str | None = None,
         include_archived: bool = False,
+        expand_graph: bool = False,
+        expand_hops: int = 1,
     ) -> list[types.TextContent]:
         """Search knowledge entries using semantic similarity (cosine distance, ranked descending).
 
@@ -769,6 +771,16 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         to search only archived entries, ``status="any"`` to include every
         status, or ``include_archived=true`` to add archived entries to the
         default candidate set.
+
+        When ``expand_graph=true``, after the semantic search returns its
+        seed result set, the tool BFS-expands 1 or 2 hops via
+        ``entry_relations`` to surface structurally connected entries.
+        Graph entries are scored at ``parent_score * 0.5 ** depth``, marked
+        with ``provenance="graph"``, and merged into the result list (sorted
+        by descending score, truncated to ``limit``).  Seeds are tagged
+        ``provenance="search"``.  The envelope gains a ``graph_expansion``
+        summary.  When ``expand_graph=false`` (default), the existing
+        envelope is unchanged — strictly additive.
 
         PARAMS:
           - query (str, required): Natural-language search query.
@@ -785,8 +797,16 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
           - tag_prefix (str, optional): Filter tags by namespace prefix.
           - include_archived (bool, optional, default=False): Include archived entries
             in the candidate set.
+          - expand_graph (bool, optional, default=False): When true, expand the seed
+            result set via ``entry_relations`` and merge the neighbours into the
+            results.
+          - expand_hops (int, optional, default=1): Depth of graph expansion when
+            ``expand_graph=true``.  Must be 1 or 2.
 
-        RETURNS (success): { results: [{ score: float, entry: {...} }], count: int }
+        RETURNS (success): { results: [{ score: float, entry: {...} }], count: int }.
+          When ``expand_graph=true`` each result also has ``provenance`` ("search" or
+          "graph"); graph results additionally carry ``depth`` and ``parent_id``, and
+          the envelope includes ``graph_expansion: { seed_count, expanded_count }``.
         RETURNS (error): { error: true, code: "INVALID_PARAMS" | "BUDGET_EXCEEDED" | "INTERNAL", message: "..." }
 
         RELATED: distillery_list (for filter-based browsing without semantic ranking),
@@ -797,6 +817,8 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             query=query,
             limit=limit,
             include_archived=include_archived,
+            expand_graph=expand_graph,
+            expand_hops=expand_hops,
             **_omit_none(
                 entry_type=entry_type,
                 author=author,
