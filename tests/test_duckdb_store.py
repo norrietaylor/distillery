@@ -1449,43 +1449,63 @@ class TestConnectionLockSerialization:
     """
 
     async def test_run_sync_holds_lock_for_duration(self, store: DuckDBStore) -> None:
-        """A second ``_run_sync`` cannot enter while the first is running."""
+        """A second ``_run_sync`` cannot enter while the first is running.
+
+        Forces real contention by blocking inside the first ``_run_sync``'s
+        worker thread on a ``threading.Event`` until after the second
+        ``_run_sync`` call has been queued.  Without the lock, the second
+        call's ``asyncio.to_thread`` would race the first worker thread
+        and ``second-enter`` could land before ``first-mid``.  With the
+        lock, the second call must wait for the first to return.
+        """
         import asyncio
+        import threading
 
         order: list[str] = []
-        first_started = asyncio.Event()
-        first_release = asyncio.Event()
+        thread_inside = threading.Event()
+        thread_release = threading.Event()
 
         def _slow() -> str:
             order.append("first-enter")
-            # Block the worker thread until the test releases it.  The
-            # event is checked synchronously via ``asyncio.run_coroutine_threadsafe``
-            # is overkill — just spin briefly and rely on the test
-            # awaiting ``second`` while ``first`` is still in to_thread.
+            # Signal the test that the worker holds ``_conn_lock``.
+            thread_inside.set()
+            # Block the worker thread until the test releases it, after
+            # the second ``_run_sync`` has been queued behind the lock.
+            thread_release.wait(timeout=5)
+            order.append("first-mid")
             return "first"
 
         async def _first() -> None:
-            first_started.set()
             await store._run_sync(_slow)  # noqa: SLF001
             order.append("first-exit")
-            first_release.set()
 
         async def _second() -> None:
-            await first_started.wait()
+            # Wait until the worker is inside ``_slow`` (lock held) before
+            # attempting the second call so contention is guaranteed.
+            await asyncio.to_thread(thread_inside.wait, 5)
             order.append("second-attempt")
-            await store._run_sync(lambda: order.append("second-enter") or "second")  # noqa: SLF001
+            # Without the lock, ``_run_sync`` would race ``_slow``.
+            # With the lock, this awaits until ``_slow`` returns.
+            await store._run_sync(  # noqa: SLF001
+                lambda: order.append("second-enter") or "second"
+            )
             order.append("second-exit")
 
-        await asyncio.gather(_first(), _second())
-        # The lock guarantees ``second-enter`` cannot land between
-        # ``first-enter`` and ``first-exit``.
-        first_enter = order.index("first-enter")
-        first_exit = order.index("first-exit")
-        second_enter = order.index("second-enter")
-        assert second_enter > first_exit, (
+        async def _release_after_second_queued() -> None:
+            await asyncio.to_thread(thread_inside.wait, 5)
+            # Yield long enough for ``_second``'s ``_run_sync`` to queue
+            # behind ``_conn_lock`` before releasing the worker.
+            await asyncio.sleep(0.1)
+            thread_release.set()
+
+        await asyncio.gather(_first(), _second(), _release_after_second_queued())
+        # The lock guarantees ``second-enter`` cannot land before
+        # ``first-mid`` (which is reached only after the worker holding
+        # the lock unblocks).
+        assert order.index("second-enter") > order.index("first-mid"), (
             f"second entered while first was running: {order!r}"
         )
-        assert first_exit > first_enter
+        assert order.index("first-mid") > order.index("first-enter")
 
     async def test_run_sync_releases_lock_on_exception(self, store: DuckDBStore) -> None:
         """A raise inside ``_run_sync`` must not deadlock subsequent callers."""
@@ -1502,9 +1522,7 @@ class TestConnectionLockSerialization:
         result = await store._run_sync(lambda: "ok")  # noqa: SLF001
         assert result == "ok"
 
-    async def test_lock_lazy_initialized_on_first_use(
-        self, mock_embedding_provider
-    ) -> None:
+    async def test_lock_lazy_initialized_on_first_use(self, mock_embedding_provider) -> None:
         """``_conn_lock`` is created on first ``_run_sync`` call, not in ``__init__``."""
         s = DuckDBStore(db_path=":memory:", embedding_provider=mock_embedding_provider)
         assert s._conn_lock is None  # noqa: SLF001
