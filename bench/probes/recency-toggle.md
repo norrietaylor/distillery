@@ -5,6 +5,10 @@
 **Branch:** bench/recency-toggle-probe
 **Repo state:** 12a29e0ed9f7cd0222a2d5eb296bbeec7b86aa28
 
+> **Citations:** Source references below are commit-pinned permalinks to
+> `12a29e0ed9f7cd0222a2d5eb296bbeec7b86aa28` (the audit base). Line numbers
+> are stable for that revision.
+
 ## Question
 
 Is `recency_decay` toggleable per-query on `DuckDBStore`, or does toggling
@@ -15,85 +19,93 @@ require rebuilding the store?
 ### Where the recency logic lives
 
 - **Constructor parameters (per-store, set once at instantiation).**
-  `src/distillery/store/duckdb.py:151-152` declares
-  `recency_window_days: int = 90` and `recency_min_weight: float = 0.5` as
-  keyword-only `__init__` parameters. They are persisted as private fields
-  at `src/distillery/store/duckdb.py:164-165`
-  (`self._recency_window_days`, `self._recency_min_weight`).
-- **Recency-weight computation.** `_recency_weight(self, created_at)` at
-  `src/distillery/store/duckdb.py:1491-1508` reads the stored fields
-  (`self._recency_window_days` and `self._recency_min_weight`) directly —
-  there is no override hook, no method-level argument, and no class-level
-  setter. The decay is linear from `1.0` at the window edge down to
-  `recency_min_weight`, computed as
+  [`DuckDBStore.__init__` kwargs `recency_window_days` / `recency_min_weight`](https://github.com/norrietaylor/distillery/blob/12a29e0ed9f7cd0222a2d5eb296bbeec7b86aa28/src/distillery/store/duckdb.py#L151-L152)
+  declare `recency_window_days: int = 90` and
+  `recency_min_weight: float = 0.5` as keyword-only `__init__`
+  parameters. They are persisted as private fields at
+  [`self._recency_window_days` / `self._recency_min_weight`](https://github.com/norrietaylor/distillery/blob/12a29e0ed9f7cd0222a2d5eb296bbeec7b86aa28/src/distillery/store/duckdb.py#L164-L165).
+- **Recency-weight computation.** [`_recency_weight(self, created_at)`](https://github.com/norrietaylor/distillery/blob/12a29e0ed9f7cd0222a2d5eb296bbeec7b86aa28/src/distillery/store/duckdb.py#L1558-L1575)
+  reads the stored fields (`self._recency_window_days` and
+  `self._recency_min_weight`) directly — there is no override hook, no
+  method-level argument, and no class-level setter. The decay is linear
+  from `1.0` at the window edge down to `recency_min_weight`, computed as
   `decay = 1.0 - (age_days - window) / max(window, 1)` and clamped via
   `max(self._recency_min_weight, decay)`.
 - **Application site.** Recency is applied unconditionally inside the
-  hybrid (BM25 + vector RRF) path at
-  `src/distillery/store/duckdb.py:1640-1652`:
+  hybrid (BM25 + vector RRF) path at the
+  [RRF fusion + recency decay block](https://github.com/norrietaylor/distillery/blob/12a29e0ed9f7cd0222a2d5eb296bbeec7b86aa28/src/distillery/store/duckdb.py#L1707-L1719):
   ```python
   # --- RRF fusion with recency decay (used for ORDERING only) ---
   ...
   recency = self._recency_weight(entry_created[eid])
   rrf_score *= recency
   ```
-  There is no `if recency_enabled:` guard. The vector-only fallback path
-  (`src/distillery/store/duckdb.py:1583-1596`) does **not** apply recency
-  at all — it sorts purely by raw cosine similarity.
+  There is no `if recency_enabled:` guard. The
+  [vector-only fallback path](https://github.com/norrietaylor/distillery/blob/12a29e0ed9f7cd0222a2d5eb296bbeec7b86aa28/src/distillery/store/duckdb.py#L1650-L1663)
+  does **not** apply recency at all — it sorts purely by raw cosine
+  similarity.
 
 ### Public API surface that controls it
 
-- **Protocol contract.** `DistilleryStore.search()` in
-  `src/distillery/store/protocol.py:147-179` accepts exactly three
-  arguments: `query: str`, `filters: dict[str, Any] | None`, `limit: int`.
-  The `filters` dict's documented keys are
-  `entry_type`, `author`, `project`, `tags`, `status`, `verification`,
-  `date_from`, `date_to` — none of them touch recency scoring. There is
-  **no per-call kwarg or filter key** for toggling, weighting, or
-  parameterising recency.
+- **Protocol contract.** [`DistilleryStore.search()` in `protocol.py`](https://github.com/norrietaylor/distillery/blob/12a29e0ed9f7cd0222a2d5eb296bbeec7b86aa28/src/distillery/store/protocol.py#L147-L179)
+  accepts exactly three arguments: `query: str`,
+  `filters: dict[str, Any] | None`, `limit: int`. The `filters` dict's
+  documented keys are `entry_type`, `author`, `project`, `tags`,
+  `status`, `verification`, `date_from`, `date_to` — none of them touch
+  recency scoring. There is **no per-call kwarg or filter key** for
+  toggling, weighting, or parameterising recency.
 - **Concrete implementation.**
-  `DuckDBStore.search()` at
-  `src/distillery/store/duckdb.py:1510-1515` adheres to that signature
-  exactly (`query, filters, limit`) — no extra keyword arguments.
-- **Config plumbing.** `DefaultsConfig` at
-  `src/distillery/config.py:108-109` exposes `recency_window_days: int = 90`
-  and `recency_min_weight: float = 0.5`. The CLI threads them straight into
-  the constructor at `src/distillery/cli.py:522-523, 673-674, 795-796,
-  1063-1064, 1754-1755` — every `DuckDBStore(...)` call site reads the
-  config-level defaults at construction time and never revisits them.
+  [`DuckDBStore.search()` signature](https://github.com/norrietaylor/distillery/blob/12a29e0ed9f7cd0222a2d5eb296bbeec7b86aa28/src/distillery/store/duckdb.py#L1577-L1582)
+  adheres to that signature exactly (`query, filters, limit`) — no extra
+  keyword arguments.
+- **Config plumbing.** [`DefaultsConfig` recency fields](https://github.com/norrietaylor/distillery/blob/12a29e0ed9f7cd0222a2d5eb296bbeec7b86aa28/src/distillery/config.py#L108-L109)
+  exposes `recency_window_days: int = 90` and
+  `recency_min_weight: float = 0.5`. The CLI threads them straight into
+  the constructor at every call site
+  ([522-523](https://github.com/norrietaylor/distillery/blob/12a29e0ed9f7cd0222a2d5eb296bbeec7b86aa28/src/distillery/cli.py#L522-L523),
+  [673-674](https://github.com/norrietaylor/distillery/blob/12a29e0ed9f7cd0222a2d5eb296bbeec7b86aa28/src/distillery/cli.py#L673-L674),
+  [795-796](https://github.com/norrietaylor/distillery/blob/12a29e0ed9f7cd0222a2d5eb296bbeec7b86aa28/src/distillery/cli.py#L795-L796),
+  [1063-1064](https://github.com/norrietaylor/distillery/blob/12a29e0ed9f7cd0222a2d5eb296bbeec7b86aa28/src/distillery/cli.py#L1063-L1064),
+  [1754-1755](https://github.com/norrietaylor/distillery/blob/12a29e0ed9f7cd0222a2d5eb296bbeec7b86aa28/src/distillery/cli.py#L1754-L1755)) —
+  every `DuckDBStore(...)` call site reads the config-level defaults at
+  construction time and never revisits them.
 - **Config file.** `distillery-dev.yaml` does not set either field, so dev
   runs use the defaults (`90` / `0.5`). The values are settable via
   `defaults.recency_window_days` / `defaults.recency_min_weight` in the
-  YAML (parsed at `src/distillery/config.py:497-519`), but again — only
-  read when the store object is constructed.
+  YAML (parsed at the
+  [`DefaultsConfig` loader block](https://github.com/norrietaylor/distillery/blob/12a29e0ed9f7cd0222a2d5eb296bbeec7b86aa28/src/distillery/config.py#L497-L519)),
+  but again — only read when the store object is constructed.
 
 ### Query-time multiplier vs index-time materialisation
 
 The decay is a **query-time multiplier**, not an index-time materialisation.
-`_recency_weight` is called inside the per-result loop at
-`src/distillery/store/duckdb.py:1644-1653`, multiplying each candidate's
-RRF score before sorting. Nothing about recency is baked into the HNSW
-index, the FTS index, or the row layout. The only thing locked in at
-construction time is the `self._recency_window_days` /
-`self._recency_min_weight` *values*, not any pre-computed decay column.
+`_recency_weight` is called inside the
+[per-result loop in the RRF fusion block](https://github.com/norrietaylor/distillery/blob/12a29e0ed9f7cd0222a2d5eb296bbeec7b86aa28/src/distillery/store/duckdb.py#L1707-L1720),
+multiplying each candidate's RRF score before sorting. Nothing about
+recency is baked into the HNSW index, the FTS index, or the row layout.
+The only thing locked in at construction time is the
+`self._recency_window_days` / `self._recency_min_weight` *values*, not
+any pre-computed decay column.
 
 This is why a per-query toggle would be a small refactor — the math is
 already entirely query-time — but the toggle doesn't exist today.
 
 ### Test evidence
 
-- `tests/test_duckdb_store.py:1107-1162` exercises hybrid search and
-  asserts that `recency_window_days=90` / `recency_min_weight=0.5` are
-  persisted on `_recency_window_days` / `_recency_min_weight` after
-  passing through the constructor. There is no test that toggles recency
-  per query — only construction-time variants.
-- `tests/test_duckdb_store.py:1377-1413` (`Tests for _recency_weight
-  calculation`) instantiates a store with specific recency parameters and
-  calls `_recency_weight` directly. Confirms the decay math but again
-  only via the constructor-injected fields.
-- `tests/test_config.py:99-199` covers config loading of
-  `recency_window_days` / `recency_min_weight` defaults and YAML overrides.
-  No test passes a recency value to `search()`; it's not in the API.
+- [`tests/test_duckdb_store.py` hybrid-search fixtures + persistence asserts (1107-1162)](https://github.com/norrietaylor/distillery/blob/12a29e0ed9f7cd0222a2d5eb296bbeec7b86aa28/tests/test_duckdb_store.py#L1107-L1162)
+  exercises hybrid search and asserts that `recency_window_days=90` /
+  `recency_min_weight=0.5` are persisted on `_recency_window_days` /
+  `_recency_min_weight` after passing through the constructor. There is
+  no test that toggles recency per query — only construction-time
+  variants.
+- [`tests/test_duckdb_store.py::TestRecencyWeight` (1377-1413)](https://github.com/norrietaylor/distillery/blob/12a29e0ed9f7cd0222a2d5eb296bbeec7b86aa28/tests/test_duckdb_store.py#L1377-L1413)
+  instantiates a store with specific recency parameters and calls
+  `_recency_weight` directly. Confirms the decay math but again only via
+  the constructor-injected fields.
+- [`tests/test_config.py` recency-default + YAML override coverage (99-199)](https://github.com/norrietaylor/distillery/blob/12a29e0ed9f7cd0222a2d5eb296bbeec7b86aa28/tests/test_config.py#L99-L199)
+  covers config loading of `recency_window_days` / `recency_min_weight`
+  defaults and YAML overrides. No test passes a recency value to
+  `search()`; it's not in the API.
 
 In summary: every test that varies recency does so by constructing a fresh
 `DuckDBStore` with different constructor kwargs. There is no test that
@@ -103,11 +115,12 @@ toggles recency on an existing store, because the API does not allow it.
 
 Setting `recency_min_weight=1.0` at construction time effectively disables
 the multiplier:
-- For entries inside the window, `_recency_weight` returns `1.0` (line
-  1503-1504, unchanged).
+- For entries inside the window,
+  [`_recency_weight` returns `1.0`](https://github.com/norrietaylor/distillery/blob/12a29e0ed9f7cd0222a2d5eb296bbeec7b86aa28/src/distillery/store/duckdb.py#L1570-L1571)
+  unchanged.
 - For entries outside the window, `decay < 1.0`, but
   `max(self._recency_min_weight, decay) == max(1.0, decay) == 1.0`
-  (line 1508).
+  ([clamp line](https://github.com/norrietaylor/distillery/blob/12a29e0ed9f7cd0222a2d5eb296bbeec7b86aa28/src/distillery/store/duckdb.py#L1575-L1575)).
 
 So `recency_min_weight=1.0` neutralises the decay multiplier without code
 changes. This still requires constructing a separate `DuckDBStore`
@@ -116,12 +129,16 @@ instance — there is no per-query equivalent.
 ## Verdict
 
 **Per-store.** Recency cannot be toggled on a per-query basis. The
-`DuckDBStore.search()` signature (`src/distillery/store/protocol.py:147-152`,
-`src/distillery/store/duckdb.py:1510-1515`) accepts no recency-related
-kwarg, and `_recency_weight` reads from instance state set in `__init__`
-(`src/distillery/store/duckdb.py:151-152, 164-165, 1491-1508`). To
-compare `--recency on` vs `--recency off`, the bench must instantiate a
-new store per cell with different `recency_min_weight` values (or with
+`DuckDBStore.search()` signature
+([protocol](https://github.com/norrietaylor/distillery/blob/12a29e0ed9f7cd0222a2d5eb296bbeec7b86aa28/src/distillery/store/protocol.py#L147-L152),
+[concrete](https://github.com/norrietaylor/distillery/blob/12a29e0ed9f7cd0222a2d5eb296bbeec7b86aa28/src/distillery/store/duckdb.py#L1577-L1582))
+accepts no recency-related kwarg, and `_recency_weight` reads from
+instance state set in `__init__`
+([kwargs](https://github.com/norrietaylor/distillery/blob/12a29e0ed9f7cd0222a2d5eb296bbeec7b86aa28/src/distillery/store/duckdb.py#L151-L152),
+[fields](https://github.com/norrietaylor/distillery/blob/12a29e0ed9f7cd0222a2d5eb296bbeec7b86aa28/src/distillery/store/duckdb.py#L164-L165),
+[function body](https://github.com/norrietaylor/distillery/blob/12a29e0ed9f7cd0222a2d5eb296bbeec7b86aa28/src/distillery/store/duckdb.py#L1558-L1575)).
+To compare `--recency on` vs `--recency off`, the bench must instantiate
+a new store per cell with different `recency_min_weight` values (or with
 the multiplier conditionally disabled via a small code change).
 
 ## Recommendation
@@ -137,9 +154,9 @@ For **W2-bench-runner**:
    `hybrid_search=True` so only the recency axis varies. This avoids
    conflating "recency off" with "hybrid off" — important because
    disabling hybrid search would also short-circuit the only path where
-   recency is applied (the vector-only fallback at
-   `src/distillery/store/duckdb.py:1583-1596` does not multiply by
-   `_recency_weight` at all).
+   recency is applied (the
+   [vector-only fallback](https://github.com/norrietaylor/distillery/blob/12a29e0ed9f7cd0222a2d5eb296bbeec7b86aa28/src/distillery/store/duckdb.py#L1650-L1663)
+   does not multiply by `_recency_weight` at all).
 3. **Cost implication.** The bench plan's headline cell (LongMemEvalₛ,
    ~500 questions, fastembed `bge-small`) already constructs an in-memory
    `DuckDBStore` per question (per the plan's verification step 4 and
