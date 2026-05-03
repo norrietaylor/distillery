@@ -109,9 +109,9 @@ distillery_relations(
 )
 ```
 
-The response envelope contains `{nodes: [{id, depth}, ...], edges: [...], node_count, edge_count}`. Pure-Python BFS, depth ≤ 3. One round-trip per seed replaces the previous per-seed `action="get"` + per-related-id `distillery_get` fan-out.
+The response envelope contains `{nodes: [{id, depth}, ...], edges: [...], node_count, edge_count}`. Pure-Python BFS, depth ≤ 2 (with `hops=2`: seed at depth 0, immediate neighbors at depth 1, two-hop neighbors at depth 2). One round-trip per seed replaces the previous per-seed `action="get"` + per-related-id `distillery_get` fan-out.
 
-Collect every node `id` from `nodes` and add unseen ones to the result set, tagged as discovered in Phase 2 (record the BFS `depth` alongside the entry — depth 1 = directly linked to the seed, depth 2 = reached via one intermediate). Record each `edges` entry as `<from_id> —[<relation_type>]→ <to_id>`.
+Collect every node `id` from `nodes` and add unseen ones to the result set, tagged as discovered in Phase 2 (record the BFS `depth` alongside the entry — depth 0 = the seed itself, depth 1 = directly linked, depth 2 = reached via one intermediate). Record each `edges` entry as `<from_id> —[<relation_type>]→ <to_id>`.
 
 For each newly discovered node id (not already fetched in Phase 1), call `distillery_get(entry_id="<id>")` to load its full content for synthesis. Skip this fetch if the traverse response already includes the entry's full content (depends on server version — if `nodes` only carries `{id, depth}`, hydration is required).
 
