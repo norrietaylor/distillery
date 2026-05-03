@@ -263,7 +263,7 @@ Heading `# Investigate: <Topic>`, then the summary line, then sections: Context 
 ```text
 # Investigate: <topic or "Entry <short-id>">
 
-Investigated "<topic>": <N> entries across <phases> phases, <K> relationship edges traversed.
+Investigated "<topic>": <N> entries across <phases> phases, <K> relationship edges traversed (hops=2), <P> potentially related via similarity.
 
 ---
 
