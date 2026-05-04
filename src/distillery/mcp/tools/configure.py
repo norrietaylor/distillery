@@ -100,6 +100,10 @@ def _coerce_value(raw_value: str | int | float, target_type: type) -> Any:
         if isinstance(raw_value, float) and raw_value != int_val:
             raise ValueError(f"Cannot losslessly convert {raw_value} to int")
         return int_val
+    if target_type is str:
+        if not isinstance(raw_value, str):
+            raise ValueError(f"Expected str, got {type(raw_value).__name__}")
+        return raw_value
     return raw_value  # pragma: no cover
 
 

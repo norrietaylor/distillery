@@ -552,3 +552,22 @@ class TestFeedsUserAgent:
         assert data["code"] == "INVALID_PARAMS"
         # Original value untouched.
         assert cfg.feeds.user_agent == ""
+
+    @pytest.mark.asyncio
+    async def test_user_agent_non_string_value_rejected_with_invalid_params(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Non-string values must surface a structured INVALID_PARAMS error
+        rather than raising TypeError inside the constraint lambda."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("DISTILLERY_CONFIG", raising=False)
+        cfg = make_config()
+        # Pass an int — must be rejected before it reaches len(val).
+        result = await _handle_configure(
+            cfg,
+            {"section": "feeds", "key": "user_agent", "value": 12345},
+        )
+        data = parse(result)
+        assert data["error"] is True
+        assert data["code"] == "INVALID_PARAMS"
+        assert cfg.feeds.user_agent == ""

@@ -732,6 +732,26 @@ class TestFeedsConfigYAML:
         with pytest.raises(ValueError, match="feeds.user_agent must be a string"):
             load_config(str(p))
 
+    def test_user_agent_null_becomes_empty_string(self, tmp_path: Path) -> None:
+        """Explicit YAML null normalises to empty string (issue #443 follow-up)."""
+        yaml_content = """\
+            feeds:
+              user_agent:
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.feeds.user_agent == ""
+
+    def test_user_agent_whitespace_is_trimmed_to_empty(self, tmp_path: Path) -> None:
+        """Whitespace-only value is stripped, falling back to default UA at request time."""
+        yaml_content = """\
+            feeds:
+              user_agent: "   "
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.feeds.user_agent == ""
+
     def test_reader_config_loaded(self, tmp_path: Path) -> None:
         yaml_content = """\
             feeds:
