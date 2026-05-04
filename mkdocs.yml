@@ -88,6 +88,7 @@ nav:
     - Team Member Guide: team/team-setup.md
     - Operator Deployment: team/deployment.md
   - Architecture: architecture.md
+  - Benchmarks: benchmarks.md
   - Contributing: contributing.md
   - Blog:
     - "Full-Proof: Distillery 0.4.0 and the Agent Memory Problem": blog/distillery-0-4-0-full-proof.md
