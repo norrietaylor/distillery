@@ -496,3 +496,59 @@ class TestReadOnlyMode:
         data = parse(result)
         assert data.get("error") is None or data.get("error") is False
         assert data["value"] == 0.85
+
+
+# ---------------------------------------------------------------------------
+# feeds.user_agent (issue #443)
+# ---------------------------------------------------------------------------
+
+
+class TestFeedsUserAgent:
+    """``feeds.user_agent`` is exposed as a runtime-configurable string so
+    deployments can override the poller UA without editing the config
+    file by hand (issue #443)."""
+
+    @pytest.mark.asyncio
+    async def test_read_default_user_agent(self) -> None:
+        cfg = make_config()
+        result = await _handle_configure(cfg, {"section": "feeds", "key": "user_agent"})
+        data = parse(result)
+        assert data.get("error") is None or data.get("error") is False
+        assert data["value"] == ""
+
+    @pytest.mark.asyncio
+    async def test_update_user_agent_in_memory(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # No config file on disk → in-memory only path.
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("DISTILLERY_CONFIG", raising=False)
+        cfg = make_config()
+        custom = "acme-bot/2.0 (+https://acme.example.com/contact)"
+        result = await _handle_configure(
+            cfg,
+            {"section": "feeds", "key": "user_agent", "value": custom},
+        )
+        data = parse(result)
+        assert data.get("error") is None or data.get("error") is False
+        assert data["changed"] is True
+        assert data["new_value"] == custom
+        assert cfg.feeds.user_agent == custom
+
+    @pytest.mark.asyncio
+    async def test_user_agent_too_long_rejected(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("DISTILLERY_CONFIG", raising=False)
+        cfg = make_config()
+        too_long = "x" * 256
+        result = await _handle_configure(
+            cfg,
+            {"section": "feeds", "key": "user_agent", "value": too_long},
+        )
+        data = parse(result)
+        assert data["error"] is True
+        assert data["code"] == "INVALID_PARAMS"
+        # Original value untouched.
+        assert cfg.feeds.user_agent == ""

@@ -161,7 +161,7 @@ def _enriched_item_text(item: FeedItem, enriched_content: str | None) -> str:
     return truncate_content("\n".join(parts))
 
 
-def _build_adapter(source: FeedSourceConfig) -> Any:
+def _build_adapter(source: FeedSourceConfig, *, user_agent: str | None = None) -> Any:
     """Instantiate the correct adapter for *source*.
 
     For GitHub sources the ``GITHUB_TOKEN`` environment variable is read and
@@ -170,6 +170,9 @@ def _build_adapter(source: FeedSourceConfig) -> Any:
 
     Args:
         source: The configured feed source.
+        user_agent: Optional User-Agent override forwarded to RSS adapters.
+            ``None`` / empty string lets the adapter pick its default
+            (project name + version + contact URL).
 
     Returns:
         An adapter instance with a ``.fetch()`` method.
@@ -195,7 +198,7 @@ def _build_adapter(source: FeedSourceConfig) -> Any:
     elif source.source_type == "rss":
         from distillery.feeds.rss import RSSAdapter
 
-        return RSSAdapter(url=source.url)
+        return RSSAdapter(url=source.url, user_agent=user_agent)
     else:
         raise ValueError(
             f"Unsupported source_type {source.source_type!r} for url {source.url!r}. "
@@ -755,7 +758,7 @@ class FeedPoller:
         """
         # Build adapter
         try:
-            adapter = _build_adapter(source)
+            adapter = _build_adapter(source, user_agent=self._config.feeds.user_agent or None)
         except ValueError as exc:
             result.errors.append(f"Failed to build adapter: {exc}")
             logger.warning("FeedPoller: %s", exc)

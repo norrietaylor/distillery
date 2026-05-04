@@ -255,3 +255,73 @@ class TestJinaReaderClientFetch:
             result = await client.fetch("https://example.com/post")
         assert result is None
         assert len(transport.calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# User-Agent (issue #443)
+# ---------------------------------------------------------------------------
+
+
+class TestJinaReaderClientUserAgent:
+    """The async poller must send a descriptive User-Agent so Reddit and
+    other contact-required upstreams accept the request (issue #443)."""
+
+    async def test_default_user_agent_contains_project_version_and_contact(self) -> None:
+        from distillery import __version__
+        from distillery.feeds.rss import DEFAULT_USER_AGENT
+
+        transport = _RecordingTransport([httpx.Response(200, text="body")])
+        client = _make_client(max_retries=0)
+        with _patched_async_client(transport):
+            await client.fetch("https://example.com/post")
+
+        assert len(transport.calls) == 1
+        ua = transport.calls[0].headers["User-Agent"]
+        assert ua == DEFAULT_USER_AGENT
+        assert "distillery" in ua.lower()
+        assert __version__ in ua
+        assert "github.com/norrietaylor/distillery" in ua
+
+    async def test_configured_user_agent_overrides_default(self) -> None:
+        custom = "acme-bot/2.0 (+https://acme.example.com/contact)"
+        transport = _RecordingTransport([httpx.Response(200, text="body")])
+        client = JinaReaderClient(
+            api_key="k",
+            max_retries=0,
+            user_agent=custom,
+        )
+        with _patched_async_client(transport):
+            await client.fetch("https://example.com/post")
+
+        assert transport.calls[0].headers["User-Agent"] == custom
+
+    async def test_empty_configured_user_agent_falls_back_to_default(self) -> None:
+        from distillery.feeds.rss import DEFAULT_USER_AGENT
+
+        for blank in ("", "   "):
+            transport = _RecordingTransport([httpx.Response(200, text="body")])
+            client = JinaReaderClient(
+                api_key="k",
+                max_retries=0,
+                user_agent=blank,
+            )
+            with _patched_async_client(transport):
+                await client.fetch("https://example.com/post")
+            assert transport.calls[0].headers["User-Agent"] == DEFAULT_USER_AGENT
+
+    def test_build_reader_client_forwards_user_agent(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("JINA_API_KEY", "real-key")
+        custom = "acme-bot/2.0"
+        client = build_reader_client(user_agent=custom)
+        assert isinstance(client, JinaReaderClient)
+        assert client._user_agent == custom
+
+    def test_build_reader_client_default_user_agent_when_unspecified(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from distillery.feeds.rss import DEFAULT_USER_AGENT
+
+        monkeypatch.setenv("JINA_API_KEY", "real-key")
+        client = build_reader_client()
+        assert isinstance(client, JinaReaderClient)
+        assert client._user_agent == DEFAULT_USER_AGENT

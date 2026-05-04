@@ -79,6 +79,15 @@ _ALLOWED_KEYS: dict[tuple[str, str], dict[str, Any]] = {
             else None
         ),
     },
+    # Issue #443: deployments hosting the poller behind a shared egress IP
+    # may need a different UA than the project default (e.g. to add their
+    # own contact address).  Empty string resets to the built-in default.
+    ("feeds", "user_agent"): {
+        "type": str,
+        "constraint": lambda _cfg, val: (
+            "feeds.user_agent must be <= 255 characters" if len(val) > 255 else None
+        ),
+    },
 }
 
 

@@ -1159,9 +1159,10 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
 
         PARAMS:
           - section (str, required): Config section path (dotted notation).
-            Valid: [feeds.thresholds, defaults, classification].
+            Valid: [feeds, feeds.thresholds, defaults, classification].
           - key (str, required): Config key within the section.
-            Valid keys by section: feeds.thresholds: [alert, digest];
+            Valid keys by section: feeds: [user_agent];
+            feeds.thresholds: [alert, digest];
             defaults: [dedup_threshold, dedup_limit, stale_days];
             classification: [confidence_threshold, mode].
           - value (str | int | float | None, optional): New value. Omit to read

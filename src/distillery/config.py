@@ -249,11 +249,19 @@ class FeedsConfig:
         sources: Ordered list of feed sources to monitor.
         thresholds: Relevance score thresholds for alert vs. digest inclusion.
         reader: Jina Reader API enrichment settings for the RSS poller.
+        user_agent: Optional override for the User-Agent header sent by the
+            RSS / Reader poller HTTP clients.  When empty (the default),
+            :data:`~distillery.feeds.rss.DEFAULT_USER_AGENT` is used —
+            ``f"distillery/{__version__} (+<repo url>)"`` — which Reddit
+            and other contact-required hosts accept.  Reddit-specific
+            override in :func:`~distillery.feeds.rss._normalise_feed_url`
+            still wins for ``reddit.com`` hosts.
     """
 
     sources: list[FeedSourceConfig] = field(default_factory=list)
     thresholds: FeedsThresholdsConfig = field(default_factory=FeedsThresholdsConfig)
     reader: ReaderConfig = field(default_factory=ReaderConfig)
+    user_agent: str = ""
 
 
 @dataclass
@@ -774,10 +782,18 @@ def _parse_feeds(raw: dict[str, Any]) -> FeedsConfig:
         raise ValueError(f"feeds.reader must be a YAML mapping, got: {type(reader_raw).__name__}")
     reader = _parse_reader(reader_raw)
 
+    user_agent_raw = raw.get("user_agent", "")
+    if user_agent_raw is None:
+        user_agent_raw = ""
+    if not isinstance(user_agent_raw, str):
+        raise ValueError(f"feeds.user_agent must be a string, got: {type(user_agent_raw).__name__}")
+    user_agent = user_agent_raw.strip()
+
     return FeedsConfig(
         sources=sources,
         thresholds=FeedsThresholdsConfig(alert=alert, digest=digest),
         reader=reader,
+        user_agent=user_agent,
     )
 
 

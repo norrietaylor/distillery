@@ -704,6 +704,34 @@ class TestFeedsConfigYAML:
         assert cfg.feeds.reader.max_retries == 2
         assert cfg.feeds.reader.concurrency == 5
 
+    def test_user_agent_default_is_empty_string(self, tmp_path: Path) -> None:
+        """``feeds.user_agent`` defaults to empty so adapters pick the
+        project default at request time (issue #443)."""
+        yaml_content = """\
+            feeds: {}
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.feeds.user_agent == ""
+
+    def test_user_agent_loaded_from_yaml(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            feeds:
+              user_agent: "acme-bot/2.0 (+https://acme.example.com/contact)"
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.feeds.user_agent == "acme-bot/2.0 (+https://acme.example.com/contact)"
+
+    def test_user_agent_non_string_raises(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            feeds:
+              user_agent: 12345
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="feeds.user_agent must be a string"):
+            load_config(str(p))
+
     def test_reader_config_loaded(self, tmp_path: Path) -> None:
         yaml_content = """\
             feeds:
