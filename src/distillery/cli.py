@@ -39,6 +39,22 @@ from distillery import __version__
 from distillery.config import CONFIG_ENV_VAR, load_config
 
 
+def _positive_int(value: str) -> int:
+    """argparse ``type`` callable that rejects ``<= 0`` integers.
+
+    Used by ``bench longmemeval`` for ``--limit`` and ``--seeds`` so the
+    CLI fails fast on ``--seeds 0`` / ``--limit -1`` rather than producing
+    an empty bench run that still exits 0.
+    """
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"invalid int value: {value!r}") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError(f"must be > 0 (got {parsed})")
+    return parsed
+
+
 def _build_parser() -> argparse.ArgumentParser:
     """Build and return the argument parser.
 
@@ -313,14 +329,14 @@ def _build_parser() -> argparse.ArgumentParser:
     longmemeval_parser.add_argument(
         "--limit",
         metavar="N",
-        type=int,
+        type=_positive_int,
         default=None,
         help="Cap the number of questions evaluated (default: full set)",
     )
     longmemeval_parser.add_argument(
         "--seeds",
         metavar="N",
-        type=int,
+        type=_positive_int,
         default=1,
         help="Number of seeds to sweep per question (default: 1)",
     )
@@ -334,7 +350,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--quiet",
         action="store_true",
         default=False,
-        help="Suppress per-question progress output",
+        help="Suppress the pre-run configuration banner on stderr",
     )
 
     return parser
@@ -1917,6 +1933,20 @@ def _cmd_bench_longmemeval(
     Returns:
         Exit code (0 on success, 1 on error).
     """
+    # Resolve and create the output directory FIRST so the cheap validation
+    # path does not depend on optional bench deps (fastembed/onnxruntime).
+    # If the user passes a bad ``--output-dir`` we want to fail in <100 ms.
+    resolved_output_dir = Path(output_dir) if output_dir else Path("bench/results")
+    try:
+        resolved_output_dir = resolved_output_dir.expanduser().resolve()
+        resolved_output_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        print(
+            f"Error: cannot create output directory {resolved_output_dir!s}: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+
     # Import lazily so `distillery --help` does not pay the cost of pulling
     # in fastembed/onnxruntime when the user is not running a bench.
     try:
@@ -1932,20 +1962,6 @@ def _cmd_bench_longmemeval(
         print(
             f"Error: bench dependencies are not installed ({exc}). "
             "Install with: pip install 'distillery-mcp[fastembed]'",
-            file=sys.stderr,
-        )
-        return 1
-
-    # Resolve and create the output directory. Default to ``bench/results/``
-    # under the current working directory so users can invoke the CLI from a
-    # checkout without extra flags.
-    resolved_output_dir = Path(output_dir) if output_dir else Path("bench/results")
-    try:
-        resolved_output_dir = resolved_output_dir.expanduser().resolve()
-        resolved_output_dir.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        print(
-            f"Error: cannot create output directory {resolved_output_dir!s}: {exc}",
             file=sys.stderr,
         )
         return 1

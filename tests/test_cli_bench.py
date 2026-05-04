@@ -248,3 +248,35 @@ class TestBenchLongmemevalRun:
         assert exc.value.code != 0
         captured = capsys.readouterr()
         assert "cannot create output directory" in captured.err.lower()
+
+
+@pytest.mark.unit
+class TestBenchLongmemevalArgValidation:
+    """argparse-time validation of ``--limit`` / ``--seeds``.
+
+    Both flags must be ``> 0`` so the bench cannot silently produce an
+    empty (and falsely successful) run. Validation happens at parse time
+    so the failure is surfaced before any heavy bench import.
+    """
+
+    @pytest.mark.parametrize(
+        "flag,value",
+        [
+            ("--limit", "0"),
+            ("--limit", "-1"),
+            ("--seeds", "0"),
+            ("--seeds", "-3"),
+        ],
+    )
+    def test_non_positive_int_rejected(
+        self,
+        flag: str,
+        value: str,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        with pytest.raises(SystemExit) as exc:
+            main(["bench", "longmemeval", flag, value])
+        # argparse always exits 2 on a bad type/value.
+        assert exc.value.code == 2
+        captured = capsys.readouterr()
+        assert "must be > 0" in captured.err
