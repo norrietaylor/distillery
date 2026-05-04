@@ -705,7 +705,7 @@ async def run_longmemeval_bench(
     appear.  This module never bakes one in.
     """
     if questions is None:
-        questions = load_longmemeval()
+        questions = await load_longmemeval()
 
     if limit is not None:
         questions = questions[:limit]
