@@ -659,6 +659,9 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         output: str | None = None,
         feed_url: str | None = None,
         include_archived: bool = False,
+        published_after: str | None = None,
+        published_before: str | None = None,
+        include_evergreen: bool = False,
     ) -> list[types.TextContent]:
         """List knowledge entries with optional filters and pagination (newest first).
 
@@ -708,6 +711,16 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             retrieve all items polled from e.g. "https://hnrss.org/frontpage".
           - include_archived (bool, optional, default=False): Include archived entries
             in the default view (same effect as status="any" when status is unset).
+          - published_after (str, optional): ISO 8601 inclusive lower bound on
+            metadata.published_at (the feed-item publication timestamp written by the
+            poller). Use this to bound the /radar candidate set by the digest window.
+          - published_before (str, optional): ISO 8601 inclusive upper bound on
+            metadata.published_at.
+          - include_evergreen (bool, optional, default=False): When False (default) and
+            published_after/published_before is set, also drops entries flagged
+            metadata.backfill=true so first-poll backfill items don't surface as
+            "new intelligence". Set to True to surface older / evergreen items
+            explicitly. See issue #444.
 
         RETURNS (success): { entries: list, count: int, total_count: int, limit: int, offset: int }
         RETURNS (error): { error: true, code: "INVALID_PARAMS" | "INTERNAL", message: "..." }
@@ -721,6 +734,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             offset=offset,
             output_mode=output_mode,
             include_archived=include_archived,
+            include_evergreen=include_evergreen,
             **_omit_none(
                 entry_type=entry_type,
                 author=author,
@@ -738,6 +752,8 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 group_by=group_by,
                 output=output,
                 feed_url=feed_url,
+                published_after=published_after,
+                published_before=published_before,
             ),
         )
         return await _handle_list(store=c["store"], arguments=args)
@@ -758,6 +774,9 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         limit: int = 10,
         tag_prefix: str | None = None,
         include_archived: bool = False,
+        published_after: str | None = None,
+        published_before: str | None = None,
+        include_evergreen: bool = False,
     ) -> list[types.TextContent]:
         """Search knowledge entries using semantic similarity (cosine distance, ranked descending).
 
@@ -785,6 +804,16 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
           - tag_prefix (str, optional): Filter tags by namespace prefix.
           - include_archived (bool, optional, default=False): Include archived entries
             in the candidate set.
+          - published_after (str, optional): ISO 8601 inclusive lower bound on
+            metadata.published_at (poller-recorded publication timestamp). Used by
+            /radar to bound the candidate set by the configured digest window.
+          - published_before (str, optional): ISO 8601 inclusive upper bound on
+            metadata.published_at.
+          - include_evergreen (bool, optional, default=False): When False (default) and
+            published_after/published_before is set, also drops entries flagged
+            metadata.backfill=true so first-poll backfill items don't surface as
+            "new intelligence". Set to True to surface older / evergreen items
+            explicitly. See issue #444.
 
         RETURNS (success): { results: [{ score: float, entry: {...} }], count: int }
         RETURNS (error): { error: true, code: "INVALID_PARAMS" | "BUDGET_EXCEEDED" | "INTERNAL", message: "..." }
@@ -797,6 +826,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             query=query,
             limit=limit,
             include_archived=include_archived,
+            include_evergreen=include_evergreen,
             **_omit_none(
                 entry_type=entry_type,
                 author=author,
@@ -808,6 +838,8 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 date_from=date_from,
                 date_to=date_to,
                 tag_prefix=tag_prefix,
+                published_after=published_after,
+                published_before=published_before,
             ),
         )
         return await _handle_search(store=c["store"], arguments=args, cfg=c["config"])

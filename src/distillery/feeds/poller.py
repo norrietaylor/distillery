@@ -402,6 +402,7 @@ def _item_to_entry_kwargs(
     keyword_map: dict[str, str] | None = None,
     *,
     enriched_content: str | None = None,
+    is_backfill: bool = False,
 ) -> dict[str, Any]:
     """Convert a :class:`~distillery.feeds.models.FeedItem` to Entry constructor kwargs.
 
@@ -421,6 +422,10 @@ def _item_to_entry_kwargs(
             ``None`` only Tier-1 source tags are applied.
         enriched_content: Optional Reader-fetched markdown to use in place
             of ``item.content``.  Provenance is recorded in metadata.
+        is_backfill: When ``True``, mark this entry as part of a first-poll
+            backfill batch via ``metadata.backfill = True``.  ``/radar`` and
+            other digest surfaces use this flag to suppress historic items
+            that pre-date the source's registration.  See issue #444.
 
     Returns:
         A dict of keyword arguments for :class:`~distillery.models.Entry`.
@@ -440,6 +445,8 @@ def _item_to_entry_kwargs(
         metadata["item_url"] = item.url
     if item.published_at:
         metadata["published_at"] = item.published_at.isoformat()
+    if is_backfill:
+        metadata["backfill"] = True
 
     if enriched_content is not None:
         # Replace the body with Reader-fetched markdown but keep the title
@@ -549,11 +556,15 @@ class FeedPoller:
             db_sources = [s for s in db_sources if s["url"] == source_url]
         # list_feed_sources returns liveness fields (last_polled_at, etc.)
         # that are not part of FeedSourceConfig — filter to the constructor
-        # kwargs before instantiation.
+        # kwargs before instantiation.  Capture which sources have never been
+        # polled so the first batch can be flagged as backfill (issue #444).
         _cfg_fields = {"url", "source_type", "label", "poll_interval_minutes", "trust_weight"}
         sources = [
             FeedSourceConfig(**{k: v for k, v in s.items() if k in _cfg_fields}) for s in db_sources
         ]
+        first_poll_urls: set[str] = {
+            s["url"] for s in db_sources if s.get("last_polled_at") is None
+        }
         if not sources:
             logger.debug("FeedPoller: no sources configured — skipping poll")
             summary.finished_at = datetime.now(tz=UTC)
@@ -601,7 +612,15 @@ class FeedPoller:
         # still advances the per-source timestamps for sources that did
         # complete (issue #404).
         results = await asyncio.gather(
-            *(self._poll_source(source, scorer, keyword_map=keyword_map) for source in sources),
+            *(
+                self._poll_source(
+                    source,
+                    scorer,
+                    keyword_map=keyword_map,
+                    is_backfill=source.url in first_poll_urls,
+                )
+                for source in sources
+            ),
             return_exceptions=True,
         )
 
@@ -695,6 +714,7 @@ class FeedPoller:
         scorer: RelevanceScorer,
         *,
         keyword_map: dict[str, str] | None = None,
+        is_backfill: bool = False,
     ) -> PollResult:
         """Poll a single source and return a :class:`PollResult`.
 
@@ -725,7 +745,13 @@ class FeedPoller:
         )
 
         try:
-            await self._do_poll_source(source, scorer, result, keyword_map=keyword_map)
+            await self._do_poll_source(
+                source,
+                scorer,
+                result,
+                keyword_map=keyword_map,
+                is_backfill=is_backfill,
+            )
         finally:
             # Persist liveness on every exit — success, handled error,
             # or cancellation — so a partial cycle still advances
@@ -748,6 +774,7 @@ class FeedPoller:
         result: PollResult,
         *,
         keyword_map: dict[str, str] | None = None,
+        is_backfill: bool = False,
     ) -> None:
         """Inner poll loop; mutates *result* in place.
 
@@ -843,6 +870,7 @@ class FeedPoller:
                     adjusted_score,
                     keyword_map,
                     enriched_content=enriched,
+                    is_backfill=is_backfill,
                 )
                 entry = Entry(**kwargs)
                 await self._store.store(entry)

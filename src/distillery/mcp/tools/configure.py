@@ -88,6 +88,10 @@ _ALLOWED_KEYS: dict[tuple[str, str], dict[str, Any]] = {
             "feeds.user_agent must be <= 255 characters" if len(val) > 255 else None
         ),
     },
+    ("feeds.digest", "window_days"): {
+        "type": int,
+        "range": (1, 3650),
+    },
 }
 
 
