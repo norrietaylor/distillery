@@ -18,6 +18,7 @@ import hashlib
 import json
 import shutil
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -153,6 +154,35 @@ def test_validate_schema_rejects_missing_keys() -> None:
 
 
 @pytest.mark.unit
+def test_validate_schema_rejects_malformed_later_question() -> None:
+    """Schema drift in non-first rows must trip validation (not just questions[0]).
+
+    Regression for CodeRabbit comment on PR #436: the original implementation
+    only spot-checked ``questions[0]``, so a bad row at index >= 1 silently
+    passed loader checks and exploded later at runtime.
+    """
+    good = dict.fromkeys(REQUIRED_QUESTION_KEYS, "x")
+    questions = [
+        good,
+        {"question": "missing the rest"},  # idx=1 — this is the bad row
+        good,
+    ]
+    with pytest.raises(DatasetSchemaError, match="missing required keys") as excinfo:
+        _validate_schema(questions)
+    assert "question 1" in str(excinfo.value)
+
+
+@pytest.mark.unit
+def test_validate_schema_rejects_non_dict_at_later_index() -> None:
+    """Non-dict entries at index > 0 must also raise (regression for PR #436)."""
+    good = dict.fromkeys(REQUIRED_QUESTION_KEYS, "x")
+    questions: list[Any] = [good, "not-a-dict", good]
+    with pytest.raises(DatasetSchemaError, match="must be dicts") as excinfo:
+        _validate_schema(questions)
+    assert "at index 1" in str(excinfo.value)
+
+
+@pytest.mark.unit
 def test_load_and_verify_full_path_with_fixture_digest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -206,13 +236,13 @@ def test_pinned_constants_are_concrete() -> None:
 
 
 @pytest.mark.integration
-def test_load_longmemeval_downloads_and_verifies(tmp_path: Path) -> None:
+async def test_load_longmemeval_downloads_and_verifies(tmp_path: Path) -> None:
     """First call: downloads the SHA-pinned dataset and verifies its hash.
 
     Note: the real ``longmemeval_s_cleaned.json`` is ~265 MB. Plan for a
     ~30-60 s run on a warm pip cache and proportional disk in ``tmp_path``.
     """
-    questions = load_longmemeval(cache_dir=tmp_path)
+    questions = await load_longmemeval(cache_dir=tmp_path)
     assert isinstance(questions, list)
     assert len(questions) == 500, "LongMemEval-S contains exactly 500 questions"
 
@@ -227,26 +257,26 @@ def test_load_longmemeval_downloads_and_verifies(tmp_path: Path) -> None:
 
 
 @pytest.mark.integration
-def test_load_longmemeval_warm_cache_offline(
+async def test_load_longmemeval_warm_cache_offline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Second call from the same cache must succeed with HF offline mode set."""
     # Warm the cache.
-    load_longmemeval(cache_dir=tmp_path)
+    await load_longmemeval(cache_dir=tmp_path)
 
     # Force HF to refuse network access; the warm cache must satisfy the call.
     monkeypatch.setenv("HF_HUB_OFFLINE", "1")
     monkeypatch.setenv("TRANSFORMERS_OFFLINE", "1")
-    questions = load_longmemeval(cache_dir=tmp_path)
+    questions = await load_longmemeval(cache_dir=tmp_path)
     assert len(questions) == 500
 
 
 @pytest.mark.integration
-def test_load_longmemeval_corrupt_cache_raises(
+async def test_load_longmemeval_corrupt_cache_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """If the cached blob is tampered with, the loader must refuse to return it."""
-    load_longmemeval(cache_dir=tmp_path)
+    await load_longmemeval(cache_dir=tmp_path)
 
     # Locate the cached snapshot entry. snapshot_download uses HF's canonical
     # cache layout: <cache>/datasets--<owner>--<repo>/snapshots/<sha>/<file>.
@@ -265,4 +295,4 @@ def test_load_longmemeval_corrupt_cache_raises(
 
     monkeypatch.setenv("HF_HUB_OFFLINE", "1")
     with pytest.raises(DatasetIntegrityError, match="SHA-256 mismatch"):
-        load_longmemeval(cache_dir=tmp_path)
+        await load_longmemeval(cache_dir=tmp_path)

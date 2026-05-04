@@ -35,6 +35,7 @@ must ship under its own ADR.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -113,19 +114,21 @@ def _verify_sha256(path: Path, expected: str) -> None:
 
 
 def _validate_schema(questions: list[dict[str, Any]]) -> None:
-    """Spot-check the first question for the contracted key set."""
+    """Validate each question for the contracted key set."""
     if not questions:
         raise DatasetSchemaError("Dataset is empty — expected 500 questions.")
-    first = questions[0]
-    if not isinstance(first, dict):
-        raise DatasetSchemaError(f"Top-level entries must be dicts, got {type(first).__name__}.")
-    missing = REQUIRED_QUESTION_KEYS - set(first.keys())
-    if missing:
-        raise DatasetSchemaError(
-            f"Dataset schema drift: question 0 missing required keys "
-            f"{sorted(missing)}. Pinned revision {DATASET_REVISION_SHA} should "
-            f"contain {sorted(REQUIRED_QUESTION_KEYS)}."
-        )
+    for idx, question in enumerate(questions):
+        if not isinstance(question, dict):
+            raise DatasetSchemaError(
+                f"Top-level entries must be dicts, got {type(question).__name__} at index {idx}."
+            )
+        missing = REQUIRED_QUESTION_KEYS - set(question.keys())
+        if missing:
+            raise DatasetSchemaError(
+                f"Dataset schema drift: question {idx} missing required keys "
+                f"{sorted(missing)}. Pinned revision {DATASET_REVISION_SHA} should "
+                f"contain {sorted(REQUIRED_QUESTION_KEYS)}."
+            )
 
 
 def _load_and_verify(json_path: Path) -> list[dict[str, Any]]:
@@ -139,8 +142,18 @@ def _load_and_verify(json_path: Path) -> list[dict[str, Any]]:
     return parsed
 
 
-def load_longmemeval(cache_dir: Path | None = None) -> list[dict[str, Any]]:
+async def load_longmemeval(cache_dir: Path | None = None) -> list[dict[str, Any]]:
     """Download (if needed), verify, and return the LongMemEval-S question list.
+
+    This is the public entry point and is ``async`` per the repository
+    storage-async convention (see ``CLAUDE.md``: *all storage operations must
+    be async using async/await patterns*). The blocking calls
+    (``snapshot_download``, SHA-256 streaming, JSON parse) are dispatched via
+    :func:`asyncio.to_thread` so the event loop is never blocked. Internal
+    helpers (``_default_cache_dir``, ``_sha256_file``, ``_load_and_verify``,
+    ``_validate_schema``) remain sync — they are single-call, short, and
+    making them async would force every caller-of-caller chain to be async
+    without benefit.
 
     Parameters
     ----------
@@ -163,8 +176,8 @@ def load_longmemeval(cache_dir: Path | None = None) -> list[dict[str, Any]]:
         If the downloaded JSON's SHA-256 does not match
         :data:`DATASET_FILE_SHA256`.
     DatasetSchemaError
-        If the parsed JSON is empty, not a list, or the first question is
-        missing one of :data:`REQUIRED_QUESTION_KEYS`.
+        If the parsed JSON is empty, not a list, or any question is missing
+        one of :data:`REQUIRED_QUESTION_KEYS`.
     ImportError
         If ``huggingface_hub`` is not installed (it lives in the ``[dev]``
         optional group).
@@ -181,7 +194,8 @@ def load_longmemeval(cache_dir: Path | None = None) -> list[dict[str, Any]]:
             "pip install -e '.[dev]'"
         ) from exc
 
-    snapshot_dir_str = snapshot_download(
+    snapshot_dir_str = await asyncio.to_thread(
+        snapshot_download,
         repo_id=DATASET_REPO_ID,
         revision=DATASET_REVISION_SHA,
         repo_type="dataset",
@@ -196,7 +210,7 @@ def load_longmemeval(cache_dir: Path | None = None) -> list[dict[str, Any]]:
             f"from {snapshot_dir}. The pinned revision may not contain this "
             f"file (revision={DATASET_REVISION_SHA})."
         )
-    return _load_and_verify(json_path)
+    return await asyncio.to_thread(_load_and_verify, json_path)
 
 
 __all__ = [
