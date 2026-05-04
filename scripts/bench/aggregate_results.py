@@ -63,8 +63,12 @@ logger = logging.getLogger(__name__)
 
 # These four axis values define "the" headline cell. Anything else is an
 # auxiliary matrix cell. The runner (`src/distillery/eval/longmemeval.py`)
-# emits these same axis values into ``summary["axes"]``, so equality
-# matching is exact.
+# emits the same retrieval/granularity/embed_model values into
+# ``summary["axes"]``; the recency axis is emitted there as
+# ``recency_requested`` (PR #439 split the axis into requested vs.
+# effective). The aggregator normalises ``recency_requested`` →
+# ``recency`` on load so headline matching stays exact against this
+# config.
 DEFAULT_HEADLINE_CONFIG: dict[str, str] = {
     "retrieval": "hybrid",
     "granularity": "session",
@@ -171,12 +175,27 @@ def _load_summaries(results_dir: Path) -> list[SummaryRecord]:
         # Prefer the in-file ``axes`` dict (it's authoritative — the
         # filename was derived from it) but fall back to filename parsing
         # if the file lacks the axes block.
+        #
+        # Schema note: PR #439 (longmemeval runner) split the old
+        # ``recency`` axis into ``recency_requested`` (what the user
+        # asked for, also encoded in the filename) and
+        # ``effective_recency`` (what actually applied — ``raw``
+        # retrieval force-bypasses recency). Match against
+        # ``recency_requested`` because that is what the filename token
+        # and the pre-registered headline config both encode. We keep
+        # the internal axis key as ``recency`` so headline matching,
+        # badge filenames, and SUMMARY.md formatting stay stable.
+        # ``recency`` is accepted as a fallback so legacy summary files
+        # produced before the schema change still load.
         axes_payload = data.get("axes") if isinstance(data, dict) else None
         if isinstance(axes_payload, dict):
+            recency_value = axes_payload.get(
+                "recency_requested", axes_payload.get("recency", match["recency"])
+            )
             axes = {
                 "retrieval": str(axes_payload.get("retrieval", match["retrieval"])),
                 "granularity": str(axes_payload.get("granularity", match["granularity"])),
-                "recency": str(axes_payload.get("recency", match["recency"])),
+                "recency": str(recency_value),
                 "embed_model": str(axes_payload.get("embed_model", match["embed"])),
             }
         else:

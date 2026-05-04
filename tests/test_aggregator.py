@@ -75,10 +75,16 @@ def _summary_payload(
                 "ndcg_at_10": max(0.0, ndcg10 - 0.05),
             },
         },
+        # Mirror the runner's post-#439 schema: recency split into
+        # ``recency_requested`` (the user-asked value, also encoded in
+        # the filename) and ``effective_recency`` (what actually
+        # applied — vector-only ``raw`` retrieval force-bypasses
+        # recency).
         "axes": {
             "retrieval": retrieval,
             "granularity": granularity,
-            "recency": recency,
+            "recency_requested": recency,
+            "effective_recency": "off" if retrieval == "raw" else recency,
             "embed_model": embed_model,
             "seeds": 1,
             "limit": None,
