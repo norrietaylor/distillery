@@ -43,7 +43,7 @@ endpoint format) will carry the latest headline triplet for the README badges.
 
 ## Structure (after all slices land)
 
-```
+```text
 bench/
   HEADLINE.md          # pre-registered headline cell + metric triplet
   LIMITATIONS.md       # what the numbers do not claim

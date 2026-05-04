@@ -97,7 +97,7 @@ carry this panel as folklore until the panel is reconstructed.
 - A badge on the README shows the headline triplet **with a link to this file**.
 - The MkDocs benchmarks page leads with a callout pointing here.
 - Internal ablation tables are clearly labelled "Distillery configurations only."
-- Per-question JSONL receipts and `summary.json` files always carry the SHA panel.
+- Per-question JSONL receipts (`results_*.jsonl`) and per-cell `summary_*.json` files always carry the SHA panel; the aggregated `bench/results/SUMMARY.md` is regenerated from them.
 - A reviewer who finds a number anywhere in the project without the SHA panel
   should reject the PR or open an issue to retract.
 

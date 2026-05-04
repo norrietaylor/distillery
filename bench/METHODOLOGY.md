@@ -44,7 +44,7 @@ Every question in the dataset is evaluated in isolation:
    `haystack_session_id` (or `<sess>_turn_<n>` derivative for per-turn
    granularity) is stored on `entry.metadata.session_id` so it can be recovered
    from `SearchResult` after retrieval.
-4. Call `store.search(question, limit=50)`. Top-50 is wide enough that R@5,
+4. Call `await store.search(query=question, filters=None, limit=50)`. Top-50 is wide enough that R@5,
    R@10, and NDCG@10 are not truncated.
 5. Map each `SearchResult.entry.metadata["session_id"]` back through the
    haystack to derive the predicted `answer_session_id`. Compare predicted
