@@ -79,6 +79,10 @@ _ALLOWED_KEYS: dict[tuple[str, str], dict[str, Any]] = {
             else None
         ),
     },
+    ("feeds.digest", "window_days"): {
+        "type": int,
+        "range": (1, 3650),
+    },
 }
 
 

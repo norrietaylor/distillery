@@ -1618,7 +1618,8 @@ def _build_filters_from_arguments(arguments: dict[str, Any]) -> dict[str, Any] |
 
     Keys extracted: ``entry_type``, ``author``, ``project``, ``tags``,
     ``status``, ``verification``, ``source``, ``date_from``, ``date_to``,
-    ``tag_prefix``, ``session_id``, ``feed_url``.
+    ``tag_prefix``, ``session_id``, ``feed_url``, ``published_after``,
+    ``published_before``.
 
     The ``feed_url`` key is translated to a ``metadata.source_url`` filter so
     callers can retrieve entries ingested from a registered feed source
@@ -1626,6 +1627,12 @@ def _build_filters_from_arguments(arguments: dict[str, Any]) -> dict[str, Any] |
     the entry's ``source`` column is set to ``import``).  URL-shaped
     ``source`` values are routed to ``feed_url`` upstream by
     :func:`_alias_source_url_to_feed_url`.
+
+    The ``published_after`` / ``published_before`` keys filter on
+    ``metadata.published_at`` (the feed-item publication timestamp recorded by
+    the poller) and ``include_evergreen=False`` adds an ``exclude_backfill``
+    flag so first-poll backfill items are dropped from the candidate set.
+    Together these implement the ``/radar`` published-at floor for issue #444.
 
     Args:
         arguments: The tool argument dict.
@@ -1645,6 +1652,8 @@ def _build_filters_from_arguments(arguments: dict[str, Any]) -> dict[str, Any] |
         "date_to",
         "tag_prefix",
         "session_id",
+        "published_after",
+        "published_before",
     )
     filters: dict[str, Any] = {}
     for key in filter_keys:
@@ -1655,6 +1664,30 @@ def _build_filters_from_arguments(arguments: dict[str, Any]) -> dict[str, Any] |
     feed_url = arguments.get("feed_url")
     if feed_url is not None:
         filters["metadata.source_url"] = feed_url
+
+    # /radar published-at floor (issue #444).  ``include_evergreen`` defaults
+    # to False at the skill layer; when explicitly True the caller wants
+    # evergreen / backfilled material surfaced regardless of age.  When False
+    # (or absent) we add ``exclude_backfill`` so first-poll backfill batches
+    # are hidden from default digest queries.  The ``published_after`` clause
+    # is supplied by the caller (typically the skill computes
+    # ``now - digest.window_days``).
+    include_evergreen_raw = arguments.get("include_evergreen")
+    if include_evergreen_raw is not None and not isinstance(include_evergreen_raw, bool):
+        # Defer error reporting to the handler; coerce truthy strings here
+        # so callers can pass either bool or canonical string.
+        if isinstance(include_evergreen_raw, str):
+            include_evergreen = include_evergreen_raw.strip().lower() in {"true", "1", "yes"}
+        else:
+            include_evergreen = bool(include_evergreen_raw)
+    else:
+        include_evergreen = bool(include_evergreen_raw) if include_evergreen_raw else False
+
+    if not include_evergreen and ("published_after" in filters or "published_before" in filters):
+        # Only attach exclude_backfill when a published-at bound is in play —
+        # otherwise generic list/search calls without time-window semantics
+        # would silently lose backfill material.
+        filters["exclude_backfill"] = True
 
     return filters if filters else None
 
