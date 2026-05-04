@@ -614,6 +614,97 @@ class TestRSSAdapter:
 
 
 # ---------------------------------------------------------------------------
+# RSSAdapter User-Agent (issue #443)
+# ---------------------------------------------------------------------------
+
+
+class TestRSSAdapterUserAgent:
+    """Issue #443: poller must send a descriptive User-Agent so Reddit
+    and other contact-required hosts accept the request."""
+
+    def _fetch_and_capture_headers(
+        self, *, url: str, user_agent: str | None = None
+    ) -> dict[str, str]:
+        from distillery.feeds.rss import RSSAdapter
+
+        mock_response = MagicMock()
+        mock_response.content = _RSS_XML
+        mock_response.raise_for_status.return_value = None
+
+        with patch("distillery.feeds.rss.httpx.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.get.return_value = mock_response
+            mock_client_cls.return_value = mock_client
+
+            if user_agent is None:
+                adapter = RSSAdapter(url)
+            else:
+                adapter = RSSAdapter(url, user_agent=user_agent)
+            adapter.fetch()
+
+            assert mock_client.get.call_count == 1
+            _, kwargs = mock_client.get.call_args
+            headers = kwargs.get("headers", {})
+            assert isinstance(headers, dict)
+            return headers
+
+    def test_default_user_agent_includes_project_version_and_contact(self) -> None:
+        """Default UA carries project name, version, and the GitHub contact URL."""
+        from distillery import __version__
+        from distillery.feeds.rss import DEFAULT_USER_AGENT
+
+        headers = self._fetch_and_capture_headers(url="https://example.com/rss")
+
+        ua = headers["User-Agent"]
+        assert ua == DEFAULT_USER_AGENT
+        assert "distillery" in ua.lower()
+        assert __version__ in ua
+        assert "github.com/norrietaylor/distillery" in ua
+
+    def test_configured_user_agent_overrides_default(self) -> None:
+        """Caller-supplied ``user_agent`` wins for non-Reddit hosts."""
+        custom = "acme-bot/2.0 (+https://acme.example.com/contact)"
+        headers = self._fetch_and_capture_headers(
+            url="https://example.com/rss",
+            user_agent=custom,
+        )
+        assert headers["User-Agent"] == custom
+
+    def test_empty_configured_user_agent_falls_back_to_default(self) -> None:
+        """Whitespace-only / empty overrides do not regress to a blank UA."""
+        from distillery.feeds.rss import DEFAULT_USER_AGENT
+
+        for blank in ("", "   "):
+            headers = self._fetch_and_capture_headers(
+                url="https://example.com/rss",
+                user_agent=blank,
+            )
+            assert headers["User-Agent"] == DEFAULT_USER_AGENT
+
+    def test_reddit_override_still_wins_when_configured_ua_is_set(self) -> None:
+        """Reddit hosts must always receive the descriptive bot UA, even when
+        ``user_agent`` is explicitly configured to something else."""
+        from distillery.feeds.rss import _REDDIT_USER_AGENT
+
+        headers = self._fetch_and_capture_headers(
+            url="https://www.reddit.com/r/python/.rss",
+            user_agent="acme-bot/2.0",
+        )
+        assert headers["User-Agent"] == _REDDIT_USER_AGENT
+
+    def test_reddit_override_applied_with_default_user_agent(self) -> None:
+        """Reddit hosts get the Reddit-specific UA out of the box."""
+        from distillery.feeds.rss import _REDDIT_USER_AGENT
+
+        headers = self._fetch_and_capture_headers(
+            url="https://www.reddit.com/r/python/",
+        )
+        assert headers["User-Agent"] == _REDDIT_USER_AGENT
+
+
+# ---------------------------------------------------------------------------
 # _derive_source_tags
 # ---------------------------------------------------------------------------
 

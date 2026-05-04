@@ -450,7 +450,7 @@ class TestFeedPollerMultipleSources:
         }
         cfg = _make_config(sources=sources, digest_threshold=0.0)
 
-        def _build_adapter_side_effect(source: FeedSourceConfig) -> MagicMock:
+        def _build_adapter_side_effect(source: FeedSourceConfig, **_kwargs: object) -> MagicMock:
             mock = MagicMock()
             mock.fetch.return_value = source_items_map[source.url]
             return mock
@@ -497,7 +497,7 @@ class TestFeedPollerParallel:
         }
         cfg = _make_config(sources=sources, digest_threshold=0.0)
 
-        def _build_adapter_side_effect(source: FeedSourceConfig) -> MagicMock:
+        def _build_adapter_side_effect(source: FeedSourceConfig, **_kwargs: object) -> MagicMock:
             mock = MagicMock()
             mock.fetch.return_value = source_items_map[source.url]
             return mock
@@ -527,7 +527,7 @@ class TestFeedPollerParallel:
 
         cfg = _make_config(sources=sources, digest_threshold=0.0)
 
-        def _build_adapter_side_effect(source: FeedSourceConfig) -> MagicMock:
+        def _build_adapter_side_effect(source: FeedSourceConfig, **_kwargs: object) -> MagicMock:
             mock = MagicMock()
             if source.url == "https://bad.com/rss":
                 mock.fetch.side_effect = RuntimeError("network error")
@@ -1080,6 +1080,8 @@ class TestLastPolledAtAdvancesPerSource:
             assert sources[0]["next_poll_at"] is not None
         finally:
             await store.close()
+
+
 # ---------------------------------------------------------------------------
 # Reader enrichment integration (#403)
 # ---------------------------------------------------------------------------
