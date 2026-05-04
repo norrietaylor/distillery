@@ -51,6 +51,9 @@ dev = [
     "types-PyYAML>=6.0",
     "types-defusedxml>=0.7.0",
     "pytest-httpx>=0.30.0",
+    # Bench tooling: SHA-pinned dataset downloads from HuggingFace.
+    # Dev-only — never required by the runtime install.
+    "huggingface_hub>=0.24,<1.0",
 ]
 docs = [
     "mkdocs-material>=9.5",
