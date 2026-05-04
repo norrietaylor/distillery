@@ -242,6 +242,24 @@ class ReaderConfig:
 
 
 @dataclass
+class DigestConfig:
+    """Digest / ``/radar`` candidate-set configuration.
+
+    Attributes:
+        window_days: Default look-back window in days for the ``/radar``
+            digest.  Items whose ``metadata.published_at`` is older than
+            this window are excluded from the default candidate set, as are
+            items flagged ``metadata.backfill = true`` regardless of
+            published date.  Callers can override per-call via the
+            ``published_after`` / ``include_evergreen`` arguments on
+            :func:`distillery_search` and :func:`distillery_list`.
+            Default ``7``.
+    """
+
+    window_days: int = 7
+
+
+@dataclass
 class FeedsConfig:
     """Ambient feed monitoring configuration.
 
@@ -249,11 +267,13 @@ class FeedsConfig:
         sources: Ordered list of feed sources to monitor.
         thresholds: Relevance score thresholds for alert vs. digest inclusion.
         reader: Jina Reader API enrichment settings for the RSS poller.
+        digest: ``/radar`` candidate-set settings (look-back window, etc.).
     """
 
     sources: list[FeedSourceConfig] = field(default_factory=list)
     thresholds: FeedsThresholdsConfig = field(default_factory=FeedsThresholdsConfig)
     reader: ReaderConfig = field(default_factory=ReaderConfig)
+    digest: DigestConfig = field(default_factory=DigestConfig)
 
 
 @dataclass
@@ -774,11 +794,35 @@ def _parse_feeds(raw: dict[str, Any]) -> FeedsConfig:
         raise ValueError(f"feeds.reader must be a YAML mapping, got: {type(reader_raw).__name__}")
     reader = _parse_reader(reader_raw)
 
+    digest_raw = raw.get("digest", {}) or {}
+    if not isinstance(digest_raw, dict):
+        raise ValueError(f"feeds.digest must be a YAML mapping, got: {type(digest_raw).__name__}")
+    digest_cfg = _parse_digest(digest_raw)
+
     return FeedsConfig(
         sources=sources,
         thresholds=FeedsThresholdsConfig(alert=alert, digest=digest),
         reader=reader,
+        digest=digest_cfg,
     )
+
+
+def _parse_digest(raw: dict[str, Any]) -> DigestConfig:
+    """Parse the ``feeds.digest`` section from a raw YAML mapping.
+
+    Args:
+        raw: Mapping with optional key ``window_days`` (positive int, default 7).
+
+    Returns:
+        A populated :class:`DigestConfig` instance.
+
+    Raises:
+        ValueError: If ``window_days`` is not a positive integer.
+    """
+    window_days = _parse_strict_int(raw.get("window_days", 7), "feeds.digest.window_days")
+    if window_days <= 0:
+        raise ValueError(f"feeds.digest.window_days must be a positive integer, got: {window_days}")
+    return DigestConfig(window_days=window_days)
 
 
 def _parse_reader(raw: dict[str, Any]) -> ReaderConfig:
