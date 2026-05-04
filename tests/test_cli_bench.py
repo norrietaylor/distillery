@@ -221,6 +221,64 @@ class TestBenchLongmemevalRun:
         assert match is not None, f"unexpected summary line: {summary_line!r}"
         assert str(jsonl_files[0]) in summary_line
 
+    def test_smoke_run_format_json_emits_parseable_envelope(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """``--format json`` must emit a single JSON object on stdout.
+
+        The scripted-automation contract is JSON, so this catches stray
+        prints and key-shape regressions on the most automation-sensitive
+        path.
+        """
+        from distillery.eval import longmemeval as bench_module
+
+        def _stub_provider(_model: str) -> _KeywordEmbedder:
+            return _KeywordEmbedder()
+
+        async def _stub_loader() -> list[dict[str, Any]]:
+            return _load_fixture()
+
+        monkeypatch.setattr(bench_module, "_build_embedding_provider", _stub_provider)
+        monkeypatch.setattr(bench_module, "load_longmemeval", _stub_loader)
+
+        out_dir = tmp_path / "results-json"
+
+        with pytest.raises(SystemExit) as exc:
+            main(
+                [
+                    "--format",
+                    "json",
+                    "bench",
+                    "longmemeval",
+                    "--limit",
+                    "1",
+                    "--output-dir",
+                    str(out_dir),
+                    "--quiet",
+                ]
+            )
+        assert exc.value.code == 0, "CLI exit code should be 0 on success"
+
+        captured = capsys.readouterr()
+        # Stdout must be exactly one JSON object — no banner, no trailing
+        # text. A clean parse + key check is sufficient.
+        payload = json.loads(captured.out.strip())
+        assert isinstance(payload, dict)
+        for key in (
+            "n_questions",
+            "recall_at_5",
+            "recall_at_10",
+            "ndcg_at_10",
+            "jsonl_path",
+            "summary_path",
+        ):
+            assert key in payload, f"missing {key} from JSON envelope"
+        assert payload["jsonl_path"] is not None
+        assert payload["jsonl_path"].endswith(".jsonl")
+
     def test_invalid_output_dir_errors(
         self,
         tmp_path: Path,
