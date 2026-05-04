@@ -110,11 +110,16 @@ jobs:
       # subsequent install step, every `:memory:` DuckDBStore in the
       # bench falls back to brute-force vector search, silently
       # invalidating the measurement.
+      - name: Get DuckDB version
+        id: get-duckdb-version
+        run: |
+          python -c "import duckdb; print(f'duckdb_version={duckdb.__version__}')" >> "$GITHUB_OUTPUT"
+
       - name: Cache DuckDB VSS extension
         uses: actions/cache@v4
         with:
           path: ~/.duckdb/extensions
-          key: duckdb-vss-${{ runner.os }}-${{ runner.arch }}-v1
+          key: duckdb-vss-${{ steps.get-duckdb-version.outputs.duckdb_version }}-${{ runner.os }}-${{ runner.arch }}-v1
 
       - name: Pre-install DuckDB VSS extension
         run: |
