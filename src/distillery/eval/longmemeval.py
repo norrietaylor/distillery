@@ -280,22 +280,28 @@ def _parse_haystack_date(value: str) -> datetime:
 
     The dataset embeds a weekday in parentheses between the date and
     the time-of-day; we discard it.  Returns a UTC-aware datetime.
-    Falls back to :func:`datetime.now` on parse failure so a single
-    malformed date doesn't crash the whole bench.
+    Falls back to the Unix epoch on parse failure or invalid calendar
+    values (e.g. ``2026-02-30``) so a single malformed date doesn't
+    crash the whole bench *and* doesn't inflate recency by silently
+    treating the row as "now".
     """
+    fallback = datetime(1970, 1, 1, tzinfo=UTC)
     if not isinstance(value, str):
-        return datetime.now(tz=UTC)
+        return fallback
     match = _DATE_RE.match(value.strip())
     if not match:
-        return datetime.now(tz=UTC)
-    return datetime(
-        int(match["y"]),
-        int(match["m"]),
-        int(match["d"]),
-        int(match["hh"]),
-        int(match["mm"]),
-        tzinfo=UTC,
-    )
+        return fallback
+    try:
+        return datetime(
+            int(match["y"]),
+            int(match["m"]),
+            int(match["d"]),
+            int(match["hh"]),
+            int(match["mm"]),
+            tzinfo=UTC,
+        )
+    except ValueError:
+        return fallback
 
 
 # ---------------------------------------------------------------------------
@@ -444,7 +450,7 @@ async def _run_one_question(
     retrieval: RetrievalMode,
     granularity: GranularityMode,
     recency: RecencyMode,
-    embed_model: EmbedModel,
+    embedder: Any,
     git_sha: str,
 ) -> QuestionRecord:
     """Build a fresh store, ingest the haystack, search, and score.
@@ -452,10 +458,12 @@ async def _run_one_question(
     Returns a fully-populated :class:`QuestionRecord`.  The PRNG seed is
     set *before* the store is constructed so HNSW insertion-order
     non-determinism is bounded by the seed.
+
+    The ``embedder`` is provided by the caller so model/client init
+    overhead (~1-2s for fastembed weights) is paid once per bench run
+    rather than once per question.
     """
     _seed_prng(seed)
-
-    embedder = _build_embedding_provider(embed_model)
 
     # Decide effective hybrid + recency settings.  See the module
     # docstring for the rationale: raw retrieval implicitly disables
@@ -705,6 +713,10 @@ async def run_longmemeval_bench(
     git_sha = _git_sha()
     all_records: list[QuestionRecord] = []
 
+    # Build the embedder once for the whole run.  Fastembed weight load
+    # is ~1-2s; on a full 500-question sweep this saves 500-1000s.
+    embedder = _build_embedding_provider(embed_model)
+
     for seed_offset in range(max(1, seeds)):
         for q_idx, question in enumerate(questions):
             # Seed is question-index + seed-offset so two seeds for the
@@ -716,7 +728,7 @@ async def run_longmemeval_bench(
                 retrieval=retrieval,
                 granularity=granularity,
                 recency=recency,
-                embed_model=embed_model,
+                embedder=embedder,
                 git_sha=git_sha,
             )
             all_records.append(record)
@@ -725,7 +737,8 @@ async def run_longmemeval_bench(
     summary["axes"] = {
         "retrieval": retrieval,
         "granularity": granularity,
-        "recency": recency,
+        "recency_requested": recency,
+        "effective_recency": "off" if retrieval == "raw" else recency,
         "embed_model": embed_model,
         "seeds": max(1, seeds),
         "limit": limit,

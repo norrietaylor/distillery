@@ -42,6 +42,7 @@ from distillery.eval.longmemeval import (
     QuestionRecord,
     _build_corpus,
     _expected_id_set,
+    _parse_haystack_date,
     run_longmemeval_bench,
 )
 
@@ -75,6 +76,20 @@ class _KeywordEmbedder:
     and queries are vectorised by counting occurrences of each lexicon
     word — so the cosine between a query and a relevant haystack
     session is high without any network or weights involved.
+
+    Note on fixture choice
+    ----------------------
+    This is intentionally a module-local stub rather than the shared
+    ``deterministic_embedding_provider`` from ``tests/conftest.py``.
+    The shared fixture is a *registry* (caller must
+    ``register(text, vector)`` for every text it cares about) and falls
+    back to opaque hash vectors for everything else — that does not
+    produce meaningful cosine similarity between a query string and a
+    *different* haystack session string mentioning the same topic.
+    The keyword-overlap design here lets the fixture's queries hit the
+    intended haystack sessions automatically (e.g. "moving to Lisbon"
+    in the question matches "I'm moving to Lisbon" in the haystack)
+    without having to enumerate every (query, document) pair upfront.
     """
 
     _LEXICON = (
@@ -412,6 +427,83 @@ async def test_raw_retrieval_records_effective_recency_off() -> None:
         "raw retrieval must record effective_recency=off because the "
         "vector-only path bypasses the recency multiplier"
     )
+
+
+def test_parse_haystack_date_falls_back_to_epoch_on_invalid_input() -> None:
+    """``_parse_haystack_date`` returns the Unix epoch for unparseable input.
+
+    Three regression cases:
+
+    * **Invalid calendar value** (``"2026-02-30"``) — previously crashed
+      because ``datetime(...)`` raises ``ValueError`` and the function
+      had no guard.  CodeRabbit on PR #439 (Critical).
+    * **Plain garbage string** — the regex never matched; previously
+      this returned ``datetime.now(tz=UTC)`` which silently inflated
+      the row's recency to "today".  Now epoch.
+    * **Non-string input** (``None``) — same fallback path; epoch, not
+      ``datetime.now``.
+
+    Picking the epoch over ``datetime.now`` keeps malformed haystack
+    rows from masquerading as the most-recent material when the
+    recency multiplier runs.
+    """
+    epoch = datetime(1970, 1, 1, tzinfo=UTC)
+
+    # The runner's regex is forgiving on the slash-vs-dash separator,
+    # but the calendar values still go through ``datetime(...)``.  We
+    # exercise the date string CodeRabbit called out plus a couple of
+    # other fall-through paths.
+    assert _parse_haystack_date("2026/02/30 12:00") == epoch
+    assert _parse_haystack_date("not a date") == epoch
+    assert _parse_haystack_date(None) == epoch  # type: ignore[arg-type]
+    # Empty string and stray whitespace also fail the regex → epoch.
+    assert _parse_haystack_date("") == epoch
+    assert _parse_haystack_date("   ") == epoch
+    # Sanity: a well-formed date still parses correctly so the regex
+    # branch isn't broken by the new guard.
+    assert _parse_haystack_date("2024/06/01 (Sat) 09:00") == datetime(2024, 6, 1, 9, 0, tzinfo=UTC)
+
+
+async def test_summary_axes_exposes_effective_recency(tmp_path: Path) -> None:
+    """``summary["axes"]`` carries both ``recency_requested`` and
+    ``effective_recency`` so consumers reading only the summary cannot
+    be misled when ``retrieval=raw`` silently disables recency.
+
+    Before the fix, ``axes`` exposed only ``recency`` which silently
+    disagreed with per-record ``_meta.effective_recency`` for raw
+    retrieval.  The summary now mirrors the per-record schema.
+    """
+    questions = _load_fixture()
+
+    report_raw = await run_longmemeval_bench(
+        retrieval="raw",
+        granularity="session",
+        recency="on",  # requested but bypassed by raw path
+        embed_model="bge-small",
+        questions=questions[:1],
+    )
+    axes_raw = report_raw.summary["axes"]
+    assert axes_raw["recency_requested"] == "on"
+    assert axes_raw["effective_recency"] == "off", (
+        "raw retrieval must report effective_recency=off in the summary "
+        "so a consumer reading only summary.json cannot misread the cell"
+    )
+    # The legacy ``recency`` key is replaced; absence is the contract
+    # so downstream tools must use the explicit *_requested / effective
+    # split.
+    assert "recency" not in axes_raw
+
+    report_hybrid = await run_longmemeval_bench(
+        retrieval="hybrid",
+        granularity="session",
+        recency="off",
+        embed_model="bge-small",
+        questions=questions[:1],
+    )
+    axes_hybrid = report_hybrid.summary["axes"]
+    assert axes_hybrid["recency_requested"] == "off"
+    assert axes_hybrid["effective_recency"] == "off"
+    assert "recency" not in axes_hybrid
 
 
 def test_filename_schema_includes_every_axis(tmp_path: Path) -> None:
