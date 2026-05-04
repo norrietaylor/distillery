@@ -79,6 +79,15 @@ _ALLOWED_KEYS: dict[tuple[str, str], dict[str, Any]] = {
             else None
         ),
     },
+    # Issue #443: deployments hosting the poller behind a shared egress IP
+    # may need a different UA than the project default (e.g. to add their
+    # own contact address).  Empty string resets to the built-in default.
+    ("feeds", "user_agent"): {
+        "type": str,
+        "constraint": lambda _cfg, val: (
+            "feeds.user_agent must be <= 255 characters" if len(val) > 255 else None
+        ),
+    },
     ("feeds.digest", "window_days"): {
         "type": int,
         "range": (1, 3650),
@@ -95,6 +104,10 @@ def _coerce_value(raw_value: str | int | float, target_type: type) -> Any:
         if isinstance(raw_value, float) and raw_value != int_val:
             raise ValueError(f"Cannot losslessly convert {raw_value} to int")
         return int_val
+    if target_type is str:
+        if not isinstance(raw_value, str):
+            raise ValueError(f"Expected str, got {type(raw_value).__name__}")
+        return raw_value
     return raw_value  # pragma: no cover
 
 
