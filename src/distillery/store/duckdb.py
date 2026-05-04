@@ -1380,6 +1380,12 @@ class DuckDBStore:
         - ``source`` (str) -- entry origin (e.g. "claude-code", "manual", "inference", etc.)
         - ``date_from`` (datetime | str) -- inclusive lower bound on ``created_at``
         - ``date_to`` (datetime | str) -- inclusive upper bound on ``created_at``
+        - ``published_after`` (datetime | str) -- inclusive lower bound on
+          ``metadata.published_at`` (ISO 8601 string compare)
+        - ``published_before`` (datetime | str) -- inclusive upper bound on
+          ``metadata.published_at`` (ISO 8601 string compare)
+        - ``exclude_backfill`` (bool) -- when True, drop rows where
+          ``metadata.backfill`` is the string ``"true"``
         """
         if not filters:
             return [], []
@@ -1459,6 +1465,35 @@ class DuckDBStore:
         if "session_id" in filters:
             clauses.append("session_id = ?")
             params.append(str(filters["session_id"]))
+
+        # Range / inequality filters on JSON metadata fields.  Used by
+        # ``/radar`` to bound the candidate set by ``metadata.published_at``
+        # (issue #444) so digests don't surface decade-old items as new
+        # intelligence.  Each value is compared as an ISO 8601 string —
+        # lexicographic order matches chronological order for that format.
+        if "published_after" in filters:
+            val = filters["published_after"]
+            if hasattr(val, "isoformat"):  # datetime
+                val = val.isoformat()
+            clauses.append("json_extract_string(metadata, '$.published_at') >= ?")
+            params.append(str(val))
+
+        if "published_before" in filters:
+            val = filters["published_before"]
+            if hasattr(val, "isoformat"):  # datetime
+                val = val.isoformat()
+            clauses.append("json_extract_string(metadata, '$.published_at') <= ?")
+            params.append(str(val))
+
+        # Exclude items flagged as first-poll backfill (issue #444).  When set
+        # to True, drops rows where ``metadata.backfill`` is the literal string
+        # ``"true"`` — DuckDB ``json_extract_string`` returns booleans as that.
+        # Existing rows without the field (NULL) are kept.
+        if filters.get("exclude_backfill"):
+            clauses.append(
+                "(json_extract_string(metadata, '$.backfill') IS NULL "
+                "OR json_extract_string(metadata, '$.backfill') != 'true')"
+            )
 
         # Support metadata path filters like "metadata.external_id".
         # DuckDB stores metadata as a JSON string; use json_extract_string
