@@ -170,7 +170,7 @@ docker build -t distillery .
 docker run -p 8000:8000 -e JINA_API_KEY=... distillery
 ```
 
-The Dockerfile is a multi-stage build: a `builder` stage that uses [`uv`](https://docs.astral.sh/uv/) to resolve dependencies from `uv.lock` into a self-contained virtualenv, and a slim runtime stage based on `cgr.dev/chainguard/wolfi-base` with only Python 3.14 and the prebuilt `.venv`. No `uv` binary, compilers, or build cache are shipped to production.
+The Dockerfile is a multi-stage build: a `builder` stage based on `cgr.dev/chainguard/python:latest-dev` that uses [`uv`](https://docs.astral.sh/uv/) to resolve dependencies from `uv.lock` into a self-contained virtualenv and pre-installs the DuckDB VSS extension, and a distroless runtime stage based on `cgr.dev/chainguard/python:latest` with the Python interpreter, the prebuilt `.venv`, and the copied DuckDB VSS cache under `/home/nonroot/.duckdb` (so HNSW indexing is available without a network download at startup). No shell, no `apk`, no `uv` binary, no compilers, and no build cache are shipped to production. The runtime image runs as the built-in `nonroot` user (uid 65532). To debug a running container there is no shell; exec into the Python REPL directly (`docker run --rm -it --entrypoint /app/.venv/bin/python <image>`) or rebuild against the `-dev` tag for a debug variant.
 
 Pin a specific `uv` version via the `UV_VERSION` build arg if you need reproducibility:
 
