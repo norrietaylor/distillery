@@ -102,6 +102,37 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[dev,fastembed]"
 
+      # Cache the DuckDB VSS extension binary. GitHub-hosted runners do
+      # not ship with VSS on disk, and the store's `_setup_vss`
+      # (src/distillery/store/duckdb.py) deliberately skips `INSTALL vss`
+      # to avoid blocking network fetches in production — it expects VSS
+      # to be pre-installed during image build. Without this cache + the
+      # subsequent install step, every `:memory:` DuckDBStore in the
+      # bench falls back to brute-force vector search, silently
+      # invalidating the measurement.
+      - name: Get DuckDB version
+        id: get-duckdb-version
+        run: |
+          python -c "import duckdb; print(f'duckdb_version={duckdb.__version__}')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache DuckDB VSS extension
+        uses: actions/cache@v4
+        with:
+          path: ~/.duckdb/extensions
+          key: duckdb-vss-${{ steps.get-duckdb-version.outputs.duckdb_version }}-${{ runner.os }}-${{ runner.arch }}-v1
+
+      - name: Pre-install DuckDB VSS extension
+        run: |
+          python - <<'PY'
+          import duckdb
+          con = duckdb.connect(':memory:')
+          con.execute("INSTALL vss")
+          con.execute("LOAD vss")
+          row = con.execute("SELECT installed, loaded FROM duckdb_extensions() WHERE extension_name = 'vss'").fetchone()
+          print(f"VSS extension state: installed={row[0]} loaded={row[1]}")
+          assert row[0] and row[1], "VSS extension failed to install/load"
+          PY
+
       # Cache fastembed model weights. Key includes the embed model name
       # so each matrix cell gets its own cache entry. fastembed downloads
       # to ~/.cache/fastembed by default.
