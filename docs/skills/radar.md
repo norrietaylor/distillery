@@ -19,7 +19,7 @@ Surfaces recent feed entries, synthesizes them into a grouped digest, and option
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--days <n>` | Look back period in days (overrides `feeds.digest.window_days`) | 7 |
+| `--days <n>` | Look back period in days (overrides `feeds.digest.window_days`) | `feeds.digest.window_days` (7 if unset) |
 | `--limit <n>` | Maximum entries to include | 20 |
 | `--suggest` | Include new source suggestions | Off |
 | `--no-store` | Don't store the digest as an entry | Stores by default |
