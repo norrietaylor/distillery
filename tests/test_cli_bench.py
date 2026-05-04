@@ -159,9 +159,14 @@ class TestBenchLongmemevalRun:
         monkeypatch.setattr(bench_module, "_build_embedding_provider", _stub_provider)
 
         # Replace the dataset loader to return the bundled fixture so the
-        # CLI path does not hit HuggingFace from a CI runner.
+        # CLI path does not hit HuggingFace from a CI runner. The runner
+        # awaits ``load_longmemeval()`` so the stub must return an awaitable.
         fixture = _load_fixture()
-        monkeypatch.setattr(bench_module, "load_longmemeval", lambda: fixture)
+
+        async def _stub_loader() -> list[dict[str, Any]]:
+            return fixture
+
+        monkeypatch.setattr(bench_module, "load_longmemeval", _stub_loader)
 
         out_dir = tmp_path / "results"
 
