@@ -215,7 +215,7 @@ class TestPollerBackfillFlag:
             ],
         }
 
-        def _build(source: FeedSourceConfig) -> MagicMock:
+        def _build(source: FeedSourceConfig, **_kwargs: Any) -> MagicMock:
             mock = MagicMock()
             mock.fetch.return_value = items_by_url[source.url]
             return mock
