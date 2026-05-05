@@ -283,6 +283,9 @@ jobs:
           # Flatten the per-cell artifact directories into one tree.
           find artifacts/ -type f \( -name '*.jsonl' -o -name '*.json' \) -print0 \
             | xargs -0 -I{} cp {} bench/results/
+          # Remove the download dir so it doesn't trip the verify-paths
+          # allowlist (which uses `git add -A` to stage everything).
+          rm -rf artifacts/
           ls -la bench/results/
 
       # Day-of-week guard: full per-question JSONL is committed only on
