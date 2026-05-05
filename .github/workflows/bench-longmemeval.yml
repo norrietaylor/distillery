@@ -68,7 +68,7 @@ jobs:
   bench-matrix:
     name: bench (${{ matrix.retrieval }}/${{ matrix.granularity }}/recency-${{ matrix.recency }}/${{ matrix.embed }})
     runs-on: ubuntu-latest
-    # Nightly cron samples 100 questions per cell to stay within ~5 hrs/run.
+    # Nightly cron samples 100 questions per cell (~2 hrs/run total).
     # Full 500q runs are workflow_dispatch only. Per-cell timeout is 120 min
     # to accommodate hybrid+turn worst case (post-VSS-preinstall ~1-1.5 hrs).
     timeout-minutes: 120
