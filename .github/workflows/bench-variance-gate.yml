@@ -1,0 +1,314 @@
+# Wave 3 variance-gate workflow.
+#
+# Runs the pre-registered headline cell (hybrid / session / recency-on /
+# bge-small) five times back-to-back at full 500-question scale, with
+# documented seed offsets 0..4. Aggregates the per-cell summaries and
+# emits a one-time variance baseline at
+# `bench/results/variance_baseline.json`.
+#
+# Halts (workflow exits red) if R@5 stddev across the 5 seeds is >=
+# 0.5pp (0.005). Per discipline rule 6 ("variance characterisation")
+# from the plan at `/Users/norrie/.claude/plans/look-at-mempalace-hook-
+# dynamic-mccarthy.md`, no public-surface number (README badge, blog,
+# benchmarks page headline) may reference the bench until the gate
+# passes and `variance_baseline.json` is committed.
+#
+# Each matrix cell is a single-seed full-500q run; the matrix axis is
+# the seed offset (0..4) which is plumbed through `--seed-offset N`
+# into the runner. The aggregator job downloads every cell's artifact,
+# extracts R@5 from the summary JSON, computes the mean + stddev, and
+# opens an auto-PR with the baseline file.
+#
+# Path-restriction: `verify-paths` allow-lists exactly the one file
+# this workflow is permitted to commit. Anything else fails the build
+# before the auto-PR is opened.
+#
+# Trigger: workflow_dispatch only. This is a one-time exercise (re-runs
+# are fine, but it should not be on a schedule).
+
+name: Bench — Variance Gate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+# Variance-gate runs are intentionally serialized so the on-disk state
+# (caches, artifacts) is never raced by two simultaneous attempts.
+concurrency:
+  group: bench-variance-gate
+  cancel-in-progress: false
+
+jobs:
+  bench-seed:
+    name: bench (seed-offset ${{ matrix.seed }})
+    runs-on: ubuntu-latest
+    # Full 500-question runs take ~1-1.5 hours per cell post-VSS-preinstall;
+    # 4 hour ceiling matches the bench-longmemeval.yml workflow_dispatch
+    # full-set ceiling and gives headroom for first-run cache misses.
+    timeout-minutes: 240
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # Five seed offsets — the variance gate samples the per-question
+        # PRNG seed at offsets 0, 1, 2, 3, 4. The runner derives the
+        # per-question seed as `seed_offset + question_index` when
+        # `--seeds 1`, so each cell is a fully independent seed run.
+        seed: [0, 1, 2, 3, 4]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev,fastembed]"
+
+      # Cache the DuckDB VSS extension. See bench-longmemeval.yml for
+      # the rationale (without VSS the store falls back to brute-force
+      # vector search, silently invalidating the measurement).
+      - name: Get DuckDB version
+        id: get-duckdb-version
+        run: |
+          python -c "import duckdb; print(f'duckdb_version={duckdb.__version__}')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache DuckDB VSS extension
+        uses: actions/cache@v4
+        with:
+          path: ~/.duckdb/extensions
+          key: duckdb-vss-${{ steps.get-duckdb-version.outputs.duckdb_version }}-${{ runner.os }}-${{ runner.arch }}-v1
+
+      - name: Pre-install DuckDB VSS extension
+        run: |
+          python - <<'PY'
+          import duckdb
+          con = duckdb.connect(':memory:')
+          con.execute("INSTALL vss")
+          con.execute("LOAD vss")
+          row = con.execute(
+              "SELECT installed, loaded FROM duckdb_extensions() "
+              "WHERE extension_name = 'vss'"
+          ).fetchone()
+          print(f"VSS extension state: installed={row[0]} loaded={row[1]}")
+          assert row[0] and row[1], "VSS extension failed to install/load"
+          PY
+
+      # Cache fastembed model weights (bge-small only — the headline cell).
+      - name: Cache fastembed model weights
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/fastembed
+          key: fastembed-${{ runner.os }}-bge-small-v1
+          restore-keys: |
+            fastembed-${{ runner.os }}-bge-small-
+
+      # Cache the HuggingFace dataset (longmemeval-cleaned, 264.5 MB),
+      # pinned to the same revision SHA as bench-longmemeval.yml.
+      - name: Cache HuggingFace dataset
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-longmemeval-98d7416c24c778c2fee6e6f3006e7a073259d48f-v1
+          restore-keys: |
+            hf-longmemeval-98d7416c24c778c2fee6e6f3006e7a073259d48f-
+
+      - name: Run bench (full 500q, seed-offset ${{ matrix.seed }})
+        env:
+          DISTILLERY_BENCH_GIT_SHA: ${{ github.sha }}
+        run: |
+          distillery bench longmemeval \
+            --retrieval hybrid \
+            --granularity session \
+            --recency on \
+            --embed-model bge-small \
+            --seeds 1 \
+            --seed-offset ${{ matrix.seed }}
+
+      - name: Upload seed artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: variance-seed-${{ matrix.seed }}
+          path: bench/results/**
+          retention-days: 90
+          if-no-files-found: error
+
+  aggregate-variance:
+    name: Aggregate variance + auto-PR
+    needs: [bench-seed]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Only run if the matrix succeeded — a failed seed run would skew
+    # the variance baseline. `cancelled()` guard plus needs.result.
+    if: ${{ !cancelled() && needs.bench-seed.result == 'success' }}
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download all variance artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Compute variance + emit baseline
+        run: |
+          python - <<'PY'
+          import glob
+          import json
+          import statistics
+          import sys
+          from pathlib import Path
+
+          # Each matrix cell uploaded its bench/results/ tree under
+          # artifacts/variance-seed-<N>/. Collect every summary_*.json.
+          summaries = []
+          for path in sorted(glob.glob("artifacts/variance-seed-*/summary_*.json")):
+              with open(path) as f:
+                  payload = json.load(f)
+              axes = payload.get("axes", {}) or {}
+              # The runner writes ``seed_offset`` in axes; tolerate older
+              # records that only set ``seeds`` (the bucket count).
+              seed_offset = axes.get("seed_offset")
+              if seed_offset is None:
+                  seed_offset = axes.get("seeds")
+              overall = payload.get("overall", {}) or {}
+              summaries.append(
+                  {
+                      "seed_offset": seed_offset,
+                      "r5": float(overall.get("recall_at_5", 0.0)),
+                      "r10": float(overall.get("recall_at_10", 0.0)),
+                      "ndcg10": float(overall.get("ndcg_at_10", 0.0)),
+                      "n_questions": int(payload.get("n_questions", 0)),
+                      "summary_path": path,
+                  }
+              )
+
+          summaries.sort(key=lambda s: s["seed_offset"] if s["seed_offset"] is not None else -1)
+
+          if len(summaries) < 5:
+              print(
+                  f"::error::Only {len(summaries)} seed runs found; need 5",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+
+          r5_values = [s["r5"] for s in summaries]
+          mean_r5 = statistics.mean(r5_values)
+          stddev_r5 = statistics.stdev(r5_values)
+
+          baseline = {
+              "metric": "R@5",
+              "config": "hybrid/session/recency-on/bge-small",
+              "questions": summaries[0]["n_questions"],
+              "seeds": [
+                  {
+                      "seed_offset": s["seed_offset"],
+                      "r5": s["r5"],
+                      "r10": s["r10"],
+                      "ndcg10": s["ndcg10"],
+                  }
+                  for s in summaries
+              ],
+              "mean": mean_r5,
+              "stddev": stddev_r5,
+              "min": min(r5_values),
+              "max": max(r5_values),
+              "gate_threshold_pp": 0.5,
+              "gate_pass": stddev_r5 < 0.005,
+          }
+
+          out_path = Path("bench/results/variance_baseline.json")
+          out_path.parent.mkdir(parents=True, exist_ok=True)
+          with out_path.open("w") as f:
+              json.dump(baseline, f, indent=2)
+              f.write("\n")
+          print(json.dumps(baseline, indent=2))
+
+          if stddev_r5 >= 0.005:
+              print(
+                  f"::error::Variance gate FAILED: R@5 stddev {stddev_r5:.4f} "
+                  f">= 0.005 (0.5pp threshold)",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+          print(
+              f"Variance gate PASSED: R@5 stddev {stddev_r5:.4f} "
+              f"< 0.005 (mean {mean_r5:.4f})"
+          )
+          PY
+
+      # Path-restriction enforcement. GitHub does not allow path-scoped
+      # GITHUB_TOKEN, so we verify the staged diff manually. Anything
+      # outside the variance_baseline.json allowlist fails the job.
+      - name: Verify paths (allowlist enforcement)
+        run: |
+          set -euo pipefail
+          ALLOW='^bench/results/variance_baseline\.json$'
+          # Drop the artifacts download dir so it doesn't show up in
+          # `git add -A`'s diff.
+          rm -rf artifacts/
+          git add -A
+          CHANGED=$(git diff --cached --name-only)
+          if [ -z "${CHANGED}" ]; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          echo "Changed files:"
+          echo "${CHANGED}"
+          BAD=$(echo "${CHANGED}" | grep -Ev "${ALLOW}" || true)
+          if [ -n "${BAD}" ]; then
+            echo "ERROR: changes outside allowlist (only bench/results/variance_baseline.json permitted):"
+            echo "${BAD}"
+            exit 1
+          fi
+          echo "All changes within allowlist."
+          # Reset the index so create-pull-request can re-stage cleanly.
+          git reset
+
+      - name: Open auto-PR
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: bench/variance-baseline-${{ github.run_id }}
+          base: main
+          title: "[bench] variance baseline from gate run ${{ github.run_id }}"
+          commit-message: |
+            bench(variance): commit variance_baseline.json from variance-gate run
+
+            Run ID: ${{ github.run_id }}
+            Headline cell: hybrid / session / recency-on / bge-small
+            Seeds: 0..4 (full 500-question runs)
+          body: |
+            Variance baseline committed by `bench-variance-gate.yml` (run ${{ github.run_id }}).
+
+            See `bench/results/variance_baseline.json` for the 5-seed mean +
+            stddev across the pre-registered headline cell
+            (`hybrid/session/recency-on/bge-small`, 500 questions per seed).
+
+            If `gate_pass: true`, the bench is a useful regression signal and
+            the headline numbers can land on public surfaces (README badges,
+            `docs/benchmarks.md`, blog post). If `gate_pass: false`, the
+            workflow itself failed before this PR could open — investigate
+            HNSW determinism, RRF tie-break, fastembed batching before
+            publishing any number.
+          labels: benchmark
+          add-paths: bench/results/variance_baseline.json
+          delete-branch: true

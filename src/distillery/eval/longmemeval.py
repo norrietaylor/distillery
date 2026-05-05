@@ -211,6 +211,7 @@ def _build_meta_panel(
     git_sha: str,
     embed_model_sha: str,
     seed: int,
+    seed_offset: int,
     retrieval: RetrievalMode,
     granularity: GranularityMode,
     recency: RecencyMode,
@@ -220,6 +221,13 @@ def _build_meta_panel(
 
     All seven required fields are present unconditionally — receipts
     with a missing field would defeat the audit trail.
+
+    ``seed_offset`` is the run-level starting offset that produced the
+    per-question ``seed`` (``seed = seed_offset * 100_000 + q_idx`` for
+    ``--seeds N`` sweeps; ``seed = seed_offset + q_idx`` when callers
+    drive the offset directly via the variance-gate path).  Carried in
+    the panel so a downstream aggregator can group records by the run
+    that produced them without inspecting the filename.
     """
     return {
         "git_sha": git_sha,
@@ -228,6 +236,7 @@ def _build_meta_panel(
         "embed_model_sha": embed_model_sha,
         "python_version": sys.version,
         "seed": seed,
+        "seed_offset": seed_offset,
         "timestamp_utc": datetime.now(tz=UTC).isoformat(),
         # Mode echoes — useful when records from multiple cells are
         # accidentally concatenated for analysis.
@@ -447,6 +456,7 @@ async def _run_one_question(
     question: dict[str, Any],
     *,
     seed: int,
+    seed_offset: int,
     retrieval: RetrievalMode,
     granularity: GranularityMode,
     recency: RecencyMode,
@@ -523,6 +533,7 @@ async def _run_one_question(
             git_sha=git_sha,
             embed_model_sha=_embed_model_sha(embedder),
             seed=seed,
+            seed_offset=seed_offset,
             retrieval=retrieval,
             granularity=granularity,
             recency=recency,
@@ -646,6 +657,7 @@ async def run_longmemeval_bench(
     embed_model: EmbedModel = "bge-small",
     limit: int | None = None,
     seeds: int = 1,
+    seed_offset: int = 0,
     output_dir: Path | None = None,
     questions: list[dict[str, Any]] | None = None,
 ) -> BenchReport:
@@ -680,6 +692,17 @@ async def run_longmemeval_bench(
         evaluated once per seed; the seed is the question index plus a
         per-seed offset so any divergence is attributable.  Defaults to
         ``1`` to keep the smoke-test path quick.
+    seed_offset:
+        Starting offset added to the per-question seed.  When the
+        bench runs as a single seed (``seeds=1``) the per-question
+        seed becomes ``seed_offset + question_index`` directly, so a
+        CI matrix can dispatch independent single-seed runs across
+        offsets ``0..N-1`` for variance characterisation (Wave 3,
+        ``bench-variance-gate.yml``).  When ``seeds > 1`` each
+        in-process sweep step ``i`` uses
+        ``seed_offset + i * 100_000 + question_index`` so the per-run
+        and per-sweep axes don't collide.  Defaults to ``0`` so the
+        existing ``--seeds N`` semantics are unchanged.
     output_dir:
         Directory to write JSONL + summary files into.  When ``None``,
         no files are written and the caller can read
@@ -717,14 +740,21 @@ async def run_longmemeval_bench(
     # is ~1-2s; on a full 500-question sweep this saves 500-1000s.
     embedder = _build_embedding_provider(embed_model)
 
-    for seed_offset in range(max(1, seeds)):
+    # ``sweep_offset`` is the in-process per-seed bucket (``--seeds N``
+    # internal sweep), ``seed_offset`` is the run-level starting offset
+    # supplied by the caller (e.g. the variance-gate matrix axis).  The
+    # per-question PRNG seed is the sum so the two never collide:
+    # ``seed_offset + sweep_offset * 100_000 + q_idx``.  When
+    # ``seeds=1`` the sweep axis is a single bucket of zero so this
+    # collapses to ``seed_offset + q_idx`` — exactly what the variance
+    # gate needs (Wave 3, discipline rule 6).
+    for sweep_offset in range(max(1, seeds)):
         for q_idx, question in enumerate(questions):
-            # Seed is question-index + seed-offset so two seeds for the
-            # same question diverge predictably.
-            seed = q_idx + seed_offset * 100_000
+            seed = seed_offset + sweep_offset * 100_000 + q_idx
             record = await _run_one_question(
                 question,
                 seed=seed,
+                seed_offset=seed_offset,
                 retrieval=retrieval,
                 granularity=granularity,
                 recency=recency,
@@ -741,6 +771,7 @@ async def run_longmemeval_bench(
         "effective_recency": "off" if retrieval == "raw" else recency,
         "embed_model": embed_model,
         "seeds": max(1, seeds),
+        "seed_offset": seed_offset,
         "limit": limit,
     }
     summary["dataset"] = {
