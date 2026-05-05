@@ -185,6 +185,11 @@ jobs:
           # not recoverable from the summary alone — silently grouping
           # such records would corrupt the variance baseline, so we
           # fail loudly instead.
+          # Required keys per summary. ``recall_at_*`` and ``ndcg_at_*``
+          # are the headline triplet; ``n_questions`` is needed so the
+          # baseline records the corpus size each seed actually saw.
+          REQUIRED_OVERALL_KEYS = ("recall_at_5", "recall_at_10", "ndcg_at_10")
+
           summaries = []
           for path in sorted(glob.glob("artifacts/variance-seed-*/summary_*.json")):
               with open(path) as f:
@@ -199,23 +204,69 @@ jobs:
                       file=sys.stderr,
                   )
                   sys.exit(1)
-              overall = payload.get("overall", {}) or {}
+              overall = payload.get("overall")
+              if not isinstance(overall, dict) or not overall:
+                  print(
+                      f"::error::summary {path} is missing or has empty ``overall`` "
+                      "block; cannot extract R@5 / R@10 / NDCG@10 for variance "
+                      "baseline.",
+                      file=sys.stderr,
+                  )
+                  sys.exit(1)
+              missing_keys = [k for k in REQUIRED_OVERALL_KEYS if k not in overall]
+              if missing_keys:
+                  print(
+                      f"::error::summary {path} ``overall`` block is missing "
+                      f"required keys: {missing_keys}",
+                      file=sys.stderr,
+                  )
+                  sys.exit(1)
+              if "n_questions" not in payload:
+                  print(
+                      f"::error::summary {path} is missing top-level "
+                      "``n_questions``; cannot record corpus size for baseline.",
+                      file=sys.stderr,
+                  )
+                  sys.exit(1)
+              try:
+                  r5 = float(overall["recall_at_5"])
+                  r10 = float(overall["recall_at_10"])
+                  ndcg10 = float(overall["ndcg_at_10"])
+                  n_questions = int(payload["n_questions"])
+                  seed_offset_int = int(seed_offset)
+              except (TypeError, ValueError) as exc:
+                  print(
+                      f"::error::summary {path} has a non-numeric metric or "
+                      f"non-integer seed_offset/n_questions: {exc}",
+                      file=sys.stderr,
+                  )
+                  sys.exit(1)
               summaries.append(
                   {
-                      "seed_offset": int(seed_offset),
-                      "r5": float(overall.get("recall_at_5", 0.0)),
-                      "r10": float(overall.get("recall_at_10", 0.0)),
-                      "ndcg10": float(overall.get("ndcg_at_10", 0.0)),
-                      "n_questions": int(payload.get("n_questions", 0)),
+                      "seed_offset": seed_offset_int,
+                      "r5": r5,
+                      "r10": r10,
+                      "ndcg10": ndcg10,
+                      "n_questions": n_questions,
                       "summary_path": path,
                   }
               )
 
           summaries.sort(key=lambda s: s["seed_offset"])
 
-          if len(summaries) < 5:
+          # Variance grouping is only meaningful when every matrix cell
+          # uploaded a summary AND each is a unique seed offset in 0..4.
+          # A loose length check would silently accept e.g. four cells
+          # with offsets {0, 1, 2, 3} plus a duplicate of offset 0 —
+          # that would skew the stddev. Enforce exact coverage.
+          observed_offsets = sorted(s["seed_offset"] for s in summaries)
+          expected_offsets = list(range(5))
+          if observed_offsets != expected_offsets:
               print(
-                  f"::error::Only {len(summaries)} seed runs found; need 5",
+                  f"::error::Variance gate aggregator expected one summary per "
+                  f"seed_offset in {expected_offsets}; got {observed_offsets}. "
+                  "Each matrix cell must upload exactly one summary with a "
+                  "unique seed_offset in 0..4.",
                   file=sys.stderr,
               )
               sys.exit(1)
