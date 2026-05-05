@@ -179,20 +179,30 @@ jobs:
 
           # Each matrix cell uploaded its bench/results/ tree under
           # artifacts/variance-seed-<N>/. Collect every summary_*.json.
+          # The runner writes ``seed_offset`` in axes (added in this same
+          # PR). A summary missing ``seed_offset`` would mean the bench
+          # was produced by an older runner whose seed-offset axis is
+          # not recoverable from the summary alone — silently grouping
+          # such records would corrupt the variance baseline, so we
+          # fail loudly instead.
           summaries = []
           for path in sorted(glob.glob("artifacts/variance-seed-*/summary_*.json")):
               with open(path) as f:
                   payload = json.load(f)
               axes = payload.get("axes", {}) or {}
-              # The runner writes ``seed_offset`` in axes; tolerate older
-              # records that only set ``seeds`` (the bucket count).
               seed_offset = axes.get("seed_offset")
               if seed_offset is None:
-                  seed_offset = axes.get("seeds")
+                  print(
+                      f"::error::summary {path} is missing ``axes.seed_offset``; "
+                      "cannot group records for variance baseline. Re-run after "
+                      "the runner emits seed_offset in axes (post-#455).",
+                      file=sys.stderr,
+                  )
+                  sys.exit(1)
               overall = payload.get("overall", {}) or {}
               summaries.append(
                   {
-                      "seed_offset": seed_offset,
+                      "seed_offset": int(seed_offset),
                       "r5": float(overall.get("recall_at_5", 0.0)),
                       "r10": float(overall.get("recall_at_10", 0.0)),
                       "ndcg10": float(overall.get("ndcg_at_10", 0.0)),
@@ -201,7 +211,7 @@ jobs:
                   }
               )
 
-          summaries.sort(key=lambda s: s["seed_offset"] if s["seed_offset"] is not None else -1)
+          summaries.sort(key=lambda s: s["seed_offset"])
 
           if len(summaries) < 5:
               print(
