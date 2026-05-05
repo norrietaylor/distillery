@@ -173,6 +173,7 @@ jobs:
           python - <<'PY'
           import glob
           import json
+          import math
           import statistics
           import sys
           from pathlib import Path
@@ -241,6 +242,18 @@ jobs:
                       file=sys.stderr,
                   )
                   sys.exit(1)
+              # ``float()`` happily accepts ``"NaN"`` / ``"Infinity"``; if a
+              # buggy upstream emitted those, ``statistics.mean`` would
+              # return ``nan`` (silently corrupting the baseline) and
+              # ``statistics.stdev`` would crash. Reject them up front.
+              for label, value in (("r5", r5), ("r10", r10), ("ndcg10", ndcg10)):
+                  if not math.isfinite(value):
+                      print(
+                          f"::error::summary {path} has non-finite {label}={value}; "
+                          "variance baseline cannot be computed from NaN/Infinity.",
+                          file=sys.stderr,
+                      )
+                      sys.exit(1)
               summaries.append(
                   {
                       "seed_offset": seed_offset_int,
