@@ -506,6 +506,78 @@ async def test_summary_axes_exposes_effective_recency(tmp_path: Path) -> None:
     assert "recency" not in axes_hybrid
 
 
+async def test_seed_offset_changes_per_question_seed_in_meta() -> None:
+    """``seed_offset`` shifts the per-question seed by exactly its value.
+
+    Pin: with ``seeds=1``, the per-question seed is
+    ``seed_offset + question_index``.  Two runs with different
+    ``seed_offset`` values must therefore produce ``_meta.seed`` and
+    ``_meta.seed_offset`` differing by exactly the offset delta on
+    every record.
+
+    This is the contract the variance-gate workflow relies on — each
+    matrix cell dispatches a single-seed run with its own offset, and
+    the aggregator groups records by ``seed_offset`` from the SHA panel.
+    """
+    questions = _load_fixture()
+
+    report_a = await run_longmemeval_bench(
+        retrieval="hybrid",
+        granularity="session",
+        recency="on",
+        embed_model="bge-small",
+        questions=questions,
+        seeds=1,
+        seed_offset=0,
+    )
+    report_b = await run_longmemeval_bench(
+        retrieval="hybrid",
+        granularity="session",
+        recency="on",
+        embed_model="bge-small",
+        questions=questions,
+        seeds=1,
+        seed_offset=7,
+    )
+
+    assert len(report_a.per_question) == len(report_b.per_question)
+    for rec_a, rec_b in zip(report_a.per_question, report_b.per_question, strict=True):
+        # Pair-up by question id so we compare the same question.
+        assert rec_a.question_id == rec_b.question_id
+        # Per-question seed differs by exactly the seed_offset delta.
+        assert rec_b.meta["seed"] - rec_a.meta["seed"] == 7
+        assert rec_a.meta["seed_offset"] == 0
+        assert rec_b.meta["seed_offset"] == 7
+
+    # Summary axes carry the offset so a downstream consumer reading
+    # only summary.json can group runs without inspecting per-record meta.
+    assert report_a.summary["axes"]["seed_offset"] == 0
+    assert report_b.summary["axes"]["seed_offset"] == 7
+
+
+async def test_seed_offset_default_is_zero() -> None:
+    """Omitting ``seed_offset`` matches the historical ``seeds=1`` semantics.
+
+    Regression guard: the new parameter must default to ``0`` so every
+    existing caller (CLI without ``--seed-offset``, in-process tests)
+    sees the original ``seed = q_idx`` behaviour.
+    """
+    questions = _load_fixture()
+
+    report = await run_longmemeval_bench(
+        retrieval="hybrid",
+        granularity="session",
+        recency="on",
+        embed_model="bge-small",
+        questions=questions,
+    )
+
+    for q_idx, record in enumerate(report.per_question):
+        assert record.meta["seed_offset"] == 0
+        # With seed_offset=0 and seeds=1, per-question seed equals q_idx.
+        assert record.meta["seed"] == q_idx
+
+
 def test_filename_schema_includes_every_axis(tmp_path: Path) -> None:
     """Output filenames must include every axis to prevent cross-axis confusion.
 
