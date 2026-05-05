@@ -271,6 +271,21 @@ jobs:
               )
               sys.exit(1)
 
+          # All 5 cells must have evaluated the same number of
+          # questions, otherwise mean/stddev across them is comparing
+          # apples to oranges (e.g. one cell silently truncated).
+          n_questions_values = {s["n_questions"] for s in summaries}
+          if len(n_questions_values) != 1:
+              by_offset = {s["seed_offset"]: s["n_questions"] for s in summaries}
+              print(
+                  f"::error::Cells disagree on n_questions: {by_offset}. "
+                  "Variance gate requires every seed to evaluate the same "
+                  "question count; aborting before computing mean/stddev.",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+          n_questions = n_questions_values.pop()
+
           r5_values = [s["r5"] for s in summaries]
           mean_r5 = statistics.mean(r5_values)
           stddev_r5 = statistics.stdev(r5_values)
@@ -278,7 +293,7 @@ jobs:
           baseline = {
               "metric": "R@5",
               "config": "hybrid/session/recency-on/bge-small",
-              "questions": summaries[0]["n_questions"],
+              "questions": n_questions,
               "seeds": [
                   {
                       "seed_offset": s["seed_offset"],
