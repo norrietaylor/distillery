@@ -4,8 +4,10 @@
 # (retrieval x granularity x recency, embed pinned to bge-small) every
 # night at 05:00 UTC, after the eval-nightly.yml workflow at 03:00 UTC.
 #
-# Cost envelope: 8 cells * ~15 min = ~120 min/night = ~730 hr/yr. Well
-# inside GitHub free-tier minutes for public repos.
+# Cost envelope: nightly cron samples 100 questions per cell (8 cells *
+# ~15 min ≈ 2 hrs/run). Full 500-question runs are workflow_dispatch only
+# (~12 hrs/run, est. 1-1.5 hrs/cell post-VSS-preinstall). Well inside
+# GitHub free-tier minutes for public repos at the daily sampling cadence.
 #
 # Path-restriction note: GitHub does not let you path-scope GITHUB_TOKEN
 # at the workflow level — `permissions:` is per-permission, not per-path.
@@ -66,7 +68,10 @@ jobs:
   bench-matrix:
     name: bench (${{ matrix.retrieval }}/${{ matrix.granularity }}/recency-${{ matrix.recency }}/${{ matrix.embed }})
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # Nightly cron samples 100 questions per cell to stay within ~5 hrs/run.
+    # Full 500q runs are workflow_dispatch only. Per-cell timeout is 120 min
+    # to accommodate hybrid+turn worst case (post-VSS-preinstall ~1-1.5 hrs).
+    timeout-minutes: 120
     permissions:
       contents: read
     strategy:
@@ -167,6 +172,9 @@ jobs:
       - name: Run bench (primary embed cell)
         env:
           DISTILLERY_BENCH_GIT_SHA: ${{ github.sha }}
+          # Nightly schedule samples 100 questions per cell; workflow_dispatch
+          # honors inputs.limit (empty = full 500-question set).
+          LIMIT: ${{ inputs.limit || (github.event_name == 'schedule' && '100' || '') }}
         run: |
           # CLI presence guard: the `distillery bench longmemeval` subcommand
           # lands in a follow-up PR (#440). Until that merges to main, every
@@ -176,44 +184,60 @@ jobs:
             echo "::warning::distillery bench longmemeval CLI not yet present on main. Skipping bench cell. Merge PR #440 to enable."
             exit 0
           fi
+          LIMIT_ARGS=()
+          if [ -n "${LIMIT:-}" ]; then
+            LIMIT_ARGS=(--limit "${LIMIT}")
+          fi
           distillery bench longmemeval \
             --retrieval ${{ matrix.retrieval }} \
             --granularity ${{ matrix.granularity }} \
             --recency ${{ matrix.recency }} \
             --embed-model ${{ matrix.embed }} \
-            ${{ inputs.limit && format('--limit {0}', inputs.limit) || '' }}
+            "${LIMIT_ARGS[@]}"
 
       - name: Run bench (bge-base extension)
         if: github.event_name == 'workflow_dispatch' && inputs.run_embed_matrix == true && matrix.embed == 'bge-small'
         env:
           DISTILLERY_BENCH_GIT_SHA: ${{ github.sha }}
+          # workflow_dispatch only: honors inputs.limit (empty = full 500).
+          LIMIT: ${{ inputs.limit || (github.event_name == 'schedule' && '100' || '') }}
         run: |
           if ! distillery bench longmemeval --help >/dev/null 2>&1; then
             echo "::warning::distillery bench longmemeval CLI not yet present on main. Skipping bench cell. Merge PR #440 to enable."
             exit 0
+          fi
+          LIMIT_ARGS=()
+          if [ -n "${LIMIT:-}" ]; then
+            LIMIT_ARGS=(--limit "${LIMIT}")
           fi
           distillery bench longmemeval \
             --retrieval ${{ matrix.retrieval }} \
             --granularity ${{ matrix.granularity }} \
             --recency ${{ matrix.recency }} \
             --embed-model bge-base \
-            ${{ inputs.limit && format('--limit {0}', inputs.limit) || '' }}
+            "${LIMIT_ARGS[@]}"
 
       - name: Run bench (bge-large extension)
         if: github.event_name == 'workflow_dispatch' && inputs.run_embed_matrix == true && matrix.embed == 'bge-small'
         env:
           DISTILLERY_BENCH_GIT_SHA: ${{ github.sha }}
+          # workflow_dispatch only: honors inputs.limit (empty = full 500).
+          LIMIT: ${{ inputs.limit || (github.event_name == 'schedule' && '100' || '') }}
         run: |
           if ! distillery bench longmemeval --help >/dev/null 2>&1; then
             echo "::warning::distillery bench longmemeval CLI not yet present on main. Skipping bench cell. Merge PR #440 to enable."
             exit 0
+          fi
+          LIMIT_ARGS=()
+          if [ -n "${LIMIT:-}" ]; then
+            LIMIT_ARGS=(--limit "${LIMIT}")
           fi
           distillery bench longmemeval \
             --retrieval ${{ matrix.retrieval }} \
             --granularity ${{ matrix.granularity }} \
             --recency ${{ matrix.recency }} \
             --embed-model bge-large \
-            ${{ inputs.limit && format('--limit {0}', inputs.limit) || '' }}
+            "${LIMIT_ARGS[@]}"
 
       # Optional Jina cell. Only fires on workflow_dispatch with
       # run_jina=true AND the JINA_API_KEY secret available. Never on
@@ -223,6 +247,8 @@ jobs:
         env:
           DISTILLERY_BENCH_GIT_SHA: ${{ github.sha }}
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+          # workflow_dispatch only: honors inputs.limit (empty = full 500).
+          LIMIT: ${{ inputs.limit || (github.event_name == 'schedule' && '100' || '') }}
         run: |
           if [ -z "${JINA_API_KEY}" ]; then
             echo "JINA_API_KEY not set in repository secrets — skipping Jina cell"
@@ -232,12 +258,16 @@ jobs:
             echo "::warning::distillery bench longmemeval CLI not yet present on main. Skipping bench cell. Merge PR #440 to enable."
             exit 0
           fi
+          LIMIT_ARGS=()
+          if [ -n "${LIMIT:-}" ]; then
+            LIMIT_ARGS=(--limit "${LIMIT}")
+          fi
           distillery bench longmemeval \
             --retrieval ${{ matrix.retrieval }} \
             --granularity ${{ matrix.granularity }} \
             --recency ${{ matrix.recency }} \
             --embed-model jina \
-            ${{ inputs.limit && format('--limit {0}', inputs.limit) || '' }}
+            "${LIMIT_ARGS[@]}"
 
       - name: Upload bench results artifact
         if: always()
