@@ -390,8 +390,11 @@ async def _ensure_store(
 def _verify_bearer_token(request: Request, secret: str) -> bool:
     """Check the ``Authorization: Bearer <token>`` header.
 
-    Uses :func:`hmac.compare_digest` for constant-time comparison to
-    prevent timing-based attacks on the token value.
+    The auth scheme is matched case-insensitively per RFC 7235 §2.1
+    ("case-insensitive token"), so ``Bearer``, ``bearer``, and ``BEARER``
+    are all accepted.  The token value itself is compared with
+    :func:`hmac.compare_digest` for constant-time comparison to prevent
+    timing-based attacks.
 
     Args:
         request: The incoming Starlette request.
@@ -401,9 +404,9 @@ def _verify_bearer_token(request: Request, secret: str) -> bool:
         ``True`` if the token matches, ``False`` otherwise.
     """
     auth_header = request.headers.get("authorization", "")
-    if not auth_header.startswith("Bearer "):
+    scheme, _, token = auth_header.partition(" ")
+    if scheme.lower() != "bearer" or not token:
         return False
-    token = auth_header[len("Bearer ") :]
     return hmac.compare_digest(token, secret)
 
 
