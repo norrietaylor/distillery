@@ -2,13 +2,14 @@
 
 Implements the following tool:
   - distillery_relations: Manage typed relations between knowledge entries.
-    Actions: 'add', 'get', 'remove', 'traverse'.
+    Actions: 'add', 'get', 'remove', 'traverse', 'metrics'.
 """
 
 from __future__ import annotations
 
 import logging
 from collections import deque
+from datetime import UTC, datetime
 from typing import Any
 
 from mcp import types
@@ -24,6 +25,19 @@ logger = logging.getLogger(__name__)
 # and prevent runaway traversal on heavily connected subgraphs.
 _TRAVERSE_MIN_HOPS = 1
 _TRAVERSE_MAX_HOPS = 3
+
+# Fixed BFS depth used to assemble the ego-graph for action="metrics" / scope="ego".
+_METRICS_EGO_HOPS = 2
+
+# Pagination page size and hard cap when filtering the entries corpus down to
+# the set whose IDs anchor a global-scope relations graph.  A single
+# ``list_entries`` call could truncate IDs on large corpora; we paginate until
+# the corpus is exhausted or the cap is hit (CodeRabbit, PR #426).
+_GRAPH_METRICS_PAGE_SIZE = 1000
+_GRAPH_METRICS_MAX_IDS = 100_000
+
+_VALID_METRICS = {"bridges", "communities"}
+_VALID_SCOPES = {"global", "ego"}
 
 # ---------------------------------------------------------------------------
 # distillery_relations handler
@@ -69,10 +83,10 @@ async def _handle_relations(
         )
     action = action_raw.strip().lower()
 
-    if action not in ("add", "get", "remove", "traverse"):
+    if action not in ("add", "get", "remove", "traverse", "metrics"):
         return error_response(
             "INVALID_PARAMS",
-            f"action must be one of 'add', 'get', 'remove', 'traverse'; got: {action!r}",
+            f"action must be one of 'add', 'get', 'remove', 'traverse', 'metrics'; got: {action!r}",
         )
 
     # ------------------------------------------------------------------
@@ -307,6 +321,12 @@ async def _handle_relations(
         )
 
     # ------------------------------------------------------------------
+    # action == "metrics"
+    # ------------------------------------------------------------------
+    if action == "metrics":
+        return await _handle_metrics(store, arguments)
+
+    # ------------------------------------------------------------------
     # action == "remove"
     # ------------------------------------------------------------------
     relation_id_raw = arguments.get("relation_id")
@@ -326,5 +346,292 @@ async def _handle_relations(
         {
             "relation_id": relation_id,
             "removed": removed,
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
+# action == "metrics" — graph metrics over relations subgraph
+# ---------------------------------------------------------------------------
+
+
+def _validate_optional_str(
+    arguments: dict[str, Any], field: str
+) -> tuple[str | None, list[types.TextContent] | None]:
+    """Return (value-or-None, error-response-or-None) for an optional string field."""
+    raw = arguments.get(field)
+    if raw is None:
+        return None, None
+    if not isinstance(raw, str):
+        return None, error_response(
+            "INVALID_PARAMS",
+            f"{field} must be a string, got: {type(raw).__name__}",
+        )
+    stripped = raw.strip()
+    return (stripped or None), None
+
+
+def _validate_optional_str_list(
+    arguments: dict[str, Any], field: str
+) -> tuple[list[str] | None, list[types.TextContent] | None]:
+    """Return (value-or-None, error-response-or-None) for an optional list-of-strings field."""
+    raw = arguments.get(field)
+    if raw is None:
+        return None, None
+    if not isinstance(raw, list) or not all(isinstance(t, str) for t in raw):
+        return None, error_response(
+            "INVALID_PARAMS",
+            f"{field} must be a list of strings",
+        )
+    return list(raw), None
+
+
+async def _collect_global_relations(
+    store: Any,
+    *,
+    project: str | None,
+    tags: list[str] | None,
+    date_from: str | None,
+    date_to: str | None,
+) -> list[dict[str, Any]]:
+    """Fetch all entry_relations rows, optionally filtered by entry-side filters.
+
+    Goes through ``store.list_relations`` (an async store method) so all DB I/O
+    runs off the event loop via the shared ``_run_sync`` lock — no direct sync
+    ``conn.execute()`` from this async handler (CodeRabbit, PR #426).
+    """
+    relations: list[dict[str, Any]] = await store.list_relations()
+
+    if not (project or tags or date_from or date_to):
+        return relations
+
+    # Use store.list_entries to resolve which entry ids match the filter set;
+    # then keep relations whose endpoints both fall within that set.
+    filters: dict[str, Any] = {}
+    if project is not None:
+        filters["project"] = project
+    if tags:
+        filters["tags"] = tags
+    if date_from is not None:
+        filters["date_from"] = date_from
+    if date_to is not None:
+        filters["date_to"] = date_to
+
+    # Paginate so corpora larger than a single page are not silently truncated.
+    matching_ids: set[str] = set()
+    offset = 0
+    while True:
+        page = await store.list_entries(
+            filters=filters,
+            limit=_GRAPH_METRICS_PAGE_SIZE,
+            offset=offset,
+        )
+        if not page:
+            break
+        for entry in page:
+            matching_ids.add(entry.id)
+        if len(page) < _GRAPH_METRICS_PAGE_SIZE:
+            break
+        offset += _GRAPH_METRICS_PAGE_SIZE
+        # Safety bound — refuse to materialise an unbounded id set in memory.
+        if len(matching_ids) >= _GRAPH_METRICS_MAX_IDS:
+            logger.warning(
+                "graph metrics: matching_ids exceeds %d cap; truncating",
+                _GRAPH_METRICS_MAX_IDS,
+            )
+            break
+
+    return [r for r in relations if r["from_id"] in matching_ids and r["to_id"] in matching_ids]
+
+
+async def _collect_ego_relations(
+    store: Any,
+    *,
+    root_id: str,
+    hops: int,
+) -> list[dict[str, Any]]:
+    """BFS the relations graph from ``root_id`` to ``hops`` depth and collect edges."""
+    visited: set[str] = {root_id}
+    edges: list[dict[str, Any]] = []
+    edge_keys: set[tuple[str, str, str]] = set()
+    queue: deque[tuple[str, int]] = deque([(root_id, 0)])
+
+    while queue:
+        node_id, depth = queue.popleft()
+        if depth >= hops:
+            continue
+        neighbours = await store.get_related(node_id, direction="both", relation_type=None)
+        for row in neighbours:
+            from_id = row["from_id"]
+            to_id = row["to_id"]
+            rel_type = row["relation_type"]
+            edge_key = (from_id, to_id, rel_type)
+            if edge_key not in edge_keys:
+                edge_keys.add(edge_key)
+                edges.append(
+                    {
+                        "from_id": from_id,
+                        "to_id": to_id,
+                        "relation_type": rel_type,
+                    }
+                )
+            if from_id == node_id:
+                other = to_id
+            elif to_id == node_id:
+                other = from_id
+            else:
+                continue
+            if other not in visited:
+                visited.add(other)
+                queue.append((other, depth + 1))
+    return edges
+
+
+async def _handle_metrics(  # noqa: PLR0911, PLR0912
+    store: Any,
+    arguments: dict[str, Any],
+) -> list[types.TextContent]:
+    """Compute graph metrics on the relations subgraph.
+
+    See module docstring for the response envelope and failure modes.
+    """
+    # NetworkX availability gate.
+    from distillery.graph import is_available
+
+    if not is_available():
+        return error_response(
+            "INTERNAL",
+            "NetworkX not installed; run: pip install distillery-mcp[graph]",
+        )
+
+    # ----- metric -----
+    metric_raw = arguments.get("metric")
+    if metric_raw is None or not isinstance(metric_raw, str):
+        return error_response("INVALID_PARAMS", "metric is required for action='metrics'")
+    metric = metric_raw.strip().lower()
+    if metric not in _VALID_METRICS:
+        return error_response(
+            "INVALID_PARAMS",
+            f"metric must be one of {sorted(_VALID_METRICS)}, got: {metric_raw!r}",
+        )
+
+    # ----- scope -----
+    scope_raw = arguments.get("scope", "global")
+    if not isinstance(scope_raw, str):
+        return error_response(
+            "INVALID_PARAMS",
+            f"scope must be a string, got: {type(scope_raw).__name__}",
+        )
+    scope = scope_raw.strip().lower() or "global"
+    if scope not in _VALID_SCOPES:
+        return error_response(
+            "INVALID_PARAMS",
+            f"scope must be one of {sorted(_VALID_SCOPES)}, got: {scope_raw!r}",
+        )
+
+    # ----- entry_id (required for ego scope) -----
+    entry_id_value, err = _validate_optional_str(arguments, "entry_id")
+    if err is not None:
+        return err
+    if scope == "ego" and not entry_id_value:
+        return error_response(
+            "INVALID_PARAMS",
+            "entry_id is required when scope='ego'",
+        )
+
+    # ----- limit -----
+    limit_raw = arguments.get("limit", 10)
+    if isinstance(limit_raw, bool) or not isinstance(limit_raw, int) or limit_raw < 1:
+        return error_response("INVALID_PARAMS", "limit must be a positive integer")
+    limit = int(limit_raw)
+
+    # ----- entry-side filters (global scope only) -----
+    project, err = _validate_optional_str(arguments, "project")
+    if err is not None:
+        return err
+    tags, err = _validate_optional_str_list(arguments, "tags")
+    if err is not None:
+        return err
+    date_from, err = _validate_optional_str(arguments, "date_from")
+    if err is not None:
+        return err
+    date_to, err = _validate_optional_str(arguments, "date_to")
+    if err is not None:
+        return err
+
+    # ----- cache lookup -----
+    from distillery.graph.builders import build_relations_graph
+    from distillery.graph.cache import default_cache
+    from distillery.graph.metrics import bridges, communities
+
+    cache = default_cache()
+    cache_key = (
+        f"{scope}:{entry_id_value or ''}:{project or ''}:"
+        f"{','.join(tags or [])}:{date_from or ''}:{date_to or ''}"
+    )
+    cached_graph = cache.get(cache_key)
+    cache_hit = cached_graph is not None
+
+    # ----- assemble graph (fetch + build) on miss -----
+    try:
+        if cached_graph is None:
+            if scope == "ego":
+                # Verify root exists before traversal.
+                assert entry_id_value is not None  # for mypy — checked above
+                root_id = entry_id_value
+                root_entry = await store.get(root_id)
+                if root_entry is None:
+                    return error_response("NOT_FOUND", f"Entry not found: {root_id!r}")
+                relations = await _collect_ego_relations(
+                    store, root_id=root_id, hops=_METRICS_EGO_HOPS
+                )
+            else:
+                relations = await _collect_global_relations(
+                    store,
+                    project=project,
+                    tags=tags,
+                    date_from=date_from,
+                    date_to=date_to,
+                )
+            g = build_relations_graph(relations, directed=True)
+            cache.set(cache_key, g)
+        else:
+            g = cached_graph
+    except RuntimeError:
+        # build_relations_graph raises this when nx is missing — but we already
+        # gated on is_available() above, so this is purely a defensive path.
+        # Log the raw exception server-side; never leak it to the client.
+        logger.exception("distillery_relations metrics: runtime error during graph build")
+        return error_response("INTERNAL", "Failed to build relations graph")
+    except Exception:  # noqa: BLE001
+        logger.exception("distillery_relations metrics: failed to build graph")
+        return error_response("INTERNAL", "Failed to build relations graph")
+
+    # ----- compute metric -----
+    try:
+        if metric == "bridges":
+            ranked = bridges(g, k=limit)
+            results: list[dict[str, Any]] = [
+                {"id": node, "score": round(score, 6)} for node, score in ranked
+            ]
+        else:  # metric == "communities"
+            comms = communities(g)
+            comms_sorted = sorted(comms, key=lambda c: len(c), reverse=True)[:limit]
+            results = [{"members": sorted(c)} for c in comms_sorted]
+    except Exception:  # noqa: BLE001
+        logger.exception("distillery_relations metrics: metric computation failed")
+        return error_response("INTERNAL", "Failed to compute graph metric")
+
+    return success_response(
+        {
+            "action": "metrics",
+            "metric": metric,
+            "scope": scope,
+            "node_count": g.number_of_nodes(),
+            "edge_count": g.number_of_edges(),
+            "results": results,
+            "count": len(results),
+            "computed_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "cache_hit": cache_hit,
         }
     )
