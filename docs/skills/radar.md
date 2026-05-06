@@ -5,12 +5,15 @@ Surfaces recent feed entries, synthesizes them into a grouped digest, and option
 ## Usage
 
 ```text
-/radar                         # Default: last 7 days, up to 20 entries
-/radar --days 3                # Last 3 days
-/radar --limit 10              # Limit to 10 entries
-/radar --suggest               # Include source suggestions
-/radar --no-store              # Don't save the digest
-/radar --include-evergreen     # Surface older / first-poll backfill items
+/radar                                  # Default: last 7 days, up to 20 entries
+/radar --days 3                         # Last 3 days
+/radar --limit 10                       # Limit to 10 entries
+/radar --topic "build hermeticity"      # Use an explicit topic instead of mining tags
+/radar --topic agentic-eval --days 14   # Topic + custom window
+/radar --topic build --topic wheels     # Multiple topics; one search query each
+/radar --suggest                        # Include source suggestions
+/radar --no-store                       # Don't save the digest
+/radar --include-evergreen              # Surface older / first-poll backfill items
 ```
 
 **Trigger phrases:** "what's new", "show my digest", "ambient digest", "what have I missed", "feed digest"
@@ -21,6 +24,7 @@ Surfaces recent feed entries, synthesizes them into a grouped digest, and option
 |--------|-------------|---------|
 | `--days <n>` | Look back period in days (overrides `feeds.digest.window_days`) | `feeds.digest.window_days` (7 if unset) |
 | `--limit <n>` | Maximum entries to include | 20 |
+| `--topic <query>` | Use the literal string as the semantic-search query instead of mining tags. Repeatable. | Off (auto-mine) |
 | `--suggest` | Include new source suggestions | Off |
 | `--no-store` | Don't store the digest as an entry | Stores by default |
 | `--include-evergreen` | Include items older than the window or flagged as first-poll backfill | Off |
@@ -69,12 +73,15 @@ Digest stored: m3n4o5p6
 
 ## How It Works
 
-1. Retrieves recent feed entries from the knowledge base (type `feed`)
-2. Groups entries by source tag or topic
-3. Synthesizes 2-4 sentence summaries per group with bullet points
-4. Generates a cross-group overall summary
-5. If `--suggest` is enabled, the feed scorer mines the knowledge base for an interest profile and emits source recommendations inline (the former `distillery_interests` tool was folded into `/radar`'s internal pipeline)
-6. Stores the digest as an entry (type `digest`) unless `--no-store` is specified
+1. Determines the query set:
+   - If one or more `--topic` flags are supplied, the literal strings become the queries (deduplicated, preserving order).
+   - Otherwise the skill mines curated entries (`session`, `reference`, `bookmark`, `idea`, `note`, `minutes`) for a tag profile, then picks **3 namespace-diverse tags** rather than the raw top-3 by count. A tag's namespace is its hierarchical path with the leaf removed, capped at two segments (e.g., `domain/build/hermeticity` → `domain/build`; `tech/duckdb` → `tech`). One leader per namespace prevents one dominant cluster from crowding out distinct topics.
+2. Runs one `distillery_search` per query against feed entries, deduplicating results by entry ID.
+3. Groups entries by source tag or topic.
+4. Synthesizes 2-4 sentence summaries per group with bullet points.
+5. Generates a cross-group overall summary.
+6. If `--suggest` is enabled, the feed scorer mines the knowledge base for an interest profile and emits source recommendations inline (the former `distillery_interests` tool was folded into `/radar`'s internal pipeline).
+7. Stores the digest as an entry (type `digest`) unless `--no-store` is specified.
 
 ## Tips
 
