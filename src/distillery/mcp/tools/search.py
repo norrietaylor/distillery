@@ -152,9 +152,19 @@ async def _handle_find_similar(
       ``conflict_check=True``, runs conflict pass 2 and adds a
       ``conflict_evaluation`` field to the response.
 
+    * **source_entry_id** (str | None): when set, the entry's content is used
+      as the similarity probe if ``content`` is omitted, the source entry is
+      always self-excluded from results, and (combined with ``exclude_linked``)
+      the entry's existing relations form the exclusion anchor.
+
+    * **exclude_linked** (bool, default ``False``): when ``True``, filters out
+      entries already linked to ``source_entry_id`` via ``entry_relations``
+      (any direction, any relation_type). Requires ``source_entry_id``.
+
     Args:
         store: Initialised :class:`~distillery.store.duckdb.DuckDBStore`.
-        arguments: Tool argument dict containing at minimum ``content``.
+        arguments: Tool argument dict; must contain ``content`` or
+            ``source_entry_id``.
         cfg: Optional configuration used to enforce embedding budget.
 
     Returns:
@@ -162,11 +172,49 @@ async def _handle_find_similar(
     """
     from distillery.mcp.budget import EmbeddingBudgetError, record_and_check
 
-    err = validate_required(arguments, "content")
-    if err:
-        return error_response("INVALID_PARAMS", err)
+    # --- new graph-extension parameters (parsed first so we can use them
+    # when validating content/source_entry_id requirements below) ---------
+    err_source_id_type = validate_type(arguments, "source_entry_id", str, "string")
+    if err_source_id_type:
+        return error_response("INVALID_PARAMS", err_source_id_type)
+    source_entry_id_raw: str | None = arguments.get("source_entry_id")
+    source_entry_id: str | None = source_entry_id_raw if source_entry_id_raw else None
 
-    content: str = arguments["content"]
+    exclude_linked: bool = bool(arguments.get("exclude_linked", False))
+    if exclude_linked and source_entry_id is None:
+        return error_response(
+            "INVALID_PARAMS",
+            "exclude_linked=true requires source_entry_id",
+        )
+
+    # Resolve source entry up-front so we can supply its content as the
+    # similarity probe when caller omits an explicit ``content`` argument.
+    source_entry = None
+    if source_entry_id is not None:
+        source_entry = await store.get(source_entry_id)
+        if source_entry is None:
+            return error_response("NOT_FOUND", f"Entry not found: {source_entry_id}")
+
+    # Either ``content`` or ``source_entry_id`` must yield a non-empty probe.
+    raw_content = arguments.get("content")
+    content_provided = isinstance(raw_content, str) and raw_content.strip() != ""
+    if not content_provided and source_entry is None:
+        return error_response(
+            "INVALID_PARAMS",
+            "Missing required fields: content",
+        )
+
+    if content_provided:
+        content: str = raw_content  # type: ignore[assignment]
+    else:
+        # source_entry is not None here (guarded above)
+        assert source_entry is not None
+        content = source_entry.content
+        if not content or not content.strip():
+            return error_response(
+                "INVALID_PARAMS",
+                "Field 'content' must be a non-empty string",
+            )
 
     threshold_raw = arguments.get("threshold", 0.8)
     err_threshold = validate_type(arguments, "threshold", (int, float), "number")
@@ -221,12 +269,43 @@ async def _handle_find_similar(
         logger.exception("Error in distillery_find_similar")
         return error_response("INTERNAL", "find_similar failed")
 
+    # --- graph-extension filtering (self + linked exclusion) ---------------
+    excluded_linked_count = 0
+    if source_entry_id is not None:
+        count_before = len(search_results)
+        linked_ids: set[str] = set()
+        if exclude_linked:
+            try:
+                relations = await store.get_related(source_entry_id, direction="both")
+            except Exception:  # noqa: BLE001
+                logger.exception("Error fetching relations in find_similar")
+                return error_response("INTERNAL", "Failed to fetch related entries")
+            for rel in relations:
+                from_id = rel.get("from_id")
+                to_id = rel.get("to_id")
+                if isinstance(from_id, str) and from_id != source_entry_id:
+                    linked_ids.add(from_id)
+                if isinstance(to_id, str) and to_id != source_entry_id:
+                    linked_ids.add(to_id)
+            search_results = [
+                sr
+                for sr in search_results
+                if sr.entry.id != source_entry_id and sr.entry.id not in linked_ids
+            ]
+        else:
+            # Self-exclusion only when source_entry_id is set without
+            # exclude_linked.
+            search_results = [sr for sr in search_results if sr.entry.id != source_entry_id]
+        excluded_linked_count = count_before - len(search_results)
+
     results = [{"score": round(sr.score, 6), "entry": sr.entry.to_dict()} for sr in search_results]
     payload: dict[str, Any] = {
         "results": results,
         "count": len(results),
         "threshold": threshold,
     }
+    if source_entry_id is not None or exclude_linked:
+        payload["excluded_linked_count"] = excluded_linked_count
 
     # --- dedup_action mode ---------------------------------------------------
     if dedup_action:
