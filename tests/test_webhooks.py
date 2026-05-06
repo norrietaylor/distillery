@@ -204,6 +204,11 @@ async def test_auth_lowercase_bearer_scheme_accepted(
         assert body["ok"] is True
         assert isinstance(body["job_id"], str) and body["job_id"]
 
+        # Wait for the background job to terminate so teardown doesn't race
+        # with the autouse fixture that clears the in-process job registry.
+        final = _wait_for_job(client, body["job_id"])
+        assert final["state"] == "succeeded"
+
 
 # ---------------------------------------------------------------------------
 # Cooldown tests
