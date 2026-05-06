@@ -1,7 +1,7 @@
 # Issue #458 — Cell A: graph-enabled regression gate.
 #
 # Runs the same headline cell config as bench-variance-gate.yml
-# (hybrid / session / recency-on / bge-small, full 500q × 5 seeds) with
+# (hybrid / session / recency-on / bge-small, 500q × 5 seeds) with
 # the retrieval-time graph expansion flag enabled (``--expand-graph``).
 # The point of this cell is to catch *regressions* on the graph-enabled
 # retrieval path — it is NOT a value-add measurement (LongMemEval is
@@ -9,14 +9,27 @@
 # hypothesis; see ``bench/LIMITATIONS.md`` §(f) and the Cell B deferral
 # in ``docs/benchmarks.md``).
 #
-# Pass criterion: Cell A's mean R@5 must be within
-# ``GRAPH_REGRESSION_DELTA_PP`` (default 0.5pp) of the committed
+# Status (until graph PRs land). PRs #422–#429 are still open at the
+# time this workflow ships. Until they merge, ``--expand-graph`` is
+# metadata and output-routing only in the LongMemEval runner — the flag
+# records the ``expand_graph`` axis on every receipt and routes outputs
+# into a separate subdirectory, but the underlying retrieval call site
+# is unchanged. Cell A is therefore forward-compatible scaffolding for
+# the regression gate, not yet an active measurement of the graph-
+# enabled path. The gate becomes live as soon as the graph PRs merge
+# (no further workflow changes needed).
+#
+# Pass criterion (when sample sizes match): Cell A's mean R@5 must be
+# within ``DELTA_THRESHOLD_PP`` (default 0.5pp) of the committed
 # HEADLINE mean (``bench/results/variance_baseline.json``). A larger
 # negative delta indicates that the graph-enabled path silently
 # regressed the baseline; a positive delta is *not* a value-add claim
 # (graph value-add is deferred to a fit-for-purpose eval — multi-hop
 # QA, synthetic team-knowledge eval, /investigate /pour synthesis eval
-# — never to LongMemEval).
+# — never to LongMemEval). The gate is skipped (with a workflow
+# warning) when the Cell A run's ``n_questions`` does not match the
+# baseline's ``questions`` field — a 100q nightly cannot meaningfully
+# trip a 500q-calibrated regression gate.
 #
 # Filing: outputs land under ``bench/results/graph_regression_cell_a/``
 # (per-seed receipts) and ``bench/results/graph_regression_cell_a.json``
@@ -338,12 +351,27 @@ jobs:
           # (e.g. variance gate hasn't been run yet on this branch) we
           # emit the Cell A mean alone and skip the gate — but log a
           # warning so CI surfaces the gap.
+          #
+          # Sample-size guard (CR feedback on PR #464): the baseline is
+          # produced by bench-variance-gate.yml at the full 500-question
+          # set, but this Cell A workflow runs 100q on schedule and full-
+          # 500q only on workflow_dispatch. Comparing a 100q mean against
+          # a 500q baseline mean is statistically meaningless even when
+          # both are bench means — the noise band scales with √n and the
+          # variance-gate threshold was characterised at n=500. Refuse to
+          # compute the gate when sample sizes diverge so a noisier
+          # 100-question run cannot trip a regression gate calibrated
+          # against a less-noisy 500-question baseline (or vice versa).
           headline_mean = None
+          headline_questions = None
           headline_path = Path("bench/results/variance_baseline.json")
           if headline_path.exists():
               with headline_path.open() as f:
                   headline_payload = json.load(f)
               headline_mean = headline_payload.get("mean")
+              # variance_baseline.json carries the sample size as
+              # ``"questions"`` (see bench-variance-gate.yml line ~310).
+              headline_questions = headline_payload.get("questions")
           else:
               print(
                   f"::warning::HEADLINE baseline {headline_path} not found; "
@@ -365,13 +393,58 @@ jobs:
 
           delta = None
           gate_pass = None
+          sample_size_match = None
           if headline_mean is not None:
-              delta = mean_r5 - float(headline_mean)
-              # Cell A is a regression gate, not a value-add eval. Only a
-              # *negative* drift larger than the threshold trips the gate
-              # — a positive delta is permitted but explicitly NOT
-              # claimed as a value-add (see bench/LIMITATIONS.md §(f)).
-              gate_pass = delta >= -delta_threshold
+              # CR feedback (#464): the regression gate is statistically
+              # meaningful only when Cell A and the HEADLINE baseline are
+              # measured at the same sample size. The noise band scales
+              # with sqrt(n) and the variance-gate threshold (default
+              # 0.5pp) was calibrated against the full 500-question set.
+              # When the sizes diverge — e.g. nightly 100q vs baseline
+              # 500q — we still emit the Cell A mean and a transparent
+              # aggregate (so trending data is preserved), but skip the
+              # gate computation and surface a workflow warning. The
+              # gate IS evaluated (fail-closed) when the sizes match.
+              if headline_questions is None:
+                  print(
+                      f"::warning::HEADLINE baseline {headline_path} is missing "
+                      "the 'questions' field; cannot validate sample-size match. "
+                      "Cell A aggregate emitted without a delta or gate. "
+                      "Re-run bench-variance-gate.yml so the baseline carries "
+                      "its sample size."
+                  )
+              else:
+                  try:
+                      headline_questions_int = int(headline_questions)
+                  except (TypeError, ValueError) as exc:
+                      print(
+                          f"::error::HEADLINE baseline 'questions'={headline_questions!r} "
+                          f"is not an integer: {exc}",
+                          file=sys.stderr,
+                      )
+                      sys.exit(1)
+                  sample_size_match = headline_questions_int == n_questions
+                  if not sample_size_match:
+                      # Trend data (mean_r5) is still useful for spotting
+                      # drift over time; skip the gate but don't fail the
+                      # workflow — a noisier 100q nightly should not
+                      # silently trip a 500q-calibrated regression gate
+                      # (or vice versa).
+                      print(
+                          f"::warning::Cell A sample size ({n_questions} questions) does "
+                          f"not match HEADLINE baseline sample size ({headline_questions_int} "
+                          "questions); regression gate skipped. Cell A aggregate "
+                          "still includes mean_r5 for trending; dispatch this "
+                          "workflow with an empty 'limit' input (full 500q) for a "
+                          "gate-relevant comparison."
+                      )
+                  else:
+                      delta = mean_r5 - float(headline_mean)
+                      # Cell A is a regression gate, not a value-add eval. Only a
+                      # *negative* drift larger than the threshold trips the gate
+                      # — a positive delta is permitted but explicitly NOT
+                      # claimed as a value-add (see bench/LIMITATIONS.md §(f)).
+                      gate_pass = delta >= -delta_threshold
 
           aggregate = {
               "cell": "graph_regression_cell_a",
@@ -391,6 +464,8 @@ jobs:
               "min_r5": min(r5_values),
               "max_r5": max(r5_values),
               "headline_mean_r5": headline_mean,
+              "headline_questions": headline_questions,
+              "sample_size_match": sample_size_match,
               "delta_r5_pp": delta * 100.0 if delta is not None else None,
               "delta_threshold_pp": delta_threshold_pp,
               "gate_pass": gate_pass,

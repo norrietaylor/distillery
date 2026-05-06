@@ -110,6 +110,18 @@ into two cells, **only one of which produces a publishable number**:
   `bench/results/graph_regression_cell_a.json`) and the 0.5.0 release notes
   may say "no regression with graph enabled" if the gate passes.
 
+  **Status (until graph PRs land).** PRs #422–#429 are still open at the
+  time this discipline note ships. Until they merge, `--expand-graph` is
+  *metadata and output-routing only* in the LongMemEval runner: the flag
+  records the `expand_graph` axis on every receipt and routes Cell A
+  outputs into a separate subdirectory so receipts cannot be confused with
+  HEADLINE, but the underlying `store.search` call site is unchanged.
+  Cell A is therefore a forward-compatible scaffold for the regression
+  gate, not yet an active measurement of the graph-enabled path. Once
+  the graph PRs merge, the runner is wired to invoke graph-enabled
+  retrieval at the same call site and the gate becomes live without
+  further workflow or docs changes.
+
 - **Cell B — graph value-add (DEFER).** A claim of the form "graph features
   improve LongMemEval" is **not supported** because LongMemEval doesn't
   contain the structure graph features are designed to exploit. Such a
