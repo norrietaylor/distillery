@@ -56,6 +56,7 @@ class TestBenchLongmemevalHelp:
             "--embed-model",
             "--limit",
             "--seeds",
+            "--expand-graph",
             "--output-dir",
             "--quiet",
         ):
@@ -453,3 +454,139 @@ class TestBenchLongmemevalSeedOffsetFlag:
         assert exc.value.code == 0
         assert captured_kwargs.get("seed_offset") == 3
         assert captured_kwargs.get("seeds") == 1
+
+
+@pytest.mark.unit
+class TestBenchLongmemevalExpandGraphFlag:
+    """``--expand-graph`` is documented and round-trips through argparse.
+
+    Issue #458, Cell A: the bench-graph-regression-cell.yml workflow
+    relies on this flag being present and reaching the runner so the
+    Cell A path can be exercised independently of HEADLINE.
+    """
+
+    def test_expand_graph_appears_in_help(
+        self,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """``--help`` lists ``--expand-graph`` so the Cell A workflow can
+        discover the flag without reading source.
+        """
+        with pytest.raises(SystemExit) as exc:
+            main(["bench", "longmemeval", "--help"])
+        assert exc.value.code == 0
+        out = capsys.readouterr().out
+        assert "--expand-graph" in out
+
+    def test_expand_graph_default_is_false(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Omitting ``--expand-graph`` keeps the runner kwarg ``False``.
+
+        The HEADLINE path's defaults are unchanged — graph features stay
+        default-off (issue #458 acceptance criterion).
+        """
+        from distillery import cli as cli_module
+
+        captured_kwargs: dict[str, Any] = {}
+
+        async def _stub_runner(**kwargs: Any) -> Any:
+            captured_kwargs.update(kwargs)
+            from distillery.eval.longmemeval import BenchReport
+
+            return BenchReport(
+                summary={
+                    "n_questions": 0,
+                    "overall": {
+                        "recall_at_5": 0.0,
+                        "recall_at_10": 0.0,
+                        "ndcg_at_10": 0.0,
+                    },
+                },
+                per_question=[],
+                jsonl_path=None,
+                summary_path=None,
+            )
+
+        monkeypatch.setattr(
+            "distillery.eval.longmemeval.run_longmemeval_bench",
+            _stub_runner,
+        )
+        if hasattr(cli_module, "run_longmemeval_bench"):  # pragma: no cover - defensive
+            monkeypatch.setattr(
+                cli_module,
+                "run_longmemeval_bench",
+                _stub_runner,
+                raising=False,
+            )
+
+        out_dir = tmp_path / "results"
+        with pytest.raises(SystemExit) as exc:
+            main(
+                [
+                    "bench",
+                    "longmemeval",
+                    "--output-dir",
+                    str(out_dir),
+                    "--quiet",
+                ]
+            )
+        assert exc.value.code == 0
+        assert captured_kwargs.get("expand_graph") is False
+
+    def test_expand_graph_round_trips_to_runner(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """``--expand-graph`` reaches ``run_longmemeval_bench`` unchanged."""
+        from distillery import cli as cli_module
+
+        captured_kwargs: dict[str, Any] = {}
+
+        async def _stub_runner(**kwargs: Any) -> Any:
+            captured_kwargs.update(kwargs)
+            from distillery.eval.longmemeval import BenchReport
+
+            return BenchReport(
+                summary={
+                    "n_questions": 0,
+                    "overall": {
+                        "recall_at_5": 0.0,
+                        "recall_at_10": 0.0,
+                        "ndcg_at_10": 0.0,
+                    },
+                },
+                per_question=[],
+                jsonl_path=None,
+                summary_path=None,
+            )
+
+        monkeypatch.setattr(
+            "distillery.eval.longmemeval.run_longmemeval_bench",
+            _stub_runner,
+        )
+        if hasattr(cli_module, "run_longmemeval_bench"):  # pragma: no cover - defensive
+            monkeypatch.setattr(
+                cli_module,
+                "run_longmemeval_bench",
+                _stub_runner,
+                raising=False,
+            )
+
+        out_dir = tmp_path / "results"
+        with pytest.raises(SystemExit) as exc:
+            main(
+                [
+                    "bench",
+                    "longmemeval",
+                    "--expand-graph",
+                    "--output-dir",
+                    str(out_dir),
+                    "--quiet",
+                ]
+            )
+        assert exc.value.code == 0
+        assert captured_kwargs.get("expand_graph") is True

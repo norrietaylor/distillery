@@ -112,6 +112,73 @@ type independently.
 | `single-session-preference` | <!-- placeholder --> `—` | <!-- placeholder --> `—` | <!-- placeholder --> `—` |
 | `single-session-assistant` | <!-- placeholder --> `—` | <!-- placeholder --> `—` | <!-- placeholder --> `—` |
 
+## Graph features — Cell A regression gate, Cell B deferred
+
+Issue [#458](https://github.com/norrietaylor/distillery/issues/458) splits the bench's
+coverage of the graph-enabled retrieval path (PRs [#422](https://github.com/norrietaylor/distillery/pull/422)–[#429](https://github.com/norrietaylor/distillery/pull/429),
+epic [#147](https://github.com/norrietaylor/distillery/issues/147)) into two cells. Only
+one produces a publishable number.
+
+### Cell A — graph regression gate (DO)
+
+Same config as the HEADLINE cell (`hybrid / session / recency-on / bge-small`, 500q × 5
+seeds), re-run with `--expand-graph` enabled. Cell A asks: **does enabling graph
+features regress baseline recall when the entry graph is sparse?** The pass criterion
+is that Cell A's mean R@5 stays within the variance-gate threshold (default 0.5pp) of
+the HEADLINE mean.
+
+!!! note "Status: forward-compatible plumbing until graph PRs land"
+
+    Until the graph retrieval PRs ([#422](https://github.com/norrietaylor/distillery/pull/422)–[#429](https://github.com/norrietaylor/distillery/pull/429))
+    merge, `--expand-graph` is **metadata and output-routing only** in the
+    LongMemEval bench runner (`src/distillery/eval/longmemeval.py`). The flag
+    records the `expand_graph` axis on every receipt and routes outputs into a
+    separate subdirectory so Cell A receipts can never be confused with
+    HEADLINE receipts, but the underlying `store.search` call site is
+    unchanged — Cell A is currently measuring the same retrieval path as
+    HEADLINE. Once the graph PRs merge, the runner will be wired to invoke
+    graph-enabled retrieval without further workflow or docs changes, and
+    Cell A's regression-gate semantics become live. Until then, treat any
+    Cell A delta as a sanity check on the receipt-isolation infrastructure,
+    not a measurement of the graph-enabled path.
+
+- **Workflow.** [`.github/workflows/bench-graph-regression-cell.yml`](https://github.com/norrietaylor/distillery/blob/main/.github/workflows/bench-graph-regression-cell.yml)
+  runs nightly at 06:00 UTC, sequenced after the HEADLINE workflow at 05:00 UTC.
+  Nightly samples 100q for trending; full-500q runs (gate-relevant) are
+  `workflow_dispatch` only and require a sample-size match against the
+  committed `variance_baseline.json` before the gate is computed.
+- **Aggregate.** Cell A's 5-seed mean + delta vs HEADLINE lands at
+  `bench/results/graph_regression_cell_a.json`. Per-seed receipts live as workflow
+  artifacts only (90-day retention) and are deliberately not committed — the repo
+  must never accumulate a graph-receipt history that could be silently
+  re-published as a HEADLINE claim.
+- **Default-off.** Graph features remain default-off in production (the existing
+  HEADLINE cell does not set `expand_graph`); Cell A exists as a separate axis
+  and does not displace the public number.
+
+### Cell B — graph value-add (DEFER)
+
+A claim of the form "graph features improve LongMemEval" is deferred to a
+fit-for-purpose eval. LongMemEval is a **single-user, single-session** benchmark
+— each question is scored against one user's haystack — and does not exercise the
+graph hypothesis (cross-user / cross-session entry relations) that motivates
+Distillery's graph features. Measuring graph value-add on LongMemEval would be a
+category error analogous to (a) above.
+
+The deferred eval will be one of:
+
+- a multi-hop QA dataset (questions whose answer requires traversing entry
+  relations);
+- a synthetic team-knowledge eval (multiple authors, cross-author lookups);
+- an in-house `/investigate` or `/pour` synthesis eval that scores the value
+  the graph adds to multi-document narrative answers.
+
+Until that eval exists, **no public surface** (this page, the README, the blog,
+the 0.5.0 release notes) may claim that graph features improve LongMemEval
+scores. The 0.5.0 release notes claim "no regression with graph enabled" —
+never "graph improves LongMemEval." Full discipline rationale is in
+[`bench/LIMITATIONS.md`](../bench/LIMITATIONS.md) §(f).
+
 ## Methodology
 
 The bench instantiates an in-memory `DuckDBStore` per question, fixes the PRNG seed before
