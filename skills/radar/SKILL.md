@@ -37,7 +37,7 @@ See CONVENTIONS.md — skip if already confirmed this conversation.
 | `--days N` | Look back N days for recent feed entries (overrides `feeds.digest.window_days`, default 7) |
 | `--limit N` | Maximum number of feed entries to include (default: 20) |
 | `--project <name>` | Scope feed entries to a specific project |
-| `--topic <query>` | Use the literal string as a semantic-search query instead of mining tags. Repeatable; each `--topic` is one query. When set, Step 3a is skipped. |
+| `--topic <query>` | Use the literal string as a semantic-search query instead of mining tags. Repeatable; each `--topic` is one query. When set, use Path 1 in Step 3a and skip Path 2 (tag mining). |
 | `--suggest` | Include source suggestions at end of digest |
 | `--store` | Store digest as a knowledge entry (default: display-only) |
 | `--include-evergreen` | Include older / first-poll backfill items in the candidate set (default: excluded) |
