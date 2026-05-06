@@ -10,6 +10,7 @@ Surfaces recent feed entries, synthesizes them into a grouped digest, and option
 /radar --limit 10              # Limit to 10 entries
 /radar --suggest               # Include source suggestions
 /radar --no-store              # Don't save the digest
+/radar --include-evergreen     # Surface older / first-poll backfill items
 ```
 
 **Trigger phrases:** "what's new", "show my digest", "ambient digest", "what have I missed", "feed digest"
@@ -18,10 +19,18 @@ Surfaces recent feed entries, synthesizes them into a grouped digest, and option
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--days <n>` | Look back period in days | 7 |
+| `--days <n>` | Look back period in days (overrides `feeds.digest.window_days`) | `feeds.digest.window_days` (7 if unset) |
 | `--limit <n>` | Maximum entries to include | 20 |
 | `--suggest` | Include new source suggestions | Off |
 | `--no-store` | Don't store the digest as an entry | Stores by default |
+| `--include-evergreen` | Include items older than the window or flagged as first-poll backfill | Off |
+
+The look-back window is bounded by `metadata.published_at` (the feed item's
+publication time), not the ingest timestamp. First-poll backfill batches —
+items pulled when a feed source is first registered — are flagged
+`metadata.backfill = true` and excluded from the default candidate set so
+they don't surface as "new intelligence". Use `--include-evergreen` to
+override.
 
 ## Output
 

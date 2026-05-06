@@ -30,6 +30,7 @@ from urllib.parse import quote
 import httpx
 
 from distillery.embedding.errors import extract_retry_after
+from distillery.feeds.rss import DEFAULT_USER_AGENT
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,7 @@ def build_reader_client(
     timeout_seconds: float = 30.0,
     max_retries: int = _MAX_RETRIES,
     concurrency: int = 5,
+    user_agent: str | None = None,
 ) -> JinaReaderClient | None:
     """Build a :class:`JinaReaderClient` if the API key is present.
 
@@ -62,6 +64,9 @@ def build_reader_client(
         timeout_seconds: Per-request timeout in seconds.
         max_retries: Maximum number of retry attempts on retryable errors.
         concurrency: Maximum number of concurrent requests.
+        user_agent: Optional User-Agent header to send on every request.
+            When ``None`` or empty, falls back to
+            :data:`~distillery.feeds.rss.DEFAULT_USER_AGENT`.
 
     Returns:
         A configured :class:`JinaReaderClient`, or ``None`` if the API key
@@ -84,6 +89,7 @@ def build_reader_client(
         timeout_seconds=timeout_seconds,
         max_retries=max_retries,
         concurrency=concurrency,
+        user_agent=user_agent,
     )
 
 
@@ -124,6 +130,7 @@ class JinaReaderClient:
         timeout_seconds: float = 30.0,
         max_retries: int = _MAX_RETRIES,
         concurrency: int = 5,
+        user_agent: str | None = None,
     ) -> None:
         if not api_key:
             raise ValueError("JinaReaderClient requires a non-empty api_key")
@@ -138,6 +145,10 @@ class JinaReaderClient:
         self._timeout = timeout_seconds
         self._max_retries = max_retries
         self._semaphore = asyncio.Semaphore(concurrency)
+        # Empty / whitespace-only strings fall back to the project default so
+        # misconfiguration cannot send blank UA headers (issue #443).
+        ua = (user_agent or "").strip()
+        self._user_agent = ua or DEFAULT_USER_AGENT
 
     async def fetch(self, url: str) -> str | None:
         """Fetch markdown for *url* via the Jina Reader API.
@@ -168,6 +179,7 @@ class JinaReaderClient:
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Accept": "text/plain",
+            "User-Agent": self._user_agent,
         }
         backoff = _INITIAL_BACKOFF
 
