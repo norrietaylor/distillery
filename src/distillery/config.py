@@ -833,19 +833,29 @@ def _parse_feeds(raw: dict[str, Any]) -> FeedsConfig:
     )
 
 
+_CANDIDATE_LIMIT_MAX = 1000
+"""Upper bound for ``feeds.digest.candidate_limit``.
+
+Mirrors the range enforced by the ``distillery_configure`` MCP tool
+(see ``src/distillery/mcp/tools/configure.py``) so the YAML and runtime
+configuration paths accept the same set of values.
+"""
+
+
 def _parse_digest(raw: dict[str, Any]) -> DigestConfig:
     """Parse the ``feeds.digest`` section from a raw YAML mapping.
 
     Args:
         raw: Mapping with optional keys ``window_days`` (positive int,
-            default 7) and ``candidate_limit`` (positive int, default 35).
+            default 7) and ``candidate_limit`` (int in ``[1, 1000]``,
+            default 35).
 
     Returns:
         A populated :class:`DigestConfig` instance.
 
     Raises:
-        ValueError: If ``window_days`` or ``candidate_limit`` is not a
-            positive integer.
+        ValueError: If ``window_days`` is not a positive integer, or
+            ``candidate_limit`` is outside ``[1, 1000]``.
     """
     window_days = _parse_strict_int(raw.get("window_days", 7), "feeds.digest.window_days")
     if window_days <= 0:
@@ -853,9 +863,10 @@ def _parse_digest(raw: dict[str, Any]) -> DigestConfig:
     candidate_limit = _parse_strict_int(
         raw.get("candidate_limit", 35), "feeds.digest.candidate_limit"
     )
-    if candidate_limit <= 0:
+    if candidate_limit <= 0 or candidate_limit > _CANDIDATE_LIMIT_MAX:
         raise ValueError(
-            f"feeds.digest.candidate_limit must be a positive integer, got: {candidate_limit}"
+            "feeds.digest.candidate_limit must be a positive integer in "
+            f"[1, {_CANDIDATE_LIMIT_MAX}], got: {candidate_limit}"
         )
     return DigestConfig(window_days=window_days, candidate_limit=candidate_limit)
 

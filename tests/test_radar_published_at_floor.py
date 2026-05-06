@@ -482,6 +482,20 @@ class TestConfigureDigestCandidateLimit:
         assert data["error"] is True
         assert data["code"] == "INVALID_PARAMS"
 
+    @pytest.mark.asyncio
+    async def test_reject_above_upper_bound(self) -> None:
+        """``configure.py`` caps ``candidate_limit`` at 1000 — values above
+        the bound must be rejected with ``INVALID_PARAMS``.
+        """
+        cfg = _make_configure_cfg()
+        result = await _handle_configure(
+            cfg,
+            {"section": "feeds.digest", "key": "candidate_limit", "value": 1001},
+        )
+        data = json.loads(result[0].text)
+        assert data["error"] is True
+        assert data["code"] == "INVALID_PARAMS"
+
 
 # ---------------------------------------------------------------------------
 # Integration: skill-shaped /radar candidate-set query

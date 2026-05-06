@@ -399,6 +399,19 @@ class TestValidationErrors:
         with pytest.raises(ValueError, match="candidate_limit"):
             load_config(str(p))
 
+    def test_feeds_digest_candidate_limit_above_max_raises_value_error(
+        self, tmp_path: Path
+    ) -> None:
+        """YAML validation mirrors the ``distillery_configure`` upper bound (1000)."""
+        yaml_content = """\
+            feeds:
+              digest:
+                candidate_limit: 1001
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="candidate_limit"):
+            load_config(str(p))
+
     def test_explicit_missing_path_raises_file_not_found(self, tmp_path: Path) -> None:
         missing = str(tmp_path / "no_such_file.yaml")
         with pytest.raises(FileNotFoundError):
