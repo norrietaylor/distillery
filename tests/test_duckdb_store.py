@@ -1550,7 +1550,9 @@ class TestFTSRebuildRollback:
     returned ``False``) and caused duplicate feed entries to accumulate.
     """
 
-    async def test_fts_rebuild_failure_invokes_rollback(self, hybrid_store: DuckDBStore) -> None:
+    async def test_fts_rebuild_failure_invokes_rollback(
+        self, hybrid_store: DuckDBStore
+    ) -> None:
         """A failed PRAGMA must trigger ``conn.rollback()`` before returning.
 
         DuckDB ``DuckDBPyConnection.execute`` is a read-only attribute on
