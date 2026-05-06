@@ -119,10 +119,13 @@ from the configured `feeds.digest.candidate_limit` (default 35). Compute `Q`
 - If explicit `--topic` flags were provided (Path 1): `Q = min(number_of_distinct_explicit_topics, <limit>)` — honor every user-supplied topic up to the limit; do *not* apply the 5-query cap.
 - Otherwise (Path 2, namespace-derived): `Q = min(number_of_distinct_namespace_queries, 5, <limit>)` — namespace-derived queries are capped at 5.
 
-Distribute the `<limit>` budget exactly so the sum of per-query limits never
-exceeds `<limit>`: let `base = <limit> // Q` and `rem = <limit> % Q`, then
-assign `base + 1` to the first `rem` queries and `base` to the rest
-(skipping any zero-budget queries). For each query, call:
+If `Q == 0` (no queries — e.g. `<limit>` is 0 or both paths produced an
+empty set), short-circuit: skip Step 3b entirely and proceed to Step 3c
+(fallback). Otherwise distribute the `<limit>` budget exactly so the sum
+of per-query limits never exceeds `<limit>`: let `base = <limit> // Q`
+and `rem = <limit> % Q`, then assign `base + 1` to the first `rem`
+queries and `base` to the rest (skipping any zero-budget queries). For
+each query, call:
 
 `distillery_search(query="<query>", entry_type="feed", limit=<per-query budget>, published_after=<iso>, include_evergreen=<bool>)`
 
