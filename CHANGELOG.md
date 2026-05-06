@@ -1,37 +1,104 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
-
-## [Unreleased]
-
 ## [0.4.1] - 2026-05-06
 
 ### Bug Fixes
 
-- `/radar` no longer surfaces stale backfill items. Candidates are now bounded by `metadata.published_at` instead of `created_at`, and first-poll backfill batches are excluded by default. Pass `include_evergreen=true` to opt back in. (#444, #446) *(feeds,skills)*
-- Async feed poller sends a descriptive default User-Agent. Reddit and other UA-enforcing sources no longer 403. (#443, #445) *(feeds)*
-- Poller dedup is fail-closed; FTS rebuild failures roll back instead of poisoning the index. (#414) *(feeds,store)*
-- Serialize DuckDB connection access with `asyncio.Lock` to eliminate connection-lock races. (#416) *(store)*
+- reject NaN/Infinity metrics in variance aggregator (CR feedback) *(bench)*
+- variance aggregator requires consistent n_questions across seeds (CR feedback) *(bench)*
+- variance aggregator validates exact seed coverage + metrics (CR feedback) *(bench)*
+- require seed_offset in variance aggregator (CR feedback) *(bench)*
+- bump bench cell timeout to 120m; nightly samples 100q *(ci)*
+- clean up artifacts/ dir after staging into bench/results (#451) *(ci)*
+- default User-Agent for async poller (#443) (#445) *(feeds)*
+- bound /radar candidates by published_at + flag backfill (#444) (#446) *(feeds)*
+- make poller dedup fail-closed and roll back on FTS rebuild failure (#414) *(feeds)*
+- re-check _conn under lock in rollback() (CodeRabbit, #417) *(store)*
+- serialize DuckDB connection access with asyncio.Lock (#416) *(store)*
+- update last_polled_at on async poll completion (#404) (#413) *(feeds)*
+- return raw cosine similarity for project-filtered search (#370) (#411) *(store)*
+- validate enum params before DB lookup in classify and resolve_review (#372) (#407) *(mcp)*
+- guard against sudo and remote docker contexts (coderabbit) *(scripts)*
+- validate --jina-key has a value (coderabbit nitpick) *(scripts)*
+- quote field names consistently in multi-empty-field message *(mcp)*
+- distinguish missing vs empty in validate_required (#371) *(mcp)*
+- audit distillery_store_batch per-item results correctly *(mcp)*
+- isolate per-item validation failures in distillery_store_batch *(mcp)*
+- wrap YAML parse errors in ValueError for friendly CLI output *(config)*
+- broaden eval scenario load exceptions for JSON envelope *(cli)*
+- emit JSON envelope on eval error paths *(cli)*
+- preserve top-level --config/--format across subparsers *(cli)*
+- pin verify=True on remaining AsyncClient sites *(feeds)*
+- address CodeRabbit review on PR #397 *(mcp)*
+- in-memory cooldown cache to dodge DuckDB-threadpool race *(mcp)*
+- report empty state on status when DB file is missing *(cli)*
+- flip webhook job to terminal only after audit/rollback land *(mcp)*
+- rate-limit exempt /jobs/ GETs, reset webhook registry in tests *(mcp)*
+- roll back store after failed webhook job + drop quoted generic *(mcp)*
+- set User-Agent so dev.to stops 403'ing the runner *(cross-post)*
+- make dev.to dedup best-effort on auth errors *(cross-post)*
+- round-4 review — require canonical_url, skip duplicates *(cross-post)*
+- round-3 review — harden file list handoff and path input *(cross-post)*
+- round-2 review — input guard, secret preflight, tag + frontmatter types *(cross-post)*
+- address review — full history, aligned globs, HTTP timeout *(cross-post)*
 
-### Changed
+### CI/CD
 
-- **BREAKING (default behavior):** `claude plugin install distillery` now configures a **local stdio** MCP server (`uvx distillery-mcp`) instead of the hosted demo at `distillery-mcp.fly.dev`. The hosted demo becomes explicit opt-in. (#381, #408) *(skills)*
-- Container image migrated to Chainguard distroless Python. (#419) *(image)*
-- Container image now publishes multi-arch (`linux/amd64` + `linux/arm64`). (#447, #450) *(ci)*
+- publish multi-arch (linux/amd64 + linux/arm64) image *(supply-chain)*
+- bump installer + binary pins, add post-install verify (#432) *(cosign)*
+- scope suppressions to package name+version (CodeRabbit, #420) *(grype)*
+- unblock GHCR publish + audit suppression list (#418) *(grype)*
+- unblock GHCR publish + audit suppression list (#418) (#420) *(grype)*
+- cross-post new docs/blog posts to dev.to and Hashnode *(blog)*
 
-### Migration
+### Documentation
 
-Existing users who relied on the hosted demo and want to keep using it after `claude plugin update` should register it explicitly at user scope (this shadows the plugin's local default):
+- align bench timeout comment with 100q cost envelope *(ci)*
+- add MkDocs benchmarks page with discipline-aware placeholders (#437) *(bench)*
+- fix remaining stale skill/tool counts in presentation.html
+- correct stale tool counts to 16 (closes #366)
+- address coderabbit review on retrieval hygiene section *(conventions)*
+- retrieval hygiene for retrieval skills *(conventions)*
+- add light-themed social card *(assets)*
+- use standard bold+italic emphasis on punch line *(blog)*
+- reorder to separate three-tier research from Distillery claim *(blog)*
+- add inline citations for quantified claims *(blog)*
+- address CodeRabbit review round 2 *(blog)*
+- update changelog for v0.4.0
+- address PR review on 0.4.0 post *(blog)*
+- add 0.4.0 Full-Proof post and nav entry *(blog)*
 
-```bash
-claude mcp add distillery --scope user --transport http --url https://distillery-mcp.fly.dev/mcp
-```
+### Features
 
-The hosted demo is intended for evaluation only — do not store sensitive data on it.
+- variance-gate workflow + --seed-offset CLI flag *(bench)*
+- migrate to Chainguard distroless Python (#419) *(image)*
+- enrich RSS poller content via Jina Reader (#412) *(feeds)*
+- integrate LLM client into classify-batch webhook (#268) (#410) *(classification)*
+- default plugin install to local stdio MCP (#381) (#408) *(skills)*
+- add local macOS launchd installer with scheduled pipelines
+- add Python 3.14 to supported versions *(config)*
+- make /poll, /rescore, /maintenance webhooks async (return 202) *(mcp)*
 
-### Bench (internal)
+### Miscellaneous
 
-LongMemEval nightly benchmark scaffolding: dataset loader (#436), runner (#439), results aggregator (#441), CLI entrypoint (#440), nightly workflow (#438), MkDocs benchmarks page (#437), variance-gate workflow + `--seed-offset` (#455), nightly workflow timeout/cadence fix (#453). No runtime impact.
+- address CR feedback on v0.4.1 PR *(release)*
+- v0.4.1 *(release)*
+- drop unmatched CVE-2026-5928 suppression *(image)*
+- merge audited grype suppressions from main *(image)*
+- scope new CVE suppressions to package name+type+version *(image)*
+- suppress new CVEs surfaced by distroless base + clarify deploy doc *(image)*
+- slim container image using uv multi-stage build (#409) *(ci)*
+- bump Dockerfile base to python-3.14 (#398) *(docker)*
+- suppress two new non-exploitable glibc CVEs *(security)*
+- gate job behind blog-cross-post environment *(cross-post)*
+- expand package description, keywords, and site meta for search *(seo)*
+
+### Testing
+
+- force real contention in lock-serialization test (CodeRabbit, #417) *(store)*
+- support mount prefix in _wait_for_job helper *(mcp)*
+- move webhook-state reset fixture to root conftest *(mcp)*
 
 ## [0.4.0] - 2026-04-19
 
