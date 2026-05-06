@@ -34,11 +34,18 @@ See CONVENTIONS.md — skip if already confirmed this conversation.
 
 | Flag | Description |
 |------|-------------|
-| `--days N` | Look back N days for recent feed entries (default: 7) |
+| `--days N` | Look back N days for recent feed entries (overrides `feeds.digest.window_days`, default 7) |
 | `--limit N` | Maximum number of feed entries to include (default: 20) |
 | `--project <name>` | Scope feed entries to a specific project |
 | `--suggest` | Include source suggestions at end of digest |
 | `--store` | Store digest as a knowledge entry (default: display-only) |
+| `--include-evergreen` | Include older / first-poll backfill items in the candidate set (default: excluded) |
+
+The look-back window is bounded by `metadata.published_at` (the feed item's
+publication timestamp), not `created_at`. Items with no `published_at` are
+included unless they are flagged `metadata.backfill = true` (first-poll
+backfill batches), in which case they are hidden by default. Pass
+`--include-evergreen` to override and surface them.
 
 ### Step 3: Retrieve Recent Feed Entries
 
@@ -50,23 +57,27 @@ Build an interest profile that excludes feed-ingested content. Make separate `di
 
 **3b. Search by interests (primary path):**
 
-For each of the top interest tags (up to 3 queries), call:
+Compute `published_after = (now - <days>).isoformat()` where `<days>` is the
+`--days` flag if provided, otherwise the configured `feeds.digest.window_days`
+(default 7). For each of the top interest tags (up to 3 queries), call:
 
-`distillery_search(query="<interest>", entry_type="feed", limit=<ceil(limit/N)>, date_from=<date>)`
+`distillery_search(query="<interest>", entry_type="feed", limit=<ceil(limit/N)>, published_after=<iso>, include_evergreen=<bool>)`
 
-Where N is the number of queries. If `--project` was specified, also pass `project=<name>`.
+Where N is the number of queries. Pass `include_evergreen=true` only when the
+user supplied `--include-evergreen`. If `--project` was specified, also pass
+`project=<name>`.
 
 Deduplicate results across queries by entry ID, keeping the highest similarity score.
 
-Report: `Retrieved <total> entries via interest-based search (<N> queries).`
+Report: `Retrieved <total> entries via interest-based search (<N> queries, window=<days>d).`
 
 **3c. Fallback (if interest tags unavailable):**
 
 If none of the curated-type `group_by="tags"` calls return any tags, fall back to:
 
-`distillery_list(entry_type="feed", limit=<limit>, output_mode="summary", date_from=<date>)`
+`distillery_list(entry_type="feed", limit=<limit>, output_mode="summary", published_after=<iso>, include_evergreen=<bool>)`
 
-Report: `Retrieved <total> entries via recent listing (fallback).`
+Report: `Retrieved <total> entries via recent listing (fallback, window=<days>d).`
 
 If the curated-type `group_by="tags"` calls themselves error, treat that as an MCP error per the Rules section below — report and stop.
 
@@ -189,7 +200,9 @@ Tags: digest, radar, ambient
 
 - NEVER use Bash, Python, or any tool not listed in allowed-tools
 - If an MCP tool call fails, report the error to the user and STOP. Do not attempt workarounds.
-- Default lookback is 7 days; default limit is 20 — respect overrides
+- Default lookback is `feeds.digest.window_days` (7 days); default limit is 20 — respect overrides
+- Filter on `published_after` (publication time), not `date_from` (ingest time) — older items polled today are not new intelligence
+- First-poll backfill items (`metadata.backfill = true`) are excluded by default; surface them with `--include-evergreen`
 - Group entries by source tag when available; fall back to topic grouping
 - Display digest by default; store only with `--store` flag
 - Always include `digest`, `radar`, `ambient` tags when storing
