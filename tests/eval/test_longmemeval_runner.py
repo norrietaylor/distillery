@@ -618,3 +618,79 @@ def test_filename_schema_includes_every_axis(tmp_path: Path) -> None:
     for axis in ("hybrid", "turn", "off", "bge-base", "20260502T010203Z"):
         assert axis in jsonl.name, f"jsonl name missing axis {axis!r}: {jsonl.name}"
         assert axis in summary.name, f"summary name missing axis {axis!r}: {summary.name}"
+
+
+def test_expand_graph_writes_to_subdirectory(tmp_path: Path) -> None:
+    """Issue #458, Cell A: ``expand_graph=True`` outputs land in a subdirectory.
+
+    The Cell A workflow writes graph-enabled receipts under
+    ``bench/results/graph_regression_cell_a/`` so the existing nightly
+    aggregator (which globs ``bench/results/`` non-recursively) cannot
+    confuse a Cell A receipt with a HEADLINE receipt.
+    """
+    from distillery.eval.longmemeval import _write_outputs
+
+    record = QuestionRecord(
+        question_id="x",
+        question_type="t",
+        expected_session_ids=[],
+        retrieved_session_ids=[],
+        rankings=[],
+        recall_at_5=0.0,
+        recall_all_at_5=0.0,
+        ndcg_at_5=0.0,
+        recall_at_10=0.0,
+        recall_all_at_10=0.0,
+        ndcg_at_10=0.0,
+        latency_ms=1.0,
+        n_corpus_entries=0,
+        meta={},
+    )
+    jsonl, summary = _write_outputs(
+        [record],
+        {"n_questions": 1, "overall": {}, "per_question_type": {}},
+        tmp_path,
+        retrieval="hybrid",
+        granularity="session",
+        recency="on",
+        embed_model="bge-small",
+        stamp="20260502T010203Z",
+        expand_graph=True,
+    )
+    assert jsonl.parent.name == "graph_regression_cell_a"
+    assert summary.parent.name == "graph_regression_cell_a"
+    assert jsonl.parent.parent == tmp_path
+
+
+async def test_expand_graph_axis_recorded_in_summary_and_meta() -> None:
+    """Issue #458, Cell A: ``expand_graph=True`` flag flows into summary axes
+    and per-record meta.
+
+    Even before the graph PRs (#422-#429) land — when the retrieval call
+    site is a no-op for graph expansion — Cell A's audit trail must be
+    distinguishable from HEADLINE so receipts cannot be silently
+    re-published as the headline number.
+    """
+    questions = _load_fixture()
+
+    report = await run_longmemeval_bench(
+        retrieval="hybrid",
+        granularity="session",
+        recency="on",
+        embed_model="bge-small",
+        questions=questions[:1],
+        expand_graph=True,
+    )
+    assert report.summary["axes"]["expand_graph"] is True
+    assert all(rec.meta["expand_graph"] is True for rec in report.per_question)
+
+    # Default path is unchanged (HEADLINE: graph features default-off).
+    report_default = await run_longmemeval_bench(
+        retrieval="hybrid",
+        granularity="session",
+        recency="on",
+        embed_model="bge-small",
+        questions=questions[:1],
+    )
+    assert report_default.summary["axes"]["expand_graph"] is False
+    assert all(rec.meta["expand_graph"] is False for rec in report_default.per_question)

@@ -90,6 +90,41 @@ A number without all four is not a Distillery claim. Reviewers, blog readers,
 and downstream tooling should treat any LongMemEval-shaped number that does not
 carry this panel as folklore until the panel is reconstructed.
 
+### (f) No graph value-add claim on LongMemEval (Cell A is a regression gate, Cell B is deferred)
+
+LongMemEval is a **single-user, single-session** benchmark. Each question is
+scored against a haystack of sessions belonging to one user; nothing in the
+dataset exercises the graph hypothesis (cross-user / cross-session entry
+relations) that motivates Distillery's graph features (PRs #422–#429, epic
+#147).
+
+The bench's coverage of the graph-enabled retrieval path is therefore split
+into two cells, **only one of which produces a publishable number**:
+
+- **Cell A — graph regression gate (DO).** The same headline cell config
+  (`hybrid / session / recency-on / bge-small`, 500q × 5 seeds) re-run with
+  `--expand-graph` enabled. Pass criterion: Cell A's mean R@5 must be within
+  the variance-gate threshold (default 0.5pp) of the HEADLINE mean. This
+  catches *accidental regressions* on the graph-enabled path. It is
+  filed under HEADLINE-shaped infrastructure (`bench-graph-regression-cell.yml`,
+  `bench/results/graph_regression_cell_a.json`) and the 0.5.0 release notes
+  may say "no regression with graph enabled" if the gate passes.
+
+- **Cell B — graph value-add (DEFER).** A claim of the form "graph features
+  improve LongMemEval" is **not supported** because LongMemEval doesn't
+  contain the structure graph features are designed to exploit. Such a
+  claim is deferred to a fit-for-purpose eval — multi-hop QA, a synthetic
+  team-knowledge eval, or a `/investigate` / `/pour` synthesis eval — once
+  one exists. Until then, no public surface (README, blog, slide, this
+  page) may claim that graph features improve LongMemEval scores.
+
+Concretely, this means: a Cell A run with mean R@5 *higher* than HEADLINE
+is **not a value-add result** — it is within the noise band the variance
+gate already characterises (`bench/results/variance_baseline.json`), and
+LongMemEval is the wrong measurement instrument for the value-add question
+regardless. The 0.5.0 release notes claim "no regression with graph
+enabled" — never "graph improves LongMemEval."
+
 ---
 
 ## What this means in practice
@@ -106,7 +141,7 @@ carry this panel as folklore until the panel is reconstructed.
 > **If any limitation in this file becomes unsupportable, the LongMemEval
 > dataset is dropped from the project, not weakened in framing.**
 
-Concretely, that means: if discipline (a)–(e) cannot all be honoured — for
+Concretely, that means: if discipline (a)–(f) cannot all be honoured — for
 example, if the project is pressured to publish a single QA-accuracy-shaped
 number, or to compare against another system on a shared axis, or to drop SHA
 provenance for convenience — the correct response is to remove the LongMemEval
