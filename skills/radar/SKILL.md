@@ -37,9 +37,22 @@ See CONVENTIONS.md — skip if already confirmed this conversation.
 | `--days N` | Look back N days for recent feed entries (overrides `feeds.digest.window_days`, default 7) |
 | `--limit N` | Maximum number of feed entries to include (default: 20) |
 | `--project <name>` | Scope feed entries to a specific project |
+| `--topic <query>` | Use the literal string as a semantic-search query instead of mining tags. Repeatable; each `--topic` is one query. When set, use Path 1 in Step 3a and skip Path 2 (tag mining). |
 | `--suggest` | Include source suggestions at end of digest |
 | `--store` | Store digest as a knowledge entry (default: display-only) |
 | `--include-evergreen` | Include older / first-poll backfill items in the candidate set (default: excluded) |
+
+**`--topic` examples:**
+
+```text
+/radar --topic "build hermeticity"
+/radar --topic agentic-eval --days 14
+/radar --topic "build hermeticity" --topic "wheels caching"
+```
+
+Multiple `--topic` flags may be passed; each becomes a separate
+`distillery_search` query. Deduplicate the literal query strings (case- and
+whitespace-insensitive) before issuing.
 
 The look-back window is bounded by `metadata.published_at` (the feed item's
 publication timestamp), not `created_at`. Items with no `published_at` are
@@ -51,17 +64,54 @@ backfill batches), in which case they are hidden by default. Pass
 
 Use tag-driven semantic search to surface the most relevant feed entries, not just the newest.
 
-**3a. Get interest profile from curated entries:**
+**3a. Determine the query set:**
 
-Build an interest profile that excludes feed-ingested content. Make separate `distillery_list(group_by="tags", entry_type=<type>)` calls for curated types: `session`, `reference`, `bookmark`, `idea`, `note`, and `minutes`. Merge the group counts across all responses, take the top 5 tags by combined count. Convert tag paths to natural language by taking the leaf segment and replacing hyphens with spaces (e.g., `domain/authentication` → query `"authentication"`).
+Two paths — explicit override or auto-derived from interests.
+
+*Path 1 — `--topic` override (skip tag mining):*
+
+If one or more `--topic <query>` flags were supplied, use the supplied
+strings directly as the query set. Deduplicate (case-insensitive, trim
+whitespace), preserving the user's order. Skip the rest of Step 3a and
+proceed to 3b. Report: `Using <N> user-supplied topic(s): <comma-separated>.`
+
+*Path 2 — Namespace-diverse interest profile (default):*
+
+Build an interest profile that excludes feed-ingested content. Make separate
+`distillery_list(group_by="tags", entry_type=<type>)` calls for curated
+types: `session`, `reference`, `bookmark`, `idea`, `note`, and `minutes`.
+Merge the group counts across all responses to obtain a combined count map.
+
+Then select **3 namespace-diverse tags**, *not* the raw top-3 by count. A
+tag's namespace is its hierarchical path with the leaf segment removed,
+capped at two segments (e.g., `domain/build/hermeticity` → namespace
+`domain/build`; `tech/duckdb` → namespace `tech`; single-segment `release`
+namespaces to itself). The selection rule:
+
+1. Group all tags by namespace.
+2. Pick the highest-count tag in each namespace (alphabetical tie-break) —
+   the *namespace leader*.
+3. Rank namespaces by *aggregate population* (sum of counts across all
+   tags in the namespace), then by leader count, then alphabetically.
+4. Return the namespace leaders of the top 3 namespaces.
+
+This guarantees the query set spans up to three distinct conceptual
+clusters. The reference implementation lives in
+`distillery.feeds.radar_selection.select_namespace_diverse_tags` — call it
+mentally as `select_namespace_diverse_tags(merged_counts, top_n=3)`.
+
+Convert each chosen tag path to a natural-language query by taking the leaf
+segment and replacing hyphens with spaces (e.g.,
+`domain/build/hermeticity` → query `"hermeticity"`).
 
 **3b. Search by interests (primary path):**
 
 Compute `published_after = (now - <days>).isoformat()` where `<days>` is the
 `--days` flag if provided, otherwise the configured `feeds.digest.window_days`
-(default 7). For each of the top interest tags (up to 3 queries), call:
+(default 7). For each query in the query set from 3a (whether `--topic`-supplied
+or namespace-derived), call:
 
-`distillery_search(query="<interest>", entry_type="feed", limit=<ceil(limit/N)>, published_after=<iso>, include_evergreen=<bool>)`
+`distillery_search(query="<query>", entry_type="feed", limit=<ceil(limit/N)>, published_after=<iso>, include_evergreen=<bool>)`
 
 Where N is the number of queries. Pass `include_evergreen=true` only when the
 user supplied `--include-evergreen`. If `--project` was specified, also pass
@@ -72,6 +122,10 @@ Deduplicate results across queries by entry ID, keeping the highest similarity s
 Report: `Retrieved <total> entries via interest-based search (<N> queries, window=<days>d).`
 
 **3c. Fallback (if interest tags unavailable):**
+
+This fallback applies only to Path 2 (auto-derived interest profile). If
+`--topic` was supplied, Step 3b always has at least one query and 3c is
+skipped.
 
 If none of the curated-type `group_by="tags"` calls return any tags, fall back to:
 
@@ -111,7 +165,7 @@ You (the executing Claude instance) produce the synthesis — do not dump raw en
 
 ### Step 5: Suggest Sources
 
-When `--suggest` is specified, use the interest tags identified in Step 3a to suggest new sources. Based on the top interest topics, recommend 3–5 relevant RSS feeds or GitHub repos the user might want to add via `/watch add <url>`. Omit this section silently if Step 3a returned no tags or if `--suggest` was not specified.
+When `--suggest` is specified, use the query set from Step 3a — namespace-diverse interest tags from Path 2, or the user-supplied `--topic` strings from Path 1 — to suggest new sources. Based on those topics, recommend 3–5 relevant RSS feeds or GitHub repos the user might want to add via `/watch add <url>`. Omit this section silently if Step 3a produced no queries or if `--suggest` was not specified.
 
 ### Step 6: Check for Duplicates (if --store specified)
 
