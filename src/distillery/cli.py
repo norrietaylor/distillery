@@ -55,6 +55,23 @@ def _positive_int(value: str) -> int:
     return parsed
 
 
+def _non_negative_int(value: str) -> int:
+    """argparse ``type`` callable that rejects ``< 0`` integers.
+
+    Used by ``bench longmemeval --seed-offset`` so the variance-gate
+    workflow can dispatch ``--seed-offset 0`` (the canonical baseline
+    cell) without tripping the stricter ``> 0`` guard, while still
+    rejecting nonsense like ``--seed-offset -1``.
+    """
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"invalid int value: {value!r}") from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError(f"must be >= 0 (got {parsed})")
+    return parsed
+
+
 def _build_parser() -> argparse.ArgumentParser:
     """Build and return the argument parser.
 
@@ -339,6 +356,18 @@ def _build_parser() -> argparse.ArgumentParser:
         type=_positive_int,
         default=1,
         help="Number of seeds to sweep per question (default: 1)",
+    )
+    longmemeval_parser.add_argument(
+        "--seed-offset",
+        metavar="N",
+        type=_non_negative_int,
+        default=0,
+        help=(
+            "Starting offset added to the per-question PRNG seed (default: 0). "
+            "Used by the variance-gate matrix to dispatch independent single-seed "
+            "runs across offsets 0..N-1; combine with --seeds 1 for one run per "
+            "matrix cell."
+        ),
     )
     longmemeval_parser.add_argument(
         "--output-dir",
@@ -1920,6 +1949,7 @@ def _cmd_bench_longmemeval(
     embed_model: str,
     limit: int | None,
     seeds: int,
+    seed_offset: int,
     output_dir: str | None,
     quiet: bool,
     fmt: str,
@@ -1970,7 +2000,8 @@ def _cmd_bench_longmemeval(
         print(
             f"Running LongMemEval bench: retrieval={retrieval} "
             f"granularity={granularity} recency={recency} "
-            f"embed_model={embed_model} limit={limit} seeds={seeds}",
+            f"embed_model={embed_model} limit={limit} seeds={seeds} "
+            f"seed_offset={seed_offset}",
             file=sys.stderr,
         )
         print(f"Output directory: {resolved_output_dir}", file=sys.stderr)
@@ -1990,6 +2021,7 @@ def _cmd_bench_longmemeval(
             embed_model=embed_model_typed,
             limit=limit,
             seeds=seeds,
+            seed_offset=seed_offset,
             output_dir=resolved_output_dir,
         )
 
@@ -2120,6 +2152,7 @@ def main(argv: list[str] | None = None) -> None:
                 embed_model=getattr(args, "embed_model", "bge-small"),
                 limit=getattr(args, "limit", None),
                 seeds=getattr(args, "seeds", 1),
+                seed_offset=getattr(args, "seed_offset", 0),
                 output_dir=getattr(args, "output_dir", None),
                 quiet=getattr(args, "quiet", False),
                 fmt=fmt,

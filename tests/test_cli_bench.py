@@ -338,3 +338,118 @@ class TestBenchLongmemevalArgValidation:
         assert exc.value.code == 2
         captured = capsys.readouterr()
         assert "must be > 0" in captured.err
+
+    @pytest.mark.parametrize("value", ["-1", "-5"])
+    def test_negative_seed_offset_rejected(
+        self,
+        value: str,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """``--seed-offset`` rejects negative values but accepts ``0``.
+
+        The variance-gate matrix dispatches offsets ``0..4``, so ``0``
+        must remain valid (unlike ``--seeds`` / ``--limit`` which must
+        be ``> 0``).  Only negative values are nonsense.
+        """
+        with pytest.raises(SystemExit) as exc:
+            main(["bench", "longmemeval", "--seed-offset", value])
+        assert exc.value.code == 2
+        captured = capsys.readouterr()
+        assert "must be >= 0" in captured.err
+
+    def test_zero_seed_offset_accepted(
+        self,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """``--seed-offset 0 --help`` parses cleanly (no argparse error)."""
+        # Use --help to short-circuit before any heavy imports / network.
+        with pytest.raises(SystemExit) as exc:
+            main(["bench", "longmemeval", "--seed-offset", "0", "--help"])
+        # --help exits 0; only argparse type errors exit 2.
+        assert exc.value.code == 0
+
+
+@pytest.mark.unit
+class TestBenchLongmemevalSeedOffsetFlag:
+    """``--seed-offset`` is documented and round-trips through argparse."""
+
+    def test_seed_offset_appears_in_help(
+        self,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """``--help`` lists ``--seed-offset`` so the variance-gate workflow
+        and any external CI matrix can discover the flag without reading
+        source.
+        """
+        with pytest.raises(SystemExit) as exc:
+            main(["bench", "longmemeval", "--help"])
+        assert exc.value.code == 0
+        out = capsys.readouterr().out
+        assert "--seed-offset" in out
+
+    def test_seed_offset_round_trips_to_runner(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """``--seed-offset N`` reaches ``run_longmemeval_bench`` unchanged.
+
+        We don't run the bench end-to-end here — we monkeypatch the
+        runner with a recording stub so the unit test stays fast and
+        does not depend on fastembed weights.
+        """
+        from distillery import cli as cli_module
+
+        captured_kwargs: dict[str, Any] = {}
+
+        async def _stub_runner(**kwargs: Any) -> Any:
+            captured_kwargs.update(kwargs)
+            from distillery.eval.longmemeval import BenchReport
+
+            return BenchReport(
+                summary={
+                    "n_questions": 0,
+                    "overall": {
+                        "recall_at_5": 0.0,
+                        "recall_at_10": 0.0,
+                        "ndcg_at_10": 0.0,
+                    },
+                },
+                per_question=[],
+                jsonl_path=None,
+                summary_path=None,
+            )
+
+        monkeypatch.setattr(
+            "distillery.eval.longmemeval.run_longmemeval_bench",
+            _stub_runner,
+        )
+        # The CLI's lazy import binds the symbol into a local name; force
+        # the lazy import path to re-resolve from the module so the patch
+        # is observed.
+        if hasattr(cli_module, "run_longmemeval_bench"):  # pragma: no cover - defensive
+            monkeypatch.setattr(
+                cli_module,
+                "run_longmemeval_bench",
+                _stub_runner,
+                raising=False,
+            )
+
+        out_dir = tmp_path / "results"
+        with pytest.raises(SystemExit) as exc:
+            main(
+                [
+                    "bench",
+                    "longmemeval",
+                    "--seed-offset",
+                    "3",
+                    "--seeds",
+                    "1",
+                    "--output-dir",
+                    str(out_dir),
+                    "--quiet",
+                ]
+            )
+        assert exc.value.code == 0
+        assert captured_kwargs.get("seed_offset") == 3
+        assert captured_kwargs.get("seeds") == 1
