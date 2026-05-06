@@ -4,9 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-05-06
+
+### Bug Fixes
+
+- `/radar` no longer surfaces stale backfill items. Candidates are now bounded by `metadata.published_at` instead of `created_at`, and first-poll backfill batches are excluded by default. Pass `include_evergreen=true` to opt back in. (#444, #446) *(feeds,skills)*
+- Async feed poller sends a descriptive default User-Agent. Reddit and other UA-enforcing sources no longer 403. (#443, #445) *(feeds)*
+- Poller dedup is fail-closed; FTS rebuild failures roll back instead of poisoning the index. (#414) *(feeds,store)*
+- Serialize DuckDB connection access with `asyncio.Lock` to eliminate connection-lock races. (#416) *(store)*
+
 ### Changed
 
-- **BREAKING (default behavior):** `claude plugin install distillery` now configures a **local stdio** MCP server (`uvx distillery-mcp`) instead of the hosted demo at `distillery-mcp.fly.dev`. The hosted demo becomes explicit opt-in. (#381) *(skills)*
+- **BREAKING (default behavior):** `claude plugin install distillery` now configures a **local stdio** MCP server (`uvx distillery-mcp`) instead of the hosted demo at `distillery-mcp.fly.dev`. The hosted demo becomes explicit opt-in. (#381, #408) *(skills)*
+- Container image migrated to Chainguard distroless Python. (#419) *(image)*
+- Container image now publishes multi-arch (`linux/amd64` + `linux/arm64`). (#447, #450) *(ci)*
 
 ### Migration
 
@@ -17,6 +28,10 @@ claude mcp add distillery --scope user --transport http --url https://distillery
 ```
 
 The hosted demo is intended for evaluation only — do not store sensitive data on it.
+
+### Bench (internal)
+
+LongMemEval nightly benchmark scaffolding: dataset loader (#436), runner (#439), results aggregator (#441), CLI entrypoint (#440), nightly workflow (#438), MkDocs benchmarks page (#437), variance-gate workflow + `--seed-offset` (#455), nightly workflow timeout/cadence fix (#453). No runtime impact.
 
 ## [0.4.0] - 2026-04-19
 
