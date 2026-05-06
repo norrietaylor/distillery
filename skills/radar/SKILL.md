@@ -181,7 +181,7 @@ Call `distillery_list(structural=["orphans"], limit=10)`. If `--project` was spe
 
 Call `distillery_relations(action="metrics", metric="bridges", scope="global", limit=5)`. If `--project` was specified, also pass `project=<name>`.
 
-If the call returns an `INTERNAL` error whose message contains `"NetworkX not installed"`, skip subsections 6b and 6c entirely and emit a single one-line note in the section: `Run \`pip install distillery-mcp[graph]\` to enable bridges/communities.` Then continue to Step 7.
+If the call returns an `INTERNAL` error whose message contains `"NetworkX not installed"`, emit a single one-line note in the section: `Run \`pip install distillery-mcp[graph]\` to enable bridges/communities.` Then skip subsection 6c and continue to Step 7 (the same error in 6c would be redundant).
 
 On success, render the top-5 bridging entries as a numbered list with their betweenness score formatted to 3 decimals (e.g. `0.412`). Resolve each id to a short title using its data already retrieved during digest synthesis if possible; otherwise show the id. If `results` is empty, render `No bridges found (graph too small or disconnected).`
 
@@ -189,7 +189,7 @@ On success, render the top-5 bridging entries as a numbered list with their betw
 
 Call `distillery_relations(action="metrics", metric="communities", scope="global", limit=5)`. If `--project` was specified, also pass `project=<name>`.
 
-If the same `"NetworkX not installed"` `INTERNAL` error is returned (and 6b did not already emit the note), emit the one-line note from 6b and continue to Step 7. If 6b already emitted the note, skip silently.
+If 6b succeeded but this call returns the same `"NetworkX not installed"` `INTERNAL` error (e.g. a transient install state), emit the one-line `pip install distillery-mcp[graph]` note from 6b and continue to Step 7.
 
 On success, for each community in `results`, list its top-3 members **by member count of the community** (i.e. communities with more total members are listed first; within a community, list the first 3 ids from the `members` array). Render as `Community <n> (<total_members> entries): <id1>, <id2>, <id3>`. Document this ordering inline in the rendered output via the heading.
 
