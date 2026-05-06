@@ -886,6 +886,11 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
           dedup?: { action: str, similar_entries: list },
           conflict_candidates?: list, conflict_evaluation?: dict,
           excluded_linked_count?: int }
+          Note: excluded_linked_count is present whenever source_entry_id is
+          set or exclude_linked=true. It counts both linked-source exclusions
+          (when exclude_linked=true) and the self-exclusion of source_entry_id
+          itself (when source_entry_id == candidate); a non-zero value is
+          therefore possible even with exclude_linked=false.
         RETURNS (error): { error: true, code: "INVALID_PARAMS" | "NOT_FOUND" | "BUDGET_EXCEEDED" | "INTERNAL", message: "..." }
 
         RELATED: distillery_store (stores with automatic dedup/conflict checks),
