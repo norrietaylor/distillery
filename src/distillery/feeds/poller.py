@@ -550,6 +550,9 @@ class FeedPoller:
         # ``[digest, alert)`` band remain digest-eligible only.  The constraint
         # ``digest <= alert`` is enforced by validate_config().
         self._alert_threshold = config.feeds.thresholds.alert
+        # One-shot guard so a misconfigured / non-numeric alert threshold
+        # only logs once per poller instance instead of per item.
+        self._alert_threshold_warning_emitted = False
         self._reader = reader
 
     async def poll(self, *, source_url: str | None = None) -> PollerSummary:
@@ -882,10 +885,19 @@ class FeedPoller:
                 # Defensive: alert threshold may be a non-numeric placeholder
                 # (e.g. MagicMock in some unit tests).  Treat any comparison
                 # failure as "not alert-worthy" — we never want a malformed
-                # threshold to break the store path.
+                # threshold to break the store path.  Log once per poller so
+                # misconfiguration is observable without spamming the log.
                 try:
                     is_alert = adjusted_score >= float(self._alert_threshold)
-                except (TypeError, ValueError):
+                except (TypeError, ValueError) as exc:
+                    if not self._alert_threshold_warning_emitted:
+                        logger.warning(
+                            "FeedPoller: invalid alert threshold %r (%s); "
+                            "alert tagging disabled for this poller instance",
+                            self._alert_threshold,
+                            exc,
+                        )
+                        self._alert_threshold_warning_emitted = True
                     is_alert = False
 
                 kwargs = _item_to_entry_kwargs(
