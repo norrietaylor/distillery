@@ -399,6 +399,19 @@ class TestValidationErrors:
         with pytest.raises(ValueError, match="candidate_limit"):
             load_config(str(p))
 
+    def test_feeds_digest_candidate_limit_non_integer_raises_value_error(
+        self, tmp_path: Path
+    ) -> None:
+        """YAML validation rejects non-integer values (mirrors ``distillery_configure``)."""
+        yaml_content = """\
+            feeds:
+              digest:
+                candidate_limit: 12.5
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="candidate_limit"):
+            load_config(str(p))
+
     def test_feeds_digest_candidate_limit_above_max_raises_value_error(
         self, tmp_path: Path
     ) -> None:

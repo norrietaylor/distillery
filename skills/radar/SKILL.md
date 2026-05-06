@@ -102,24 +102,32 @@ mentally as `select_namespace_diverse_tags(merged_counts, top_n=5)`.
 
 Convert each chosen tag path to a natural-language query by taking the leaf
 segment and replacing hyphens with spaces (e.g.,
-`domain/build/hermeticity` → query `"hermeticity"`).
+`domain/build/hermeticity` → query `"hermeticity"`). De-duplicate the
+normalized query strings (case- and whitespace-insensitive), preserving the
+highest-ranked occurrence; if a collision drops a tag, substitute the
+next-ranked namespace leader from the merged counts so the query set still
+spans up to 5 distinct queries.
 
 **3b. Search by interests (primary path):**
 
 Compute `published_after = (now - <days>).isoformat()` where `<days>` is the
 `--days` flag if provided, otherwise the configured `feeds.digest.window_days`
 (default 7). Resolve `<limit>` from the `--limit` flag if provided, otherwise
-from the configured `feeds.digest.candidate_limit` (default 35). For each
-query in the query set from 3a (whether `--topic`-supplied or
-namespace-derived), call:
+from the configured `feeds.digest.candidate_limit` (default 35). Let
+`Q = min(number_of_distinct_queries_from_3a, 5, <limit>)` — that is, the
+number of queries in the set from Step 3a (whether `--topic`-supplied or
+namespace-derived), capped at 5 and at `<limit>`. Distribute the `<limit>`
+budget exactly so the sum of per-query limits never exceeds `<limit>`: let
+`base = <limit> // Q` and `rem = <limit> % Q`, then assign `base + 1` to the
+first `rem` queries and `base` to the rest (skipping any zero-budget
+queries). For each query, call:
 
-`distillery_search(query="<query>", entry_type="feed", limit=<ceil(limit/N)>, published_after=<iso>, include_evergreen=<bool>)`
+`distillery_search(query="<query>", entry_type="feed", limit=<per-query budget>, published_after=<iso>, include_evergreen=<bool>)`
 
-Where N is the number of queries in the set. With the default `<limit>` of 35
-and N=5 (the namespace-diverse default), this yields 5 × ceil(35/5)=7 → 35
-raw → ~30 unique candidates after dedup. If fewer than 5 namespace-diverse
-tags are available, issue one query per tag returned and size each query as
-`ceil(limit/N)` accordingly. Pass `include_evergreen=true` only when the user
+With the default `<limit>` of 35 and Q=5, this yields 5 queries of 7 results
+each → 35 raw → ~30 unique candidates after dedup. For small limits (e.g.,
+`--limit 3` with 5 queries), Q=3 and only 3 queries are issued so the
+override is honored exactly. Pass `include_evergreen=true` only when the user
 supplied `--include-evergreen`. If `--project` was specified, also pass
 `project=<name>`.
 
@@ -135,7 +143,11 @@ skipped.
 
 If none of the curated-type `group_by="tags"` calls return any tags, fall back to:
 
-`distillery_list(entry_type="feed", limit=<limit>, output_mode="summary", published_after=<iso>, include_evergreen=<bool>)`
+`distillery_list(entry_type="feed", limit=<limit>, output_mode="summary", published_after=<iso>, include_evergreen=<bool>, project=<name?>)`
+
+Apply the same project-scoping rule as Step 3b: only include `project=<name>`
+when `--project` was supplied, so the fallback never synthesizes entries from
+other projects when the user explicitly scoped the request.
 
 Report: `Retrieved <total> entries via recent listing (fallback, window=<days>d).`
 
