@@ -155,11 +155,14 @@ jobs:
         env:
           DISTILLERY_BENCH_GIT_SHA: ${{ github.sha }}
           # Nightly schedule samples 100 questions per cell to stay inside the
-          # nightly cost envelope; workflow_dispatch honours inputs.limit.
-          # The 5-seed mean / delta computation is still meaningful at 100q —
-          # the noise band scales with √n_questions but the regression gate
-          # tolerance is set against HEADLINE's own variance which is sampled
-          # at the same n.
+          # nightly cost envelope (5 cells × 500q would be ~6 hrs/night).
+          # workflow_dispatch honours inputs.limit (empty = full 500q). The
+          # 100q nightly produces useful trending data (mean_r5 over time)
+          # but the regression GATE is computed only when n_questions
+          # matches the HEADLINE baseline's sample size — see the
+          # sample-size-match guard in the aggregator step. So the nightly
+          # records the mean for trending; the gate-relevant comparison is
+          # workflow_dispatch with empty 'limit' (full 500q).
           LIMIT: ${{ inputs.limit || (github.event_name == 'schedule' && '100' || '') }}
         run: |
           # CLI presence guard: ``--expand-graph`` was added by issue #458
