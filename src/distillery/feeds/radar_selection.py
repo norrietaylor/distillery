@@ -75,9 +75,12 @@ def select_namespace_diverse_tags(
     1. Group all tags by :func:`tag_namespace`.
     2. For each namespace, pick its highest-count tag (alphabetical
        tie-break) — this is the *namespace leader*.
-    3. Rank namespace leaders by their count (alphabetical tie-break on
-       both leader name and namespace).
-    4. Return up to ``top_n`` namespace leaders.
+    3. Rank namespaces by *aggregate* population (sum of counts across the
+       namespace's tags), then by leader count, then alphabetically.  This
+       matches the issue #460 spec ("most-populated namespaces") and
+       prevents a broadly-populated namespace from losing to one with a
+       single spiky tag.
+    4. Return the namespace leaders of the top ``top_n`` namespaces.
 
     Parameters
     ----------
@@ -102,18 +105,19 @@ def select_namespace_diverse_tags(
             continue
         grouped[tag_namespace(tag)].append((tag, count))
 
-    leaders: list[tuple[str, str, int | float]] = []
+    leaders: list[tuple[str, str, int | float, int | float]] = []
     for ns, members in grouped.items():
         # Highest count first; alphabetical tag name as deterministic tie-break.
         members.sort(key=lambda item: (-item[1], item[0]))
         leader_tag, leader_count = members[0]
-        leaders.append((ns, leader_tag, leader_count))
+        namespace_total = sum(count for _tag, count in members)
+        leaders.append((ns, leader_tag, leader_count, namespace_total))
 
-    # Rank namespaces by their leader's count, then by namespace name, then
-    # by leader tag name — fully deterministic.
-    leaders.sort(key=lambda item: (-item[2], item[0], item[1]))
+    # Rank namespaces by aggregate population first, then leader count, then
+    # deterministic alphabetical tie-breaks (namespace name, then leader tag).
+    leaders.sort(key=lambda item: (-item[3], -item[2], item[0], item[1]))
 
-    return [tag for _ns, tag, _count in leaders[:top_n]]
+    return [tag for _ns, tag, _leader_count, _ns_total in leaders[:top_n]]
 
 
 __all__ = ["select_namespace_diverse_tags", "tag_namespace"]

@@ -12,7 +12,7 @@ Surfaces recent feed entries, synthesizes them into a grouped digest, and option
 /radar --topic agentic-eval --days 14   # Topic + custom window
 /radar --topic build --topic wheels     # Multiple topics; one search query each
 /radar --suggest                        # Include source suggestions
-/radar --no-store                       # Don't save the digest
+/radar --store                          # Store the digest as an entry (default: display-only)
 /radar --include-evergreen              # Surface older / first-poll backfill items
 ```
 
@@ -26,7 +26,7 @@ Surfaces recent feed entries, synthesizes them into a grouped digest, and option
 | `--limit <n>` | Maximum entries to include | 20 |
 | `--topic <query>` | Use the literal string as the semantic-search query instead of mining tags. Repeatable. | Off (auto-mine) |
 | `--suggest` | Include new source suggestions | Off |
-| `--no-store` | Don't store the digest as an entry | Stores by default |
+| `--store` | Store the digest as an entry | Off (display-only) |
 | `--include-evergreen` | Include items older than the window or flagged as first-poll backfill | Off |
 
 The look-back window is bounded by `metadata.published_at` (the feed item's
@@ -81,11 +81,11 @@ Digest stored: m3n4o5p6
 4. Synthesizes 2-4 sentence summaries per group with bullet points.
 5. Generates a cross-group overall summary.
 6. If `--suggest` is enabled, the feed scorer mines the knowledge base for an interest profile and emits source recommendations inline (the former `distillery_interests` tool was folded into `/radar`'s internal pipeline).
-7. Stores the digest as an entry (type `digest`) unless `--no-store` is specified.
+7. Stores the digest as an entry (type `digest`) only when `--store` is specified.
 
 ## Tips
 
-- The digest is stored by default with tags `digest/radar/ambient` for future retrieval
+- Digests are display-only by default; pass `--store` to persist with tags `digest/radar/ambient` for future retrieval
 - Source suggestions are based on your interest profile (mined from existing entries)
 - Use `/watch add` to subscribe to suggested sources
 - Groups are organized by source when available, falling back to topic clustering

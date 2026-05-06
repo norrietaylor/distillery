@@ -44,7 +44,7 @@ See CONVENTIONS.md — skip if already confirmed this conversation.
 
 **`--topic` examples:**
 
-```
+```text
 /radar --topic "build hermeticity"
 /radar --topic agentic-eval --days 14
 /radar --topic "build hermeticity" --topic "wheels caching"
@@ -91,7 +91,9 @@ namespaces to itself). The selection rule:
 1. Group all tags by namespace.
 2. Pick the highest-count tag in each namespace (alphabetical tie-break) —
    the *namespace leader*.
-3. Rank namespace leaders by their count and take the top 3 leaders.
+3. Rank namespaces by *aggregate population* (sum of counts across all
+   tags in the namespace), then by leader count, then alphabetically.
+4. Return the namespace leaders of the top 3 namespaces.
 
 This guarantees the query set spans up to three distinct conceptual
 clusters. The reference implementation lives in

@@ -145,6 +145,34 @@ class TestSelectNamespaceDiverseTags:
             "tech/duckdb",
         ]
 
+    def test_namespace_aggregate_outranks_spiky_leader(self) -> None:
+        """A broadly-populated namespace must outrank a namespace whose
+        single spiky tag has a higher individual count.  This is the
+        spec interpretation of "most-populated namespaces" from #460
+        and prevents thin namespaces from monopolizing query slots.
+        """
+        counts = {
+            # tech namespace: one spiky tag.
+            "tech/rust": 20,
+            # domain/build namespace: many smaller tags, aggregate dominates.
+            "domain/build/hermeticity": 9,
+            "domain/build/cache": 8,
+            "domain/build/wheels": 7,
+            "domain/build/reproducibility": 6,
+            # domain/agents namespace: medium aggregate.
+            "domain/agents/eval": 12,
+            "domain/agents/orchestration": 5,
+        }
+        result = select_namespace_diverse_tags(counts, top_n=3)
+        # Aggregate ranking: domain/build (30) > domain/agents (17) > tech (20).
+        # Wait: tech is 20, domain/agents is 17 — so order is
+        # domain/build (30), tech (20), domain/agents (17).
+        assert result == [
+            "domain/build/hermeticity",
+            "tech/rust",
+            "domain/agents/eval",
+        ]
+
     def test_skips_empty_tag_strings(self) -> None:
         counts = {"": 100, "domain/agents/eval": 5}
         result = select_namespace_diverse_tags(counts, top_n=3)
