@@ -191,7 +191,13 @@ Call `distillery_relations(action="metrics", metric="communities", scope="global
 
 If 6b succeeded but this call returns the same `"NetworkX not installed"` `INTERNAL` error (e.g. a transient install state), emit the one-line `pip install distillery-mcp[graph]` note from 6b and continue to Step 7.
 
-On success, for each community in `results`, list its top-3 members **by member count of the community** (i.e. communities with more total members are listed first; within a community, list the first 3 ids from the `members` array). Render as `Community <n> (<total_members> entries): <id1>, <id2>, <id3>`. Document this ordering inline in the rendered output via the heading.
+On success, sort the `results` array by each community's `total_members`
+field in descending order (community with the most members first). For
+each community in that sorted order, render the first three ids from its
+`members` array (positional, not ranked by any other metric). Output
+format: `Community <n> (<total_members> entries): <id1>, <id2>, <id3>`,
+where `<n>` is the rank in the sorted list. Document this ordering
+inline in the rendered output via the heading.
 
 **Optional stale flag:** For each community, if `updated_at` is available on every member and EVERY member has `updated_at < now - 60 days`, mark the community with a `[stale]` tag in its line. Skip the stale check silently if `updated_at` is not available without an extra fetch.
 
