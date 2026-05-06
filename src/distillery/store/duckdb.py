@@ -1380,6 +1380,12 @@ class DuckDBStore:
         - ``source`` (str) -- entry origin (e.g. "claude-code", "manual", "inference", etc.)
         - ``date_from`` (datetime | str) -- inclusive lower bound on ``created_at``
         - ``date_to`` (datetime | str) -- inclusive upper bound on ``created_at``
+        - ``published_after`` (datetime | str) -- inclusive lower bound on
+          ``metadata.published_at`` (ISO 8601 string compare)
+        - ``published_before`` (datetime | str) -- inclusive upper bound on
+          ``metadata.published_at`` (ISO 8601 string compare)
+        - ``exclude_backfill`` (bool) -- when True, drop rows where
+          ``metadata.backfill`` is the string ``"true"``
         """
         if not filters:
             return [], []
@@ -1459,6 +1465,35 @@ class DuckDBStore:
         if "session_id" in filters:
             clauses.append("session_id = ?")
             params.append(str(filters["session_id"]))
+
+        # Range / inequality filters on JSON metadata fields.  Used by
+        # ``/radar`` to bound the candidate set by ``metadata.published_at``
+        # (issue #444) so digests don't surface decade-old items as new
+        # intelligence.  Each value is compared as an ISO 8601 string —
+        # lexicographic order matches chronological order for that format.
+        if "published_after" in filters:
+            val = filters["published_after"]
+            if hasattr(val, "isoformat"):  # datetime
+                val = val.isoformat()
+            clauses.append("json_extract_string(metadata, '$.published_at') >= ?")
+            params.append(str(val))
+
+        if "published_before" in filters:
+            val = filters["published_before"]
+            if hasattr(val, "isoformat"):  # datetime
+                val = val.isoformat()
+            clauses.append("json_extract_string(metadata, '$.published_at') <= ?")
+            params.append(str(val))
+
+        # Exclude items flagged as first-poll backfill (issue #444).  When set
+        # to True, drops rows where ``metadata.backfill`` is the literal string
+        # ``"true"`` — DuckDB ``json_extract_string`` returns booleans as that.
+        # Existing rows without the field (NULL) are kept.
+        if filters.get("exclude_backfill"):
+            clauses.append(
+                "(json_extract_string(metadata, '$.backfill') IS NULL "
+                "OR json_extract_string(metadata, '$.backfill') != 'true')"
+            )
 
         # Support metadata path filters like "metadata.external_id".
         # DuckDB stores metadata as a JSON string; use json_extract_string
@@ -2952,3 +2987,62 @@ class DuckDBStore:
             ``True`` if the row existed and was deleted, ``False`` otherwise.
         """
         return await self._run_sync(self._sync_remove_relation, relation_id)
+
+    def _sync_list_relations(self) -> list[dict[str, Any]]:
+        """Synchronous implementation of list_relations(); called via asyncio.to_thread."""
+        assert self._conn is not None
+        rows = self._conn.execute(
+            "SELECT id, from_id, to_id, relation_type, "
+            "strftime(created_at, '%Y-%m-%dT%H:%M:%S') || 'Z' "
+            "FROM entry_relations ORDER BY created_at ASC"
+        ).fetchall()
+        return [
+            {
+                "id": row[0],
+                "from_id": row[1],
+                "to_id": row[2],
+                "relation_type": row[3],
+                "created_at": row[4],
+            }
+            for row in rows
+        ]
+
+    async def list_relations(self) -> list[dict[str, Any]]:
+        """Return every row from ``entry_relations`` as a list of dicts.
+
+        Used by graph metrics (``distillery_relations`` action="metrics") to
+        assemble the full subgraph for global-scope analysis. Goes through
+        :meth:`_run_sync` so the async event loop is never blocked by sync
+        DuckDB I/O and the shared connection is serialised under the same
+        lock as every other store operation.
+
+        Returns:
+            List of dicts with keys: ``id``, ``from_id``, ``to_id``,
+            ``relation_type``, ``created_at`` (ISO 8601 str).  Ordered by
+            ascending ``created_at``.
+        """
+        return await self._run_sync(self._sync_list_relations)
+
+    def _sync_get_all_related_entry_ids(self) -> set[str]:
+        """Synchronous implementation of get_all_related_entry_ids()."""
+        assert self._conn is not None
+        # Single scan over entry_relations to collect every entry id that
+        # appears as either endpoint of any relation. Used by the orphan
+        # filter on distillery_list to identify entries with no relations.
+        rows = self._conn.execute(
+            "SELECT from_id FROM entry_relations UNION SELECT to_id FROM entry_relations"
+        ).fetchall()
+        return {row[0] for row in rows}
+
+    async def get_all_related_entry_ids(self) -> set[str]:
+        """Return the set of entry IDs that appear in any ``entry_relations`` row.
+
+        Used by structural filters (e.g. orphan detection) on
+        ``distillery_list``: the complement set is the orphan set. Returns
+        an empty set when no relations exist.
+
+        Returns:
+            Set of entry UUID strings appearing as either ``from_id`` or
+            ``to_id`` in at least one row of ``entry_relations``.
+        """
+        return await self._run_sync(self._sync_get_all_related_entry_ids)
