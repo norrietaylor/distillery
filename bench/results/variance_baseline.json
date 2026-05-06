@@ -1,0 +1,43 @@
+{
+  "metric": "R@5",
+  "config": "hybrid/session/recency-on/bge-small",
+  "questions": 500,
+  "seeds": [
+    {
+      "seed_offset": 0,
+      "r5": 0.972,
+      "r10": 0.986,
+      "ndcg10": 0.9069617070344332
+    },
+    {
+      "seed_offset": 1,
+      "r5": 0.972,
+      "r10": 0.986,
+      "ndcg10": 0.9055479589164965
+    },
+    {
+      "seed_offset": 2,
+      "r5": 0.972,
+      "r10": 0.986,
+      "ndcg10": 0.9092330953944676
+    },
+    {
+      "seed_offset": 3,
+      "r5": 0.972,
+      "r10": 0.986,
+      "ndcg10": 0.9062195961281174
+    },
+    {
+      "seed_offset": 4,
+      "r5": 0.972,
+      "r10": 0.986,
+      "ndcg10": 0.9059940690599955
+    }
+  ],
+  "mean": 0.972,
+  "stddev": 0.0,
+  "min": 0.972,
+  "max": 0.972,
+  "gate_threshold_pp": 0.5,
+  "gate_pass": true
+}

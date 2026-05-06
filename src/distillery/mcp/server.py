@@ -659,6 +659,10 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         output: str | None = None,
         feed_url: str | None = None,
         include_archived: bool = False,
+        published_after: str | None = None,
+        published_before: str | None = None,
+        include_evergreen: bool = False,
+        structural: list[str] | None = None,
     ) -> list[types.TextContent]:
         """List knowledge entries with optional filters and pagination (newest first).
 
@@ -708,8 +712,28 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             retrieve all items polled from e.g. "https://hnrss.org/frontpage".
           - include_archived (bool, optional, default=False): Include archived entries
             in the default view (same effect as status="any" when status is unset).
+          - published_after (str, optional): ISO 8601 inclusive lower bound on
+            metadata.published_at (the feed-item publication timestamp written by the
+            poller). Use this to bound the /radar candidate set by the digest window.
+          - published_before (str, optional): ISO 8601 inclusive upper bound on
+            metadata.published_at.
+          - include_evergreen (bool, optional, default=False): When False (default) and
+            published_after/published_before is set, also drops entries flagged
+            metadata.backfill=true so first-poll backfill items don't surface as
+            "new intelligence". Set to True to surface older / evergreen items
+            explicitly. See issue #444.
+          - structural (list[str], optional): Surface entries with specific graph
+            anomalies relative to ``entry_relations``. Accepted values:
+            ["orphans"] — entries that do not appear as either endpoint of any
+            relation row. Unknown values yield INVALID_PARAMS. Combines (AND) with
+            every other filter (project, tags, status, date range, stale_days,
+            etc.) — orphans are first restricted by those filters, then the
+            no-relations predicate is applied.
 
-        RETURNS (success): { entries: list, count: int, total_count: int, limit: int, offset: int }
+        RETURNS (success): { entries: list, count: int, total_count: int, limit: int,
+          offset: int, output_mode: str } — when ``structural`` is set, the payload
+          additionally includes ``structural_filter`` (comma-joined applied filters,
+          e.g. "orphans"). Existing fields are unchanged.
         RETURNS (error): { error: true, code: "INVALID_PARAMS" | "INTERNAL", message: "..." }
 
         RELATED: distillery_search (for semantic search),
@@ -721,6 +745,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             offset=offset,
             output_mode=output_mode,
             include_archived=include_archived,
+            include_evergreen=include_evergreen,
             **_omit_none(
                 entry_type=entry_type,
                 author=author,
@@ -738,6 +763,9 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 group_by=group_by,
                 output=output,
                 feed_url=feed_url,
+                published_after=published_after,
+                published_before=published_before,
+                structural=structural,
             ),
         )
         return await _handle_list(store=c["store"], arguments=args)
@@ -758,6 +786,11 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         limit: int = 10,
         tag_prefix: str | None = None,
         include_archived: bool = False,
+        published_after: str | None = None,
+        published_before: str | None = None,
+        include_evergreen: bool = False,
+        expand_graph: bool = False,
+        expand_hops: int = 1,
     ) -> list[types.TextContent]:
         """Search knowledge entries using semantic similarity (cosine distance, ranked descending).
 
@@ -769,6 +802,16 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         to search only archived entries, ``status="any"`` to include every
         status, or ``include_archived=true`` to add archived entries to the
         default candidate set.
+
+        When ``expand_graph=true``, after the semantic search returns its
+        seed result set, the tool BFS-expands 1 or 2 hops via
+        ``entry_relations`` to surface structurally connected entries.
+        Graph entries are scored at ``parent_score * 0.5 ** depth``, marked
+        with ``provenance="graph"``, and merged into the result list (sorted
+        by descending score, truncated to ``limit``).  Seeds are tagged
+        ``provenance="search"``.  The envelope gains a ``graph_expansion``
+        summary.  When ``expand_graph=false`` (default), the existing
+        envelope is unchanged — strictly additive.
 
         PARAMS:
           - query (str, required): Natural-language search query.
@@ -785,8 +828,26 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
           - tag_prefix (str, optional): Filter tags by namespace prefix.
           - include_archived (bool, optional, default=False): Include archived entries
             in the candidate set.
+          - published_after (str, optional): ISO 8601 inclusive lower bound on
+            metadata.published_at (poller-recorded publication timestamp). Used by
+            /radar to bound the candidate set by the configured digest window.
+          - published_before (str, optional): ISO 8601 inclusive upper bound on
+            metadata.published_at.
+          - include_evergreen (bool, optional, default=False): When False (default) and
+            published_after/published_before is set, also drops entries flagged
+            metadata.backfill=true so first-poll backfill items don't surface as
+            "new intelligence". Set to True to surface older / evergreen items
+            explicitly. See issue #444.
+          - expand_graph (bool, optional, default=False): When true, expand the seed
+            result set via ``entry_relations`` and merge the neighbours into the
+            results.
+          - expand_hops (int, optional, default=1): Depth of graph expansion when
+            ``expand_graph=true``.  Must be 1 or 2.
 
-        RETURNS (success): { results: [{ score: float, entry: {...} }], count: int }
+        RETURNS (success): { results: [{ score: float, entry: {...} }], count: int }.
+          When ``expand_graph=true`` each result also has ``provenance`` ("search" or
+          "graph"); graph results additionally carry ``depth`` and ``parent_id``, and
+          the envelope includes ``graph_expansion: { seed_count, expanded_count }``.
         RETURNS (error): { error: true, code: "INVALID_PARAMS" | "BUDGET_EXCEEDED" | "INTERNAL", message: "..." }
 
         RELATED: distillery_list (for filter-based browsing without semantic ranking),
@@ -797,6 +858,9 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             query=query,
             limit=limit,
             include_archived=include_archived,
+            include_evergreen=include_evergreen,
+            expand_graph=expand_graph,
+            expand_hops=expand_hops,
             **_omit_none(
                 entry_type=entry_type,
                 author=author,
@@ -808,6 +872,8 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 date_from=date_from,
                 date_to=date_to,
                 tag_prefix=tag_prefix,
+                published_after=published_after,
+                published_before=published_before,
             ),
         )
         return await _handle_search(store=c["store"], arguments=args, cfg=c["config"])
@@ -815,20 +881,26 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
     @server.tool
     async def distillery_find_similar(  # noqa: PLR0913
         ctx: Context,
-        content: str,
+        content: str | None = None,
         threshold: float = 0.8,
         limit: int = 10,
         dedup_action: bool = False,
         conflict_check: bool = False,
         llm_responses: list[dict[str, Any]] | None = None,
+        source_entry_id: str | None = None,
+        exclude_linked: bool = False,
     ) -> list[types.TextContent]:
         """Find stored entries similar to the given text (cosine similarity).
 
-        USE WHEN: checking for duplicates or conflicts before storing, or finding
-        entries related to arbitrary text. Supports progressive disclosure modes.
+        USE WHEN: checking for duplicates or conflicts before storing, finding
+        entries related to arbitrary text, or surfacing hidden connections to a
+        known entry (entries that are similar but not yet linked via relations).
+        Supports progressive disclosure modes.
 
         PARAMS:
-          - content (str, required): Text to compare against stored entries.
+          - content (str, optional): Text to compare against stored entries.
+            Required unless source_entry_id is provided. When both are set,
+            content wins as the similarity probe.
           - threshold (float, optional, default=0.8): Cosine similarity cutoff (0-1).
           - limit (int, optional, default=10): Max results (1-200).
           - dedup_action (bool, optional, default=false): When true, includes dedup
@@ -837,23 +909,40 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             conflict candidates with LLM evaluation prompts.
           - llm_responses (list[dict], optional): With conflict_check=true, evaluates
             LLM conflict verdicts. Each item: { entry_id: str, is_conflict: bool, reasoning: str }.
+          - source_entry_id (str, optional): Anchor entry whose content is used
+            as the similarity probe when content is omitted, and whose id is
+            self-excluded from results. Required when exclude_linked=true.
+          - exclude_linked (bool, optional, default=false): When true, filters out
+            entries already linked to source_entry_id via entry_relations
+            (any direction, any relation_type). Surfaces hidden connections.
 
         RETURNS (success): { results: [{ score: float, entry: {...} }], count: int, threshold: float,
           dedup?: { action: str, similar_entries: list },
-          conflict_candidates?: list, conflict_evaluation?: dict }
-        RETURNS (error): { error: true, code: "INVALID_PARAMS" | "BUDGET_EXCEEDED" | "INTERNAL", message: "..." }
+          conflict_candidates?: list, conflict_evaluation?: dict,
+          excluded_linked_count?: int }
+          Note: excluded_linked_count is present whenever source_entry_id is
+          set or exclude_linked=true. It counts both linked-source exclusions
+          (when exclude_linked=true) and the self-exclusion of source_entry_id
+          itself (when source_entry_id == candidate); a non-zero value is
+          therefore possible even with exclude_linked=false.
+        RETURNS (error): { error: true, code: "INVALID_PARAMS" | "NOT_FOUND" | "BUDGET_EXCEEDED" | "INTERNAL", message: "..." }
 
         RELATED: distillery_store (stores with automatic dedup/conflict checks),
-        distillery_search (for natural-language queries)
+        distillery_search (for natural-language queries),
+        distillery_relations (to inspect existing links between entries)
         """
         c = _lc(ctx)
         args: dict[str, Any] = dict(
-            content=content,
             threshold=threshold,
             limit=limit,
             dedup_action=dedup_action,
             conflict_check=conflict_check,
-            **_omit_none(llm_responses=llm_responses),
+            exclude_linked=exclude_linked,
+            **_omit_none(
+                content=content,
+                llm_responses=llm_responses,
+                source_entry_id=source_entry_id,
+            ),
         )
         return await _handle_find_similar(store=c["store"], cfg=c["config"], arguments=args)
 
@@ -1050,26 +1139,53 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         entry_id: str | None = None,
         direction: str = "both",
         relation_id: str | None = None,
+        hops: int = 2,
+        metric: str | None = None,
+        scope: str = "global",
+        limit: int = 10,
+        project: str | None = None,
+        tags: list[str] | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
     ) -> list[types.TextContent]:
         """Manage typed relations between knowledge entries.
 
         USE WHEN: linking entries together (e.g. marking one as blocking another,
-        citing a reference, or flagging duplicates).
+        citing a reference, or flagging duplicates), walking the relation
+        graph from a seed entry to surface multi-hop neighbours, or computing
+        graph metrics (bridges, communities) on the relations subgraph.
 
         PARAMS:
-          - action (str, required): Operation. Valid: [add, get, remove].
+          - action (str, required): Operation. Valid: [add, get, remove, traverse, metrics].
           - from_id (str, required for add): Source entry UUID.
           - to_id (str, required for add): Target entry UUID.
-          - relation_type (str, required for add, optional for get): Relation type.
-            Valid: [link, corrects, supersedes, related, blocks, depends_on, citation, duplicate].
-          - entry_id (str, required for get): Entry UUID to query relations for.
-          - direction (str, optional for get, default="both"): Filter direction.
+          - relation_type (str, required for add, optional for get/traverse): Relation type.
+            Valid: [link, corrects, supersedes, related, blocks, depends_on, citation,
+            duplicate, merge_source, sync_source].
+          - entry_id (str, required for get/traverse, required for metrics scope='ego'):
+            Entry UUID to query relations for (BFS root for traverse / ego-graph).
+          - direction (str, optional for get/traverse, default="both"): Filter direction.
             Valid: [outgoing, incoming, both].
           - relation_id (str, required for remove): UUID of the relation to delete.
+          - hops (int, optional for traverse, default=2): BFS depth, capped at [1, 3].
+          - metric (str, required for metrics): Graph metric to compute.
+            Valid: [bridges, communities]. Requires the [graph] optional extra.
+          - scope (str, optional for metrics, default="global"): Subgraph scope.
+            Valid: [global, ego]. ``"ego"`` requires ``entry_id``.
+          - limit (int, optional for metrics, default=10): For ``metric="bridges"``
+            returns the top-k entries by betweenness centrality; for
+            ``metric="communities"`` returns the K largest communities.
+          - project / tags / date_from / date_to (optional, metrics global scope):
+            restrict the entries whose relations participate in the graph.
 
         RETURNS (success): { relation_id: str, from_id: str, to_id: str, relation_type: str } (add) or
           { entry_id: str, relations: list, count: int } (get) or
-          { relation_id: str, removed: bool } (remove)
+          { relation_id: str, removed: bool } (remove) or
+          { action: "traverse", root: str, hops: int, direction: str, relation_type: str | null,
+            nodes: [{id: str, depth: int}], edges: [{from_id, to_id, relation_type}],
+            node_count: int, edge_count: int } (traverse) or
+          { action: "metrics", metric: str, scope: str, node_count: int, edge_count: int,
+            results: list, count: int, computed_at: str, cache_hit: bool } (metrics).
         RETURNS (error): { error: true, code: "NOT_FOUND" | "INVALID_PARAMS" | "INTERNAL", message: "..." }
 
         RELATED: distillery_correct (creates 'corrects' relations automatically),
@@ -1087,6 +1203,14 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                     entry_id=entry_id,
                     direction=direction,
                     relation_id=relation_id,
+                    hops=hops,
+                    metric=metric,
+                    scope=scope,
+                    limit=limit,
+                    project=project,
+                    tags=tags,
+                    date_from=date_from,
+                    date_to=date_to,
                 ),
             ),
         )
@@ -1159,9 +1283,10 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
 
         PARAMS:
           - section (str, required): Config section path (dotted notation).
-            Valid: [feeds.thresholds, defaults, classification].
+            Valid: [feeds, feeds.thresholds, defaults, classification].
           - key (str, required): Config key within the section.
-            Valid keys by section: feeds.thresholds: [alert, digest];
+            Valid keys by section: feeds: [user_agent];
+            feeds.thresholds: [alert, digest];
             defaults: [dedup_threshold, dedup_limit, stale_days];
             classification: [confidence_threshold, mode].
           - value (str | int | float | None, optional): New value. Omit to read

@@ -168,6 +168,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+        with:
+          platforms: linux/arm64
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
 
@@ -200,13 +205,31 @@ jobs:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: ${{ steps.tags.outputs.tags }}
           cache-from: type=gha,scope=${{ matrix.target }}
           build-args: |
             BUILD_SHA=${{ github.sha }}
 
+      # Cosign installer pinned to the v3.10.1 release SHA (latest v3.x as of
+      # 2026-05-03).  Cosign binary pinned to v2.6.3 (latest v2.x); v2 keeps
+      # the attestation format we already produce — moving to v3.0.x changes
+      # the predicate structure and would require coordinating with verifier
+      # tooling.  Bumping pins addresses issue #432 by replacing 5-month-old
+      # bootstrap script & binary URLs that hit a transient release-CDN miss.
       - name: Install Cosign
-        uses: sigstore/cosign-installer@f713795cb21599bc4e5c4b58cbad1da852d7eeb9 # v3
+        uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
+        with:
+          cosign-release: v2.6.3
+
+      # Sanity-check the binary downloaded successfully.  ``Install Cosign``
+      # is a shell script under the hood — if its release-CDN fetch fails
+      # silently in some future regression, surface the problem here rather
+      # than letting the next step blow up with "cosign: command not found".
+      - name: Verify Cosign install
+        run: |
+          cosign version
+          which cosign
 
       - name: Sign container image
         env:

@@ -22,6 +22,7 @@ from xml.etree.ElementTree import Element
 import defusedxml.ElementTree as DefusedElementTree
 import httpx
 
+from distillery import __version__
 from distillery.feeds.models import FeedItem
 
 logger = logging.getLogger(__name__)
@@ -41,8 +42,18 @@ _REDDIT_SUBREDDIT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Default poller User-Agent.  Includes project name + version + a contact URL
+# so upstream operators can identify and reach us; required by Reddit and
+# other hosts that block generic / unidentified bots (issue #443).
+DEFAULT_USER_AGENT = f"distillery/{__version__} (+https://github.com/norrietaylor/distillery)"
+
 # User-Agent that Reddit will accept (requires a descriptive bot string).
-_REDDIT_USER_AGENT = "Distillery/0.1 (RSS feed reader; https://github.com/norrietaylor/distillery)"
+# Kept distinct from ``DEFAULT_USER_AGENT`` so the Reddit-specific override
+# below continues to win for reddit.com hosts even when callers configure
+# ``feeds.user_agent`` to something else.
+_REDDIT_USER_AGENT = (
+    f"distillery/{__version__} (RSS feed reader; +https://github.com/norrietaylor/distillery)"
+)
 
 
 def _normalise_feed_url(url: str) -> tuple[str, dict[str, str]]:
@@ -368,7 +379,7 @@ class RSSAdapter:
         If *url* is empty.
     """
 
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, *, user_agent: str | None = None) -> None:
         if not url.strip():
             raise ValueError("RSSAdapter requires a non-empty feed URL.")
         raw = url.strip()
@@ -376,6 +387,10 @@ class RSSAdapter:
         self._source_url = raw  # original URL — used as identity / source_url in FeedItems
         self._fetch_url = normalised  # possibly rewritten URL — used for HTTP requests only
         self._extra_headers = extra_headers
+        # When the caller supplies an empty / whitespace string treat it as
+        # "use the default" so misconfigured deployments still send a sane UA.
+        ua = (user_agent or "").strip()
+        self._user_agent = ua or DEFAULT_USER_AGENT
         self.last_polled_at: datetime | None = None
 
     # ------------------------------------------------------------------
@@ -405,7 +420,10 @@ class RSSAdapter:
         """
         logger.debug("RSSAdapter: fetching %s", self._fetch_url)
 
-        headers = {"User-Agent": "Distillery/0.1 (RSS adapter)"}
+        # Extra headers (e.g. the Reddit-specific override from
+        # ``_normalise_feed_url``) win over the default / configured UA so
+        # reddit.com hosts always get the descriptive bot string they require.
+        headers = {"User-Agent": self._user_agent}
         headers.update(self._extra_headers)
 
         with httpx.Client(timeout=_REQUEST_TIMEOUT, verify=True) as client:
