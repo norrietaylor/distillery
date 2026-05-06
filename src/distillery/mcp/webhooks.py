@@ -59,6 +59,7 @@ def _build_reader(config: DistilleryConfig) -> JinaReaderClient | None:
         timeout_seconds=reader_cfg.timeout_seconds,
         max_retries=reader_cfg.max_retries,
         concurrency=reader_cfg.concurrency,
+        user_agent=config.feeds.user_agent or None,
     )
 
 
