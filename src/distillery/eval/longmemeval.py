@@ -216,6 +216,7 @@ def _build_meta_panel(
     granularity: GranularityMode,
     recency: RecencyMode,
     effective_recency: RecencyMode,
+    expand_graph: bool = False,
 ) -> dict[str, Any]:
     """Build the per-record SHA / provenance panel.
 
@@ -228,6 +229,13 @@ def _build_meta_panel(
     drive the offset directly via the variance-gate path).  Carried in
     the panel so a downstream aggregator can group records by the run
     that produced them without inspecting the filename.
+
+    ``expand_graph`` is the retrieval-time graph expansion axis (issue
+    #458, Cell A).  When ``True``, the bench is exercising the
+    graph-enabled retrieval path (default-off in production).  When
+    ``False`` (default) the panel reads as before.  Recorded on every
+    record so a downstream consumer can never confuse Cell A receipts
+    with HEADLINE receipts.
     """
     return {
         "git_sha": git_sha,
@@ -244,6 +252,7 @@ def _build_meta_panel(
         "granularity": granularity,
         "recency_requested": recency,
         "effective_recency": effective_recency,
+        "expand_graph": expand_graph,
     }
 
 
@@ -462,6 +471,7 @@ async def _run_one_question(
     recency: RecencyMode,
     embedder: Any,
     git_sha: str,
+    expand_graph: bool = False,
 ) -> QuestionRecord:
     """Build a fresh store, ingest the haystack, search, and score.
 
@@ -538,6 +548,7 @@ async def _run_one_question(
             granularity=granularity,
             recency=recency,
             effective_recency=effective_recency,
+            expand_graph=expand_graph,
         )
 
         return QuestionRecord(
@@ -626,8 +637,19 @@ def _write_outputs(
     recency: RecencyMode,
     embed_model: EmbedModel,
     stamp: str,
+    expand_graph: bool = False,
 ) -> tuple[Path, Path]:
-    """Write the JSONL + summary files; return ``(jsonl_path, summary_path)``."""
+    """Write the JSONL + summary files; return ``(jsonl_path, summary_path)``.
+
+    Issue #458 / Cell A: when ``expand_graph=True`` the outputs land in a
+    ``graph_regression_cell_a/`` subdirectory of ``output_dir`` so the
+    existing nightly aggregator (``scripts/bench/aggregate_results.py``)
+    — which globs ``output_dir`` non-recursively — never sees them and
+    cannot mistake a graph-enabled receipt for a HEADLINE receipt.  The
+    Cell A workflow has its own aggregator step.
+    """
+    if expand_graph:
+        output_dir = output_dir / "graph_regression_cell_a"
     output_dir.mkdir(parents=True, exist_ok=True)
     base = f"longmemeval_{retrieval}_{granularity}_{recency}_{embed_model}_{stamp}"
     jsonl_path = output_dir / f"results_{base}.jsonl"
@@ -658,6 +680,7 @@ async def run_longmemeval_bench(
     limit: int | None = None,
     seeds: int = 1,
     seed_offset: int = 0,
+    expand_graph: bool = False,
     output_dir: Path | None = None,
     questions: list[dict[str, Any]] | None = None,
 ) -> BenchReport:
@@ -703,6 +726,20 @@ async def run_longmemeval_bench(
         ``seed_offset + i * 100_000 + question_index`` so the per-run
         and per-sweep axes don't collide.  Defaults to ``0`` so the
         existing ``--seeds N`` semantics are unchanged.
+    expand_graph:
+        Issue #458, Cell A.  When ``True``, mark the run as exercising
+        the graph-enabled retrieval path and write outputs to a
+        ``graph_regression_cell_a/`` subdirectory of ``output_dir`` so
+        the existing HEADLINE aggregator never confuses Cell A receipts
+        with HEADLINE receipts.  Until graph PRs (#422-#429) land, this
+        is metadata-only at the search call — the axis is recorded in
+        ``summary["axes"]["expand_graph"]`` and on every
+        ``_meta.expand_graph`` panel for receipt provenance, and the
+        retrieval call site is unchanged.  When the graph PRs merge,
+        the search call here gains the actual ``expand_graph=True``
+        kwarg and Cell A starts measuring the graph-enabled path
+        without further workflow changes.  Defaults to ``False``
+        (HEADLINE behaviour, no axis change).
     output_dir:
         Directory to write JSONL + summary files into.  When ``None``,
         no files are written and the caller can read
@@ -760,6 +797,7 @@ async def run_longmemeval_bench(
                 recency=recency,
                 embedder=embedder,
                 git_sha=git_sha,
+                expand_graph=expand_graph,
             )
             all_records.append(record)
 
@@ -772,6 +810,7 @@ async def run_longmemeval_bench(
         "embed_model": embed_model,
         "seeds": max(1, seeds),
         "seed_offset": seed_offset,
+        "expand_graph": expand_graph,
         "limit": limit,
     }
     summary["dataset"] = {
@@ -794,6 +833,7 @@ async def run_longmemeval_bench(
             recency=recency,
             embed_model=embed_model,
             stamp=stamp,
+            expand_graph=expand_graph,
         )
 
     return BenchReport(
