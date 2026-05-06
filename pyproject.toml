@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "distillery-mcp"
-version = "0.4.0"
+version = "0.4.1"
 description = "Persistent shared memory for Claude Code — MCP server with DuckDB vector search, semantic dedup, and ambient intelligence for team knowledge"
 readme = "README.md"
 requires-python = ">=3.11"
