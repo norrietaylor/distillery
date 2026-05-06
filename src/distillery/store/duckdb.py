@@ -1165,8 +1165,8 @@ class DuckDBStore:
             Also attempts to update the entry's `accessed_at` timestamp; failures to update are ignored.
         """
         conn = self.connection
-        sql = f"SELECT {self._ENTRY_COLUMNS} FROM entries WHERE id = ?"
-        result = conn.execute(sql, [entry_id])
+        sql = f"SELECT {self._ENTRY_COLUMNS} FROM entries WHERE id = ? AND status != ?"
+        result = conn.execute(sql, [entry_id, EntryStatus.ARCHIVED.value])
         col_names = [desc[0] for desc in result.description]
         row = result.fetchone()
         if row is None:
