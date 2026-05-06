@@ -236,6 +236,27 @@ class TestYAMLLoading:
         assert cfg.defaults.dedup_limit == 3
         assert cfg.defaults.stale_days == 30
 
+    def test_feeds_digest_defaults(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """``feeds.digest`` falls back to defaults (window_days=7, candidate_limit=35)."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        cfg = load_config()
+        assert cfg.feeds.digest.window_days == 7
+        assert cfg.feeds.digest.candidate_limit == 35
+
+    def test_feeds_digest_overrides(self, tmp_path: Path) -> None:
+        """``feeds.digest.window_days`` and ``candidate_limit`` are overridable via YAML."""
+        yaml_content = """\
+            feeds:
+              digest:
+                window_days: 14
+                candidate_limit: 50
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.feeds.digest.window_days == 14
+        assert cfg.feeds.digest.candidate_limit == 50
+
 
 # ---------------------------------------------------------------------------
 # Validation errors
@@ -366,6 +387,16 @@ class TestValidationErrors:
         """
         p = write_yaml(tmp_path, yaml_content)
         with pytest.raises(ValueError):
+            load_config(str(p))
+
+    def test_feeds_digest_candidate_limit_zero_raises_value_error(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            feeds:
+              digest:
+                candidate_limit: 0
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="candidate_limit"):
             load_config(str(p))
 
     def test_explicit_missing_path_raises_file_not_found(self, tmp_path: Path) -> None:

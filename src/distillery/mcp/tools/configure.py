@@ -92,6 +92,10 @@ _ALLOWED_KEYS: dict[tuple[str, str], dict[str, Any]] = {
         "type": int,
         "range": (1, 3650),
     },
+    ("feeds.digest", "candidate_limit"): {
+        "type": int,
+        "range": (1, 1000),
+    },
 }
 
 

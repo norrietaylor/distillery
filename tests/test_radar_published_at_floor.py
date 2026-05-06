@@ -432,6 +432,58 @@ class TestConfigureDigestWindowDays:
 
 
 # ---------------------------------------------------------------------------
+# distillery_configure: feeds.digest.candidate_limit knob (Issue #461)
+# ---------------------------------------------------------------------------
+
+
+class TestConfigureDigestCandidateLimit:
+    @pytest.mark.asyncio
+    async def test_read_default_value(self) -> None:
+        cfg = _make_configure_cfg()
+        # DigestConfig.candidate_limit defaults to 35.
+        assert cfg.feeds.digest.candidate_limit == 35
+        result = await _handle_configure(cfg, {"section": "feeds.digest", "key": "candidate_limit"})
+        data = json.loads(result[0].text)
+        assert data.get("error") is not True
+        assert data["value"] == 35
+
+    @pytest.mark.asyncio
+    async def test_set_new_value(self) -> None:
+        cfg = _make_configure_cfg()
+        result = await _handle_configure(
+            cfg,
+            {"section": "feeds.digest", "key": "candidate_limit", "value": 50},
+        )
+        data = json.loads(result[0].text)
+        assert data.get("error") is not True
+        assert data["changed"] is True
+        assert data["new_value"] == 50
+        assert cfg.feeds.digest.candidate_limit == 50
+
+    @pytest.mark.asyncio
+    async def test_reject_zero(self) -> None:
+        cfg = _make_configure_cfg()
+        result = await _handle_configure(
+            cfg,
+            {"section": "feeds.digest", "key": "candidate_limit", "value": 0},
+        )
+        data = json.loads(result[0].text)
+        assert data["error"] is True
+        assert data["code"] == "INVALID_PARAMS"
+
+    @pytest.mark.asyncio
+    async def test_reject_non_integer(self) -> None:
+        cfg = _make_configure_cfg()
+        result = await _handle_configure(
+            cfg,
+            {"section": "feeds.digest", "key": "candidate_limit", "value": 12.5},
+        )
+        data = json.loads(result[0].text)
+        assert data["error"] is True
+        assert data["code"] == "INVALID_PARAMS"
+
+
+# ---------------------------------------------------------------------------
 # Integration: skill-shaped /radar candidate-set query
 # ---------------------------------------------------------------------------
 

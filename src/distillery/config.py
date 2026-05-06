@@ -254,9 +254,19 @@ class DigestConfig:
             ``published_after`` / ``include_evergreen`` arguments on
             :func:`distillery_search` and :func:`distillery_list`.
             Default ``7``.
+        candidate_limit: Default maximum number of feed entries the
+            ``/radar`` skill retrieves into its candidate set before
+            synthesis.  The skill issues one semantic-search query per
+            top-5 interest tag and divides this budget evenly across
+            queries (``ceil(candidate_limit / N)`` per query).  Callers
+            can override per-call via the ``--limit`` flag on ``/radar``.
+            Default ``35`` (5 queries × 7 results → ~30 unique after
+            dedup, providing enough breadth to surface rank-4/5 tag
+            namespaces alongside dominant sources).
     """
 
     window_days: int = 7
+    candidate_limit: int = 35
 
 
 @dataclass
@@ -827,18 +837,27 @@ def _parse_digest(raw: dict[str, Any]) -> DigestConfig:
     """Parse the ``feeds.digest`` section from a raw YAML mapping.
 
     Args:
-        raw: Mapping with optional key ``window_days`` (positive int, default 7).
+        raw: Mapping with optional keys ``window_days`` (positive int,
+            default 7) and ``candidate_limit`` (positive int, default 35).
 
     Returns:
         A populated :class:`DigestConfig` instance.
 
     Raises:
-        ValueError: If ``window_days`` is not a positive integer.
+        ValueError: If ``window_days`` or ``candidate_limit`` is not a
+            positive integer.
     """
     window_days = _parse_strict_int(raw.get("window_days", 7), "feeds.digest.window_days")
     if window_days <= 0:
         raise ValueError(f"feeds.digest.window_days must be a positive integer, got: {window_days}")
-    return DigestConfig(window_days=window_days)
+    candidate_limit = _parse_strict_int(
+        raw.get("candidate_limit", 35), "feeds.digest.candidate_limit"
+    )
+    if candidate_limit <= 0:
+        raise ValueError(
+            f"feeds.digest.candidate_limit must be a positive integer, got: {candidate_limit}"
+        )
+    return DigestConfig(window_days=window_days, candidate_limit=candidate_limit)
 
 
 def _parse_reader(raw: dict[str, Any]) -> ReaderConfig:

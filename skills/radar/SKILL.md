@@ -35,7 +35,7 @@ See CONVENTIONS.md — skip if already confirmed this conversation.
 | Flag | Description |
 |------|-------------|
 | `--days N` | Look back N days for recent feed entries (overrides `feeds.digest.window_days`, default 7) |
-| `--limit N` | Maximum number of feed entries to include (default: 20) |
+| `--limit N` | Maximum number of feed entries to include (overrides `feeds.digest.candidate_limit`, default 35) |
 | `--project <name>` | Scope feed entries to a specific project |
 | `--topic <query>` | Use the literal string as a semantic-search query instead of mining tags. Repeatable; each `--topic` is one query. When set, use Path 1 in Step 3a and skip Path 2 (tag mining). |
 | `--suggest` | Include source suggestions at end of digest |
@@ -82,7 +82,7 @@ Build an interest profile that excludes feed-ingested content. Make separate
 types: `session`, `reference`, `bookmark`, `idea`, `note`, and `minutes`.
 Merge the group counts across all responses to obtain a combined count map.
 
-Then select **3 namespace-diverse tags**, *not* the raw top-3 by count. A
+Then select **5 namespace-diverse tags**, *not* the raw top-5 by count. A
 tag's namespace is its hierarchical path with the leaf segment removed,
 capped at two segments (e.g., `domain/build/hermeticity` → namespace
 `domain/build`; `tech/duckdb` → namespace `tech`; single-segment `release`
@@ -93,12 +93,12 @@ namespaces to itself). The selection rule:
    the *namespace leader*.
 3. Rank namespaces by *aggregate population* (sum of counts across all
    tags in the namespace), then by leader count, then alphabetically.
-4. Return the namespace leaders of the top 3 namespaces.
+4. Return the namespace leaders of the top 5 namespaces.
 
-This guarantees the query set spans up to three distinct conceptual
+This guarantees the query set spans up to five distinct conceptual
 clusters. The reference implementation lives in
 `distillery.feeds.radar_selection.select_namespace_diverse_tags` — call it
-mentally as `select_namespace_diverse_tags(merged_counts, top_n=3)`.
+mentally as `select_namespace_diverse_tags(merged_counts, top_n=5)`.
 
 Convert each chosen tag path to a natural-language query by taking the leaf
 segment and replacing hyphens with spaces (e.g.,
@@ -108,13 +108,19 @@ segment and replacing hyphens with spaces (e.g.,
 
 Compute `published_after = (now - <days>).isoformat()` where `<days>` is the
 `--days` flag if provided, otherwise the configured `feeds.digest.window_days`
-(default 7). For each query in the query set from 3a (whether `--topic`-supplied
-or namespace-derived), call:
+(default 7). Resolve `<limit>` from the `--limit` flag if provided, otherwise
+from the configured `feeds.digest.candidate_limit` (default 35). For each
+query in the query set from 3a (whether `--topic`-supplied or
+namespace-derived), call:
 
 `distillery_search(query="<query>", entry_type="feed", limit=<ceil(limit/N)>, published_after=<iso>, include_evergreen=<bool>)`
 
-Where N is the number of queries. Pass `include_evergreen=true` only when the
-user supplied `--include-evergreen`. If `--project` was specified, also pass
+Where N is the number of queries in the set. With the default `<limit>` of 35
+and N=5 (the namespace-diverse default), this yields 5 × ceil(35/5)=7 → 35
+raw → ~30 unique candidates after dedup. If fewer than 5 namespace-diverse
+tags are available, issue one query per tag returned and size each query as
+`ceil(limit/N)` accordingly. Pass `include_evergreen=true` only when the user
+supplied `--include-evergreen`. If `--project` was specified, also pass
 `project=<name>`.
 
 Deduplicate results across queries by entry ID, keeping the highest similarity score.
@@ -254,7 +260,7 @@ Tags: digest, radar, ambient
 
 - NEVER use Bash, Python, or any tool not listed in allowed-tools
 - If an MCP tool call fails, report the error to the user and STOP. Do not attempt workarounds.
-- Default lookback is `feeds.digest.window_days` (7 days); default limit is 20 — respect overrides
+- Default lookback is `feeds.digest.window_days` (7 days); default candidate limit is `feeds.digest.candidate_limit` (35 entries) — respect `--days` and `--limit` overrides
 - Filter on `published_after` (publication time), not `date_from` (ingest time) — older items polled today are not new intelligence
 - First-poll backfill items (`metadata.backfill = true`) are excluded by default; surface them with `--include-evergreen`
 - Group entries by source tag when available; fall back to topic grouping
