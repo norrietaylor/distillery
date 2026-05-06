@@ -35,7 +35,7 @@ See CONVENTIONS.md — skip if already confirmed this conversation.
 | Flag | Description |
 |------|-------------|
 | `--days N` | Look back N days for recent feed entries (overrides `feeds.digest.window_days`, default 7) |
-| `--limit N` | Maximum number of feed entries to include (default: 20) |
+| `--limit N` | Maximum number of feed entries to include (overrides `feeds.digest.candidate_limit`, default 35) |
 | `--project <name>` | Scope feed entries to a specific project |
 | `--topic <query>` | Use the literal string as a semantic-search query instead of mining tags. Repeatable; each `--topic` is one query. When set, use Path 1 in Step 3a and skip Path 2 (tag mining). |
 | `--suggest` | Include source suggestions at end of digest |
@@ -82,7 +82,7 @@ Build an interest profile that excludes feed-ingested content. Make separate
 types: `session`, `reference`, `bookmark`, `idea`, `note`, and `minutes`.
 Merge the group counts across all responses to obtain a combined count map.
 
-Then select **3 namespace-diverse tags**, *not* the raw top-3 by count. A
+Then select **5 namespace-diverse tags**, *not* the raw top-5 by count. A
 tag's namespace is its hierarchical path with the leaf segment removed,
 capped at two segments (e.g., `domain/build/hermeticity` → namespace
 `domain/build`; `tech/duckdb` → namespace `tech`; single-segment `release`
@@ -93,28 +93,47 @@ namespaces to itself). The selection rule:
    the *namespace leader*.
 3. Rank namespaces by *aggregate population* (sum of counts across all
    tags in the namespace), then by leader count, then alphabetically.
-4. Return the namespace leaders of the top 3 namespaces.
+4. Return the namespace leaders of the top 5 namespaces.
 
-This guarantees the query set spans up to three distinct conceptual
+This guarantees the query set spans up to five distinct conceptual
 clusters. The reference implementation lives in
 `distillery.feeds.radar_selection.select_namespace_diverse_tags` — call it
-mentally as `select_namespace_diverse_tags(merged_counts, top_n=3)`.
+mentally as `select_namespace_diverse_tags(merged_counts, top_n=5)`.
 
 Convert each chosen tag path to a natural-language query by taking the leaf
 segment and replacing hyphens with spaces (e.g.,
-`domain/build/hermeticity` → query `"hermeticity"`).
+`domain/build/hermeticity` → query `"hermeticity"`). De-duplicate the
+normalized query strings (case- and whitespace-insensitive), preserving the
+highest-ranked occurrence; if a collision drops a tag, substitute the
+next-ranked namespace leader from the merged counts so the query set still
+spans up to 5 distinct queries.
 
 **3b. Search by interests (primary path):**
 
 Compute `published_after = (now - <days>).isoformat()` where `<days>` is the
 `--days` flag if provided, otherwise the configured `feeds.digest.window_days`
-(default 7). For each query in the query set from 3a (whether `--topic`-supplied
-or namespace-derived), call:
+(default 7). Resolve `<limit>` from the `--limit` flag if provided, otherwise
+from the configured `feeds.digest.candidate_limit` (default 35). Compute `Q`
+(the number of queries to issue):
 
-`distillery_search(query="<query>", entry_type="feed", limit=<ceil(limit/N)>, published_after=<iso>, include_evergreen=<bool>)`
+- If explicit `--topic` flags were provided (Path 1): `Q = min(number_of_distinct_explicit_topics, <limit>)` — honor every user-supplied topic up to the limit; do *not* apply the 5-query cap.
+- Otherwise (Path 2, namespace-derived): `Q = min(number_of_distinct_namespace_queries, 5, <limit>)` — namespace-derived queries are capped at 5.
 
-Where N is the number of queries. Pass `include_evergreen=true` only when the
-user supplied `--include-evergreen`. If `--project` was specified, also pass
+If `Q == 0` (no queries — e.g. `<limit>` is 0 or both paths produced an
+empty set), short-circuit: skip Step 3b entirely and proceed to Step 3c
+(fallback). Otherwise distribute the `<limit>` budget exactly so the sum
+of per-query limits never exceeds `<limit>`: let `base = <limit> // Q`
+and `rem = <limit> % Q`, then assign `base + 1` to the first `rem`
+queries and `base` to the rest (skipping any zero-budget queries). For
+each query, call:
+
+`distillery_search(query="<query>", entry_type="feed", limit=<per-query budget>, published_after=<iso>, include_evergreen=<bool>)`
+
+With the default `<limit>` of 35 and Q=5, this yields 5 queries of 7 results
+each → 35 raw → ~30 unique candidates after dedup. For small limits (e.g.,
+`--limit 3` with 5 queries), Q=3 and only 3 queries are issued so the
+override is honored exactly. Pass `include_evergreen=true` only when the user
+supplied `--include-evergreen`. If `--project` was specified, also pass
 `project=<name>`.
 
 Deduplicate results across queries by entry ID, keeping the highest similarity score.
@@ -129,7 +148,11 @@ skipped.
 
 If none of the curated-type `group_by="tags"` calls return any tags, fall back to:
 
-`distillery_list(entry_type="feed", limit=<limit>, output_mode="summary", published_after=<iso>, include_evergreen=<bool>)`
+`distillery_list(entry_type="feed", limit=<limit>, output_mode="summary", published_after=<iso>, include_evergreen=<bool>, project=<name?>)`
+
+Apply the same project-scoping rule as Step 3b: only include `project=<name>`
+when `--project` was supplied, so the fallback never synthesizes entries from
+other projects when the user explicitly scoped the request.
 
 Report: `Retrieved <total> entries via recent listing (fallback, window=<days>d).`
 
@@ -254,7 +277,7 @@ Tags: digest, radar, ambient
 
 - NEVER use Bash, Python, or any tool not listed in allowed-tools
 - If an MCP tool call fails, report the error to the user and STOP. Do not attempt workarounds.
-- Default lookback is `feeds.digest.window_days` (7 days); default limit is 20 — respect overrides
+- Default lookback is `feeds.digest.window_days` (7 days); default candidate limit is `feeds.digest.candidate_limit` (35 entries) — respect `--days` and `--limit` overrides
 - Filter on `published_after` (publication time), not `date_from` (ingest time) — older items polled today are not new intelligence
 - First-poll backfill items (`metadata.backfill = true`) are excluded by default; surface them with `--include-evergreen`
 - Group entries by source tag when available; fall back to topic grouping

@@ -92,11 +92,20 @@ _ALLOWED_KEYS: dict[tuple[str, str], dict[str, Any]] = {
         "type": int,
         "range": (1, 3650),
     },
+    ("feeds.digest", "candidate_limit"): {
+        "type": int,
+        "range": (1, 1000),
+    },
 }
 
 
 def _coerce_value(raw_value: str | int | float, target_type: type) -> Any:
     """Coerce *raw_value* to *target_type*, raising ValueError on failure."""
+    # Reject bools for numeric types: bool is a subclass of int in Python so
+    # int(True) == 1 / int(False) == 0 silently coerce, which diverges from
+    # YAML's _parse_strict_int() rejection.  Match that behavior here.
+    if target_type in (int, float) and isinstance(raw_value, bool):
+        raise ValueError(f"Expected {target_type.__name__}, got bool")
     if target_type is float:
         return float(raw_value)
     if target_type is int:

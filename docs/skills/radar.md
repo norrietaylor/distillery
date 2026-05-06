@@ -5,7 +5,7 @@ Surfaces recent feed entries, synthesizes them into a grouped digest, and option
 ## Usage
 
 ```text
-/radar                                  # Default: last 7 days, up to 20 entries
+/radar                                  # Default: last 7 days, up to 35 entries
 /radar --days 3                         # Last 3 days
 /radar --limit 10                       # Limit to 10 entries
 /radar --topic "build hermeticity"      # Use an explicit topic instead of mining tags
@@ -23,7 +23,7 @@ Surfaces recent feed entries, synthesizes them into a grouped digest, and option
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--days <n>` | Look back period in days (overrides `feeds.digest.window_days`) | `feeds.digest.window_days` (7 if unset) |
-| `--limit <n>` | Maximum entries to include | 20 |
+| `--limit <n>` | Maximum entries to include (overrides `feeds.digest.candidate_limit`) | `feeds.digest.candidate_limit` (35 if unset) |
 | `--topic <query>` | Use the literal string as the semantic-search query instead of mining tags. Repeatable. | Off (auto-mine) |
 | `--suggest` | Include new source suggestions | Off |
 | `--store` | Store the digest as an entry | Off (display-only) |
@@ -75,7 +75,7 @@ Digest stored: m3n4o5p6
 
 1. Determines the query set:
    - If one or more `--topic` flags are supplied, the literal strings become the queries (deduplicated, preserving order).
-   - Otherwise the skill mines curated entries (`session`, `reference`, `bookmark`, `idea`, `note`, `minutes`) for a tag profile, then picks **3 namespace-diverse tags** rather than the raw top-3 by count. A tag's namespace is its hierarchical path with the leaf removed, capped at two segments (e.g., `domain/build/hermeticity` → `domain/build`; `tech/duckdb` → `tech`). One leader per namespace prevents one dominant cluster from crowding out distinct topics.
+   - Otherwise the skill mines curated entries (`session`, `reference`, `bookmark`, `idea`, `note`, `minutes`) for a tag profile, then picks **5 namespace-diverse tags** rather than the raw top-5 by count. A tag's namespace is its hierarchical path with the leaf removed, capped at two segments (e.g., `domain/build/hermeticity` → `domain/build`; `tech/duckdb` → `tech`). One leader per namespace prevents one dominant cluster from crowding out distinct topics.
 2. Runs one `distillery_search` per query against feed entries, deduplicating results by entry ID.
 3. Groups entries by source tag or topic.
 4. Synthesizes 2-4 sentence summaries per group with bullet points.
