@@ -98,15 +98,19 @@ class DistilleryStore(Protocol):
         """
         ...
 
-    async def get(self, entry_id: str) -> Entry | None:
+    async def get(self, entry_id: str, *, include_archived: bool = False) -> Entry | None:
         """Retrieve an entry by its ID.
 
         Args:
             entry_id: The UUID string of the entry to fetch.
+            include_archived: If ``True``, soft-deleted entries (status
+                ``archived``) are also returned.  Defaults to ``False`` so
+                callers must opt in to seeing archived data.
 
         Returns:
             The matching ``Entry``, or ``None`` if no entry with that ID
-            exists or if the entry has been soft-deleted (status ``archived``).
+            exists or if the entry has been soft-deleted (status ``archived``)
+            and ``include_archived`` is ``False``.
         """
         ...
 

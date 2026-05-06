@@ -1151,22 +1151,30 @@ class DuckDBStore:
         """
         return await self._run_sync(self._sync_store_batch, entries)
 
-    def _sync_get(self, entry_id: str) -> Entry | None:
+    def _sync_get(self, entry_id: str, include_archived: bool = False) -> Entry | None:
         """
         Retrieve the entry with the given ID and convert it to an Entry object.
 
         Parameters:
             entry_id (str): UUID of the entry to retrieve.
+            include_archived (bool): If True, archived (soft-deleted) entries are
+                also returned. Defaults to False so callers must opt in.
 
         Returns:
-            Entry | None: The matching Entry if found, `None` if no entry exists with the given ID.
+            Entry | None: The matching Entry if found, `None` if no entry exists
+            with the given ID, or if the entry is archived and
+            ``include_archived`` is ``False``.
 
         Notes:
             Also attempts to update the entry's `accessed_at` timestamp; failures to update are ignored.
         """
         conn = self.connection
-        sql = f"SELECT {self._ENTRY_COLUMNS} FROM entries WHERE id = ? AND status != ?"
-        result = conn.execute(sql, [entry_id, EntryStatus.ARCHIVED.value])
+        if include_archived:
+            sql = f"SELECT {self._ENTRY_COLUMNS} FROM entries WHERE id = ?"
+            result = conn.execute(sql, [entry_id])
+        else:
+            sql = f"SELECT {self._ENTRY_COLUMNS} FROM entries WHERE id = ? AND status != ?"
+            result = conn.execute(sql, [entry_id, EntryStatus.ARCHIVED.value])
         col_names = [desc[0] for desc in result.description]
         row = result.fetchone()
         if row is None:
@@ -1181,13 +1189,19 @@ class DuckDBStore:
             logger.debug("accessed_at update failed for id=%s (ignored)", entry_id)
         return self._row_to_entry(row, col_names)
 
-    async def get(self, entry_id: str) -> Entry | None:
+    async def get(self, entry_id: str, *, include_archived: bool = False) -> Entry | None:
         """Retrieve an entry by its ID.
 
+        Args:
+            entry_id: The UUID string of the entry to fetch.
+            include_archived: If ``True``, soft-deleted entries (status
+                ``archived``) are also returned. Defaults to ``False``.
+
         Returns:
-            The matching ``Entry``, or ``None`` if the ID does not exist.
+            The matching ``Entry``, or ``None`` if the ID does not exist or
+            the entry is archived and ``include_archived`` is ``False``.
         """
-        return await self._run_sync(self._sync_get, entry_id)
+        return await self._run_sync(self._sync_get, entry_id, include_archived)
 
     def _sync_update(self, entry_id: str, updates: dict[str, Any]) -> Entry:
         """
