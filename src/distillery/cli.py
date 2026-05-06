@@ -370,6 +370,20 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     longmemeval_parser.add_argument(
+        "--expand-graph",
+        action="store_true",
+        default=False,
+        help=(
+            "Issue #458, Cell A: enable the retrieval-time graph expansion path "
+            "(default off — HEADLINE behaviour). When set, outputs land in a "
+            "graph_regression_cell_a/ subdirectory of --output-dir so the "
+            "HEADLINE aggregator cannot confuse Cell A receipts with the public "
+            "headline. Used by .github/workflows/bench-graph-regression-cell.yml "
+            "as a regression gate against accidental recall regressions on the "
+            "graph-enabled path. See docs/benchmarks.md and bench/LIMITATIONS.md."
+        ),
+    )
+    longmemeval_parser.add_argument(
         "--output-dir",
         metavar="PATH",
         default=None,
@@ -1950,6 +1964,7 @@ def _cmd_bench_longmemeval(
     limit: int | None,
     seeds: int,
     seed_offset: int,
+    expand_graph: bool,
     output_dir: str | None,
     quiet: bool,
     fmt: str,
@@ -2001,7 +2016,7 @@ def _cmd_bench_longmemeval(
             f"Running LongMemEval bench: retrieval={retrieval} "
             f"granularity={granularity} recency={recency} "
             f"embed_model={embed_model} limit={limit} seeds={seeds} "
-            f"seed_offset={seed_offset}",
+            f"seed_offset={seed_offset} expand_graph={expand_graph}",
             file=sys.stderr,
         )
         print(f"Output directory: {resolved_output_dir}", file=sys.stderr)
@@ -2022,6 +2037,7 @@ def _cmd_bench_longmemeval(
             limit=limit,
             seeds=seeds,
             seed_offset=seed_offset,
+            expand_graph=expand_graph,
             output_dir=resolved_output_dir,
         )
 
@@ -2153,6 +2169,7 @@ def main(argv: list[str] | None = None) -> None:
                 limit=getattr(args, "limit", None),
                 seeds=getattr(args, "seeds", 1),
                 seed_offset=getattr(args, "seed_offset", 0),
+                expand_graph=getattr(args, "expand_graph", False),
                 output_dir=getattr(args, "output_dir", None),
                 quiet=getattr(args, "quiet", False),
                 fmt=fmt,
