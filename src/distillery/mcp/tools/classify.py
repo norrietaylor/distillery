@@ -293,8 +293,12 @@ async def _handle_resolve_review(
     action: str = arguments["action"]
 
     # --- retrieve existing entry --------------------------------------------
+    # include_archived=True because resolve_review supports idempotent
+    # archive-of-archived and reclassify-of-archived (without flipping status
+    # back to active).  store.get() filters archived rows by default per the
+    # protocol contract.
     try:
-        entry = await store.get(entry_id)
+        entry = await store.get(entry_id, include_archived=True)
     except Exception:  # noqa: BLE001
         logger.exception("Error fetching entry id=%s for resolve_review", entry_id)
         return error_response("INTERNAL", "Failed to retrieve entry")
