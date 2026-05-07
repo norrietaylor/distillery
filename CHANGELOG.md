@@ -3,67 +3,74 @@
 All notable changes to this project will be documented in this file.
 ## [0.5.0] - 2026-05-07
 
-### Features
-
-- /radar issues all top-5 queries and raises default limit to 35 (#461) (#462) *(skills)*
-- /radar --topic flag and namespace-aware tag selection (#460) (#463) *(skills)*
-- /radar --structure flag for orphans + bridges + communities (#141) (#429) *(skill)*
-- /investigate uses multi-hop traverse + hidden-connections gap filling (#427) *(skill)*
-- /pour --graph flag for graph-expanded retrieval (#138) (#428) *(skill)*
-- add structural=["orphans"] filter to distillery_list (#141) (#423) *(mcp)*
-- add action="metrics" to distillery_relations + [graph] extra (#138, #141) (#426) *(mcp)*
-- add expand_graph + expand_hops to distillery_search (#138) (#425) *(mcp)*
-- add exclude_linked + source_entry_id to find_similar (#140) (#422) *(mcp)*
-- add action="traverse" to distillery_relations (#138) (#424) *(mcp)*
-- add Cell A graph regression gate; defer Cell B value-add (#458) (#464) *(bench)*
-
 ### Bug Fixes
 
 - add include_archived opt-in to get(); update consumers *(store)*
+- filter archived entries from get() *(store)*
+- validate OpenAI response length matches input *(embedding)*
+- sync .grype.yaml SBOM banner to python-3.14.4-r4 *(supply-chain)*
+- bump python-multipart in uv.lock to 0.0.27 *(deps)*
+- bump python-multipart to >=0.0.27 and refresh .grype.yaml python suppression *(supply-chain)*
+- accept case-insensitive Bearer auth scheme *(mcp)*
+- clamp HeuristicClassifier confidence to [0.0, 1.0] *(classification)*
 - log once when alert threshold coercion fails *(feeds)*
-- apply alert threshold in FeedPoller (#472) (#477) *(feeds)*
-- accept case-insensitive Bearer auth scheme (#476) *(mcp)*
-- clamp HeuristicClassifier confidence to [0.0, 1.0] (#475) *(classification)*
-- filter archived entries from get() (#468) (#474) *(store)*
-- validate OpenAI response length matches input (#473) *(embedding)*
+- apply alert threshold in FeedPoller *(feeds)*
+- guard Q==0 in /radar budget distribution *(skills)*
+- address CR feedback on PR #462 *(skills,mcp)*
+- address CR feedback on /radar five-query budgeting *(skills)*
+- align YAML and MCP validation for feeds.digest.candidate_limit *(config)*
+- simplify /radar 6b/6c NetworkX error flow *(skills)*
 - structural filter validation + cap-exceeded fail-fast (review) *(mcp)*
 - cache eviction + async DB + pagination + error-msg hygiene (review) *(mcp,graph)*
 - expand_graph honours archived-visibility filter (review) *(mcp)*
-- align YAML and MCP validation for feeds.digest.candidate_limit *(config)*
-- guard Q==0 in /radar budget distribution *(skills)*
-- simplify /radar 6b/6c NetworkX error flow *(skills)*
 - clarify --topic skip semantics in Step 3a *(skills)*
-
-### CI/CD
-
-- bump python-multipart to >=0.0.27 and refresh .grype.yaml python suppression *(supply-chain)*
-- sync .grype.yaml SBOM banner to python-3.14.4-r4 *(supply-chain)*
+- address CR feedback on radar --topic / namespace selection *(skills)*
 
 ### Documentation
 
-- clarify excluded_linked_count return semantics (CR feedback) *(mcp)*
 - clarify Cell A LIMIT comment matches sample-size guard *(bench)*
+- clarify /radar 6c community ordering and member rendering *(skills)*
+- clarify excluded_linked_count return semantics (CR feedback) *(mcp)*
 - clarify investigate Phase 2b cap behaviour (review) *(skill)*
 - clarify investigate BFS depth wording (review feedback) *(skill)*
 - align investigate Output Format example with summary template *(skills)*
 - fix MD038 code-span spacing in /pour --graph (review) *(skill)*
-- clarify /radar 6c community ordering and member rendering *(skills)*
+- update changelog for v0.4.1
 
-### Skills
+### Features
 
-- /investigate gains Phase 2 multi-hop traverse + Phase 2b hidden-connections gap fill (#427)
-- /pour gains opt-in `--graph` flag for 1-hop graph-expanded retrieval (#428)
-- /radar gains `--structure` (orphans / bridges / communities), `--topic` (literal-string queries with namespace-aware fallback), and `--limit` honoring `feeds.digest.candidate_limit` (#429, #463, #462)
-
-### Bench
-
-- Cell A graph regression gate live: 500q × 5 seeds, mean R@5 0.972, delta 0.0pp vs HEADLINE, gate_pass=true ([run 25453787717](https://github.com/norrietaylor/distillery/actions/runs/25453787717))
-- Cell B (graph value-add) deferred — LongMemEval is single-user/single-session and cannot measure the cross-user/cross-session graph hypothesis (see `bench/LIMITATIONS.md` §(f))
+- add Cell A graph regression gate; defer Cell B value-add (#458) *(bench)*
+- /radar issues all top-5 queries and raises default limit to 35 (#461) *(skills)*
+- add structural=["orphans"] filter to distillery_list (#141) *(mcp)*
+- add action="metrics" to distillery_relations + [graph] extra (#138, #141) *(mcp)*
+- add exclude_linked + source_entry_id to find_similar (#140) *(mcp)*
+- add action="traverse" to distillery_relations (#138) *(mcp)*
+- add expand_graph + expand_hops to distillery_search (#138) *(mcp)*
+- /investigate uses multi-hop traverse + hidden-connections gap filling *(skill)*
+- /pour --graph flag for graph-expanded retrieval (#138) *(skill)*
+- /radar --topic flag and namespace-aware tag selection (#460) *(skills)*
 
 ### Miscellaneous
 
-- nightly LongMemEval results 2026-05-05 / 2026-05-06 / 2026-05-07 *(bench)*
-- update Cell A regression aggregate from run *(bench,graph)*
+- bump plugin/marketplace/server.json to 0.5.0 *(release)*
+- bump __version__ to 0.5.0 *(release)*
+- v0.5.0 *(release)*
+- address CR feedback on Cell A regression gate *(bench)*
+
+### Styling
+
+- revert incidental ruff format of unrelated test signature *(test)*
+
+### Testing
+
+- wait for background job in lowercase Bearer regression test *(mcp)*
+
+### Bench
+
+- nightly LongMemEval results 2026-05-07
+- update Cell A regression aggregate from run *(graph)*
+- nightly LongMemEval results 2026-05-06
+- nightly LongMemEval results 2026-05-05
 
 ## [0.4.1] - 2026-05-06
 
@@ -111,9 +118,9 @@ All notable changes to this project will be documented in this file.
 
 - publish multi-arch (linux/amd64 + linux/arm64) image *(supply-chain)*
 - bump installer + binary pins, add post-install verify (#432) *(cosign)*
+- unblock GHCR publish + audit suppression list (#418) (#420) *(grype)*
 - scope suppressions to package name+version (CodeRabbit, #420) *(grype)*
 - unblock GHCR publish + audit suppression list (#418) *(grype)*
-- unblock GHCR publish + audit suppression list (#418) (#420) *(grype)*
 - cross-post new docs/blog posts to dev.to and Hashnode *(blog)*
 
 ### Documentation
@@ -137,6 +144,7 @@ All notable changes to this project will be documented in this file.
 
 - variance-gate workflow + --seed-offset CLI flag *(bench)*
 - migrate to Chainguard distroless Python (#419) *(image)*
+- /radar --structure flag for orphans + bridges + communities (#141) *(skill)*
 - enrich RSS poller content via Jina Reader (#412) *(feeds)*
 - integrate LLM client into classify-batch webhook (#268) (#410) *(classification)*
 - default plugin install to local stdio MCP (#381) (#408) *(skills)*
@@ -163,6 +171,10 @@ All notable changes to this project will be documented in this file.
 - force real contention in lock-serialization test (CodeRabbit, #417) *(store)*
 - support mount prefix in _wait_for_job helper *(mcp)*
 - move webhook-state reset fixture to root conftest *(mcp)*
+
+### Bench
+
+- commit variance_baseline.json from variance-gate run *(variance)*
 
 ## [0.4.0] - 2026-04-19
 
