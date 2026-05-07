@@ -605,6 +605,29 @@ class TestOpenAIEmbeddingProviderErrors:
         assert result[0] == [0.1, 0.2, 0.3, 0.4]
         assert result[1] == [0.5, 0.6, 0.7, 0.8]
 
+    def test_embed_batch_raises_when_response_count_mismatches(self) -> None:
+        """A short OpenAI response must raise RuntimeError instead of silently
+        misaligning embeddings with their input texts.
+
+        Regression for #470 — without this guard a 2-input request that
+        receives 1 embedding back would return a single vector mapped to
+        the first input, dropping the second silently. Mirrors the Jina
+        provider's check in ``_parse_response``.
+        """
+        # Request two texts but mock only one embedding back.
+        short_payload = _make_openai_response([[0.1, 0.2, 0.3, 0.4]])
+        short_response = _mock_httpx_response(200, short_payload)
+
+        provider = OpenAIEmbeddingProvider(api_key="sk-test", dimensions=4)
+
+        with patch.object(provider, "_client") as mock_client:
+            mock_client.post.return_value = short_response
+            with pytest.raises(
+                RuntimeError,
+                match=r"OpenAI returned 1 embeddings, expected 2\.",
+            ):
+                provider.embed_batch(["first", "second"])
+
 
 # ---------------------------------------------------------------------------
 # OpenAIEmbeddingProvider: rate limiting and retry behaviour

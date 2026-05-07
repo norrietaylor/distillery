@@ -246,6 +246,10 @@ class OpenAIEmbeddingProvider:
 
         # Sort results by index to guarantee order matches input
         embeddings_data = sorted(data["data"], key=lambda d: d["index"])
+        if len(embeddings_data) != len(texts):
+            raise RuntimeError(
+                f"OpenAI returned {len(embeddings_data)} embeddings, expected {len(texts)}."
+            )
         return [item["embedding"] for item in embeddings_data]
 
     def __del__(self) -> None:
