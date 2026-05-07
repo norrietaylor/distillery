@@ -59,7 +59,7 @@ chase a number.
 | Embed model | `bge-small` (`BAAI/bge-small-en-v1.5`, 384-dim, fastembed) |
 
 Full pre-registration rationale and change-control rules live in
-[`bench/HEADLINE.md`](../bench/HEADLINE.md).
+[`bench/HEADLINE.md`](https://github.com/norrietaylor/distillery/blob/main/bench/HEADLINE.md).
 
 ## What this number does NOT claim
 
@@ -80,7 +80,7 @@ Full pre-registration rationale and change-control rules live in
       alongside it in `bench/results/variance_baseline.json`.
 
     Read the full limitations before citing this number →
-    [bench/LIMITATIONS.md](../bench/LIMITATIONS.md)
+    [bench/LIMITATIONS.md](https://github.com/norrietaylor/distillery/blob/main/bench/LIMITATIONS.md)
 
 ## Internal comparison table
 
@@ -181,7 +181,7 @@ Until that eval exists, **no public surface** (this page, the README, the blog,
 the 0.5.0 release notes) may claim that graph features improve LongMemEval
 scores. The 0.5.0 release notes claim "no regression with graph enabled" —
 never "graph improves LongMemEval." Full discipline rationale is in
-[`bench/LIMITATIONS.md`](../bench/LIMITATIONS.md) §(f).
+[`bench/LIMITATIONS.md`](https://github.com/norrietaylor/distillery/blob/main/bench/LIMITATIONS.md) §(f).
 
 ## Methodology
 
@@ -197,7 +197,7 @@ Scoring is a textbook `dcg`/`ndcg`/`evaluate_retrieval` reimplementation in
 this page can be reproduced bit-for-bit.
 
 Full methodology and dataset citation:
-[`bench/METHODOLOGY.md`](../bench/METHODOLOGY.md).
+[`bench/METHODOLOGY.md`](https://github.com/norrietaylor/distillery/blob/main/bench/METHODOLOGY.md).
 
 Dataset citation: Wu et al., *LongMemEval: Benchmarking Chat Assistants on Long-Term
 Interactive Memory*, ICLR 2025 — [arxiv:2410.10813](https://arxiv.org/html/2410.10813v1).
@@ -220,4 +220,4 @@ distillery bench longmemeval \
 
 Outputs land in `bench/results/results_longmemeval_<mode>_<embed>_<UTC>.jsonl` plus a
 `summary.json` next to it. The canonical reproduction guide — including the 5-seed variance
-characterisation procedure — is in [`bench/README.md`](../bench/README.md).
+characterisation procedure — is in [`bench/README.md`](https://github.com/norrietaylor/distillery/blob/main/bench/README.md).
