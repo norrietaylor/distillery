@@ -129,10 +129,14 @@ class HeuristicClassifier:
         entry_embedding = embedding_provider.embed(entry.content)
         best_type, best_similarity = self.classify_entry(entry_embedding, centroids)
 
+        # Cosine similarity is in [-1.0, 1.0]; clamp to ClassificationResult's
+        # documented confidence range of [0.0, 1.0] (mirrors engine.py:155).
+        confidence = max(0.0, min(1.0, best_similarity))
+
         if best_type is not None:
             return ClassificationResult(
                 entry_type=EntryType(best_type),
-                confidence=best_similarity,
+                confidence=confidence,
                 status=EntryStatus.ACTIVE,
                 reasoning=(
                     f"Heuristic classification: best centroid match is "
@@ -144,7 +148,7 @@ class HeuristicClassifier:
 
         return ClassificationResult(
             entry_type=EntryType.INBOX,
-            confidence=best_similarity,
+            confidence=confidence,
             status=EntryStatus.PENDING_REVIEW,
             reasoning=(
                 f"Heuristic classification: no centroid exceeded threshold "
@@ -305,11 +309,15 @@ class HeuristicClassifier:
             entry_embedding = embedding_provider.embed(entry.content)
             best_type, best_similarity = self.classify_entry(entry_embedding, centroids)
 
+            # Cosine similarity is in [-1.0, 1.0]; clamp to ClassificationResult's
+            # documented confidence range of [0.0, 1.0] (mirrors engine.py:155).
+            confidence = max(0.0, min(1.0, best_similarity))
+
             if best_type is not None:
                 results.append(
                     ClassificationResult(
                         entry_type=EntryType(best_type),
-                        confidence=best_similarity,
+                        confidence=confidence,
                         status=EntryStatus.ACTIVE,
                         reasoning=(
                             f"Heuristic classification: best centroid match is "
@@ -323,7 +331,7 @@ class HeuristicClassifier:
                 results.append(
                     ClassificationResult(
                         entry_type=EntryType.INBOX,
-                        confidence=best_similarity,
+                        confidence=confidence,
                         status=EntryStatus.PENDING_REVIEW,
                         reasoning=(
                             f"Heuristic classification: no centroid exceeded threshold "
