@@ -273,20 +273,24 @@ class TestDelete:
         assert entry.id in ids
 
     async def test_delete_entry_not_returned_by_get(self, store: DuckDBStore) -> None:
-        """get() returns None for archived (soft-deleted) entries by default is OK --
-        but actually the current protocol says get returns None for archived entries.
-        Let's verify what the implementation does: get() fetches by ID with no status filter."""
+        """get() must return None for archived (soft-deleted) entries.
+
+        The protocol contract (store/protocol.py) requires get() to return None
+        for entries whose status is ARCHIVED. Regression test for #468.
+        """
         entry = make_entry()
         await store.store(entry)
         await store.delete(entry.id)
-        # get() may or may not filter archived -- verify what it returns
         fetched = await store.get(entry.id)
-        # The entry exists in DB but is archived; get() returns it regardless
-        # (protocol says None for soft-deleted, but implementation may differ --
-        # we verify the status is ARCHIVED).
-        if fetched is not None:
-            assert fetched.status is EntryStatus.ARCHIVED
-        # Either None or ARCHIVED is valid behaviour for soft-delete.
+        assert fetched is None
+
+    async def test_get_returns_none_after_archive_via_update(self, store: DuckDBStore) -> None:
+        """get() must return None when an entry's status is set to ARCHIVED via update()."""
+        entry = make_entry()
+        await store.store(entry)
+        await store.update(entry.id, {"status": EntryStatus.ARCHIVED})
+        fetched = await store.get(entry.id)
+        assert fetched is None
 
     async def test_delete_twice_still_returns_true(self, store: DuckDBStore) -> None:
         """Deleting an already-archived entry sets it to archived again -> True."""
