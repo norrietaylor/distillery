@@ -127,20 +127,24 @@ features regress baseline recall when the entry graph is sparse?** The pass crit
 is that Cell A's mean R@5 stays within the variance-gate threshold (default 0.5pp) of
 the HEADLINE mean.
 
-!!! note "Status: forward-compatible plumbing until graph PRs land"
+!!! success "Status: gate live — first 500q × 5-seed result lands at delta = 0.0pp"
 
-    Until the graph retrieval PRs ([#422](https://github.com/norrietaylor/distillery/pull/422)–[#429](https://github.com/norrietaylor/distillery/pull/429))
-    merge, `--expand-graph` is **metadata and output-routing only** in the
-    LongMemEval bench runner (`src/distillery/eval/longmemeval.py`). The flag
-    records the `expand_graph` axis on every receipt and routes outputs into a
-    separate subdirectory so Cell A receipts can never be confused with
-    HEADLINE receipts, but the underlying `store.search` call site is
-    unchanged — Cell A is currently measuring the same retrieval path as
-    HEADLINE. Once the graph PRs merge, the runner will be wired to invoke
-    graph-enabled retrieval without further workflow or docs changes, and
-    Cell A's regression-gate semantics become live. Until then, treat any
-    Cell A delta as a sanity check on the receipt-isolation infrastructure,
-    not a measurement of the graph-enabled path.
+    The graph retrieval PRs ([#422](https://github.com/norrietaylor/distillery/pull/422)–[#429](https://github.com/norrietaylor/distillery/pull/429))
+    merged ahead of the 0.5.0 release, and Cell A's regression-gate semantics
+    are live. The first full-500q × 5-seed Cell A run on the v0.5.0 commit
+    landed at **mean R@5 = 0.972** (stddev 0.000), exactly matching the
+    HEADLINE mean of 0.972 over the same 500q sample for a **delta of 0.0pp**
+    against the 0.5pp variance-gate threshold (`gate_pass=true`,
+    `sample_size_match=true`). Run:
+    [`actions/runs/25453787717`](https://github.com/norrietaylor/distillery/actions/runs/25453787717).
+    Aggregate receipt: [`bench/results/graph_regression_cell_a.json`](https://github.com/norrietaylor/distillery/blob/main/bench/results/graph_regression_cell_a.json).
+
+    Per the discipline in `bench/LIMITATIONS.md` §(f), this is a regression
+    result only — *no* value-add claim is implied. Cell A passing means
+    "enabling graph features did not regress baseline recall on
+    LongMemEval-S" and nothing more. The graph hypothesis (cross-user /
+    cross-session relations) is not exercised by LongMemEval and is deferred
+    to Cell B.
 
 - **Workflow.** [`.github/workflows/bench-graph-regression-cell.yml`](https://github.com/norrietaylor/distillery/blob/main/.github/workflows/bench-graph-regression-cell.yml)
   runs nightly at 06:00 UTC, sequenced after the HEADLINE workflow at 05:00 UTC.

@@ -1,16 +1,17 @@
 # /radar — Ambient Intelligence Digest
 
-Surfaces recent feed entries, synthesizes them into a grouped digest, and optionally suggests new sources based on your interest profile.
+Surfaces recent feed entries, synthesizes them into a grouped digest, optionally suggests new sources, and optionally appends a structural view of the knowledge graph (`--structure`).
 
 ## Usage
 
 ```text
 /radar                                  # Default: last 7 days, up to 35 entries
 /radar --days 3                         # Last 3 days
-/radar --limit 10                       # Limit to 10 entries
+/radar --limit 10                       # Limit to 10 entries (overrides feeds.digest.candidate_limit)
 /radar --topic "build hermeticity"      # Use an explicit topic instead of mining tags
 /radar --topic agentic-eval --days 14   # Topic + custom window
 /radar --topic build --topic wheels     # Multiple topics; one search query each
+/radar --structure                      # Append orphans + bridges + communities
 /radar --suggest                        # Include source suggestions
 /radar --store                          # Store the digest as an entry (default: display-only)
 /radar --include-evergreen              # Surface older / first-poll backfill items
@@ -25,6 +26,7 @@ Surfaces recent feed entries, synthesizes them into a grouped digest, and option
 | `--days <n>` | Look back period in days (overrides `feeds.digest.window_days`) | `feeds.digest.window_days` (7 if unset) |
 | `--limit <n>` | Maximum entries to include (overrides `feeds.digest.candidate_limit`) | `feeds.digest.candidate_limit` (35 if unset) |
 | `--topic <query>` | Use the literal string as the semantic-search query instead of mining tags. Repeatable. | Off (auto-mine) |
+| `--structure` | Append a Knowledge Structure section (orphans + bridges + communities) | Off |
 | `--suggest` | Include new source suggestions | Off |
 | `--store` | Store the digest as an entry | Off (display-only) |
 | `--include-evergreen` | Include items older than the window or flagged as first-poll backfill | Off |
@@ -36,10 +38,50 @@ items pulled when a feed source is first registered — are flagged
 they don't surface as "new intelligence". Use `--include-evergreen` to
 override.
 
+## Query selection
+
+Two paths feed the candidate-search step:
+
+**Path 1 — `--topic` override.** Each `--topic <query>` flag becomes one literal `distillery_search` call. Topics are deduplicated case-insensitively, preserving order. The 5-query namespace cap does *not* apply — every distinct user-supplied topic is honored, up to `--limit`. Tag mining is skipped entirely.
+
+**Path 2 — Namespace-diverse interest profile (default).** The skill mines curated entries (`session`, `reference`, `bookmark`, `idea`, `note`, `minutes`) for a tag profile, then picks **5 namespace-diverse tags** rather than the raw top-5 by count. A tag's namespace is its hierarchical path with the leaf removed, capped at two segments (e.g., `domain/build/hermeticity` → `domain/build`; `tech/duckdb` → `tech`). One leader per namespace prevents a dominant cluster from crowding out distinct topics. The reference implementation lives in `distillery.feeds.radar_selection.select_namespace_diverse_tags`.
+
+## Limit semantics and the 5-query default
+
+The candidate budget is distributed across queries so the sum of per-query limits never exceeds `--limit`:
+
+- Compute `Q` (the query count): up to 5 for Path 2, up to `min(distinct_topics, --limit)` for Path 1.
+- Let `base = limit // Q` and `rem = limit % Q`. The first `rem` queries get `base + 1`, the rest get `base`.
+
+With the default `--limit 35` and Q=5 (Path 2), this yields 5 queries × 7 results each → ~30 unique candidates after dedup. For small overrides like `--limit 3`, Q is reduced to 3 so the override is honored exactly (no zero-budget queries are issued). If `Q == 0` (e.g., `--limit 0` or both paths yielded an empty set), the search step short-circuits and falls back to a recent-listing query.
+
+Configure the system-wide default via `feeds.digest.candidate_limit` in `distillery.yaml`:
+
+```yaml
+feeds:
+  digest:
+    window_days: 7
+    candidate_limit: 35
+```
+
+Both YAML loading and the MCP `distillery_configure` tool validate this knob the same way (positive integer); `--limit` overrides it per-invocation.
+
+## `--structure` flag — Knowledge Structure section
+
+When `--structure` is set, an additional section is appended to the digest with three subsections:
+
+**Orphans.** Up to 10 entries with no incoming or outgoing relations, surfaced via `distillery_list(structural=["orphans"])`. These are knowledge fragments worth reviewing for connection opportunities. Empty list renders as `No orphan entries — every entry has at least one relation.`
+
+**Bridges.** Top-5 entries by **betweenness centrality** in the entry-relations graph, surfaced via `distillery_relations(action="metrics", metric="bridges")`. Scores are rendered to 3 decimals (e.g., `0.412`). High-centrality entries are knowledge "joints" — losing or contradicting them disconnects the graph the most.
+
+**Communities.** Detected clusters in the entry-relations graph, surfaced via `distillery_relations(action="metrics", metric="communities")`. Communities are sorted by `total_members` (largest first). For each community, the line shows the first three member ids: `Community 1 (12 entries): <id1>, <id2>, <id3>`. If every member has `updated_at < now - 60 days`, the community is tagged `[stale]`.
+
+Bridges and communities require the `[graph]` extra (NetworkX). If the MCP server returns `INTERNAL` with `"NetworkX not installed"`, `/radar` emits a single one-line note — `Run \`pip install distillery-mcp[graph]\` to enable bridges/communities.` — and continues without the structural metrics. The orphans subsection does not require NetworkX.
+
 ## Output
 
 ```markdown
-# Radar Digest — 2026-03-31
+# Radar Digest — 2026-05-07
 
 12 feed entries from the last 7 days.
 
@@ -49,7 +91,6 @@ JSON extension for nested document queries.
 
 - v1.2 release includes 3x faster vector search indexing
 - New JSON extension supports path-based queries
-- Community contribution guide updated
 
 ## Claude Code
 Two new features landed: hook-based automation and MCP server improvements.
@@ -62,30 +103,25 @@ This week saw performance improvements in DuckDB's vector search (directly
 relevant to Distillery's storage layer) and new automation capabilities
 in Claude Code.
 
-## Suggested Sources
-| URL | Type | Why |
-|-----|------|-----|
-| github.com/jlowin/fastmcp | github | FastMCP is a core dependency |
-| simonwillison.net/atom/everything | rss | Covers DuckDB, embeddings, AI tooling |
+## Knowledge Structure
 
-Digest stored: m3n4o5p6
+### Orphans
+- a1b2c3d4 — One-off reference doc on token rotation
+- e5f6g7h8 — Standalone bookmark, no follow-up captured
+
+### Bridges (top by betweenness centrality)
+1. m1n2o3p4 — OAuth design session (score: 0.412)
+2. q1r2s3t4 — DuckDB migration plan (score: 0.387)
+
+### Communities (ordered by total member count; top 3 members shown per community)
+- Community 1 (12 entries): m1n2o3p4, q1r2s3t4, u1v2w3x4
+- Community 2 (8 entries) [stale]: y1z2a3b4, c1d2e3f4, g1h2i3j4
 ```
-
-## How It Works
-
-1. Determines the query set:
-   - If one or more `--topic` flags are supplied, the literal strings become the queries (deduplicated, preserving order).
-   - Otherwise the skill mines curated entries (`session`, `reference`, `bookmark`, `idea`, `note`, `minutes`) for a tag profile, then picks **5 namespace-diverse tags** rather than the raw top-5 by count. A tag's namespace is its hierarchical path with the leaf removed, capped at two segments (e.g., `domain/build/hermeticity` → `domain/build`; `tech/duckdb` → `tech`). One leader per namespace prevents one dominant cluster from crowding out distinct topics.
-2. Runs one `distillery_search` per query against feed entries, deduplicating results by entry ID.
-3. Groups entries by source tag or topic.
-4. Synthesizes 2-4 sentence summaries per group with bullet points.
-5. Generates a cross-group overall summary.
-6. If `--suggest` is enabled, the feed scorer mines the knowledge base for an interest profile and emits source recommendations inline (the former `distillery_interests` tool was folded into `/radar`'s internal pipeline).
-7. Stores the digest as an entry (type `digest`) only when `--store` is specified.
 
 ## Tips
 
 - Digests are display-only by default; pass `--store` to persist with tags `digest/radar/ambient` for future retrieval
-- Source suggestions are based on your interest profile (mined from existing entries)
+- `--topic` is the right flag when you want to follow a specific thread *and* you don't want the digest diluted by your dominant tag clusters
+- `--structure` is most useful as an occasional pulse-check, not every run — bridges and communities don't move much day-to-day
+- Source suggestions (`--suggest`) are based on the same query set used in Step 3a
 - Use `/watch add` to subscribe to suggested sources
-- Groups are organized by source when available, falling back to topic clustering

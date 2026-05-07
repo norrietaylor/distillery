@@ -91,6 +91,7 @@ nav:
   - Benchmarks: benchmarks.md
   - Contributing: contributing.md
   - Blog:
+    - "Walking the Graph: Distillery 0.5.0": blog/distillery-0-5-0-graph.md
     - "Full-Proof: Distillery 0.4.0 and the Agent Memory Problem": blog/distillery-0-4-0-full-proof.md
     - Building a Second Brain for Claude Code: blog/building-a-second-brain-for-claude-code.md
   - Roadmap: roadmap.md
