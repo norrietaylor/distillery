@@ -32,9 +32,9 @@
 ignore:
   # ---------------------------------------------------------------------
   # Active suppressions — confirmed against the CI scan of the python-3.14
-  # runtime image (SBOM: python-3.14.4-r3 + glibc 2.43-r7, Chainguard
+  # runtime image (SBOM: python-3.14.4-r4 + glibc 2.43-r7, Chainguard
   # distroless `cgr.dev/chainguard/python` base, which is built on Wolfi).
-  # Reviewed: 2026-05-03 (issue #418, distroless migration #419).
+  # Reviewed: 2026-05-07 (issue #418, distroless migration #419).
   # ---------------------------------------------------------------------
 
   - vulnerability: CVE-2026-3298
