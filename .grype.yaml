@@ -32,17 +32,17 @@
 ignore:
   # ---------------------------------------------------------------------
   # Active suppressions — confirmed against the CI scan of the python-3.14
-  # runtime image (SBOM: python-3.14.4-r3 + glibc 2.43-r7, Chainguard
+  # runtime image (SBOM: python-3.14.4-r4 + glibc 2.43-r7, Chainguard
   # distroless `cgr.dev/chainguard/python` base, which is built on Wolfi).
-  # Reviewed: 2026-05-03 (issue #418, distroless migration #419).
+  # Reviewed: 2026-05-07 (issue #418, distroless migration #419).
   # ---------------------------------------------------------------------
 
   - vulnerability: CVE-2026-3298
     package:
       name: python-3.14
-      version: 3.14.4-r3
+      version: 3.14.4-r4
       type: apk
-    reason: "CPython 3.14.4-r3 — CVSS High; affects the interpreter's startup path under specific PYTHONHOME / site-packages override conditions on multi-user systems.  Not exploitable in our deployment: Distillery runs as the Chainguard distroless 'nonroot' user (uid 65532) inside an immutable distroless container with a fixed PYTHONHOME and no shared-tenant site-packages directory.  No upstream fix released by CPython upstream or Wolfi.  Reviewed: 2026-05-03"
+    reason: "CPython 3.14.4-r4 — CVSS High; affects the interpreter's startup path under specific PYTHONHOME / site-packages override conditions on multi-user systems.  Not exploitable in our deployment: Distillery runs as the Chainguard distroless 'nonroot' user (uid 65532) inside an immutable distroless container with a fixed PYTHONHOME and no shared-tenant site-packages directory.  No upstream fix released by CPython upstream or Wolfi.  Reviewed: 2026-05-07"
 
   - vulnerability: CVE-2026-5435
     package:
