@@ -100,11 +100,12 @@ def _source_to_dict(source: FeedSourceConfig) -> dict[str, object]:
 def _make_config(
     sources: list[FeedSourceConfig] | None = None,
     digest_threshold: float = 0.0,
+    alert_threshold: float = 0.85,
 ) -> DistilleryConfig:
     cfg = DistilleryConfig()
     cfg.feeds = FeedsConfig(
         sources=sources or [],
-        thresholds=FeedsThresholdsConfig(alert=0.85, digest=digest_threshold),
+        thresholds=FeedsThresholdsConfig(alert=alert_threshold, digest=digest_threshold),
     )
     return cfg
 
@@ -420,6 +421,117 @@ class TestFeedPollerRSS:
 
         assert summary.total_stored == 0
         assert summary.total_below_threshold == 1
+
+
+# ---------------------------------------------------------------------------
+# FeedPoller.poll — alert threshold (issue #472)
+# ---------------------------------------------------------------------------
+
+
+class TestFeedPollerAlertThreshold:
+    """Two-tier threshold: items >= alert get metadata.is_alert=True;
+    items in [digest, alert) are stored without the alert flag.
+
+    Regression test for issue #472: FeedPoller previously read only the digest
+    threshold and ignored ``feeds.thresholds.alert`` entirely.
+    """
+
+    def _rss_source(self) -> FeedSourceConfig:
+        return FeedSourceConfig(
+            url="https://example.com/rss",
+            source_type="rss",
+            trust_weight=1.0,
+        )
+
+    async def test_init_reads_alert_threshold_from_config(self) -> None:
+        store = _make_store()
+        cfg = _make_config(digest_threshold=0.4, alert_threshold=0.9)
+        poller = FeedPoller(store=store, config=cfg)
+        assert poller._alert_threshold == pytest.approx(0.9)
+        assert poller._threshold == pytest.approx(0.4)
+
+    async def test_item_at_or_above_alert_threshold_flagged(self) -> None:
+        items = [_make_feed_item(item_id="alert-1", title="Critical", content="Hot news")]
+        src = self._rss_source()
+        store = _make_store(feed_sources=[_source_to_dict(src)])
+        cfg = _make_config(sources=[src], digest_threshold=0.5, alert_threshold=0.85)
+
+        with patch("distillery.feeds.poller._build_adapter") as mock_build:
+            mock_adapter = MagicMock()
+            mock_adapter.fetch.return_value = items
+            mock_build.return_value = mock_adapter
+
+            async def _find_similar(content: str, threshold: float, limit: int) -> list:
+                if threshold == 0.95:
+                    return []  # no dedup match
+                return [_make_search_result(score=0.9)]  # >= alert (0.85)
+
+            store.find_similar.side_effect = _find_similar
+            poller = FeedPoller(store=store, config=cfg)
+            summary = await poller.poll()
+
+        assert summary.total_stored == 1
+        # Inspect the Entry passed to store.store()
+        store.store.assert_awaited_once()
+        stored_entry = store.store.await_args.args[0]
+        assert stored_entry.metadata.get("is_alert") is True
+
+    async def test_item_in_digest_band_not_flagged_as_alert(self) -> None:
+        items = [_make_feed_item(item_id="digest-1", title="Mild", content="Lukewarm")]
+        src = self._rss_source()
+        store = _make_store(feed_sources=[_source_to_dict(src)])
+        cfg = _make_config(sources=[src], digest_threshold=0.5, alert_threshold=0.85)
+
+        with patch("distillery.feeds.poller._build_adapter") as mock_build:
+            mock_adapter = MagicMock()
+            mock_adapter.fetch.return_value = items
+            mock_build.return_value = mock_adapter
+
+            async def _find_similar(content: str, threshold: float, limit: int) -> list:
+                if threshold == 0.95:
+                    return []
+                # 0.7 is in the [digest=0.5, alert=0.85) band — stored,
+                # but must NOT be flagged as alert.
+                return [_make_search_result(score=0.7)]
+
+            store.find_similar.side_effect = _find_similar
+            poller = FeedPoller(store=store, config=cfg)
+            summary = await poller.poll()
+
+        assert summary.total_stored == 1
+        store.store.assert_awaited_once()
+        stored_entry = store.store.await_args.args[0]
+        assert "is_alert" not in stored_entry.metadata or stored_entry.metadata["is_alert"] is False
+
+    async def test_alert_threshold_respects_trust_weight(self) -> None:
+        """adjusted_score = score * trust_weight is what gets compared, not raw score."""
+        source = FeedSourceConfig(
+            url="https://example.com/rss",
+            source_type="rss",
+            trust_weight=0.5,
+        )
+        items = [_make_feed_item(item_id="tw-1")]
+        store = _make_store(feed_sources=[_source_to_dict(source)])
+        # digest=0.3 lets it through; alert=0.85 — raw 0.9 * 0.5 = 0.45 < 0.85.
+        cfg = _make_config(sources=[source], digest_threshold=0.3, alert_threshold=0.85)
+
+        with patch("distillery.feeds.poller._build_adapter") as mock_build:
+            mock_adapter = MagicMock()
+            mock_adapter.fetch.return_value = items
+            mock_build.return_value = mock_adapter
+
+            async def _find_similar(content: str, threshold: float, limit: int) -> list:
+                if threshold == 0.95:
+                    return []
+                return [_make_search_result(score=0.9)]
+
+            store.find_similar.side_effect = _find_similar
+            poller = FeedPoller(store=store, config=cfg)
+            summary = await poller.poll()
+
+        assert summary.total_stored == 1
+        stored_entry = store.store.await_args.args[0]
+        assert "is_alert" not in stored_entry.metadata or stored_entry.metadata["is_alert"] is False
 
 
 # ---------------------------------------------------------------------------
