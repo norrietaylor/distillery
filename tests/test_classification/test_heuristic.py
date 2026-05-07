@@ -386,3 +386,99 @@ class TestClassifyIntegration:
         result = await classifier.classify(inbox_entry, store, deterministic_embedding_provider)
 
         assert isinstance(result, ClassificationResult)
+
+
+# ---------------------------------------------------------------------------
+# Regression: confidence stays within [0.0, 1.0]  (issue #471)
+# ---------------------------------------------------------------------------
+
+
+class TestConfidenceClamping:
+    """Regression tests ensuring confidence is always within [0.0, 1.0].
+
+    Cosine similarity ranges over [-1.0, 1.0], but the
+    :class:`~distillery.classification.models.ClassificationResult` contract
+    documents ``confidence`` as ``[0.0, 1.0]``.  When an entry's embedding
+    points opposite to every centroid, the raw best_similarity is negative
+    and must be clamped before being assigned to ``confidence``.
+    """
+
+    async def test_classify_clamps_negative_similarity_to_zero(
+        self,
+        store: Any,
+        deterministic_embedding_provider: DeterministicEmbeddingProvider,
+    ) -> None:
+        """An entry opposite to every centroid yields confidence == 0.0."""
+        # Build a session cluster pointing along +axis 0.
+        dims = deterministic_embedding_provider.dimensions
+        positive = _axis_vector(dims, 0)
+        negative = [-x for x in positive]
+
+        for i in range(MIN_ENTRIES_PER_TYPE):
+            content = f"positive cluster entry {i}"
+            deterministic_embedding_provider.register(content, positive)
+            entry = make_entry(
+                content=content,
+                entry_type=EntryType.SESSION,
+                status=EntryStatus.ACTIVE,
+            )
+            await store.store(entry)
+
+        # Inbox entry points in the opposite direction -> cosine sim = -1.0.
+        inbox_content = "diametrically opposed entry"
+        deterministic_embedding_provider.register(inbox_content, negative)
+        inbox_entry = make_entry(
+            content=inbox_content,
+            entry_type=EntryType.INBOX,
+        )
+
+        classifier = HeuristicClassifier()
+        result = await classifier.classify(inbox_entry, store, deterministic_embedding_provider)
+
+        # The raw best_similarity is -1.0 (opposite cluster), well below
+        # SIMILARITY_THRESHOLD, so the entry is sent to review.  But the
+        # reported confidence MUST remain within the documented [0.0, 1.0]
+        # range, not the raw cosine value.
+        assert result.status == EntryStatus.PENDING_REVIEW
+        assert result.confidence >= 0.0, f"confidence must be >= 0.0, got {result.confidence}"
+        assert result.confidence <= 1.0, f"confidence must be <= 1.0, got {result.confidence}"
+        assert result.confidence == pytest.approx(0.0, abs=1e-9)
+
+    async def test_classify_batch_clamps_negative_similarity_to_zero(
+        self,
+        store: Any,
+        deterministic_embedding_provider: DeterministicEmbeddingProvider,
+    ) -> None:
+        """classify_batch must also clamp negative similarities to 0.0."""
+        dims = deterministic_embedding_provider.dimensions
+        positive = _axis_vector(dims, 0)
+        negative = [-x for x in positive]
+
+        for i in range(MIN_ENTRIES_PER_TYPE):
+            content = f"batch positive entry {i}"
+            deterministic_embedding_provider.register(content, positive)
+            await store.store(
+                make_entry(
+                    content=content,
+                    entry_type=EntryType.SESSION,
+                    status=EntryStatus.ACTIVE,
+                )
+            )
+
+        # Two inbox entries: one opposite, one orthogonal.
+        opposite_content = "batch opposite entry"
+        deterministic_embedding_provider.register(opposite_content, negative)
+        orthogonal_content = "batch orthogonal entry"
+        deterministic_embedding_provider.register(orthogonal_content, _axis_vector(dims, dims - 1))
+        entries = [
+            make_entry(content=opposite_content, entry_type=EntryType.INBOX),
+            make_entry(content=orthogonal_content, entry_type=EntryType.INBOX),
+        ]
+
+        classifier = HeuristicClassifier()
+        results = await classifier.classify_batch(entries, store, deterministic_embedding_provider)
+
+        assert len(results) == 2
+        for result in results:
+            assert result.confidence >= 0.0, f"confidence must be >= 0.0, got {result.confidence}"
+            assert result.confidence <= 1.0, f"confidence must be <= 1.0, got {result.confidence}"
