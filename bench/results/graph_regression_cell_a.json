@@ -1,0 +1,47 @@
+{
+  "cell": "graph_regression_cell_a",
+  "config": "hybrid/session/recency-on/bge-small/expand_graph=true",
+  "questions": 500,
+  "seeds": [
+    {
+      "seed_offset": 0,
+      "r5": 0.972,
+      "r10": 0.986,
+      "ndcg10": 0.904159415149803
+    },
+    {
+      "seed_offset": 1,
+      "r5": 0.972,
+      "r10": 0.986,
+      "ndcg10": 0.9077913715025137
+    },
+    {
+      "seed_offset": 2,
+      "r5": 0.972,
+      "r10": 0.986,
+      "ndcg10": 0.9090497684001617
+    },
+    {
+      "seed_offset": 3,
+      "r5": 0.972,
+      "r10": 0.986,
+      "ndcg10": 0.9050063543843158
+    },
+    {
+      "seed_offset": 4,
+      "r5": 0.972,
+      "r10": 0.986,
+      "ndcg10": 0.90305211245423
+    }
+  ],
+  "mean_r5": 0.972,
+  "stddev_r5": 0.0,
+  "min_r5": 0.972,
+  "max_r5": 0.972,
+  "headline_mean_r5": 0.972,
+  "headline_questions": 500,
+  "sample_size_match": true,
+  "delta_r5_pp": 0.0,
+  "delta_threshold_pp": 0.5,
+  "gate_pass": true
+}
