@@ -24,7 +24,7 @@ from starlette.routing import Mount, Route
 from starlette.testclient import TestClient
 
 from distillery.config import DistilleryConfig, ServerConfig, WebhookConfig
-from distillery.mcp.webhooks import create_webhook_app
+from distillery.mcp.webhooks import _verify_bearer_token, create_webhook_app
 from distillery.store.duckdb import DuckDBStore
 
 # The autouse fixture that clears ``_jobs``, ``_active_job_by_endpoint``,
@@ -145,6 +145,67 @@ async def test_auth_valid_token_returns_202(
 
         # The background task must complete; the real FeedPoller runs against
         # the empty fixture store and returns an all-zeros poll summary.
+        final = _wait_for_job(client, body["job_id"])
+        assert final["state"] == "succeeded"
+
+
+def _make_request_with_auth(header_value: str) -> Request:
+    """Build a minimal Starlette :class:`Request` carrying *header_value* as Authorization."""
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/poll",
+        "headers": [(b"authorization", header_value.encode("latin-1"))],
+    }
+    return Request(scope)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "scheme",
+    ["Bearer", "bearer", "BEARER", "BeArEr"],
+    ids=["title-case", "lower-case", "upper-case", "mixed-case"],
+)
+def test_verify_bearer_token_scheme_case_insensitive(scheme: str) -> None:
+    """Regression for #469: RFC 7235 §2.1 makes the auth scheme case-insensitive."""
+    request = _make_request_with_auth(f"{scheme} {_SECRET}")
+    assert _verify_bearer_token(request, _SECRET) is True
+
+
+@pytest.mark.unit
+def test_verify_bearer_token_rejects_other_schemes() -> None:
+    """Schemes other than ``bearer`` must still be rejected even if the token matches."""
+    request = _make_request_with_auth(f"Basic {_SECRET}")
+    assert _verify_bearer_token(request, _SECRET) is False
+
+
+@pytest.mark.unit
+def test_verify_bearer_token_rejects_missing_token() -> None:
+    """A header with the right scheme but no token value must be rejected."""
+    assert _verify_bearer_token(_make_request_with_auth("Bearer"), _SECRET) is False
+    assert _verify_bearer_token(_make_request_with_auth("Bearer "), _SECRET) is False
+
+
+@pytest.mark.unit
+async def test_auth_lowercase_bearer_scheme_accepted(
+    store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end regression: ``Authorization: bearer <token>`` is accepted (#469)."""
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+    config = _make_config()
+    shared = _make_shared_state(store)
+    app = create_webhook_app(shared, config)
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        resp = client.post("/poll", headers={"Authorization": f"bearer {_SECRET}"})
+
+        assert resp.status_code == 202, f"Expected 202, got {resp.status_code}: {resp.text}"
+        body = resp.json()
+        assert body["ok"] is True
+        assert isinstance(body["job_id"], str) and body["job_id"]
+
+        # Wait for the background job to terminate so teardown doesn't race
+        # with the autouse fixture that clears the in-process job registry.
         final = _wait_for_job(client, body["job_id"])
         assert final["state"] == "succeeded"
 
