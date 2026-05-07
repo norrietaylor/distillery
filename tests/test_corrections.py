@@ -40,8 +40,9 @@ async def test_correct_entry(store: DuckDBStore, original_entry: str) -> None:
     assert data["archived_entry_id"] == original_entry
     assert "correction_entry_id" in data
 
-    # Original should be archived.
-    orig = await store.get(original_entry)
+    # Original should be archived (use include_archived=True since get()
+    # filters archived by default per the protocol contract).
+    orig = await store.get(original_entry, include_archived=True)
     assert orig is not None
     assert orig.status == EntryStatus.ARCHIVED
 
@@ -161,9 +162,10 @@ async def test_correction_chain(store: DuckDBStore, original_entry: str) -> None
     d2 = parse_mcp_response(r2)
     entry_c_id = d2["correction_entry_id"]
 
-    # A and B should both be archived.
-    a = await store.get(original_entry)
-    b = await store.get(entry_b_id)
+    # A and B should both be archived (use include_archived=True since get()
+    # filters archived by default per the protocol contract).
+    a = await store.get(original_entry, include_archived=True)
+    b = await store.get(entry_b_id, include_archived=True)
     c = await store.get(entry_c_id)
     assert a is not None and a.status == EntryStatus.ARCHIVED
     assert b is not None and b.status == EntryStatus.ARCHIVED

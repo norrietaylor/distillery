@@ -276,9 +276,13 @@ async def _expand_search_with_graph(
 
     # Fetch entries for all expanded ids; skip any that have been deleted
     # or whose status would have been filtered out by the seed search.
+    # When the seed search permits archived entries (allowed_statuses is None
+    # or contains "archived"), pass include_archived=True so store.get() will
+    # surface them; otherwise the default (filter-out) behaviour applies.
+    fetch_archived = allowed_statuses is None or "archived" in allowed_statuses
     expanded_results: list[dict[str, Any]] = []
     for entry_id, info in expanded.items():
-        entry = await store.get(entry_id)
+        entry = await store.get(entry_id, include_archived=fetch_archived)
         if entry is None:
             continue
         if allowed_statuses is not None and str(entry.status) not in allowed_statuses:

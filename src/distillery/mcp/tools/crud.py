@@ -1834,8 +1834,11 @@ async def _handle_correct(
     wrong_entry_id: str = arguments["wrong_entry_id"]
 
     # --- fetch original entry -----------------------------------------------
+    # include_archived=True so we can distinguish "no such entry" (NOT_FOUND)
+    # from "entry exists but is archived" (INVALID_PARAMS).  store.get() filters
+    # archived rows by default per the protocol contract.
     try:
-        original = await store.get(wrong_entry_id)
+        original = await store.get(wrong_entry_id, include_archived=True)
     except Exception:  # noqa: BLE001
         logger.exception("Error fetching entry id=%s for correction", wrong_entry_id)
         return error_response("INTERNAL", "Failed to retrieve original entry")
