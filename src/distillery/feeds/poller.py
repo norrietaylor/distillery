@@ -403,6 +403,7 @@ def _item_to_entry_kwargs(
     *,
     enriched_content: str | None = None,
     is_backfill: bool = False,
+    is_alert: bool = False,
 ) -> dict[str, Any]:
     """Convert a :class:`~distillery.feeds.models.FeedItem` to Entry constructor kwargs.
 
@@ -426,6 +427,12 @@ def _item_to_entry_kwargs(
             backfill batch via ``metadata.backfill = True``.  ``/radar`` and
             other digest surfaces use this flag to suppress historic items
             that pre-date the source's registration.  See issue #444.
+        is_alert: When ``True``, mark this entry as having met the alert
+            threshold (``feeds.thresholds.alert``) via ``metadata.is_alert =
+            True``.  Items in the ``[digest, alert)`` band remain
+            digest-eligible only.  See issue #472.  A downstream alert
+            consumer (e.g. notification sink) is intentionally out of scope
+            for this fix and is left to a follow-up.
 
     Returns:
         A dict of keyword arguments for :class:`~distillery.models.Entry`.
@@ -447,6 +454,8 @@ def _item_to_entry_kwargs(
         metadata["published_at"] = item.published_at.isoformat()
     if is_backfill:
         metadata["backfill"] = True
+    if is_alert:
+        metadata["is_alert"] = True
 
     if enriched_content is not None:
         # Replace the body with Reader-fetched markdown but keep the title
@@ -536,6 +545,14 @@ class FeedPoller:
             if relevance_threshold is not None
             else config.feeds.thresholds.digest
         )
+        # Two-tier threshold: items with adjusted_score >= alert threshold get
+        # flagged via metadata.is_alert (issue #472).  Items in the
+        # ``[digest, alert)`` band remain digest-eligible only.  The constraint
+        # ``digest <= alert`` is enforced by validate_config().
+        self._alert_threshold = config.feeds.thresholds.alert
+        # One-shot guard so a misconfigured / non-numeric alert threshold
+        # only logs once per poller instance instead of per item.
+        self._alert_threshold_warning_emitted = False
         self._reader = reader
 
     async def poll(self, *, source_url: str | None = None) -> PollerSummary:
@@ -865,12 +882,31 @@ class FeedPoller:
             try:
                 from distillery.models import Entry
 
+                # Defensive: alert threshold may be a non-numeric placeholder
+                # (e.g. MagicMock in some unit tests).  Treat any comparison
+                # failure as "not alert-worthy" — we never want a malformed
+                # threshold to break the store path.  Log once per poller so
+                # misconfiguration is observable without spamming the log.
+                try:
+                    is_alert = adjusted_score >= float(self._alert_threshold)
+                except (TypeError, ValueError) as exc:
+                    if not self._alert_threshold_warning_emitted:
+                        logger.warning(
+                            "FeedPoller: invalid alert threshold %r (%s); "
+                            "alert tagging disabled for this poller instance",
+                            self._alert_threshold,
+                            exc,
+                        )
+                        self._alert_threshold_warning_emitted = True
+                    is_alert = False
+
                 kwargs = _item_to_entry_kwargs(
                     item,
                     adjusted_score,
                     keyword_map,
                     enriched_content=enriched,
                     is_backfill=is_backfill,
+                    is_alert=is_alert,
                 )
                 entry = Entry(**kwargs)
                 await self._store.store(entry)
