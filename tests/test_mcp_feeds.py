@@ -94,6 +94,8 @@ class FakeSourceStore:
         label: str = "",
         poll_interval_minutes: int = 60,
         trust_weight: float = 1.0,
+        threshold_alert: float | None = None,
+        threshold_digest: float | None = None,
     ) -> dict[str, Any]:
         if any(s["url"] == url for s in self._sources):
             raise ValueError(f"Feed source with URL {url!r} already exists.")
@@ -107,6 +109,8 @@ class FakeSourceStore:
             "last_item_count": 0,
             "last_error": None,
             "next_poll_at": None,
+            "threshold_alert": threshold_alert,
+            "threshold_digest": threshold_digest,
         }
         self._sources.append(entry)
         return entry
@@ -427,6 +431,95 @@ class TestHandleWatchAdd:
         data = parse(result)
         assert "sources" in data
         assert isinstance(data["sources"], list)
+
+    async def test_add_with_thresholds_persists_per_source_overrides(self) -> None:
+        """``thresholds`` argument is plumbed through to the store as
+        ``threshold_alert`` / ``threshold_digest`` columns (issue #480)."""
+        store = FakeSourceStore()
+        result = await _handle_watch(
+            store=store,
+            arguments={
+                "action": "add",
+                "url": "https://lobste.rs/rss",
+                "source_type": "rss",
+                "thresholds": {"alert": 0.92, "digest": 0.80},
+            },
+        )
+        data = parse(result)
+        assert "error" not in data
+        assert data["added"]["threshold_alert"] == pytest.approx(0.92)
+        assert data["added"]["threshold_digest"] == pytest.approx(0.80)
+        # Round-trip via list shows the persisted overrides.
+        listed = parse(await _handle_watch(store=store, arguments={"action": "list"}))["sources"][0]
+        assert listed["threshold_alert"] == pytest.approx(0.92)
+        assert listed["threshold_digest"] == pytest.approx(0.80)
+
+    async def test_add_with_partial_thresholds_only_overrides_supplied_field(self) -> None:
+        """A ``thresholds`` mapping with only ``digest`` leaves alert as ``None``
+        — the partial override falls back to global for the missing tier."""
+        store = FakeSourceStore()
+        result = await _handle_watch(
+            store=store,
+            arguments={
+                "action": "add",
+                "url": "https://news.ycombinator.com/rss",
+                "source_type": "rss",
+                "thresholds": {"digest": 0.75},
+            },
+        )
+        data = parse(result)
+        assert "error" not in data
+        assert data["added"]["threshold_digest"] == pytest.approx(0.75)
+        assert data["added"]["threshold_alert"] is None
+
+    async def test_add_thresholds_out_of_range_returns_invalid_params(self) -> None:
+        """Out-of-range threshold value is rejected with INVALID_PARAMS."""
+        store = FakeSourceStore()
+        result = await _handle_watch(
+            store=store,
+            arguments={
+                "action": "add",
+                "url": "https://example.com/rss",
+                "source_type": "rss",
+                "thresholds": {"digest": 1.5},
+            },
+        )
+        data = parse(result)
+        assert data["error"] is True
+        assert data["code"] == "INVALID_PARAMS"
+
+    async def test_add_thresholds_digest_above_alert_returns_invalid_params(self) -> None:
+        """``digest > alert`` is rejected with INVALID_PARAMS to mirror the
+        global ``feeds.thresholds`` invariant."""
+        store = FakeSourceStore()
+        result = await _handle_watch(
+            store=store,
+            arguments={
+                "action": "add",
+                "url": "https://example.com/rss",
+                "source_type": "rss",
+                "thresholds": {"alert": 0.5, "digest": 0.9},
+            },
+        )
+        data = parse(result)
+        assert data["error"] is True
+        assert data["code"] == "INVALID_PARAMS"
+
+    async def test_add_thresholds_unknown_key_returns_invalid_params(self) -> None:
+        """Unknown keys in the ``thresholds`` map are rejected (typo guard)."""
+        store = FakeSourceStore()
+        result = await _handle_watch(
+            store=store,
+            arguments={
+                "action": "add",
+                "url": "https://example.com/rss",
+                "source_type": "rss",
+                "thresholds": {"alarm": 0.9},
+            },
+        )
+        data = parse(result)
+        assert data["error"] is True
+        assert data["code"] == "INVALID_PARAMS"
 
 
 # ---------------------------------------------------------------------------

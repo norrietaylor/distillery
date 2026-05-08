@@ -151,6 +151,61 @@ async def _probe_url(url: str) -> str | None:
     return None
 
 
+def _parse_thresholds_arg(
+    raw: Any,
+) -> tuple[float | None, float | None]:
+    """Parse the optional ``thresholds`` argument on ``distillery_watch add``.
+
+    Accepts either ``None`` (no override) or a mapping with optional
+    ``alert`` / ``digest`` keys.  Each value, when provided, must be a
+    finite float in ``[0.0, 1.0]``.  When both are provided the
+    ``digest <= alert`` invariant is enforced.
+
+    Returns:
+        ``(alert, digest)`` — either may be ``None`` when the operator
+        only overrode the other tier.
+
+    Raises:
+        ValueError: With a structured message suitable for surfacing as
+            ``INVALID_PARAMS`` when the input shape or values are wrong.
+    """
+    if raw is None:
+        return None, None
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"thresholds must be a mapping with optional 'alert'/'digest' keys, "
+            f"got: {type(raw).__name__}"
+        )
+    valid_keys = {"alert", "digest"}
+    extra = set(raw.keys()) - valid_keys
+    if extra:
+        raise ValueError(
+            f"thresholds has unknown keys: {sorted(extra)}; expected any of {sorted(valid_keys)}"
+        )
+
+    def _parse_optional(field_name: str) -> float | None:
+        if field_name not in raw:
+            return None
+        value_raw = raw[field_name]
+        if value_raw is None:
+            return None
+        try:
+            value = float(value_raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"thresholds.{field_name} must be a float, got: {value_raw!r}"
+            ) from exc
+        if not (0.0 <= value <= 1.0):
+            raise ValueError(f"thresholds.{field_name} must be between 0.0 and 1.0, got: {value}")
+        return value
+
+    alert = _parse_optional("alert")
+    digest = _parse_optional("digest")
+    if alert is not None and digest is not None and digest > alert:
+        raise ValueError(f"thresholds.digest ({digest}) must be <= thresholds.alert ({alert})")
+    return alert, digest
+
+
 def _parse_bool_arg(raw: Any, *, default: bool) -> bool:
     """Parse a boolean argument without silently accepting malformed input.
 
@@ -276,6 +331,12 @@ async def _handle_watch(
                 f"trust_weight must be between 0.0 and 1.0, got: {trust_weight}",
             )
 
+        thresholds_raw = arguments.get("thresholds")
+        try:
+            threshold_alert, threshold_digest = _parse_thresholds_arg(thresholds_raw)
+        except ValueError as exc:
+            return error_response("INVALID_PARAMS", str(exc))
+
         try:
             sync_history = _parse_bool_arg(arguments.get("sync_history"), default=False)
         except ValueError as exc:
@@ -331,6 +392,8 @@ async def _handle_watch(
                 label=label,
                 poll_interval_minutes=poll_interval,
                 trust_weight=trust_weight,
+                threshold_alert=threshold_alert,
+                threshold_digest=threshold_digest,
             )
             db_sources = await store.list_feed_sources()
         except ValueError:

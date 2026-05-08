@@ -1190,3 +1190,283 @@ class TestPollCycleTopicTagIntegration:
         assert "source/rss" in stored_tags
         # No topic tags since vocabulary fetch failed
         assert "domain/authentication" not in stored_tags
+
+
+# ---------------------------------------------------------------------------
+# Per-source threshold overrides (issue #480)
+# ---------------------------------------------------------------------------
+
+
+class TestPerSourceThresholdOverrides:
+    """Per-source ``thresholds`` block beats the global default in the poller."""
+
+    @staticmethod
+    def _make_item(
+        item_id: str = "test-item",
+        title: str = "OAuth authentication guide",
+        content: str = "",
+    ) -> FeedItem:
+        return FeedItem(
+            source_url="https://example.com/rss",
+            source_type="rss",
+            item_id=item_id,
+            title=title,
+            content=content,
+        )
+
+    @pytest.mark.asyncio
+    async def test_per_source_digest_override_filters_when_score_below(self) -> None:
+        """A per-source digest override above the global default filters items
+        whose score sits between the two thresholds."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from distillery.feeds.poller import FeedPoller
+
+        config = MagicMock()
+        # Global digest is 0.0 — would normally accept everything.
+        config.feeds.thresholds.digest = 0.0
+        config.feeds.thresholds.alert = 0.85
+
+        store = AsyncMock()
+        store.list_feed_sources.return_value = [
+            {
+                "url": "https://example.com/rss",
+                "source_type": "rss",
+                "label": "",
+                "poll_interval_minutes": 60,
+                "trust_weight": 1.0,
+                "threshold_alert": None,
+                # Per-source digest raises the bar to 0.80; score 0.5 should
+                # therefore be filtered out as below threshold.
+                "threshold_digest": 0.80,
+            }
+        ]
+        store.get_tag_vocabulary.return_value = {}
+        store.find_similar.return_value = []
+        store.list_entries.return_value = []
+
+        item = self._make_item(item_id="below-override", title="lobsters submission")
+
+        with (
+            patch("distillery.feeds.poller._build_adapter") as mock_build_adapter,
+            patch("distillery.feeds.poller.RelevanceScorer") as mock_scorer_cls,
+            patch("distillery.feeds.interests.InterestExtractor") as mock_extractor_cls,
+        ):
+            mock_adapter = MagicMock()
+            mock_adapter.fetch.return_value = [item]
+            mock_build_adapter.return_value = mock_adapter
+
+            mock_scorer = AsyncMock()
+            mock_scorer.score.return_value = 0.5
+            mock_scorer_cls.return_value = mock_scorer
+
+            mock_extractor = AsyncMock()
+            mock_extractor.extract.return_value = MagicMock(entry_count=0, top_tags=[])
+            mock_extractor_cls.return_value = mock_extractor
+
+            poller = FeedPoller(store=store, config=config)
+            summary = await poller.poll()
+
+        assert summary.total_stored == 0
+        assert summary.total_below_threshold == 1
+
+    @pytest.mark.asyncio
+    async def test_missing_override_falls_back_to_global(self) -> None:
+        """A source without a per-source threshold uses the global default
+        — pre-#480 behaviour preserved exactly when the new field is unset."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from distillery.feeds.poller import FeedPoller
+
+        config = MagicMock()
+        # Global digest 0.4 — score 0.5 should be kept (>= 0.4).
+        config.feeds.thresholds.digest = 0.4
+        config.feeds.thresholds.alert = 0.85
+
+        store = AsyncMock()
+        store.list_feed_sources.return_value = [
+            {
+                "url": "https://example.com/rss",
+                "source_type": "rss",
+                "label": "",
+                "poll_interval_minutes": 60,
+                "trust_weight": 1.0,
+                # No per-source override — both threshold_* keys are None.
+                "threshold_alert": None,
+                "threshold_digest": None,
+            }
+        ]
+        store.get_tag_vocabulary.return_value = {}
+        store.find_similar.return_value = []
+        store.list_entries.return_value = []
+
+        stored: list = []
+
+        async def capture_store(entry: object) -> None:
+            stored.append(entry)
+
+        store.store.side_effect = capture_store
+
+        item = self._make_item(item_id="fallback-keeps", title="vendor blog post")
+
+        with (
+            patch("distillery.feeds.poller._build_adapter") as mock_build_adapter,
+            patch("distillery.feeds.poller.RelevanceScorer") as mock_scorer_cls,
+            patch("distillery.feeds.interests.InterestExtractor") as mock_extractor_cls,
+        ):
+            mock_adapter = MagicMock()
+            mock_adapter.fetch.return_value = [item]
+            mock_build_adapter.return_value = mock_adapter
+
+            mock_scorer = AsyncMock()
+            mock_scorer.score.return_value = 0.5
+            mock_scorer_cls.return_value = mock_scorer
+
+            mock_extractor = AsyncMock()
+            mock_extractor.extract.return_value = MagicMock(entry_count=0, top_tags=[])
+            mock_extractor_cls.return_value = mock_extractor
+
+            poller = FeedPoller(store=store, config=config)
+            summary = await poller.poll()
+
+        assert summary.total_stored == 1
+        assert summary.total_below_threshold == 0
+        assert len(stored) == 1
+
+    @pytest.mark.asyncio
+    async def test_per_source_alert_override_drives_alert_tagging(self) -> None:
+        """A per-source ``alert`` override controls ``metadata.is_alert`` flag
+        independently of the global ``feeds.thresholds.alert``."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from distillery.feeds.poller import FeedPoller
+
+        config = MagicMock()
+        # Global alert is high — score 0.92 would normally NOT alert.
+        config.feeds.thresholds.digest = 0.0
+        config.feeds.thresholds.alert = 0.95
+
+        store = AsyncMock()
+        store.list_feed_sources.return_value = [
+            {
+                "url": "https://example.com/rss",
+                "source_type": "rss",
+                "label": "",
+                "poll_interval_minutes": 60,
+                "trust_weight": 1.0,
+                # Per-source alert lowered to 0.90 — score 0.92 should alert.
+                "threshold_alert": 0.90,
+                "threshold_digest": None,
+            }
+        ]
+        store.get_tag_vocabulary.return_value = {}
+        store.find_similar.return_value = []
+        store.list_entries.return_value = []
+
+        stored: list = []
+
+        async def capture_store(entry: object) -> None:
+            stored.append(entry)
+
+        store.store.side_effect = capture_store
+
+        item = self._make_item(item_id="alert-flagged", title="security advisory")
+
+        with (
+            patch("distillery.feeds.poller._build_adapter") as mock_build_adapter,
+            patch("distillery.feeds.poller.RelevanceScorer") as mock_scorer_cls,
+            patch("distillery.feeds.interests.InterestExtractor") as mock_extractor_cls,
+        ):
+            mock_adapter = MagicMock()
+            mock_adapter.fetch.return_value = [item]
+            mock_build_adapter.return_value = mock_adapter
+
+            mock_scorer = AsyncMock()
+            mock_scorer.score.return_value = 0.92
+            mock_scorer_cls.return_value = mock_scorer
+
+            mock_extractor = AsyncMock()
+            mock_extractor.extract.return_value = MagicMock(entry_count=0, top_tags=[])
+            mock_extractor_cls.return_value = mock_extractor
+
+            poller = FeedPoller(store=store, config=config)
+            summary = await poller.poll()
+
+        assert summary.total_stored == 1
+        assert len(stored) == 1
+        assert stored[0].metadata.get("is_alert") is True
+
+    def test_yaml_round_trip_preserves_overrides(self) -> None:
+        """Parsing YAML with a per-source ``thresholds`` block populates
+        :class:`FeedSourceThresholdsConfig`; missing keys leave ``None``."""
+        from distillery.config import _parse_feed_source
+
+        cfg = _parse_feed_source(
+            {
+                "url": "https://lobste.rs/rss",
+                "source_type": "rss",
+                "thresholds": {"alert": 0.90, "digest": 0.80},
+            },
+            index=0,
+        )
+        assert cfg.thresholds.alert == pytest.approx(0.90)
+        assert cfg.thresholds.digest == pytest.approx(0.80)
+
+        cfg_partial = _parse_feed_source(
+            {
+                "url": "https://news.ycombinator.com/rss",
+                "source_type": "rss",
+                "thresholds": {"digest": 0.75},
+            },
+            index=1,
+        )
+        assert cfg_partial.thresholds.alert is None
+        assert cfg_partial.thresholds.digest == pytest.approx(0.75)
+
+        cfg_default = _parse_feed_source(
+            {
+                "url": "https://blog.example.com/rss",
+                "source_type": "rss",
+            },
+            index=2,
+        )
+        assert cfg_default.thresholds.alert is None
+        assert cfg_default.thresholds.digest is None
+
+    def test_invalid_threshold_range_rejected(self) -> None:
+        """Out-of-range values fail YAML parsing rather than silently coercing."""
+        from distillery.config import _parse_feed_source
+
+        with pytest.raises(ValueError, match="thresholds.digest"):
+            _parse_feed_source(
+                {
+                    "url": "https://example.com/rss",
+                    "source_type": "rss",
+                    "thresholds": {"digest": 1.5},
+                },
+                index=0,
+            )
+        with pytest.raises(ValueError, match="thresholds.alert"):
+            _parse_feed_source(
+                {
+                    "url": "https://example.com/rss",
+                    "source_type": "rss",
+                    "thresholds": {"alert": -0.1},
+                },
+                index=0,
+            )
+
+    def test_digest_above_alert_rejected(self) -> None:
+        """When both fields are set, ``digest <= alert`` is enforced (mirrors
+        the global ``feeds.thresholds`` invariant)."""
+        from distillery.config import _parse_feed_source
+
+        with pytest.raises(ValueError, match="must be <="):
+            _parse_feed_source(
+                {
+                    "url": "https://example.com/rss",
+                    "source_type": "rss",
+                    "thresholds": {"alert": 0.6, "digest": 0.9},
+                },
+                index=0,
+            )
