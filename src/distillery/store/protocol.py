@@ -529,6 +529,22 @@ class DistilleryStore(Protocol):
         """
         ...
 
+    async def reconcile_relations(self) -> dict[str, int]:
+        """Re-run idempotent edge-population mechanisms and return insert counts.
+
+        Recovery hook for ``distillery_relations action="reconcile"`` (issue
+        #490 mechanism #9).  Re-scans every entry's ``metadata.related_entries``
+        and inserts any missing rows into ``entry_relations``; relies on the
+        unique ``(from_id, to_id, relation_type)`` index for idempotency.
+
+        Returns:
+            Dict with at least ``metadata_links`` (rows inserted from
+            ``metadata.related_entries``) and ``total``.  Future mechanisms
+            (#3-#8 in issue #490) will contribute additional named keys
+            without changing the existing contract.
+        """
+        ...
+
     async def get_metadata(self, key: str) -> str | None:
         """Read a value from the ``_meta`` key-value table.
 
