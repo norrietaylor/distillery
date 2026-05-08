@@ -188,3 +188,136 @@ entries:
     author: carol
     tags: [meeting, roadmap, quarterly]
     project: distillery
+
+  # ---------------------------------------------------------------------------
+  # kind/ axis golden cases (issue #481)
+  #
+  # Each entry below pins one of the seven kind/* values.  These exist to
+  # exercise classifier prompts and downstream filters that key off the new
+  # content-type axis; entries are intentionally lightweight (single-line
+  # content sufficient to disambiguate the kind from the artifact form).
+  # ---------------------------------------------------------------------------
+
+  # kind/release (3)
+  - content: "Distillery v0.5.0 is out. Highlights: graph relations, namespace-diverse /radar, MotherDuck backend, hosted MCP transport. Upgrade with `pip install -U distillery-mcp`."
+    entry_type: feed
+    author: bot
+    tags: [feed, release-notes, kind/release]
+    project: distillery
+    metadata:
+      url: "https://github.com/norrietaylor/distillery/releases/tag/v0.5.0"
+
+  - content: "Anthropic ships Claude Sonnet 4.7 with 1M context window for paid tiers. Available immediately via Messages API; pricing and rate limits unchanged from 4.6."
+    entry_type: feed
+    author: bot
+    tags: [feed, anthropic, kind/release]
+
+  - content: "DuckDB 1.2 launches with native VSS HNSW index persistence, Apache Arrow zero-copy, and a 30% smaller wheel. Drop-in upgrade from 1.1.x."
+    entry_type: feed
+    author: bot
+    tags: [feed, duckdb, kind/release]
+
+  # kind/reference (3)
+  - content: "RFC 8949 (Concise Binary Object Representation, CBOR). Defines a binary data serialisation format derived from JSON, suited to constrained nodes and small message size."
+    entry_type: reference
+    author: alice
+    tags: [reference, rfc, kind/reference]
+    metadata:
+      url: "https://www.rfc-editor.org/rfc/rfc8949"
+
+  - content: "DuckDB VSS extension reference: HNSW index parameters (M, ef_construction), supported metrics (cosine, l2sq, ip), and persistence semantics across DuckDB restarts."
+    entry_type: reference
+    author: alice
+    tags: [reference, duckdb, vector-search, kind/reference]
+    project: distillery
+
+  - content: "Anthropic Messages API tool use spec — describes tool_use / tool_result blocks, parallel tool calls, error handling, and the input_schema JSONSchema dialect."
+    entry_type: reference
+    author: bob
+    tags: [reference, anthropic, tool-use, kind/reference]
+
+  # kind/howto (3)
+  - content: "Tutorial: Build a Claude Code MCP server in 50 lines. Steps: install fastmcp, decorate a function with @mcp.tool, register over stdio, register the server in ~/.claude/config.json."
+    entry_type: bookmark
+    author: bob
+    tags: [bookmark, mcp, tutorial, kind/howto]
+    project: distillery
+
+  - content: "How to enable HNSW vector search in DuckDB: INSTALL vss; LOAD vss; CREATE INDEX idx ON tbl USING HNSW(embedding) WITH (metric='cosine'). Walks through ingestion and a sample similarity query."
+    entry_type: bookmark
+    author: alice
+    tags: [bookmark, duckdb, tutorial, kind/howto]
+    project: distillery
+
+  - content: "Walkthrough: deploy a FastAPI service to Fly.io with a persistent volume, GitHub Actions CI, and a custom domain. Includes Dockerfile, fly.toml, and a smoke-test script."
+    entry_type: bookmark
+    author: carol
+    tags: [bookmark, fly-io, tutorial, kind/howto]
+
+  # kind/opinion (3)
+  - content: "Essay: Agentic Coding is a Trap. Argues that fully-autonomous coding agents incentivise quantity over taste; prefers tight human-in-the-loop tools that surface intent before edits."
+    entry_type: feed
+    author: bot
+    tags: [feed, essay, agents, kind/opinion]
+    metadata:
+      url: "https://example.com/agentic-coding-trap"
+
+  - content: "Hot-take: knowledge-base bloat is the new tech debt. Author claims most teams over-store decisions and under-prune them, leading to retrieval noise that masquerades as signal."
+    entry_type: feed
+    author: bot
+    tags: [feed, knowledge-management, kind/opinion]
+
+  - content: "Retrospective: why we abandoned microservices for a modular monolith. Two years in, deployment overhead and trace complexity outweighed the team-autonomy gains."
+    entry_type: feed
+    author: bot
+    tags: [feed, architecture, retrospective, kind/opinion]
+
+  # kind/incident (3)
+  - content: "GitHub incident: elevated Actions queue times across us-east-1 between 14:02 and 15:47 UTC on 2026-04-12. Root cause: scheduler hot-spotting after a config rollout. Mitigation: rollback + capacity bump."
+    entry_type: feed
+    author: bot
+    tags: [feed, github, postmortem, kind/incident]
+
+  - content: "CVE-2026-12345: prototype-pollution in popular-pkg <2.4.1. Severity: high. Affected versions allow attacker-controlled keys on Object.prototype via merge(). Upgrade to 2.4.1 or apply patch."
+    entry_type: feed
+    author: bot
+    tags: [feed, security, cve, kind/incident]
+
+  - content: "Postmortem: Cloudflare regional outage 2026-03-30. A BGP misconfiguration drained traffic from EU-West for 27 minutes. Action items: pre-deploy lint, regional canary, faster rollback."
+    entry_type: feed
+    author: bot
+    tags: [feed, cloudflare, postmortem, kind/incident]
+
+  # kind/announcement (3)
+  - content: "Acme Corp announces Series B funding of $40M led by Sequoia, with participation from existing investors. Plans to grow eng team and open a Berlin office."
+    entry_type: feed
+    author: bot
+    tags: [feed, funding, kind/announcement]
+
+  - content: "Jane Doe joins Anthropic as VP of Research. Previously led the alignment team at OpenAI. Role focuses on long-horizon agentic safety."
+    entry_type: feed
+    author: bot
+    tags: [feed, hiring, kind/announcement]
+
+  - content: "Linux Foundation announces a new working group on agent interoperability standards, chaired by maintainers from MCP, OpenAI, and Anthropic. Charter and first meeting in May."
+    entry_type: feed
+    author: bot
+    tags: [feed, standards, kind/announcement]
+
+  # kind/discussion (3)
+  - content: "Hacker News thread: Show HN: my AI knowledge-base app. 312 comments. Top thread debates whether vector search is sufficient or whether structured KGs are needed for high-stakes recall."
+    entry_type: feed
+    author: bot
+    tags: [feed, hn, kind/discussion]
+    metadata:
+      url: "https://news.ycombinator.com/item?id=99999999"
+
+  - content: "Reddit /r/programming thread on rewriting CRUD apps in Rust. 280 comments split between safety-evangelists and pragmatists pointing at hiring constraints."
+    entry_type: feed
+    author: bot
+    tags: [feed, reddit, kind/discussion]
+
+  - content: "Lobsters thread: 'Is it time to retire OOP?' 95 comments — long-form responses arguing that the question is malformed and that the inheritance-vs-composition debate has nothing to do with OOP per se."
+    entry_type: feed
+    author: bot
+    tags: [feed, lobsters, kind/discussion]

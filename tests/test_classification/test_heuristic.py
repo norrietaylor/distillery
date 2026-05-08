@@ -290,6 +290,26 @@ class TestClassifyIntegration:
         assert result.entry_type == EntryType.SESSION
         assert result.status == EntryStatus.ACTIVE
         assert result.confidence >= SIMILARITY_THRESHOLD
+        # Heuristic classifier never assigns a kind/ axis (#481).
+        assert result.suggested_kind is None
+        assert not any(t.startswith("kind/") for t in result.suggested_tags)
+
+    async def test_heuristic_returns_no_kind_when_no_centroids(
+        self,
+        store: Any,
+        deterministic_embedding_provider: DeterministicEmbeddingProvider,
+    ) -> None:
+        """Empty-store path must return ``suggested_kind=None`` rather than crash (#481)."""
+        entry = make_entry(content="orphan", entry_type=EntryType.INBOX)
+        deterministic_embedding_provider.register(
+            "orphan",
+            _axis_vector(deterministic_embedding_provider.dimensions, 0),
+        )
+
+        classifier = HeuristicClassifier()
+        result = await classifier.classify(entry, store, deterministic_embedding_provider)
+
+        assert result.suggested_kind is None
 
     async def test_pending_review_when_no_centroid_match(
         self,

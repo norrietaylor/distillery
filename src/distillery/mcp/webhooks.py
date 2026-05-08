@@ -367,6 +367,8 @@ async def _ensure_store(
                         label=source.label,
                         poll_interval_minutes=source.poll_interval_minutes,
                         trust_weight=source.trust_weight,
+                        threshold_alert=source.thresholds.alert,
+                        threshold_digest=source.thresholds.digest,
                     )
             await store.set_metadata("feeds_seeded", "true")
 

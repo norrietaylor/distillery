@@ -666,6 +666,8 @@ def _cmd_poll(config_path: str | None, fmt: str, source_url: str | None) -> int:
                         label=source.label,
                         poll_interval_minutes=source.poll_interval_minutes,
                         trust_weight=source.trust_weight,
+                        threshold_alert=source.thresholds.alert,
+                        threshold_digest=source.thresholds.digest,
                     )
 
         # Check sources from DB.
@@ -1317,12 +1319,20 @@ def _cmd_import(
         sources_imported = 0
         for fsrc in feed_sources_data:
             with contextlib.suppress(ValueError):
+                threshold_alert_raw = fsrc.get("threshold_alert")
+                threshold_digest_raw = fsrc.get("threshold_digest")
                 await store.add_feed_source(
                     url=fsrc.get("url", ""),
                     source_type=fsrc.get("source_type", "rss"),
                     label=fsrc.get("label", ""),
                     poll_interval_minutes=int(fsrc.get("poll_interval_minutes", 60)),
                     trust_weight=float(fsrc.get("trust_weight", 1.0)),
+                    threshold_alert=(
+                        float(threshold_alert_raw) if threshold_alert_raw is not None else None
+                    ),
+                    threshold_digest=(
+                        float(threshold_digest_raw) if threshold_digest_raw is not None else None
+                    ),
                 )
                 sources_imported += 1
 
