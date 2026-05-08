@@ -124,8 +124,9 @@ jobs:
           # --body "…\`url\`…" form leaked the backslash into the rendered
           # comment (visible as %5C%60 in server access logs), so link-preview
           # crawlers slurped the trailing \` into the URL and hit fresh 404s
-          # on every deploy. GitHub Actions expands ${{ … }} before bash runs,
-          # so a quoted heredoc is safe for all the values we need.
+          # on every deploy. GitHub Actions expands ${{ ... }} expressions
+          # before bash runs, so a quoted heredoc is safe for all the values
+          # we need.
           gh pr comment "${{ steps.pr.outputs.pr_number }}" \
             --repo "${{ github.repository }}" \
             --body-file - <<'EOF'
