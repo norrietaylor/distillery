@@ -31,7 +31,11 @@ from urllib.parse import unquote, urlparse
 import duckdb
 
 from distillery.models import Entry, EntryStatus, validate_metadata
-from distillery.store.migrations import _CREATE_META_TABLE, run_pending_migrations
+from distillery.store.migrations import (
+    _CREATE_META_TABLE,
+    backfill_relations_from_metadata,
+    run_pending_migrations,
+)
 
 if TYPE_CHECKING:
     from distillery.embedding.protocol import EmbeddingProvider
@@ -762,6 +766,27 @@ class DuckDBStore:
                 # 5. Record DuckDB / VSS version info in _meta.
                 self._track_version_info(conn)
 
+                # 6. Re-scan ``metadata.related_entries`` on every startup so
+                #    deployments that captured related_entries *after* migration
+                #    8 first ran (e.g. seed data ingested before this codepath
+                #    existed, or any drift between metadata and the relations
+                #    table) populate retroactively. The helper is idempotent
+                #    via the ``idx_entry_relations_unique`` index, so the cost
+                #    on a healthy DB is one ``SELECT id, metadata`` scan plus
+                #    suppressed inserts. See issue #490.
+                try:
+                    backfilled = backfill_relations_from_metadata(conn)
+                    if backfilled:
+                        logger.info(
+                            "Startup backfill: inserted %d entry_relations rows from "
+                            "metadata.related_entries",
+                            backfilled,
+                        )
+                except duckdb.CatalogException:
+                    # entry_relations table absent — should not happen post-migration,
+                    # but treat defensively so a missing schema does not block init.
+                    logger.debug("Startup backfill skipped: entry_relations table not present")
+
                 logger.info(
                     "Schema at version %d, DuckDB %s",
                     schema_version,
@@ -1025,6 +1050,56 @@ class DuckDBStore:
         }
     )
 
+    @staticmethod
+    def _fan_out_related_entries(
+        conn: duckdb.DuckDBPyConnection,
+        from_id: str,
+        metadata: dict[str, Any] | None,
+    ) -> int:
+        """Insert ``entry_relations`` rows for ``metadata.related_entries`` of *from_id*.
+
+        Mechanism #1 from issue #490 — fan-out on every store/update write so
+        the relations table stays in sync with whatever the caller persisted in
+        ``metadata.related_entries``. Idempotent via the
+        ``idx_entry_relations_unique`` index on
+        ``(from_id, to_id, relation_type)``.
+
+        Args:
+            conn: Active DuckDB connection (caller manages the transaction).
+            from_id: UUID of the source entry that owns this metadata blob.
+            metadata: The entry's ``metadata`` dict (may be ``None`` or absent
+                ``related_entries``); falsy / non-dict input is a no-op.
+
+        Returns:
+            Number of relation rows actually inserted (excludes index-suppressed
+            duplicates and skipped invalid targets).
+        """
+        if not isinstance(metadata, dict):
+            return 0
+        related = metadata.get("related_entries")
+        if not isinstance(related, list) or not related:
+            return 0
+
+        inserted = 0
+        for to_id in related:
+            if not isinstance(to_id, str) or not to_id or to_id == from_id:
+                continue
+            # Validate target exists — mirror migration 8 behaviour so we never
+            # introduce dangling edges from a typo / stale metadata payload.
+            target = conn.execute("SELECT id FROM entries WHERE id = ?", [to_id]).fetchone()
+            if target is None:
+                continue
+            relation_id = str(uuid.uuid4())
+            row = conn.execute(
+                "INSERT OR IGNORE INTO entry_relations "
+                "(id, from_id, to_id, relation_type) "
+                "VALUES (?, ?, ?, 'link') RETURNING id",
+                [relation_id, from_id, to_id],
+            ).fetchone()
+            if row is not None:
+                inserted += 1
+        return inserted
+
     def _sync_store(self, entry: Entry) -> str:
         """Synchronous implementation of store(); called via asyncio.to_thread."""
         validate_metadata(entry.entry_type.value, entry.metadata)
@@ -1059,6 +1134,12 @@ class DuckDBStore:
             entry.session_id,
         ]
         conn.execute(sql, params)
+        # Fan out metadata.related_entries → entry_relations (issue #490). The
+        # underlying unique index makes this idempotent; failures here would
+        # leave the entry in place but with missing edges, so we let any DB
+        # error surface to the caller (mirrors transactional intent — caller's
+        # outer retry/abort logic decides how to handle).
+        self._fan_out_related_entries(conn, entry.id, entry.metadata)
         # Rebuild FTS index so new content is searchable via BM25.
         self._rebuild_fts_index(conn)
         # Flush WAL so the new row survives ungraceful termination.
@@ -1128,6 +1209,14 @@ class DuckDBStore:
                     entry.session_id,
                 ]
                 conn.execute(sql, params)
+            # Fan out metadata.related_entries on every batched entry so the
+            # relations table stays in sync (issue #490). Run inside the same
+            # transaction as the entry inserts so a partial fan-out is rolled
+            # back together with the failing batch. Targets that point at
+            # entries earlier in the *same* batch resolve via the in-flight
+            # transactional view.
+            for entry in entries:
+                self._fan_out_related_entries(conn, entry.id, entry.metadata)
             conn.commit()
         except Exception:
             conn.rollback()
@@ -1302,6 +1391,12 @@ class DuckDBStore:
         set_params.append(entry_id)
 
         conn.execute(sql, set_params)
+        # Fan out metadata.related_entries → entry_relations whenever the
+        # caller writes a new metadata blob (issue #490). The unique index
+        # provides idempotency and we never *delete* edges here — this is a
+        # forward-only sync mirroring mechanism #1's "additive" semantic.
+        if "metadata" in updates and isinstance(updates["metadata"], dict):
+            self._fan_out_related_entries(conn, entry_id, updates["metadata"])
         # Rebuild FTS index when content changes.
         if "content" in updates:
             self._rebuild_fts_index(conn)
@@ -3067,6 +3162,43 @@ class DuckDBStore:
             ascending ``created_at``.
         """
         return await self._run_sync(self._sync_list_relations)
+
+    def _sync_reconcile_relations(self) -> dict[str, int]:
+        """Synchronous implementation of reconcile_relations(); via asyncio.to_thread."""
+        assert self._conn is not None
+        conn = self._conn
+        # Wrap in a transaction so a mid-scan failure leaves the table in its
+        # prior state. The helper is itself idempotent, so the worst-case is a
+        # retried no-op on the next call.
+        try:
+            conn.execute("BEGIN TRANSACTION")
+            inserted_metadata = backfill_relations_from_metadata(conn)
+            conn.execute("COMMIT")
+        except Exception:
+            with contextlib.suppress(Exception):
+                conn.execute("ROLLBACK")
+            raise
+        # Force a checkpoint so recovered edges reach the main DB file rather
+        # than sitting in the WAL where an ungraceful restart could lose them
+        # (issue #346 semantics — see :meth:`_checkpoint_after_write`).
+        self._checkpoint_after_write(conn)
+        return {"metadata_links": inserted_metadata, "total": inserted_metadata}
+
+    async def reconcile_relations(self) -> dict[str, int]:
+        """Re-run the metadata-driven entry_relations backfill and return counts.
+
+        Idempotent recovery hook for issue #490 mechanism #9.  Re-scans every
+        entry's ``metadata.related_entries`` and inserts any missing rows into
+        ``entry_relations``; existing rows are left alone via the unique
+        ``(from_id, to_id, relation_type)`` index.
+
+        Returns:
+            Dict with ``metadata_links`` (rows inserted from
+            ``metadata.related_entries``) and ``total`` (sum across all
+            mechanisms — currently equal to ``metadata_links``; future
+            mechanisms #3-#8 in issue #490 will contribute additional fields).
+        """
+        return await self._run_sync(self._sync_reconcile_relations)
 
     def _sync_get_all_related_entry_ids(self) -> set[str]:
         """Synchronous implementation of get_all_related_entry_ids()."""

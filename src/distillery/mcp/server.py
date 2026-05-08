@@ -891,6 +891,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         llm_responses: list[dict[str, Any]] | None = None,
         source_entry_id: str | None = None,
         exclude_linked: bool = False,
+        accept_action: str | None = None,
     ) -> list[types.TextContent]:
         """Find stored entries similar to the given text (cosine similarity).
 
@@ -917,6 +918,11 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
           - exclude_linked (bool, optional, default=false): When true, filters out
             entries already linked to source_entry_id via entry_relations
             (any direction, any relation_type). Surfaces hidden connections.
+          - accept_action (str, optional): When set, persists an
+            entry_relations row from source_entry_id to each result above
+            threshold. Valid: ['link' → related, 'merge' → merge_source,
+            'duplicate' → duplicate]. Requires source_entry_id. Idempotent via
+            the unique (from_id, to_id, relation_type) index.
 
         RETURNS (success): { results: [{ score: float, entry: {...} }], count: int, threshold: float,
           dedup?: { action: str, similar_entries: list },
@@ -944,6 +950,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 content=content,
                 llm_responses=llm_responses,
                 source_entry_id=source_entry_id,
+                accept_action=accept_action,
             ),
         )
         return await _handle_find_similar(store=c["store"], cfg=c["config"], arguments=args)
