@@ -660,15 +660,25 @@ async def _handle_find_similar(
                 # exists, so we use the pre-fetched ``existing_targets`` set
                 # to distinguish "newly inserted" from "already present".
                 relation_id = await store.add_relation(source_entry_id, target_id, relation_type)
-            except ValueError as exc:
+            except ValueError:
                 # Source or target missing — surface but don't abort the
                 # whole batch; this should be rare since source_entry_id was
                 # validated earlier and target ids come from the search.
+                # Log details server-side; keep client payload generic so we
+                # don't leak raw store error text to MCP callers.
+                logger.warning(
+                    "find_similar accept_action: relation validation failed "
+                    "from=%s to=%s type=%s",
+                    source_entry_id,
+                    target_id,
+                    relation_type,
+                    exc_info=True,
+                )
                 accept_outcomes.append(
                     {
                         "to_id": target_id,
                         "persisted": False,
-                        "error": str(exc),
+                        "error": "missing source or target entry",
                     }
                 )
                 continue

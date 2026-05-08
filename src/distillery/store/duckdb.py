@@ -3147,6 +3147,10 @@ class DuckDBStore:
             with contextlib.suppress(Exception):
                 conn.execute("ROLLBACK")
             raise
+        # Force a checkpoint so recovered edges reach the main DB file rather
+        # than sitting in the WAL where an ungraceful restart could lose them
+        # (issue #346 semantics — see :meth:`_checkpoint_after_write`).
+        self._checkpoint_after_write(conn)
         return {"metadata_links": inserted_metadata, "total": inserted_metadata}
 
     async def reconcile_relations(self) -> dict[str, int]:

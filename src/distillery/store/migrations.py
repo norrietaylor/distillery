@@ -246,6 +246,11 @@ def backfill_relations_from_metadata(conn: duckdb.DuckDBPyConnection) -> int:
         except (json.JSONDecodeError, TypeError):
             continue
 
+        # ``json.loads`` can return list/str/number/None for malformed blobs;
+        # guard so a single bad row doesn't abort the whole backfill/reconcile.
+        if not isinstance(meta, dict):
+            continue
+
         related: object = meta.get("related_entries")
         if not isinstance(related, list):
             continue

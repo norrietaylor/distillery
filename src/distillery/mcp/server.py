@@ -948,6 +948,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 content=content,
                 llm_responses=llm_responses,
                 source_entry_id=source_entry_id,
+                accept_action=accept_action,
             ),
         )
         return await _handle_find_similar(store=c["store"], cfg=c["config"], arguments=args)
