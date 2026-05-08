@@ -170,6 +170,28 @@ class TagsConfig:
 
 
 @dataclass
+class FeedSourceThresholdsConfig:
+    """Per-source override of :class:`FeedsThresholdsConfig`.
+
+    When either field is ``None`` the corresponding global threshold from
+    ``feeds.thresholds`` applies.  ``trust_weight`` only attenuates scores
+    downward, so to *raise* the bar for a noisy aggregator (HN/Lobsters/Reddit)
+    operators set ``digest`` (and optionally ``alert``) explicitly here.
+
+    Attributes:
+        alert: Cosine similarity score at or above which an item from this
+            source triggers an alert.  ``None`` falls back to
+            ``feeds.thresholds.alert``.
+        digest: Cosine similarity score at or above which (but below
+            *alert*) an item from this source is included in the next
+            digest.  ``None`` falls back to ``feeds.thresholds.digest``.
+    """
+
+    alert: float | None = None
+    digest: float | None = None
+
+
+@dataclass
 class FeedSourceConfig:
     """Configuration for a single monitored feed source.
 
@@ -182,6 +204,12 @@ class FeedSourceConfig:
         trust_weight: Relevance trust multiplier in the range ``[0.0, 1.0]``.
             Higher values amplify relevance scores from this source.  Defaults
             to ``1.0``.
+        thresholds: Optional per-source override for
+            :class:`FeedsThresholdsConfig`.  When unset, the global
+            ``feeds.thresholds`` values apply.  Used to raise the bar for
+            noisy aggregators (HN, Lobsters, Reddit) that ``trust_weight``
+            cannot separate from vendor blogs because ``trust_weight`` only
+            attenuates downward.
     """
 
     url: str = ""
@@ -189,6 +217,7 @@ class FeedSourceConfig:
     label: str = ""
     poll_interval_minutes: int = 60
     trust_weight: float = 1.0
+    thresholds: FeedSourceThresholdsConfig = field(default_factory=FeedSourceThresholdsConfig)
 
 
 @dataclass
@@ -766,13 +795,90 @@ def _parse_feed_source(raw: dict[str, Any], index: int) -> FeedSourceConfig:
             f"feeds.sources[{index}].trust_weight must be between 0.0 and 1.0, got: {trust_weight}"
         )
 
+    thresholds = _parse_feed_source_thresholds(raw.get("thresholds"), index)
+
     return FeedSourceConfig(
         url=url,
         source_type=source_type,
         label=label,
         poll_interval_minutes=poll_interval,
         trust_weight=trust_weight,
+        thresholds=thresholds,
     )
+
+
+def _parse_feed_source_thresholds(raw: Any, index: int) -> FeedSourceThresholdsConfig:
+    """Parse the optional ``thresholds`` block on a feed source entry.
+
+    A missing block (``None`` or absent key) yields a config with both
+    fields ``None`` so the global ``feeds.thresholds`` values apply.
+
+    Args:
+        raw: The raw value associated with the ``thresholds`` key, or
+            ``None`` when the key is absent.
+        index: Zero-based position of the parent feed source (used in
+            error messages).
+
+    Returns:
+        A populated :class:`FeedSourceThresholdsConfig`.  Either field may
+        be ``None`` when the operator only overrode the other tier.
+
+    Raises:
+        ValueError: If ``raw`` is not a mapping or ``None``, an unknown
+            key is present, a value is not a float, or a value falls
+            outside ``[0.0, 1.0]``.  When both fields are set the
+            ``digest <= alert`` invariant is also enforced (mirrors the
+            global ``feeds.thresholds`` constraint).
+    """
+    if raw is None:
+        return FeedSourceThresholdsConfig()
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"feeds.sources[{index}].thresholds must be a YAML mapping, got: {type(raw).__name__}"
+        )
+
+    valid_keys = {"alert", "digest"}
+    extra = set(raw.keys()) - valid_keys
+    if extra:
+        raise ValueError(
+            f"feeds.sources[{index}].thresholds has unknown keys: {sorted(extra)}; "
+            f"expected any of {sorted(valid_keys)}"
+        )
+
+    def _parse_optional(field_name: str) -> float | None:
+        if field_name not in raw:
+            return None
+        value_raw = raw[field_name]
+        if value_raw is None:
+            return None
+        # Reject booleans explicitly: ``float(True)`` returns ``1.0`` so YAML
+        # ``true``/``false`` would otherwise be silently accepted as numeric.
+        if isinstance(value_raw, bool):
+            raise ValueError(
+                f"feeds.sources[{index}].thresholds.{field_name} must be a float, "
+                f"got: {value_raw!r}"
+            )
+        try:
+            value = float(value_raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"feeds.sources[{index}].thresholds.{field_name} must be a float, "
+                f"got: {value_raw!r}"
+            ) from exc
+        if not (0.0 <= value <= 1.0):
+            raise ValueError(
+                f"feeds.sources[{index}].thresholds.{field_name} must be between "
+                f"0.0 and 1.0, got: {value}"
+            )
+        return value
+
+    alert = _parse_optional("alert")
+    digest = _parse_optional("digest")
+    if alert is not None and digest is not None and digest > alert:
+        raise ValueError(
+            f"feeds.sources[{index}].thresholds.digest ({digest}) must be <= alert ({alert})"
+        )
+    return FeedSourceThresholdsConfig(alert=alert, digest=digest)
 
 
 def _parse_feeds(raw: dict[str, Any]) -> FeedsConfig:

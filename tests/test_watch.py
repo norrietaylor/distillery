@@ -37,6 +37,8 @@ class FakeSourceStore:
         label: str = "",
         poll_interval_minutes: int = 60,
         trust_weight: float = 1.0,
+        threshold_alert: float | None = None,
+        threshold_digest: float | None = None,
     ) -> dict[str, Any]:
         if any(s["url"] == url for s in self._sources):
             raise ValueError(f"Feed source with URL {url!r} already exists.")
@@ -46,6 +48,8 @@ class FakeSourceStore:
             "label": label,
             "poll_interval_minutes": poll_interval_minutes,
             "trust_weight": trust_weight,
+            "threshold_alert": threshold_alert,
+            "threshold_digest": threshold_digest,
         }
         self._sources.append(d)
         return d

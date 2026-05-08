@@ -436,6 +436,30 @@ def create_sync_jobs(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
     logger.info("Migration 13: sync_jobs table created")
 
 
+_ADD_FEED_SOURCE_THRESHOLD_COLUMNS = [
+    "ALTER TABLE feed_sources ADD COLUMN IF NOT EXISTS threshold_alert FLOAT;",
+    "ALTER TABLE feed_sources ADD COLUMN IF NOT EXISTS threshold_digest FLOAT;",
+]
+
+
+def add_feed_source_thresholds(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
+    """Migration 14: Add per-source threshold override columns.
+
+    Adds two nullable ``FLOAT`` columns to ``feed_sources``:
+
+    - ``threshold_alert`` — overrides ``feeds.thresholds.alert`` for this
+      source when non-NULL.
+    - ``threshold_digest`` — overrides ``feeds.thresholds.digest`` for this
+      source when non-NULL.
+
+    NULL means "fall back to global", preserving pre-#480 behaviour for
+    sources that were created before the migration ran.
+    """
+    for stmt in _ADD_FEED_SOURCE_THRESHOLD_COLUMNS:
+        conn.execute(stmt)
+    logger.info("Migration 14: feed_sources threshold override columns added")
+
+
 # ---------------------------------------------------------------------------
 # Migration registry
 # ---------------------------------------------------------------------------
@@ -454,6 +478,7 @@ MIGRATIONS: dict[int, MigrationFunc] = {
     11: add_session_id,
     12: add_feed_source_liveness,
     13: create_sync_jobs,
+    14: add_feed_source_thresholds,
 }
 """Ordered mapping of schema version to migration function.
 

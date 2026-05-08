@@ -198,6 +198,8 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                             label=src.label,
                             poll_interval_minutes=src.poll_interval_minutes,
                             trust_weight=src.trust_weight,
+                            threshold_alert=src.thresholds.alert,
+                            threshold_digest=src.thresholds.digest,
                         )
                 await store.set_metadata("feeds_seeded", "true")
             # Wire the sync-job tracker to the store and reconcile any
@@ -1078,6 +1080,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         label: str | None = None,
         poll_interval_minutes: int | None = None,
         trust_weight: float | None = None,
+        thresholds: dict[str, float] | None = None,
         sync_history: bool = False,
         purge: bool = False,
         probe: bool = True,
@@ -1095,6 +1098,13 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
           - label (str, optional): Human-readable label for the source.
           - poll_interval_minutes (int, optional, default=60): Polling frequency in minutes.
           - trust_weight (float, optional, default=1.0): Source trust weight (0-1).
+          - thresholds (object, optional): Per-source overrides for the global
+            ``feeds.thresholds`` values.  Mapping with optional float keys
+            ``alert`` and/or ``digest`` in [0.0, 1.0] (when both set,
+            ``digest <= alert``).  When omitted, the global cutoffs apply
+            (pre-existing behaviour).  Use this to raise the bar for noisy
+            aggregators (HN/Lobsters/Reddit) since ``trust_weight`` only
+            attenuates downward.
           - sync_history (bool, optional, default=false): When true and source_type is
             "github", kicks off an async background import of historical issues/PRs
             (returns immediately with job_id; use distillery_sync_status to check progress).
@@ -1130,6 +1140,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                     label=label,
                     poll_interval_minutes=poll_interval_minutes,
                     trust_weight=trust_weight,
+                    thresholds=thresholds,
                     sync_history=sync_history or None,
                     purge=purge or None,
                 ),
