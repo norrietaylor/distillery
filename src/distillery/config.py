@@ -851,6 +851,13 @@ def _parse_feed_source_thresholds(raw: Any, index: int) -> FeedSourceThresholdsC
         value_raw = raw[field_name]
         if value_raw is None:
             return None
+        # Reject booleans explicitly: ``float(True)`` returns ``1.0`` so YAML
+        # ``true``/``false`` would otherwise be silently accepted as numeric.
+        if isinstance(value_raw, bool):
+            raise ValueError(
+                f"feeds.sources[{index}].thresholds.{field_name} must be a float, "
+                f"got: {value_raw!r}"
+            )
         try:
             value = float(value_raw)
         except (TypeError, ValueError) as exc:

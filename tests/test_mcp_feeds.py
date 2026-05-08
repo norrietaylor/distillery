@@ -521,6 +521,39 @@ class TestHandleWatchAdd:
         assert data["error"] is True
         assert data["code"] == "INVALID_PARAMS"
 
+    async def test_add_thresholds_boolean_value_returns_invalid_params(self) -> None:
+        """JSON ``true``/``false`` must not be coerced to ``1.0``/``0.0``.
+
+        Without an explicit ``isinstance(..., bool)`` guard, ``float(True)``
+        would return ``1.0`` and silently saturate the threshold.
+        """
+        store = FakeSourceStore()
+        result = await _handle_watch(
+            store=store,
+            arguments={
+                "action": "add",
+                "url": "https://example.com/rss",
+                "source_type": "rss",
+                "thresholds": {"alert": True},
+            },
+        )
+        data = parse(result)
+        assert data["error"] is True
+        assert data["code"] == "INVALID_PARAMS"
+
+        result = await _handle_watch(
+            store=store,
+            arguments={
+                "action": "add",
+                "url": "https://example.com/rss",
+                "source_type": "rss",
+                "thresholds": {"digest": False},
+            },
+        )
+        data = parse(result)
+        assert data["error"] is True
+        assert data["code"] == "INVALID_PARAMS"
+
 
 # ---------------------------------------------------------------------------
 # _handle_watch — remove action

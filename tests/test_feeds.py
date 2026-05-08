@@ -1470,3 +1470,31 @@ class TestPerSourceThresholdOverrides:
                 },
                 index=0,
             )
+
+    def test_boolean_threshold_rejected(self) -> None:
+        """YAML booleans must not be silently coerced to ``0.0``/``1.0``.
+
+        ``float(True)`` returns ``1.0`` so without an explicit
+        ``isinstance(..., bool)`` guard a malformed ``alert: true`` would pass
+        validation as a fully-saturated threshold.
+        """
+        from distillery.config import _parse_feed_source
+
+        with pytest.raises(ValueError, match="thresholds.alert"):
+            _parse_feed_source(
+                {
+                    "url": "https://example.com/rss",
+                    "source_type": "rss",
+                    "thresholds": {"alert": True},
+                },
+                index=0,
+            )
+        with pytest.raises(ValueError, match="thresholds.digest"):
+            _parse_feed_source(
+                {
+                    "url": "https://example.com/rss",
+                    "source_type": "rss",
+                    "thresholds": {"digest": False},
+                },
+                index=0,
+            )

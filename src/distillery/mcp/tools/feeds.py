@@ -189,6 +189,10 @@ def _parse_thresholds_arg(
         value_raw = raw[field_name]
         if value_raw is None:
             return None
+        # Reject booleans explicitly: ``float(True)`` returns ``1.0`` so JSON
+        # ``true``/``false`` would otherwise be silently accepted as numeric.
+        if isinstance(value_raw, bool):
+            raise ValueError(f"thresholds.{field_name} must be a float, got: {value_raw!r}")
         try:
             value = float(value_raw)
         except (TypeError, ValueError) as exc:
