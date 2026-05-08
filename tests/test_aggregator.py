@@ -440,3 +440,241 @@ class TestDefaultHeadlineConfig:
             "recency": "on",
             "embed_model": "bge-small",
         }
+
+
+# ---------------------------------------------------------------------------
+# docs/benchmarks.md templating
+# ---------------------------------------------------------------------------
+
+
+_DOC_TEMPLATE = """# Benchmarks
+
+Some hand-authored prose.
+
+## Headline
+
+<!-- BENCH:HEADLINE-CARDS:START -->
+<div class="grid cards" markdown>
+
+-   __Recall@5__
+
+    ---
+
+    `—`
+
+    Headline cell, mean across seeds.
+
+-   __Recall@10__
+
+    ---
+
+    `—`
+
+    Headline cell, mean across seeds.
+
+-   __NDCG@10__
+
+    ---
+
+    `—`
+
+    Headline cell, mean across seeds.
+
+</div>
+<!-- BENCH:HEADLINE-CARDS:END -->
+
+## Internal comparison table
+
+<!-- BENCH:MATRIX:START -->
+| Configuration | R@5 | R@10 | NDCG@10 |
+|---|---|---|---|
+| `hybrid + recency on` (headline) | `—` | `—` | `—` |
+| `raw + recency on` | `—` | `—` | `—` |
+| `hybrid + recency off` | `—` | `—` | `—` |
+| `hybrid + granularity=turn` | `—` | `—` | `—` |
+<!-- BENCH:MATRIX:END -->
+
+The granularity=turn row is for ablation interest only.
+
+## Per-question-type breakdown
+
+<!-- BENCH:PER-TYPE:START -->
+| Question type | R@5 | R@10 | NDCG@10 |
+|---|---|---|---|
+| `knowledge-update` | `—` | `—` | `—` |
+| `multi-session` | `—` | `—` | `—` |
+| `temporal` | `—` | `—` | `—` |
+| `single-session-user` | `—` | `—` | `—` |
+| `single-session-preference` | `—` | `—` | `—` |
+| `single-session-assistant` | `—` | `—` | `—` |
+<!-- BENCH:PER-TYPE:END -->
+
+End of doc.
+"""
+
+
+@pytest.mark.unit
+class TestDocsTemplating:
+    """The aggregator must rewrite the three marker-delimited regions in
+    ``docs/benchmarks.md`` and leave hand-authored prose untouched.
+    """
+
+    def _seed_matrix(self, results_dir: Path) -> None:
+        """Write headline + 3 matrix cells with distinguishable scores."""
+        _write_summary(
+            results_dir,
+            retrieval="hybrid",
+            granularity="session",
+            recency="on",
+            embed_model="bge-small",
+            stamp="20260430T050000Z",
+            payload=_summary_payload(
+                retrieval="hybrid",
+                granularity="session",
+                recency="on",
+                embed_model="bge-small",
+                r5=0.970,
+                r10=0.990,
+                ndcg10=0.890,
+            ),
+        )
+        _write_summary(
+            results_dir,
+            retrieval="raw",
+            granularity="session",
+            recency="on",
+            embed_model="bge-small",
+            stamp="20260430T050100Z",
+            payload=_summary_payload(
+                retrieval="raw",
+                granularity="session",
+                recency="on",
+                embed_model="bge-small",
+                r5=0.870,
+                r10=0.940,
+                ndcg10=0.787,
+            ),
+        )
+        _write_summary(
+            results_dir,
+            retrieval="hybrid",
+            granularity="session",
+            recency="off",
+            embed_model="bge-small",
+            stamp="20260430T050200Z",
+            payload=_summary_payload(
+                retrieval="hybrid",
+                granularity="session",
+                recency="off",
+                embed_model="bge-small",
+                r5=0.972,
+                r10=0.992,
+                ndcg10=0.892,
+            ),
+        )
+        _write_summary(
+            results_dir,
+            retrieval="hybrid",
+            granularity="turn",
+            recency="on",
+            embed_model="bge-small",
+            stamp="20260430T050300Z",
+            payload=_summary_payload(
+                retrieval="hybrid",
+                granularity="turn",
+                recency="on",
+                embed_model="bge-small",
+                r5=0.980,
+                r10=1.000,
+                ndcg10=0.681,
+            ),
+        )
+
+    def test_docs_templated_when_headline_present(self, tmp_path: Path) -> None:
+        results_dir = tmp_path / "results"
+        output_dir = tmp_path / "out"
+        docs_path = tmp_path / "benchmarks.md"
+        docs_path.write_text(_DOC_TEMPLATE, encoding="utf-8")
+
+        self._seed_matrix(results_dir)
+
+        report = aggregate(results_dir, output_dir=output_dir, docs_path=docs_path)
+
+        assert report.docs_path == docs_path
+        rendered = docs_path.read_text(encoding="utf-8")
+
+        # Headline cards carry the headline triplet.
+        assert "`0.970`" in rendered
+        assert "`0.990`" in rendered
+        assert "`0.890`" in rendered
+
+        # Matrix has the four mapped rows with their cell-specific scores.
+        assert "| `hybrid + recency on` (headline) | `0.970` | `0.990` | `0.890` |" in rendered
+        assert "| `raw + recency on` | `0.870` | `0.940` | `0.787` |" in rendered
+        assert "| `hybrid + recency off` | `0.972` | `0.992` | `0.892` |" in rendered
+        assert "| `hybrid + granularity=turn` | `0.980` | `1.000` | `0.681` |" in rendered
+
+        # Per-type table — fixture only carries multi-session and
+        # single-session-user; the other four stay as ``—``.
+        assert "| `multi-session` | `0.870` | `0.940` | `0.840` |" in rendered
+        assert "| `single-session-user` | `0.970` | `0.990` | `0.890` |" in rendered
+        assert "| `knowledge-update` | `—` | `—` | `—` |" in rendered
+        assert "| `temporal` | `—` | `—` | `—` |" in rendered
+
+        # Hand-authored prose preserved.
+        assert "Some hand-authored prose." in rendered
+        assert "The granularity=turn row is for ablation interest only." in rendered
+        assert "End of doc." in rendered
+
+    def test_docs_untouched_when_no_headline(self, tmp_path: Path) -> None:
+        """Honesty: keep placeholders when no headline run is available."""
+        results_dir = tmp_path / "results"
+        output_dir = tmp_path / "out"
+        docs_path = tmp_path / "benchmarks.md"
+        docs_path.write_text(_DOC_TEMPLATE, encoding="utf-8")
+
+        # Only a non-headline cell.
+        _write_summary(
+            results_dir,
+            retrieval="raw",
+            granularity="session",
+            recency="off",
+            embed_model="bge-small",
+            stamp="20260430T050000Z",
+        )
+
+        report = aggregate(results_dir, output_dir=output_dir, docs_path=docs_path)
+
+        assert report.headline is None
+        assert report.docs_path is None
+        assert docs_path.read_text(encoding="utf-8") == _DOC_TEMPLATE
+
+    def test_docs_skipped_when_path_absent(self, tmp_path: Path) -> None:
+        """A pointer to a missing file is a warning, not a crash."""
+        results_dir = tmp_path / "results"
+        output_dir = tmp_path / "out"
+        docs_path = tmp_path / "does-not-exist.md"
+
+        self._seed_matrix(results_dir)
+
+        report = aggregate(results_dir, output_dir=output_dir, docs_path=docs_path)
+
+        assert report.headline is not None
+        assert report.docs_path is None
+        assert not docs_path.exists()
+
+    def test_docs_missing_marker_fails_loudly(self, tmp_path: Path) -> None:
+        """A doc without a marker pair is a template bug — surface it."""
+        results_dir = tmp_path / "results"
+        output_dir = tmp_path / "out"
+        docs_path = tmp_path / "benchmarks.md"
+        # Drop the per-type marker pair entirely.
+        broken = _DOC_TEMPLATE.replace("<!-- BENCH:PER-TYPE:START -->", "").replace(
+            "<!-- BENCH:PER-TYPE:END -->", ""
+        )
+        docs_path.write_text(broken, encoding="utf-8")
+
+        self._seed_matrix(results_dir)
+
+        with pytest.raises(ValueError, match="BENCH:PER-TYPE"):
+            aggregate(results_dir, output_dir=output_dir, docs_path=docs_path)
