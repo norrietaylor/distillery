@@ -52,8 +52,14 @@ class ClassificationResult:
             otherwise.
         reasoning: Human-readable explanation from the LLM.  May be empty
             on parse failure.
-        suggested_tags: Suggested string labels for the entry.
+        suggested_tags: Suggested string labels for the entry.  When
+            ``suggested_kind`` is set, the corresponding ``kind/<value>``
+            tag is included here automatically.
         suggested_project: Optional project name extracted from content.
+        suggested_kind: Predicted ``kind/`` content-type axis value
+            (without the ``kind/`` prefix), e.g. ``"opinion"``,
+            ``"release"``.  ``None`` when the LLM omitted the field, the
+            value was unrecognised, or the heuristic classifier was used.
     """
 
     entry_type: EntryType
@@ -62,6 +68,7 @@ class ClassificationResult:
     reasoning: str = ""
     suggested_tags: list[str] = field(default_factory=list)
     suggested_project: str | None = None
+    suggested_kind: str | None = None
 
 
 @dataclass

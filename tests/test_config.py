@@ -554,7 +554,8 @@ class TestTagsConfig:
         cfg = load_config()
         assert isinstance(cfg.tags, TagsConfig)
         assert cfg.tags.enforce_namespaces is False
-        assert cfg.tags.reserved_prefixes == []
+        # ``kind/`` is reserved by default for the content-type axis (#481).
+        assert cfg.tags.reserved_prefixes == ["kind"]
 
     def test_tags_section_parsed_enforce_namespaces_true(self, tmp_path: Path) -> None:
         yaml_content = """\
