@@ -537,7 +537,11 @@ class TestExampleConfigFile:
         cfg = load_config(str(example_path))
         assert isinstance(cfg.tags, TagsConfig)
         assert cfg.tags.enforce_namespaces is False
-        assert cfg.tags.reserved_prefixes == []
+        # The example explicitly reserves the ``kind/`` namespace (the
+        # classifier-owned content-type axis).  Setting this to ``[]`` would
+        # silently disable that invariant for users who copy the example
+        # verbatim, so the example mirrors the in-code default.
+        assert cfg.tags.reserved_prefixes == ["kind"]
 
 
 # ---------------------------------------------------------------------------
@@ -554,7 +558,8 @@ class TestTagsConfig:
         cfg = load_config()
         assert isinstance(cfg.tags, TagsConfig)
         assert cfg.tags.enforce_namespaces is False
-        assert cfg.tags.reserved_prefixes == []
+        # ``kind/`` is reserved by default for the content-type axis (#481).
+        assert cfg.tags.reserved_prefixes == ["kind"]
 
     def test_tags_section_parsed_enforce_namespaces_true(self, tmp_path: Path) -> None:
         yaml_content = """\
