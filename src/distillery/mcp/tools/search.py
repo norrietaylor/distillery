@@ -30,6 +30,16 @@ from distillery.mcp.tools.crud import (
 
 logger = logging.getLogger(__name__)
 
+# Maps ``distillery_find_similar(accept_action=...)`` values to the
+# ``entry_relations.relation_type`` written when the caller accepts a match
+# (issue #490 mechanism #2). Mirrors the dedup actions returned by
+# :class:`distillery.classification.dedup.DeduplicationChecker`.
+_ACCEPT_ACTION_TO_RELATION_TYPE: dict[str, str] = {
+    "link": "related",
+    "merge": "merge_source",
+    "duplicate": "duplicate",
+}
+
 # ---------------------------------------------------------------------------
 # _handle_search
 # ---------------------------------------------------------------------------
@@ -354,6 +364,15 @@ async def _handle_find_similar(
       entries already linked to ``source_entry_id`` via ``entry_relations``
       (any direction, any relation_type). Requires ``source_entry_id``.
 
+    * **accept_action** (str | None): when set to ``"link"``, ``"merge"``, or
+      ``"duplicate"``, persists an ``entry_relations`` row from
+      ``source_entry_id`` to each result entry above ``threshold``.  Requires
+      ``source_entry_id``.  The action maps to relation_type as follows:
+      ``link → "related"``, ``merge → "merge_source"``,
+      ``duplicate → "duplicate"``.  Idempotent via the unique
+      ``(from_id, to_id, relation_type)`` index — re-running silently skips
+      already-persisted edges.  Issue #490 mechanism #2.
+
     Args:
         store: Initialised :class:`~distillery.store.duckdb.DuckDBStore`.
         arguments: Tool argument dict; must contain ``content`` or
@@ -379,6 +398,30 @@ async def _handle_find_similar(
             "INVALID_PARAMS",
             "exclude_linked=true requires source_entry_id",
         )
+
+    # accept_action persists relations from source_entry_id to each match
+    # (issue #490 mechanism #2). Validate up-front so the caller sees a clean
+    # error before we burn an embedding on the search.
+    accept_action_raw = arguments.get("accept_action")
+    err_accept = validate_type(arguments, "accept_action", str, "string")
+    if err_accept:
+        return error_response("INVALID_PARAMS", err_accept)
+    accept_action: str | None = (
+        accept_action_raw.strip().lower() if isinstance(accept_action_raw, str) else None
+    )
+    accept_action = accept_action or None
+    if accept_action is not None:
+        if accept_action not in _ACCEPT_ACTION_TO_RELATION_TYPE:
+            return error_response(
+                "INVALID_PARAMS",
+                f"accept_action must be one of {sorted(_ACCEPT_ACTION_TO_RELATION_TYPE)}, "
+                f"got: {accept_action_raw!r}",
+            )
+        if source_entry_id is None:
+            return error_response(
+                "INVALID_PARAMS",
+                "accept_action requires source_entry_id",
+            )
 
     # Resolve source entry up-front so we can supply its content as the
     # similarity probe when caller omits an explicit ``content`` argument.
@@ -582,6 +625,84 @@ async def _handle_find_similar(
             except Exception:  # noqa: BLE001
                 logger.exception("Error running conflict discovery in find_similar")
                 return error_response("INTERNAL", "Conflict check failed")
+
+    # --- accept_action persistence (issue #490 mechanism #2) ----------------
+    # Persist relations from source_entry_id → each result entry as a typed
+    # relation, mirroring the user/agent's accepted dedup outcome. Idempotent
+    # via the unique (from_id, to_id, relation_type) index, so re-running over
+    # an already-linked result silently skips. We surface a count plus the
+    # per-result outcome so callers can verify the write took.
+    if accept_action is not None and source_entry_id is not None:
+        relation_type = _ACCEPT_ACTION_TO_RELATION_TYPE[accept_action]
+        accept_outcomes: list[dict[str, Any]] = []
+        persisted_new = 0
+        # Fetch existing outgoing relations of this type once so the per-target
+        # "newly persisted" classification is one query rather than N (each
+        # call would otherwise serialise on the shared store lock).
+        try:
+            existing_outgoing = await store.get_related(
+                source_entry_id, direction="outgoing", relation_type=relation_type
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("find_similar accept_action: failed to fetch existing relations")
+            return error_response("INTERNAL", "Failed to inspect existing relations")
+        existing_targets: set[str] = {
+            rel["to_id"] for rel in existing_outgoing if isinstance(rel.get("to_id"), str)
+        }
+        for sr in search_results:
+            target_id = sr.entry.id
+            if target_id == source_entry_id:
+                continue
+            already_linked = target_id in existing_targets
+            try:
+                # ``add_relation`` is itself idempotent — it returns the
+                # existing row's id when the (from, to, type) triple already
+                # exists, so we use the pre-fetched ``existing_targets`` set
+                # to distinguish "newly inserted" from "already present".
+                relation_id = await store.add_relation(source_entry_id, target_id, relation_type)
+            except ValueError as exc:
+                # Source or target missing — surface but don't abort the
+                # whole batch; this should be rare since source_entry_id was
+                # validated earlier and target ids come from the search.
+                accept_outcomes.append(
+                    {
+                        "to_id": target_id,
+                        "persisted": False,
+                        "error": str(exc),
+                    }
+                )
+                continue
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "find_similar accept_action: failed to persist relation from=%s to=%s type=%s",
+                    source_entry_id,
+                    target_id,
+                    relation_type,
+                )
+                accept_outcomes.append(
+                    {
+                        "to_id": target_id,
+                        "persisted": False,
+                        "error": "persist failed",
+                    }
+                )
+                continue
+            if not already_linked:
+                persisted_new += 1
+                existing_targets.add(target_id)
+            accept_outcomes.append(
+                {
+                    "to_id": target_id,
+                    "relation_id": relation_id,
+                    "relation_type": relation_type,
+                    "persisted": True,
+                    "newly_persisted": not already_linked,
+                }
+            )
+        payload["accept_action"] = accept_action
+        payload["accept_relation_type"] = relation_type
+        payload["accept_outcomes"] = accept_outcomes
+        payload["accept_persisted_count"] = persisted_new
 
     return success_response(payload)
 

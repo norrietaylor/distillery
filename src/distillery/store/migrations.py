@@ -209,27 +209,29 @@ def create_hnsw_index(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
         logger.warning("Migration 6: HNSW index type not recognized, skipping")
 
 
-def create_entry_relations(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
-    """Migration 8: Create ``entry_relations`` table and backfill from metadata.
+def backfill_relations_from_metadata(conn: duckdb.DuckDBPyConnection) -> int:
+    """Scan ``entries.metadata.related_entries`` and insert missing ``entry_relations`` rows.
 
-    Creates the ``entry_relations`` table for typed, queryable relationships
-    between entries.  After table creation, backfills existing entries whose
-    ``metadata`` JSON column contains a ``related_entries`` list: each element
-    is inserted as a row with ``relation_type='link'``.
+    Idempotent: relies on the ``idx_entry_relations_unique`` unique index on
+    ``(from_id, to_id, relation_type)`` so re-running never produces duplicates.
+    Returns the number of rows actually inserted (excludes index-suppressed
+    duplicates).
 
-    The backfill is idempotent because the ``CREATE TABLE IF NOT EXISTS`` guard
-    means this migration is only executed once per database.
+    This helper is the single source of truth for mechanism #1 in issue #490
+    (re-scan on upgrade and on every write) and is invoked from:
+
+      * Migration 8 (initial table creation + backfill).
+      * The ``DuckDBStore`` write paths (``_sync_store``,
+        ``_sync_store_batch``, ``_sync_update``) after entry insert.
+      * ``distillery_relations action="reconcile"`` for operator-initiated
+        recovery from drift.
+
+    The caller is responsible for transaction management — this function
+    assumes ``entry_relations`` (and its unique index) already exist.
     """
     import json
     import uuid
 
-    conn.execute(_CREATE_ENTRY_RELATIONS_TABLE)
-    conn.execute(_CREATE_ENTRY_RELATIONS_UNIQUE_INDEX)
-    conn.execute(_CREATE_ENTRY_RELATIONS_TO_ID_INDEX)
-    logger.info("Migration 8: entry_relations table created")
-
-    # Backfill: scan all entries whose metadata contains a 'related_entries' list.
-    # Collect all existing entry IDs so we only create relations to valid targets.
     existing_ids: set[str] = {r[0] for r in conn.execute("SELECT id FROM entries").fetchall()}
     rows = conn.execute("SELECT id, metadata FROM entries WHERE metadata IS NOT NULL").fetchall()
     backfilled = 0
@@ -251,6 +253,9 @@ def create_entry_relations(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> No
         for to_id in related:
             if not isinstance(to_id, str) or not to_id:
                 continue
+            if to_id == entry_id:
+                # Self-loops are not meaningful for related_entries.
+                continue
             if to_id not in existing_ids:
                 continue
             relation_id = str(uuid.uuid4())
@@ -262,6 +267,29 @@ def create_entry_relations(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> No
             if inserted:
                 backfilled += 1
 
+    return backfilled
+
+
+def create_entry_relations(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
+    """Migration 8: Create ``entry_relations`` table and backfill from metadata.
+
+    Creates the ``entry_relations`` table for typed, queryable relationships
+    between entries.  After table creation, backfills existing entries whose
+    ``metadata`` JSON column contains a ``related_entries`` list: each element
+    is inserted as a row with ``relation_type='link'``.
+
+    The backfill is idempotent — the underlying
+    :func:`backfill_relations_from_metadata` helper relies on the unique
+    ``(from_id, to_id, relation_type)`` index — and is reused on every store
+    startup (issue #490) so entries written before this migration first ran
+    populate edges retroactively.
+    """
+    conn.execute(_CREATE_ENTRY_RELATIONS_TABLE)
+    conn.execute(_CREATE_ENTRY_RELATIONS_UNIQUE_INDEX)
+    conn.execute(_CREATE_ENTRY_RELATIONS_TO_ID_INDEX)
+    logger.info("Migration 8: entry_relations table created")
+
+    backfilled = backfill_relations_from_metadata(conn)
     if backfilled:
         logger.info("Migration 8: backfilled %d entry_relations rows from metadata", backfilled)
     else:
