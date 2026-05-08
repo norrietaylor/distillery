@@ -28,14 +28,17 @@ on:
   issue_comment:
     types: [created]
   # Phantom-run suppression. With only `issue_comment` declared, every
-  # push to main creates a 0-job check_suite entry that records as
-  # `failure` in the Actions UI even though no jobs ran (verified:
-  # billing=0, jobs=0, conclusion=failure). Declaring an unreachable
-  # `push:` trigger gives the check-suite enumerator an explicit
-  # branch filter to match against, which suppresses the phantom
-  # entries without ever firing real jobs on push events.
+  # push creates a 0-job check_suite entry that records as `failure`
+  # in the Actions UI even though no jobs ran. Two earlier attempts
+  # (workflow deregister/re-register in #488/#489 and an unreachable
+  # branch filter in #491) failed to suppress those check_suites.
+  # Declaring `push:` here so the workflow has a real handler, paired
+  # with the `phantom_suppression_noop` job below that runs on push
+  # events and exits 0, makes every push produce a 1-job success run
+  # instead of the 0-job failure phantom. The existing issue_comment
+  # jobs gate themselves with `if: github.event_name == 'issue_comment'`,
+  # so push events never trigger any real work.
   push:
-    branches: ["__phantom_run_suppression__"]
 
 # Default permissions are minimal. Each job opts in to what it needs.
 # The deploy job — which checks out PR head code and builds it — is
@@ -51,6 +54,25 @@ env:
   IMAGE_NAME: ghcr.io/norrietaylor/distillery
 
 jobs:
+  # ──────────────────────────────────────────────────────────────────
+  # Job 0: phantom-suppression no-op.
+  #
+  # Fires only on push events. Records the workflow run as 1-job
+  # success instead of a 0-job failure phantom in the Actions UI.
+  # See the `on:` block comment for why two earlier suppression
+  # attempts (#488/#489 deregister, #491 unreachable branch filter)
+  # failed and this is what's left.
+  #
+  # The job is intentionally trivial — fastest possible runner spin,
+  # single echo, no side effects. ~10 s of runner time per push.
+  # ──────────────────────────────────────────────────────────────────
+  phantom_suppression_noop:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - run: echo "no-op marker — staging-deploy real jobs only run on issue_comment events"
+
   # ──────────────────────────────────────────────────────────────────
   # Job 1a: Resolve the PR head SHA on a trusted, unprivileged runner.
   #
