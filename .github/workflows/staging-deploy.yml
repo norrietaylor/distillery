@@ -27,6 +27,15 @@ name: Staging Deploy (on comment)
 on:
   issue_comment:
     types: [created]
+  # Phantom-run suppression. With only `issue_comment` declared, every
+  # push to main creates a 0-job check_suite entry that records as
+  # `failure` in the Actions UI even though no jobs ran (verified:
+  # billing=0, jobs=0, conclusion=failure). Declaring an unreachable
+  # `push:` trigger gives the check-suite enumerator an explicit
+  # branch filter to match against, which suppresses the phantom
+  # entries without ever firing real jobs on push events.
+  push:
+    branches: ["__phantom_run_suppression__"]
 
 # Default permissions are minimal. Each job opts in to what it needs.
 # The deploy job — which checks out PR head code and builds it — is
