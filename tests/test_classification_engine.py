@@ -353,6 +353,23 @@ class TestKindAxis:
         # Exactly one kind/opinion entry, even though the LLM listed it twice.
         assert result.suggested_tags.count("kind/opinion") == 1
 
+    def test_conflicting_kind_in_suggested_tags_is_replaced_by_canonical_kind(self) -> None:
+        """Canonical ``kind`` field wins; conflicting kind/* in suggested_tags is dropped."""
+        engine = _make_engine()
+        response = _json_response(
+            "feed",
+            0.9,
+            suggested_tags=["domain/api", "kind/opinion"],
+            kind="release",
+        )
+        result = engine.parse_response(response)
+
+        assert result.suggested_kind == "release"
+        # Only the canonical kind tag remains; the stale kind/opinion is stripped.
+        kind_tags = [t for t in result.suggested_tags if t.lower().startswith("kind/")]
+        assert kind_tags == ["kind/release"]
+        assert "domain/api" in result.suggested_tags
+
     def test_unknown_kind_yields_none_and_no_tag(self) -> None:
         engine = _make_engine()
         response = _json_response("feed", 0.8, kind="bogus-kind")

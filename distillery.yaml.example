@@ -241,4 +241,4 @@ tags:
   # content-type axis (kind/release, kind/opinion, ...) assigned by the
   # classifier.  Setting this key explicitly (including to []) overrides the
   # default.  Example: ["kind", "system"] reserves both namespaces.
-  reserved_prefixes: []
+  reserved_prefixes: ["kind"]

@@ -203,11 +203,15 @@ class ClassificationEngine:
             elif normalised:
                 logger.warning("ClassificationEngine: unknown kind %r, dropping", raw_kind)
 
-        # Merge ``kind/<value>`` into suggested_tags (de-duplicated, preserve order).
+        # Canonicalize the ``kind/`` axis: keep at most one ``kind/<value>`` tag,
+        # always sourced from the dedicated ``kind`` field.  Strip any pre-existing
+        # ``kind/*`` entries from suggested_tags (case-insensitive) to avoid
+        # conflicting or duplicate kind tags, then append the canonical tag.
+        suggested_tags = [
+            tag for tag in suggested_tags if not tag.strip().lower().startswith("kind/")
+        ]
         if suggested_kind is not None:
-            kind_tag = f"kind/{suggested_kind}"
-            if kind_tag not in suggested_tags:
-                suggested_tags.append(kind_tag)
+            suggested_tags.append(f"kind/{suggested_kind}")
 
         status = self._status_for(confidence)
 
