@@ -408,7 +408,7 @@ class TestKindAxis:
         result = engine.parse_response("not json")
 
         assert result.suggested_kind is None
-        assert "kind/" not in result.suggested_tags
+        assert not any(tag.startswith("kind/") for tag in result.suggested_tags)
 
 
 # ---------------------------------------------------------------------------
