@@ -1,0 +1,291 @@
+name: Staging Deploy (on comment)
+
+# Build the PR head SHA as a staging image and dispatch the Fly.io
+# staging deploy in norrietaylor/distill_ops. Lifecycle is driven by PR
+# comments:
+#   /deploy-staging    — build image, dispatch staging-deploy
+#   /teardown-staging  — dispatch staging-teardown
+# The underscore spellings /deploy_staging and /teardown_staging are
+# accepted as equivalent aliases — both get typed interchangeably in
+# practice, and rejecting the underscore form silently skips every job
+# with no feedback, which is worse than accepting both.
+#
+# Teardown is triggered by an explicit /teardown-staging (or
+# /teardown_staging) comment only. We deliberately do NOT tear down
+# on PR close any more — closing an unrelated PR (e.g. auto-merge of
+# a separate branch) used to nuke an active staging slot on this PR,
+# which was surprising and destructive. Explicit teardown is good
+# enough; idle cleanup lives in distill_ops' scheduler-staging cron.
+#
+# Staging is a singleton. A second /deploy-staging on a different PR
+# replaces the current deployment.
+#
+# Supply-chain scanning (Grype/cosign/SBOM) runs on the PR itself via
+# supply-chain.yml; we intentionally skip it here to keep the dev loop
+# fast.
+
+on:
+  issue_comment:
+    types: [created]
+
+# Default permissions are minimal. Each job opts in to what it needs.
+# The deploy job — which checks out PR head code and builds it — is
+# the only one that needs package-write, and it is additionally gated
+# behind the `staging-deploy` GitHub Environment so a repo reviewer
+# must click Approve before the untrusted Dockerfile is built. This
+# closes the CodeQL `actions/untrusted-checkout-toctou` window.
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/norrietaylor/distillery
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────
+  # Job 1a: Resolve the PR head SHA on a trusted, unprivileged runner.
+  #
+  # This job intentionally has no write scopes and does NOT check out
+  # any PR code. It only resolves the current head SHA and exposes it
+  # as a job output. The downstream `build` job consumes that immutable
+  # output — so between the author_association check here and the
+  # checkout there, the SHA cannot change. This closes the
+  # `actions/untrusted-checkout-toctou` hole.
+  # ──────────────────────────────────────────────────────────────────
+  resolve:
+    name: Resolve PR head SHA
+    # startsWith (NOT contains) is load-bearing: any bot comment whose
+    # body mentions the command string in prose (e.g. the staging
+    # success comment's help text "Comment /deploy-staging ...") will
+    # otherwise self-trigger this workflow via the issue_comment event
+    # on that same comment. Commands must begin at column 0.
+    #
+    # Both /deploy-staging and /deploy_staging are accepted — the two
+    # spellings get typed interchangeably in practice, and rejecting
+    # the underscore form silently (it just evaluates `if:` to false
+    # and skips every job with no feedback) is worse than accepting
+    # both. Self-trigger protection is unchanged: still startsWith.
+    if: >
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request != null &&
+      (
+        startsWith(github.event.comment.body, '/deploy-staging') ||
+        startsWith(github.event.comment.body, '/deploy_staging')
+      ) &&
+      (
+        github.event.comment.author_association == 'OWNER' ||
+        github.event.comment.author_association == 'MEMBER' ||
+        github.event.comment.author_association == 'COLLABORATOR'
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    outputs:
+      pr_number: ${{ steps.pr.outputs.pr_number }}
+      head_sha: ${{ steps.pr.outputs.head_sha }}
+      short_sha: ${{ steps.pr.outputs.short_sha }}
+      image_tag: ${{ steps.pr.outputs.image_tag }}
+    steps:
+      - name: React to trigger comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api \
+            --method POST \
+            "repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions" \
+            -f content=eyes
+
+      - name: Resolve PR head SHA
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER="${{ github.event.issue.number }}"
+          HEAD_SHA=$(gh pr view "${PR_NUMBER}" \
+            --repo "${{ github.repository }}" \
+            --json headRefOid \
+            --jq .headRefOid)
+          SHORT_SHA="${HEAD_SHA:0:7}"
+          IMAGE_TAG="pr-${PR_NUMBER}-sha-${SHORT_SHA}"
+          {
+            echo "pr_number=${PR_NUMBER}"
+            echo "head_sha=${HEAD_SHA}"
+            echo "short_sha=${SHORT_SHA}"
+            echo "image_tag=${IMAGE_TAG}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Announce pending approval
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Use --body-file with a quoted heredoc so Markdown backticks are
+          # passed through literally without bash's escape-dance. The old
+          # --body "…\`url\`…" form leaked the backslash into the rendered
+          # comment (visible as %5C%60 in server access logs), so link-preview
+          # crawlers slurped the trailing \` into the URL and hit fresh 404s
+          # on every deploy. GitHub Actions expands ${{ ... }} expressions
+          # before bash runs, so a quoted heredoc is safe for all the values
+          # we need.
+          gh pr comment "${{ steps.pr.outputs.pr_number }}" \
+            --repo "${{ github.repository }}" \
+            --body-file - <<'EOF'
+          ⏳ Staging deploy pending review — resolved head SHA `${{ steps.pr.outputs.head_sha }}`. A repo collaborator must approve the `staging-deploy` environment before the image is built: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+          Once deployed, staging will be reachable at:
+          - Web / claude.ai: `https://distillery-mcp-dev.fly.dev/mcp`
+          - Health check: `https://distillery-mcp-dev.fly.dev/.well-known/oauth-authorization-server`
+
+          (note the `/mcp` path — `GET /mcp` returns 405 (MCP only accepts POST), and the bare hostname returns 404)
+          EOF
+
+  # ──────────────────────────────────────────────────────────────────
+  # Job 1b: Build and push the staging image.
+  #
+  # Requires environment approval — configure `staging-deploy` in
+  # Settings → Environments with required reviewers = repo collaborators
+  # before merging this workflow. The approver sees the resolved head
+  # SHA (as a link in the resolve job's output) before approving.
+  # ──────────────────────────────────────────────────────────────────
+  build:
+    name: Build and dispatch staging deploy
+    needs: resolve
+    runs-on: ubuntu-latest
+    environment:
+      name: staging-deploy
+      url: https://distillery-mcp-dev.fly.dev
+    permissions:
+      contents: read
+      packages: write
+      pull-requests: write
+    steps:
+      # No actions/checkout step — buildx pulls the pinned SHA as a
+      # remote Git context directly into the build daemon, which keeps
+      # untrusted PR code out of the runner workspace and satisfies
+      # CodeQL's `actions/untrusted-checkout` rule. The SHA is the
+      # immutable output of the unprivileged `resolve` job, so it
+      # cannot be mutated between resolution and build.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push staging image
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7
+        with:
+          # Remote Git context pinned to the resolved SHA.
+          context: https://github.com/${{ github.repository }}.git#${{ needs.resolve.outputs.head_sha }}
+          file: Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ needs.resolve.outputs.image_tag }}
+            ${{ env.IMAGE_NAME }}:staging
+          # Cache is scoped per-PR so each branch maintains its own
+          # layer cache. This prevents a Dockerfile change in one PR
+          # from poisoning cached layers used by other PRs' staging
+          # builds. GH Actions cache eviction handles cleanup as PRs
+          # go stale.
+          cache-from: type=gha,scope=staging-pr-${{ needs.resolve.outputs.pr_number }}
+          cache-to: type=gha,scope=staging-pr-${{ needs.resolve.outputs.pr_number }},mode=max
+          build-args: |
+            BUILD_SHA=${{ needs.resolve.outputs.head_sha }}
+
+      - name: Dispatch staging deploy to distill_ops
+        env:
+          GH_TOKEN: ${{ secrets.DISTILL_OPS_DEPLOY_TOKEN }}
+        run: |
+          # `gh workflow run` triggers a workflow_dispatch event on the
+          # target workflow. This requires only actions:write on the
+          # target repo (same scope supply-chain.yml already uses to
+          # trigger prod fly-deploy.yml). We previously used
+          # `gh api .../dispatches` which fires a repository_dispatch
+          # event and needs contents:write — a scope the existing
+          # DISTILL_OPS_DEPLOY_TOKEN PAT doesn't carry. Switching to
+          # gh workflow run lets us reuse the existing token without
+          # broadening its permissions.
+          gh workflow run staging-deploy.yml \
+            --repo norrietaylor/distill_ops \
+            --ref main \
+            -f "image_tag=${{ needs.resolve.outputs.image_tag }}" \
+            -f "pr_number=${{ needs.resolve.outputs.pr_number }}" \
+            -f "head_sha=${{ needs.resolve.outputs.head_sha }}"
+
+      - name: Comment dispatch confirmation
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # See the "Announce pending approval" step for why we use
+          # --body-file + a quoted heredoc here instead of --body "…\`…\`…".
+          gh pr comment "${{ needs.resolve.outputs.pr_number }}" \
+            --repo "${{ github.repository }}" \
+            --body-file - <<'EOF'
+          🚀 Staging deploy dispatched — image `${{ needs.resolve.outputs.image_tag }}` pushed. Build log: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}. Fly deploy is handled in [distill_ops staging-deploy](https://github.com/norrietaylor/distill_ops/actions/workflows/staging-deploy.yml); it will comment back when the app is healthy.
+
+          **Staging endpoint** (once healthy):
+          - MCP URL: `https://distillery-mcp-dev.fly.dev/mcp`  ← use this to connect from Claude Code / claude.ai
+          - Health check: https://distillery-mcp-dev.fly.dev/.well-known/oauth-authorization-server
+
+          The `/mcp` path suffix is required — `GET /mcp` returns 405 (MCP only accepts POST), and the bare hostname returns 404.
+          EOF
+
+  # ──────────────────────────────────────────────────────────────────
+  # Job 2: /teardown-staging via comment
+  # ──────────────────────────────────────────────────────────────────
+  teardown_comment:
+    name: Dispatch staging teardown (comment)
+    # startsWith (NOT contains) — see the `resolve` job above. The
+    # distill_ops staging-deploy success comment intentionally no
+    # longer contains the literal "/teardown-staging" in its help
+    # text, but defence in depth: a prefix check means *only* a
+    # bare-command comment starting with "/teardown-staging" fires
+    # the teardown. Any prose that mentions the command in-line does
+    # nothing. Both /teardown-staging and /teardown_staging are
+    # accepted, mirroring the resolve job's /deploy-{staging spelling}
+    # leniency.
+    if: >
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request != null &&
+      (
+        startsWith(github.event.comment.body, '/teardown-staging') ||
+        startsWith(github.event.comment.body, '/teardown_staging')
+      ) &&
+      (
+        github.event.comment.author_association == 'OWNER' ||
+        github.event.comment.author_association == 'MEMBER' ||
+        github.event.comment.author_association == 'COLLABORATOR'
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: React to trigger comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api \
+            --method POST \
+            "repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions" \
+            -f content=eyes
+
+      - name: Dispatch staging teardown to distill_ops
+        env:
+          GH_TOKEN: ${{ secrets.DISTILL_OPS_DEPLOY_TOKEN }}
+        run: |
+          # See the deploy job above for why we use `gh workflow run`
+          # instead of `gh api .../dispatches`.
+          # Note: the distill_ops staging-teardown workflow_dispatch
+          # input surface is (pr_number,) only — reason and repo fall
+          # through to their defaults ('manual' and
+          # norrietaylor/distillery). Minor fidelity loss vs. the old
+          # repository_dispatch path: the PR comment will say
+          # "reason: manual" instead of "reason: comment" / "pr-closed".
+          gh workflow run staging-teardown.yml \
+            --repo norrietaylor/distill_ops \
+            --ref main \
+            -f "pr_number=${{ github.event.issue.number }}"
