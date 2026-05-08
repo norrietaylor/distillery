@@ -16,6 +16,14 @@ and writes:
   triplet, a Distillery-only matrix of recent runs, the per-question-type
   breakdown for the headline cell, and a 7-day history of headline R@5.
 
+* ``docs/benchmarks.md`` — the public mkdocs page. Three marker-delimited
+  regions (``BENCH:HEADLINE-CARDS``, ``BENCH:MATRIX``, ``BENCH:PER-TYPE``)
+  are rewritten in place with the headline triplet, the four-row internal
+  comparison matrix, and the per-question-type breakdown. The hand-authored
+  prose around each region is preserved verbatim. Templating is skipped
+  (placeholders remain) when no headline run is available, mirroring the
+  badge "unknown" fallback.
+
 Honesty constraint
 ------------------
 
@@ -30,11 +38,14 @@ CLI
 
     python scripts/bench/aggregate_results.py \\
         --results-dir bench/results/ \\
-        --output-dir bench/
+        --output-dir bench/ \\
+        --docs-path docs/benchmarks.md
 
 The ``--output-dir`` controls where the three badge files land.
 ``SUMMARY.md`` is always written into ``<results_dir>/SUMMARY.md``
-because it documents the runs in that directory.
+because it documents the runs in that directory. ``--docs-path``
+points at the public mkdocs page; pass ``--no-docs`` to skip
+templating it.
 
 See the plan in ``/Users/norrie/.claude/plans/look-at-mempalace-hook-dynamic-mccarthy.md``
 (Wave 2, deliverable 3 — "Nightly automation" — and deliverable 4 —
@@ -494,6 +505,222 @@ def _render_summary_md(
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# docs/benchmarks.md templating
+# ---------------------------------------------------------------------------
+#
+# The mkdocs page contains three dynamic regions delimited by HTML
+# comments. The aggregator regenerates each region in place; everything
+# outside the markers is preserved verbatim so hand-authored prose
+# survives nightly runs.
+#
+# Marker contract:
+#   <!-- BENCH:<NAME>:START -->\n<content>\n<!-- BENCH:<NAME>:END -->
+#
+# The block between START and END (exclusive of the marker lines
+# themselves) is replaced wholesale.
+
+# Order matches the four rows hand-authored in docs/benchmarks.md. The
+# aggregator looks up the latest run for each (retrieval, granularity,
+# recency, embed_model) tuple; missing cells render as ``—``.
+_DOCS_MATRIX_ROWS: tuple[tuple[str, dict[str, str]], ...] = (
+    (
+        "`hybrid + recency on` (headline)",
+        {
+            "retrieval": "hybrid",
+            "granularity": "session",
+            "recency": "on",
+            "embed_model": "bge-small",
+        },
+    ),
+    (
+        "`raw + recency on`",
+        {
+            "retrieval": "raw",
+            "granularity": "session",
+            "recency": "on",
+            "embed_model": "bge-small",
+        },
+    ),
+    (
+        "`hybrid + recency off`",
+        {
+            "retrieval": "hybrid",
+            "granularity": "session",
+            "recency": "off",
+            "embed_model": "bge-small",
+        },
+    ),
+    (
+        "`hybrid + granularity=turn`",
+        {
+            "retrieval": "hybrid",
+            "granularity": "turn",
+            "recency": "on",
+            "embed_model": "bge-small",
+        },
+    ),
+)
+
+# Six LongMemEval-S question types, in the order documented in
+# docs/benchmarks.md. Types absent from the headline summary render
+# as ``—`` rather than zero — that distinction matters for honesty.
+_DOCS_PER_TYPE_ROWS: tuple[str, ...] = (
+    "knowledge-update",
+    "multi-session",
+    "temporal",
+    "single-session-user",
+    "single-session-preference",
+    "single-session-assistant",
+)
+
+
+def _render_docs_headline_cards(headline: SummaryRecord) -> str:
+    """Render the three Material grid cards with current headline scores."""
+    overall = headline.data.get("overall", {}) if isinstance(headline.data, dict) else {}
+    r5 = _format_score(overall.get("recall_at_5"))
+    r10 = _format_score(overall.get("recall_at_10"))
+    nd = _format_score(overall.get("ndcg_at_10"))
+    return (
+        '<div class="grid cards" markdown>\n'
+        "\n"
+        "-   __Recall@5__\n"
+        "\n"
+        "    ---\n"
+        "\n"
+        f"    `{r5}`\n"
+        "\n"
+        "    Headline cell, mean across seeds.\n"
+        "\n"
+        "-   __Recall@10__\n"
+        "\n"
+        "    ---\n"
+        "\n"
+        f"    `{r10}`\n"
+        "\n"
+        "    Headline cell, mean across seeds.\n"
+        "\n"
+        "-   __NDCG@10__\n"
+        "\n"
+        "    ---\n"
+        "\n"
+        f"    `{nd}`\n"
+        "\n"
+        "    Headline cell, mean across seeds.\n"
+        "\n"
+        "</div>"
+    )
+
+
+def _render_docs_matrix_table(matrix: list[SummaryRecord]) -> str:
+    """Render the 4-row Distillery-only matrix table for docs/benchmarks.md.
+
+    Doc-row labels are hand-authored prose mapped to canonical 4-axis
+    keys via ``_DOCS_MATRIX_ROWS``. Cells with no matching record render
+    as ``—``.
+    """
+    by_axes: dict[tuple[str, str, str, str], SummaryRecord] = {}
+    for record in matrix:
+        record_key = (
+            record.axes["retrieval"],
+            record.axes["granularity"],
+            record.axes["recency"],
+            record.axes["embed_model"],
+        )
+        by_axes[record_key] = record
+
+    lines = [
+        "| Configuration | R@5 | R@10 | NDCG@10 |",
+        "|---|---|---|---|",
+    ]
+    for label, axes in _DOCS_MATRIX_ROWS:
+        key = (
+            axes["retrieval"],
+            axes["granularity"],
+            axes["recency"],
+            axes["embed_model"],
+        )
+        match: SummaryRecord | None = by_axes.get(key)
+        if match is None:
+            lines.append(f"| {label} | `—` | `—` | `—` |")
+            continue
+        overall = match.data.get("overall", {}) if isinstance(match.data, dict) else {}
+        lines.append(
+            f"| {label} | `{_format_score(overall.get('recall_at_5'))}` | "
+            f"`{_format_score(overall.get('recall_at_10'))}` | "
+            f"`{_format_score(overall.get('ndcg_at_10'))}` |"
+        )
+    return "\n".join(lines)
+
+
+def _render_docs_per_type_table(headline: SummaryRecord) -> str:
+    """Render the 6-row per-question-type breakdown table for the headline cell.
+
+    Question types absent from ``headline.data['per_question_type']``
+    keep ``—`` cells — the LongMemEval-S sample may not include every
+    type on every run, and zero would be a misleading rendering.
+    """
+    per_type = headline.data.get("per_question_type", {}) if isinstance(headline.data, dict) else {}
+    if not isinstance(per_type, dict):
+        per_type = {}
+
+    lines = [
+        "| Question type | R@5 | R@10 | NDCG@10 |",
+        "|---|---|---|---|",
+    ]
+    for qtype in _DOCS_PER_TYPE_ROWS:
+        bucket = per_type.get(qtype) if isinstance(per_type.get(qtype), dict) else None
+        if bucket is None:
+            lines.append(f"| `{qtype}` | `—` | `—` | `—` |")
+            continue
+        lines.append(
+            f"| `{qtype}` | `{_format_score(bucket.get('recall_at_5'))}` | "
+            f"`{_format_score(bucket.get('recall_at_10'))}` | "
+            f"`{_format_score(bucket.get('ndcg_at_10'))}` |"
+        )
+    return "\n".join(lines)
+
+
+def _substitute_marker_block(content: str, marker_name: str, replacement: str) -> str:
+    """Replace the body between ``BENCH:<marker_name>`` markers.
+
+    Raises ``ValueError`` when the markers are missing or out of order
+    — that is a doc-template bug that should fail loudly rather than
+    silently no-op the publish step.
+    """
+    start = f"<!-- BENCH:{marker_name}:START -->"
+    end = f"<!-- BENCH:{marker_name}:END -->"
+    pattern = re.compile(
+        re.escape(start) + r"\n(.*?)\n" + re.escape(end),
+        re.DOTALL,
+    )
+    if not pattern.search(content):
+        raise ValueError(f"Marker pair BENCH:{marker_name} missing from docs page")
+    return pattern.sub(f"{start}\n{replacement}\n{end}", content, count=1)
+
+
+def _render_docs_benchmarks_md(
+    *,
+    existing: str,
+    headline: SummaryRecord | None,
+    matrix: list[SummaryRecord],
+) -> str:
+    """Return ``docs/benchmarks.md`` content with all three regions rewritten.
+
+    When ``headline is None`` the file is returned unchanged — the
+    placeholders stay until a headline run lands, matching the
+    "unknown" badge fallback discipline.
+    """
+    if headline is None:
+        return existing
+    out = _substitute_marker_block(
+        existing, "HEADLINE-CARDS", _render_docs_headline_cards(headline)
+    )
+    out = _substitute_marker_block(out, "MATRIX", _render_docs_matrix_table(matrix))
+    out = _substitute_marker_block(out, "PER-TYPE", _render_docs_per_type_table(headline))
+    return out
+
+
 def _normalise_headline_keys(config: dict[str, str]) -> dict[str, str]:
     """Map a user-supplied headline config to the canonical axes dict.
 
@@ -530,6 +757,7 @@ class AggregateReport:
     history: list[SummaryRecord] = field(default_factory=list)
     badge_paths: dict[str, Path] = field(default_factory=dict)
     summary_path: Path | None = None
+    docs_path: Path | None = None
 
 
 def aggregate(
@@ -537,6 +765,7 @@ def aggregate(
     *,
     headline_config: dict[str, str] | None = None,
     output_dir: Path,
+    docs_path: Path | None = None,
     now: datetime | None = None,
 ) -> AggregateReport:
     """Aggregate bench results, write badges and SUMMARY.md.
@@ -553,6 +782,12 @@ def aggregate(
         Where the three ``badge_*.json`` files are written. The
         ``SUMMARY.md`` always lands in ``results_dir`` because it
         documents the runs there.
+    docs_path:
+        Optional path to ``docs/benchmarks.md``. When provided and a
+        headline run exists, the three marker-delimited regions in
+        the file are rewritten in place. ``None`` (or no headline run)
+        leaves the docs page untouched — placeholders persist until
+        the next nightly with a headline cell.
     now:
         Optional override for "current time" — used by tests so the
         7-day history window is deterministic.
@@ -594,12 +829,28 @@ def aggregate(
     with summary_path.open("w", encoding="utf-8") as f:
         f.write(summary_md)
 
+    docs_written: Path | None = None
+    if docs_path is not None and headline is not None:
+        if not docs_path.exists():
+            logger.warning("docs_path %s does not exist; skipping docs publish", docs_path)
+        else:
+            existing = docs_path.read_text(encoding="utf-8")
+            updated = _render_docs_benchmarks_md(
+                existing=existing,
+                headline=headline,
+                matrix=matrix,
+            )
+            if updated != existing:
+                docs_path.write_text(updated, encoding="utf-8")
+            docs_written = docs_path
+
     return AggregateReport(
         headline=headline,
         matrix=matrix,
         history=history,
         badge_paths=badge_paths,
         summary_path=summary_path,
+        docs_path=docs_written,
     )
 
 
@@ -656,6 +907,20 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Override headline embed-model axis.",
     )
     parser.add_argument(
+        "--docs-path",
+        type=Path,
+        default=Path("docs/benchmarks.md"),
+        help=(
+            "Path to docs/benchmarks.md to template in place "
+            "(default: docs/benchmarks.md). Pass --no-docs to skip."
+        ),
+    )
+    parser.add_argument(
+        "--no-docs",
+        action="store_true",
+        help="Skip docs/benchmarks.md templating.",
+    )
+    parser.add_argument(
         "--verbose",
         "-v",
         action="store_true",
@@ -679,10 +944,12 @@ def main(argv: list[str] | None = None) -> int:
         "embed_model": args.headline_embed,
     }
 
+    docs_path = None if args.no_docs else args.docs_path
     report = aggregate(
         args.results_dir,
         headline_config=headline_config,
         output_dir=args.output_dir,
+        docs_path=docs_path,
     )
 
     if report.headline is None:
@@ -703,6 +970,9 @@ def main(argv: list[str] | None = None) -> int:
             overall.get("ndcg_at_10"),
             report.headline.path.name,
         )
+
+    if report.docs_path is not None:
+        logger.info("Templated docs page: %s", report.docs_path)
 
     return 0
 

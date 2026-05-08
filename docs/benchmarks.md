@@ -15,14 +15,14 @@ displayed here until that gate is green.
 The pre-registered headline triplet — Recall@5, Recall@10, NDCG@10 — for the headline cell
 (`retrieval=hybrid, granularity=session, recency=on, embed=bge-small`).
 
+<!-- BENCH:HEADLINE-CARDS:START -->
 <div class="grid cards" markdown>
 
 -   __Recall@5__
 
     ---
 
-    <!-- TODO: populated by first nightly -->
-    `—`
+    `0.970`
 
     Headline cell, mean across seeds.
 
@@ -30,8 +30,7 @@ The pre-registered headline triplet — Recall@5, Recall@10, NDCG@10 — for the
 
     ---
 
-    <!-- TODO: populated by first nightly -->
-    `—`
+    `0.990`
 
     Headline cell, mean across seeds.
 
@@ -39,12 +38,12 @@ The pre-registered headline triplet — Recall@5, Recall@10, NDCG@10 — for the
 
     ---
 
-    <!-- TODO: populated by first nightly -->
-    `—`
+    `0.890`
 
     Headline cell, mean across seeds.
 
 </div>
+<!-- BENCH:HEADLINE-CARDS:END -->
 
 ## Configuration
 
@@ -88,12 +87,14 @@ Full pre-registration rationale and change-control rules live in
 configuration evaluated against the same LongMemEval-S question set with the same SHA-pinned
 dataset and embedding model.
 
+<!-- BENCH:MATRIX:START -->
 | Configuration | R@5 | R@10 | NDCG@10 |
 |---|---|---|---|
-| `hybrid + recency on` (headline) | <!-- placeholder --> `—` | <!-- placeholder --> `—` | <!-- placeholder --> `—` |
-| `raw + recency on` | <!-- placeholder --> `—` | <!-- placeholder --> `—` | <!-- placeholder --> `—` |
-| `hybrid + recency off` | <!-- placeholder --> `—` | <!-- placeholder --> `—` | <!-- placeholder --> `—` |
-| `hybrid + granularity=turn` | <!-- placeholder --> `—` | <!-- placeholder --> `—` | <!-- placeholder --> `—` |
+| `hybrid + recency on` (headline) | `0.970` | `0.990` | `0.890` |
+| `raw + recency on` | `0.870` | `0.940` | `0.787` |
+| `hybrid + recency off` | `0.970` | `0.990` | `0.892` |
+| `hybrid + granularity=turn` | `0.980` | `1.000` | `0.681` |
+<!-- BENCH:MATRIX:END -->
 
 The `granularity=turn` row is shown for ablation interest only; it is not directly
 comparable to the session rows above (see the LIMITATIONS callout).
@@ -103,14 +104,16 @@ comparable to the session rows above (see the LIMITATIONS callout).
 LongMemEval-S partitions questions into six types. The headline cell scores each
 type independently.
 
+<!-- BENCH:PER-TYPE:START -->
 | Question type | R@5 | R@10 | NDCG@10 |
 |---|---|---|---|
-| `knowledge-update` | <!-- placeholder --> `—` | <!-- placeholder --> `—` | <!-- placeholder --> `—` |
-| `multi-session` | <!-- placeholder --> `—` | <!-- placeholder --> `—` | <!-- placeholder --> `—` |
-| `temporal` | <!-- placeholder --> `—` | <!-- placeholder --> `—` | <!-- placeholder --> `—` |
-| `single-session-user` | <!-- placeholder --> `—` | <!-- placeholder --> `—` | <!-- placeholder --> `—` |
-| `single-session-preference` | <!-- placeholder --> `—` | <!-- placeholder --> `—` | <!-- placeholder --> `—` |
-| `single-session-assistant` | <!-- placeholder --> `—` | <!-- placeholder --> `—` | <!-- placeholder --> `—` |
+| `knowledge-update` | `—` | `—` | `—` |
+| `multi-session` | `1.000` | `1.000` | `0.914` |
+| `temporal` | `—` | `—` | `—` |
+| `single-session-user` | `0.957` | `0.986` | `0.880` |
+| `single-session-preference` | `—` | `—` | `—` |
+| `single-session-assistant` | `—` | `—` | `—` |
+<!-- BENCH:PER-TYPE:END -->
 
 ## Graph features — Cell A regression gate, Cell B deferred
 

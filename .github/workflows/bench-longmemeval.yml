@@ -15,9 +15,10 @@
 #   1. Granting only the minimum permissions required (contents: write,
 #      pull-requests: write).
 #   2. A `verify-paths` step in the aggregator job that fails the build
-#      if the auto-PR diff touches anything outside `bench/results/**`
-#      and `bench/badge_*.json` (r5/r10/ndcg10 — emitted by the W2
-#      aggregator via --output-dir).
+#      if the auto-PR diff touches anything outside `bench/results/**`,
+#      `bench/badge_*.json` (r5/r10/ndcg10 — emitted by the W2 aggregator
+#      via --output-dir), and `docs/benchmarks.md` (templated in place by
+#      the aggregator's --docs-path step from the same source data).
 # A reviewer-side check (the `benchmark` label) is the third defence.
 #
 # Dependencies (subsequent slices, not yet landed):
@@ -346,7 +347,8 @@ jobs:
           if [ -f scripts/bench/aggregate_results.py ]; then
             python scripts/bench/aggregate_results.py \
               --results-dir bench/results/ \
-              --output-dir bench/
+              --output-dir bench/ \
+              --docs-path docs/benchmarks.md
           else
             # TODO: created by W2-bench-runner or follow-up.
             # Until the aggregator script lands, we surface the bench
@@ -362,7 +364,7 @@ jobs:
       - name: Verify paths (allowlist enforcement)
         run: |
           set -euo pipefail
-          ALLOW='^(bench/results/|bench/badge_(r5|r10|ndcg10)\.json$)'
+          ALLOW='^(bench/results/|bench/badge_(r5|r10|ndcg10)\.json$|docs/benchmarks\.md$)'
           # Stage everything that would be committed and inspect the
           # paths against the allowlist.
           git add -A
@@ -375,7 +377,7 @@ jobs:
           echo "${CHANGED}"
           BAD=$(echo "${CHANGED}" | grep -Ev "${ALLOW}" || true)
           if [ -n "${BAD}" ]; then
-            echo "ERROR: changes outside allowlist (bench/results/**, bench/badge_*.json):"
+            echo "ERROR: changes outside allowlist (bench/results/**, bench/badge_*.json, docs/benchmarks.md):"
             echo "${BAD}"
             exit 1
           fi
@@ -417,12 +419,14 @@ jobs:
             - Date (UTC): ${{ steps.pr-meta.outputs.date }}
             - JSONL receipts in this commit: ${{ steps.commit-set.outputs.include_jsonl }}
 
-            All paths in this PR are restricted to `bench/results/**` and
-            `bench/badge_*.json` by the verify-paths step.
+            All paths in this PR are restricted to `bench/results/**`,
+            `bench/badge_*.json`, and `docs/benchmarks.md` by the
+            verify-paths step.
           labels: benchmark
           add-paths: |
             bench/results/**
             bench/badge_r5.json
             bench/badge_r10.json
             bench/badge_ndcg10.json
+            docs/benchmarks.md
           delete-branch: true
