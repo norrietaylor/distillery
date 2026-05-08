@@ -366,8 +366,11 @@ class DistilleryStore(Protocol):
         Each dict contains keys: ``url``, ``source_type``, ``label``,
         ``poll_interval_minutes``, ``trust_weight``, ``last_polled_at``
         (ISO 8601 string or ``None``), ``last_item_count`` (int),
-        ``last_error`` (str or ``None``), and ``next_poll_at``
-        (ISO 8601 string or ``None``).
+        ``last_error`` (str or ``None``), ``next_poll_at``
+        (ISO 8601 string or ``None``), and per-source threshold
+        overrides ``threshold_alert`` / ``threshold_digest`` (float in
+        ``[0.0, 1.0]`` or ``None`` to fall back to the global
+        ``feeds.thresholds`` values).
 
         Returns:
             List of feed source dicts ordered by creation time.
@@ -381,6 +384,8 @@ class DistilleryStore(Protocol):
         label: str = "",
         poll_interval_minutes: int = 60,
         trust_weight: float = 1.0,
+        threshold_alert: float | None = None,
+        threshold_digest: float | None = None,
     ) -> dict[str, Any]:
         """Persist a new feed source and return it as a dict.
 
@@ -390,6 +395,12 @@ class DistilleryStore(Protocol):
             label: Human-readable label.
             poll_interval_minutes: Poll frequency in minutes.
             trust_weight: Relevance multiplier in ``[0.0, 1.0]``.
+            threshold_alert: Optional per-source override of
+                ``feeds.thresholds.alert`` in ``[0.0, 1.0]``.  ``None``
+                falls back to the global value.
+            threshold_digest: Optional per-source override of
+                ``feeds.thresholds.digest`` in ``[0.0, 1.0]``.  ``None``
+                falls back to the global value.
 
         Returns:
             Dict with the stored feed source fields.
@@ -526,6 +537,22 @@ class DistilleryStore(Protocol):
             List of dicts with keys: ``id``, ``from_id``, ``to_id``,
             ``relation_type``, ``created_at`` (ISO 8601 str).  Ordered by
             ascending ``created_at``.
+        """
+        ...
+
+    async def reconcile_relations(self) -> dict[str, int]:
+        """Re-run idempotent edge-population mechanisms and return insert counts.
+
+        Recovery hook for ``distillery_relations action="reconcile"`` (issue
+        #490 mechanism #9).  Re-scans every entry's ``metadata.related_entries``
+        and inserts any missing rows into ``entry_relations``; relies on the
+        unique ``(from_id, to_id, relation_type)`` index for idempotency.
+
+        Returns:
+            Dict with at least ``metadata_links`` (rows inserted from
+            ``metadata.related_entries``) and ``total``.  Future mechanisms
+            (#3-#8 in issue #490) will contribute additional named keys
+            without changing the existing contract.
         """
         ...
 

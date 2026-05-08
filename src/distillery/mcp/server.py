@@ -198,6 +198,8 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                             label=src.label,
                             poll_interval_minutes=src.poll_interval_minutes,
                             trust_weight=src.trust_weight,
+                            threshold_alert=src.thresholds.alert,
+                            threshold_digest=src.thresholds.digest,
                         )
                 await store.set_metadata("feeds_seeded", "true")
             # Wire the sync-job tracker to the store and reconcile any
@@ -889,6 +891,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         llm_responses: list[dict[str, Any]] | None = None,
         source_entry_id: str | None = None,
         exclude_linked: bool = False,
+        accept_action: str | None = None,
     ) -> list[types.TextContent]:
         """Find stored entries similar to the given text (cosine similarity).
 
@@ -915,6 +918,11 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
           - exclude_linked (bool, optional, default=false): When true, filters out
             entries already linked to source_entry_id via entry_relations
             (any direction, any relation_type). Surfaces hidden connections.
+          - accept_action (str, optional): When set, persists an
+            entry_relations row from source_entry_id to each result above
+            threshold. Valid: ['link' → related, 'merge' → merge_source,
+            'duplicate' → duplicate]. Requires source_entry_id. Idempotent via
+            the unique (from_id, to_id, relation_type) index.
 
         RETURNS (success): { results: [{ score: float, entry: {...} }], count: int, threshold: float,
           dedup?: { action: str, similar_entries: list },
@@ -942,6 +950,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 content=content,
                 llm_responses=llm_responses,
                 source_entry_id=source_entry_id,
+                accept_action=accept_action,
             ),
         )
         return await _handle_find_similar(store=c["store"], cfg=c["config"], arguments=args)
@@ -1071,6 +1080,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         label: str | None = None,
         poll_interval_minutes: int | None = None,
         trust_weight: float | None = None,
+        thresholds: dict[str, float] | None = None,
         sync_history: bool = False,
         purge: bool = False,
         probe: bool = True,
@@ -1088,6 +1098,13 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
           - label (str, optional): Human-readable label for the source.
           - poll_interval_minutes (int, optional, default=60): Polling frequency in minutes.
           - trust_weight (float, optional, default=1.0): Source trust weight (0-1).
+          - thresholds (object, optional): Per-source overrides for the global
+            ``feeds.thresholds`` values.  Mapping with optional float keys
+            ``alert`` and/or ``digest`` in [0.0, 1.0] (when both set,
+            ``digest <= alert``).  When omitted, the global cutoffs apply
+            (pre-existing behaviour).  Use this to raise the bar for noisy
+            aggregators (HN/Lobsters/Reddit) since ``trust_weight`` only
+            attenuates downward.
           - sync_history (bool, optional, default=false): When true and source_type is
             "github", kicks off an async background import of historical issues/PRs
             (returns immediately with job_id; use distillery_sync_status to check progress).
@@ -1123,6 +1140,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                     label=label,
                     poll_interval_minutes=poll_interval_minutes,
                     trust_weight=trust_weight,
+                    thresholds=thresholds,
                     sync_history=sync_history or None,
                     purge=purge or None,
                 ),

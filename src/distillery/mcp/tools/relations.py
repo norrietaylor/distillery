@@ -83,10 +83,11 @@ async def _handle_relations(
         )
     action = action_raw.strip().lower()
 
-    if action not in ("add", "get", "remove", "traverse", "metrics"):
+    if action not in ("add", "get", "remove", "traverse", "metrics", "reconcile"):
         return error_response(
             "INVALID_PARAMS",
-            f"action must be one of 'add', 'get', 'remove', 'traverse', 'metrics'; got: {action!r}",
+            "action must be one of 'add', 'get', 'remove', 'traverse', 'metrics', "
+            f"'reconcile'; got: {action!r}",
         )
 
     # ------------------------------------------------------------------
@@ -325,6 +326,24 @@ async def _handle_relations(
     # ------------------------------------------------------------------
     if action == "metrics":
         return await _handle_metrics(store, arguments)
+
+    # ------------------------------------------------------------------
+    # action == "reconcile"
+    # ------------------------------------------------------------------
+    if action == "reconcile":
+        try:
+            counts = await store.reconcile_relations()
+        except Exception:  # noqa: BLE001
+            logger.exception("distillery_relations reconcile: unexpected error")
+            return error_response("INTERNAL", "Failed to reconcile relations")
+
+        return success_response(
+            {
+                "action": "reconcile",
+                "metadata_links": counts.get("metadata_links", 0),
+                "total": counts.get("total", 0),
+            }
+        )
 
     # ------------------------------------------------------------------
     # action == "remove"

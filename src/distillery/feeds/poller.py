@@ -555,6 +555,31 @@ class FeedPoller:
         self._alert_threshold_warning_emitted = False
         self._reader = reader
 
+    def _resolve_digest_threshold(self, source: FeedSourceConfig) -> float:
+        """Return the effective digest threshold for *source*.
+
+        Prefers ``source.thresholds.digest`` when set; otherwise falls back
+        to the poller-level default (which itself is sourced from
+        ``feeds.thresholds.digest`` unless overridden via the
+        ``relevance_threshold`` constructor argument).  The fallback path
+        preserves pre-#480 behaviour exactly.
+        """
+        override: float | None = getattr(getattr(source, "thresholds", None), "digest", None)
+        if override is not None:
+            return override
+        return self._threshold
+
+    def _resolve_alert_threshold(self, source: FeedSourceConfig) -> float:
+        """Return the effective alert threshold for *source*.
+
+        Prefers ``source.thresholds.alert`` when set; otherwise falls back
+        to ``feeds.thresholds.alert`` (the poller-level default).
+        """
+        override: float | None = getattr(getattr(source, "thresholds", None), "alert", None)
+        if override is not None:
+            return override
+        return self._alert_threshold
+
     async def poll(self, *, source_url: str | None = None) -> PollerSummary:
         """Execute a full poll cycle across configured sources.
 
@@ -566,7 +591,7 @@ class FeedPoller:
         """
         summary = PollerSummary(started_at=datetime.now(tz=UTC))
 
-        from distillery.config import FeedSourceConfig
+        from distillery.config import FeedSourceConfig, FeedSourceThresholdsConfig
 
         db_sources = await self._store.list_feed_sources()
         if source_url is not None:
@@ -576,9 +601,14 @@ class FeedPoller:
         # kwargs before instantiation.  Capture which sources have never been
         # polled so the first batch can be flagged as backfill (issue #444).
         _cfg_fields = {"url", "source_type", "label", "poll_interval_minutes", "trust_weight"}
-        sources = [
-            FeedSourceConfig(**{k: v for k, v in s.items() if k in _cfg_fields}) for s in db_sources
-        ]
+        sources: list[FeedSourceConfig] = []
+        for s in db_sources:
+            kwargs = {k: v for k, v in s.items() if k in _cfg_fields}
+            kwargs["thresholds"] = FeedSourceThresholdsConfig(
+                alert=s.get("threshold_alert"),
+                digest=s.get("threshold_digest"),
+            )
+            sources.append(FeedSourceConfig(**kwargs))
         first_poll_urls: set[str] = {
             s["url"] for s in db_sources if s.get("last_polled_at") is None
         }
@@ -868,13 +898,18 @@ class FeedPoller:
                 continue
             adjusted_score = score * source.trust_weight
 
-            if adjusted_score < self._threshold:
+            # Resolve effective thresholds: per-source overrides win over
+            # the poller-level (global) defaults so noisy aggregators
+            # (HN/Lobsters/Reddit) can be held to a higher bar than vendor
+            # blogs even though ``trust_weight`` only attenuates downward.
+            effective_digest = self._resolve_digest_threshold(source)
+            if adjusted_score < effective_digest:
                 result.items_below_threshold += 1
                 logger.debug(
                     "FeedPoller: item %r score %.3f below threshold %.3f",
                     item.item_id,
                     adjusted_score,
-                    self._threshold,
+                    effective_digest,
                 )
                 continue
 
@@ -887,14 +922,15 @@ class FeedPoller:
                 # failure as "not alert-worthy" — we never want a malformed
                 # threshold to break the store path.  Log once per poller so
                 # misconfiguration is observable without spamming the log.
+                effective_alert = self._resolve_alert_threshold(source)
                 try:
-                    is_alert = adjusted_score >= float(self._alert_threshold)
+                    is_alert = adjusted_score >= float(effective_alert)
                 except (TypeError, ValueError) as exc:
                     if not self._alert_threshold_warning_emitted:
                         logger.warning(
                             "FeedPoller: invalid alert threshold %r (%s); "
                             "alert tagging disabled for this poller instance",
-                            self._alert_threshold,
+                            effective_alert,
                             exc,
                         )
                         self._alert_threshold_warning_emitted = True
