@@ -1,0 +1,39 @@
+{
+  "n_questions": 100,
+  "overall": {
+    "recall_at_5": 0.97,
+    "recall_at_10": 0.99,
+    "ndcg_at_10": 0.8795885647462985
+  },
+  "per_question_type": {
+    "multi-session": {
+      "n": 30,
+      "recall_at_5": 1.0,
+      "recall_at_10": 1.0,
+      "ndcg_at_10": 0.9032888434109048
+    },
+    "single-session-user": {
+      "n": 70,
+      "recall_at_5": 0.9571428571428572,
+      "recall_at_10": 0.9857142857142858,
+      "ndcg_at_10": 0.8694313024614674
+    }
+  },
+  "axes": {
+    "retrieval": "hybrid",
+    "granularity": "session",
+    "recency_requested": "on",
+    "effective_recency": "on",
+    "embed_model": "bge-small",
+    "seeds": 1,
+    "seed_offset": 0,
+    "expand_graph": false,
+    "limit": 100
+  },
+  "dataset": {
+    "revision_sha": "98d7416c24c778c2fee6e6f3006e7a073259d48f",
+    "file_sha256": "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442"
+  },
+  "git_sha": "8465814371152d04c265ea1a98910e00d9490837",
+  "timestamp_utc": "2026-05-13T08:14:42.270236+00:00"
+}
