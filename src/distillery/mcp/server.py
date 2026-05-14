@@ -217,6 +217,25 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                     )
             except Exception:  # noqa: BLE001
                 logger.exception("Sync-job tracker hydration failed (non-fatal)")
+
+            # Sweep any stale webhook job pointers carried over from a
+            # previous run.  In-memory state is normally empty on cold
+            # start, but Fly autosuspend (issue #507) can resume a process
+            # with the ``_active_job_by_endpoint`` dict still populated
+            # from a poll that never reached a terminal state — leaving
+            # every subsequent ``/api/poll`` permanently blocked on a 409.
+            try:
+                from distillery.mcp.webhooks import sweep_stale_jobs
+
+                swept = await sweep_stale_jobs()
+                if swept:
+                    logger.info(
+                        "Swept %d stale webhook job pointer(s) on startup "
+                        "(issue #507 recovery path)",
+                        swept,
+                    )
+            except Exception:  # noqa: BLE001
+                logger.exception("Stale-job sweep failed (non-fatal)")
             _shared.update(store=store, config=config, embedding_provider=ep)
             # Record startup timestamp for distillery_status uptime reporting.
             # Stored in shared state (not replaced on subsequent lifespan entries

@@ -97,6 +97,19 @@ _init_lock = asyncio.Lock()
 # Maximum number of job records to retain in memory.
 _JOBS_MAX = 100
 
+# Maximum age (seconds) before an in-flight job is treated as orphaned.
+#
+# Issue #507: when Fly autosuspends a machine mid-poll, the background asyncio
+# task dies but the in-memory ``_jobs`` / ``_active_job_by_endpoint`` registry
+# survives across resume.  Without an age guard the stale "running" pointer
+# permanently blocks every subsequent ``/api/poll`` with a 409.  Any
+# non-terminal job whose ``submitted_at`` is older than this threshold is
+# swept (marked failed and cleared from the active-job pointer) so the next
+# request either succeeds or returns 429 for a real cooldown — never a stale
+# 409.  Sized well above the longest realistic poll cycle so live jobs are
+# never misclassified.
+_ACTIVE_JOB_TTL_SECONDS: int = 1800  # 30 minutes
+
 
 @dataclass
 class _JobStatus:
@@ -116,6 +129,67 @@ class _JobStatus:
 _jobs: OrderedDict[str, _JobStatus] = OrderedDict()
 _active_job_by_endpoint: dict[str, str] = {}
 _jobs_lock = asyncio.Lock()
+
+
+def _is_stale(job: _JobStatus, *, now: datetime | None = None) -> bool:
+    """Return ``True`` when *job* is non-terminal and older than the TTL.
+
+    A job is considered stale when it has not reached ``succeeded`` or
+    ``failed`` and its ``submitted_at`` timestamp is more than
+    :data:`_ACTIVE_JOB_TTL_SECONDS` in the past.  The Fly autosuspend
+    scenario (issue #507) is the canonical example: the asyncio task is
+    dead but the in-memory record cannot tell, so we use elapsed time as
+    a proxy for "this cannot still be running".
+    """
+    if job.state in ("succeeded", "failed"):
+        return False
+    now = now or datetime.now(UTC)
+    age = (now - job.submitted_at).total_seconds()
+    return age > _ACTIVE_JOB_TTL_SECONDS
+
+
+async def sweep_stale_jobs() -> int:
+    """Clear stale in-flight jobs from the in-memory registry.
+
+    Sweeps both the ``_jobs`` table and the ``_active_job_by_endpoint``
+    pointer.  Any non-terminal job older than :data:`_ACTIVE_JOB_TTL_SECONDS`
+    is transitioned to ``failed`` with a descriptive error so callers
+    polling ``GET /jobs/{id}`` see a clear cause; its endpoint pointer is
+    also dropped so the next ``POST`` can enqueue a fresh job.
+
+    Called from the webhook app's startup hook (issue #507) and as a
+    request-time safety net inside :func:`_active_job_id`.  Returns the
+    number of jobs that were marked stale, which the startup hook logs.
+    """
+    swept = 0
+    async with _jobs_lock:
+        now = datetime.now(UTC)
+        stale_ids: list[str] = []
+        for job_id, job in _jobs.items():
+            if _is_stale(job, now=now):
+                stale_ids.append(job_id)
+        for job_id in stale_ids:
+            job = _jobs[job_id]
+            job.state = "failed"
+            job.finished_at = now
+            job.error = (
+                f"orphaned: no terminal state after {_ACTIVE_JOB_TTL_SECONDS}s "
+                "(likely killed by machine suspend or crash)"
+            )
+            if _active_job_by_endpoint.get(job.endpoint) == job_id:
+                del _active_job_by_endpoint[job.endpoint]
+            swept += 1
+        # Defensive: drop any active-job pointer whose underlying record was
+        # evicted from the FIFO (mirrors the existing _active_job_id guard
+        # but covers the startup-time sweep where _active_job_id has not
+        # yet been called).
+        orphan_pointers = [
+            endpoint for endpoint, jid in _active_job_by_endpoint.items() if jid not in _jobs
+        ]
+        for endpoint in orphan_pointers:
+            del _active_job_by_endpoint[endpoint]
+            swept += 1
+    return swept
 
 
 async def _register_job(endpoint: str) -> _JobStatus:
@@ -142,8 +216,13 @@ async def _register_job(endpoint: str) -> _JobStatus:
 async def _active_job_id(endpoint: str) -> str | None:
     """Return the current active job id for *endpoint*, if any is in flight.
 
-    Stale pointers (job record evicted or already terminal) are cleaned up so
-    subsequent requests aren't blocked by a pointer to a completed job.
+    Stale pointers (job record evicted, already terminal, or older than
+    :data:`_ACTIVE_JOB_TTL_SECONDS` without reaching a terminal state) are
+    cleaned up so subsequent requests aren't blocked by a pointer to a
+    completed or orphaned job.  The TTL guard is the request-time half of
+    the issue #507 fix: even when startup never runs (e.g. Fly autosuspend
+    resumes the same process with memory intact), an aged-out pointer is
+    self-healed on the next request.
     """
     async with _jobs_lock:
         job_id = _active_job_by_endpoint.get(endpoint)
@@ -151,6 +230,15 @@ async def _active_job_id(endpoint: str) -> str | None:
             return None
         job = _jobs.get(job_id)
         if job is None or job.state in ("succeeded", "failed"):
+            _active_job_by_endpoint.pop(endpoint, None)
+            return None
+        if _is_stale(job):
+            job.state = "failed"
+            job.finished_at = datetime.now(UTC)
+            job.error = (
+                f"orphaned: no terminal state after {_ACTIVE_JOB_TTL_SECONDS}s "
+                "(likely killed by machine suspend or crash)"
+            )
             _active_job_by_endpoint.pop(endpoint, None)
             return None
         return job_id
@@ -1499,6 +1587,35 @@ def create_webhook_app(
     # proper Starlette instance (required for Mount).
     from distillery.mcp.middleware import RateLimitMiddleware
 
+    @contextlib.asynccontextmanager
+    async def _lifespan(_app: Starlette) -> Any:
+        """Sweep stale in-flight jobs at app boot (issue #507).
+
+        On a clean restart the in-memory registry is already empty so this
+        is a no-op.  On platforms whose lifecycle preserves Python memory
+        across "restart"-like events (the documented Fly autosuspend case)
+        the sweep is the recovery path: any non-terminal job whose
+        ``submitted_at`` predates the TTL is marked failed and its
+        active-job pointer dropped so the next ``POST /api/poll`` enqueues
+        a fresh job rather than returning a permanent 409.
+
+        Starlette removed ``on_startup``/``on_shutdown`` in newer versions
+        in favour of a single ``lifespan`` async context manager, so the
+        sweep is wired via this contextmanager.  Failure to sweep must
+        never block app startup — exceptions are logged and swallowed.
+        """
+        try:
+            swept = await sweep_stale_jobs()
+        except Exception:  # noqa: BLE001
+            logger.exception("Webhook startup: stale-job sweep failed")
+        else:
+            if swept:
+                logger.info(
+                    "Webhook startup: swept %d stale in-flight job(s) (issue #507 recovery path)",
+                    swept,
+                )
+        yield
+
     app = Starlette(
         routes=routes,
         middleware=[
@@ -1513,6 +1630,7 @@ def create_webhook_app(
                 skip_get_path_prefixes=("/jobs/",),
             ),
         ],
+        lifespan=_lifespan,
     )
 
     return app
