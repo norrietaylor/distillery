@@ -99,6 +99,120 @@ async def test_add_relation_stores_relation_type(store) -> None:  # type: ignore
 
 
 # ---------------------------------------------------------------------------
+# add_relation read-path alignment (issue #515 — _sync_add_relation must accept
+# any entry the read path can return, including archived rows).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_add_relation_accepts_archived_entries(store) -> None:  # type: ignore[no-untyped-def]
+    """Archived entries are still valid endpoints for add_relation.
+
+    Prevents regression of the asymmetry described in issue #515:
+    ``relations.add`` must align with the read path's permissive
+    existence check (``include_archived=True``) so historical edges
+    can still be inserted against soft-deleted rows.
+    """
+    from_id = await _store_entry(store, content="entry A (will be archived)")
+    to_id = await _store_entry(store, content="entry B (will be archived)")
+
+    # Archive both endpoints — store.delete is a soft-delete (status="archived").
+    assert await store.delete(from_id) is True
+    assert await store.delete(to_id) is True
+
+    # Sanity: default include_archived=False hides them from the get path,
+    # but include_archived=True still returns them.
+    assert await store.get(from_id) is None
+    assert await store.get(to_id) is None
+    assert await store.get(from_id, include_archived=True) is not None
+    assert await store.get(to_id, include_archived=True) is not None
+
+    # add_relation must succeed: archived endpoints are still in entries.
+    relation_id = await store.add_relation(from_id, to_id, "link")
+    assert isinstance(relation_id, str)
+    assert len(relation_id) > 0
+
+
+@pytest.mark.unit
+async def test_add_relation_uses_shared_existence_helper(store) -> None:  # type: ignore[no-untyped-def]
+    """_sync_add_relation routes its existence check through _sync_entry_exists.
+
+    Locks in the structural alignment that closes issue #515. If a future
+    refactor reintroduces a divergent SELECT in _sync_add_relation, this
+    test (which monkeypatches the helper) will fail.
+    """
+    from_id = await _store_entry(store, content="entry A")
+    to_id = await _store_entry(store, content="entry B")
+
+    # Force the helper to reject every id — _sync_add_relation must observe
+    # that and raise. If _sync_add_relation bypasses the helper with its
+    # own inline SELECT, the call would succeed and this test would fail.
+    def _always_missing(_entry_id: str) -> bool:
+        return False
+
+    store._sync_entry_exists = _always_missing  # type: ignore[method-assign]
+    try:
+        with pytest.raises(ValueError, match="Entry not found"):
+            await store.add_relation(from_id, to_id, "link")
+    finally:
+        # Restore the bound method so subsequent fixture teardown is clean.
+        del store._sync_entry_exists
+
+
+@pytest.mark.unit
+async def test_add_relation_error_carries_diagnostic(store) -> None:  # type: ignore[no-untyped-def]
+    """The NOT_FOUND ValueError surfaces a diagnostic dict for operators.
+
+    Issue #515's hardest property to debug in production was the absence
+    of any signal about *why* the existence check disagreed with the
+    read path. The error message now embeds a ``diagnostic`` dict
+    enumerating visibility from the read path, base-table count, and
+    relation-endpoint presence so the next investigation has data on
+    the first try.
+    """
+    to_id = await _store_entry(store, content="real entry")
+    missing_id = "00000000-0000-0000-0000-000000000000"
+
+    with pytest.raises(ValueError) as excinfo:
+        await store.add_relation(missing_id, to_id, "link")
+
+    msg = str(excinfo.value)
+    assert "from_id" in msg
+    assert "diagnostic=" in msg
+    # The four core diagnostic probes are always recorded, even when
+    # their underlying tables are empty.
+    assert "entries_count" in msg
+    assert "visible_via_get" in msg
+    assert "relation_endpoint" in msg
+
+
+@pytest.mark.unit
+async def test_sync_diagnose_missing_entry_reports_orphaned_edge(store) -> None:  # type: ignore[no-untyped-def]
+    """Diagnostic helper flags the orphaned-edge case from issue #515.
+
+    Simulates the prod state hypothesised in the issue: a row that was
+    deleted from ``entries`` but still appears as an endpoint in
+    ``entry_relations``. The diagnostic must report
+    ``entries_count == 0`` while ``relation_endpoint`` is True so an
+    operator can tell at a glance that the row was orphaned by a
+    maintenance pass.
+    """
+    a = await _store_entry(store, content="endpoint A")
+    b = await _store_entry(store, content="endpoint B")
+    await store.add_relation(a, b, "link")
+
+    # Hard-delete ``a`` from entries directly (bypass the soft-delete path)
+    # to mirror the prod symptom: edges intact, base row gone.
+    conn = store.connection
+    conn.execute("DELETE FROM entries WHERE id = ?", [a])
+
+    diag = await store._run_sync(store._sync_diagnose_missing_entry, a)
+    assert diag["entries_count"] == 0
+    assert diag["visible_via_get"] is False
+    assert diag["relation_endpoint"] is True
+
+
+# ---------------------------------------------------------------------------
 # get_related
 # ---------------------------------------------------------------------------
 
