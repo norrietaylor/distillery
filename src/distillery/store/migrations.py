@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import re
 from typing import Any, Protocol
 
 import duckdb
@@ -207,6 +208,89 @@ def create_hnsw_index(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
         logger.debug("Migration 6: HNSW index already exists, skipping")
     except duckdb.BinderException:
         logger.warning("Migration 6: HNSW index type not recognized, skipping")
+
+
+_WIKILINK_PATTERN = re.compile(r"\[\[entry-([0-9a-f]{8})\]\]")
+
+
+def backfill_relations_from_wikilinks(conn: duckdb.DuckDBPyConnection) -> int:
+    """Scan ``entries.content`` for ``[[entry-<8-hex>]]`` refs and insert ``link`` rows.
+
+    Idempotent: relies on the ``idx_entry_relations_unique`` unique index on
+    ``(from_id, to_id, relation_type)`` so re-running never produces duplicates.
+    Returns the number of rows actually inserted (excludes index-suppressed
+    duplicates, self-references, dangling targets and ambiguous prefixes).
+
+    This helper is the single source of truth for mechanism #8 in issue #496
+    (inline wikilink reference parsing).  Entry IDs are UUID4 strings, so the
+    leading 8-hex prefix is the first dash-delimited segment.  When two or
+    more existing entries share the same 8-hex prefix the reference is
+    ambiguous and is skipped entirely (no edge is written to either
+    candidate) — idempotency + safety beat completeness.
+
+    The caller is responsible for transaction management — this function
+    assumes ``entry_relations`` (and its unique index) already exist.
+    """
+    import uuid
+
+    # Build a prefix -> id map up front.  Prefixes that collide (>= 2 entries
+    # share the same first 8 hex chars) are tracked as "ambiguous" and
+    # excluded from the lookup, mirroring the safety-over-completeness rule.
+    prefix_to_id: dict[str, str] = {}
+    ambiguous: set[str] = set()
+    all_ids: set[str] = set()
+    for (entry_id,) in conn.execute("SELECT id FROM entries").fetchall():
+        if not isinstance(entry_id, str) or len(entry_id) < 8:
+            continue
+        all_ids.add(entry_id)
+        prefix = entry_id[:8].lower()
+        if prefix in ambiguous:
+            continue
+        existing = prefix_to_id.get(prefix)
+        if existing is None:
+            prefix_to_id[prefix] = entry_id
+        elif existing != entry_id:
+            # Two distinct entries share the same 8-hex prefix — refuse to
+            # link to either to avoid silently picking the wrong target.
+            ambiguous.add(prefix)
+            del prefix_to_id[prefix]
+            logger.debug(
+                "Wikilink backfill: prefix %r is ambiguous; skipping all references", prefix
+            )
+
+    rows = conn.execute("SELECT id, content FROM entries WHERE content IS NOT NULL").fetchall()
+    inserted = 0
+    for entry_id, content in rows:
+        if not isinstance(content, str) or not content:
+            continue
+        # ``set`` to dedupe multiple occurrences of the same prefix within a
+        # single entry — the unique index would catch them anyway, but this
+        # avoids the extra round-trips.
+        seen_prefixes: set[str] = set()
+        for match in _WIKILINK_PATTERN.finditer(content):
+            prefix = match.group(1).lower()
+            if prefix in seen_prefixes:
+                continue
+            seen_prefixes.add(prefix)
+            to_id = prefix_to_id.get(prefix)
+            if to_id is None:
+                # Either ambiguous (already logged above) or no such entry.
+                continue
+            if to_id == entry_id:
+                # Self-references are not meaningful.
+                continue
+            if to_id not in all_ids:
+                continue
+            relation_id = str(uuid.uuid4())
+            row = conn.execute(
+                "INSERT OR IGNORE INTO entry_relations (id, from_id, to_id, relation_type) "
+                "VALUES (?, ?, ?, 'link') RETURNING id",
+                [relation_id, entry_id, to_id],
+            ).fetchone()
+            if row:
+                inserted += 1
+
+    return inserted
 
 
 def backfill_relations_from_metadata(conn: duckdb.DuckDBPyConnection) -> int:

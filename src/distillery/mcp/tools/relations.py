@@ -341,6 +341,7 @@ async def _handle_relations(
             {
                 "action": "reconcile",
                 "metadata_links": counts.get("metadata_links", 0),
+                "wikilink_links": counts.get("wikilink_links", 0),
                 "total": counts.get("total", 0),
             }
         )
