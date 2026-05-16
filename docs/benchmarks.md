@@ -92,7 +92,7 @@ dataset and embedding model.
 |---|---|---|---|
 | `hybrid + recency on` (headline) | `0.970` | `0.990` | `0.890` |
 | `raw + recency on` | `0.870` | `0.940` | `0.787` |
-| `hybrid + recency off` | `0.970` | `0.990` | `0.892` |
+| `hybrid + recency off` | `0.970` | `0.990` | `0.887` |
 | `hybrid + granularity=turn` | `0.980` | `1.000` | `0.681` |
 <!-- BENCH:MATRIX:END -->
 
