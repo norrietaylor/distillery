@@ -1,47 +1,47 @@
 {
   "cell": "graph_regression_cell_a",
   "config": "hybrid/session/recency-on/bge-small/expand_graph=true",
-  "questions": 500,
+  "questions": 100,
   "seeds": [
     {
       "seed_offset": 0,
-      "r5": 0.972,
-      "r10": 0.986,
-      "ndcg10": 0.904159415149803
+      "r5": 0.97,
+      "r10": 0.99,
+      "ndcg10": 0.8847200438230978
     },
     {
       "seed_offset": 1,
-      "r5": 0.972,
-      "r10": 0.986,
-      "ndcg10": 0.9077913715025137
+      "r5": 0.97,
+      "r10": 0.99,
+      "ndcg10": 0.8923926402897239
     },
     {
       "seed_offset": 2,
-      "r5": 0.972,
-      "r10": 0.986,
-      "ndcg10": 0.9090497684001617
+      "r5": 0.97,
+      "r10": 0.99,
+      "ndcg10": 0.8938334169022375
     },
     {
       "seed_offset": 3,
-      "r5": 0.972,
-      "r10": 0.986,
-      "ndcg10": 0.9050063543843158
+      "r5": 0.97,
+      "r10": 0.99,
+      "ndcg10": 0.8901427144379521
     },
     {
       "seed_offset": 4,
-      "r5": 0.972,
-      "r10": 0.986,
-      "ndcg10": 0.90305211245423
+      "r5": 0.97,
+      "r10": 0.99,
+      "ndcg10": 0.883279267210584
     }
   ],
-  "mean_r5": 0.972,
+  "mean_r5": 0.97,
   "stddev_r5": 0.0,
-  "min_r5": 0.972,
-  "max_r5": 0.972,
+  "min_r5": 0.97,
+  "max_r5": 0.97,
   "headline_mean_r5": 0.972,
   "headline_questions": 500,
-  "sample_size_match": true,
-  "delta_r5_pp": 0.0,
+  "sample_size_match": false,
+  "delta_r5_pp": null,
   "delta_threshold_pp": 0.5,
-  "gate_pass": true
+  "gate_pass": null
 }
