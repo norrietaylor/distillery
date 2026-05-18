@@ -388,6 +388,9 @@ class TestMachineTokenAuth:
         assert raw == "tok-secret-123"
         assert access.client_id == "spectacles-bot"
         assert access.claims["login"] == "spectacles-bot"
+        # Must carry the `user` scope or FastMCP's auth layer rejects the
+        # otherwise-authenticated token with 403 insufficient_scope.
+        assert "user" in access.scopes
 
     def test_load_machine_tokens_default_identity(
         self, monkeypatch: pytest.MonkeyPatch
