@@ -231,8 +231,9 @@ class OrgMembershipChecker:
         Response codes:
         * 204 — member.
         * 404 — not a member (or org does not exist).
-        * 302 — org is private and the token cannot see it; fall back to
-          ``GET /user/orgs`` if a token is available.
+        * 302 — the token is not seen as an org member, so GitHub will only
+          answer the public-membership endpoint; follow there via
+          :meth:`_fetch_public_member`.
         * anything else / network error — fail closed (deny).
         """
         headers: dict[str, str] = {
@@ -255,15 +256,10 @@ class OrgMembershipChecker:
             if resp.status_code == 404:
                 return False
             if resp.status_code == 302:
-                if token:
-                    return await self._fetch_via_user_orgs(token, org)
-                logger.warning(
-                    "Org %r is private but no GitHub token is available for the "
-                    "/user/orgs fallback. Set GITHUB_ORG_CHECK_TOKEN or enable "
-                    "read:org scope on the OAuth app.",
-                    org,
-                )
-                return False
+                # The token lacks org-member context, so GitHub redirects to
+                # the public-membership endpoint. Follow there — a public
+                # member resolves with no token scope at all.
+                return await self._fetch_public_member(username, org)
             logger.warning(
                 "Unexpected GitHub API status %s checking %s in %s",
                 resp.status_code,
@@ -280,41 +276,47 @@ class OrgMembershipChecker:
             )
             return False
 
-    async def _fetch_via_user_orgs(self, token: str, org: str) -> bool:
-        """Fallback: ``GET /user/orgs`` — lists all orgs the user belongs to.
+    async def _fetch_public_member(self, username: str, org: str) -> bool:
+        """Call ``GET /orgs/{org}/public_members/{username}``.
 
-        Used when ``GET /orgs/{org}/members/{username}`` returns 302 (private
-        org; token cannot see direct member list).  The user's own token with
-        ``read:org`` scope *can* list their private org memberships here.
+        Reached when ``GET /orgs/{org}/members/{username}`` returns 302 — the
+        token is not seen as an org member, so GitHub will only confirm
+        *public* membership. This endpoint needs no token or scope.
 
-        Paginates through all pages (100 per page) to handle users who are
-        members of more than 100 organisations.
+        * 204 — the user is a public member of the org.
+        * 404 — not a public member. A *private* membership is invisible
+          here; to gate private members, set ``GITHUB_ORG_CHECK_TOKEN`` (a
+          ``read:org`` PAT) so the members endpoint answers 204/404 directly.
+        * anything else / network error — fail closed (deny).
         """
         headers = {
-            "Authorization": f"Bearer {token}",
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
         }
-        org_lower = org.lower()
-        # Cap at 50 pages (5 000 orgs) to avoid infinite loops.
-        max_pages = 50
         try:
-            async with httpx.AsyncClient(timeout=10.0, verify=True) as client:
-                for page in range(1, max_pages + 1):
-                    resp = await client.get(
-                        f"{GITHUB_API}/user/orgs",
-                        headers=headers,
-                        params={"per_page": 100, "page": page},
-                    )
-                    if resp.status_code != 200:
-                        logger.warning("GET /user/orgs returned %s", resp.status_code)
-                        return False
-                    orgs: list[dict[str, Any]] = resp.json()
-                    if not orgs:
-                        break
-                    if any(o.get("login", "").lower() == org_lower for o in orgs):
-                        return True
-        except (httpx.HTTPError, ValueError) as exc:
-            logger.error("GitHub /user/orgs API error: %s", exc)
+            async with httpx.AsyncClient(
+                timeout=10.0, follow_redirects=False, verify=True
+            ) as client:
+                resp = await client.get(
+                    f"{GITHUB_API}/orgs/{org}/public_members/{username}",
+                    headers=headers,
+                )
+            if resp.status_code == 204:
+                return True
+            if resp.status_code == 404:
+                return False
+            logger.warning(
+                "Unexpected GitHub API status %s on public_members for %s in %s",
+                resp.status_code,
+                username,
+                org,
+            )
             return False
-        return False
+        except httpx.HTTPError as exc:
+            logger.error(
+                "GitHub public_members API error for %s in %s: %s",
+                username,
+                org,
+                exc,
+            )
+            return False
