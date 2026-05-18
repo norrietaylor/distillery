@@ -31,6 +31,24 @@ class TestInitialization:
         await s.initialize()  # should be a no-op
         await s.close()
 
+    async def test_initialize_survives_unsupported_chmod(
+        self, mock_embedding_provider, tmp_path, monkeypatch
+    ) -> None:
+        """A filesystem that rejects chmod (e.g. GCS FUSE) must not abort startup."""
+
+        def _refuse_chmod(*_args, **_kwargs) -> None:
+            raise OSError(1, "Operation not permitted")
+
+        monkeypatch.setattr("os.chmod", _refuse_chmod)
+
+        db_path = tmp_path / "distillery.db"
+        s = DuckDBStore(
+            db_path=str(db_path), embedding_provider=mock_embedding_provider
+        )
+        await s.initialize()
+        assert s.connection is not None
+        await s.close()
+
     async def test_connection_raises_before_initialize(self, mock_embedding_provider) -> None:
         s = DuckDBStore(db_path=":memory:", embedding_provider=mock_embedding_provider)
         with pytest.raises(RuntimeError, match="initialize"):
