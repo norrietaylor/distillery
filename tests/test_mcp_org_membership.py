@@ -564,3 +564,32 @@ class TestBuildOrgChecker:
         checker = build_org_checker(config)
         assert checker is not None
         assert checker._allowed_orgs.count("acme") == 1
+
+
+# ---------------------------------------------------------------------------
+# Cache bounds
+# ---------------------------------------------------------------------------
+
+
+class TestCacheBounds:
+    """Both caches are keyed by request-supplied values, so they must stay
+    bounded regardless of how many distinct keys are seen."""
+
+    async def test_membership_cache_is_bounded(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("distillery.mcp.org_membership._MAX_CACHE_ENTRIES", 5)
+        checker = OrgMembershipChecker(allowed_orgs=["acme"])
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client_cls.return_value = _make_async_client_mock(_mock_response(404))
+            for i in range(40):
+                await checker.is_allowed(f"user{i}", hint_token="tok")
+        assert len(checker._cache) == 5
+
+    def test_user_token_cache_is_bounded(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("distillery.mcp.org_membership._MAX_CACHE_ENTRIES", 5)
+        checker = OrgMembershipChecker(allowed_orgs=["acme"])
+        for i in range(40):
+            checker.store_user_token(f"user{i}", f"tok{i}")
+        assert len(checker._user_tokens) == 5
+        # Oldest-first eviction: newest retained, oldest dropped.
+        assert "user39" in checker._user_tokens
+        assert "user0" not in checker._user_tokens
