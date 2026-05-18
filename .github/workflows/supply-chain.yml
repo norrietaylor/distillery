@@ -280,9 +280,15 @@ jobs:
             sbom-${{ matrix.target }}.cdx.json
             grype-report-${{ matrix.target }}.json
 
-      - name: Trigger deploy in distill_ops
+      - name: Trigger deploys in distill_ops
         run: |
+          # Fire both deploy targets for the freshly published image.
+          # gcp-deploy's region is omitted — it defaults inside that
+          # workflow, keeping region knowledge in distill_ops.
           gh workflow run fly-deploy.yml \
+            --repo norrietaylor/distill_ops \
+            -f image_tag=sha-${{ steps.tags.outputs.short_sha }}
+          gh workflow run gcp-deploy.yml \
             --repo norrietaylor/distill_ops \
             -f image_tag=sha-${{ steps.tags.outputs.short_sha }}
         env:
