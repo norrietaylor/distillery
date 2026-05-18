@@ -490,7 +490,9 @@ class TestOrgMembershipMiddleware:
     async def test_missing_auth_header_passes_through(self) -> None:
         """No auth header -> pass through to app (FastMCP will 401)."""
         checker = self._make_checker(allowed_orgs=["myorg"])
-        mw = OrgMembershipMiddleware(_dummy_app, checker)
+        mw = OrgMembershipMiddleware(
+            _dummy_app, checker, token_verifier=_verifier(_make_access({"login": "x"}))
+        )
 
         cap = _ResponseCapture()
         await mw(_make_scope(), _noop_receive, cap)
@@ -500,7 +502,9 @@ class TestOrgMembershipMiddleware:
     async def test_non_bearer_auth_passes_through(self) -> None:
         """Auth header without Bearer prefix -> pass through."""
         checker = self._make_checker(allowed_orgs=["myorg"])
-        mw = OrgMembershipMiddleware(_dummy_app, checker)
+        mw = OrgMembershipMiddleware(
+            _dummy_app, checker, token_verifier=_verifier(_make_access({"login": "x"}))
+        )
 
         scope = _make_scope(headers=[(b"authorization", b"Basic dXNlcjpwYXNz")])
         cap = _ResponseCapture()
@@ -594,13 +598,18 @@ class TestOrgMembershipMiddleware:
         assert "<unknown>" in cap.json["message"]
 
     async def test_missing_token_verifier_fails_closed(self) -> None:
-        """An enabled checker with no token_verifier wired -> 403 fail-closed."""
+        """Enabled checker, no token_verifier wired -> 403 fail-closed.
+
+        Uses a request with no Authorization header: the guard must fire
+        before the no-bearer passthrough, so a misconfigured gate cannot
+        leak unauthenticated requests.
+        """
         checker = self._make_checker(allowed_orgs=["myorg"], is_allowed_return=True)
         mw = OrgMembershipMiddleware(_dummy_app, checker)  # no token_verifier
-        scope = _make_scope(headers=[(b"authorization", b"Bearer ref-token")])
         cap = _ResponseCapture()
-        await mw(scope, _noop_receive, cap)
+        await mw(_make_scope(), _noop_receive, cap)
         assert cap.status == 403
+        checker.is_allowed.assert_not_awaited()
 
     async def test_sub_claim_used_when_no_login(self) -> None:
         """A verified token with `sub` (no `login`) uses sub as the username."""

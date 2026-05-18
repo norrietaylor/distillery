@@ -436,6 +436,17 @@ class OrgMembershipMiddleware:
             await self.app(scope, receive, send)
             return
 
+        # Misconfiguration: the checker is enabled but no verifier was wired.
+        # Fail closed for *every* request — including ones with no
+        # Authorization header — rather than admit any request unchecked.
+        # Checked before the header inspection so the no-bearer passthrough
+        # below cannot leak requests past a broken gate.
+        if self._token_verifier is None:
+            logger.error("OrgMembershipMiddleware enabled but no token_verifier wired")
+            await self._audit_org_denied("<unknown>")
+            await self._send_403(send, "<unknown>", list(self.checker.allowed_orgs))
+            return
+
         headers = Headers(scope=scope)
         auth = headers.get("authorization", "")
         if not auth.lower().startswith("bearer "):
@@ -451,14 +462,6 @@ class OrgMembershipMiddleware:
         # lookup and returns an AccessToken whose claims include `login`
         # (and `machine` for pre-shared machine tokens) — the same data tool
         # handlers read via get_access_token().
-        if self._token_verifier is None:
-            # Misconfiguration: an enabled checker with no verifier wired.
-            # Fail closed rather than admit every request unchecked.
-            logger.error("OrgMembershipMiddleware enabled but no token_verifier wired")
-            await self._audit_org_denied("<unknown>")
-            await self._send_403(send, "<unknown>", list(self.checker.allowed_orgs))
-            return
-
         access = await self._token_verifier(bearer_token)
         if access is None:
             # Invalid/unrecognised token — let FastMCP's own auth reject it
