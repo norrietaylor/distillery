@@ -2889,16 +2889,126 @@ class DuckDBStore:
     # Entry relations
     # ------------------------------------------------------------------
 
+    def _sync_entry_exists(self, entry_id: str) -> bool:
+        """Return whether *entry_id* is present in the ``entries`` base table.
+
+        Shared existence-check helper used by every write path that must
+        validate that an entry it is about to reference still exists.
+        Archived (soft-deleted) entries are considered present so historical
+        relations and corrections can still be inserted.
+
+        This is the single source of truth the read path (:meth:`_sync_get`
+        with ``include_archived=True``) and the relation write path
+        (:meth:`_sync_add_relation`) share. Routing every existence check
+        through one helper closes the asymmetry described in issue #515
+        (read paths returning an entry while ``relations.add`` reports
+        ``NOT_FOUND``) by eliminating any chance of the queries diverging
+        in shape, casing, or column projection.
+        """
+        assert self._conn is not None
+        row = self._conn.execute("SELECT id FROM entries WHERE id = ?", [entry_id]).fetchone()
+        return row is not None
+
+    def _sync_diagnose_missing_entry(self, entry_id: str) -> dict[str, Any]:
+        """Collect cross-table visibility info for *entry_id* on the error path.
+
+        Issued only when :meth:`_sync_add_relation`'s existence check has
+        already failed, so the cost (a handful of single-row SELECTs) does
+        not touch the happy path. Returns a dict suitable for embedding in
+        the ``ValueError`` raised back to the caller and in the operator
+        log line — the next investigator should be able to determine
+        immediately whether the entry is invisible to every code path or
+        only to the relation write path.
+
+        Probes:
+        - ``entries_count``    — base-table COUNT(*) for the id.
+        - ``visible_via_get``  — whether ``_sync_get(include_archived=True)``
+          can return the row. Same SQL shape as the read path users invoke
+          for ``distillery_get``.
+        - ``relation_endpoint`` — whether the id appears as ``from_id`` or
+          ``to_id`` in any existing ``entry_relations`` row.
+        - ``fts_doc_present``  — whether the FTS shadow table
+          ``fts_main_entries.docs`` carries a document for the id, which
+          would prove the id was once indexed even if the base row is
+          now missing.
+
+        Any probe that raises (because a table or extension is unavailable)
+        records the exception as a string in its slot so the caller still
+        gets a partial diagnostic instead of a secondary crash.
+        """
+        assert self._conn is not None
+        diag: dict[str, Any] = {}
+        # 1. Count from the base entries table — the same table _sync_get
+        # queries. A zero here while visible_via_get returns True would
+        # prove a snapshot/transaction-state divergence on the connection.
+        try:
+            row = self._conn.execute(
+                "SELECT COUNT(*) FROM entries WHERE id = ?", [entry_id]
+            ).fetchone()
+            diag["entries_count"] = int(row[0]) if row is not None else 0
+        except Exception as exc:  # pragma: no cover — diagnostic path
+            diag["entries_count_error"] = repr(exc)
+
+        # 2. Same lookup the read path uses (include_archived=True so the
+        # filter shape is identical to _sync_add_relation's intent).
+        try:
+            diag["visible_via_get"] = self._sync_get(entry_id, include_archived=True) is not None
+        except Exception as exc:  # pragma: no cover — diagnostic path
+            diag["visible_via_get_error"] = repr(exc)
+
+        # 3. Whether the id is referenced from entry_relations. If True
+        # while entries_count is 0, that confirms the "orphaned-edges"
+        # hypothesis from issue #515: a maintenance pass deleted the row
+        # but left edges intact.
+        try:
+            row = self._conn.execute(
+                "SELECT COUNT(*) FROM entry_relations WHERE from_id = ? OR to_id = ?",
+                [entry_id, entry_id],
+            ).fetchone()
+            diag["relation_endpoint"] = (int(row[0]) if row is not None else 0) > 0
+        except Exception as exc:  # pragma: no cover — diagnostic path
+            diag["relation_endpoint_error"] = repr(exc)
+
+        # 4. Whether the FTS shadow table still carries a document for
+        # this id. The FTS extension stores its index in a separate schema
+        # (``fts_main_entries.docs``); a row here without a matching
+        # ``entries`` row would point at FTS-driven divergence.
+        try:
+            row = self._conn.execute(
+                "SELECT COUNT(*) FROM fts_main_entries.docs WHERE name = ?",
+                [entry_id],
+            ).fetchone()
+            diag["fts_doc_present"] = (int(row[0]) if row is not None else 0) > 0
+        except Exception as exc:
+            # FTS may not be loaded in this deployment; that is normal,
+            # not a diagnostic failure. Record at debug level only.
+            diag["fts_doc_present"] = None
+            diag["fts_doc_error"] = repr(exc)
+
+        return diag
+
     def _sync_add_relation(self, from_id: str, to_id: str, relation_type: str) -> str:
         """Synchronous implementation of add_relation(); called via asyncio.to_thread."""
         assert self._conn is not None
-        # Validate that both entries exist (including archived — preserves historical links)
-        from_row = self._conn.execute("SELECT id FROM entries WHERE id = ?", [from_id]).fetchone()
-        if from_row is None:
-            raise ValueError(f"Entry not found: from_id={from_id!r}")
-        to_row = self._conn.execute("SELECT id FROM entries WHERE id = ?", [to_id]).fetchone()
-        if to_row is None:
-            raise ValueError(f"Entry not found: to_id={to_id!r}")
+        # Validate that both entries exist (including archived — preserves historical links).
+        # Routes through :meth:`_sync_entry_exists` so this lookup uses the same SQL shape
+        # as every other existence check; see issue #515 for the asymmetry this prevents.
+        if not self._sync_entry_exists(from_id):
+            diag = self._sync_diagnose_missing_entry(from_id)
+            logger.warning(
+                "add_relation rejected: from_id=%r not in entries; diagnostic=%s",
+                from_id,
+                diag,
+            )
+            raise ValueError(f"Entry not found: from_id={from_id!r} (diagnostic={diag})")
+        if not self._sync_entry_exists(to_id):
+            diag = self._sync_diagnose_missing_entry(to_id)
+            logger.warning(
+                "add_relation rejected: to_id=%r not in entries; diagnostic=%s",
+                to_id,
+                diag,
+            )
+            raise ValueError(f"Entry not found: to_id={to_id!r} (diagnostic={diag})")
         # Check for existing relation with the same (from_id, to_id, relation_type)
         existing = self._conn.execute(
             "SELECT id FROM entry_relations WHERE from_id = ? AND to_id = ? AND relation_type = ?",
