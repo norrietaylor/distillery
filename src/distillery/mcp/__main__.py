@@ -202,6 +202,7 @@ def main(argv: list[str] | None = None) -> int:
                 trust_proxy=rl.trust_proxy,
                 loopback_exempt=rl.loopback_exempt,
                 org_checker=org_checker,
+                token_verifier=auth.verify_token if auth is not None else None,
                 audit_callback=_auth_audit_cb,
             )
 
