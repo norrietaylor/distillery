@@ -30,11 +30,27 @@ logger = logging.getLogger(__name__)
 # Prompt template
 # ---------------------------------------------------------------------------
 
+_KIND_VALUES: tuple[str, ...] = (
+    "release",
+    "reference",
+    "howto",
+    "opinion",
+    "incident",
+    "announcement",
+    "discussion",
+)
+"""Allowed values for the ``kind`` axis (without the ``kind/`` prefix).
+
+The ``kind/`` namespace is the *content-type* axis, orthogonal to the
+``entry_type`` (the *artifact form*).  See issue #481 for rationale.
+"""
+
+
 _CLASSIFY_PROMPT = """\
 You are a knowledge-base classifier.  Your task is to classify the following \
-content into one of these categories and return a JSON object.
+content and return a JSON object.
 
-Categories:
+Pick exactly one *entry_type* (the artifact form):
 - session: A captured work session or context snapshot (e.g. "explored auth module").
 - bookmark: A saved URL or external reference.
 - minutes: Notes from a meeting or discussion.
@@ -48,6 +64,16 @@ Categories:
 - feed: An ambient feed item captured from a monitored source (RSS, GitHub, Hacker News).
 - inbox: Cannot be classified (use as a fallback).
 
+Pick exactly one *kind* (the content-type axis, orthogonal to entry_type):
+- release: product / version announcement, changelog, launch.
+- reference: spec, RFC, doc, paper, persistent factual artifact.
+- howto: tutorial, guide, walkthrough.
+- opinion: essay, hot-take, position piece, retrospective.
+- incident: outage, postmortem, security advisory.
+- announcement: hire, funding, org news; non-product.
+- discussion: thread, forum, comment-driven (HN/Reddit/Lobsters submissions \
+when not classifiable as above).
+
 Content to classify:
 \"\"\"
 {content}
@@ -55,7 +81,8 @@ Content to classify:
 
 Respond with ONLY valid JSON in this exact format:
 {{
-  "entry_type": "<one of the categories above>",
+  "entry_type": "<one of the entry_type categories above>",
+  "kind": "<one of: release|reference|howto|opinion|incident|announcement|discussion>",
   "confidence": <float 0.0-1.0>,
   "reasoning": "<brief explanation>",
   "suggested_tags": ["<tag1>", "<tag2>"],
@@ -162,6 +189,30 @@ class ClassificationEngine:
         raw_project = data.get("suggested_project")
         suggested_project = str(raw_project) if raw_project else None
 
+        # Parse the ``kind`` axis.  Strict: only known values are accepted.
+        # Unknown / missing values yield ``suggested_kind=None`` and no tag.
+        suggested_kind: str | None = None
+        raw_kind = data.get("kind")
+        if isinstance(raw_kind, str):
+            normalised = raw_kind.lower().strip()
+            # Tolerate values the LLM may emit with the prefix already attached.
+            if normalised.startswith("kind/"):
+                normalised = normalised[len("kind/") :]
+            if normalised in _KIND_VALUES:
+                suggested_kind = normalised
+            elif normalised:
+                logger.warning("ClassificationEngine: unknown kind %r, dropping", raw_kind)
+
+        # Canonicalize the ``kind/`` axis: keep at most one ``kind/<value>`` tag,
+        # always sourced from the dedicated ``kind`` field.  Strip any pre-existing
+        # ``kind/*`` entries from suggested_tags (case-insensitive) to avoid
+        # conflicting or duplicate kind tags, then append the canonical tag.
+        suggested_tags = [
+            tag for tag in suggested_tags if not tag.strip().lower().startswith("kind/")
+        ]
+        if suggested_kind is not None:
+            suggested_tags.append(f"kind/{suggested_kind}")
+
         status = self._status_for(confidence)
 
         return ClassificationResult(
@@ -171,6 +222,7 @@ class ClassificationEngine:
             reasoning=reasoning,
             suggested_tags=suggested_tags,
             suggested_project=suggested_project,
+            suggested_kind=suggested_kind,
         )
 
     def _fallback(self) -> ClassificationResult:
@@ -182,6 +234,7 @@ class ClassificationEngine:
             reasoning="",
             suggested_tags=[],
             suggested_project=None,
+            suggested_kind=None,
         )
 
     def _status_for(self, confidence: float) -> EntryStatus:

@@ -7,6 +7,7 @@ API calls.  The engine's job is purely to format prompts and parse JSON.
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import pytest
 
@@ -32,15 +33,27 @@ def _json_response(
     reasoning: str = "Test reasoning.",
     suggested_tags: list[str] | None = None,
     suggested_project: str | None = None,
+    kind: str | None = "reference",
+    *,
+    omit_kind: bool = False,
 ) -> str:
-    """Build a well-formed JSON response string as if from an LLM."""
-    payload = {
+    """Build a well-formed JSON response string as if from an LLM.
+
+    Args:
+        kind: Value for the ``kind`` field.  Defaults to ``"reference"`` so
+            existing tests that don't care about the axis still produce a
+            well-formed payload.  Set ``omit_kind=True`` to drop the field
+            entirely (back-compat / unknown-LLM responses).
+    """
+    payload: dict[str, Any] = {
         "entry_type": entry_type,
         "confidence": confidence,
         "reasoning": reasoning,
         "suggested_tags": suggested_tags or [],
         "suggested_project": suggested_project,
     }
+    if not omit_kind:
+        payload["kind"] = kind
     return json.dumps(payload)
 
 
@@ -244,6 +257,7 @@ class TestOptionalFields:
             0.88,
             "Auth work.",
             suggested_tags=["auth", "oauth2", "security"],
+            omit_kind=True,
         )
         result = engine.parse_response(response)
 
@@ -253,7 +267,7 @@ class TestOptionalFields:
 
     def test_empty_suggested_tags_is_empty_list(self) -> None:
         engine = _make_engine()
-        response = _json_response("session", 0.88)
+        response = _json_response("session", 0.88, omit_kind=True)
         result = engine.parse_response(response)
 
         assert result.suggested_tags == []
@@ -294,6 +308,149 @@ class TestPromptBuilding:
         prompt = engine.build_prompt("anything")
 
         assert "JSON" in prompt or "json" in prompt
+
+
+# ---------------------------------------------------------------------------
+# kind/ axis (issue #481)
+# ---------------------------------------------------------------------------
+
+
+class TestKindAxis:
+    """The classifier emits a single ``kind/<value>`` tag per entry."""
+
+    @pytest.mark.parametrize(
+        "kind_value",
+        [
+            "release",
+            "reference",
+            "howto",
+            "opinion",
+            "incident",
+            "announcement",
+            "discussion",
+        ],
+    )
+    def test_each_kind_round_trips(self, kind_value: str) -> None:
+        engine = _make_engine()
+        response = _json_response("feed", 0.85, kind=kind_value)
+        result = engine.parse_response(response)
+
+        assert result.suggested_kind == kind_value
+        assert f"kind/{kind_value}" in result.suggested_tags
+
+    def test_kind_tag_is_de_duplicated_against_suggested_tags(self) -> None:
+        """If the LLM also lists the kind tag explicitly, it must not duplicate."""
+        engine = _make_engine()
+        response = _json_response(
+            "feed",
+            0.9,
+            suggested_tags=["domain/api", "kind/opinion"],
+            kind="opinion",
+        )
+        result = engine.parse_response(response)
+
+        assert result.suggested_kind == "opinion"
+        # Exactly one kind/opinion entry, even though the LLM listed it twice.
+        assert result.suggested_tags.count("kind/opinion") == 1
+
+    def test_conflicting_kind_in_suggested_tags_is_replaced_by_canonical_kind(self) -> None:
+        """Canonical ``kind`` field wins; conflicting kind/* in suggested_tags is dropped."""
+        engine = _make_engine()
+        response = _json_response(
+            "feed",
+            0.9,
+            suggested_tags=["domain/api", "kind/opinion"],
+            kind="release",
+        )
+        result = engine.parse_response(response)
+
+        assert result.suggested_kind == "release"
+        # Only the canonical kind tag remains; the stale kind/opinion is stripped.
+        kind_tags = [t for t in result.suggested_tags if t.lower().startswith("kind/")]
+        assert kind_tags == ["kind/release"]
+        assert "domain/api" in result.suggested_tags
+
+    def test_unknown_kind_yields_none_and_no_tag(self) -> None:
+        engine = _make_engine()
+        response = _json_response("feed", 0.8, kind="bogus-kind")
+        result = engine.parse_response(response)
+
+        assert result.suggested_kind is None
+        assert not any(t.startswith("kind/") for t in result.suggested_tags)
+
+    def test_missing_kind_yields_none_and_no_tag(self) -> None:
+        engine = _make_engine()
+        response = _json_response("feed", 0.8, omit_kind=True)
+        result = engine.parse_response(response)
+
+        assert result.suggested_kind is None
+        assert not any(t.startswith("kind/") for t in result.suggested_tags)
+
+    def test_kind_with_prefix_is_accepted(self) -> None:
+        """LLMs sometimes emit ``kind/release``; strip the prefix gracefully."""
+        engine = _make_engine()
+        response = _json_response("feed", 0.8, kind="kind/release")
+        result = engine.parse_response(response)
+
+        assert result.suggested_kind == "release"
+        assert "kind/release" in result.suggested_tags
+
+    def test_kind_uppercase_normalised(self) -> None:
+        engine = _make_engine()
+        response = _json_response("feed", 0.8, kind="OPINION")
+        result = engine.parse_response(response)
+
+        assert result.suggested_kind == "opinion"
+        assert "kind/opinion" in result.suggested_tags
+
+    def test_fallback_result_has_no_kind(self) -> None:
+        engine = _make_engine()
+        result = engine.parse_response("not json")
+
+        assert result.suggested_kind is None
+        assert not any(tag.startswith("kind/") for tag in result.suggested_tags)
+
+
+# ---------------------------------------------------------------------------
+# Prompt contract (issue #481)
+# ---------------------------------------------------------------------------
+
+
+class TestPromptContract:
+    """The classifier prompt must enumerate the ``kind`` axis enum."""
+
+    def test_prompt_requires_kind_field(self) -> None:
+        engine = _make_engine()
+        prompt = engine.build_prompt("anything")
+
+        assert '"kind"' in prompt
+
+    @pytest.mark.parametrize(
+        "kind_value",
+        [
+            "release",
+            "reference",
+            "howto",
+            "opinion",
+            "incident",
+            "announcement",
+            "discussion",
+        ],
+    )
+    def test_prompt_lists_each_kind_value(self, kind_value: str) -> None:
+        engine = _make_engine()
+        prompt = engine.build_prompt("anything")
+
+        assert kind_value in prompt
+
+    def test_prompt_documents_pipe_separated_enum(self) -> None:
+        """The contract line ``"kind": "<one of: release|...>"`` is present."""
+        engine = _make_engine()
+        prompt = engine.build_prompt("anything")
+
+        # Anchor on the full enum string the LLM must respect.
+        expected_enum = "release|reference|howto|opinion|incident|announcement|discussion"
+        assert expected_enum in prompt
 
 
 # ---------------------------------------------------------------------------

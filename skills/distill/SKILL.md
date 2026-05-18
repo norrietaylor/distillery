@@ -98,6 +98,12 @@ Auto-extract 2-5 keywords from the summary. Prefer hierarchical tags:
 - `domain/{topic}` for domain-specific tags (e.g., `domain/storage`, `domain/api-design`)
 - Fall back to flat tags only when no project context is available
 
+Distillery recognises six top-level namespaces in total — `project/`,
+`entity/`, `domain/`, `tech/`, `source/`, and `kind/` (the content-type
+axis assigned by the classifier; see [CONVENTIONS.md](../CONVENTIONS.md#tag-namespaces)).
+**Do not set `kind/*` tags by hand** — the namespace is reserved and the
+store will reject user-supplied `kind/*` from non-internal sources.
+
 Repo name sanitization: lowercase, replace non-`[a-z0-9-]` chars with hyphens, collapse consecutive hyphens, trim leading/trailing hyphens, prefix with `repo-` if result doesn't start with `[a-z0-9]`. Final segment must match `[a-z0-9][a-z0-9\-]*`.
 
 Merge with any explicit `#tag` arguments (strip leading `#`). Tags are lowercase, hyphen-separated within segments.

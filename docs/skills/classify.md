@@ -24,8 +24,17 @@ Entry: a1b2c3d4
 Type: session
 Confidence: 92% (high)
 Reasoning: Contains decisions and action items from a working session
-Suggested tags: domain/caching, project/billing/decisions
+Suggested tags: domain/caching, project/billing/decisions, kind/howto
 ```
+
+The classifier also assigns a `kind/<value>` tag from a fixed enum
+(`release`, `reference`, `howto`, `opinion`, `incident`, `announcement`,
+`discussion`).  This is the **content-type axis** — orthogonal to the
+entry type — and lives under the reserved `kind/` namespace.  See
+[skills/CONVENTIONS.md][conventions-tag-namespaces] for the full list of
+tag namespaces.
+
+[conventions-tag-namespaces]: https://github.com/norrietaylor/distillery/blob/main/skills/CONVENTIONS.md#tag-namespaces
 
 ### Batch Inbox (`--inbox`)
 

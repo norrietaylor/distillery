@@ -388,6 +388,32 @@ Actions:
 - Prefer hierarchical: `project/{repo}/sessions`, `domain/{topic}`, `source/bookmark/{domain}`
 - Strip leading `#` from user-provided tags
 
+### Tag namespaces
+
+The codebase recognises six top-level tag namespaces:
+
+| Namespace | What it answers | Example |
+|---|---|---|
+| `project/` | which repo / product is this about? | `project/distillery/decisions` |
+| `entity/` | which person, team, or org? | `entity/anthropic` |
+| `domain/` | what subject area? | `domain/api-design` |
+| `tech/` | which technology / tool? | `tech/duckdb` |
+| `source/` | where did the content come from? | `source/bookmark/docs-python-org` |
+| `kind/` | what *content type* is this? (#481) | `kind/release`, `kind/opinion` |
+
+The first five namespaces describe *what the entry is about*.  The sixth,
+`kind/`, is the **content-type axis** assigned by the classifier — it
+distinguishes (e.g.) a `kind/opinion` essay from a `kind/release` post on
+the same topic.  Exactly one `kind/<value>` tag per ingested entry, drawn
+from a fixed enum: `release`, `reference`, `howto`, `opinion`, `incident`,
+`announcement`, `discussion`.
+
+`kind/` is **reserved** in `tags.reserved_prefixes` by default — only the
+classifier may set it; user-supplied `kind/*` tags via `distillery_store`
+are rejected.  Pre-existing entries have no `kind/*` tag; *absence of
+`kind/*` is **not** equivalent to `kind/opinion`.*  Filters that exclude
+`kind/opinion` should not also exclude entries that lack a `kind/` tag.
+
 ## Provenance
 
 Search results must include: entry ID, `[type]` badge, author, created date, similarity %.
