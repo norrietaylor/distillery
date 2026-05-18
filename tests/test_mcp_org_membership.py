@@ -166,52 +166,47 @@ class TestOrgMembershipApiNonMember:
 
 
 class TestOrgMembershipApiPrivateOrg:
-    async def test_302_without_token_returns_false(self) -> None:
+    """302 on /members/{user} -> follow to /public_members/{user}."""
+
+    @staticmethod
+    def _patched_client(members_resp: MagicMock, public_resp: MagicMock) -> MagicMock:
+        """An httpx.AsyncClient mock routing members vs public_members."""
+
+        async def fake_get(url: str, **kwargs: object) -> MagicMock:
+            return public_resp if "public_members" in url else members_resp
+
+        mock_client = _make_async_client_mock()
+        mock_client.get = fake_get
+        return mock_client
+
+    async def test_302_then_public_member_204_returns_true(self) -> None:
+        """302 on /members -> /public_members 204 -> True (no token needed)."""
         checker = OrgMembershipChecker(allowed_orgs=["private-corp"])
         with patch("httpx.AsyncClient") as mock_client_cls:
-            mock_client_cls.return_value = _make_async_client_mock(_mock_response(302))
+            mock_client_cls.return_value = self._patched_client(
+                _mock_response(302), _mock_response(204)
+            )
+            result = await checker.is_allowed("alice")
+        assert result is True
+
+    async def test_302_then_public_member_404_returns_false(self) -> None:
+        """302 on /members -> /public_members 404 (not a public member) -> False."""
+        checker = OrgMembershipChecker(allowed_orgs=["private-corp"])
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client_cls.return_value = self._patched_client(
+                _mock_response(302), _mock_response(404)
+            )
             result = await checker.is_allowed("alice")
         assert result is False
 
-    async def test_302_with_token_falls_back_to_user_orgs_member(self) -> None:
-        """302 on /members/{user} + user in /user/orgs → True."""
+    async def test_302_then_public_member_unexpected_status_returns_false(self) -> None:
+        """302 on /members -> unexpected status on /public_members -> fail closed."""
         checker = OrgMembershipChecker(allowed_orgs=["private-corp"])
-
-        members_resp = _mock_response(302)
-        user_orgs_resp = _mock_response(200, [{"login": "private-corp"}])
-
         with patch("httpx.AsyncClient") as mock_client_cls:
-
-            async def fake_get(url: str, **kwargs: object) -> MagicMock:
-                if "members" in url:
-                    return members_resp
-                return user_orgs_resp
-
-            mock_client = _make_async_client_mock()
-            mock_client.get = fake_get
-            mock_client_cls.return_value = mock_client
-
-            result = await checker.is_allowed("alice", hint_token="ghp_tok")
-        assert result is True
-
-    async def test_302_with_token_falls_back_to_user_orgs_non_member(self) -> None:
-        checker = OrgMembershipChecker(allowed_orgs=["private-corp"])
-
-        members_resp = _mock_response(302)
-        user_orgs_resp = _mock_response(200, [{"login": "other-org"}])
-
-        with patch("httpx.AsyncClient") as mock_client_cls:
-
-            async def fake_get(url: str, **kwargs: object) -> MagicMock:
-                if "members" in url:
-                    return members_resp
-                return user_orgs_resp
-
-            mock_client = _make_async_client_mock()
-            mock_client.get = fake_get
-            mock_client_cls.return_value = mock_client
-
-            result = await checker.is_allowed("alice", hint_token="ghp_tok")
+            mock_client_cls.return_value = self._patched_client(
+                _mock_response(302), _mock_response(500)
+            )
+            result = await checker.is_allowed("alice")
         assert result is False
 
 

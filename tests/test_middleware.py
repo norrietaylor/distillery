@@ -21,6 +21,7 @@ from __future__ import annotations
 import base64
 import json
 import time
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -428,6 +429,20 @@ class TestBodySizeLimitMiddleware:
 # ===================================================================
 
 
+def _make_access(claims: dict[str, Any]) -> Any:
+    """Stand-in for a verified AccessToken carrying the given claims."""
+    return SimpleNamespace(claims=claims)
+
+
+def _verifier(result: Any) -> Any:
+    """An async token_verifier (provider.verify_token stand-in) returning result."""
+
+    async def _verify(_token: str) -> Any:
+        return result
+
+    return _verify
+
+
 class TestOrgMembershipMiddleware:
     """Tests for OrgMembershipMiddleware."""
 
@@ -445,10 +460,12 @@ class TestOrgMembershipMiddleware:
 
     async def test_valid_org_member_passes(self) -> None:
         checker = self._make_checker(allowed_orgs=["myorg"], is_allowed_return=True)
-        mw = OrgMembershipMiddleware(_dummy_app, checker)
-
-        token = _make_jwt({"login": "gooduser"})
-        scope = _make_scope(headers=[(b"authorization", f"Bearer {token}".encode())])
+        mw = OrgMembershipMiddleware(
+            _dummy_app,
+            checker,
+            token_verifier=_verifier(_make_access({"login": "gooduser"})),
+        )
+        scope = _make_scope(headers=[(b"authorization", b"Bearer ref-token")])
         cap = _ResponseCapture()
         await mw(scope, _noop_receive, cap)
         assert cap.status == 200
@@ -456,10 +473,12 @@ class TestOrgMembershipMiddleware:
 
     async def test_non_member_rejected_403(self) -> None:
         checker = self._make_checker(allowed_orgs=["myorg"], is_allowed_return=False)
-        mw = OrgMembershipMiddleware(_dummy_app, checker)
-
-        token = _make_jwt({"login": "baduser"})
-        scope = _make_scope(headers=[(b"authorization", f"Bearer {token}".encode())])
+        mw = OrgMembershipMiddleware(
+            _dummy_app,
+            checker,
+            token_verifier=_verifier(_make_access({"login": "baduser"})),
+        )
+        scope = _make_scope(headers=[(b"authorization", b"Bearer ref-token")])
         cap = _ResponseCapture()
         await mw(scope, _noop_receive, cap)
         assert cap.status == 403
@@ -471,7 +490,9 @@ class TestOrgMembershipMiddleware:
     async def test_missing_auth_header_passes_through(self) -> None:
         """No auth header -> pass through to app (FastMCP will 401)."""
         checker = self._make_checker(allowed_orgs=["myorg"])
-        mw = OrgMembershipMiddleware(_dummy_app, checker)
+        mw = OrgMembershipMiddleware(
+            _dummy_app, checker, token_verifier=_verifier(_make_access({"login": "x"}))
+        )
 
         cap = _ResponseCapture()
         await mw(_make_scope(), _noop_receive, cap)
@@ -481,13 +502,44 @@ class TestOrgMembershipMiddleware:
     async def test_non_bearer_auth_passes_through(self) -> None:
         """Auth header without Bearer prefix -> pass through."""
         checker = self._make_checker(allowed_orgs=["myorg"])
-        mw = OrgMembershipMiddleware(_dummy_app, checker)
+        mw = OrgMembershipMiddleware(
+            _dummy_app, checker, token_verifier=_verifier(_make_access({"login": "x"}))
+        )
 
         scope = _make_scope(headers=[(b"authorization", b"Basic dXNlcjpwYXNz")])
         cap = _ResponseCapture()
         await mw(scope, _noop_receive, cap)
         assert cap.status == 200
         checker.is_allowed.assert_not_awaited()
+
+    async def test_machine_token_bypasses_org_check(self) -> None:
+        """A verified token carrying the `machine` claim is exempt from the gate."""
+        checker = self._make_checker(allowed_orgs=["myorg"], is_allowed_return=False)
+        mw = OrgMembershipMiddleware(
+            _dummy_app,
+            checker,
+            token_verifier=_verifier(
+                _make_access({"machine": True, "login": "spectacles"})
+            ),
+        )
+        scope = _make_scope(headers=[(b"authorization", b"Bearer machine-tok")])
+        cap = _ResponseCapture()
+        await mw(scope, _noop_receive, cap)
+        assert cap.status == 200
+        checker.is_allowed.assert_not_awaited()
+
+    async def test_non_machine_bearer_still_org_checked(self) -> None:
+        """A non-machine verified token is still org-checked."""
+        checker = self._make_checker(allowed_orgs=["myorg"], is_allowed_return=False)
+        mw = OrgMembershipMiddleware(
+            _dummy_app,
+            checker,
+            token_verifier=_verifier(_make_access({"login": "baduser"})),
+        )
+        scope = _make_scope(headers=[(b"authorization", b"Bearer ref-token")])
+        cap = _ResponseCapture()
+        await mw(scope, _noop_receive, cap)
+        assert cap.status == 403
 
     async def test_oauth_path_bypasses_check(self) -> None:
         """OAuth paths should always pass through regardless of auth."""
@@ -505,8 +557,7 @@ class TestOrgMembershipMiddleware:
         checker = self._make_checker(allowed_orgs=[])  # empty -> disabled
         mw = OrgMembershipMiddleware(_dummy_app, checker)
 
-        token = _make_jwt({"login": "anyone"})
-        scope = _make_scope(headers=[(b"authorization", f"Bearer {token}".encode())])
+        scope = _make_scope(headers=[(b"authorization", b"Bearer ref-token")])
         cap = _ResponseCapture()
         await mw(scope, _noop_receive, cap)
         assert cap.status == 200
@@ -520,65 +571,86 @@ class TestOrgMembershipMiddleware:
         await mw(scope, _noop_receive, cap)
         assert cap.status == 200
 
-    async def test_opaque_token_fail_closed(self) -> None:
-        """Non-JWT bearer token (no dots) -> 403 fail-closed."""
+    async def test_unverifiable_token_passes_to_fastmcp(self) -> None:
+        """A token verify_token rejects -> pass through; FastMCP issues the 401."""
         checker = self._make_checker(allowed_orgs=["myorg"], is_allowed_return=True)
-        mw = OrgMembershipMiddleware(_dummy_app, checker)
+        mw = OrgMembershipMiddleware(
+            _dummy_app, checker, token_verifier=_verifier(None)
+        )
+        scope = _make_scope(headers=[(b"authorization", b"Bearer bogus")])
+        cap = _ResponseCapture()
+        await mw(scope, _noop_receive, cap)
+        assert cap.status == 200
+        checker.is_allowed.assert_not_awaited()
 
-        scope = _make_scope(headers=[(b"authorization", b"Bearer opaque-token-no-dots")])
+    async def test_verified_token_without_identity_fails_closed(self) -> None:
+        """A verified token with no login/sub claim -> 403 fail-closed."""
+        checker = self._make_checker(allowed_orgs=["myorg"], is_allowed_return=True)
+        mw = OrgMembershipMiddleware(
+            _dummy_app,
+            checker,
+            token_verifier=_verifier(_make_access({"email": "user@example.com"})),
+        )
+        scope = _make_scope(headers=[(b"authorization", b"Bearer ref-token")])
         cap = _ResponseCapture()
         await mw(scope, _noop_receive, cap)
         assert cap.status == 403
         assert "<unknown>" in cap.json["message"]
 
-    async def test_jwt_without_login_claim_fail_closed(self) -> None:
-        """JWT with no login/sub claim -> 403 fail-closed."""
-        checker = self._make_checker(allowed_orgs=["myorg"], is_allowed_return=True)
-        mw = OrgMembershipMiddleware(_dummy_app, checker)
+    async def test_missing_token_verifier_fails_closed(self) -> None:
+        """Enabled checker, no token_verifier wired -> 403 fail-closed.
 
-        token = _make_jwt({"email": "user@example.com"})  # no login or sub
-        scope = _make_scope(headers=[(b"authorization", f"Bearer {token}".encode())])
+        Uses a request with no Authorization header: the guard must fire
+        before the no-bearer passthrough, so a misconfigured gate cannot
+        leak unauthenticated requests.
+        """
+        checker = self._make_checker(allowed_orgs=["myorg"], is_allowed_return=True)
+        mw = OrgMembershipMiddleware(_dummy_app, checker)  # no token_verifier
         cap = _ResponseCapture()
-        await mw(scope, _noop_receive, cap)
+        await mw(_make_scope(), _noop_receive, cap)
         assert cap.status == 403
+        checker.is_allowed.assert_not_awaited()
 
-    async def test_jwt_with_sub_claim_used_as_username(self) -> None:
-        """JWT with 'sub' (no 'login') should use sub as username."""
+    async def test_sub_claim_used_when_no_login(self) -> None:
+        """A verified token with `sub` (no `login`) uses sub as the username."""
         checker = self._make_checker(allowed_orgs=["myorg"], is_allowed_return=True)
-        mw = OrgMembershipMiddleware(_dummy_app, checker)
-
-        token = _make_jwt({"sub": "subuser"})
-        scope = _make_scope(headers=[(b"authorization", f"Bearer {token}".encode())])
+        mw = OrgMembershipMiddleware(
+            _dummy_app,
+            checker,
+            token_verifier=_verifier(_make_access({"sub": "subuser"})),
+        )
+        scope = _make_scope(headers=[(b"authorization", b"Bearer ref-token")])
         cap = _ResponseCapture()
         await mw(scope, _noop_receive, cap)
         assert cap.status == 200
         checker.is_allowed.assert_awaited_once_with("subuser")
 
-    async def test_caching_via_checker(self) -> None:
-        """Multiple requests with same token use the checker's cache."""
+    async def test_checker_called_each_request(self) -> None:
+        """The middleware calls is_allowed per request; the checker caches."""
         checker = self._make_checker(allowed_orgs=["myorg"], is_allowed_return=True)
-        mw = OrgMembershipMiddleware(_dummy_app, checker)
-
-        token = _make_jwt({"login": "cacheduser"})
-        scope = _make_scope(headers=[(b"authorization", f"Bearer {token}".encode())])
-
+        mw = OrgMembershipMiddleware(
+            _dummy_app,
+            checker,
+            token_verifier=_verifier(_make_access({"login": "cacheduser"})),
+        )
+        scope = _make_scope(headers=[(b"authorization", b"Bearer ref-token")])
         for _ in range(3):
             cap = _ResponseCapture()
             await mw(scope, _noop_receive, cap)
             assert cap.status == 200
-
-        # The checker.is_allowed is called each time by the middleware;
-        # the OrgMembershipChecker itself handles caching internally.
         assert checker.is_allowed.await_count == 3
 
     async def test_org_denied_fires_audit_callback(self) -> None:
         """Org membership denial fires the audit callback."""
         checker = self._make_checker(allowed_orgs=["myorg"], is_allowed_return=False)
         audit_cb = AsyncMock()
-        mw = OrgMembershipMiddleware(_dummy_app, checker, audit_callback=audit_cb)
-
-        token = _make_jwt({"login": "baduser"})
-        scope = _make_scope(headers=[(b"authorization", f"Bearer {token}".encode())])
+        mw = OrgMembershipMiddleware(
+            _dummy_app,
+            checker,
+            token_verifier=_verifier(_make_access({"login": "baduser"})),
+            audit_callback=audit_cb,
+        )
+        scope = _make_scope(headers=[(b"authorization", b"Bearer ref-token")])
         cap = _ResponseCapture()
         await mw(scope, _noop_receive, cap)
         assert cap.status == 403
@@ -588,12 +660,16 @@ class TestOrgMembershipMiddleware:
         )
 
     async def test_org_denied_unknown_user_fires_audit(self) -> None:
-        """Opaque token (unknown user) denial fires audit callback."""
+        """A verified token with no identity claim fires the audit callback."""
         checker = self._make_checker(allowed_orgs=["myorg"], is_allowed_return=True)
         audit_cb = AsyncMock()
-        mw = OrgMembershipMiddleware(_dummy_app, checker, audit_callback=audit_cb)
-
-        scope = _make_scope(headers=[(b"authorization", b"Bearer opaque-token-no-dots")])
+        mw = OrgMembershipMiddleware(
+            _dummy_app,
+            checker,
+            token_verifier=_verifier(_make_access({})),
+            audit_callback=audit_cb,
+        )
+        scope = _make_scope(headers=[(b"authorization", b"Bearer ref-token")])
         cap = _ResponseCapture()
         await mw(scope, _noop_receive, cap)
         assert cap.status == 403
@@ -606,10 +682,13 @@ class TestOrgMembershipMiddleware:
         """A failing audit callback must not prevent the 403 response."""
         checker = self._make_checker(allowed_orgs=["myorg"], is_allowed_return=False)
         audit_cb = AsyncMock(side_effect=RuntimeError("db down"))
-        mw = OrgMembershipMiddleware(_dummy_app, checker, audit_callback=audit_cb)
-
-        token = _make_jwt({"login": "baduser"})
-        scope = _make_scope(headers=[(b"authorization", f"Bearer {token}".encode())])
+        mw = OrgMembershipMiddleware(
+            _dummy_app,
+            checker,
+            token_verifier=_verifier(_make_access({"login": "baduser"})),
+            audit_callback=audit_cb,
+        )
+        scope = _make_scope(headers=[(b"authorization", b"Bearer ref-token")])
         cap = _ResponseCapture()
         await mw(scope, _noop_receive, cap)
         # 403 is still sent despite audit failure.
@@ -619,10 +698,13 @@ class TestOrgMembershipMiddleware:
         """Audit callback is NOT fired when user is allowed."""
         checker = self._make_checker(allowed_orgs=["myorg"], is_allowed_return=True)
         audit_cb = AsyncMock()
-        mw = OrgMembershipMiddleware(_dummy_app, checker, audit_callback=audit_cb)
-
-        token = _make_jwt({"login": "gooduser"})
-        scope = _make_scope(headers=[(b"authorization", f"Bearer {token}".encode())])
+        mw = OrgMembershipMiddleware(
+            _dummy_app,
+            checker,
+            token_verifier=_verifier(_make_access({"login": "gooduser"})),
+            audit_callback=audit_cb,
+        )
+        scope = _make_scope(headers=[(b"authorization", b"Bearer ref-token")])
         cap = _ResponseCapture()
         await mw(scope, _noop_receive, cap)
         assert cap.status == 200
@@ -692,10 +774,13 @@ class TestApplyHttpMiddleware:
         checker.allowed_orgs = ["testorg"]
         checker.is_allowed = AsyncMock(return_value=True)
 
-        app = apply_http_middleware(_dummy_app, org_checker=checker)
+        app = apply_http_middleware(
+            _dummy_app,
+            org_checker=checker,
+            token_verifier=_verifier(_make_access({"login": "devuser"})),
+        )
 
-        token = _make_jwt({"login": "devuser"})
-        scope = _make_scope(headers=[(b"authorization", f"Bearer {token}".encode())])
+        scope = _make_scope(headers=[(b"authorization", b"Bearer ref-token")])
         cap = _ResponseCapture()
         await app(scope, _noop_receive, cap)
         assert cap.status == 200

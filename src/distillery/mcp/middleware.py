@@ -16,7 +16,7 @@ import logging
 import time
 import uuid
 from collections import deque
-from collections.abc import MutableMapping
+from collections.abc import Awaitable, Callable, MutableMapping
 from typing import TYPE_CHECKING, Any
 
 from starlette.datastructures import Headers
@@ -378,19 +378,29 @@ class OrgMembershipMiddleware:
     an ``Authorization: Bearer`` header are also passed through — FastMCP
     will reject them with 401 anyway.
 
-    For requests bearing a JWT access token, the middleware decodes the JWT
-    payload (without re-verifying the signature — FastMCP already did that)
-    to extract the ``login`` claim and then calls
-    :meth:`~distillery.mcp.org_membership.OrgMembershipChecker.is_allowed`.
-    Non-members receive a JSON 403 response with a clear error message.
+    For requests bearing an ``Authorization: Bearer`` token, the middleware
+    resolves the caller's identity through *token_verifier* — the auth
+    provider's ``verify_token`` — and reads the ``login`` claim from the
+    verified :class:`AccessToken`. It cannot decode the raw bearer itself:
+    a FastMCP OAuth-proxy access token is a reference token and carries no
+    ``login`` claim; only ``verify_token`` resolves it to the upstream
+    GitHub identity (the same data tool handlers read via
+    ``get_access_token()``). The middleware then calls
+    :meth:`~distillery.mcp.org_membership.OrgMembershipChecker.is_allowed`;
+    non-members receive a JSON 403.
 
-    If the token is not a JWT (e.g. an opaque token) or the JWT does not
-    contain a ``login``/``sub`` claim, the middleware rejects the request
-    with a 403 (fail-closed) rather than passing it through unenforced.
+    A token carrying the ``machine`` claim (a pre-shared machine token) is
+    passed through — possession of the token is the authorization, and the
+    org gate applies only to interactive GitHub OAuth users. A token that
+    ``verify_token`` rejects is passed through so FastMCP's own auth issues
+    the 401. A verified token with no ``login``/``sub`` claim fails closed.
 
     Args:
         app: The wrapped ASGI application.
         checker: Configured :class:`~distillery.mcp.org_membership.OrgMembershipChecker`.
+        token_verifier: The auth provider's ``verify_token`` coroutine.
+            Required whenever *checker* is enabled.
+        audit_callback: Optional async audit-log callback.
     """
 
     # Paths that handle the OAuth dance — never block these.
@@ -404,10 +414,16 @@ class OrgMembershipMiddleware:
         self,
         app: ASGIApp,
         checker: OrgMembershipChecker,
+        token_verifier: Callable[[str], Awaitable[Any]] | None = None,
         audit_callback: AuditCallback | None = None,
     ) -> None:
         self.app = app
         self.checker = checker
+        # The auth provider's verify_token: resolves a raw bearer to the
+        # verified AccessToken whose claims carry the GitHub `login` (and
+        # `machine` for pre-shared machine tokens). Required whenever the
+        # checker is enabled — see __call__.
+        self._token_verifier = token_verifier
         self._audit_callback = audit_callback
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -420,6 +436,17 @@ class OrgMembershipMiddleware:
             await self.app(scope, receive, send)
             return
 
+        # Misconfiguration: the checker is enabled but no verifier was wired.
+        # Fail closed for *every* request — including ones with no
+        # Authorization header — rather than admit any request unchecked.
+        # Checked before the header inspection so the no-bearer passthrough
+        # below cannot leak requests past a broken gate.
+        if self._token_verifier is None:
+            logger.error("OrgMembershipMiddleware enabled but no token_verifier wired")
+            await self._audit_org_denied("<unknown>")
+            await self._send_403(send, "<unknown>", list(self.checker.allowed_orgs))
+            return
+
         headers = Headers(scope=scope)
         auth = headers.get("authorization", "")
         if not auth.lower().startswith("bearer "):
@@ -429,26 +456,41 @@ class OrgMembershipMiddleware:
 
         bearer_token = auth[7:]
 
-        # Attempt to decode the JWT to get the GitHub login claim.
-        # FastMCP 3.x may include GitHub identity claims in the JWT payload.
-        from distillery.mcp.org_membership import _try_decode_jwt_claims
+        # Resolve the caller from the *verified* access token. The raw bearer
+        # is a FastMCP OAuth-proxy reference token and carries no `login`
+        # claim of its own; verify_token() performs the jti -> upstream
+        # lookup and returns an AccessToken whose claims include `login`
+        # (and `machine` for pre-shared machine tokens) — the same data tool
+        # handlers read via get_access_token().
+        access = await self._token_verifier(bearer_token)
+        if access is None:
+            # Invalid/unrecognised token — let FastMCP's own auth reject it
+            # with 401. The org gate decides membership, not token validity.
+            await self.app(scope, receive, send)
+            return
 
-        claims = _try_decode_jwt_claims(bearer_token)
-        if claims:
-            raw = claims.get("login") or claims.get("sub") or ""
-            username = raw.strip() if isinstance(raw, str) else ""
-            if username:
-                if not await self.checker.is_allowed(username):
-                    await self._audit_org_denied(username)
-                    await self._send_403(send, username, list(self.checker.allowed_orgs))
-                    return
-                await self.app(scope, receive, send)
-                return
+        claims = getattr(access, "claims", None) or {}
+        # Machine tokens are pre-shared credentials for non-interactive
+        # clients (CI / agentic workflows); possession of the token is the
+        # authorization. The org gate applies only to interactive GitHub
+        # OAuth users.
+        if claims.get("machine"):
+            await self.app(scope, receive, send)
+            return
 
-        # Cannot identify the user (opaque token or JWT without
-        # login/sub claim) — fail closed.
-        await self._audit_org_denied("<unknown>")
-        await self._send_403(send, "<unknown>", list(self.checker.allowed_orgs))
+        raw = claims.get("login") or claims.get("sub") or ""
+        username = raw.strip() if isinstance(raw, str) else ""
+        if not username:
+            # Verified token with no GitHub identity claim — fail closed.
+            await self._audit_org_denied("<unknown>")
+            await self._send_403(send, "<unknown>", list(self.checker.allowed_orgs))
+            return
+
+        if not await self.checker.is_allowed(username):
+            await self._audit_org_denied(username)
+            await self._send_403(send, username, list(self.checker.allowed_orgs))
+            return
+        await self.app(scope, receive, send)
 
     async def _audit_org_denied(self, username: str) -> None:
         """Fire the audit callback when a user is denied by org membership check.
@@ -506,6 +548,7 @@ def apply_http_middleware(
     trust_proxy: bool = False,
     loopback_exempt: bool = True,
     org_checker: OrgMembershipChecker | None = None,
+    token_verifier: Callable[[str], Awaitable[Any]] | None = None,
     audit_callback: AuditCallback | None = None,
 ) -> ASGIApp:
     """Wrap *app* with rate-limit, body-size, request-ID, and org-membership middleware.
@@ -529,6 +572,9 @@ def apply_http_middleware(
         org_checker: Optional org membership checker.  When provided and
             :attr:`~distillery.mcp.org_membership.OrgMembershipChecker.enabled`
             is ``True``, :class:`OrgMembershipMiddleware` is added.
+        token_verifier: The auth provider's ``verify_token`` coroutine, used
+            by :class:`OrgMembershipMiddleware` to resolve the verified
+            caller identity.  Required when *org_checker* is enabled.
         audit_callback: Optional async callback for writing audit log entries
             when org membership checks deny access.  Signature:
             ``(user_id, operation, entry_id, action, outcome) -> Awaitable[None]``.
@@ -538,7 +584,9 @@ def apply_http_middleware(
     """
     app = BodySizeLimitMiddleware(app, max_bytes=max_body_bytes)
     if org_checker is not None and org_checker.enabled:
-        app = OrgMembershipMiddleware(app, org_checker, audit_callback=audit_callback)
+        app = OrgMembershipMiddleware(
+            app, org_checker, token_verifier=token_verifier, audit_callback=audit_callback
+        )
     app = RateLimitMiddleware(
         app,
         requests_per_minute=requests_per_minute,
