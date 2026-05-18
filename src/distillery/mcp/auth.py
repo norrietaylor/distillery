@@ -57,6 +57,12 @@ def _load_machine_tokens() -> list[tuple[str, AccessToken]]:
     attributed to ``DISTILLERY_MCP_MACHINE_IDENTITY`` via the ``login`` claim —
     the same claim a GitHub OAuth user carries — so authorship and audit keep
     working unchanged.
+
+    The access token carries the ``user`` scope: distillery's GitHub OAuth
+    requests that scope, and FastMCP's auth layer enforces it on every verified
+    token. A machine token without it is authenticated but then rejected with
+    ``403 insufficient_scope`` — so it must present the same scope an
+    interactive GitHub OAuth user would.
     """
     raw = os.environ.get(_MACHINE_TOKEN_ENV, "").strip()
     if not raw:
@@ -65,7 +71,7 @@ def _load_machine_tokens() -> list[tuple[str, AccessToken]]:
     access = AccessToken(
         token=raw,
         client_id=identity,
-        scopes=["machine"],
+        scopes=["user"],
         expires_at=None,
         claims={"login": identity, "machine": True},
     )
