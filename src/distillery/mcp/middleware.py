@@ -11,6 +11,7 @@ when ``--transport http`` is selected.
 
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 import time
@@ -409,6 +410,11 @@ class OrgMembershipMiddleware:
         self.app = app
         self.checker = checker
         self._audit_callback = audit_callback
+        # Pre-shared machine tokens are exempt from the org gate (see __call__).
+        # Loaded once at construction from DISTILLERY_MCP_MACHINE_TOKEN.
+        from distillery.mcp.auth import load_machine_token_values
+
+        self._machine_tokens: list[str] = load_machine_token_values()
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or not self.checker.enabled:
@@ -428,6 +434,17 @@ class OrgMembershipMiddleware:
             return
 
         bearer_token = auth[7:]
+
+        # Machine tokens (DISTILLERY_MCP_MACHINE_TOKEN) are pre-shared
+        # credentials for non-interactive clients — CI / agentic workflows
+        # that cannot complete the GitHub OAuth flow. They are not GitHub
+        # identities and carry no org membership: possession of the token is
+        # the authorization. Pass them through — the org gate applies only to
+        # interactive GitHub OAuth users. Constant-time compare on a secret.
+        for machine_token in self._machine_tokens:
+            if hmac.compare_digest(bearer_token.encode(), machine_token.encode()):
+                await self.app(scope, receive, send)
+                return
 
         # Attempt to decode the JWT to get the GitHub login claim.
         # FastMCP 3.x may include GitHub identity claims in the JWT payload.

@@ -45,6 +45,18 @@ _MACHINE_IDENTITY_ENV = "DISTILLERY_MCP_MACHINE_IDENTITY"
 _DEFAULT_MACHINE_IDENTITY = "distillery-machine"
 
 
+def load_machine_token_values() -> list[str]:
+    """Return the configured pre-shared machine token(s), or ``[]`` when unset.
+
+    Single source of truth for reading ``DISTILLERY_MCP_MACHINE_TOKEN``. Both
+    the auth verifier (:func:`_load_machine_tokens`) and ``OrgMembershipMiddleware``
+    use it — the middleware to recognise machine-token requests and exempt them
+    from the org-membership gate.
+    """
+    raw = os.environ.get(_MACHINE_TOKEN_ENV, "").strip()
+    return [raw] if raw else []
+
+
 def _load_machine_tokens() -> list[tuple[str, AccessToken]]:
     """Load the optional pre-shared machine token from the environment.
 
@@ -64,9 +76,10 @@ def _load_machine_tokens() -> list[tuple[str, AccessToken]]:
     ``403 insufficient_scope`` — so it must present the same scope an
     interactive GitHub OAuth user would.
     """
-    raw = os.environ.get(_MACHINE_TOKEN_ENV, "").strip()
-    if not raw:
+    values = load_machine_token_values()
+    if not values:
         return []
+    raw = values[0]
     identity = os.environ.get(_MACHINE_IDENTITY_ENV, "").strip() or _DEFAULT_MACHINE_IDENTITY
     access = AccessToken(
         token=raw,

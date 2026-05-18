@@ -489,6 +489,34 @@ class TestOrgMembershipMiddleware:
         assert cap.status == 200
         checker.is_allowed.assert_not_awaited()
 
+    async def test_machine_token_bypasses_org_check(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A pre-shared machine token is exempt from the org gate."""
+        monkeypatch.setenv("DISTILLERY_MCP_MACHINE_TOKEN", "machine-tok-xyz")
+        checker = self._make_checker(allowed_orgs=["myorg"], is_allowed_return=False)
+        mw = OrgMembershipMiddleware(_dummy_app, checker)
+
+        scope = _make_scope(headers=[(b"authorization", b"Bearer machine-tok-xyz")])
+        cap = _ResponseCapture()
+        await mw(scope, _noop_receive, cap)
+        assert cap.status == 200
+        checker.is_allowed.assert_not_awaited()
+
+    async def test_non_machine_bearer_still_org_checked(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With a machine token configured, a different bearer is still gated."""
+        monkeypatch.setenv("DISTILLERY_MCP_MACHINE_TOKEN", "machine-tok-xyz")
+        checker = self._make_checker(allowed_orgs=["myorg"], is_allowed_return=False)
+        mw = OrgMembershipMiddleware(_dummy_app, checker)
+
+        token = _make_jwt({"login": "baduser"})
+        scope = _make_scope(headers=[(b"authorization", f"Bearer {token}".encode())])
+        cap = _ResponseCapture()
+        await mw(scope, _noop_receive, cap)
+        assert cap.status == 403
+
     async def test_oauth_path_bypasses_check(self) -> None:
         """OAuth paths should always pass through regardless of auth."""
         checker = self._make_checker(allowed_orgs=["myorg"], is_allowed_return=False)
