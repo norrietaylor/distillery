@@ -37,19 +37,12 @@ ignore:
   # Refreshed: 2026-05-15 (issue #271, checking for new CVEs; individual CVE review dates in each entry's reason field).
   # ---------------------------------------------------------------------
 
-  - vulnerability: CVE-2026-3298
+  - vulnerability: CVE-2026-7210
     package:
       name: python-3.14
-      version: 3.14.4-r4
+      version: 3.14.5-r1
       type: apk
-    reason: "CPython 3.14.4-r4 — CVSS High; affects the interpreter's startup path under specific PYTHONHOME / site-packages override conditions on multi-user systems.  Not exploitable in our deployment: Distillery runs as the Chainguard distroless 'nonroot' user (uid 65532) inside an immutable distroless container with a fixed PYTHONHOME and no shared-tenant site-packages directory.  No upstream fix released by CPython upstream or Wolfi.  Reviewed: 2026-05-07"
-
-  - vulnerability: CVE-2026-5435
-    package:
-      name: glibc
-      version: 2.43-r7
-      type: apk
-    reason: "glibc 2.43-r7 (Wolfi) — CVSS High; locale/charset boundary handling.  Not exploitable in our deployment: container runs with the C.UTF-8 locale, all I/O is UTF-8 end-to-end (HTTP/JSON, DuckDB, Python source), and no user-controlled locale strings reach glibc.  Sourceware tracking issue open; no fix released yet.  Reviewed: 2026-05-03"
+    reason: "CPython 3.14.5-r1 — CVSS Critical; libexpat hash-flooding: xml.parsers.expat and xml.etree.ElementTree use insufficient entropy for hash-flooding protection, so a crafted XML document can trigger a hash-collision DoS.  Distillery parses feed XML, so this is a real but DoS-only exposure; defusedxml guards XXE / entity expansion but not expat's hash entropy.  No upstream fix available: full mitigation requires libexpat >= 2.8.0 plus a CPython patch, and neither Wolfi nor CPython has released a fixed python-3.14 build.  Grype matched via NVD CPE with no version constraint.  Revisit on the next Chainguard base-image rebuild.  Reviewed: 2026-05-17"
 
 
 # Fail on critical and high severity vulnerabilities.

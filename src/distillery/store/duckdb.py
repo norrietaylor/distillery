@@ -225,7 +225,21 @@ class DuckDBStore:
             and not self._is_motherduck_path(self._db_path)
         )
         if is_local and Path(self._db_path).exists():
-            os.chmod(self._db_path, 0o600)
+            # Best-effort: GCS FUSE and some network filesystems do not
+            # support chmod and raise OSError. On those mounts the file
+            # mode is governed by the mount options, not the process, and
+            # access is gated by the storage layer's own ACLs — so a
+            # failed chmod is not a security regression. Block-volume
+            # deployments (e.g. Fly) still get the 0600 lockdown.
+            try:
+                os.chmod(self._db_path, 0o600)
+            except OSError as exc:
+                logger.warning(
+                    "Could not chmod %s to 0600; filesystem may not "
+                    "support it (e.g. GCS FUSE): %s",
+                    self._db_path,
+                    exc,
+                )
 
         return conn
 
