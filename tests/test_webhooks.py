@@ -1119,3 +1119,225 @@ async def test_409_preferred_over_429_when_both_apply(
             assert second.json()["error"] == "job_in_progress"
 
             _wait_for_job(client, first.json()["job_id"], timeout_s=3.0)
+
+
+# ---------------------------------------------------------------------------
+# Stale active-job recovery (issue #507)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_stale_active_job_pointer_does_not_block_new_poll(
+    store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #507: a non-terminal job older than the TTL must not return 409.
+
+    Simulates the Fly autosuspend symptom by seeding a ``running`` job whose
+    ``submitted_at`` predates :data:`_ACTIVE_JOB_TTL_SECONDS` and pointing
+    the active-job map at it.  A subsequent ``POST /poll`` must self-heal
+    (sweep the orphan, enqueue a fresh job) and return 202 — never the
+    permanent 409 that prompted the issue.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from distillery.mcp import webhooks as _webhooks
+    from distillery.mcp.webhooks import _JobStatus
+
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+    config = _make_config()
+    shared = _make_shared_state(store)
+
+    # Seed an orphaned job: state=running, submitted_at well past TTL.
+    stale_id = "orphan-from-suspend"
+    stale_age = _webhooks._ACTIVE_JOB_TTL_SECONDS + 60
+    stale_job = _JobStatus(
+        id=stale_id,
+        endpoint="poll",
+        state="running",
+        submitted_at=datetime.now(UTC) - timedelta(seconds=stale_age),
+        started_at=datetime.now(UTC) - timedelta(seconds=stale_age),
+    )
+    _webhooks._jobs[stale_id] = stale_job
+    _webhooks._active_job_by_endpoint["poll"] = stale_id
+
+    app = create_webhook_app(shared, config)
+    with TestClient(app, raise_server_exceptions=False) as client:
+        resp = client.post("/poll", headers=_AUTH_HEADER)
+        # 202 (sweep cleared the orphan and enqueued a new job) is the
+        # expected outcome.  429 would also be acceptable per the
+        # acceptance criteria — it would mean cooldown fired for a real
+        # reason — but with a fresh store no cooldown is in flight, so 202
+        # is what we get.  The forbidden outcome is 409.
+        assert resp.status_code in (202, 429), (
+            f"Expected 202 or 429 after sweep, got {resp.status_code}: {resp.text}"
+        )
+        assert resp.status_code != 409, (
+            "Stale active_job_id must not produce a permanent 409 (issue #507)"
+        )
+        body = resp.json()
+        if resp.status_code == 202:
+            # New job id must differ from the orphan — confirming the
+            # sweep cleared the pointer rather than re-issuing the old id.
+            assert body["job_id"] != stale_id
+            _wait_for_job(client, body["job_id"], timeout_s=5.0)
+
+    # Orphan should be terminal (failed) after the sweep so callers polling
+    # GET /jobs/<orphan-id> see a clear "killed by suspend" cause rather
+    # than an indefinite "running".
+    assert _webhooks._jobs[stale_id].state == "failed"
+    assert _webhooks._jobs[stale_id].error is not None
+    assert "orphan" in _webhooks._jobs[stale_id].error.lower()
+
+
+@pytest.mark.unit
+async def test_fresh_in_flight_job_still_returns_409(
+    store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The TTL guard must not regress legitimate in-flight 409s.
+
+    A job submitted moments ago is still live — the existing idempotency
+    contract (second concurrent poll returns 409 with the running job id)
+    must continue to hold so schedulers re-attach rather than race a
+    duplicate.
+    """
+    from datetime import UTC, datetime
+
+    from distillery.mcp import webhooks as _webhooks
+    from distillery.mcp.webhooks import _JobStatus
+
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+    config = _make_config()
+    shared = _make_shared_state(store)
+
+    fresh_id = "fresh-running-job"
+    fresh_job = _JobStatus(
+        id=fresh_id,
+        endpoint="poll",
+        state="running",
+        submitted_at=datetime.now(UTC),  # just submitted
+        started_at=datetime.now(UTC),
+    )
+    _webhooks._jobs[fresh_id] = fresh_job
+    _webhooks._active_job_by_endpoint["poll"] = fresh_id
+
+    app = create_webhook_app(shared, config)
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.post("/poll", headers=_AUTH_HEADER)
+    assert resp.status_code == 409
+    body = resp.json()
+    assert body["error"] == "job_in_progress"
+    assert body["job_id"] == fresh_id
+
+
+@pytest.mark.unit
+async def test_sweep_stale_jobs_marks_orphans_failed() -> None:
+    """``sweep_stale_jobs`` transitions stale jobs to terminal failed state.
+
+    Direct unit test on the sweep function so the startup-hook plumbing
+    (which TestClient does exercise) is not the only coverage of the
+    recovery primitive.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from distillery.mcp import webhooks as _webhooks
+    from distillery.mcp.webhooks import _JobStatus, sweep_stale_jobs
+
+    # Three jobs: one stale running, one fresh running, one already done.
+    now = datetime.now(UTC)
+    stale_age = _webhooks._ACTIVE_JOB_TTL_SECONDS + 60
+
+    stale = _JobStatus(
+        id="stale",
+        endpoint="poll",
+        state="running",
+        submitted_at=now - timedelta(seconds=stale_age),
+    )
+    fresh = _JobStatus(
+        id="fresh",
+        endpoint="rescore",
+        state="running",
+        submitted_at=now,
+    )
+    done = _JobStatus(
+        id="done",
+        endpoint="maintenance",
+        state="succeeded",
+        submitted_at=now - timedelta(seconds=stale_age),
+        finished_at=now - timedelta(seconds=10),
+    )
+    _webhooks._jobs["stale"] = stale
+    _webhooks._jobs["fresh"] = fresh
+    _webhooks._jobs["done"] = done
+    _webhooks._active_job_by_endpoint["poll"] = "stale"
+    _webhooks._active_job_by_endpoint["rescore"] = "fresh"
+
+    swept = await sweep_stale_jobs()
+
+    # Only the stale one is swept.  ``done`` is already terminal; ``fresh``
+    # is within TTL.
+    assert swept == 1
+    assert stale.state == "failed"
+    assert stale.error is not None
+    assert fresh.state == "running"  # untouched
+    assert done.state == "succeeded"  # untouched
+    # Active-job pointer for stale endpoint is dropped; fresh one remains.
+    assert "poll" not in _webhooks._active_job_by_endpoint
+    assert _webhooks._active_job_by_endpoint["rescore"] == "fresh"
+
+
+@pytest.mark.unit
+async def test_sweep_drops_pointer_to_evicted_job() -> None:
+    """A dangling active-job pointer whose job record was evicted is dropped.
+
+    Belt-and-braces: even if the FIFO ``_jobs`` eviction has discarded a
+    record while leaving its endpoint pointer behind, the sweep cleans up.
+    """
+    from distillery.mcp import webhooks as _webhooks
+    from distillery.mcp.webhooks import sweep_stale_jobs
+
+    # Pointer references a job id that does not exist in ``_jobs``.
+    _webhooks._active_job_by_endpoint["poll"] = "evicted-job-id"
+
+    swept = await sweep_stale_jobs()
+
+    assert swept == 1
+    assert "poll" not in _webhooks._active_job_by_endpoint
+
+
+@pytest.mark.unit
+async def test_startup_hook_clears_stale_pointer_on_app_boot(
+    store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Starlette ``on_startup`` fires the sweep when the app enters its lifecycle.
+
+    Exercises the wiring rather than the sweep semantics — confirms that
+    entering the TestClient's lifespan context actually invokes
+    ``sweep_stale_jobs`` against the module-level registry.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from distillery.mcp import webhooks as _webhooks
+    from distillery.mcp.webhooks import _JobStatus
+
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+    config = _make_config()
+    shared = _make_shared_state(store)
+
+    stale_age = _webhooks._ACTIVE_JOB_TTL_SECONDS + 60
+    stale = _JobStatus(
+        id="pre-boot-orphan",
+        endpoint="poll",
+        state="running",
+        submitted_at=datetime.now(UTC) - timedelta(seconds=stale_age),
+    )
+    _webhooks._jobs["pre-boot-orphan"] = stale
+    _webhooks._active_job_by_endpoint["poll"] = "pre-boot-orphan"
+
+    app = create_webhook_app(shared, config)
+    # Entering the TestClient context manager drives the Starlette lifespan,
+    # which runs the ``on_startup`` hook we installed.
+    with TestClient(app, raise_server_exceptions=False):
+        pass
+
+    assert stale.state == "failed"
+    assert "poll" not in _webhooks._active_job_by_endpoint
