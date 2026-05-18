@@ -13,9 +13,12 @@ Covers:
 from __future__ import annotations
 
 import textwrap
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
 from distillery.feeds.github import GitHubAdapter, _event_to_feed_item, _parse_github_url
@@ -23,6 +26,27 @@ from distillery.feeds.models import FeedItem
 from distillery.feeds.rss import RSSAdapter, parse_feed_xml
 
 pytestmark = pytest.mark.unit
+
+
+# A routable public IP the SSRF host check accepts; used to keep RSSAdapter
+# fetch tests hermetic (no real DNS).
+_PUBLIC_IP = "93.184.216.34"
+
+
+@contextmanager
+def _mock_rss_http(handler: Callable[[httpx.Request], httpx.Response]) -> Iterator[None]:
+    """Wire ``RSSAdapter.fetch`` to a MockTransport-backed client.
+
+    ``handler`` receives each outbound :class:`httpx.Request` and returns the
+    :class:`httpx.Response` to serve. The SSRF host resolver is stubbed to a
+    public address so test URLs never trigger real DNS.
+    """
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    with (
+        patch("distillery.feeds.rss.httpx.Client", return_value=client),
+        patch("distillery.feeds.url_guard._resolve_ips", return_value=[_PUBLIC_IP]),
+    ):
+        yield
 
 
 # ---------------------------------------------------------------------------
@@ -560,17 +584,10 @@ class TestRSSAdapter:
         assert adapter.source_url == "https://example.com/rss"
 
     def test_fetch_returns_items(self) -> None:
-        mock_response = MagicMock()
-        mock_response.content = _RSS_XML
-        mock_response.raise_for_status.return_value = None
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=_RSS_XML)
 
-        with patch("distillery.feeds.rss.httpx.Client") as mock_client_cls:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
-            mock_client.get.return_value = mock_response
-            mock_client_cls.return_value = mock_client
-
+        with _mock_rss_http(handler):
             adapter = RSSAdapter("https://example.com/rss")
             items = adapter.fetch()
 
@@ -578,39 +595,57 @@ class TestRSSAdapter:
         assert items[0].title == "First post"
 
     def test_fetch_updates_last_polled_at(self) -> None:
-        mock_response = MagicMock()
-        mock_response.content = _RSS_XML
-        mock_response.raise_for_status.return_value = None
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=_RSS_XML)
 
-        with patch("distillery.feeds.rss.httpx.Client") as mock_client_cls:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
-            mock_client.get.return_value = mock_response
-            mock_client_cls.return_value = mock_client
-
+        with _mock_rss_http(handler):
             adapter = RSSAdapter("https://example.com/rss")
             assert adapter.last_polled_at is None
             adapter.fetch()
             assert adapter.last_polled_at is not None
 
     def test_fetch_atom_feed(self) -> None:
-        mock_response = MagicMock()
-        mock_response.content = _ATOM_XML
-        mock_response.raise_for_status.return_value = None
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=_ATOM_XML)
 
-        with patch("distillery.feeds.rss.httpx.Client") as mock_client_cls:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
-            mock_client.get.return_value = mock_response
-            mock_client_cls.return_value = mock_client
-
+        with _mock_rss_http(handler):
             adapter = RSSAdapter("https://example.com/atom")
             items = adapter.fetch()
 
         assert len(items) == 2
         assert items[0].title == "Atom Entry One"
+
+    def test_fetch_follows_redirect_to_public_host(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/rss":
+                return httpx.Response(302, headers={"location": "https://example.com/feed.xml"})
+            return httpx.Response(200, content=_RSS_XML)
+
+        with _mock_rss_http(handler):
+            adapter = RSSAdapter("https://example.com/rss")
+            items = adapter.fetch()
+
+        assert len(items) == 2
+
+    def test_fetch_rejects_redirect_to_internal_host(self) -> None:
+        from distillery.feeds.url_guard import UnsafeURLError
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            # First hop is the public test host; it redirects to a link-local
+            # metadata address that the guard must refuse to follow.
+            return httpx.Response(302, headers={"location": "http://169.254.169.254/latest/"})
+
+        with _mock_rss_http(handler), pytest.raises(UnsafeURLError):
+            RSSAdapter("https://example.com/rss").fetch()
+
+    def test_fetch_rejects_oversized_body(self) -> None:
+        from distillery.feeds.url_guard import MAX_RESPONSE_BYTES, ResponseTooLargeError
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=b"x" * (MAX_RESPONSE_BYTES + 1))
+
+        with _mock_rss_http(handler), pytest.raises(ResponseTooLargeError):
+            RSSAdapter("https://example.com/rss").fetch()
 
 
 # ---------------------------------------------------------------------------
@@ -624,31 +659,25 @@ class TestRSSAdapterUserAgent:
 
     def _fetch_and_capture_headers(
         self, *, url: str, user_agent: str | None = None
-    ) -> dict[str, str]:
+    ) -> httpx.Headers:
         from distillery.feeds.rss import RSSAdapter
 
-        mock_response = MagicMock()
-        mock_response.content = _RSS_XML
-        mock_response.raise_for_status.return_value = None
+        captured: dict[str, httpx.Headers] = {}
 
-        with patch("distillery.feeds.rss.httpx.Client") as mock_client_cls:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
-            mock_client.get.return_value = mock_response
-            mock_client_cls.return_value = mock_client
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["headers"] = request.headers
+            return httpx.Response(200, content=_RSS_XML)
 
+        with _mock_rss_http(handler):
             if user_agent is None:
                 adapter = RSSAdapter(url)
             else:
                 adapter = RSSAdapter(url, user_agent=user_agent)
             adapter.fetch()
 
-            assert mock_client.get.call_count == 1
-            _, kwargs = mock_client.get.call_args
-            headers = kwargs.get("headers", {})
-            assert isinstance(headers, dict)
-            return headers
+        headers = captured["headers"]
+        assert isinstance(headers, httpx.Headers)
+        return headers
 
     def test_default_user_agent_includes_project_version_and_contact(self) -> None:
         """Default UA carries project name, version, and the GitHub contact URL."""

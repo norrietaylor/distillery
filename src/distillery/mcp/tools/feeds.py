@@ -29,6 +29,7 @@ from urllib.parse import urlparse
 from mcp import types
 
 from distillery.config import DistilleryConfig
+from distillery.feeds.url_guard import UnsafeURLError, validate_public_url
 from distillery.mcp.tools._common import (
     error_response,
     success_response,
@@ -116,9 +117,12 @@ async def _probe_url(url: str) -> str | None:
     """
     import httpx
 
+    # Redirects are not followed here: a redirect target could resolve to a
+    # non-public host. A 3xx response still counts as reachable below, and the
+    # poller's own fetch path re-validates every redirect hop.
     try:
         async with httpx.AsyncClient(
-            timeout=_PROBE_TIMEOUT_SECONDS, follow_redirects=True
+            timeout=_PROBE_TIMEOUT_SECONDS, follow_redirects=False
         ) as client:
             try:
                 response = await client.head(url)
@@ -356,6 +360,22 @@ async def _handle_watch(
                 syntax_error,
                 details={"field": "url", "url": url, "syntax_error": syntax_error},
             )
+
+        # ------------------------------------------------------------------
+        # Outbound-fetch host validation (rss sources only).
+        # The poller issues HTTP requests against this URL, so restrict it to
+        # publicly-routable hosts before persisting. GitHub sources are exempt:
+        # the GitHub adapter constructs api.github.com URLs itself.
+        # ------------------------------------------------------------------
+        if source_type == "rss":
+            try:
+                await asyncio.to_thread(validate_public_url, url)
+            except UnsafeURLError as exc:
+                return error_response(
+                    "INVALID_PARAMS",
+                    str(exc),
+                    details={"field": "url", "url": url},
+                )
 
         # ------------------------------------------------------------------
         # Optional reachability probe.

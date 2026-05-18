@@ -24,6 +24,7 @@ import httpx
 
 from distillery import __version__
 from distillery.feeds.models import FeedItem
+from distillery.feeds.url_guard import fetch_feed_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -415,6 +416,10 @@ class RSSAdapter:
         Raises:
             httpx.HTTPStatusError: On non-2xx HTTP responses.
             httpx.RequestError: On network-level failures.
+            distillery.feeds.url_guard.UnsafeURLError: If the feed URL — or a
+                redirect target — does not resolve to a public host.
+            distillery.feeds.url_guard.ResponseTooLargeError: If the response
+                body exceeds the size cap.
             xml.etree.ElementTree.ParseError: If the response body is not
                 valid XML.
         """
@@ -426,16 +431,13 @@ class RSSAdapter:
         headers = {"User-Agent": self._user_agent}
         headers.update(self._extra_headers)
 
+        # ``fetch_feed_bytes`` follows redirects manually, re-validating the
+        # host at every hop, and streams the body under a fixed size cap.
         with httpx.Client(timeout=_REQUEST_TIMEOUT, verify=True) as client:
-            response = client.get(
-                self._fetch_url,
-                headers=headers,
-                follow_redirects=True,
-            )
-            response.raise_for_status()
+            content = fetch_feed_bytes(client, self._fetch_url, headers)
 
         self.last_polled_at = datetime.now(tz=UTC)
 
         # Use the original source_url (not the rewritten fetch URL) so
         # FeedItem.source_url and _stable_id inputs stay consistent.
-        return parse_feed_xml(response.content, self._source_url)
+        return parse_feed_xml(content, self._source_url)
