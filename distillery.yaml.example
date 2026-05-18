@@ -236,5 +236,9 @@ tags:
   # Each prefix must be a valid lowercase alphanumeric slug (e.g. "system").
   # Entries with tags under a reserved prefix submitted via MCP will be
   # rejected unless the source is an authorized internal source.
-  # Example: ["system"] reserves system/* tags for internal use.
-  reserved_prefixes: []
+  #
+  # Default (when this key is omitted): ["kind"] — the kind/ namespace is the
+  # content-type axis (kind/release, kind/opinion, ...) assigned by the
+  # classifier.  Setting this key explicitly (including to []) overrides the
+  # default.  Example: ["kind", "system"] reserves both namespaces.
+  reserved_prefixes: ["kind"]

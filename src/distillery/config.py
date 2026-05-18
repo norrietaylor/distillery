@@ -162,11 +162,15 @@ class TagsConfig:
         reserved_prefixes: Top-level namespace prefixes (e.g. ``["system"]``)
             that only specific internal sources may use.  Each entry must be a
             valid lowercase alphanumeric slug (same rules as a single tag
-            segment).  Defaults to ``[]``.
+            segment).  Defaults to ``["kind"]`` — the ``kind/`` namespace is
+            the content-type axis (``kind/release``, ``kind/opinion``, …)
+            assigned by the classifier; user-supplied ``kind/*`` tags via
+            ``distillery_store`` are rejected so the axis remains a single
+            source of truth.
     """
 
     enforce_namespaces: bool = False
-    reserved_prefixes: list[str] = field(default_factory=list)
+    reserved_prefixes: list[str] = field(default_factory=lambda: ["kind"])
 
 
 @dataclass
@@ -711,7 +715,9 @@ def _parse_tags(raw: dict[str, Any]) -> TagsConfig:
     Args:
         raw: Mapping (typically from YAML) containing any of the following keys:
             - ``enforce_namespaces`` (bool, default ``False``)
-            - ``reserved_prefixes`` (list[str], default ``[]``)
+            - ``reserved_prefixes`` (list[str]) — when absent, falls back to
+              the :class:`TagsConfig` dataclass default (``["kind"]``); when
+              present (including ``[]``), the explicit value wins.
 
     Returns:
         A populated :class:`TagsConfig` instance.
@@ -727,16 +733,20 @@ def _parse_tags(raw: dict[str, Any]) -> TagsConfig:
     if not isinstance(enforce_raw, bool):
         raise ValueError(f"tags.enforce_namespaces must be a boolean, got: {enforce_raw!r}")
 
-    prefixes_raw = raw.get("reserved_prefixes", [])
-    if not isinstance(prefixes_raw, list):
-        raise ValueError(
-            f"tags.reserved_prefixes must be a list, got: {type(prefixes_raw).__name__}"
+    if "reserved_prefixes" in raw:
+        prefixes_raw = raw["reserved_prefixes"]
+        if not isinstance(prefixes_raw, list):
+            raise ValueError(
+                f"tags.reserved_prefixes must be a list, got: {type(prefixes_raw).__name__}"
+            )
+        reserved_prefixes = [str(p) for p in prefixes_raw]
+        return TagsConfig(
+            enforce_namespaces=enforce_raw,
+            reserved_prefixes=reserved_prefixes,
         )
 
-    return TagsConfig(
-        enforce_namespaces=enforce_raw,
-        reserved_prefixes=[str(p) for p in prefixes_raw],
-    )
+    # Absent ``reserved_prefixes`` → use dataclass default (``["kind"]``).
+    return TagsConfig(enforce_namespaces=enforce_raw)
 
 
 def _parse_feed_source(raw: dict[str, Any], index: int) -> FeedSourceConfig:
