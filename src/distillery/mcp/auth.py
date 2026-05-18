@@ -19,12 +19,14 @@ Includes a workaround for FastMCP CIMD localhost redirect validation
 from __future__ import annotations
 
 import fnmatch
+import hmac
 import logging
 import os
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+from fastmcp.server.auth import AccessToken
 from fastmcp.server.auth.providers.github import GitHubProvider
 
 from distillery.config import DistilleryConfig, parse_env_allowed_orgs
@@ -34,7 +36,77 @@ from distillery.mcp.types import AuditCallback
 logger = logging.getLogger(__name__)
 
 
-class OrgRestrictedGitHubProvider(GitHubProvider):
+# Environment variables for the optional pre-shared machine-token auth path.
+# DISTILLERY_MCP_MACHINE_TOKEN holds the token; DISTILLERY_MCP_MACHINE_IDENTITY
+# is the GitHub-style login attributed to calls made with it (authorship and
+# audit). The feature is off unless the token variable is set.
+_MACHINE_TOKEN_ENV = "DISTILLERY_MCP_MACHINE_TOKEN"
+_MACHINE_IDENTITY_ENV = "DISTILLERY_MCP_MACHINE_IDENTITY"
+_DEFAULT_MACHINE_IDENTITY = "distillery-machine"
+
+
+def _load_machine_tokens() -> list[tuple[str, AccessToken]]:
+    """Load the optional pre-shared machine token from the environment.
+
+    Returns an empty list when ``DISTILLERY_MCP_MACHINE_TOKEN`` is unset — the
+    machine-token path is opt-in and off by default, so existing deployments
+    are unaffected.
+
+    The token authenticates non-interactive MCP clients (CI workflows) that
+    cannot complete the browser-based GitHub OAuth flow. Calls made with it are
+    attributed to ``DISTILLERY_MCP_MACHINE_IDENTITY`` via the ``login`` claim —
+    the same claim a GitHub OAuth user carries — so authorship and audit keep
+    working unchanged.
+    """
+    raw = os.environ.get(_MACHINE_TOKEN_ENV, "").strip()
+    if not raw:
+        return []
+    identity = os.environ.get(_MACHINE_IDENTITY_ENV, "").strip() or _DEFAULT_MACHINE_IDENTITY
+    access = AccessToken(
+        token=raw,
+        client_id=identity,
+        scopes=["machine"],
+        expires_at=None,
+        claims={"login": identity, "machine": True},
+    )
+    logger.info("Machine-token MCP auth enabled (identity=%r)", identity)
+    return [(raw, access)]
+
+
+class _MachineTokenGitHubProvider(GitHubProvider):
+    """``GitHubProvider`` that also accepts pre-shared machine tokens.
+
+    Interactive clients authenticate through the GitHub OAuth flow and present
+    a FastMCP-issued JWT, which the ``OAuthProxy`` base verifies. Non-interactive
+    clients — CI workflows that cannot run the browser OAuth flow — present a
+    static pre-shared token instead.
+
+    :meth:`verify_token` checks the configured machine tokens first, with a
+    constant-time comparison, and falls through to the OAuth-proxy verification
+    otherwise. A machine token is its own credential: possession authorises the
+    call, so it does not pass through the GitHub OAuth flow or the
+    org-membership gate.
+    """
+
+    def __init__(
+        self,
+        *,
+        machine_tokens: list[tuple[str, AccessToken]] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self._machine_tokens: list[tuple[str, AccessToken]] = machine_tokens or []
+
+    async def verify_token(self, token: str) -> AccessToken | None:
+        """Verify a bearer token: machine tokens first, then the OAuth proxy."""
+        for candidate, access in self._machine_tokens:
+            if hmac.compare_digest(token.encode(), candidate.encode()):
+                logger.debug("Authenticated machine token (identity=%s)", access.client_id)
+                return access
+        return await super().verify_token(token)
+
+
+class OrgRestrictedGitHubProvider(_MachineTokenGitHubProvider):
     """GitHubProvider subclass that captures user tokens for org membership checks.
 
     Overrides :meth:`_extract_upstream_claims` to:
@@ -43,6 +115,10 @@ class OrgRestrictedGitHubProvider(GitHubProvider):
        can identify the user without an extra API call.
     3. Call :meth:`OrgMembershipChecker.store_user_token` so private-org
        membership checks can use the user's own OAuth token.
+
+    Inherits the pre-shared machine-token path from
+    :class:`_MachineTokenGitHubProvider`; machine tokens skip the OAuth flow and
+    the org-membership gate by design.
     """
 
     def __init__(
@@ -53,11 +129,13 @@ class OrgRestrictedGitHubProvider(GitHubProvider):
         client_secret: str,
         base_url: str,
         audit_callback: AuditCallback | None = None,
+        machine_tokens: list[tuple[str, AccessToken]] | None = None,
     ) -> None:
         super().__init__(
             client_id=client_id,
             client_secret=client_secret,
             base_url=base_url,
+            machine_tokens=machine_tokens,
         )
         self._org_checker = org_checker
         self._audit_callback = audit_callback
@@ -384,6 +462,8 @@ def build_github_auth(
         base_url,
     )
 
+    machine_tokens = _load_machine_tokens()
+
     if org_checker is not None:
         return OrgRestrictedGitHubProvider(
             org_checker=org_checker,
@@ -391,12 +471,14 @@ def build_github_auth(
             client_secret=client_secret,
             base_url=base_url,
             audit_callback=audit_callback,
+            machine_tokens=machine_tokens,
         )
 
-    return GitHubProvider(
+    return _MachineTokenGitHubProvider(
         client_id=client_id,
         client_secret=client_secret,
         base_url=base_url,
+        machine_tokens=machine_tokens,
     )
 
 

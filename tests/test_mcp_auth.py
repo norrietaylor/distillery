@@ -157,8 +157,16 @@ class TestBuildGithubAuthWithOrgChecker:
 
         assert isinstance(provider, OrgRestrictedGitHubProvider)
 
-    def test_returns_plain_provider_when_no_checker(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """build_github_auth() returns plain GitHubProvider when org_checker is None."""
+    def test_returns_non_org_restricted_provider_when_no_checker(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """build_github_auth() returns a non-org-restricted GitHubProvider when
+        org_checker is None.
+
+        The provider is a GitHubProvider (so OAuth works) but not an
+        OrgRestrictedGitHubProvider. It is a _MachineTokenGitHubProvider so the
+        pre-shared machine-token path is available even without org gating.
+        """
         monkeypatch.setenv("GITHUB_CLIENT_ID", "test-id")
         monkeypatch.setenv("GITHUB_CLIENT_SECRET", "test-secret")
         monkeypatch.setenv("DISTILLERY_BASE_URL", "https://example.com")
@@ -168,7 +176,8 @@ class TestBuildGithubAuthWithOrgChecker:
 
         from fastmcp.server.auth.providers.github import GitHubProvider
 
-        assert type(provider) is GitHubProvider
+        assert isinstance(provider, GitHubProvider)
+        assert not isinstance(provider, OrgRestrictedGitHubProvider)
 
 
 class TestBuildOrgCheckerIntegration:
@@ -345,3 +354,103 @@ class TestAuthAuditEvents:
         provider = self._make_provider(audit_cb=None)
         result = await provider._extract_upstream_claims({})
         assert result is None  # no crash
+
+
+# ---------------------------------------------------------------------------
+# Tests: pre-shared machine-token auth
+# ---------------------------------------------------------------------------
+
+
+class TestMachineTokenAuth:
+    """The opt-in pre-shared machine-token MCP auth path."""
+
+    def test_load_machine_tokens_unset_returns_empty(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No DISTILLERY_MCP_MACHINE_TOKEN -> feature off, empty list."""
+        from distillery.mcp.auth import _load_machine_tokens
+
+        monkeypatch.delenv("DISTILLERY_MCP_MACHINE_TOKEN", raising=False)
+        assert _load_machine_tokens() == []
+
+    def test_load_machine_tokens_builds_access_token(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A configured token yields an AccessToken with the login claim."""
+        from distillery.mcp.auth import _load_machine_tokens
+
+        monkeypatch.setenv("DISTILLERY_MCP_MACHINE_TOKEN", "tok-secret-123")
+        monkeypatch.setenv("DISTILLERY_MCP_MACHINE_IDENTITY", "spectacles-bot")
+
+        loaded = _load_machine_tokens()
+        assert len(loaded) == 1
+        raw, access = loaded[0]
+        assert raw == "tok-secret-123"
+        assert access.client_id == "spectacles-bot"
+        assert access.claims["login"] == "spectacles-bot"
+
+    def test_load_machine_tokens_default_identity(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Identity defaults when DISTILLERY_MCP_MACHINE_IDENTITY is unset."""
+        from distillery.mcp.auth import _load_machine_tokens
+
+        monkeypatch.setenv("DISTILLERY_MCP_MACHINE_TOKEN", "tok-x")
+        monkeypatch.delenv("DISTILLERY_MCP_MACHINE_IDENTITY", raising=False)
+
+        _, access = _load_machine_tokens()[0]
+        assert access.client_id == "distillery-machine"
+
+    async def test_verify_token_accepts_configured_machine_token(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A request bearing the machine token resolves to its identity."""
+        monkeypatch.setenv("GITHUB_CLIENT_ID", "id")
+        monkeypatch.setenv("GITHUB_CLIENT_SECRET", "secret")
+        monkeypatch.setenv("DISTILLERY_BASE_URL", "https://distillery.example.com")
+        monkeypatch.setenv("DISTILLERY_MCP_MACHINE_TOKEN", "machine-tok-abc")
+        monkeypatch.setenv("DISTILLERY_MCP_MACHINE_IDENTITY", "ci-bot")
+
+        provider = build_github_auth(_make_config())
+        access = await provider.verify_token("machine-tok-abc")
+
+        assert access is not None
+        assert access.claims["login"] == "ci-bot"
+
+    async def test_verify_token_unknown_falls_through_to_oauth(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A non-machine token is delegated to the OAuth-proxy verifier."""
+        monkeypatch.setenv("GITHUB_CLIENT_ID", "id")
+        monkeypatch.setenv("GITHUB_CLIENT_SECRET", "secret")
+        monkeypatch.setenv("DISTILLERY_BASE_URL", "https://distillery.example.com")
+        monkeypatch.setenv("DISTILLERY_MCP_MACHINE_TOKEN", "machine-tok-abc")
+
+        from fastmcp.server.auth.providers.github import GitHubProvider
+
+        oauth_verify = AsyncMock(return_value=None)
+        monkeypatch.setattr(GitHubProvider, "verify_token", oauth_verify)
+
+        provider = build_github_auth(_make_config())
+        result = await provider.verify_token("not-a-machine-token")
+
+        assert result is None
+        oauth_verify.assert_awaited_once_with("not-a-machine-token")
+
+    async def test_verify_token_off_by_default_delegates_to_oauth(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With the feature off, every token goes to the OAuth proxy."""
+        monkeypatch.setenv("GITHUB_CLIENT_ID", "id")
+        monkeypatch.setenv("GITHUB_CLIENT_SECRET", "secret")
+        monkeypatch.setenv("DISTILLERY_BASE_URL", "https://distillery.example.com")
+        monkeypatch.delenv("DISTILLERY_MCP_MACHINE_TOKEN", raising=False)
+
+        from fastmcp.server.auth.providers.github import GitHubProvider
+
+        oauth_verify = AsyncMock(return_value=None)
+        monkeypatch.setattr(GitHubProvider, "verify_token", oauth_verify)
+
+        provider = build_github_auth(_make_config())
+        await provider.verify_token("anything")
+        oauth_verify.assert_awaited_once_with("anything")
