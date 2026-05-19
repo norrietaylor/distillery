@@ -1269,7 +1269,7 @@ def _validate(config: DistilleryConfig) -> None:
                 "Set the environment variable before starting the server."
             )
 
-    valid_providers = {"jina", "openai", "mock"}
+    valid_providers = {"jina", "openai", "mock", "fastembed"}
     if config.embedding.provider and config.embedding.provider not in valid_providers:
         raise ValueError(
             f"embedding.provider must be one of {sorted(valid_providers)}, "

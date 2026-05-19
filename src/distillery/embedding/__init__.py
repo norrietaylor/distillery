@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .errors import EmbeddingProviderError, parse_retry_after
+from .fastembed import FastembedProvider
 from .jina import JinaEmbeddingProvider
 from .openai import OpenAIEmbeddingProvider
 from .protocol import EmbeddingProvider
@@ -10,6 +11,7 @@ from .protocol import EmbeddingProvider
 __all__ = [
     "EmbeddingProvider",
     "EmbeddingProviderError",
+    "FastembedProvider",
     "JinaEmbeddingProvider",
     "OpenAIEmbeddingProvider",
     "create_provider",
@@ -27,6 +29,7 @@ def create_provider(config: object) -> EmbeddingProvider:
 
     - ``"openai"`` — :class:`OpenAIEmbeddingProvider` using the OpenAI API.
     - ``"jina"`` — :class:`JinaEmbeddingProvider` using the Jina AI API.
+    - ``"fastembed"`` — :class:`FastembedProvider` using local ONNX inference.
 
     Args:
         config: A :class:`~distillery.config.DistilleryConfig` instance (or
@@ -57,6 +60,10 @@ def create_provider(config: object) -> EmbeddingProvider:
             api_key_env=embedding_cfg.api_key_env or "JINA_API_KEY",
         )
 
+    if provider_name == "fastembed":
+        return FastembedProvider(model=embedding_cfg.model)
+
     raise ValueError(
-        f"Unknown embedding provider: {provider_name!r}. Supported values are 'openai' and 'jina'."
+        f"Unknown embedding provider: {provider_name!r}. "
+        "Supported values are 'openai', 'jina', and 'fastembed'."
     )
