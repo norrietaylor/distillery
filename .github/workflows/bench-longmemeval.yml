@@ -399,6 +399,7 @@ jobs:
       # Only the allowlisted paths are passed to `add-paths`, which is a
       # second layer of defence on top of the verify-paths step above.
       - name: Create auto-PR
+        id: cpr
         uses: peter-evans/create-pull-request@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -430,3 +431,13 @@ jobs:
             bench/badge_ndcg10.json
             docs/benchmarks.md
           delete-branch: true
+
+      # Bench PRs are data-only (paths gated by verify-paths above) and
+      # GITHUB_TOKEN-created PRs do not cascade other workflows, so there
+      # is nothing to wait on — merge directly.
+      - name: Auto-merge bench PR
+        if: steps.cpr.outputs.pull-request-number
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUM: ${{ steps.cpr.outputs.pull-request-number }}
+        run: gh pr merge "$PR_NUM" --merge --delete-branch

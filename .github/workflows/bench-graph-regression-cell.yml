@@ -527,6 +527,7 @@ jobs:
           git reset
 
       - name: Open auto-PR
+        id: cpr
         uses: peter-evans/create-pull-request@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -554,3 +555,11 @@ jobs:
           labels: benchmark
           add-paths: bench/results/graph_regression_cell_a.json
           delete-branch: true
+
+      # Bench PRs are data-only (allowlisted paths above); merge immediately.
+      - name: Auto-merge bench PR
+        if: steps.cpr.outputs.pull-request-number
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUM: ${{ steps.cpr.outputs.pull-request-number }}
+        run: gh pr merge "$PR_NUM" --merge --delete-branch
