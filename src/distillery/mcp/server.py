@@ -136,12 +136,17 @@ def _create_embedding_provider(config: DistilleryConfig) -> Any:
         from distillery.mcp._stub_embedding import HashEmbeddingProvider
 
         return HashEmbeddingProvider(dimensions=d)
+    if n == "fastembed":
+        from distillery.embedding.fastembed import FastembedProvider
+
+        return FastembedProvider(model=m)
     if n == "":
         from distillery.mcp._stub_embedding import StubEmbeddingProvider
 
         return StubEmbeddingProvider(dimensions=d)
     raise ValueError(
-        f"Unsupported embedding provider: {n!r}. Must be one of: 'jina', 'openai', 'mock'."
+        f"Unsupported embedding provider: {n!r}. "
+        "Must be one of: 'jina', 'openai', 'mock', 'fastembed'."
     )
 
 
