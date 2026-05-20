@@ -1861,13 +1861,16 @@ class TestIssue369MaintenanceClassify:
         tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        """L3.8: ``maintenance classify`` consumes ``status=pending_review`` entries.
+        """L3.8: ``maintenance classify`` visits all seeded ``pending_review`` entries.
 
-        Uses ``--mode heuristic`` so the test does not require an LLM
-        client. The exact ``classified`` / ``pending_review`` split
-        depends on centroid similarity — we assert only that the sum
-        equals the seeded count, which is the behavioural invariant
-        described by the row in issue #369.
+        Seeds 3 ``PENDING_REVIEW`` inbox entries and asserts the
+        per-disposition counts sum to 3 (``classified`` + still
+        ``pending_review`` + ``errors``). Uses ``--mode heuristic`` so
+        the test does not require an LLM client. Heuristic outcomes are
+        centroid-similarity dependent, so the test deliberately does
+        NOT pin any specific entry to ``classified`` vs left in review
+        — only that all 3 were visited (the behavioural invariant from
+        the issue #369 row).
         """
         db_path = str(tmp_path / "with_pending.db")
         cfg_path = _write_mock_config(tmp_path, db_path)
@@ -2005,7 +2008,15 @@ class TestIssue369ExportImportLifecycle:
         tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        """L4.2: exporting twice to the same path overwrites the previous file."""
+        """L4.2: re-running export to the same path overwrites cleanly, not appends.
+
+        Asserts the file parses as a single JSON object on both runs and that
+        the second parse has the same entry count as the first. A byte-length
+        equality check would be brittle to additive payload schema changes
+        (e.g., a new variable-length field) and would not detect a truncated
+        but identically-sized regression — the structural check catches both
+        truncation and append regressions without that fragility.
+        """
         db_path = str(tmp_path / "src.db")
         cfg_path = _write_mock_config(tmp_path, db_path)
         self._seed_entries_and_sources(db_path, n_entries=2, n_sources=0)
@@ -2013,17 +2024,19 @@ class TestIssue369ExportImportLifecycle:
         out_path = tmp_path / "dump.json"
         rc1 = _cmd_export(str(cfg_path), "text", str(out_path))
         assert rc1 == 0
-        size_first = out_path.stat().st_size
+        payload_first = json.loads(out_path.read_text(encoding="utf-8"))
         capsys.readouterr()
 
         rc2 = _cmd_export(str(cfg_path), "text", str(out_path))
         assert rc2 == 0
-        size_second = out_path.stat().st_size
+        payload_second = json.loads(out_path.read_text(encoding="utf-8"))
         capsys.readouterr()
 
-        # Same content -> same size (and the file is still valid JSON).
-        assert size_first == size_second
-        json.loads(out_path.read_text(encoding="utf-8"))
+        # Structural: file is still a single object (not concatenated runs)
+        # and entry count matches the seed count on both runs.
+        assert isinstance(payload_second, dict)
+        assert len(payload_second["entries"]) == len(payload_first["entries"])
+        assert len(payload_second["entries"]) == 2
 
     def test_import_merge_to_fresh_db_matches_entry_count(
         self,
