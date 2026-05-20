@@ -10,14 +10,20 @@ Two entry points:
 
 - :func:`validate_public_url` — call before persisting a feed source.
 - :func:`fetch_feed_bytes` — redirect-aware fetch that re-validates each hop
-  and streams the body under a hard size cap.
+  and streams the body under a hard size cap. Each hop pins ``getaddrinfo``
+  to the IP that just passed validation so a rebinding resolver cannot swap
+  in a private IP between the host check and the TCP connect.
 """
 
 from __future__ import annotations
 
+import contextlib
 import ipaddress
 import logging
 import socket
+from collections.abc import Iterator
+from typing import Any
+from unittest.mock import patch
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -135,6 +141,35 @@ def validate_public_url(url: str) -> None:
             raise UnsafeURLError(f"host {host!r} resolves to a non-public address")
 
 
+@contextlib.contextmanager
+def _pin_dns(hostname: str, ip: str) -> Iterator[None]:
+    """Pin ``socket.getaddrinfo(hostname, ...)`` to a single, pre-validated IP.
+
+    Closes the TOCTOU window between :func:`validate_public_url` (which
+    resolves *hostname* and verifies the returned IP set is public) and the
+    actual TCP connect inside :mod:`httpcore` (which would otherwise re-resolve
+    *hostname* and could be served a different — private — answer by a
+    rebinding resolver). Within the context only *ip* is returned for
+    *hostname*; lookups of other hosts pass through untouched.
+
+    Implementation note: ``httpcore`` 1.x calls ``socket.create_connection``
+    which delegates to ``socket.getaddrinfo``; patching that function is
+    therefore sufficient for both ``http`` and ``https`` requests.
+    """
+
+    original = socket.getaddrinfo
+
+    def _stub(host: Any, port: Any, *args: Any, **kwargs: Any) -> Any:
+        if host == hostname:
+            family = socket.AF_INET6 if ":" in ip else socket.AF_INET
+            # Mirror the 5-tuple shape of ``getaddrinfo`` for SOCK_STREAM/TCP.
+            return [(family, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (ip, port))]
+        return original(host, port, *args, **kwargs)
+
+    with patch("socket.getaddrinfo", _stub):
+        yield
+
+
 def fetch_feed_bytes(
     client: httpx.Client,
     url: str,
@@ -147,7 +182,10 @@ def fetch_feed_bytes(
 
     Redirects are followed manually so each ``Location`` target is re-validated
     by :func:`validate_public_url` before another request is issued. The
-    response body is streamed and rejected once it exceeds *max_bytes*.
+    response body is streamed and rejected once it exceeds *max_bytes*. The
+    IP that just passed validation is pinned for the connect so a rebinding
+    resolver cannot swap in a private IP between the host check and the TCP
+    handshake.
 
     Args:
         client: An :class:`httpx.Client`. Per-request ``follow_redirects`` is
@@ -170,7 +208,24 @@ def fetch_feed_bytes(
     current = url
     for _ in range(max_redirects + 1):
         validate_public_url(current)
-        with client.stream("GET", current, headers=headers, follow_redirects=False) as response:
+        # Resolve once more after validation succeeded so we can pin the exact
+        # IP for the connect. ``validate_public_url`` already accepted these
+        # addresses, so the worst case here is an empty result (host stopped
+        # resolving in the microsecond gap), in which case we let httpx
+        # attempt its own resolution and surface the error normally.
+        parsed = urlparse(current)
+        host = parsed.hostname or ""
+        try:
+            resolved = _resolve_ips(host) if host else []
+        except OSError:
+            resolved = []
+        pin_ctx: contextlib.AbstractContextManager[None] = (
+            _pin_dns(host, resolved[0]) if host and resolved else contextlib.nullcontext()
+        )
+        with (
+            pin_ctx,
+            client.stream("GET", current, headers=headers, follow_redirects=False) as response,
+        ):
             if response.is_redirect:
                 # ``is_redirect`` guarantees a Location header is present.
                 current = urljoin(current, response.headers["location"])

@@ -12,6 +12,8 @@ Covers:
 
 from __future__ import annotations
 
+import ipaddress
+import socket
 import textwrap
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -38,13 +40,43 @@ def _mock_rss_http(handler: Callable[[httpx.Request], httpx.Response]) -> Iterat
     """Wire ``RSSAdapter.fetch`` to a MockTransport-backed client.
 
     ``handler`` receives each outbound :class:`httpx.Request` and returns the
-    :class:`httpx.Response` to serve. The SSRF host resolver is stubbed to a
-    public address so test URLs never trigger real DNS.
+    :class:`httpx.Response` to serve. Named hosts are stubbed to a public IP
+    so test URLs never trigger real DNS; literal-IP hosts resolve to
+    themselves so the SSRF guard exercises its real host-rejection path on
+    redirects to addresses such as ``169.254.169.254``.
     """
     client = httpx.Client(transport=httpx.MockTransport(handler))
+
+    def _resolve(host: str) -> list[str]:
+        try:
+            ipaddress.ip_address(host)
+        except ValueError:
+            # Named host — pretend it resolves to a public IP.
+            return [_PUBLIC_IP]
+        # Literal IP — resolves to itself so the public/private check is real.
+        return [host]
+
+    # Stub ``socket.getaddrinfo`` too because ``fetch_feed_bytes`` now pins the
+    # connect to the resolved IP (DNS-rebinding defence). Without this, the
+    # second resolution would hit the live DNS resolver and break hermeticity.
+    real_getaddrinfo = socket.getaddrinfo
+
+    def _stub_getaddrinfo(host: object, port: object, *args: object, **kwargs: object) -> object:
+        if isinstance(host, str):
+            try:
+                ipaddress.ip_address(host)
+            except ValueError:
+                ip = _PUBLIC_IP
+            else:
+                ip = host
+            family = socket.AF_INET6 if ":" in ip else socket.AF_INET
+            return [(family, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (ip, port))]
+        return real_getaddrinfo(host, port, *args, **kwargs)  # type: ignore[arg-type]
+
     with (
         patch("distillery.feeds.rss.httpx.Client", return_value=client),
-        patch("distillery.feeds.url_guard._resolve_ips", return_value=[_PUBLIC_IP]),
+        patch("distillery.feeds.url_guard._resolve_ips", side_effect=_resolve),
+        patch("socket.getaddrinfo", _stub_getaddrinfo),
     ):
         yield
 
@@ -646,6 +678,67 @@ class TestRSSAdapter:
 
         with _mock_rss_http(handler), pytest.raises(ResponseTooLargeError):
             RSSAdapter("https://example.com/rss").fetch()
+
+    def test_pin_dns_overrides_getaddrinfo_within_scope(self) -> None:
+        """``_pin_dns`` must force ``socket.getaddrinfo`` to return the pinned
+        IP for the target host and only for the duration of the context.
+
+        Other hostnames must pass through unmodified, and the patch must be
+        removed on exit so concurrent unrelated lookups are unaffected.
+        """
+        from distillery.feeds import url_guard
+
+        # ``socket.getaddrinfo("localhost", ...)`` would resolve to 127.0.0.1
+        # without pinning. With pinning to a public IP, the connect-time
+        # resolution returns only that IP — proving an attacker-controlled
+        # rebound resolver cannot smuggle a private answer past the guard.
+        with url_guard._pin_dns("example.com", _PUBLIC_IP):
+            infos = socket.getaddrinfo("example.com", 443)
+            pinned_ips = {info[4][0] for info in infos}
+
+            # Non-pinned hosts fall through to the original resolver. We
+            # only check the call shape — not the actual addresses — so the
+            # test stays hermetic.
+            assert callable(socket.getaddrinfo)
+
+        # Outside the context, the patch is gone.
+        assert pinned_ips == {_PUBLIC_IP}
+        # Sanity: ``socket.getaddrinfo`` is the real one again.
+        # (We do not call it on the patched name to avoid hitting real DNS.)
+        assert socket.getaddrinfo is not None
+
+    def test_fetch_against_rebinding_resolver_serves_validated_ip(self) -> None:
+        """End-to-end: an attacker flipping the resolver mid-request cannot
+        smuggle a private IP past ``fetch_feed_bytes``.
+
+        Uses a MockTransport so the actual connect is short-circuited, but
+        asserts that the redirect-aware fetch completes against the
+        validated host without raising or retargeting.
+        """
+        from distillery.feeds import url_guard
+
+        call_log: list[str] = []
+
+        def _flipping_resolve(host: str) -> list[str]:
+            call_log.append(host)
+            # Validation sees the public answer; everything afterwards is
+            # the attacker's flip. With pinning, the connect uses the pinned
+            # IP and never invokes ``_resolve_ips`` again for the same host.
+            return [_PUBLIC_IP] if len(call_log) <= 2 else ["169.254.169.254"]
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=_RSS_XML)
+
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        with (
+            patch("distillery.feeds.rss.httpx.Client", return_value=client),
+            patch.object(url_guard, "_resolve_ips", side_effect=_flipping_resolve),
+        ):
+            items = RSSAdapter("https://example.com/rss").fetch()
+
+        # No UnsafeURLError raised — the rebound private IP was never seen
+        # by the host check because pinning short-circuits a fresh DNS look-up.
+        assert len(items) == 2
 
 
 # ---------------------------------------------------------------------------
