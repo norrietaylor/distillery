@@ -564,6 +564,32 @@ def test_wikilink_backfill_dedupes_repeated_prefix_in_same_content() -> None:
         conn.close()
 
 
+def test_wikilink_backfill_matches_uppercase_hex_prefix() -> None:
+    """``[[entry-ABCDEF12]]`` should resolve the same as ``[[entry-abcdef12]]``.
+
+    Entry IDs are stored lowercase, so the captured prefix must be lowercased
+    before the prefix lookup.  Without ``[0-9A-Fa-f]`` in the regex character
+    class, the reference would be silently dropped.
+    """
+    conn = duckdb.connect(":memory:")
+    try:
+        _setup_through_8(conn)
+        src_id = "bbbbbbbb-1111-4111-1111-111111111111"
+        tgt_id = "abcdef12-2222-4222-2222-222222222222"
+        _insert_entry_with_content(conn, tgt_id, "target")
+        # Uppercase hex in the wikilink — must still resolve.
+        _insert_entry_with_content(conn, src_id, "see [[entry-ABCDEF12]] please")
+
+        inserted = backfill_relations_from_wikilinks(conn)
+        assert inserted == 1
+        rows = conn.execute(
+            "SELECT from_id, to_id, relation_type FROM entry_relations"
+        ).fetchall()
+        assert rows == [(src_id, tgt_id, "link")]
+    finally:
+        conn.close()
+
+
 # ---------------------------------------------------------------------------
 # reconcile handler integration — mechanism #8 wired into action="reconcile"
 # ---------------------------------------------------------------------------

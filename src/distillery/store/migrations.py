@@ -210,7 +210,7 @@ def create_hnsw_index(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
         logger.warning("Migration 6: HNSW index type not recognized, skipping")
 
 
-_WIKILINK_PATTERN = re.compile(r"\[\[entry-([0-9a-f]{8})\]\]")
+_WIKILINK_PATTERN = re.compile(r"\[\[entry-([0-9A-Fa-f]{8})\]\]")
 
 
 def backfill_relations_from_wikilinks(conn: duckdb.DuckDBPyConnection) -> int:
