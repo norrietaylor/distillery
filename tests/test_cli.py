@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import textwrap
 from pathlib import Path
 
@@ -447,11 +448,12 @@ class TestIssue369TopLevelFlagPropagation:
         tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        """L1.8: ``distillery --config $PATH status`` must read the supplied path's DB.
+        """L1.8: ``--config`` works at the top level AND after the subcommand, identically.
 
-        The previous regression test asserted exit code 0 only; this one
-        verifies the *effect* — that the JSON output references the tmp DB
-        path, not the default user-home location.
+        Mirrors the L1.6/L1.7 dual-position pattern: running the CLI twice
+        (once with ``--config`` before the subcommand, once after) must
+        produce the same JSON output. Guards against a regression that flips
+        propagation direction — i.e. only one position remaining wired up.
         """
         db_path = tmp_path / "explicit.db"
         cfg_path = write_config(tmp_path, str(db_path))
@@ -459,8 +461,15 @@ class TestIssue369TopLevelFlagPropagation:
         with pytest.raises(SystemExit) as exc:
             main(["--config", str(cfg_path), "--format", "json", "status"])
         assert exc.value.code == 0
-        data = json.loads(capsys.readouterr().out)
-        assert data["database_path"] == str(db_path)
+        data_top = json.loads(capsys.readouterr().out)
+
+        with pytest.raises(SystemExit) as exc:
+            main(["status", "--config", str(cfg_path), "--format", "json"])
+        assert exc.value.code == 0
+        data_sub = json.loads(capsys.readouterr().out)
+
+        assert data_top["database_path"] == str(db_path)
+        assert data_top == data_sub
 
     def test_malformed_yaml_no_traceback_subprocess(
         self,
@@ -477,7 +486,13 @@ class TestIssue369TopLevelFlagPropagation:
 
         distillery_bin = shutil.which("distillery")
         if distillery_bin is None:
-            pytest.skip("distillery console script not installed on PATH")
+            if os.environ.get("CI"):
+                pytest.fail(
+                    "distillery console script missing from PATH in CI — packaging regression?"
+                )
+            pytest.skip(
+                "distillery console script not installed on PATH (run `pip install -e .` locally)"
+            )
 
         bad = tmp_path / "bad.yaml"
         # Truly malformed YAML (unterminated flow sequence).
