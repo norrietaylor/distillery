@@ -402,9 +402,14 @@ class TestPluginDocumentationContent:
         assert "claude plugin marketplace add" in content
 
     def test_mentions_pip_install(self) -> None:
-        """Plugin doc must include pip install instructions."""
+        """Plugin doc must include pip install instructions.
+
+        Tolerates shell-quoted extras (e.g. ``pip install 'distillery-mcp[fastembed]'``)
+        which is required for zsh users since brackets are glob metacharacters.
+        """
         content = load_plugin_doc()
-        assert "pip install distillery-mcp" in content
+        assert "pip install" in content
+        assert "distillery-mcp" in content
 
     def test_mentions_jina_api_key(self) -> None:
         """Plugin doc must mention the JINA_API_KEY environment variable."""
