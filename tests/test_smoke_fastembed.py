@@ -8,7 +8,7 @@ invocation; it can pull ~67 MB of ONNX weights from HuggingFace on first run.
 
 from __future__ import annotations
 
-import os
+from pathlib import Path
 
 import pytest
 
@@ -48,9 +48,8 @@ def test_create_provider_fastembed_no_keys(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 @pytest.mark.skipif(not _have_fastembed(), reason="fastembed extra not installed")
-@pytest.mark.asyncio
 async def test_store_with_fastembed_roundtrip(
-    tmp_path: object, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Storing five entries and recalling the closest one against a fresh
     DuckDB file works with a real fastembed provider — no API keys.
@@ -63,29 +62,32 @@ async def test_store_with_fastembed_roundtrip(
     from distillery.store.duckdb import DuckDBStore
 
     provider = FastembedProvider(model="BAAI/bge-small-en-v1.5")
-    db_path = os.fspath(tmp_path) + "/smoke.db"  # type: ignore[attr-defined]
+    db_path = str(tmp_path / "smoke.db")
     store = DuckDBStore(db_path=db_path, embedding_provider=provider)
-    await store.initialize()
+    try:
+        await store.initialize()
 
-    seeds = [
-        "DuckDB is a fast in-process analytical database.",
-        "Cosine similarity measures the angle between two vectors.",
-        "The Vancouver waterfront has a seaplane terminal.",
-        "Sourdough bread relies on wild yeast and lactic bacteria.",
-        "ONNX runtime executes neural network graphs across hardware.",
-    ]
-    for s in seeds:
-        await store.store(
-            Entry(
-                content=s,
-                entry_type=EntryType.REFERENCE,
-                source=EntrySource.MANUAL,
-                author="smoke-test",
-                status=EntryStatus.ACTIVE,
+        seeds = [
+            "DuckDB is a fast in-process analytical database.",
+            "Cosine similarity measures the angle between two vectors.",
+            "The Vancouver waterfront has a seaplane terminal.",
+            "Sourdough bread relies on wild yeast and lactic bacteria.",
+            "ONNX runtime executes neural network graphs across hardware.",
+        ]
+        for s in seeds:
+            await store.store(
+                Entry(
+                    content=s,
+                    entry_type=EntryType.REFERENCE,
+                    source=EntrySource.MANUAL,
+                    author="smoke-test",
+                    status=EntryStatus.ACTIVE,
+                )
             )
-        )
 
-    hits = await store.search("vector database query speed", filters=None, limit=3)
-    assert len(hits) >= 1
-    top_text = hits[0].entry.content.lower()
-    assert "duckdb" in top_text or "vector" in top_text or "cosine" in top_text
+        hits = await store.search("vector database query speed", filters=None, limit=3)
+        assert len(hits) >= 1
+        top_text = hits[0].entry.content.lower()
+        assert "duckdb" in top_text or "vector" in top_text or "cosine" in top_text
+    finally:
+        await store.close()
