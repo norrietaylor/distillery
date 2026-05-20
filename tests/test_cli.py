@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import textwrap
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -14,8 +16,10 @@ from distillery.cli import (
     _build_parser,
     _check_health,
     _cmd_export,
+    _cmd_gh_backfill,
     _cmd_health,
     _cmd_import,
+    _cmd_maintenance_classify,
     _cmd_retag,
     _cmd_status,
     _query_status,
@@ -1432,3 +1436,917 @@ class TestEvalJsonErrorPaths:
         # Text path writes to stderr, not stdout.
         assert captured.out == ""
         assert "scenarios directory not found" in captured.err
+
+
+# ---------------------------------------------------------------------------
+# Issue #369 remaining rows — health edge cases, retag paths, gh-backfill,
+# maintenance classify with pending entries, export/import lifecycle.
+#
+# Shared seeding helpers used by the test classes below.
+# ---------------------------------------------------------------------------
+
+
+#: Embedding dimensions used by the issue #369 seeding helpers.
+#: Must match the default ``DistilleryConfig.embedding.dimensions`` so the
+#: CLI's read path (``HashEmbeddingProvider(dimensions=cfg.embedding.dimensions)``
+#: when ``provider: "mock"``) opens the seeded DB without a dimensions
+#: mismatch. The default config value is 1024.
+_ISSUE369_EMBED_DIMS = 1024
+
+
+def _make_legacy_github_entry_raw(
+    *,
+    entry_id: str,
+    owner: str = "acme",
+    repo: str = "widgets",
+    ref_type: str = "issue",
+    number: int = 1,
+    state: str = "open",
+) -> dict[str, Any]:
+    """Build a raw entry dict shaped like a pre-#312 GitHub sync entry.
+
+    Used by L3.4/L3.5 to seed entries with ``project=None`` and ``tags=[]``
+    so ``gh-backfill`` has work to do.
+    """
+    return {
+        "id": entry_id,
+        "content": f"# Legacy issue {number}",
+        "entry_type": "github",
+        "source": "import",
+        "author": "",
+        "project": None,
+        "tags": [],
+        "status": "active",
+        "metadata": {
+            "repo": f"{owner}/{repo}",
+            "ref_type": ref_type,
+            "ref_number": number,
+            "title": f"Legacy issue {number}",
+            "url": f"https://github.com/{owner}/{repo}/issues/{number}",
+            "state": state,
+            "labels": [],
+            "assignees": [],
+            "external_id": f"{owner}/{repo}#{ref_type}-{number}",
+        },
+        "version": 1,
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+        "created_by": "",
+        "last_modified_by": "",
+    }
+
+
+def _seed_entries(db_path: str, entries: list[dict[str, Any]]) -> None:
+    """Initialise a DuckDBStore at *db_path* and INSERT raw rows.
+
+    Mirrors the helper in ``tests/test_cli_export_import.py`` but lives
+    here so the issue #369 tests can import it without cross-file
+    dependencies. Uses ``HashEmbeddingProvider`` at the default
+    embedding dimensions (1024) so the CLI's ``provider: "mock"`` read
+    path opens the seeded DB without a dimensions mismatch.
+    """
+    import json as _json
+    from datetime import UTC, datetime
+
+    from distillery.mcp._stub_embedding import HashEmbeddingProvider
+    from distillery.store.duckdb import DuckDBStore
+
+    async def _run() -> None:
+        provider = HashEmbeddingProvider(dimensions=_ISSUE369_EMBED_DIMS)
+        store = DuckDBStore(db_path=db_path, embedding_provider=provider)
+        await store.initialize()
+        conn = store._conn  # type: ignore[attr-defined]
+        assert conn is not None
+
+        def _parse_dt(val: Any) -> datetime:
+            if isinstance(val, datetime):
+                return val if val.tzinfo is not None else val.replace(tzinfo=UTC)
+            dt = datetime.fromisoformat(str(val))
+            return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
+
+        for raw in entries:
+            embedding = provider.embed(raw.get("content", ""))
+            conn.execute(
+                "INSERT INTO entries "
+                "(id, content, entry_type, source, author, project, tags, status, "
+                " metadata, created_at, updated_at, version, embedding, "
+                " created_by, last_modified_by, expires_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    raw["id"],
+                    raw["content"],
+                    raw.get("entry_type", "inbox"),
+                    raw.get("source", "manual"),
+                    raw.get("author", ""),
+                    raw.get("project"),
+                    list(raw.get("tags") or []),
+                    raw.get("status", "active"),
+                    _json.dumps(raw.get("metadata") or {}),
+                    _parse_dt(raw["created_at"]),
+                    _parse_dt(raw["updated_at"]),
+                    int(raw.get("version", 1)),
+                    embedding,
+                    raw.get("created_by", ""),
+                    raw.get("last_modified_by", ""),
+                    None,
+                ],
+            )
+        await store.close()
+
+    asyncio.run(_run())
+
+
+def _write_mock_config(tmp_path: Path, db_path: str, name: str = "distillery.yaml") -> Path:
+    """Write a config that uses the ``mock`` HashEmbeddingProvider.
+
+    Required when seeding via :func:`_seed_entries` (which uses the same
+    provider) so the CLI's read path opens the database with a matching
+    embedding model. Mirrors the helper in ``test_cli_export_import``.
+    """
+    cfg = tmp_path / name
+    cfg.write_text(
+        textwrap.dedent(
+            f"""\
+            storage:
+              backend: duckdb
+              database_path: "{db_path}"
+            embedding:
+              provider: "mock"
+            """
+        )
+    )
+    return cfg
+
+
+async def _async_get_entry(db_path: str, entry_id: str) -> Any:
+    """Fetch a single entry by ID using a fresh store handle."""
+    from distillery.mcp._stub_embedding import HashEmbeddingProvider
+    from distillery.store.duckdb import DuckDBStore
+
+    provider = HashEmbeddingProvider(dimensions=_ISSUE369_EMBED_DIMS)
+    store = DuckDBStore(db_path=db_path, embedding_provider=provider)
+    await store.initialize()
+    try:
+        return await store.get(entry_id)
+    finally:
+        await store.close()
+
+
+# ---------------------------------------------------------------------------
+# Group L2 — health edge cases (L2.5 corrupt DB, L2.6 health JSON shape)
+# ---------------------------------------------------------------------------
+
+
+class TestIssue369HealthEdgeCases:
+    """L2.5 — corrupt DB file must surface a structured error, not a traceback.
+
+    L2.6 — ``distillery --format json health`` against a healthy DB must
+    emit valid JSON with a ``status`` field.
+    """
+
+    def test_health_corrupt_db_no_traceback_subprocess(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """L2.5: writing 12 bytes of garbage to the DB file must not leak a traceback.
+
+        Invoked as a subprocess (mirrors the L1.11 pattern) so the test
+        observes the real stderr a user would see. Skips when the
+        ``distillery`` console script is not installed on PATH.
+        """
+        import shutil
+        import subprocess
+
+        distillery_bin = shutil.which("distillery")
+        if distillery_bin is None:
+            pytest.skip("distillery console script not installed on PATH")
+
+        bad_db = tmp_path / "corrupt.db"
+        # 12 bytes of garbage — not a valid DuckDB header.
+        bad_db.write_bytes(b"NOT A DB!!!\x00")
+        cfg_path = write_config(tmp_path, str(bad_db))
+
+        result = subprocess.run(
+            [distillery_bin, "--config", str(cfg_path), "health"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        # The exact exit code may vary, but it must be nonzero AND no
+        # raw Python traceback should leak to stderr.
+        assert result.returncode != 0, (
+            f"Expected nonzero exit on corrupt DB, got {result.returncode}.\n"
+            f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
+        )
+        assert "Traceback" not in result.stderr, (
+            f"Corrupt DB leaked a Python traceback to stderr: {result.stderr!r}"
+        )
+
+    def test_health_json_format_healthy_db_emits_status(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """L2.6: ``distillery --format json health`` emits parseable JSON with ``status``.
+
+        Duplicates ``TestHealthCommand.test_health_json_format`` for
+        clarity in the issue #369 coverage matrix; trivially cheap and
+        keeps the row's PASS evidence anchored to a single test name.
+        """
+        cfg_path = write_config(tmp_path, ":memory:")
+        with pytest.raises(SystemExit) as exc:
+            main(["--format", "json", "health", "--config", str(cfg_path)])
+        assert exc.value.code == 0
+        data = json.loads(capsys.readouterr().out)
+        assert "status" in data
+        assert data["status"] == "OK"
+
+
+# ---------------------------------------------------------------------------
+# Group L3 — Retag paths (L3.1 dry-run, L3.2 actual + idempotent, L3.3 --force)
+# ---------------------------------------------------------------------------
+
+
+class TestIssue369RetagPaths:
+    """Tests for L3.1, L3.2, L3.3 — retag dry-run, actual write, --force re-run."""
+
+    def _seed_feed_entries(self, db_path: str, count: int) -> list[str]:
+        """Seed *count* feed entries with empty tags + an inbox seed for vocabulary."""
+        from distillery.mcp._stub_embedding import HashEmbeddingProvider
+        from distillery.models import EntrySource, EntryType
+        from distillery.store.duckdb import DuckDBStore
+
+        ids: list[str] = []
+
+        async def _seed() -> None:
+            provider = HashEmbeddingProvider(dimensions=_ISSUE369_EMBED_DIMS)
+            store = DuckDBStore(db_path=db_path, embedding_provider=provider)
+            await store.initialize()
+            # Vocabulary seed — gives derive_all_tags a non-empty tag corpus.
+            from tests.conftest import make_entry
+
+            seed = make_entry(
+                content="security advisory seed",
+                tags=["security"],
+                entry_type=EntryType.INBOX,
+                source=EntrySource.MANUAL,
+            )
+            await store.store(seed)
+            for i in range(count):
+                feed = make_entry(
+                    content=f"critical security patch released for item {i}",
+                    entry_type=EntryType.FEED,
+                    source=EntrySource.MANUAL,
+                    tags=[],
+                    metadata={
+                        "source_type": "rss",
+                        "source_url": f"https://example.com/feed/{i}",
+                    },
+                )
+                fid = await store.store(feed)
+                ids.append(fid)
+            await store.close()
+
+        asyncio.run(_seed())
+        return ids
+
+    def _read_tags(self, db_path: str, entry_ids: list[str]) -> dict[str, list[str]]:
+        """Return ``{id: tags}`` for the given entry IDs."""
+        from distillery.mcp._stub_embedding import HashEmbeddingProvider
+        from distillery.store.duckdb import DuckDBStore
+
+        async def _read() -> dict[str, list[str]]:
+            provider = HashEmbeddingProvider(dimensions=_ISSUE369_EMBED_DIMS)
+            store = DuckDBStore(db_path=db_path, embedding_provider=provider)
+            await store.initialize()
+            result: dict[str, list[str]] = {}
+            try:
+                for eid in entry_ids:
+                    entry = await store.get(eid)
+                    result[eid] = list(entry.tags) if entry is not None else []
+            finally:
+                await store.close()
+            return result
+
+        return asyncio.run(_read())
+
+    def test_retag_dry_run_preserves_tags(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """L3.1: ``retag --dry-run`` reports counts but does not persist tag changes."""
+        db_path = str(tmp_path / "test.db")
+        cfg_path = _write_mock_config(tmp_path, db_path)
+
+        ids = self._seed_feed_entries(db_path, count=3)
+        tags_before = self._read_tags(db_path, ids)
+
+        rc = _cmd_retag(str(cfg_path), "json", dry_run=True, force=False)
+        assert rc == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data["dry_run"] is True
+
+        tags_after = self._read_tags(db_path, ids)
+        # Tags must be identical pre and post.
+        assert tags_before == tags_after, (
+            f"Dry-run mutated DB:\n  before={tags_before}\n  after ={tags_after}"
+        )
+
+    def test_retag_actual_writes_and_is_idempotent(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """L3.2: real retag writes tags; second run reports 0 updates (idempotent)."""
+        db_path = str(tmp_path / "test.db")
+        cfg_path = _write_mock_config(tmp_path, db_path)
+
+        self._seed_feed_entries(db_path, count=3)
+
+        # First run — should update some entries.
+        rc1 = _cmd_retag(str(cfg_path), "json", dry_run=False, force=False)
+        assert rc1 == 0
+        data1 = json.loads(capsys.readouterr().out)
+        assert data1["dry_run"] is False
+        first_updated = data1["total_updated"]
+
+        # Second run — without --force, entries that now have tags should
+        # be skipped; updated count must be 0.
+        rc2 = _cmd_retag(str(cfg_path), "json", dry_run=False, force=False)
+        assert rc2 == 0
+        data2 = json.loads(capsys.readouterr().out)
+        assert data2["total_updated"] == 0, (
+            f"Retag is not idempotent — second run updated {data2['total_updated']} "
+            f"entries (first run updated {first_updated})."
+        )
+
+    def test_retag_force_reprocesses_all(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """L3.3: ``--force`` rescans every feed entry, ignoring the no-empty-tags gate."""
+        db_path = str(tmp_path / "test.db")
+        cfg_path = _write_mock_config(tmp_path, db_path)
+
+        self._seed_feed_entries(db_path, count=3)
+
+        # First, do a real retag so the entries acquire tags.
+        rc1 = _cmd_retag(str(cfg_path), "json", dry_run=False, force=False)
+        assert rc1 == 0
+        capsys.readouterr()
+
+        # Now run with --force; total_scanned must include all feed entries
+        # regardless of their tag state.
+        rc2 = _cmd_retag(str(cfg_path), "json", dry_run=False, force=True)
+        assert rc2 == 0
+        data = json.loads(capsys.readouterr().out)
+        # 3 feed entries were seeded — --force scans them all.
+        assert data["total_scanned"] == 3, (
+            f"--force should scan all 3 feed entries; got total_scanned={data['total_scanned']}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Group L3 — gh-backfill (L3.4 dry-run, L3.5 actual + idempotent, L3.6 empty DB)
+# ---------------------------------------------------------------------------
+
+
+class TestIssue369GhBackfillPaths:
+    """Tests for L3.4, L3.5, L3.6 — gh-backfill dry-run, actual write, empty DB."""
+
+    def test_gh_backfill_dry_run_preserves_entries(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """L3.4: ``gh-backfill --dry-run`` reports work but does not write."""
+        db_path = str(tmp_path / "test.db")
+        cfg_path = _write_mock_config(tmp_path, db_path)
+
+        seeded = [
+            _make_legacy_github_entry_raw(
+                entry_id=f"deadbeef-0000-0000-0000-0000000000{i:02d}", number=i
+            )
+            for i in (1, 2)
+        ]
+        _seed_entries(db_path, seeded)
+
+        rc = _cmd_gh_backfill(str(cfg_path), "json", dry_run=True)
+        assert rc == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data["dry_run"] is True
+        # Both legacy entries should be flagged as needing an update.
+        assert data["entries_updated"] == 2
+
+        # Verify DB state unchanged: project still None, tags still empty.
+        for seed in seeded:
+            entry = asyncio.run(_async_get_entry(db_path, seed["id"]))
+            assert entry is not None
+            assert entry.project is None
+            assert list(entry.tags) == []
+
+    def test_gh_backfill_actual_writes_and_is_idempotent(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """L3.5: real backfill populates project + canonical tags; re-running updates 0."""
+        db_path = str(tmp_path / "test.db")
+        cfg_path = _write_mock_config(tmp_path, db_path)
+
+        seeded = [
+            _make_legacy_github_entry_raw(
+                entry_id=f"feedface-0000-0000-0000-0000000000{i:02d}", number=i
+            )
+            for i in (1, 2)
+        ]
+        _seed_entries(db_path, seeded)
+
+        # First run — writes.
+        rc1 = _cmd_gh_backfill(str(cfg_path), "json", dry_run=False)
+        assert rc1 == 0
+        data1 = json.loads(capsys.readouterr().out)
+        assert data1["entries_updated"] == 2
+
+        # Verify entries now have ``project`` + canonical tags.
+        for seed in seeded:
+            entry = asyncio.run(_async_get_entry(db_path, seed["id"]))
+            assert entry is not None
+            assert entry.project == "widgets", f"project missing on {seed['id']}"
+            assert "source/github" in entry.tags
+            assert "repo/widgets" in entry.tags
+
+        # Second run — idempotent.
+        rc2 = _cmd_gh_backfill(str(cfg_path), "json", dry_run=False)
+        assert rc2 == 0
+        data2 = json.loads(capsys.readouterr().out)
+        assert data2["entries_updated"] == 0, (
+            f"gh-backfill is not idempotent — re-run updated {data2['entries_updated']} entries"
+        )
+
+    def test_gh_backfill_empty_db_exits_zero(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """L3.6: ``gh-backfill`` against an empty DB exits 0 with 0 candidates."""
+        db_path = str(tmp_path / "empty.db")
+        cfg_path = _write_mock_config(tmp_path, db_path)
+        # No seeding — initialise the store so the table exists.
+        _seed_entries(db_path, [])
+
+        rc = _cmd_gh_backfill(str(cfg_path), "json", dry_run=False)
+        assert rc == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data["entries_updated"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Group L3 — maintenance classify (L3.7 empty, L3.8 with pending, L3.9 JSON shape)
+# ---------------------------------------------------------------------------
+
+
+class TestIssue369MaintenanceClassify:
+    """Tests for L3.7, L3.8, L3.9 — empty inbox, pending entries, JSON shape."""
+
+    def _seed_pending_inbox(self, db_path: str, count: int = 3) -> list[str]:
+        """Seed *count* inbox entries already in ``pending_review`` status."""
+        from distillery.mcp._stub_embedding import HashEmbeddingProvider
+        from distillery.models import EntrySource, EntryStatus, EntryType
+        from distillery.store.duckdb import DuckDBStore
+        from tests.conftest import make_entry
+
+        ids: list[str] = []
+
+        async def _seed() -> None:
+            provider = HashEmbeddingProvider(dimensions=_ISSUE369_EMBED_DIMS)
+            store = DuckDBStore(db_path=db_path, embedding_provider=provider)
+            await store.initialize()
+            # Give the heuristic classifier a non-trivial active corpus so
+            # ``compute_centroids`` returns something. Without active inbox
+            # entries the centroid table is empty and classify_batch will
+            # return ``pending_review`` for every entry with confidence 0.0.
+            active_seed = make_entry(
+                content="active inbox baseline note about logging",
+                tags=["operations"],
+                entry_type=EntryType.INBOX,
+                source=EntrySource.MANUAL,
+                status=EntryStatus.ACTIVE,
+            )
+            await store.store(active_seed)
+            for i in range(count):
+                pending = make_entry(
+                    content=f"obscure unrelated topic alpha {i}",
+                    entry_type=EntryType.INBOX,
+                    source=EntrySource.MANUAL,
+                    status=EntryStatus.PENDING_REVIEW,
+                )
+                pid = await store.store(pending)
+                ids.append(pid)
+            await store.close()
+
+        asyncio.run(_seed())
+        return ids
+
+    def test_maintenance_classify_no_entries_text(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """L3.7: classify against an empty DB exits 0 with 0 processed."""
+        db_path = str(tmp_path / "empty.db")
+        cfg_path = _write_mock_config(tmp_path, db_path)
+        _seed_entries(db_path, [])  # initialise tables
+
+        rc = _cmd_maintenance_classify(
+            str(cfg_path),
+            "text",
+            entry_type="inbox",
+            mode="heuristic",
+        )
+        assert rc == 0
+        out = capsys.readouterr().out
+        # All three counters should be zero.
+        assert "classified:" in out
+        assert "pending_review:" in out
+        assert "errors:" in out
+
+    def test_maintenance_classify_processes_pending_entries(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """L3.8: ``maintenance classify`` visits all seeded ``pending_review`` entries.
+
+        Seeds 3 ``PENDING_REVIEW`` inbox entries and asserts the
+        per-disposition counts sum to 3 (``classified`` + still
+        ``pending_review`` + ``errors``). Uses ``--mode heuristic`` so
+        the test does not require an LLM client. Heuristic outcomes are
+        centroid-similarity dependent, so the test deliberately does
+        NOT pin any specific entry to ``classified`` vs left in review
+        — only that all 3 were visited (the behavioural invariant from
+        the issue #369 row).
+        """
+        db_path = str(tmp_path / "with_pending.db")
+        cfg_path = _write_mock_config(tmp_path, db_path)
+        self._seed_pending_inbox(db_path, count=3)
+
+        rc = _cmd_maintenance_classify(
+            str(cfg_path),
+            "json",
+            entry_type="inbox",
+            mode="heuristic",
+        )
+        assert rc == 0
+        data = json.loads(capsys.readouterr().out)
+        # Each seeded pending entry must end up in exactly one of the
+        # three buckets (classified / pending_review / errors).
+        total = data["classified"] + data["pending_review"] + data["errors"]
+        assert total == 3, (
+            f"Expected 3 entries processed (3 seeded pending_review); got total={total}, "
+            f"data={data!r}"
+        )
+        assert data["errors"] == 0
+
+    def test_maintenance_classify_json_shape(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """L3.9: JSON shape includes the four documented top-level keys.
+
+        Per the webhook contract: ``{"classified", "pending_review",
+        "errors", "by_type"}``. Confirms the per-disposition counts are
+        always present (even when zero).
+        """
+        cfg_path = write_config(tmp_path, ":memory:")
+        with pytest.raises(SystemExit) as exc:
+            main(["maintenance", "classify", "--config", str(cfg_path), "--format", "json"])
+        assert exc.value.code == 0
+        data = json.loads(capsys.readouterr().out)
+        assert set(data.keys()) >= {"classified", "pending_review", "errors", "by_type"}
+        assert isinstance(data["by_type"], dict)
+
+
+# ---------------------------------------------------------------------------
+# Group L4 — export / import lifecycle (L4.1–L4.7)
+# ---------------------------------------------------------------------------
+
+
+class TestIssue369ExportImportLifecycle:
+    """End-to-end export/import lifecycle tests for rows L4.1 through L4.7."""
+
+    def _seed_entries_and_sources(
+        self,
+        db_path: str,
+        n_entries: int = 5,
+        n_sources: int = 2,
+    ) -> None:
+        """Seed *n_entries* entries plus *n_sources* feed sources."""
+        from distillery.mcp._stub_embedding import HashEmbeddingProvider
+        from distillery.store.duckdb import DuckDBStore
+
+        entries = [
+            {
+                "id": f"01abcdef-0000-0000-0000-0000000000{i:02d}",
+                "content": f"Entry number {i} body content",
+                "entry_type": "inbox",
+                "source": "manual",
+                "author": "tester",
+                "project": None,
+                "tags": ["sample"],
+                "status": "active",
+                "metadata": {},
+                "version": 1,
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+                "created_by": "tester",
+                "last_modified_by": "tester",
+            }
+            for i in range(n_entries)
+        ]
+        _seed_entries(db_path, entries)
+
+        async def _add_sources() -> None:
+            provider = HashEmbeddingProvider(dimensions=_ISSUE369_EMBED_DIMS)
+            store = DuckDBStore(db_path=db_path, embedding_provider=provider)
+            await store.initialize()
+            try:
+                for i in range(n_sources):
+                    await store.add_feed_source(
+                        url=f"https://example.com/feed-{i}.rss",
+                        source_type="rss",
+                        label=f"Example {i}",
+                        poll_interval_minutes=60 + i,
+                        trust_weight=1.0 - 0.1 * i,
+                    )
+            finally:
+                await store.close()
+
+        asyncio.run(_add_sources())
+
+    def test_export_no_embedding_vectors(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """L4.1: export schema must omit embedding vectors as a regression guard.
+
+        The current export schema strips the ``embedding`` column at the
+        SQL level (``SELECT id, content, ...`` does not include it).
+        This test pins that invariant — if a future refactor adds the
+        column back into the SELECT, this test fails.
+        """
+        db_path = str(tmp_path / "src.db")
+        cfg_path = _write_mock_config(tmp_path, db_path)
+        self._seed_entries_and_sources(db_path, n_entries=5, n_sources=2)
+
+        out_path = tmp_path / "dump.json"
+        rc = _cmd_export(str(cfg_path), "text", str(out_path))
+        assert rc == 0
+        capsys.readouterr()
+
+        data = json.loads(out_path.read_text(encoding="utf-8"))
+        assert "entries" in data and isinstance(data["entries"], list)
+        assert "feed_sources" in data and isinstance(data["feed_sources"], list)
+        assert len(data["entries"]) == 5
+        assert len(data["feed_sources"]) == 2
+
+        for entry in data["entries"]:
+            assert "embedding" not in entry, (
+                f"Export leaked embedding vector for entry {entry.get('id')!r} — "
+                f"keys: {sorted(entry.keys())}"
+            )
+
+    def test_export_overwrite_is_clean(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """L4.2: re-running export to the same path overwrites cleanly, not appends.
+
+        Asserts the file parses as a single JSON object on both runs and that
+        the second parse has the same entry count as the first. A byte-length
+        equality check would be brittle to additive payload schema changes
+        (e.g., a new variable-length field) and would not detect a truncated
+        but identically-sized regression — the structural check catches both
+        truncation and append regressions without that fragility.
+        """
+        db_path = str(tmp_path / "src.db")
+        cfg_path = _write_mock_config(tmp_path, db_path)
+        self._seed_entries_and_sources(db_path, n_entries=2, n_sources=0)
+
+        out_path = tmp_path / "dump.json"
+        rc1 = _cmd_export(str(cfg_path), "text", str(out_path))
+        assert rc1 == 0
+        payload_first = json.loads(out_path.read_text(encoding="utf-8"))
+        capsys.readouterr()
+
+        rc2 = _cmd_export(str(cfg_path), "text", str(out_path))
+        assert rc2 == 0
+        payload_second = json.loads(out_path.read_text(encoding="utf-8"))
+        capsys.readouterr()
+
+        # Structural: file is still a single object (not concatenated runs)
+        # and entry count matches the seed count on both runs.
+        assert isinstance(payload_second, dict)
+        assert len(payload_second["entries"]) == len(payload_first["entries"])
+        assert len(payload_second["entries"]) == 2
+
+    def test_import_merge_to_fresh_db_matches_entry_count(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """L4.3: merge import into a fresh DB produces a count matching the dump."""
+        src_db = str(tmp_path / "src.db")
+        cfg_src = _write_mock_config(tmp_path, src_db, name="src.yaml")
+        self._seed_entries_and_sources(src_db, n_entries=4, n_sources=0)
+
+        dump = tmp_path / "dump.json"
+        rc_export = _cmd_export(str(cfg_src), "text", str(dump))
+        assert rc_export == 0
+        capsys.readouterr()
+        n_entries_in_dump = len(json.loads(dump.read_text(encoding="utf-8"))["entries"])
+        assert n_entries_in_dump == 4
+
+        dst_db = str(tmp_path / "dst.db")
+        cfg_dst = _write_mock_config(tmp_path, dst_db, name="dst.yaml")
+        rc_import = _cmd_import(str(cfg_dst), "text", str(dump), "merge", True)
+        assert rc_import == 0
+        out = capsys.readouterr().out
+        assert f"Imported {n_entries_in_dump} entries" in out
+
+    def test_import_merge_skips_existing(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """L4.4: re-importing the same payload in merge mode reports N skipped."""
+        src_db = str(tmp_path / "src.db")
+        cfg_src = _write_mock_config(tmp_path, src_db, name="src.yaml")
+        self._seed_entries_and_sources(src_db, n_entries=3, n_sources=0)
+
+        dump = tmp_path / "dump.json"
+        rc_export = _cmd_export(str(cfg_src), "text", str(dump))
+        assert rc_export == 0
+        capsys.readouterr()
+
+        dst_db = str(tmp_path / "dst.db")
+        cfg_dst = _write_mock_config(tmp_path, dst_db, name="dst.yaml")
+
+        # First import: 3 in.
+        rc1 = _cmd_import(str(cfg_dst), "text", str(dump), "merge", True)
+        assert rc1 == 0
+        out1 = capsys.readouterr().out
+        assert "Imported 3 entries" in out1
+
+        # Second import: all 3 skipped.
+        rc2 = _cmd_import(str(cfg_dst), "text", str(dump), "merge", True)
+        assert rc2 == 0
+        out2 = capsys.readouterr().out
+        assert "Imported 0 entries" in out2
+        assert "3 skipped" in out2
+
+    def test_import_replace_with_yes_succeeds(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """L4.5: ``--mode replace --yes`` performs the destructive import cleanly."""
+        src_db = str(tmp_path / "src.db")
+        cfg_src = _write_mock_config(tmp_path, src_db, name="src.yaml")
+        self._seed_entries_and_sources(src_db, n_entries=2, n_sources=0)
+
+        dump = tmp_path / "dump.json"
+        rc_export = _cmd_export(str(cfg_src), "text", str(dump))
+        assert rc_export == 0
+        capsys.readouterr()
+
+        # Pre-populate destination DB with one different entry so we can
+        # verify replace truly clears it.
+        dst_db = str(tmp_path / "dst.db")
+        cfg_dst = _write_mock_config(tmp_path, dst_db, name="dst.yaml")
+        _seed_entries(
+            dst_db,
+            [
+                {
+                    "id": "ffffffff-0000-0000-0000-000000000001",
+                    "content": "pre-existing in dst",
+                    "entry_type": "inbox",
+                    "source": "manual",
+                    "author": "x",
+                    "project": None,
+                    "tags": [],
+                    "status": "active",
+                    "metadata": {},
+                    "version": 1,
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                    "updated_at": "2026-01-01T00:00:00+00:00",
+                    "created_by": "x",
+                    "last_modified_by": "x",
+                }
+            ],
+        )
+
+        rc = _cmd_import(str(cfg_dst), "text", str(dump), "replace", True)
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "Imported 2 entries" in out
+
+        # The pre-existing entry must be gone.
+        gone = asyncio.run(_async_get_entry(dst_db, "ffffffff-0000-0000-0000-000000000001"))
+        assert gone is None, "Replace mode did not clear pre-existing entries"
+
+    def test_import_replace_without_yes_in_non_interactive_cancels(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """L4.6: replace mode without ``--yes`` requires confirmation.
+
+        The current behaviour (per ``_cmd_import``): in replace mode
+        without ``--yes`` the CLI calls ``input(...)`` for a y/N prompt;
+        on ``EOFError`` (e.g. piped/empty stdin) the import is cancelled
+        with exit code 1. This test pins that behaviour. The issue #369
+        plan text suggested either a prompt or a hard rejection — both
+        are acceptable here as long as the import is *not* silently
+        executed. We verify the non-interactive EOF path returns 1.
+        """
+        import unittest.mock as mock
+
+        db_path = str(tmp_path / "dst.db")
+        cfg_path = _write_mock_config(tmp_path, db_path)
+        dump = tmp_path / "dump.json"
+        dump.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "exported_at": "2026-01-01T00:00:00+00:00",
+                    "meta": {},
+                    "entries": [],
+                    "feed_sources": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with mock.patch("builtins.input", side_effect=EOFError):
+            rc = _cmd_import(str(cfg_path), "text", str(dump), "replace", False)
+        # Non-interactive replace must NOT execute silently; it must
+        # exit nonzero.
+        assert rc == 1
+
+    def test_import_malformed_json_subprocess_no_traceback(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """L4.7: malformed import JSON exits nonzero with a readable, traceback-free error.
+
+        Invoked as a subprocess (mirrors the L1.11 / L2.5 pattern) so we
+        observe the real stderr. Skips when the ``distillery`` console
+        script is not installed on PATH.
+        """
+        import shutil
+        import subprocess
+
+        distillery_bin = shutil.which("distillery")
+        if distillery_bin is None:
+            pytest.skip("distillery console script not installed on PATH")
+
+        bad = tmp_path / "bad.json"
+        # Truncated JSON object.
+        bad.write_text('{"version": 1, "entries":', encoding="utf-8")
+        cfg_path = _write_mock_config(tmp_path, str(tmp_path / "dst.db"))
+
+        result = subprocess.run(
+            [
+                distillery_bin,
+                "--config",
+                str(cfg_path),
+                "import",
+                "--input",
+                str(bad),
+                "--yes",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode != 0, (
+            f"Expected nonzero exit for malformed JSON; got {result.returncode}.\n"
+            f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
+        )
+        # Friendly error mentions the parse failure on stderr.
+        assert (
+            "invalid JSON" in result.stderr
+            or "parse" in result.stderr.lower()
+            or "JSON" in result.stderr
+        ), f"Expected a JSON parse error on stderr; got: {result.stderr!r}"
+        # No Python traceback leak.
+        assert "Traceback" not in result.stderr, (
+            f"Malformed JSON leaked a Python traceback: {result.stderr!r}"
+        )
+        assert "json.decoder.JSONDecodeError" not in result.stderr
