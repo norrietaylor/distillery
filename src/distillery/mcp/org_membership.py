@@ -19,6 +19,7 @@ import base64
 import json
 import logging
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any
 
@@ -27,6 +28,11 @@ import httpx
 logger = logging.getLogger(__name__)
 
 GITHUB_API = "https://api.github.com"
+
+# Hard cap on the membership and user-token caches. Both caches are keyed by
+# request-supplied values, so a fixed cap with oldest-first eviction keeps
+# memory bounded regardless of how many distinct keys are seen.
+_MAX_CACHE_ENTRIES = 1024
 
 
 # ---------------------------------------------------------------------------
@@ -42,9 +48,13 @@ def _try_decode_jwt_claims(token: str) -> dict[str, Any] | None:
     token so that the ASGI middleware can identify the requesting user without
     a round-trip to GitHub.
 
-    Security note: this function does **not** verify the signature.
-    FastMCP has already verified the token before the middleware sees it;
-    we are only reading the claims that FastMCP put there.
+    Security note: this function does **not** verify the JWT signature, and in
+    the current ASGI wiring it runs *before* FastMCP verifies the token. The
+    ``login`` / ``sub`` claim it returns is therefore caller-controlled and
+    must only feed lookups whose results are bounded and fail-closed — never be
+    treated as a trusted identity. FastMCP performs the authoritative signature
+    check at the inner layer, so request handlers never run for an unverified
+    token.
     """
     try:
         parts = token.split(".")
@@ -101,11 +111,13 @@ class OrgMembershipChecker:
         self._allowed_orgs: list[str] = list(dict.fromkeys(allowed_orgs))
         self._ttl = cache_ttl_seconds
         self._server_token = server_token
-        # (username, org) -> CacheEntry
-        self._cache: dict[tuple[str, str], _CacheEntry] = {}
+        # (username, org) -> CacheEntry. Bounded at _MAX_CACHE_ENTRIES with
+        # oldest-first eviction so caller-supplied usernames cannot grow it
+        # without limit.
+        self._cache: OrderedDict[tuple[str, str], _CacheEntry] = OrderedDict()
         self._lock = asyncio.Lock()
-        # username -> (github_token, stored_at_monotonic)
-        self._user_tokens: dict[str, tuple[str, float]] = {}
+        # username -> (github_token, stored_at_monotonic). Bounded the same way.
+        self._user_tokens: OrderedDict[str, tuple[str, float]] = OrderedDict()
 
     @property
     def enabled(self) -> bool:
@@ -129,6 +141,9 @@ class OrgMembershipChecker:
         token (required for private-org membership visibility).
         """
         self._user_tokens[username] = (github_token, time.monotonic())
+        self._user_tokens.move_to_end(username)
+        while len(self._user_tokens) > _MAX_CACHE_ENTRIES:
+            self._user_tokens.popitem(last=False)
 
     def _resolve_token(self, username: str, hint_token: str | None) -> str | None:
         """Return the best available GitHub token for *username*.
@@ -190,10 +205,11 @@ class OrgMembershipChecker:
         now: float,
     ) -> bool:
         """Return cached or freshly-fetched membership result for one org."""
+        key = (username, org)
         async with self._lock:
-            key = (username, org)
             entry = self._cache.get(key)
             if entry is not None and now < entry.expires_at:
+                self._cache.move_to_end(key)
                 logger.debug(
                     "Membership cache hit: %s in %s -> %s",
                     username,
@@ -206,10 +222,14 @@ class OrgMembershipChecker:
         result = await self._fetch_membership(token, username, org)
 
         async with self._lock:
-            self._cache[(username, org)] = _CacheEntry(
+            self._cache[key] = _CacheEntry(
                 is_member=result,
                 expires_at=now + self._ttl,
             )
+            self._cache.move_to_end(key)
+            # Evict oldest entries once the cache exceeds its hard cap.
+            while len(self._cache) > _MAX_CACHE_ENTRIES:
+                self._cache.popitem(last=False)
 
         logger.info(
             "Org membership check: %s in %s -> %s (cached %ds)",

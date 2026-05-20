@@ -344,6 +344,50 @@ class TestHandleWatchAdd:
         data = parse(result)
         assert data["added"]["trust_weight"] == pytest.approx(0.7)
 
+    async def test_add_rss_rejects_internal_metadata_host(self) -> None:
+        store = FakeSourceStore()
+        result = await _handle_watch(
+            store=store,
+            arguments={
+                "action": "add",
+                "url": "http://169.254.169.254/latest/meta-data/",
+                "source_type": "rss",
+            },
+        )
+        data = parse(result)
+        assert data["error"] is True
+        assert data["code"] == "INVALID_PARAMS"
+        # Rejected before persistence — nothing written to the store.
+        assert store._sources == []
+
+    async def test_add_rss_rejects_loopback_host(self) -> None:
+        store = FakeSourceStore()
+        result = await _handle_watch(
+            store=store,
+            arguments={
+                "action": "add",
+                "url": "http://127.0.0.1:9000/feed",
+                "source_type": "rss",
+            },
+        )
+        data = parse(result)
+        assert data["error"] is True
+        assert data["code"] == "INVALID_PARAMS"
+
+    async def test_add_rss_rejects_private_host(self) -> None:
+        store = FakeSourceStore()
+        result = await _handle_watch(
+            store=store,
+            arguments={
+                "action": "add",
+                "url": "http://10.0.0.5/internal.rss",
+                "source_type": "rss",
+            },
+        )
+        data = parse(result)
+        assert data["error"] is True
+        assert data["code"] == "INVALID_PARAMS"
+
     async def test_add_missing_url_returns_missing_field(self) -> None:
         store = FakeSourceStore()
         result = await _handle_watch(

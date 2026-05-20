@@ -1,0 +1,252 @@
+"""Outbound-fetch guard for the feed poller.
+
+Feed source URLs are operator- and user-supplied via ``distillery_watch``.
+The poller later issues HTTP requests against them, so this module restricts
+those requests to publicly-routable hosts and re-checks the target at every
+redirect hop. It also caps the response body so a single feed cannot exhaust
+server memory.
+
+Two entry points:
+
+- :func:`validate_public_url` — call before persisting a feed source.
+- :func:`fetch_feed_bytes` — redirect-aware fetch that re-validates each hop
+  and streams the body under a hard size cap. Each hop pins ``getaddrinfo``
+  to the IP that just passed validation so a rebinding resolver cannot swap
+  in a private IP between the host check and the TCP connect.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import ipaddress
+import logging
+import socket
+from collections.abc import Iterator
+from typing import Any
+from unittest.mock import patch
+from urllib.parse import urljoin, urlparse
+
+import httpx
+
+logger = logging.getLogger(__name__)
+
+# Schemes the poller is permitted to fetch.
+ALLOWED_SCHEMES = frozenset({"http", "https"})
+
+# Maximum redirect hops followed before a fetch is abandoned.
+MAX_REDIRECTS = 5
+
+# Hard cap on a feed response body. Feeds are small XML documents; a larger
+# body is rejected before it is fully buffered.
+MAX_RESPONSE_BYTES = 5 * 1024 * 1024  # 5 MiB
+
+# Carrier-grade NAT range (RFC 6598). ``ipaddress.is_private`` only covers
+# this on newer Python versions, so it is checked explicitly.
+_CGNAT_V4 = ipaddress.ip_network("100.64.0.0/10")
+
+
+class UnsafeURLError(ValueError):
+    """Raised when a URL targets a non-public or otherwise disallowed host."""
+
+
+class ResponseTooLargeError(ValueError):
+    """Raised when a feed response body exceeds :data:`MAX_RESPONSE_BYTES`."""
+
+
+def _resolve_ips(host: str) -> list[str]:
+    """Return every IP address *host* resolves to.
+
+    Wraps :func:`socket.getaddrinfo`; kept as a module-level function so tests
+    can substitute a deterministic resolver.
+    """
+    infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    return [str(info[4][0]) for info in infos]
+
+
+def _ip_is_public(raw_ip: str) -> bool:
+    """Return ``True`` only for a globally-routable unicast address.
+
+    Loopback, link-local (incl. the cloud metadata address ``169.254.169.254``),
+    private, CGNAT, multicast, reserved, and unspecified addresses all return
+    ``False``.
+    """
+    ip: ipaddress.IPv4Address | ipaddress.IPv6Address = ipaddress.ip_address(raw_ip)
+    # IPv4-mapped IPv6 (``::ffff:a.b.c.d``) — evaluate the embedded v4 address.
+    mapped = getattr(ip, "ipv4_mapped", None)
+    if mapped is not None:
+        ip = mapped
+    if (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_reserved
+        or ip.is_unspecified
+    ):
+        return False
+    # Carrier-grade NAT (RFC 6598) is not flagged by ``is_private`` on every
+    # supported Python version, so it is checked explicitly.
+    return not (isinstance(ip, ipaddress.IPv4Address) and ip in _CGNAT_V4)
+
+
+def validate_public_url(url: str) -> None:
+    """Validate that *url* is an ``http(s)`` URL whose host is publicly routable.
+
+    A host that does not resolve at all is *not* rejected: it cannot point at
+    an internal address, so it is not an SSRF concern, and reachability is the
+    caller's responsibility (the ``distillery_watch`` probe / the poller fetch).
+
+    Args:
+        url: The candidate URL.
+
+    Raises:
+        UnsafeURLError: If the scheme is not ``http``/``https``, the host is
+            missing, or any resolved address is loopback, link-local, private,
+            CGNAT, or otherwise non-public.
+    """
+    parsed = urlparse(url)
+    scheme = parsed.scheme.lower()
+    if scheme not in ALLOWED_SCHEMES:
+        raise UnsafeURLError(f"url must use the http or https scheme, got: {scheme!r}")
+    host = parsed.hostname
+    if not host:
+        raise UnsafeURLError(f"url is missing a host: {url!r}")
+
+    try:
+        addresses = _resolve_ips(host)
+    except socket.gaierror as exc:
+        # Only treat *permanent* "host does not exist" failures as the silent-
+        # return case. A transient resolver failure (e.g. ``EAI_AGAIN``) must
+        # not be conflated with NXDOMAIN: if the resolver is briefly down, the
+        # host may still resolve to a private address moments later, which
+        # would defeat the SSRF guard once combined with DNS pinning.
+        unresolved_codes = {socket.EAI_NONAME}
+        eai_nodata = getattr(socket, "EAI_NODATA", None)
+        if eai_nodata is not None:
+            unresolved_codes.add(eai_nodata)
+        if exc.errno in unresolved_codes:
+            # Host does not resolve; reachability is the caller's concern.
+            return
+        raise UnsafeURLError(f"host {host!r} could not be resolved") from exc
+    except OSError as exc:
+        # Any other low-level resolver error — fail closed.
+        raise UnsafeURLError(f"host {host!r} could not be resolved") from exc
+
+    for raw_ip in addresses:
+        try:
+            public = _ip_is_public(raw_ip)
+        except ValueError as exc:  # malformed address from the resolver
+            raise UnsafeURLError(f"host {host!r} resolved to an invalid address") from exc
+        if not public:
+            raise UnsafeURLError(f"host {host!r} resolves to a non-public address")
+
+
+@contextlib.contextmanager
+def _pin_dns(hostname: str, ip: str) -> Iterator[None]:
+    """Pin ``socket.getaddrinfo(hostname, ...)`` to a single, pre-validated IP.
+
+    Closes the TOCTOU window between :func:`validate_public_url` (which
+    resolves *hostname* and verifies the returned IP set is public) and the
+    actual TCP connect inside :mod:`httpcore` (which would otherwise re-resolve
+    *hostname* and could be served a different — private — answer by a
+    rebinding resolver). Within the context only *ip* is returned for
+    *hostname*; lookups of other hosts pass through untouched.
+
+    Implementation note: ``httpcore`` 1.x calls ``socket.create_connection``
+    which delegates to ``socket.getaddrinfo``; patching that function is
+    therefore sufficient for both ``http`` and ``https`` requests.
+    """
+
+    original = socket.getaddrinfo
+
+    def _stub(host: Any, port: Any, *args: Any, **kwargs: Any) -> Any:
+        if host == hostname:
+            family = socket.AF_INET6 if ":" in ip else socket.AF_INET
+            # Mirror the 5-tuple shape of ``getaddrinfo`` for SOCK_STREAM/TCP.
+            return [(family, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (ip, port))]
+        return original(host, port, *args, **kwargs)
+
+    with patch("socket.getaddrinfo", _stub):
+        yield
+
+
+def fetch_feed_bytes(
+    client: httpx.Client,
+    url: str,
+    headers: dict[str, str],
+    *,
+    max_redirects: int = MAX_REDIRECTS,
+    max_bytes: int = MAX_RESPONSE_BYTES,
+) -> bytes:
+    """Fetch *url* with *client*, validating the host at every redirect hop.
+
+    Redirects are followed manually so each ``Location`` target is re-validated
+    by :func:`validate_public_url` before another request is issued. The
+    response body is streamed and rejected once it exceeds *max_bytes*. The
+    IP that just passed validation is pinned for the connect so a rebinding
+    resolver cannot swap in a private IP between the host check and the TCP
+    handshake.
+
+    Args:
+        client: An :class:`httpx.Client`. Per-request ``follow_redirects`` is
+            forced off regardless of the client's default.
+        url: The URL to fetch.
+        headers: Request headers (e.g. ``User-Agent``).
+        max_redirects: Maximum redirect hops to follow.
+        max_bytes: Maximum accepted response body size in bytes.
+
+    Returns:
+        The response body bytes.
+
+    Raises:
+        UnsafeURLError: If *url* or any redirect target is not a public host,
+            or the redirect limit is exceeded.
+        ResponseTooLargeError: If the body exceeds *max_bytes*.
+        httpx.HTTPStatusError: On a non-2xx, non-redirect response.
+        httpx.HTTPError: On a network-level failure.
+    """
+    current = url
+    for _ in range(max_redirects + 1):
+        validate_public_url(current)
+        # Resolve once more after validation succeeded so we can pin the exact
+        # IP for the connect. ``validate_public_url`` already accepted these
+        # addresses, so the worst case here is an empty result (host stopped
+        # resolving in the microsecond gap), in which case we let httpx
+        # attempt its own resolution and surface the error normally.
+        parsed = urlparse(current)
+        host = parsed.hostname or ""
+        try:
+            resolved = _resolve_ips(host) if host else []
+        except OSError:
+            resolved = []
+        pin_ctx: contextlib.AbstractContextManager[None] = (
+            _pin_dns(host, resolved[0]) if host and resolved else contextlib.nullcontext()
+        )
+        with (
+            pin_ctx,
+            client.stream("GET", current, headers=headers, follow_redirects=False) as response,
+        ):
+            if response.is_redirect:
+                # ``is_redirect`` guarantees a Location header is present.
+                current = urljoin(current, response.headers["location"])
+                continue
+            response.raise_for_status()
+
+            declared = response.headers.get("content-length")
+            if declared is not None and declared.isdigit() and int(declared) > max_bytes:
+                raise ResponseTooLargeError(
+                    f"feed response declares {declared} bytes, exceeding the {max_bytes}-byte limit"
+                )
+
+            chunks: list[bytes] = []
+            total = 0
+            for chunk in response.iter_bytes():
+                total += len(chunk)
+                if total > max_bytes:
+                    raise ResponseTooLargeError(
+                        f"feed response exceeded the {max_bytes}-byte limit"
+                    )
+                chunks.append(chunk)
+            return b"".join(chunks)
+
+    raise UnsafeURLError(f"feed URL exceeded {max_redirects} redirects: {url!r}")
