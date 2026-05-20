@@ -52,10 +52,18 @@ class EmbeddingConfig:
     """Embedding provider configuration.
 
     Attributes:
-        provider: Embedding provider name. One of 'jina' or 'openai'.
+        provider: Embedding provider name. One of ``"jina"``, ``"openai"``,
+            ``"fastembed"`` (local ONNX, no key), or ``"mock"`` (deterministic
+            hash, used by tests).
         model: Embedding model identifier.
-        dimensions: Dimensionality of embedding vectors.
+        dimensions: Dimensionality of embedding vectors. Forwarded to the API
+            for hosted providers (Jina / OpenAI) that support dimension
+            reduction. For ``"fastembed"`` the model dictates the dimension
+            and this value must match; see
+            :data:`distillery.embedding.fastembed._KNOWN_DIMENSIONS`.
         api_key_env: Name of the environment variable that holds the API key.
+            Ignored when ``provider == "fastembed"`` (local inference, no
+            key required).
     """
 
     provider: str = ""
@@ -1233,7 +1241,8 @@ def _validate(config: DistilleryConfig) -> None:
 
     Raises:
         ValueError: If any of the following conditions are violated:
-            - embedding.provider is non-empty and not one of "jina" or "openai".
+            - embedding.provider is non-empty and not one of "jina", "openai",
+              "fastembed", or "mock".
             - embedding.dimensions is not greater than 0.
             - classification.confidence_threshold is not between 0.0 and 1.0.
             - classification.dedup_link_threshold, classification.dedup_merge_threshold,
@@ -1269,7 +1278,7 @@ def _validate(config: DistilleryConfig) -> None:
                 "Set the environment variable before starting the server."
             )
 
-    valid_providers = {"jina", "openai", "mock"}
+    valid_providers = {"jina", "openai", "mock", "fastembed"}
     if config.embedding.provider and config.embedding.provider not in valid_providers:
         raise ValueError(
             f"embedding.provider must be one of {sorted(valid_providers)}, "

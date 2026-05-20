@@ -42,9 +42,7 @@ class TestInitialization:
         monkeypatch.setattr("os.chmod", _refuse_chmod)
 
         db_path = tmp_path / "distillery.db"
-        s = DuckDBStore(
-            db_path=str(db_path), embedding_provider=mock_embedding_provider
-        )
+        s = DuckDBStore(db_path=str(db_path), embedding_provider=mock_embedding_provider)
         await s.initialize()
         assert s.connection is not None
         await s.close()
@@ -1568,9 +1566,7 @@ class TestFTSRebuildRollback:
     returned ``False``) and caused duplicate feed entries to accumulate.
     """
 
-    async def test_fts_rebuild_failure_invokes_rollback(
-        self, hybrid_store: DuckDBStore
-    ) -> None:
+    async def test_fts_rebuild_failure_invokes_rollback(self, hybrid_store: DuckDBStore) -> None:
         """A failed PRAGMA must trigger ``conn.rollback()`` before returning.
 
         DuckDB ``DuckDBPyConnection.execute`` is a read-only attribute on
