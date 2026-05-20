@@ -1,6 +1,7 @@
 """Tests for issue #490 — entry_relations backfill on write + reconcile + accept_action.
 
-Covers the three patch-fix mechanisms scoped into the initial PR:
+Covers the patch-fix mechanisms scoped into the initial PR plus the
+wikilink mechanism added under issue #496:
 
   * Mechanism #1 — ``metadata.related_entries`` is fanned out into
     ``entry_relations`` on every ``store`` / ``store_batch`` / ``update`` call,
@@ -9,6 +10,9 @@ Covers the three patch-fix mechanisms scoped into the initial PR:
     retroactively.
   * Mechanism #2 — ``distillery_find_similar(accept_action=...)`` persists a
     typed relation from ``source_entry_id`` to each result above threshold.
+  * Mechanism #8 (issue #496) — inline ``[[entry-<8-hex>]]`` wikilink
+    references in ``content`` are parsed during reconcile and added as
+    ``link`` rows.
   * Mechanism #9 — ``distillery_relations action="reconcile"`` re-runs the
     metadata backfill and reports per-mechanism counts.
 
@@ -19,6 +23,7 @@ scoring is reproducible.
 from __future__ import annotations
 
 import json
+import uuid
 
 import duckdb
 import pytest
@@ -29,6 +34,7 @@ from distillery.mcp.tools.search import _handle_find_similar
 from distillery.store.duckdb import DuckDBStore
 from distillery.store.migrations import (
     backfill_relations_from_metadata,
+    backfill_relations_from_wikilinks,
     run_pending_migrations,
 )
 from tests.conftest import ControlledEmbeddingProvider, make_entry, parse_mcp_response
@@ -423,3 +429,249 @@ async def test_find_similar_accept_action_rejects_unknown_value(
     )
     assert payload.get("error") is True
     assert payload.get("code") == "INVALID_PARAMS"
+
+
+# ---------------------------------------------------------------------------
+# Wikilink backfill helper (issue #496 mechanism #8) — pure-SQL pass
+# ---------------------------------------------------------------------------
+
+
+def _insert_entry_with_content(
+    conn: duckdb.DuckDBPyConnection,
+    entry_id: str,
+    content: str = "test content",
+) -> None:
+    conn.execute(
+        "INSERT INTO entries (id, content, entry_type, source, author, embedding) "
+        "VALUES (?, ?, 'inbox', 'manual', 'tester', ?)",
+        [entry_id, content, _EMBEDDING],
+    )
+
+
+def test_wikilink_backfill_links_pair_on_prefix_match() -> None:
+    """A ``[[entry-<prefix>]]`` reference in content resolves to a ``link`` row."""
+    conn = duckdb.connect(":memory:")
+    try:
+        _setup_through_8(conn)
+        # UUIDs are mutable so we hand-craft prefixes for deterministic resolution.
+        src_id = "11111111-aaaa-4aaa-aaaa-aaaaaaaaaaaa"
+        tgt_id = "22222222-bbbb-4bbb-bbbb-bbbbbbbbbbbb"
+        _insert_entry_with_content(conn, tgt_id, "target entry")
+        _insert_entry_with_content(conn, src_id, "see [[entry-22222222]] for details")
+
+        inserted = backfill_relations_from_wikilinks(conn)
+        assert inserted == 1
+        rows = conn.execute("SELECT from_id, to_id, relation_type FROM entry_relations").fetchall()
+        assert rows == [(src_id, tgt_id, "link")]
+    finally:
+        conn.close()
+
+
+def test_wikilink_backfill_is_idempotent() -> None:
+    """Re-running the helper never produces duplicate edges."""
+    conn = duckdb.connect(":memory:")
+    try:
+        _setup_through_8(conn)
+        src_id = "33333333-cccc-4ccc-cccc-cccccccccccc"
+        tgt_id = "44444444-dddd-4ddd-dddd-dddddddddddd"
+        _insert_entry_with_content(conn, tgt_id, "target")
+        _insert_entry_with_content(conn, src_id, "ref: [[entry-44444444]]")
+
+        first = backfill_relations_from_wikilinks(conn)
+        second = backfill_relations_from_wikilinks(conn)
+        assert first == 1
+        assert second == 0
+        count = conn.execute(
+            "SELECT COUNT(*) FROM entry_relations WHERE relation_type = 'link'"
+        ).fetchone()
+        assert count is not None and count[0] == 1
+    finally:
+        conn.close()
+
+
+def test_wikilink_backfill_skips_self_reference() -> None:
+    """An entry whose content references its own prefix must not get a self-edge."""
+    conn = duckdb.connect(":memory:")
+    try:
+        _setup_through_8(conn)
+        entry_id = "55555555-eeee-4eee-eeee-eeeeeeeeeeee"
+        _insert_entry_with_content(conn, entry_id, "I link to myself [[entry-55555555]]")
+
+        inserted = backfill_relations_from_wikilinks(conn)
+        assert inserted == 0
+        rows = conn.execute("SELECT COUNT(*) FROM entry_relations").fetchone()
+        assert rows is not None and rows[0] == 0
+    finally:
+        conn.close()
+
+
+def test_wikilink_backfill_skips_ambiguous_prefix() -> None:
+    """Two entries sharing the same 8-hex prefix produce no edge for either."""
+    conn = duckdb.connect(":memory:")
+    try:
+        _setup_through_8(conn)
+        # Two distinct UUIDs sharing the same 8-hex prefix '66666666'.
+        tgt_a = "66666666-aaaa-4aaa-aaaa-aaaaaaaaaaaa"
+        tgt_b = "66666666-bbbb-4bbb-bbbb-bbbbbbbbbbbb"
+        src_id = "77777777-cccc-4ccc-cccc-cccccccccccc"
+        _insert_entry_with_content(conn, tgt_a, "a")
+        _insert_entry_with_content(conn, tgt_b, "b")
+        _insert_entry_with_content(conn, src_id, "see [[entry-66666666]]")
+
+        inserted = backfill_relations_from_wikilinks(conn)
+        assert inserted == 0
+        rows = conn.execute(
+            "SELECT to_id FROM entry_relations WHERE from_id = ?",
+            [src_id],
+        ).fetchall()
+        assert rows == []
+    finally:
+        conn.close()
+
+
+def test_wikilink_backfill_skips_unknown_prefix() -> None:
+    """A reference whose prefix matches no existing entry is silently dropped."""
+    conn = duckdb.connect(":memory:")
+    try:
+        _setup_through_8(conn)
+        src_id = "88888888-aaaa-4aaa-aaaa-aaaaaaaaaaaa"
+        _insert_entry_with_content(conn, src_id, "dangling [[entry-deadbeef]]")
+
+        inserted = backfill_relations_from_wikilinks(conn)
+        assert inserted == 0
+    finally:
+        conn.close()
+
+
+def test_wikilink_backfill_dedupes_repeated_prefix_in_same_content() -> None:
+    """Multiple occurrences of the same prefix in one entry yield a single edge."""
+    conn = duckdb.connect(":memory:")
+    try:
+        _setup_through_8(conn)
+        src_id = "99999999-aaaa-4aaa-aaaa-aaaaaaaaaaaa"
+        tgt_id = "aaaaaaaa-bbbb-4bbb-bbbb-bbbbbbbbbbbb"
+        _insert_entry_with_content(conn, tgt_id, "target")
+        _insert_entry_with_content(conn, src_id, "[[entry-aaaaaaaa]] and again [[entry-aaaaaaaa]]")
+
+        inserted = backfill_relations_from_wikilinks(conn)
+        assert inserted == 1
+        rows = conn.execute(
+            "SELECT COUNT(*) FROM entry_relations WHERE from_id = ? AND to_id = ?",
+            [src_id, tgt_id],
+        ).fetchone()
+        assert rows is not None and rows[0] == 1
+    finally:
+        conn.close()
+
+
+def test_wikilink_backfill_matches_uppercase_hex_prefix() -> None:
+    """``[[entry-ABCDEF12]]`` should resolve the same as ``[[entry-abcdef12]]``.
+
+    Entry IDs are stored lowercase, so the captured prefix must be lowercased
+    before the prefix lookup.  Without ``[0-9A-Fa-f]`` in the regex character
+    class, the reference would be silently dropped.
+    """
+    conn = duckdb.connect(":memory:")
+    try:
+        _setup_through_8(conn)
+        src_id = "bbbbbbbb-1111-4111-1111-111111111111"
+        tgt_id = "abcdef12-2222-4222-2222-222222222222"
+        _insert_entry_with_content(conn, tgt_id, "target")
+        # Uppercase hex in the wikilink — must still resolve.
+        _insert_entry_with_content(conn, src_id, "see [[entry-ABCDEF12]] please")
+
+        inserted = backfill_relations_from_wikilinks(conn)
+        assert inserted == 1
+        rows = conn.execute(
+            "SELECT from_id, to_id, relation_type FROM entry_relations"
+        ).fetchall()
+        assert rows == [(src_id, tgt_id, "link")]
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# reconcile handler integration — mechanism #8 wired into action="reconcile"
+# ---------------------------------------------------------------------------
+
+
+async def test_reconcile_creates_link_from_wikilink_reference(store: DuckDBStore) -> None:
+    """A ``[[entry-<prefix>]]`` in one entry's content links it to the target via reconcile."""
+    tgt_id = await store.store(make_entry(content="target body"))
+    src_id = await store.store(
+        make_entry(content=f"see [[entry-{tgt_id[:8]}]] for the canonical version")
+    )
+
+    result = await _handle_relations(store, {"action": "reconcile"})
+    payload = parse_mcp_response(result)
+    assert payload["action"] == "reconcile"
+    assert payload["wikilink_links"] == 1
+    # Metadata pass contributes nothing because related_entries is unset.
+    assert payload["metadata_links"] == 0
+    assert payload["total"] == 1
+
+    rows = await store.get_related(src_id, direction="outgoing")
+    assert {(r["to_id"], r["relation_type"]) for r in rows} == {(tgt_id, "link")}
+
+
+async def test_reconcile_wikilink_is_idempotent(store: DuckDBStore) -> None:
+    """A second reconcile call after a wikilink has been linked reports zero new edges."""
+    tgt_id = await store.store(make_entry(content="canonical"))
+    src_id = await store.store(make_entry(content=f"ref [[entry-{tgt_id[:8]}]]"))
+
+    first = parse_mcp_response(await _handle_relations(store, {"action": "reconcile"}))
+    second = parse_mcp_response(await _handle_relations(store, {"action": "reconcile"}))
+
+    assert first["wikilink_links"] == 1
+    assert second["wikilink_links"] == 0
+    rows = await store.get_related(src_id, direction="outgoing")
+    assert len(rows) == 1
+
+
+async def test_reconcile_wikilink_self_reference_skipped(store: DuckDBStore) -> None:
+    """An entry referencing its own 8-hex prefix never gets a self-edge."""
+    # First insert with placeholder content so we can derive the prefix.
+    entry_id = await store.store(make_entry(content="placeholder"))
+    await store.update(entry_id, {"content": f"I cite myself [[entry-{entry_id[:8]}]]"})
+
+    payload = parse_mcp_response(await _handle_relations(store, {"action": "reconcile"}))
+    assert payload["wikilink_links"] == 0
+    assert await store.get_related(entry_id, direction="outgoing") == []
+
+
+async def test_reconcile_wikilink_ambiguous_prefix_skipped(store: DuckDBStore) -> None:
+    """Two existing entries sharing the same 8-hex prefix produce no wikilink edge.
+
+    We bypass ``store()`` because it allocates new UUIDs; instead we craft
+    the rows directly via the raw DuckDB connection so the prefix collision
+    is deterministic.
+    """
+    shared_prefix = "ffffeeee"
+    tgt_a = f"{shared_prefix}-1111-4111-9111-111111111111"
+    tgt_b = f"{shared_prefix}-2222-4222-9222-222222222222"
+    src_id = str(uuid.uuid4())
+
+    # Direct inserts so we control the IDs (and therefore the prefix collision).
+    # The local ``store`` fixture uses ControlledEmbeddingProvider (8 dims).
+    embedding = [0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25]
+    store.connection.execute(
+        "INSERT INTO entries (id, content, entry_type, source, author, embedding) "
+        "VALUES (?, 'target a', 'inbox', 'manual', 'tester', ?)",
+        [tgt_a, embedding],
+    )
+    store.connection.execute(
+        "INSERT INTO entries (id, content, entry_type, source, author, embedding) "
+        "VALUES (?, 'target b', 'inbox', 'manual', 'tester', ?)",
+        [tgt_b, embedding],
+    )
+    store.connection.execute(
+        "INSERT INTO entries (id, content, entry_type, source, author, embedding) "
+        "VALUES (?, ?, 'inbox', 'manual', 'tester', ?)",
+        [src_id, f"ambiguous [[entry-{shared_prefix}]]", embedding],
+    )
+
+    payload = parse_mcp_response(await _handle_relations(store, {"action": "reconcile"}))
+    assert payload["wikilink_links"] == 0
+    # Neither candidate gets the edge.
+    rows = await store.get_related(src_id, direction="outgoing")
+    assert rows == []

@@ -34,6 +34,7 @@ from distillery.models import Entry, EntryStatus, validate_metadata
 from distillery.store.migrations import (
     _CREATE_META_TABLE,
     backfill_relations_from_metadata,
+    backfill_relations_from_wikilinks,
     run_pending_migrations,
 )
 
@@ -3291,11 +3292,12 @@ class DuckDBStore:
         assert self._conn is not None
         conn = self._conn
         # Wrap in a transaction so a mid-scan failure leaves the table in its
-        # prior state. The helper is itself idempotent, so the worst-case is a
-        # retried no-op on the next call.
+        # prior state. The helpers are themselves idempotent, so the
+        # worst-case is a retried no-op on the next call.
         try:
             conn.execute("BEGIN TRANSACTION")
             inserted_metadata = backfill_relations_from_metadata(conn)
+            inserted_wikilinks = backfill_relations_from_wikilinks(conn)
             conn.execute("COMMIT")
         except Exception:
             with contextlib.suppress(Exception):
@@ -3305,21 +3307,31 @@ class DuckDBStore:
         # than sitting in the WAL where an ungraceful restart could lose them
         # (issue #346 semantics — see :meth:`_checkpoint_after_write`).
         self._checkpoint_after_write(conn)
-        return {"metadata_links": inserted_metadata, "total": inserted_metadata}
+        return {
+            "metadata_links": inserted_metadata,
+            "wikilink_links": inserted_wikilinks,
+            "total": inserted_metadata + inserted_wikilinks,
+        }
 
     async def reconcile_relations(self) -> dict[str, int]:
-        """Re-run the metadata-driven entry_relations backfill and return counts.
+        """Re-run the entry_relations backfill mechanisms and return counts.
 
-        Idempotent recovery hook for issue #490 mechanism #9.  Re-scans every
-        entry's ``metadata.related_entries`` and inserts any missing rows into
-        ``entry_relations``; existing rows are left alone via the unique
-        ``(from_id, to_id, relation_type)`` index.
+        Idempotent recovery hook for issue #490 mechanism #9 plus issue
+        #496 mechanism #8.  Currently runs two passes:
+
+          * ``metadata.related_entries`` fan-out (mechanism #1).
+          * Inline ``[[entry-<8-hex>]]`` wikilink parsing in ``content``
+            (mechanism #8 from issue #496).
+
+        Existing rows are left alone via the unique ``(from_id, to_id,
+        relation_type)`` index, so re-running never duplicates edges.
 
         Returns:
             Dict with ``metadata_links`` (rows inserted from
-            ``metadata.related_entries``) and ``total`` (sum across all
-            mechanisms — currently equal to ``metadata_links``; future
-            mechanisms #3-#8 in issue #490 will contribute additional fields).
+            ``metadata.related_entries``), ``wikilink_links`` (rows inserted
+            from inline ``[[entry-<8-hex>]]`` references) and ``total`` (sum
+            across all mechanisms — future mechanisms #3-#7 in issue #496
+            will contribute additional fields).
         """
         return await self._run_sync(self._sync_reconcile_relations)
 
