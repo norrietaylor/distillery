@@ -1,6 +1,75 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.6.0] - 2026-05-20
+
+### Bug Fixes
+
+- resolve a 302 org check via /public_members *(mcp)*
+- check the verifier guard before the no-bearer passthrough *(mcp)*
+- resolve org-check identity from the verified access token *(mcp)*
+- exempt machine tokens from the org-membership gate *(mcp)*
+- align add_relation existence check with read path (#515) *(store)*
+- sweep stale active_job_id on startup and at request time *(mcp)*
+- give the machine token the `user` scope *(mcp)*
+- make DuckDB file chmod best-effort *(store)*
+- use prefix-startswith for kind/ absence assertion (CR feedback) *(test)*
+- enforce single canonical kind/* tag (CR feedback) *(classification)*
+- align grype suppressions with current base image *(ci)*
+- address CR feedback on PR #495 *(store)*
+- re-run entry_relations backfill on upgrade and on every write (#490) *(store)*
+- reject boolean threshold values explicitly (CR feedback) *(feeds)*
+- replace Unicode ellipsis in staging-deploy comment (CR feedback) *(ci)*
+- rewrite ../bench/* links to absolute GitHub URLs *(docs)*
+
+### CI/CD
+
+- correct dependabot/fetch-metadata pin to actual v2.4.0 SHA *(automerge)*
+- enable bot auto-merge for Dependabot and benchmark PRs *(automerge)*
+- trigger gcp-deploy alongside fly-deploy *(supply-chain)*
+- noop job on push to suppress 0-job phantom failures *(staging)*
+- suppress phantom 0-job failures via unreachable push trigger *(staging)*
+
+### Documentation
+
+- document fastembed provider in config + example + README *(embedding)*
+- update changelog for v0.5.0
+
+### Features
+
+- wire fastembed into provider factory + validator *(embedding)*
+- add opt-in pre-shared machine-token auth for /mcp *(mcp)*
+- add kind/ content-type axis (#481) *(classification)*
+- per-source threshold overrides (#480) *(feeds)*
+- publish nightly numbers into docs/benchmarks.md *(bench)*
+
+### Miscellaneous
+
+- bump urllib3 from 2.6.3 to 2.7.0 *(deps)*
+- bump langchain-classic from 1.0.3 to 1.0.7 *(deps)*
+- bump authlib from 1.6.11 to 1.6.12 *(deps)*
+- bump langsmith from 0.7.31 to 0.8.0 *(deps)*
+- clarify header comment terminology (CR feedback) *(security)*
+- refresh Grype suppressions for upstream Wolfi CVEs *(security)*
+- re-register staging-deploy workflow (step 2 of 2) *(ci)*
+- deregister stale staging-deploy workflow (step 1 of 2) *(ci)*
+
+### Testing
+
+- strengthen issue #369 export & classify assertions (review feedback) *(cli)*
+- expand issue #369 coverage — health, retag, gh-backfill, export/import, classify *(cli)*
+- strengthen issue #369 regression coverage (review feedback) *(cli)*
+- add explicit issue #369 regression coverage *(cli)*
+
+### Bench
+
+- nightly LongMemEval results 2026-05-18
+- update Cell A regression aggregate from run *(graph)*
+
+### Release
+
+- v0.6.0 — fastembed as plugin install default
+
 ## [0.5.0] - 2026-05-07
 
 ### Bug Fixes

@@ -518,9 +518,7 @@ class TestOrgMembershipMiddleware:
         mw = OrgMembershipMiddleware(
             _dummy_app,
             checker,
-            token_verifier=_verifier(
-                _make_access({"machine": True, "login": "spectacles"})
-            ),
+            token_verifier=_verifier(_make_access({"machine": True, "login": "spectacles"})),
         )
         scope = _make_scope(headers=[(b"authorization", b"Bearer machine-tok")])
         cap = _ResponseCapture()
@@ -574,9 +572,7 @@ class TestOrgMembershipMiddleware:
     async def test_unverifiable_token_passes_to_fastmcp(self) -> None:
         """A token verify_token rejects -> pass through; FastMCP issues the 401."""
         checker = self._make_checker(allowed_orgs=["myorg"], is_allowed_return=True)
-        mw = OrgMembershipMiddleware(
-            _dummy_app, checker, token_verifier=_verifier(None)
-        )
+        mw = OrgMembershipMiddleware(_dummy_app, checker, token_verifier=_verifier(None))
         scope = _make_scope(headers=[(b"authorization", b"Bearer bogus")])
         cap = _ResponseCapture()
         await mw(scope, _noop_receive, cap)

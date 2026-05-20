@@ -235,8 +235,7 @@ class DuckDBStore:
                 os.chmod(self._db_path, 0o600)
             except OSError as exc:
                 logger.warning(
-                    "Could not chmod %s to 0600; filesystem may not "
-                    "support it (e.g. GCS FUSE): %s",
+                    "Could not chmod %s to 0600; filesystem may not support it (e.g. GCS FUSE): %s",
                     self._db_path,
                     exc,
                 )
