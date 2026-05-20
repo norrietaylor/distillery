@@ -108,10 +108,23 @@ def validate_public_url(url: str) -> None:
 
     try:
         addresses = _resolve_ips(host)
-    except OSError:
-        # Resolution failed — no resolved address can point at an internal
-        # host, so there is nothing to block here.
-        return
+    except socket.gaierror as exc:
+        # Only treat *permanent* "host does not exist" failures as the silent-
+        # return case. A transient resolver failure (e.g. ``EAI_AGAIN``) must
+        # not be conflated with NXDOMAIN: if the resolver is briefly down, the
+        # host may still resolve to a private address moments later, which
+        # would defeat the SSRF guard once combined with DNS pinning.
+        unresolved_codes = {socket.EAI_NONAME}
+        eai_nodata = getattr(socket, "EAI_NODATA", None)
+        if eai_nodata is not None:
+            unresolved_codes.add(eai_nodata)
+        if exc.errno in unresolved_codes:
+            # Host does not resolve; reachability is the caller's concern.
+            return
+        raise UnsafeURLError(f"host {host!r} could not be resolved") from exc
+    except OSError as exc:
+        # Any other low-level resolver error — fail closed.
+        raise UnsafeURLError(f"host {host!r} could not be resolved") from exc
 
     for raw_ip in addresses:
         try:

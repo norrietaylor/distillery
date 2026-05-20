@@ -110,13 +110,34 @@ class TestValidatePublicURL:
         validate_public_url("https://feeds.example.com/rss")
 
     def test_unresolvable_host_not_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # A host that does not resolve cannot point at an internal address, so
-        # the SSRF guard passes it; reachability is checked elsewhere.
+        # NXDOMAIN-class failures (EAI_NONAME / EAI_NODATA) cannot point at an
+        # internal address, so the SSRF guard passes them silently;
+        # reachability is checked elsewhere.
         def _boom(host: str) -> list[str]:
-            raise socket.gaierror("name resolution failed")
+            raise socket.gaierror(socket.EAI_NONAME, "name resolution failed")
 
         monkeypatch.setattr("distillery.feeds.url_guard._resolve_ips", _boom)
         validate_public_url("https://nonexistent.invalid/feed")
+
+    def test_transient_dns_failure_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # A transient resolver outage (EAI_AGAIN) MUST fail closed: returning
+        # silently would let the same hostname resolve to a private IP a
+        # moment later, defeating the guard once combined with DNS pinning.
+        def _boom(host: str) -> list[str]:
+            raise socket.gaierror(socket.EAI_AGAIN, "temporary failure")
+
+        monkeypatch.setattr("distillery.feeds.url_guard._resolve_ips", _boom)
+        with pytest.raises(UnsafeURLError, match="could not be resolved"):
+            validate_public_url("https://flaky.example.com/feed")
+
+    def test_unknown_oserror_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Any non-gaierror low-level resolver error must also fail closed.
+        def _boom(host: str) -> list[str]:
+            raise OSError("resolver crashed")
+
+        monkeypatch.setattr("distillery.feeds.url_guard._resolve_ips", _boom)
+        with pytest.raises(UnsafeURLError, match="could not be resolved"):
+            validate_public_url("https://broken.example.com/feed")
 
 
 # ---------------------------------------------------------------------------
