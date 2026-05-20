@@ -667,8 +667,7 @@ async def _handle_find_similar(
                 # Log details server-side; keep client payload generic so we
                 # don't leak raw store error text to MCP callers.
                 logger.warning(
-                    "find_similar accept_action: relation validation failed "
-                    "from=%s to=%s type=%s",
+                    "find_similar accept_action: relation validation failed from=%s to=%s type=%s",
                     source_entry_id,
                     target_id,
                     relation_type,
