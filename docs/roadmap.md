@@ -6,7 +6,7 @@
 - [x] `Entry` data model with structured metadata and type-specific extensions
 - [x] `DistilleryStore` protocol — async storage abstraction enabling backend migration
 - [x] DuckDB backend with VSS extension and HNSW index (cosine similarity)
-- [x] Configurable embedding providers (Jina v3 default, OpenAI adapter)
+- [x] Configurable embedding providers (fastembed default for the plugin install path, Jina v3 / OpenAI adapters)
 - [x] Embedding model lock via `_meta` table — prevents mixed-model corruption
 - [x] MCP server with 16 tools over stdio and streamable-HTTP (consolidated from 20 in `staging/api-hardening`)
 - [x] `distillery.yaml` config system with validation
@@ -84,7 +84,7 @@
 
 ### Onboarding
 - [x] `/setup` skill — MCP connectivity wizard, auto-poll configuration, session hook setup
-- [x] uvx-first setup — `uvx distillery-mcp` as recommended first-time path
+- [x] uvx-first setup — `uvx --from 'distillery-mcp[fastembed]>=0.6.0' distillery-mcp` as recommended first-time path (zero API key required)
 
 ### API Hardening (`staging/api-hardening` → released)
 - [x] API consolidation: 20 → 16 tools. Removed `distillery_aggregate`, `distillery_stale`, `distillery_tag_tree`, `distillery_metrics`, `distillery_interests`, `distillery_type_schemas`, `distillery_poll`, `distillery_rescore`. Functionality folded into `distillery_list`, `distillery_status`, `distillery_configure`, REST `/api/maintenance`, and the `distillery://schemas/entry-types` resource.
@@ -155,6 +155,6 @@ PRs go directly to `main`.
 | Auth | GitHub OAuth (FastMCP) | + multi-team RBAC |
 | Storage | DuckDB + VSS + FTS / MotherDuck | Same |
 | Search | Hybrid BM25 + vector (RRF) | + score normalization |
-| Embeddings | Jina v3 / OpenAI | Same |
+| Embeddings | fastembed (default for plugin) / Jina v3 / OpenAI | Same |
 | Language | Python 3.11+ | Same |
 | Hosting | Local / Fly.io / Prefect Horizon | Same |

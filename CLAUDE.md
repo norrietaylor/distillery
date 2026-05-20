@@ -56,7 +56,7 @@ Webhook API (src/distillery/mcp/webhooks.py) →  /hooks/poll, /hooks/rescore, /
     ↓
 Core Protocols (store/protocol.py, embedding/protocol.py)  →  typed Protocol interfaces
     ↓
-Backends (store/duckdb.py, embedding/jina.py, embedding/openai.py)  →  DuckDB + VSS, embedding APIs
+Backends (store/duckdb.py, embedding/fastembed.py, embedding/jina.py, embedding/openai.py)  →  DuckDB + VSS, embedding APIs
 ```
 
 - **Entry** (`models.py`): core data model — str id (UUID4), content, entry_type, source, status, tags, metadata, version, project (str | None)

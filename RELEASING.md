@@ -28,7 +28,7 @@ Users install the server via `pip install distillery-mcp` or `uvx distillery-mcp
    | File | Field(s) | Notes |
    |------|----------|-------|
    | `pyproject.toml` | `version` | Source of truth |
-   | `src/distillery/__init__.py` | `__version__` | Reported by `distillery_metrics` |
+   | `src/distillery/__init__.py` | `__version__` | Reported by `distillery_status` |
    | `.claude-plugin/plugin.json` | `version`, SessionStart echo string | Plugin manifest |
    | `.claude-plugin/marketplace.json` | `plugins[0].version` | Marketplace listing |
    | `server.json` | `version`, `packages[*].version` | MCP Registry listing |
@@ -93,7 +93,7 @@ Validate on the release branch:
 - CI passes (tests, mypy, ruff, coverage)
 - `promptfoo eval` passes against the MCP server
 - Deploy to the hosted server (`fly deploy` from distill_ops) and smoke-test
-- Verify `distillery_metrics` reports the correct version
+- Verify `distillery_status` reports the correct version
 
 Once validated, merge the PR to `main`.
 

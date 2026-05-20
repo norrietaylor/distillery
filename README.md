@@ -74,18 +74,23 @@ claude plugin marketplace add norrietaylor/distillery
 claude plugin install distillery
 ```
 
-This installs all 14 skills and configures the MCP server to run **locally** via `uvx distillery-mcp` — a private, self-contained knowledge base on your machine. Requires Python 3.11+ and [`uv`](https://docs.astral.sh/uv/) (install: `curl -LsSf https://astral.sh/uv/install.sh | sh`).
+This installs all 14 skills and configures the MCP server to run **locally** via `uvx --from 'distillery-mcp[fastembed]>=0.6.0' distillery-mcp` — a private, self-contained knowledge base on your machine, with on-device `fastembed` embeddings as the install-time default (no API key required). Requires Python 3.11+ and [`uv`](https://docs.astral.sh/uv/) (install: `curl -LsSf https://astral.sh/uv/install.sh | sh`).
 
-### Step 2: Set Your Embedding API Key (Optional but Recommended)
+### Step 2 (Optional): Use Jina or OpenAI Instead
+
+The default `fastembed` provider runs offline with no API key. If you'd rather use a hosted embedding service, set `DISTILLERY_EMBEDDING_PROVIDER` and provide the matching API key:
 
 ```bash
-# Get a free API key from jina.ai
+# Jina (free tier at jina.ai)
+export DISTILLERY_EMBEDDING_PROVIDER=jina
 export JINA_API_KEY=jina_...
+
+# Or OpenAI
+export DISTILLERY_EMBEDDING_PROVIDER=openai
+export OPENAI_API_KEY=sk-...
 ```
 
-`uvx` inherits this from your shell environment. Without a key, Distillery falls back to a stub embedding provider (search quality degraded).
-
-For fully offline operation with no API key, install the optional `[fastembed]` extra and set `embedding.provider: fastembed` in your config — see [`distillery.yaml.example`](distillery.yaml.example) (Option C) for the full block.
+`uvx` inherits these from your shell environment. See [`distillery.yaml.example`](distillery.yaml.example) for the full provider configuration block (including Option C for fastembed model selection).
 
 Restart Claude Code and run the onboarding wizard:
 

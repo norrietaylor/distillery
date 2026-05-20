@@ -99,7 +99,7 @@ Distillery is built as a 4-layer system where skills (SKILL.md files) drive all 
 
   <rect class="d-box" x="254" y="292" width="152" height="72" rx="8"/>
   <text class="d-box-title" x="330" y="314" text-anchor="middle">Embedding</text>
-  <text class="d-box-sub" x="330" y="330" text-anchor="middle">Jina v3 / OpenAI</text>
+  <text class="d-box-sub" x="330" y="330" text-anchor="middle">fastembed / Jina / OpenAI</text>
   <text class="d-box-sub" x="330" y="344" text-anchor="middle">Configurable provider</text>
 
   <rect class="d-box" x="420" y="292" width="160" height="72" rx="8"/>
@@ -150,7 +150,7 @@ Distillery is built as a 4-layer system where skills (SKILL.md files) drive all 
 | **Auth** | MCP: GitHub OAuth with org-restricted access. Webhooks: bearer token via `DISTILLERY_WEBHOOK_SECRET`. Middleware handles logging, rate limiting, security headers, budget tracking. | `src/distillery/mcp/auth.py`, `middleware.py`, `budget.py` |
 | **Core Protocols** | Typed `Protocol` interfaces (structural subtyping, not ABCs). All storage operations are async. Includes `query_audit_log` for audit data access. | `src/distillery/store/protocol.py`, `embedding/protocol.py` |
 | **Feeds** | GitHub events and RSS/Atom polling. Authenticated via `GITHUB_TOKEN` for private repos. Auto-tagging (source + topic tags from KB vocabulary). Relevance scoring via embeddings. Interest extraction for source suggestions. | `src/distillery/feeds/` |
-| **Backends** | DuckDB + VSS (HNSW) + FTS (BM25). Hybrid search with RRF fusion and recency decay. Jina v3 / OpenAI embeddings. LLM classification with dedup + conflict detection. | `src/distillery/store/duckdb.py`, `embedding/`, `classification/` |
+| **Backends** | DuckDB + VSS (HNSW) + FTS (BM25). Hybrid search with RRF fusion and recency decay. fastembed (default, on-device) / Jina v3 / OpenAI embeddings. LLM classification with dedup + conflict detection. | `src/distillery/store/duckdb.py`, `embedding/`, `classification/` |
 
 ## Key Design Decisions
 
@@ -160,7 +160,7 @@ Distillery is built as a 4-layer system where skills (SKILL.md files) drive all 
 
 **Storage abstraction via `DistilleryStore` protocol.** Enables future migration to Elasticsearch without rewriting skills or the MCP server.
 
-**Configurable embedding providers.** Swap between Jina v3, OpenAI, or a zero-vector stub for testing via `distillery.yaml`.
+**Configurable embedding providers.** Swap between on-device `fastembed` (the plugin's install-time default), Jina v3, OpenAI, or a zero-vector stub for testing via `distillery.yaml`.
 
 **Semantic deduplication.** Prevents knowledge base pollution with configurable thresholds:
 
@@ -224,6 +224,7 @@ distillery/
 │   │   └── duckdb.py        # DuckDB + VSS backend
 │   ├── embedding/
 │   │   ├── protocol.py      # EmbeddingProvider protocol
+│   │   ├── fastembed.py     # fastembed (ONNX, on-device) adapter
 │   │   ├── jina.py          # Jina v3 adapter
 │   │   └── openai.py        # OpenAI adapter
 │   ├── classification/
