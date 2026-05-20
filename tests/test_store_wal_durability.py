@@ -193,9 +193,7 @@ class TestEntriesSurviveUngracefulTermination:
 
             conn = duckdb.connect(db_path, read_only=True)
             try:
-                row = conn.execute(
-                    "SELECT id FROM entries WHERE id = ?", [entry_id]
-                ).fetchone()
+                row = conn.execute("SELECT id FROM entries WHERE id = ?", [entry_id]).fetchone()
             finally:
                 conn.close()
 
@@ -231,9 +229,7 @@ class TestEntriesSurviveUngracefulTermination:
 
             conn = duckdb.connect(db_path, read_only=True)
             try:
-                row = conn.execute(
-                    "SELECT status FROM entries WHERE id = ?", [entry_id]
-                ).fetchone()
+                row = conn.execute("SELECT status FROM entries WHERE id = ?", [entry_id]).fetchone()
             finally:
                 conn.close()
 
@@ -266,9 +262,7 @@ class TestEntriesSurviveUngracefulTermination:
 
             conn = duckdb.connect(db_path, read_only=True)
             try:
-                row = conn.execute(
-                    "SELECT status FROM entries WHERE id = ?", [entry_id]
-                ).fetchone()
+                row = conn.execute("SELECT status FROM entries WHERE id = ?", [entry_id]).fetchone()
             finally:
                 conn.close()
 
@@ -445,9 +439,7 @@ class TestWalRecoveryPreservesBytes:
             db_path = str(Path(tmp) / "ghost.db")
 
             # Seed a database and drop a sentinel WAL file next to it.
-            store = DuckDBStore(
-                db_path=db_path, embedding_provider=mock_embedding_provider
-            )
+            store = DuckDBStore(db_path=db_path, embedding_provider=mock_embedding_provider)
             await store.initialize()
             await store.close()
 
@@ -469,17 +461,15 @@ class TestWalRecoveryPreservesBytes:
                     # deliberately matches a narrow signature).
                     raise duckdb.Error(
                         "Dependency Error: Failure while replaying WAL file "
-                        "\"/tmp/ghost.db.wal\": Cannot drop entry "
-                        "\"fts_main_entries\" because there are entries that "
+                        '"/tmp/ghost.db.wal": Cannot drop entry '
+                        '"fts_main_entries" because there are entries that '
                         "depend on it."
                     )
                 return real_open(self)
 
             monkeypatch.setattr(DuckDBStore, "_open_connection", flaky_open)
 
-            store2 = DuckDBStore(
-                db_path=db_path, embedding_provider=mock_embedding_provider
-            )
+            store2 = DuckDBStore(db_path=db_path, embedding_provider=mock_embedding_provider)
             try:
                 await store2.initialize()
             finally:

@@ -85,6 +85,8 @@ export JINA_API_KEY=jina_...
 
 `uvx` inherits this from your shell environment. Without a key, Distillery falls back to a stub embedding provider (search quality degraded).
 
+For fully offline operation with no API key, install the optional `[fastembed]` extra and set `embedding.provider: fastembed` in your config — see [`distillery.yaml.example`](distillery.yaml.example) (Option C) for the full block.
+
 Restart Claude Code and run the onboarding wizard:
 
 ```text

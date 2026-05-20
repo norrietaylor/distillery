@@ -161,9 +161,7 @@ def upstream_error_response(exc: EmbeddingProviderError) -> list[types.TextConte
     from distillery.mcp.tools._common import error_response
 
     code = (
-        ToolErrorCode.UPSTREAM_RATE_LIMITED
-        if exc.is_rate_limited
-        else ToolErrorCode.UPSTREAM_ERROR
+        ToolErrorCode.UPSTREAM_RATE_LIMITED if exc.is_rate_limited else ToolErrorCode.UPSTREAM_ERROR
     )
     details: dict[str, Any] = {"provider": exc.provider}
     if exc.status_code is not None:

@@ -351,9 +351,7 @@ class SyncJobTracker:
         cutoff_iso = _dt_to_iso(cutoff)
         try:
             rows = await asyncio.to_thread(
-                lambda: store.connection.execute(
-                    _SELECT_RECENT_SYNC_JOBS, [cutoff_iso]
-                ).fetchall()
+                lambda: store.connection.execute(_SELECT_RECENT_SYNC_JOBS, [cutoff_iso]).fetchall()
             )
         except Exception:  # noqa: BLE001
             logger.exception("SyncJobTracker.hydrate: failed to load sync_jobs")

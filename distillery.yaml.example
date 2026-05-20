@@ -148,6 +148,24 @@ embedding:
 #   # Set it in your shell: export OPENAI_API_KEY=sk-...
 #   api_key_env: OPENAI_API_KEY
 
+# --- Option C: Local embeddings (fastembed, no API key) ---------------------
+# Runs ONNX inference on-device — no network call, no API key. Requires the
+# optional dependency group: `pip install distillery-mcp[fastembed]`.
+# The model is downloaded once on first use (cached under ~/.cache/fastembed).
+# embedding:
+#   provider: fastembed
+#   # HuggingFace model identifier. Aliases supported: "bge-small" (default,
+#   # ~67 MB, 384 dim), "bge-base" (~210 MB, 768 dim), "bge-large", "nomic",
+#   # "mxbai". See distillery.embedding.fastembed.MODEL_ALIASES.
+#   model: BAAI/bge-small-en-v1.5
+#   # Must match the model's native output size. The provider does not
+#   # reduce dimensions; mismatched values will fail at storage init.
+#   #   bge-small-en-v1.5  -> 384
+#   #   bge-base-en-v1.5   -> 768
+#   #   bge-large-en-v1.5  -> 1024
+#   dimensions: 384
+#   # api_key_env is ignored for fastembed — leave unset or empty.
+
 # ---------------------------------------------------------------------------
 # Team settings
 # ---------------------------------------------------------------------------
