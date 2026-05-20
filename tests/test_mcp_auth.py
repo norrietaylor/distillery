@@ -364,18 +364,14 @@ class TestAuthAuditEvents:
 class TestMachineTokenAuth:
     """The opt-in pre-shared machine-token MCP auth path."""
 
-    def test_load_machine_tokens_unset_returns_empty(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_load_machine_tokens_unset_returns_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """No DISTILLERY_MCP_MACHINE_TOKEN -> feature off, empty list."""
         from distillery.mcp.auth import _load_machine_tokens
 
         monkeypatch.delenv("DISTILLERY_MCP_MACHINE_TOKEN", raising=False)
         assert _load_machine_tokens() == []
 
-    def test_load_machine_tokens_builds_access_token(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_load_machine_tokens_builds_access_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A configured token yields an AccessToken with the login claim."""
         from distillery.mcp.auth import _load_machine_tokens
 
@@ -392,9 +388,7 @@ class TestMachineTokenAuth:
         # otherwise-authenticated token with 403 insufficient_scope.
         assert "user" in access.scopes
 
-    def test_load_machine_tokens_default_identity(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_load_machine_tokens_default_identity(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Identity defaults when DISTILLERY_MCP_MACHINE_IDENTITY is unset."""
         from distillery.mcp.auth import _load_machine_tokens
 

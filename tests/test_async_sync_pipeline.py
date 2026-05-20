@@ -276,9 +276,7 @@ class TestSyncJobTrackerPersistence:
         # Should not raise — in-memory state still updates.
         tracker.mark_running(job.job_id)
         assert tracker.get_job(job.job_id).status == SyncJobStatus.RUNNING  # type: ignore[union-attr]
-        assert any(
-            "failed to persist snapshot" in rec.message.lower() for rec in caplog.records
-        )
+        assert any("failed to persist snapshot" in rec.message.lower() for rec in caplog.records)
 
     @pytest.mark.integration
     async def test_hydrate_no_op_without_store(self) -> None:
