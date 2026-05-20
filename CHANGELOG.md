@@ -1,6 +1,39 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.6.1] - 2026-05-20
+
+### Bug Fixes
+
+- accept uppercase hex in wikilink pattern (CodeRabbit) *(store)*
+- return stable validation message for unsafe feed URLs *(mcp)*
+- pin DNS resolution to prevent DNS-rebinding SSRF *(feeds)*
+- distinguish permanent vs transient DNS failures in url_guard *(feeds)*
+- cap org-membership and user-token caches *(mcp)*
+
+### Documentation
+
+- update changelog for v0.6.0
+- audit and refresh for v0.6.0 (fastembed default)
+
+### Features
+
+- parse [[entry-<8hex>]] wikilinks during reconcile (#496 mechanism 8) *(store)*
+- validate feed source URLs and cap response size *(feeds)*
+
+### Miscellaneous
+
+- bump idna from 3.11 to 3.15 *(deps)*
+- bump pymdown-extensions from 10.21.2 to 10.21.3 *(deps)*
+
+### Testing
+
+- relax pip-install assertion to tolerate shell-quoted extras *(plugin)*
+
+### Release
+
+- v0.6.1
+
 ## [0.6.0] - 2026-05-20
 
 ### Bug Fixes
