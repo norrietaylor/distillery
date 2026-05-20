@@ -370,10 +370,14 @@ async def _handle_watch(
         if source_type == "rss":
             try:
                 await asyncio.to_thread(validate_public_url, url)
-            except UnsafeURLError as exc:
+            except UnsafeURLError:
+                # Return a stable, client-facing message rather than echoing
+                # raw exception text. This keeps the public contract decoupled
+                # from the wording inside ``url_guard`` and avoids leaking
+                # validation internals (e.g. resolver behaviour).
                 return error_response(
                     "INVALID_PARAMS",
-                    str(exc),
+                    "url must resolve to a public http(s) host",
                     details={"field": "url", "url": url},
                 )
 
