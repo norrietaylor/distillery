@@ -1,0 +1,32 @@
+# Auto-merge Dependabot PRs for patch and minor updates once required
+# checks pass. Major updates are deliberately excluded so a human still
+# reviews them. Dependabot PRs trigger workflows normally (they are not
+# subject to the GITHUB_TOKEN recursion guard that affects bot-authored
+# PRs created via peter-evans/create-pull-request), so a top-level
+# pull_request trigger is sufficient here.
+
+name: Dependabot auto-merge
+
+on: pull_request
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@d7267f607e9d3fb96fc2fbe83e0af444713e90b7 # v2.4.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enable auto-merge for patch and minor updates
+        if: contains(fromJSON('["version-update:semver-patch","version-update:semver-minor"]'), steps.meta.outputs.update-type)
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr merge --auto --merge --delete-branch "$PR_URL"
