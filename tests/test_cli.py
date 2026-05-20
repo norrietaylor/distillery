@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import textwrap
 from pathlib import Path
 
@@ -290,6 +291,8 @@ class TestStatusCommand:
         assert data["entries_by_status"] == {}
         # Status must not create the DB file as a side effect (parity with health).
         assert not db_path.exists()
+
+
 # ---------------------------------------------------------------------------
 # --config flag
 # ---------------------------------------------------------------------------
@@ -395,6 +398,123 @@ class TestConfigFlag:
 
 
 # ---------------------------------------------------------------------------
+# Issue #369 regression tests — top-level flags must produce identical output
+# regardless of position, and malformed configs must surface friendly errors.
+# ---------------------------------------------------------------------------
+
+
+class TestIssue369TopLevelFlagPropagation:
+    """End-to-end regression suite for issue #369 rows L1.6, L1.7, L1.8, L1.11."""
+
+    def test_status_json_identical_with_top_level_or_subcommand_format(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """L1.6: ``distillery --format json status`` matches ``distillery status --format json``."""
+        cfg_path = write_config(tmp_path, ":memory:")
+
+        with pytest.raises(SystemExit):
+            main(["--format", "json", "status", "--config", str(cfg_path)])
+        out_top = capsys.readouterr().out
+
+        with pytest.raises(SystemExit):
+            main(["status", "--config", str(cfg_path), "--format", "json"])
+        out_sub = capsys.readouterr().out
+
+        # Both must be valid JSON and structurally identical.
+        assert json.loads(out_top) == json.loads(out_sub)
+
+    def test_health_json_identical_with_top_level_or_subcommand_format(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """L1.7: same invariant for the ``health`` subcommand."""
+        cfg_path = write_config(tmp_path, ":memory:")
+
+        with pytest.raises(SystemExit):
+            main(["--format", "json", "health", "--config", str(cfg_path)])
+        out_top = capsys.readouterr().out
+
+        with pytest.raises(SystemExit):
+            main(["health", "--config", str(cfg_path), "--format", "json"])
+        out_sub = capsys.readouterr().out
+
+        assert json.loads(out_top) == json.loads(out_sub)
+
+    def test_top_level_config_flag_uses_supplied_db_path(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """L1.8: ``--config`` works at the top level AND after the subcommand, identically.
+
+        Mirrors the L1.6/L1.7 dual-position pattern: running the CLI twice
+        (once with ``--config`` before the subcommand, once after) must
+        produce the same JSON output. Guards against a regression that flips
+        propagation direction — i.e. only one position remaining wired up.
+        """
+        db_path = tmp_path / "explicit.db"
+        cfg_path = write_config(tmp_path, str(db_path))
+
+        with pytest.raises(SystemExit) as exc:
+            main(["--config", str(cfg_path), "--format", "json", "status"])
+        assert exc.value.code == 0
+        data_top = json.loads(capsys.readouterr().out)
+
+        with pytest.raises(SystemExit) as exc:
+            main(["status", "--config", str(cfg_path), "--format", "json"])
+        assert exc.value.code == 0
+        data_sub = json.loads(capsys.readouterr().out)
+
+        assert data_top["database_path"] == str(db_path)
+        assert data_top == data_sub
+
+    def test_malformed_yaml_no_traceback_subprocess(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """L1.11: malformed YAML exits nonzero and surfaces a readable error.
+
+        Invoked as a subprocess to assert the *real* stderr a user would see
+        — no Python traceback, the bad config path is named, and exit is
+        nonzero. Mirrors the issue #369 reproduction harness.
+        """
+        import shutil
+        import subprocess
+
+        distillery_bin = shutil.which("distillery")
+        if distillery_bin is None:
+            if os.environ.get("CI"):
+                pytest.fail(
+                    "distillery console script missing from PATH in CI — packaging regression?"
+                )
+            pytest.skip(
+                "distillery console script not installed on PATH (run `pip install -e .` locally)"
+            )
+
+        bad = tmp_path / "bad.yaml"
+        # Truly malformed YAML (unterminated flow sequence).
+        bad.write_text("storage:\n  database_path: [unterminated\n")
+
+        result = subprocess.run(
+            [distillery_bin, "--config", str(bad), "status"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode != 0
+        # Friendly error mentions the file path.
+        assert str(bad) in result.stderr
+        # No Python traceback leaks to stderr.
+        assert "Traceback" not in result.stderr
+        assert "yaml.parser" not in result.stderr
+        assert "yaml.scanner" not in result.stderr
+
+
+# ---------------------------------------------------------------------------
 # DISTILLERY_CONFIG environment variable
 # ---------------------------------------------------------------------------
 
@@ -465,9 +585,7 @@ class TestQueryStatus:
         with pytest.raises(RuntimeError):
             _query_status(bad)
 
-    def test_missing_db_file_with_existing_parent_reports_empty(
-        self, tmp_path: Path
-    ) -> None:
+    def test_missing_db_file_with_existing_parent_reports_empty(self, tmp_path: Path) -> None:
         """A fresh/uninitialised DB file (parent dir exists) reports empty state (issue #375)."""
         db_path = str(tmp_path / "never-initialized.db")
         result = _query_status(db_path)
