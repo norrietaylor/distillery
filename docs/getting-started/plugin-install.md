@@ -12,10 +12,10 @@ claude plugin marketplace add norrietaylor/distillery
 claude plugin install distillery
 ```
 
-This installs the skill definitions globally and configures the MCP server to run **locally** via `uvx distillery-mcp` — a private, self-contained knowledge base on your machine. Requires Python 3.11+ and [`uv`](https://docs.astral.sh/uv/) on your `PATH`.
+This installs the skill definitions globally and configures the MCP server to run **locally** via `uvx --from 'distillery-mcp[fastembed]>=0.6.0' distillery-mcp` — a private, self-contained knowledge base on your machine, with on-device `fastembed` embeddings as the install-time default (no API key required). Requires Python 3.11+ and [`uv`](https://docs.astral.sh/uv/) on your `PATH`.
 
 !!! tip "Install uv"
-    `curl -LsSf https://astral.sh/uv/install.sh | sh` — or use `pip install distillery-mcp` and override the plugin's default `command` to `distillery-mcp` (see [Troubleshooting](mcp-setup.md#troubleshooting)).
+    `curl -LsSf https://astral.sh/uv/install.sh | sh` — or use `pip install 'distillery-mcp[fastembed]'` and override the plugin's default `command` to `distillery-mcp` (see [Troubleshooting](mcp-setup.md#troubleshooting)).
 
 After installation, restart Claude Code and run the onboarding wizard:
 
@@ -64,7 +64,7 @@ ln -s ~/.claude/distillery/skills/setup     ~/.claude/skills/setup
 
 The skills require the Distillery MCP server. The plugin's **default** is local stdio via `uvx distillery-mcp`. Hosted demo and self-hosted HTTP are opt-in alternatives.
 
-### Default — Local stdio with uvx
+### Default — Local stdio with uvx (fastembed)
 
 `claude plugin install distillery` registers this configuration automatically. The plugin manifest declares:
 
@@ -73,30 +73,47 @@ The skills require the Distillery MCP server. The plugin's **default** is local 
   "mcpServers": {
     "distillery": {
       "command": "uvx",
-      "args": ["distillery-mcp"]
+      "args": ["--from", "distillery-mcp[fastembed]>=0.6.0", "distillery-mcp"],
+      "env": {
+        "DISTILLERY_EMBEDDING_PROVIDER": "fastembed"
+      }
     }
   }
 }
 ```
 
-`uvx` inherits the Claude Code process environment, so set `JINA_API_KEY` (and any other Distillery config vars) in your shell before launching Claude Code:
+Out of the box, no API keys are required — `fastembed` runs ONNX inference on-device. Optional Distillery config vars (like `DISTILLERY_CONFIG`) are inherited from the Claude Code process environment:
 
 ```bash
-export JINA_API_KEY=jina_...   # free at jina.ai
 # Optional:
 export DISTILLERY_CONFIG=/path/to/distillery.yaml
 ```
 
-Without a `JINA_API_KEY`, Distillery falls back to the stub embedding provider (search quality degraded). See [Local Setup](local-setup.md) for full configuration (embedding providers, cloud storage, etc.).
+To use a hosted embedding provider instead (Jina or OpenAI), override the default in your shell before launching Claude Code:
 
-If you prefer to manage the configuration yourself in `~/.claude.json`, you can shadow the plugin registration with the same stdio block. `uvx` inherits the Claude Code process environment, so set `JINA_API_KEY` (and any other Distillery config vars) in your shell before launching Claude Code rather than relying on `${VAR}` interpolation here:
+```bash
+# Jina (free tier at jina.ai)
+export DISTILLERY_EMBEDDING_PROVIDER=jina
+export JINA_API_KEY=jina_...
+
+# Or OpenAI
+export DISTILLERY_EMBEDDING_PROVIDER=openai
+export OPENAI_API_KEY=sk-...
+```
+
+See [Local Setup](local-setup.md) for full configuration (embedding providers, cloud storage, etc.).
+
+If you prefer to manage the configuration yourself in `~/.claude.json`, you can shadow the plugin registration with the same stdio block (env vars like `DISTILLERY_EMBEDDING_PROVIDER` and any provider API key should be set in your shell rather than via `${VAR}` interpolation):
 
 ```json
 {
   "mcpServers": {
     "distillery": {
       "command": "uvx",
-      "args": ["distillery-mcp"]
+      "args": ["--from", "distillery-mcp[fastembed]>=0.6.0", "distillery-mcp"],
+      "env": {
+        "DISTILLERY_EMBEDDING_PROVIDER": "fastembed"
+      }
     }
   }
 }
