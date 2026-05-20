@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from distillery.mcp._stub_embedding import HashEmbeddingProvider
+
 from .errors import EmbeddingProviderError, parse_retry_after
 from .fastembed import FastembedProvider
 from .jina import JinaEmbeddingProvider
@@ -12,6 +14,7 @@ __all__ = [
     "EmbeddingProvider",
     "EmbeddingProviderError",
     "FastembedProvider",
+    "HashEmbeddingProvider",
     "JinaEmbeddingProvider",
     "OpenAIEmbeddingProvider",
     "create_provider",
@@ -30,6 +33,8 @@ def create_provider(config: object) -> EmbeddingProvider:
     - ``"openai"`` — :class:`OpenAIEmbeddingProvider` using the OpenAI API.
     - ``"jina"`` — :class:`JinaEmbeddingProvider` using the Jina AI API.
     - ``"fastembed"`` — :class:`FastembedProvider` using local ONNX inference.
+    - ``"mock"`` — :class:`HashEmbeddingProvider` returning deterministic
+      hash-based vectors (no network, no API key; used by tests and dev).
 
     Args:
         config: A :class:`~distillery.config.DistilleryConfig` instance (or
@@ -63,7 +68,10 @@ def create_provider(config: object) -> EmbeddingProvider:
     if provider_name == "fastembed":
         return FastembedProvider(model=embedding_cfg.model)
 
+    if provider_name == "mock":
+        return HashEmbeddingProvider(dimensions=embedding_cfg.dimensions)
+
     raise ValueError(
         f"Unknown embedding provider: {provider_name!r}. "
-        "Supported values are 'openai', 'jina', and 'fastembed'."
+        "Supported values are 'openai', 'jina', 'fastembed', and 'mock'."
     )
