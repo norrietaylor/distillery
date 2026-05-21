@@ -9,7 +9,7 @@ Headline cell: `hybrid/session/on/bge-small` (pre-registered in `bench/HEADLINE.
 
 | Date (UTC) | git_sha | dataset_revision_sha | R@5 | R@10 | NDCG@10 |
 | --- | --- | --- | ---: | ---: | ---: |
-| 2026-05-18T09:08:51Z | `fce1688c85df` | `98d7416c24c7` | 0.970 | 0.990 | 0.885 |
+| 2026-05-21T08:58:11Z | `109877e70b90` | `98d7416c24c7` | 0.970 | 0.990 | 0.880 |
 
 ## Latest matrix
 
@@ -17,26 +17,27 @@ Distillery configurations only. Cross-system comparisons are forbidden by discip
 
 | Cell | R@5 | R@10 | NDCG@10 | UTC |
 | --- | ---: | ---: | ---: | --- |
-| `hybrid/session/off/bge-small` | 0.970 | 0.990 | 0.890 | 2026-05-18T09:09:58Z |
-| `hybrid/session/on/bge-small` | 0.970 | 0.990 | 0.885 | 2026-05-18T09:08:51Z |
-| `hybrid/turn/off/bge-small` | 0.980 | 1.000 | 0.680 | 2026-05-18T10:20:27Z |
-| `hybrid/turn/on/bge-small` | 0.980 | 1.000 | 0.680 | 2026-05-18T10:20:35Z |
-| `raw/session/off/bge-small` | 0.870 | 0.940 | 0.787 | 2026-05-18T09:08:56Z |
-| `raw/session/on/bge-small` | 0.870 | 0.940 | 0.787 | 2026-05-18T09:09:34Z |
-| `raw/turn/off/bge-small` | 0.960 | 0.980 | 0.717 | 2026-05-18T10:03:12Z |
-| `raw/turn/on/bge-small` | 0.960 | 0.980 | 0.716 | 2026-05-18T10:21:14Z |
+| `hybrid/session/off/bge-small` | 0.970 | 0.990 | 0.889 | 2026-05-21T08:58:39Z |
+| `hybrid/session/on/bge-small` | 0.970 | 0.990 | 0.880 | 2026-05-21T08:58:11Z |
+| `hybrid/turn/off/bge-small` | 0.980 | 1.000 | 0.682 | 2026-05-21T10:08:47Z |
+| `hybrid/turn/on/bge-small` | 0.980 | 1.000 | 0.682 | 2026-05-21T10:26:11Z |
+| `raw/session/off/bge-small` | 0.870 | 0.940 | 0.787 | 2026-05-21T08:57:19Z |
+| `raw/session/on/bge-small` | 0.870 | 0.940 | 0.787 | 2026-05-21T08:58:56Z |
+| `raw/turn/off/bge-small` | 0.960 | 0.980 | 0.716 | 2026-05-21T10:08:09Z |
+| `raw/turn/on/bge-small` | 0.960 | 0.980 | 0.716 | 2026-05-21T10:08:28Z |
 
 ## Per-question-type breakdown (headline cell)
 
 | Question type | n | R@5 | R@10 | NDCG@10 |
 | --- | ---: | ---: | ---: | ---: |
-| `multi-session` | 30 | 1.000 | 1.000 | 0.909 |
-| `single-session-user` | 70 | 0.957 | 0.986 | 0.875 |
+| `multi-session` | 30 | 1.000 | 1.000 | 0.903 |
+| `single-session-user` | 70 | 0.957 | 0.986 | 0.869 |
 
 ## History (last 7 days, headline cell)
 
 | UTC | R@5 |
 | --- | ---: |
+| 2026-05-21T08:58:11Z | 0.970 |
 | 2026-05-18T09:08:51Z | 0.970 |
 
 ---
