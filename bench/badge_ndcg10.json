@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
   "label": "LongMemEval NDCG@10",
-  "message": "0.885",
+  "message": "0.894",
   "color": "yellowgreen"
 }
