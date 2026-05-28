@@ -38,7 +38,7 @@ The pre-registered headline triplet — Recall@5, Recall@10, NDCG@10 — for the
 
     ---
 
-    `0.885`
+    `0.892`
 
     Headline cell, mean across seeds.
 
@@ -90,10 +90,10 @@ dataset and embedding model.
 <!-- BENCH:MATRIX:START -->
 | Configuration | R@5 | R@10 | NDCG@10 |
 |---|---|---|---|
-| `hybrid + recency on` (headline) | `0.970` | `0.990` | `0.885` |
+| `hybrid + recency on` (headline) | `0.970` | `0.990` | `0.892` |
 | `raw + recency on` | `0.870` | `0.940` | `0.787` |
-| `hybrid + recency off` | `0.970` | `0.990` | `0.890` |
-| `hybrid + granularity=turn` | `0.980` | `1.000` | `0.680` |
+| `hybrid + recency off` | `0.970` | `0.990` | `0.885` |
+| `hybrid + granularity=turn` | `0.980` | `1.000` | `0.681` |
 <!-- BENCH:MATRIX:END -->
 
 The `granularity=turn` row is shown for ablation interest only; it is not directly
@@ -110,7 +110,7 @@ type independently.
 | `knowledge-update` | `—` | `—` | `—` |
 | `multi-session` | `1.000` | `1.000` | `0.909` |
 | `temporal` | `—` | `—` | `—` |
-| `single-session-user` | `0.957` | `0.986` | `0.875` |
+| `single-session-user` | `0.957` | `0.986` | `0.885` |
 | `single-session-preference` | `—` | `—` | `—` |
 | `single-session-assistant` | `—` | `—` | `—` |
 <!-- BENCH:PER-TYPE:END -->
