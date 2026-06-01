@@ -92,8 +92,8 @@ dataset and embedding model.
 |---|---|---|---|
 | `hybrid + recency on` (headline) | `0.970` | `0.990` | `0.885` |
 | `raw + recency on` | `0.870` | `0.940` | `0.787` |
-| `hybrid + recency off` | `0.970` | `0.990` | `0.890` |
-| `hybrid + granularity=turn` | `0.980` | `1.000` | `0.680` |
+| `hybrid + recency off` | `0.970` | `0.990` | `0.896` |
+| `hybrid + granularity=turn` | `0.980` | `1.000` | `0.681` |
 <!-- BENCH:MATRIX:END -->
 
 The `granularity=turn` row is shown for ablation interest only; it is not directly
@@ -108,7 +108,7 @@ type independently.
 | Question type | R@5 | R@10 | NDCG@10 |
 |---|---|---|---|
 | `knowledge-update` | `—` | `—` | `—` |
-| `multi-session` | `1.000` | `1.000` | `0.909` |
+| `multi-session` | `1.000` | `1.000` | `0.908` |
 | `temporal` | `—` | `—` | `—` |
 | `single-session-user` | `0.957` | `0.986` | `0.875` |
 | `single-session-preference` | `—` | `—` | `—` |
