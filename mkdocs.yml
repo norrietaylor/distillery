@@ -84,6 +84,7 @@ nav:
     - /briefing: skills/briefing.md
   - Reference:
     - CLI: reference/cli.md
+    - Dedup &amp; Merge Maintenance: reference/dedup-maintenance.md
   - Team Access:
     - Team Member Guide: team/team-setup.md
     - Operator Deployment: team/deployment.md
