@@ -47,6 +47,21 @@ logger = logging.getLogger(__name__)
 _T = TypeVar("_T")
 
 
+class EntriesIntegrityError(RuntimeError):
+    """Raised when a post-bulk-rewrite read-back of ``entries`` fails.
+
+    A bulk rewrite of the ``entries`` table (e.g. a dedup/merge that
+    UPDATEs or DELETE+INSERTs across the variable-length VARCHAR / embedding
+    columns) can produce on-disk corruption that ``SELECT COUNT(*)`` never
+    detects — the catalog row-group metadata still counts the rows even when
+    the data pages backing them are unreadable (issue #584).  Operations that
+    perform such rewrites call :meth:`DuckDBStore.verify_entries_readable`
+    afterwards; this exception signals that the verification materialised an
+    unreadable column and the caller must fail loud rather than report
+    success.
+    """
+
+
 def _sql_escape(value: str) -> str:
     """Escape a string value for safe embedding in a SQL literal.
 
@@ -397,6 +412,70 @@ class DuckDBStore:
             # can see repeated failures, but don't raise — the caller has
             # already observed a successful write.
             logger.debug("CHECKPOINT after write failed (non-fatal): %s", exc)
+
+    def _sync_verify_entries_readable(self, entry_ids: Sequence[str]) -> None:
+        """Read-back verification after a bulk rewrite of ``entries`` (issue #584).
+
+        A dedup/merge that rewrites many rows across the variable-length
+        VARCHAR (``content``, ``metadata``, dictionary-encoded columns) and
+        ``embedding`` columns can leave the table corrupt in a way that
+        ``SELECT COUNT(*)`` never surfaces — the row-group metadata still
+        counts the rows while the data pages backing them are gone.  After such
+        a rewrite we therefore:
+
+        1. ``CHECKPOINT`` to flush the WAL and force re-encoding of the touched
+           row groups into the main database file.
+        2. Materialise the touched columns (``id``, ``content``, ``metadata``)
+           for the affected ids, calling ``fetchall()`` so DuckDB actually
+           scans the data pages rather than returning catalog statistics.
+        3. Run ``PRAGMA storage_info('entries')`` as a bounded integrity sweep
+           over the table's storage metadata.
+
+        Any failure in those steps raises :class:`EntriesIntegrityError` so the
+        caller fails loud instead of reporting a successful operation over a
+        corrupt table.  An empty ``entry_ids`` still runs the checkpoint and
+        the storage-info sweep.
+
+        Args:
+            entry_ids: UUID strings of the rows touched by the rewrite.
+
+        Raises:
+            EntriesIntegrityError: If the checkpoint, read-back, or storage
+                sweep errors — i.e. the table is no longer readable.
+        """
+        conn = self.connection
+        try:
+            conn.execute("CHECKPOINT")
+            ids = list(dict.fromkeys(entry_ids))
+            if ids:
+                # ``id = ANY(?)`` materialises the variable-length columns for
+                # the touched rows; ``fetchall()`` forces the scan of the data
+                # pages (a corrupt dictionary/raw page errors or SIGSEGVs here,
+                # whereas COUNT(*) would silently succeed).
+                conn.execute(
+                    "SELECT id, content, metadata FROM entries WHERE id = ANY(?)",
+                    [ids],
+                ).fetchall()
+            # Bounded integrity sweep over the storage metadata of the table.
+            conn.execute("PRAGMA storage_info('entries')").fetchall()
+        except Exception as exc:  # noqa: BLE001 — surface ANY read-back failure
+            raise EntriesIntegrityError(
+                f"entries table read-back failed after bulk rewrite "
+                f"({len(list(entry_ids))} ids touched): {exc}"
+            ) from exc
+
+    async def verify_entries_readable(self, entry_ids: Sequence[str]) -> None:
+        """Verify the ``entries`` table is readable after a bulk rewrite.
+
+        Call this after any operation that bulk-rewrites ``entries`` across the
+        variable-length VARCHAR / embedding columns (dedup, merge, batch
+        rewrite).  It checkpoints, reads back the touched rows, and runs a
+        storage-info sweep; see :meth:`_sync_verify_entries_readable`.
+
+        Raises:
+            EntriesIntegrityError: If the post-rewrite read-back fails.
+        """
+        await self._run_sync(self._sync_verify_entries_readable, entry_ids)
 
     def _setup_httpfs(self, conn: duckdb.DuckDBPyConnection) -> None:
         """Install and load the httpfs extension, then configure S3 credentials.

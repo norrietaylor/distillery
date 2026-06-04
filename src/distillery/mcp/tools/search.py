@@ -713,6 +713,29 @@ async def _handle_find_similar(
         payload["accept_outcomes"] = accept_outcomes
         payload["accept_persisted_count"] = persisted_new
 
+        # Post-rewrite integrity guard (issue #584). A merge/duplicate accept
+        # is the entry point for dedup operations that touch the variable-length
+        # VARCHAR / embedding columns of the affected rows. After persisting the
+        # outcome we read back the touched entries (source + targets) so that a
+        # silently-corrupt entries table — the kind COUNT(*) never detects —
+        # makes this operation fail loud rather than report success.
+        if accept_action in ("merge", "duplicate"):
+            touched_ids = [source_entry_id, *(o["to_id"] for o in accept_outcomes)]
+            try:
+                await store.verify_entries_readable(touched_ids)
+            except Exception:
+                logger.exception(
+                    "find_similar accept_action=%s: post-rewrite entries read-back failed "
+                    "for source=%s",
+                    accept_action,
+                    source_entry_id,
+                )
+                return error_response(
+                    "INTERNAL",
+                    "Entries table failed post-merge integrity verification; "
+                    "the merge may have corrupted on-disk data",
+                )
+
     return success_response(payload)
 
 
