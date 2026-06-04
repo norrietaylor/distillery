@@ -7,9 +7,11 @@ deterministic while exercising the real DuckDB query paths.
 
 from __future__ import annotations
 
+import contextlib
 import math
 from datetime import UTC, datetime
 
+import duckdb
 import pytest
 
 from distillery.models import Entry, EntrySource, EntryStatus, EntryType
@@ -1698,6 +1700,50 @@ class TestStatusStaysResponsiveUnderWriteContention:
                 assert ready is True
 
         await asyncio.gather(*(_probe() for _ in range(8)))
+
+    async def test_close_does_not_race_in_flight_status_probes(self) -> None:
+        """``close()`` serialises the read-handle close with ``_read_lock``.
+
+        The read handle is a single ``DuckDBPyConnection``; closing it on the
+        shutdown task while a ``_run_read`` probe is still touching it on a
+        worker thread is the same two-threads-on-one-connection hazard that
+        ``_read_lock`` otherwise guards (issue #416 / #558).  ``close()`` now
+        takes ``_read_lock`` around the read-handle close, so an in-flight
+        probe always completes (or fails gracefully) before the handle is
+        torn down — never a SIGSEGV.  This drives many overlapping probes and
+        closes the store underneath them, asserting a clean shutdown.
+        """
+        import asyncio
+
+        provider = _SlowEmbeddingProvider(delay=0.0)
+        store = DuckDBStore(db_path=":memory:", embedding_provider=provider)
+        await store.initialize()
+        for i in range(10):
+            await store.store(make_entry(content=f"seed {i}"))
+
+        async def _probe_until_closed() -> None:
+            # Hammer the read handle until ``close()`` has torn it down.  A
+            # probe that captured the handle just before close completes may
+            # see a graceful ``duckdb`` "Connection already closed" or, once
+            # ``_read_conn`` is ``None``, a ``RuntimeError`` "not initialized".
+            # Both are acceptable — the point is the process never crashes from
+            # two threads touching one connection (the issue #416 SIGSEGV).
+            while store._read_conn is not None:
+                with contextlib.suppress(RuntimeError, duckdb.Error):
+                    await store.count_entries(filters=None)
+                    await store.probe_readiness()
+
+        probers = [asyncio.create_task(_probe_until_closed()) for _ in range(8)]
+        # Let the probers ramp up, then close underneath them.
+        await asyncio.sleep(0.01)
+        await store.close()
+
+        # All probers terminate cleanly; the process did not crash.
+        await asyncio.gather(*probers)
+        assert store._read_conn is None
+        ready, reason = await store.probe_readiness()
+        assert ready is False
+        assert reason == "store not initialized"
 
 
 class TestFTSRebuildRollback:

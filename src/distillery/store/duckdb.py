@@ -905,10 +905,15 @@ class DuckDBStore:
                 logger.debug("Shutdown CHECKPOINT skipped: %s", exc)
             # Close the read handle first; it shares ``_conn``'s database
             # instance, so it must go before the parent connection (issue #558).
+            # Hold ``_read_lock`` so the close cannot race an in-flight
+            # ``_run_read`` probe still touching ``_read_conn`` on a worker
+            # thread — the same single-connection-two-threads hazard
+            # ``_read_lock`` otherwise guards (issue #416 / #558).
             if self._read_conn is not None:
-                with contextlib.suppress(duckdb.Error):
-                    await asyncio.to_thread(self._read_conn.close)
-                self._read_conn = None
+                async with self._get_read_lock():
+                    with contextlib.suppress(duckdb.Error):
+                        await asyncio.to_thread(self._read_conn.close)
+                    self._read_conn = None
             await asyncio.to_thread(self._conn.close)
             self._conn = None
             self._initialized = False
