@@ -189,6 +189,131 @@ class TestStatusDegraded:
         assert "DB unreadable" in caplog.text
 
 
+class _CorruptPagesConn:
+    """Connection proxy simulating issue #582: catalog intact, data pages dead.
+
+    DuckDB answers ``SELECT COUNT(*)`` from row-group metadata without
+    touching any data page, so it keeps succeeding even when every data
+    page in ``entries`` is corrupt.  Any query that *materializes* a real
+    column (e.g. the ``SELECT id ... LIMIT 1`` probe) must read those pages
+    and therefore raises.  The real-world failure is a SIGSEGV inside
+    DuckDB's C++ layer, which is impractical to fabricate deterministically
+    in-process without crashing the test runner; this proxy reproduces the
+    observable contract (COUNT ok, materialization fails) safely.
+    """
+
+    def __init__(self, real: object) -> None:
+        self._real = real
+
+    def execute(self, sql: str, *args: object, **kwargs: object) -> object:
+        if "count(*)" in sql.lower():
+            return self._real.execute(sql, *args, **kwargs)  # type: ignore[attr-defined]
+        import duckdb
+
+        raise duckdb.IOException("Bitpacking offset is out of range at block 446")
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._real, name)
+
+
+class TestProbeReadinessMaterializesRow:
+    """Issue #582: the readiness probe must read data pages, not just COUNT(*)."""
+
+    async def test_probe_fails_when_data_pages_unreadable_but_count_ok(
+        self, store: DuckDBStore
+    ) -> None:
+        """COUNT(*) succeeds from the catalog, but the probe materializes a
+        row and so surfaces the corruption as ``(False, ...)``.
+        """
+        # Sanity: COUNT(*) still works against the corrupt-pages proxy.
+        corrupt = _CorruptPagesConn(store._conn)  # type: ignore[attr-defined]
+        assert corrupt.execute("SELECT COUNT(*) FROM entries").fetchone() is not None
+
+        store._conn = corrupt  # type: ignore[attr-defined,assignment]
+        try:
+            ready, err = await store.probe_readiness()
+        finally:
+            store._conn = corrupt._real  # type: ignore[attr-defined,assignment]
+
+        assert ready is False
+        assert err is not None
+        # Reason carries the exception class + message for operators.
+        assert "IOException" in err
+        assert "block 446" in err
+
+    async def test_probe_query_does_not_use_count(self, store: DuckDBStore) -> None:
+        """A probe served purely from catalog metadata would not catch the
+        corruption class in #582; assert the probe issues a materializing
+        ``SELECT id ... LIMIT 1`` instead of ``COUNT(*)``.
+        """
+        seen: list[str] = []
+        real = store._conn  # type: ignore[attr-defined]
+
+        class _Recording:
+            def execute(self, sql: str, *a: object, **k: object) -> object:
+                seen.append(sql)
+                return real.execute(sql, *a, **k)  # type: ignore[union-attr]
+
+            def __getattr__(self, name: str) -> object:
+                return getattr(real, name)
+
+        store._conn = _Recording()  # type: ignore[attr-defined,assignment]
+        try:
+            ready, err = await store.probe_readiness()
+        finally:
+            store._conn = real  # type: ignore[attr-defined,assignment]
+
+        assert ready is True
+        assert err is None
+        assert any("ORDER BY id" in s for s in seen)
+        assert not any("COUNT(*)" in s.upper() for s in seen)
+
+
+class TestStatusDegradedOnUnreadablePages:
+    """Issue #582: ``distillery_status`` must report ``degraded`` when the
+    entries table is unreadable, even though ``COUNT(*)`` succeeds."""
+
+    async def test_status_degraded_when_probe_fails_but_count_ok(
+        self,
+        store: DuckDBStore,
+        mock_embedding_provider: object,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        import logging
+
+        from distillery.config import DistilleryConfig
+        from distillery.mcp.tools.meta import _handle_status
+
+        from .conftest import parse_mcp_response
+
+        store._conn = _CorruptPagesConn(store._conn)  # type: ignore[attr-defined,assignment]
+        try:
+            with caplog.at_level(logging.WARNING, logger="distillery.mcp.tools.meta"):
+                result = await _handle_status(
+                    store=store,
+                    config=DistilleryConfig(),
+                    embedding_provider=mock_embedding_provider,
+                    tool_count=16,
+                    transport="http",
+                    started_at=None,
+                )
+        finally:
+            store._conn = store._conn._real  # type: ignore[attr-defined,assignment]
+
+        payload = parse_mcp_response(result)
+
+        # COUNT(*) succeeds, so entry_count is populated — yet the store is
+        # NOT healthy because data pages are unreadable.
+        assert payload["store"]["entry_count"] is not None
+        assert payload["store_ready"] is False
+        assert payload["store_ready_error"] == "readiness_probe_failed"
+        assert payload["status"] == "degraded"
+        assert "readiness_probe_failed" in payload["degraded_reasons"]
+        # Raw DuckDB internals stay server-side; only the stable code is exposed.
+        assert "IOException" not in result[0].text
+        assert "IOException" in caplog.text
+
+
 class TestStatusLastPollAt:
     """Issue #404: ``distillery_status.last_feed_poll.last_poll_at`` must
     reflect the most recent ``feed_sources.last_polled_at`` value, not the

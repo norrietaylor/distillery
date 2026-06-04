@@ -1024,15 +1024,25 @@ class DuckDBStore:
         surfaces as an explicit error instead of a silent null in the
         status payload.
 
-        The probe runs ``SELECT COUNT(*) FROM entries`` via the normal
-        async path so transient aborted-transaction state is rolled back
-        by :meth:`_run_sync` before a second probe is attempted.
+        The probe runs ``SELECT id FROM entries ORDER BY id LIMIT 1`` via the
+        normal async path so transient aborted-transaction state is rolled
+        back by :meth:`_run_sync` before a second probe is attempted.
+
+        ``COUNT(*)`` is deliberately *not* used: DuckDB answers it from
+        row-group metadata without touching any data page, so it returns
+        success even when every data page in ``entries`` is corrupt (issue
+        #582 — a DB stayed ``status: "ok"`` for ~30 days while every column
+        materialization segfaulted).  Materializing one row from a real
+        column is microseconds against ``id``'s primary-key index when
+        healthy, and forces the page reads that surface corruption.
         """
         if self._conn is None:
             return False, "store not initialized"
         try:
             await self._run_sync(
-                lambda: self._conn.execute("SELECT COUNT(*) FROM entries").fetchone()  # type: ignore[union-attr]
+                lambda: self._conn.execute(  # type: ignore[union-attr]
+                    "SELECT id FROM entries ORDER BY id LIMIT 1"
+                ).fetchone()
             )
         except Exception as exc:  # noqa: BLE001
             return False, f"{type(exc).__name__}: {exc}"
