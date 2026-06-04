@@ -258,6 +258,18 @@ class SyncJobTracker:
         self._persist_snapshot(job)
         return job
 
+    def register_job(self, job: SyncJob) -> None:
+        """Adopt an existing :class:`SyncJob` into this tracker's registry.
+
+        Shares the *same* mutable job object — state transitions made via
+        either tracker are visible through the other. Used to give a
+        background job a tracker bound to its dedicated store (so snapshot
+        persistence targets that store's connection) while the module-level
+        singleton retains the job for hot ``distillery_sync_status`` reads
+        in the same process (issue #588).
+        """
+        self._jobs[job.job_id] = job
+
     def get_job(self, job_id: str) -> SyncJob | None:
         """Look up a job by ID.
 

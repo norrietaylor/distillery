@@ -15,7 +15,7 @@ import contextlib
 import json
 import logging
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -148,6 +148,41 @@ def _create_embedding_provider(config: DistilleryConfig) -> Any:
         f"Unsupported embedding provider: {n!r}. "
         "Must be one of: 'jina', 'openai', 'mock', 'fastembed'."
     )
+
+
+def _build_background_store_factory(
+    config: DistilleryConfig,
+) -> Callable[[], Awaitable[Any]]:
+    """Return an async factory that opens a dedicated, initialised store.
+
+    Used to give a detached background sync job (issue #588) a store handle
+    decoupled from the request lifespan: under stateless HTTP the request
+    store is closed when the response returns, so the job must own its own
+    connection for its full lifetime. The factory mirrors the lifespan/webhook
+    store construction (db-path normalisation, MotherDuck token, S3 settings)
+    and returns a fresh :class:`DuckDBStore` the caller is responsible for
+    closing.
+    """
+
+    async def _factory() -> Any:
+        ep = _create_embedding_provider(config)
+        db_path = _normalize_db_path(config.storage.database_path)
+        if db_path.startswith("md:"):
+            tok = os.environ.get(config.storage.motherduck_token_env)
+            if tok:
+                os.environ["MOTHERDUCK_TOKEN"] = tok
+        from distillery.store.duckdb import DuckDBStore
+
+        store = DuckDBStore(
+            db_path=db_path,
+            embedding_provider=ep,
+            s3_region=config.storage.s3_region,
+            s3_endpoint=config.storage.s3_endpoint,
+        )
+        await store.initialize()
+        return store
+
+    return _factory
 
 
 def create_server(config: DistilleryConfig | None = None, auth: Any | None = None) -> FastMCP:
@@ -1285,26 +1320,19 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         c = _lc(ctx)
         # In stateless HTTP mode each request gets its own lifespan, so the
         # shared ``store`` is closed as soon as the request returns. A
-        # background=True call would spawn a detached asyncio task that keeps
-        # a reference to the now-closing store, racing with ``_store.close()``
-        # and corrupting WAL/checkpoint state. Reject the combination up-front
-        # so callers see a clear error instead of a silent failure.
+        # background=True task that captured that store would race
+        # ``_store.close()`` and corrupt WAL/checkpoint state. To support
+        # background sync over HTTP we hand the detached job a dedicated store
+        # it owns for its full lifetime via ``store_factory`` — an own
+        # connect/close decoupled from the request lifespan (issue #588).
         transport = _shared.get("transport") or c.get("transport")
-        if background and transport == "http":
-            return error_response(
-                "INVALID_PARAMS",
-                (
-                    "background=True is not supported when the server runs in "
-                    "stateless HTTP mode — the detached sync task would outlive "
-                    "the request lifespan and race with store shutdown. "
-                    "Retry with background=False, or run the server in stdio mode."
-                ),
-            )
+        store_factory = _build_background_store_factory(config) if transport == "http" else None
         return await _handle_gh_sync(
             store=c["store"],
             arguments=dict(
                 url=url, author=author, **_omit_none(project=project, background=background or None)
             ),
+            store_factory=store_factory,
         )
 
     @server.tool

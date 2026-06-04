@@ -755,6 +755,200 @@ class TestHandleGhSync:
         await asyncio.sleep(0.1)
 
 
+class TestDecoupledGhSync:
+    """Tests for the decoupled-store background sync path (issue #588).
+
+    Stateless HTTP closes the request-scoped store as soon as the tool
+    response returns, so ``background=True`` must run against a dedicated
+    store the job owns for its full lifetime (own connect/close). These
+    tests prove the job survives the request store's ``close()`` with no
+    use-after-close and no WAL/checkpoint corruption.
+    """
+
+    @pytest.mark.integration
+    async def test_background_decoupled_store_runs_after_request_close(
+        self,
+        tmp_path,  # type: ignore[no-untyped-def]
+        mock_embedding_provider,  # type: ignore[no-untyped-def]
+        httpx_mock,  # type: ignore[no-untyped-def]
+    ) -> None:
+        """A cold backfill completes on its own connection after the request
+        store is closed, and ``distillery_sync_status`` reports the counts."""
+        from distillery.feeds.sync_jobs import SyncJobStatus, get_tracker
+        from distillery.store.duckdb import DuckDBStore
+
+        db_path = str(tmp_path / "decoupled.duckdb")
+
+        # Cold backfill: an empty store with a page of PRs to ingest. Fewer
+        # than _DEFAULT_PER_PAGE (100) items terminates pagination after one
+        # page, so no second issues request is needed.
+        issues = [_mock_issue(number=n, title=f"PR {n}", is_pr=True) for n in range(1, 8)]
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/test/repo/issues\?.*"),
+            json=issues,
+        )
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/test/repo/issues/\d+/comments.*"),
+            json=[],
+            is_reusable=True,
+        )
+
+        # The request-scoped store: closed immediately after the tool returns,
+        # mirroring stateless HTTP lifespan teardown.
+        request_store = DuckDBStore(db_path=db_path, embedding_provider=mock_embedding_provider)
+        await request_store.initialize()
+
+        # Reset the singleton tracker for isolation and wire it to the request
+        # store the way the lifespan does — proving sync_status still works in
+        # process even though persistence is routed through the owned store.
+        tracker = get_tracker()
+        tracker._jobs.clear()
+        tracker.attach_store(request_store)
+
+        # The factory the background job uses to open its OWN store on the same
+        # database file (own connect/close, decoupled from the request).
+        async def _store_factory() -> DuckDBStore:
+            owned = DuckDBStore(db_path=db_path, embedding_provider=mock_embedding_provider)
+            await owned.initialize()
+            return owned
+
+        result = await _handle_gh_sync(
+            store=request_store,
+            arguments={"url": "test/repo", "background": True},
+            store_factory=_store_factory,
+        )
+        data = _parse_response(result)
+
+        # Acceptance: a job_id is returned immediately, no INVALID_PARAMS.
+        assert "error" not in data
+        assert data.get("code") != "INVALID_PARAMS"
+        job_id = data["sync_job"]["job_id"]
+        assert job_id
+        assert data["sync_job"]["status"] == "pending"
+
+        # The request returns: close the request store right away. The detached
+        # job must not touch this connection again.
+        await request_store.close()
+
+        # Drive the background task to completion against its own connection.
+        for _ in range(200):
+            await asyncio.sleep(0.02)
+            job = tracker.get_job(job_id)
+            assert job is not None
+            if job.status in (SyncJobStatus.COMPLETED, SyncJobStatus.FAILED):
+                break
+
+        job = tracker.get_job(job_id)
+        assert job is not None
+        # No use-after-close: the job reaches COMPLETED, not FAILED.
+        assert job.status == SyncJobStatus.COMPLETED
+        assert job.entries_created == 7
+        assert job.entries_updated == 0
+
+        # Acceptance: distillery_sync_status reports completed + correct counts.
+        status = _parse_response(await _handle_sync_status(arguments={"job_id": job_id}))
+        assert status["status"] == "completed"
+        assert status["entries_created"] == 7
+
+        # Acceptance: no WAL/checkpoint corruption. Reopen the file with a
+        # fresh connection and verify the synced entries persisted intact.
+        verify_store = DuckDBStore(db_path=db_path, embedding_provider=mock_embedding_provider)
+        await verify_store.initialize()
+        try:
+            entries = await verify_store.list_entries(
+                filters={"entry_type": "github"}, limit=100, offset=0
+            )
+            assert len(entries) == 7
+            # The sync_jobs row was persisted through the owned connection and
+            # is readable after a clean checkpoint.
+            row = verify_store.connection.execute(
+                "SELECT status, entries_created FROM sync_jobs WHERE job_id = ?",
+                [job_id],
+            ).fetchone()
+            assert row is not None
+            assert row[0] == "completed"
+            assert row[1] == 7
+        finally:
+            await verify_store.close()
+            tracker.attach_store(None)
+            tracker._jobs.clear()
+
+    @pytest.mark.integration
+    async def test_build_background_store_factory_opens_independent_store(
+        self,
+        tmp_path,  # type: ignore[no-untyped-def]
+    ) -> None:
+        """The server's factory yields an initialised store on its own
+        connection that survives an independent store's close (issue #588)."""
+        from distillery.config import (
+            DistilleryConfig,
+            EmbeddingConfig,
+            StorageConfig,
+        )
+        from distillery.mcp.server import (
+            _build_background_store_factory,
+            _create_embedding_provider,
+        )
+        from distillery.store.duckdb import DuckDBStore
+
+        db_path = str(tmp_path / "factory.duckdb")
+        config = DistilleryConfig(
+            storage=StorageConfig(database_path=db_path),
+            embedding=EmbeddingConfig(provider="mock", dimensions=8),
+        )
+
+        # A "request" store opens the file, then closes (as on response return).
+        request_store = DuckDBStore(
+            db_path=db_path,
+            embedding_provider=_create_embedding_provider(config),
+        )
+        await request_store.initialize()
+
+        factory = _build_background_store_factory(config)
+        owned = await factory()
+        try:
+            await request_store.close()
+            # The owned store is still usable after the request store closed.
+            owned.connection.execute("SELECT COUNT(*) FROM entries").fetchone()
+        finally:
+            await owned.close()
+
+    @pytest.mark.integration
+    async def test_background_decoupled_store_factory_failure_marks_job_failed(
+        self,
+        store,  # type: ignore[no-untyped-def]
+    ) -> None:
+        """If the dedicated store cannot be opened, the job is marked failed
+        rather than silently dropped — sync_status can still surface it."""
+        from distillery.feeds.sync_jobs import SyncJobStatus, get_tracker
+
+        tracker = get_tracker()
+        tracker._jobs.clear()
+
+        async def _failing_factory() -> Any:
+            raise RuntimeError("cannot open store")
+
+        result = await _handle_gh_sync(
+            store=store,
+            arguments={"url": "test/repo", "background": True},
+            store_factory=_failing_factory,
+        )
+        data = _parse_response(result)
+        job_id = data["sync_job"]["job_id"]
+
+        for _ in range(100):
+            await asyncio.sleep(0.01)
+            job = tracker.get_job(job_id)
+            assert job is not None
+            if job.status == SyncJobStatus.FAILED:
+                break
+
+        job = tracker.get_job(job_id)
+        assert job is not None
+        assert job.status == SyncJobStatus.FAILED
+        tracker._jobs.clear()
+
+
 class TestHandleSyncStatus:
     """Tests for the distillery_sync_status tool handler."""
 
