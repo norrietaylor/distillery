@@ -23,6 +23,7 @@ import asyncio
 import logging
 import os
 import re
+from collections.abc import Awaitable, Callable
 from typing import Any
 from urllib.parse import urlparse
 
@@ -810,6 +811,7 @@ def _derive_suggestions(
 async def _handle_gh_sync(
     store: Any,
     arguments: dict[str, Any],
+    store_factory: Callable[[], Awaitable[Any]] | None = None,
 ) -> list[types.TextContent]:
     """Handle the ``distillery_gh_sync`` tool.
 
@@ -818,8 +820,16 @@ async def _handle_gh_sync(
     (background job) modes.
 
     Args:
-        store: An initialised storage backend.
+        store: An initialised storage backend used for the synchronous path.
         arguments: Parsed tool arguments dict.
+        store_factory: Optional async factory that opens and initialises a
+            **dedicated** store owned by the background job for its full
+            lifetime.  When provided, ``background=True`` runs the sync
+            against this decoupled connection (own connect/close) instead of
+            the request-scoped ``store`` — required under stateless HTTP,
+            where the request store is closed as soon as the response
+            returns (issue #588).  When ``None`` (e.g. stdio mode), the
+            background job uses the long-lived shared ``store``.
 
     Returns:
         A structured MCP success or error response.
@@ -850,24 +860,44 @@ async def _handle_gh_sync(
     except ValueError as exc:
         return error_response("INVALID_PARAMS", str(exc))
 
-    adapter = GitHubSyncAdapter(
-        store=store,
-        url=url,
-        author=author,
-        project=project,
-    )
-
     if background:
         from distillery.feeds.sync_jobs import get_tracker, run_sync_job_async
 
         tracker = get_tracker()
         job = tracker.create_job(source_url=url, source_type="github")
 
-        def _on_page(page_num: int, created: int, updated: int) -> None:
-            tracker.update_progress(job.job_id, page_num, created, updated)
+        if store_factory is None:
+            # Shared-store path (e.g. stdio): the long-lived store outlives
+            # the response, so the detached task may safely use it.
+            def _on_page(page_num: int, created: int, updated: int) -> None:
+                tracker.update_progress(job.job_id, page_num, created, updated)
 
-        sync_coro = adapter.sync_batched(on_page=_on_page)
-        asyncio.create_task(run_sync_job_async(job, tracker, sync_coro))
+            adapter = GitHubSyncAdapter(
+                store=store,
+                url=url,
+                author=author,
+                project=project,
+            )
+            sync_coro = adapter.sync_batched(on_page=_on_page)
+            asyncio.create_task(run_sync_job_async(job, tracker, sync_coro, store))
+        else:
+            # Decoupled-store path (stateless HTTP): the request-scoped
+            # ``store`` is closed when this response returns, so the detached
+            # task must own a dedicated connection for its full lifetime
+            # instead of racing ``_store.close()`` (issue #588). The store is
+            # opened lazily inside the task and closed in a ``finally`` so its
+            # WAL is checkpointed cleanly after the sync, regardless of the
+            # request lifespan.
+            asyncio.create_task(
+                _run_decoupled_gh_sync(
+                    job=job,
+                    tracker=tracker,
+                    store_factory=store_factory,
+                    url=url,
+                    author=author,
+                    project=project,
+                )
+            )
         return success_response(
             {
                 "sync_job": job.to_dict(),
@@ -878,6 +908,12 @@ async def _handle_gh_sync(
             }
         )
 
+    adapter = GitHubSyncAdapter(
+        store=store,
+        url=url,
+        author=author,
+        project=project,
+    )
     try:
         result = await adapter.sync_batched()
     except Exception:  # noqa: BLE001
@@ -895,6 +931,67 @@ async def _handle_gh_sync(
             "sync_timestamp": result.sync_timestamp.isoformat(),
         }
     )
+
+
+async def _run_decoupled_gh_sync(
+    *,
+    job: Any,
+    tracker: Any,
+    store_factory: Callable[[], Awaitable[Any]],
+    url: str,
+    author: str,
+    project: str | None,
+) -> None:
+    """Run a background GitHub sync against a dedicated, job-owned store.
+
+    Used in stateless HTTP mode where the request-scoped store is closed
+    when the tool response returns. The job opens its own store here, owns it
+    for the full sync, and closes it in a ``finally`` so the WAL is
+    checkpointed cleanly afterwards — there is no use-after-close on the
+    request store and no race with ``_store.close()`` (issue #588).
+
+    Persistence failures during setup are recorded on the job so
+    ``distillery_sync_status`` reflects them rather than silently dropping
+    the job.
+    """
+    from distillery.feeds.github_sync import GitHubSyncAdapter
+    from distillery.feeds.sync_jobs import SyncJobTracker, run_sync_job_async
+
+    try:
+        owned_store = await store_factory()
+    except Exception:  # noqa: BLE001
+        logger.exception("distillery_gh_sync: failed to open dedicated store for %s", url)
+        tracker.mark_failed(job.job_id, "Sync job failed")
+        return
+
+    # Drive state transitions through a tracker bound to the dedicated store so
+    # snapshot persistence (``sync_jobs`` UPSERTs) targets the job-owned
+    # connection rather than the request-scoped one that is already closing.
+    # The job object is shared by reference, so the singleton ``tracker`` still
+    # reflects progress for in-process ``distillery_sync_status`` reads, and the
+    # rows land in the same database file for cross-session hydration.
+    owned_tracker = SyncJobTracker(store=owned_store)
+    owned_tracker.register_job(job)
+
+    def _owned_on_page(page_num: int, created: int, updated: int) -> None:
+        owned_tracker.update_progress(job.job_id, page_num, created, updated)
+
+    try:
+        adapter = GitHubSyncAdapter(
+            store=owned_store,
+            url=url,
+            author=author,
+            project=project,
+        )
+        sync_coro = adapter.sync_batched(on_page=_owned_on_page)
+        await run_sync_job_async(job, owned_tracker, sync_coro, owned_store)
+    finally:
+        close = getattr(owned_store, "close", None)
+        if close is not None:
+            try:
+                await close()
+            except Exception:  # noqa: BLE001
+                logger.exception("distillery_gh_sync: failed to close dedicated store for %s", url)
 
 
 # ---------------------------------------------------------------------------
