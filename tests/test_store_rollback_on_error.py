@@ -151,8 +151,8 @@ class TestReadAfterWriteFailure:
         # exception escapes, restoring the connection for subsequent reads.
         original_sync_store = store._sync_store  # type: ignore[attr-defined]
 
-        def failing_sync_store(entry: object) -> str:
-            original_sync_store(entry)  # do the write, then raise
+        def failing_sync_store(entry: object, embedding: object) -> str:
+            original_sync_store(entry, embedding)  # do the write, then raise
             raise RuntimeError("simulated post-write failure")
 
         store._sync_store = failing_sync_store  # type: ignore[attr-defined,method-assign]
@@ -332,14 +332,17 @@ class TestProbeReadinessMaterializesRow:
         row and so surfaces the corruption as ``(False, ...)``.
         """
         # Sanity: COUNT(*) still works against the corrupt-pages proxy.
-        corrupt = _CorruptPagesConn(store._conn)  # type: ignore[attr-defined]
+        # ``probe_readiness`` runs against the independent read handle
+        # (``_read_conn``) so it never queues behind a slow write (#558); the
+        # corruption proxy is injected there, not on ``_conn``.
+        corrupt = _CorruptPagesConn(store._read_conn)  # type: ignore[attr-defined]
         assert corrupt.execute("SELECT COUNT(*) FROM entries").fetchone() is not None
 
-        store._conn = corrupt  # type: ignore[attr-defined,assignment]
+        store._read_conn = corrupt  # type: ignore[attr-defined,assignment]
         try:
             ready, err = await store.probe_readiness()
         finally:
-            store._conn = corrupt._real  # type: ignore[attr-defined,assignment]
+            store._read_conn = corrupt._real  # type: ignore[attr-defined,assignment]
 
         assert ready is False
         assert err is not None
@@ -353,7 +356,9 @@ class TestProbeReadinessMaterializesRow:
         ``SELECT id ... LIMIT 1`` instead of ``COUNT(*)``.
         """
         seen: list[str] = []
-        real = store._conn  # type: ignore[attr-defined]
+        # The probe materializes against the read handle (#558); record the SQL
+        # issued there.
+        real = store._read_conn  # type: ignore[attr-defined]
 
         class _Recording:
             def execute(self, sql: str, *a: object, **k: object) -> object:
@@ -363,11 +368,11 @@ class TestProbeReadinessMaterializesRow:
             def __getattr__(self, name: str) -> object:
                 return getattr(real, name)
 
-        store._conn = _Recording()  # type: ignore[attr-defined,assignment]
+        store._read_conn = _Recording()  # type: ignore[attr-defined,assignment]
         try:
             ready, err = await store.probe_readiness()
         finally:
-            store._conn = real  # type: ignore[attr-defined,assignment]
+            store._read_conn = real  # type: ignore[attr-defined,assignment]
 
         assert ready is True
         assert err is None
@@ -392,7 +397,11 @@ class TestStatusDegradedOnUnreadablePages:
 
         from .conftest import parse_mcp_response
 
-        store._conn = _CorruptPagesConn(store._conn)  # type: ignore[attr-defined,assignment]
+        # Corrupt the read handle: both ``count_entries`` and ``probe_readiness``
+        # run through it (#558). ``COUNT(*)`` still passes through the proxy to
+        # the real connection (so ``entry_count`` is populated), but the
+        # materializing probe query raises — exercising #582's degraded path.
+        store._read_conn = _CorruptPagesConn(store._read_conn)  # type: ignore[attr-defined,assignment]
         try:
             with caplog.at_level(logging.WARNING, logger="distillery.mcp.tools.meta"):
                 result = await _handle_status(
@@ -404,7 +413,7 @@ class TestStatusDegradedOnUnreadablePages:
                     started_at=None,
                 )
         finally:
-            store._conn = store._conn._real  # type: ignore[attr-defined,assignment]
+            store._read_conn = store._read_conn._real  # type: ignore[attr-defined,assignment]
 
         payload = parse_mcp_response(result)
 
