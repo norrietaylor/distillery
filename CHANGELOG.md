@@ -1,6 +1,44 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.6.2] - 2026-06-04
+
+### Bug Fixes
+
+- fail fast when DuckDB connection is terminally invalidated *(store)*
+- verify entries readable after dedup merge bulk-rewrite *(store)*
+- support background gh_sync over HTTP via decoupled store *(feeds)*
+- probe_readiness materializes a row instead of COUNT(*) *(store)*
+- return INVALID_PARAMS for schema-validation rejections *(mcp)*
+- unblock distillery_status from embedding-bound writes (#558) *(store)*
+
+### CI/CD
+
+- hermetic default suite + grype python-3.14 r2 pin
+- hermetic default suite + grype python-3.14 r2 pin
+- hermetic default suite + grype python-3.14 r2 pin
+- hermetic default suite + grype python-3.14 r2 pin
+- hermetic default suite + grype python-3.14 r2 pin
+- hermetic default suite + grype python-3.14 r2 pin
+
+### Documentation
+
+- update changelog for v0.6.1
+
+### Miscellaneous
+
+- bump aiohttp from 3.13.5 to 3.14.0 *(deps)*
+
+### Release
+
+- v0.6.2
+
+### Store
+
+- address CodeRabbit review for PR #592
+- address CodeRabbit review for PR #593
+- address review for #558 — serialise read-handle close with _read_lock
+
 ## [0.6.1] - 2026-05-20
 
 ### Bug Fixes
