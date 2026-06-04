@@ -491,6 +491,25 @@ class DistilleryStore(Protocol):
         """
         ...
 
+    async def verify_entries_readable(self, entry_ids: Sequence[str]) -> None:
+        """Verify the ``entries`` table is readable after a bulk rewrite.
+
+        Call after any operation that bulk-rewrites ``entries`` across the
+        variable-length VARCHAR / embedding columns (dedup, merge, batch
+        rewrite).  Implementations checkpoint, read back the touched rows
+        (materialising the variable-length columns rather than relying on
+        ``COUNT(*)``), and run a bounded integrity sweep, then fail loud if any
+        step errors (issue #584).
+
+        Args:
+            entry_ids: UUID strings of the rows touched by the rewrite.
+
+        Raises:
+            Exception: If the post-rewrite read-back fails — the table is no
+                longer readable and the caller must not report success.
+        """
+        ...
+
     async def get_related(
         self,
         entry_id: str,

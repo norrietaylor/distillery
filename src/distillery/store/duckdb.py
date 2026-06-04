@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import re
+import signal
 import uuid
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
@@ -45,6 +46,21 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
+
+
+class EntriesIntegrityError(RuntimeError):
+    """Raised when a post-bulk-rewrite read-back of ``entries`` fails.
+
+    A bulk rewrite of the ``entries`` table (e.g. a dedup/merge that
+    UPDATEs or DELETE+INSERTs across the variable-length VARCHAR / embedding
+    columns) can produce on-disk corruption that ``SELECT COUNT(*)`` never
+    detects — the catalog row-group metadata still counts the rows even when
+    the data pages backing them are unreadable (issue #584).  Operations that
+    perform such rewrites call :meth:`DuckDBStore.verify_entries_readable`
+    afterwards; this exception signals that the verification materialised an
+    unreadable column and the caller must fail loud rather than report
+    success.
+    """
 
 
 def _sql_escape(value: str) -> str:
@@ -161,6 +177,24 @@ class DuckDBStore:
         self._s3_region = s3_region
         self._s3_endpoint = s3_endpoint
         self._conn: duckdb.DuckDBPyConnection | None = None
+        # Independent read-only handle on the same database, used by health
+        # probes (``probe_readiness``/``count_entries``/``list_feed_sources``)
+        # so ``distillery_status`` answers in milliseconds regardless of write
+        # contention on ``_conn``.  It is a separate ``DuckDBPyConnection``
+        # (obtained via ``_conn.cursor()``) with its own client context, so
+        # reading from it on a worker thread does not race writes on ``_conn``
+        # (DuckDB MVCC handles the concurrency).  This preserves the issue #416
+        # invariant: ``_conn`` itself is still only ever touched under
+        # ``_conn_lock``; the read handle is a distinct object (issue #558).
+        self._read_conn: duckdb.DuckDBPyConnection | None = None
+        # ``_read_conn`` is a single ``DuckDBPyConnection``, which is itself not
+        # thread-safe for concurrent use — two status probes overlapping would
+        # race two ``asyncio.to_thread`` workers on it (the same hazard as
+        # issue #416 on ``_conn``).  ``_read_lock`` serialises the read handle.
+        # It is *separate* from ``_conn_lock`` so reads never queue behind a
+        # slow embedding-bound write, and read ops are millisecond-scale so
+        # serialising them among themselves does not reintroduce the symptom.
+        self._read_lock: asyncio.Lock | None = None
         self._initialized: bool = False
         self._vss_available: bool = False
         self._fts_available: bool = False
@@ -183,6 +217,16 @@ class DuckDBStore:
         # be instantiated outside an event loop (e.g. construction at
         # module import in tests); see ``_get_conn_lock``.
         self._conn_lock: asyncio.Lock | None = None
+        # Set when DuckDB raises a ``FatalException`` that permanently
+        # invalidates the connection (e.g. "database has been invalidated
+        # because of a previous fatal error").  Once set, the connection is
+        # dead for the life of the process: every subsequent operation raises
+        # the same fatal forever.  ``_run_sync`` sets this flag, logs at
+        # CRITICAL, and signals the supervisor (SIGTERM) so the process is
+        # restarted instead of looping 500s indefinitely (issue #583).  The
+        # MCP/webhook layer reads it to fail fast with ``503 Retry-After``
+        # and to report ``degraded`` status without waiting on a probe.
+        self._terminal_failure: BaseException | None = None
 
     # ------------------------------------------------------------------
     # Cloud path helpers
@@ -397,6 +441,73 @@ class DuckDBStore:
             # can see repeated failures, but don't raise — the caller has
             # already observed a successful write.
             logger.debug("CHECKPOINT after write failed (non-fatal): %s", exc)
+
+    def _sync_verify_entries_readable(self, entry_ids: Sequence[str]) -> None:
+        """Read-back verification after a bulk rewrite of ``entries`` (issue #584).
+
+        A dedup/merge that rewrites many rows across the variable-length
+        VARCHAR (``content``, ``metadata``, dictionary-encoded columns) and
+        ``embedding`` columns can leave the table corrupt in a way that
+        ``SELECT COUNT(*)`` never surfaces — the row-group metadata still
+        counts the rows while the data pages backing them are gone.  After such
+        a rewrite we therefore:
+
+        1. ``CHECKPOINT`` to flush the WAL and force re-encoding of the touched
+           row groups into the main database file.
+        2. Materialise the touched columns (``id``, ``content``, ``metadata``,
+           ``embedding``) for the affected ids, calling ``fetchall()`` so DuckDB
+           actually scans the data pages rather than returning catalog
+           statistics.  ``embedding`` (FLOAT[1024]) is a corruption target named
+           in issue #584, so it must be read back too — a torn rewrite isolated
+           to the embedding column would otherwise go undetected.
+        3. Run ``PRAGMA storage_info('entries')`` as a bounded integrity sweep
+           over the table's storage metadata.
+
+        Any failure in those steps raises :class:`EntriesIntegrityError` so the
+        caller fails loud instead of reporting a successful operation over a
+        corrupt table.  An empty ``entry_ids`` still runs the checkpoint and
+        the storage-info sweep.
+
+        Args:
+            entry_ids: UUID strings of the rows touched by the rewrite.
+
+        Raises:
+            EntriesIntegrityError: If the checkpoint, read-back, or storage
+                sweep errors — i.e. the table is no longer readable.
+        """
+        conn = self.connection
+        try:
+            conn.execute("CHECKPOINT")
+            ids = list(dict.fromkeys(entry_ids))
+            if ids:
+                # ``id = ANY(?)`` materialises the variable-length columns for
+                # the touched rows; ``fetchall()`` forces the scan of the data
+                # pages (a corrupt dictionary/raw page errors or SIGSEGVs here,
+                # whereas COUNT(*) would silently succeed).
+                conn.execute(
+                    "SELECT id, content, metadata, embedding FROM entries WHERE id = ANY(?)",
+                    [ids],
+                ).fetchall()
+            # Bounded integrity sweep over the storage metadata of the table.
+            conn.execute("PRAGMA storage_info('entries')").fetchall()
+        except Exception as exc:  # noqa: BLE001 — surface ANY read-back failure
+            raise EntriesIntegrityError(
+                f"entries table read-back failed after bulk rewrite "
+                f"({len(list(entry_ids))} ids touched): {exc}"
+            ) from exc
+
+    async def verify_entries_readable(self, entry_ids: Sequence[str]) -> None:
+        """Verify the ``entries`` table is readable after a bulk rewrite.
+
+        Call this after any operation that bulk-rewrites ``entries`` across the
+        variable-length VARCHAR / embedding columns (dedup, merge, batch
+        rewrite).  It checkpoints, reads back the touched rows, and runs a
+        storage-info sweep; see :meth:`_sync_verify_entries_readable`.
+
+        Raises:
+            EntriesIntegrityError: If the post-rewrite read-back fails.
+        """
+        await self._run_sync(self._sync_verify_entries_readable, entry_ids)
 
     def _setup_httpfs(self, conn: duckdb.DuckDBPyConnection) -> None:
         """Install and load the httpfs extension, then configure S3 credentials.
@@ -846,6 +957,13 @@ class DuckDBStore:
             logger.debug("Post-init CHECKPOINT skipped: %s", exc)
 
         self._conn = conn
+        # Spin up an independent read handle on the same database instance so
+        # health probes bypass ``_conn_lock`` (issue #558).  ``cursor()``
+        # returns a fresh ``DuckDBPyConnection`` sharing the same underlying
+        # database — this works for both file-backed and ``:memory:`` paths,
+        # unlike ``connect(..., read_only=True)`` which DuckDB refuses while a
+        # read-write connection to the same file is open in-process.
+        self._read_conn = conn.cursor()
         self._initialized = True
         logger.info("DuckDBStore initialized at %s", self._db_path)
 
@@ -878,6 +996,17 @@ class DuckDBStore:
                 await asyncio.to_thread(self._conn.execute, "CHECKPOINT")
             except duckdb.Error as exc:  # pragma: no cover
                 logger.debug("Shutdown CHECKPOINT skipped: %s", exc)
+            # Close the read handle first; it shares ``_conn``'s database
+            # instance, so it must go before the parent connection (issue #558).
+            # Hold ``_read_lock`` so the close cannot race an in-flight
+            # ``_run_read`` probe still touching ``_read_conn`` on a worker
+            # thread — the same single-connection-two-threads hazard
+            # ``_read_lock`` otherwise guards (issue #416 / #558).
+            if self._read_conn is not None:
+                async with self._get_read_lock():
+                    with contextlib.suppress(duckdb.Error):
+                        await asyncio.to_thread(self._read_conn.close)
+                    self._read_conn = None
             await asyncio.to_thread(self._conn.close)
             self._conn = None
             self._initialized = False
@@ -940,6 +1069,17 @@ class DuckDBStore:
             self._conn_lock = asyncio.Lock()
         return self._conn_lock
 
+    def _get_read_lock(self) -> asyncio.Lock:
+        """Return the read-handle-serialization lock, creating it lazily.
+
+        Mirrors :meth:`_get_conn_lock` but guards ``_read_conn`` instead of
+        ``_conn`` (issue #558).  Created on first use from inside an async
+        method so it binds to the running event loop.
+        """
+        if self._read_lock is None:
+            self._read_lock = asyncio.Lock()
+        return self._read_lock
+
     async def _run_sync(
         self,
         fn: Callable[..., _T],
@@ -976,6 +1116,30 @@ class DuckDBStore:
         async with self._get_conn_lock():
             try:
                 return await asyncio.to_thread(fn, *args, **kwargs)
+            except duckdb.FatalException as exc:
+                # A ``FatalException`` carrying "has been invalidated"
+                # permanently poisons the connection: every later operation
+                # raises the same fatal forever, so a ``ROLLBACK`` cannot
+                # recover it.  Rather than loop 500s indefinitely (one
+                # incident ran 7.5 days writing 32 MB of identical stacks —
+                # issue #583), record the failure, log at CRITICAL, and ask
+                # the supervisor (launchd/systemd) to restart us via SIGTERM.
+                # The fresh process either replays the WAL cleanly or fails
+                # visibly at startup.  Non-invalidating fatals fall through to
+                # the generic rollback path below.
+                if "has been invalidated" in str(exc):
+                    self._terminal_failure = exc
+                    logger.critical(
+                        "DuckDB connection terminally invalidated; signalling "
+                        "supervisor for restart (SIGTERM): %s",
+                        exc,
+                    )
+                    os.kill(os.getpid(), signal.SIGTERM)
+                    raise
+                conn = self._conn
+                if conn is not None:
+                    await asyncio.to_thread(self._rollback_quietly, conn)
+                raise
             except Exception:
                 # Catching ``Exception`` — not ``BaseException`` — so that
                 # ``asyncio.CancelledError`` does not trigger rollback.
@@ -993,6 +1157,37 @@ class DuckDBStore:
                 if conn is not None:
                     await asyncio.to_thread(self._rollback_quietly, conn)
                 raise
+
+    async def _run_read(self, fn: Callable[[duckdb.DuckDBPyConnection], _T]) -> _T:
+        """Run a read-only *fn* against the independent read handle.
+
+        Health probes (``probe_readiness``/``count_entries``/
+        ``list_feed_sources``) call this instead of :meth:`_run_sync` so they
+        answer in milliseconds even when ``_conn`` is saturated with slow
+        embedding-bound writes (issue #558).  ``_read_conn`` is a distinct
+        ``DuckDBPyConnection`` (a ``cursor()`` of ``_conn``) with its own
+        client context, so reading from it on a worker thread does not race
+        writes on ``_conn``: DuckDB MVCC serialises the two internally.
+
+        ``_conn_lock`` is **not** taken — that is the point: reads never queue
+        behind a write.  But ``_read_conn`` is itself a single connection, so
+        concurrent reads are serialised by the *separate* ``_read_lock`` (a
+        single ``DuckDBPyConnection`` is not safe to touch from two worker
+        threads at once — the same hazard issue #416 fixed on ``_conn``).
+        Read ops are millisecond-scale, so this serialisation never
+        reintroduces the "looks dead" symptom.
+
+        *fn* must be read-only.  Any error leaves the read handle untouched
+        (no rollback): a SELECT cannot poison ``_read_conn`` the way a failed
+        write poisons ``_conn``.
+        """
+        read_conn = self._read_conn
+        if read_conn is None:
+            raise RuntimeError(
+                "DuckDBStore has not been initialized. Call 'await store.initialize()' first."
+            )
+        async with self._get_read_lock():
+            return await asyncio.to_thread(fn, read_conn)
 
     async def rollback(self) -> None:
         """Public rollback hook for non-store code paths that touch the connection.
@@ -1024,15 +1219,24 @@ class DuckDBStore:
         surfaces as an explicit error instead of a silent null in the
         status payload.
 
-        The probe runs ``SELECT COUNT(*) FROM entries`` via the normal
-        async path so transient aborted-transaction state is rolled back
-        by :meth:`_run_sync` before a second probe is attempted.
+        The probe runs ``SELECT id FROM entries ORDER BY id LIMIT 1`` against
+        the independent read handle (:meth:`_run_read`), so it never queues
+        behind a slow embedding-bound write holding ``_conn_lock`` (issue
+        #558).
+
+        ``COUNT(*)`` is deliberately *not* used: DuckDB answers it from
+        row-group metadata without touching any data page, so it returns
+        success even when every data page in ``entries`` is corrupt (issue
+        #582 — a DB stayed ``status: "ok"`` for ~30 days while every column
+        materialization segfaulted).  Materializing one row from a real
+        column is microseconds against ``id``'s primary-key index when
+        healthy, and forces the page reads that surface corruption.
         """
-        if self._conn is None:
+        if self._read_conn is None:
             return False, "store not initialized"
         try:
-            await self._run_sync(
-                lambda: self._conn.execute("SELECT COUNT(*) FROM entries").fetchone()  # type: ignore[union-attr]
+            await self._run_read(
+                lambda conn: conn.execute("SELECT id FROM entries ORDER BY id LIMIT 1").fetchone()
             )
         except Exception as exc:  # noqa: BLE001
             return False, f"{type(exc).__name__}: {exc}"
@@ -1114,11 +1318,16 @@ class DuckDBStore:
                 inserted += 1
         return inserted
 
-    def _sync_store(self, entry: Entry) -> str:
-        """Synchronous implementation of store(); called via asyncio.to_thread."""
+    def _sync_store(self, entry: Entry, embedding: list[float]) -> str:
+        """Synchronous implementation of store(); called via asyncio.to_thread.
+
+        *embedding* is computed by :meth:`store` off-thread *before* the SQL
+        lock is acquired (issue #558), so this method only does the SQL
+        critical section — keeping ``_conn_lock`` held for milliseconds, not
+        the full embedding round-trip.
+        """
         validate_metadata(entry.entry_type.value, entry.metadata)
         conn = self.connection
-        embedding = self._embedding_provider.embed(entry.content)
 
         sql = (
             "INSERT INTO entries "
@@ -1171,10 +1380,21 @@ class DuckDBStore:
         Returns:
             The UUID string of the stored entry.
         """
-        return await self._run_sync(self._sync_store, entry)
+        # Embed off-thread *before* taking the SQL lock so concurrent stores
+        # overlap their embedding round-trips instead of serialising on
+        # ``_conn_lock`` (issue #558).
+        embedding = await asyncio.to_thread(self._embedding_provider.embed, entry.content)
+        return await self._run_sync(self._sync_store, entry, embedding)
 
-    def _sync_store_batch(self, entries: Sequence[Entry]) -> list[str]:
-        """Synchronous batch-store implementation; called via asyncio.to_thread."""
+    def _sync_store_batch(
+        self, entries: Sequence[Entry], embeddings: list[list[float]]
+    ) -> list[str]:
+        """Synchronous batch-store implementation; called via asyncio.to_thread.
+
+        *embeddings* are computed by :meth:`store_batch` off-thread *before*
+        the SQL lock is acquired (issue #558), so this method only runs the
+        SQL critical section under ``_conn_lock``.
+        """
         if not entries:
             return []
 
@@ -1183,8 +1403,6 @@ class DuckDBStore:
 
         conn = self.connection
 
-        # Batch embed all contents in one call.
-        embeddings = self._embedding_provider.embed_batch([e.content for e in entries])
         if len(embeddings) != len(entries):
             raise RuntimeError(
                 f"embed_batch returned {len(embeddings)} vectors for "
@@ -1252,7 +1470,15 @@ class DuckDBStore:
         Returns:
             List of UUID strings for the stored entries.
         """
-        return await self._run_sync(self._sync_store_batch, entries)
+        if not entries:
+            return []
+        # Embed off-thread *before* taking the SQL lock so the network
+        # round-trip overlaps with other in-flight stores instead of holding
+        # ``_conn_lock`` for its full duration (issue #558).
+        embeddings = await asyncio.to_thread(
+            self._embedding_provider.embed_batch, [e.content for e in entries]
+        )
+        return await self._run_sync(self._sync_store_batch, entries, embeddings)
 
     def _sync_get(self, entry_id: str, include_archived: bool = False) -> Entry | None:
         """
@@ -1306,13 +1532,19 @@ class DuckDBStore:
         """
         return await self._run_sync(self._sync_get, entry_id, include_archived)
 
-    def _sync_update(self, entry_id: str, updates: dict[str, Any]) -> Entry:
+    def _sync_update(
+        self,
+        entry_id: str,
+        updates: dict[str, Any],
+        embedding: list[float] | None,
+    ) -> Entry:
         """
         Apply partial updates to an existing entry and return its updated representation.
 
         Performs a database UPDATE for the entry identified by entry_id using the keys
         provided in updates. Immutable fields are rejected. If `content` is updated,
-        a new embedding is computed and stored. `metadata` dicts are serialized to
+        the precomputed *embedding* (computed by :meth:`update` off-thread before the
+        SQL lock — issue #558) is stored. `metadata` dicts are serialized to
         JSON and `tags` lists are stored as arrays. The entry's `version` is
         incremented and both `updated_at` and `accessed_at` are refreshed to the
         current UTC time.
@@ -1324,7 +1556,9 @@ class DuckDBStore:
                   - Enum-like objects with a `.value` attribute are stored as that value.
                   - `metadata`: dict values are serialized to JSON.
                   - `tags`: lists are stored as array values.
-                  - `content`: triggers recomputation and storage of the embedding.
+                  - `content`: triggers storage of the precomputed *embedding*.
+            embedding (list[float] | None): Precomputed embedding of the new
+                ``content``; ``None`` when ``content`` is not being updated.
 
         Returns:
             Entry: The entry record after the update.
@@ -1387,11 +1621,11 @@ class DuckDBStore:
             else:
                 set_params.append(value)
 
-        # Re-embed when content changes.
+        # Re-embed when content changes (the embedding was computed off-thread
+        # in :meth:`update` before the lock — issue #558).
         if "content" in updates:
-            new_embedding = self._embedding_provider.embed(updates["content"])
             set_parts.append("embedding = ?")
-            set_params.append(new_embedding)
+            set_params.append(embedding)
 
         # Always increment version and refresh updated_at and accessed_at.
         set_parts.append("version = version + 1")
@@ -1444,7 +1678,13 @@ class DuckDBStore:
         Returns:
             The updated ``Entry``.
         """
-        return await self._run_sync(self._sync_update, entry_id, updates)
+        # Embed off-thread *before* taking the SQL lock so the network
+        # round-trip overlaps with other in-flight writes (issue #558).  Only
+        # ``content`` changes require a new embedding.
+        embedding: list[float] | None = None
+        if "content" in updates:
+            embedding = await asyncio.to_thread(self._embedding_provider.embed, updates["content"])
+        return await self._run_sync(self._sync_update, entry_id, updates, embedding)
 
     def _sync_delete(self, entry_id: str) -> bool:
         """Synchronous implementation of delete(); called via asyncio.to_thread."""
@@ -2158,8 +2398,7 @@ class DuckDBStore:
         if stale_days is not None and stale_days < 0:
             raise ValueError("stale_days must be non-negative")
 
-        def _sync() -> int:
-            conn = self.connection
+        def _sync(conn: duckdb.DuckDBPyConnection) -> int:
             where_clauses, params = self._build_filter_clauses(filters)
             if stale_days is not None:
                 where_clauses.append(
@@ -2173,7 +2412,9 @@ class DuckDBStore:
             row = conn.execute(sql, params).fetchone()
             return int(row[0]) if row else 0
 
-        return await self._run_sync(_sync)
+        # Read-only count via the independent read handle so ``distillery_status``
+        # stays responsive under write contention (issue #558).
+        return await self._run_read(_sync)
 
     async def aggregate_entries(
         self,
@@ -2574,7 +2815,7 @@ class DuckDBStore:
     # Feed source persistence
     # ------------------------------------------------------------------
 
-    def _sync_list_feed_sources(self) -> list[dict[str, Any]]:
+    def _sync_list_feed_sources(self, conn: duckdb.DuckDBPyConnection) -> list[dict[str, Any]]:
         """Return all persisted feed sources as dicts.
 
         Includes liveness fields (``last_polled_at``, ``last_item_count``,
@@ -2583,11 +2824,13 @@ class DuckDBStore:
         strings.  ``next_poll_at`` is derived from ``last_polled_at +
         poll_interval_minutes`` and is ``None`` when the source has never
         been polled.
+
+        Runs against the connection passed in (the read handle for status
+        probes) so it never queues behind ``_conn_lock`` (issue #558).
         """
         from datetime import timedelta
 
-        assert self._conn is not None
-        result = self._conn.execute(
+        result = conn.execute(
             "SELECT url, source_type, label, poll_interval_minutes, trust_weight, "
             "last_polled_at, last_item_count, last_error, "
             "threshold_alert, threshold_digest "
@@ -2730,7 +2973,9 @@ class DuckDBStore:
 
     async def list_feed_sources(self) -> list[dict[str, Any]]:
         """Return all persisted feed sources as dicts."""
-        return await self._run_sync(self._sync_list_feed_sources)
+        # Read-only via the independent read handle so ``distillery_status``
+        # stays responsive under write contention (issue #558).
+        return await self._run_read(self._sync_list_feed_sources)
 
     async def add_feed_source(
         self,

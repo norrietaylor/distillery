@@ -78,6 +78,38 @@ _COOLDOWN_SECONDS: dict[str, int] = {
 # cooldown checks.  Created lazily in the app factory.
 _endpoint_locks: dict[str, asyncio.Lock] = {}
 
+# Seconds to advertise in ``Retry-After`` when the store has terminally
+# failed (issue #583).  The process has already requested a SIGTERM restart;
+# this tells the scheduler to back off rather than hammer the dying server
+# with the per-minute poll cron (which produced 30k+ looping 500s in the
+# observed incident).
+_TERMINAL_RETRY_AFTER_SECONDS = 30
+
+
+def _terminal_failure_response(store: Any) -> JSONResponse | None:
+    """Return a ``503`` with ``Retry-After`` when *store* is terminally dead.
+
+    A DuckDB ``FatalException`` carrying "has been invalidated" permanently
+    poisons the connection (issue #583).  ``DuckDBStore._run_sync`` records it
+    on ``store._terminal_failure`` and signals the supervisor for a restart.
+    Until the process exits, webhook calls short-circuit here with a ``503``
+    so the scheduler backs off instead of looping ``500`` against a dead DB.
+
+    Returns ``None`` when the store is healthy so the caller proceeds normally.
+    """
+    # ``_terminal_failure`` is either ``None`` (healthy) or the captured
+    # ``BaseException``.  Checking ``isinstance`` rather than mere truthiness
+    # avoids mistaking a ``MagicMock`` auto-attribute (used by store-mocking
+    # tests) for a real terminal failure.
+    if not isinstance(getattr(store, "_terminal_failure", None), BaseException):
+        return None
+    return JSONResponse(
+        {"ok": False, "error": "store_terminally_failed"},
+        status_code=503,
+        headers={"Retry-After": str(_TERMINAL_RETRY_AFTER_SECONDS)},
+    )
+
+
 # Lock to serialize cold-start store initialisation so that concurrent
 # first-hit requests (e.g. workflow_dispatch "all") don't each create a
 # separate DuckDBStore.
@@ -910,6 +942,14 @@ async def _run_maintenance(state: dict[str, Any]) -> JSONResponse:
         else {"ok": False, "error": poll_body.get("error", "poll failed")}
     )
 
+    # Re-check the terminal-failure flag between phases (issue #583): a fatal
+    # connection invalidation surfaced during poll must halt the job before it
+    # issues further queries against the dead DB, rather than looping each
+    # remaining phase through the same fatal.
+    terminal = _terminal_failure_response(store)
+    if terminal is not None:
+        return terminal
+
     # 2. Rescore — re-score existing entries.
     rescore_lock = _endpoint_locks.setdefault("rescore", asyncio.Lock())
     async with rescore_lock:
@@ -921,6 +961,12 @@ async def _run_maintenance(state: dict[str, Any]) -> JSONResponse:
         if rescore_body.get("ok")
         else {"ok": False, "error": rescore_body.get("error", "rescore failed")}
     )
+
+    # Re-check before classify-batch as well — a fatal raised during rescore
+    # must likewise halt the job rather than proceed against the dead DB.
+    terminal = _terminal_failure_response(store)
+    if terminal is not None:
+        return terminal
 
     # 3. Classify-batch — classify pending inbox entries.
     classify_lock = _endpoint_locks.setdefault("classify-batch", asyncio.Lock())
@@ -1370,6 +1416,10 @@ def create_webhook_app(
         state = await _ensure_store(shared_state, config)
         store = state["store"]
 
+        terminal = _terminal_failure_response(store)
+        if terminal is not None:
+            return terminal
+
         parser, runner = _ASYNC_ENDPOINTS[endpoint]
         parsed = await parser(request)
         if isinstance(parsed, JSONResponse):
@@ -1446,6 +1496,10 @@ def create_webhook_app(
 
         state = await _ensure_store(shared_state, config)
         store = state["store"]
+
+        terminal = _terminal_failure_response(store)
+        if terminal is not None:
+            return terminal
 
         lock = _endpoint_locks.setdefault(endpoint, asyncio.Lock())
         async with lock:

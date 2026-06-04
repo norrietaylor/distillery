@@ -431,3 +431,155 @@ class TestDistilleryStoreMCPValidation:
         )
         data = json.loads(content[0].text)
         assert data.get("error") is True
+
+
+# ---------------------------------------------------------------------------
+# Issue #559: schema-validation ValueError must surface as INVALID_PARAMS
+# (not masked as INTERNAL) with the original, actionable message.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestStoreValidationErrorCode:
+    async def test_store_person_without_expertise_is_invalid_params(self, store: Any) -> None:
+        """person w/o metadata.expertise → INVALID_PARAMS naming 'expertise'."""
+        from distillery.mcp.tools.crud import _handle_store
+
+        content = await _handle_store(
+            store=store,
+            arguments={
+                "content": "Mitchell Hashimoto — Ghostty author",
+                "entry_type": "person",
+                "author": "karl",
+                "metadata": {"url": "https://mitchellh.com/"},
+            },
+        )
+        data = json.loads(content[0].text)
+        assert data.get("error") is True
+        assert data["code"] == "INVALID_PARAMS"
+        assert "expertise" in data["message"]
+
+    async def test_store_project_without_repo_is_invalid_params(self, store: Any) -> None:
+        """project w/o metadata.repo → INVALID_PARAMS naming 'repo'."""
+        from distillery.mcp.tools.crud import _handle_store
+
+        content = await _handle_store(
+            store=store,
+            arguments={
+                "content": "Distillery knowledge base",
+                "entry_type": "project",
+                "author": "karl",
+                "metadata": {"status": "active"},
+            },
+        )
+        data = json.loads(content[0].text)
+        assert data.get("error") is True
+        assert data["code"] == "INVALID_PARAMS"
+        assert "repo" in data["message"]
+
+    async def test_store_feed_invalid_source_type_is_invalid_params(self, store: Any) -> None:
+        """feed with source_type='webhook' → INVALID_PARAMS naming the constraint."""
+        from distillery.mcp.tools.crud import _handle_store
+
+        content = await _handle_store(
+            store=store,
+            arguments={
+                "content": "A feed item",
+                "entry_type": "feed",
+                "author": "karl",
+                "metadata": {
+                    "source_url": "https://example.com/feed",
+                    "source_type": "webhook",
+                },
+            },
+        )
+        data = json.loads(content[0].text)
+        assert data.get("error") is True
+        assert data["code"] == "INVALID_PARAMS"
+        # Message names the offending field and the allowed values.
+        assert "source_type" in data["message"]
+        assert "rss" in data["message"]
+
+    async def test_store_reference_arbitrary_metadata_succeeds(self, store: Any) -> None:
+        """reference with arbitrary metadata still succeeds (no schema)."""
+        from distillery.mcp.tools.crud import _handle_store
+
+        content = await _handle_store(
+            store=store,
+            arguments={
+                "content": "Some reference doc",
+                "entry_type": "reference",
+                "author": "karl",
+                "metadata": {"url": "https://mitchellh.com/", "anything": "goes"},
+            },
+        )
+        data = json.loads(content[0].text)
+        assert not data.get("error")
+        assert "entry_id" in data
+        assert data["persisted"] is True
+
+    async def test_store_batch_invalid_metadata_is_invalid_params(self, store: Any) -> None:
+        """store_batch with a schema-invalid item → top-level INVALID_PARAMS."""
+        from distillery.mcp.tools.crud import _handle_store_batch
+
+        content = await _handle_store_batch(
+            store=store,
+            arguments={
+                "entries": [
+                    {
+                        "content": "Alice the engineer",
+                        "entry_type": "person",
+                        "author": "karl",
+                        "metadata": {"team": "backend"},
+                    }
+                ]
+            },
+        )
+        data = json.loads(content[0].text)
+        assert data.get("error") is True
+        assert data["code"] == "INVALID_PARAMS"
+        assert "expertise" in data["message"]
+
+    async def test_update_to_invalid_metadata_is_invalid_params(self, store: Any) -> None:
+        """update removing a required field → INVALID_PARAMS naming the field."""
+        from distillery.mcp.tools.crud import _handle_store, _handle_update
+
+        store_content = await _handle_store(
+            store=store,
+            arguments={
+                "content": "Alice knows Python",
+                "entry_type": "person",
+                "author": "karl",
+                "metadata": {"expertise": ["python"]},
+            },
+        )
+        entry_id = json.loads(store_content[0].text)["entry_id"]
+
+        content = await _handle_update(
+            store=store,
+            arguments={
+                "entry_id": entry_id,
+                "metadata": {"team": "backend"},
+            },
+        )
+        data = json.loads(content[0].text)
+        assert data.get("error") is True
+        assert data["code"] == "INVALID_PARAMS"
+        assert "expertise" in data["message"]
+
+    def test_store_docstring_lists_required_metadata_types(self) -> None:
+        """distillery_store docstring names the schema-validated entry types."""
+        import inspect
+
+        from distillery.mcp import server
+
+        # The tool wrappers are defined inside create_server(); inspect the
+        # source so the test does not depend on instantiating the server.
+        source = inspect.getsource(server.create_server)
+        store_doc = source[source.index("async def distillery_store(") :]
+        store_doc = store_doc[: store_doc.index("async def distillery_store_batch(")]
+
+        for entry_type in ("person", "project", "digest", "github", "feed"):
+            assert entry_type in store_doc, f"{entry_type!r} not mentioned in store docstring"
+        assert "expertise" in store_doc
+        assert "repo" in store_doc
