@@ -106,6 +106,15 @@ async def _handle_status(
         "tool_count": int(tool_count),
     }
 
+    # --- terminal store failure (issue #583) --------------------------------
+    # When the DuckDB connection has been permanently invalidated, every store
+    # call raises the same fatal forever.  Surface ``degraded`` immediately
+    # from the cached flag rather than letting count/probe queries each block
+    # and re-raise — operators (and the /setup wizard) see the dead state at
+    # once instead of waiting on a probe timeout.
+    if isinstance(getattr(store, "_terminal_failure", None), BaseException):
+        degraded_reasons.append("store_terminally_failed")
+
     # --- store stats ---------------------------------------------------------
     # Use the async protocol contract rather than poking at the DuckDB-specific
     # ``store.connection`` — keeps this handler backend-agnostic and prevents

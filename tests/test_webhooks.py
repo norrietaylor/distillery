@@ -292,6 +292,67 @@ async def test_cooldown_persisted(store: DuckDBStore, monkeypatch: pytest.Monkey
 
 
 # ---------------------------------------------------------------------------
+# Terminal store-failure tests (issue #583)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("endpoint", ["poll", "rescore", "maintenance", "hooks/classify-batch"])
+async def test_terminal_failure_returns_503_with_retry_after(
+    store: DuckDBStore, monkeypatch: pytest.MonkeyPatch, endpoint: str
+) -> None:
+    """Issue #583: once the store is terminally invalidated, authenticated
+    webhook calls short-circuit with ``503`` + ``Retry-After`` instead of
+    enqueueing work or looping ``500`` against a dead DB connection.
+    """
+    import duckdb
+
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+    config = _make_config()
+    shared = _make_shared_state(store)
+    app = create_webhook_app(shared, config)
+
+    # Simulate the post-fatal state recorded by ``DuckDBStore._run_sync``.
+    store._terminal_failure = duckdb.FatalException(  # type: ignore[attr-defined]
+        "database has been invalidated because of a previous fatal error"
+    )
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        resp = client.post(f"/{endpoint}", headers=_AUTH_HEADER)
+
+    assert resp.status_code == 503, f"Expected 503, got {resp.status_code}: {resp.text}"
+    assert resp.headers.get("retry-after") == "30"
+    body = resp.json()
+    assert body["ok"] is False
+    assert body["error"] == "store_terminally_failed"
+
+
+@pytest.mark.unit
+async def test_terminal_failure_check_runs_after_auth(
+    store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unauthenticated request still gets 401, not 503 — the terminal
+    short-circuit must not leak the dead-store signal to anonymous callers.
+    """
+    import duckdb
+
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+    config = _make_config()
+    shared = _make_shared_state(store)
+    app = create_webhook_app(shared, config)
+
+    store._terminal_failure = duckdb.FatalException(  # type: ignore[attr-defined]
+        "database has been invalidated"
+    )
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        resp = client.post("/poll")  # no Authorization header
+
+    assert resp.status_code == 401
+    assert resp.json() == {"ok": False, "error": "unauthorized"}
+
+
+# ---------------------------------------------------------------------------
 # App composition tests
 # ---------------------------------------------------------------------------
 
