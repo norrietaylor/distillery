@@ -2,5 +2,5 @@
 
 import os
 
-__version__ = "0.6.1"
+__version__ = "0.6.2"
 __build_sha__ = os.environ.get("DISTILLERY_BUILD_SHA", "dev")
