@@ -357,7 +357,17 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
           - author (str, required): Who authored this entry.
           - project (str, optional): Project scope for the entry.
           - tags (list[str], optional): Tags for categorisation; supports namespaced tags (e.g. "topic/ai").
-          - metadata (dict, optional): Arbitrary key-value metadata.
+          - metadata (dict, optional): Arbitrary key-value metadata. Some entry
+            types REQUIRE specific metadata keys (TYPE_METADATA_SCHEMAS); omitting
+            them returns INVALID_PARAMS naming the missing/invalid field:
+              - person:  expertise (list[str])
+              - project: repo (str)
+              - digest:  period_start, period_end (str)
+              - github:  repo, ref_type, ref_number; ref_type in
+                [issue, pr, discussion, release]
+              - feed:    source_url, source_type; source_type in [rss, github]
+            Other types (session, bookmark, minutes, meeting, reference, idea,
+            inbox) accept arbitrary metadata.
           - source (str, optional, default="claude-code"): Origin of the entry.
             Valid: [claude-code, manual, import, inference, documentation, external].
           - session_id (str, optional): Opaque session identifier for grouping related entries.
