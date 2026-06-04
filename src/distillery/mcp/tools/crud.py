@@ -509,6 +509,12 @@ async def _handle_store(
     # --- persist ------------------------------------------------------------
     try:
         entry_id = await store.store(entry)
+    except ValueError as exc:
+        # Schema-validation rejection from validate_metadata (e.g. a person
+        # entry missing required metadata.expertise).  This is a caller-shape
+        # error, not a server fault — surface the original message under
+        # INVALID_PARAMS instead of collapsing it into INTERNAL (issue #559).
+        return error_response("INVALID_PARAMS", str(exc))
     except EmbeddingProviderError as exc:
         logger.warning(
             "Upstream embedding provider failed during store "
@@ -916,6 +922,13 @@ async def _handle_store_batch(
     # --- persist ------------------------------------------------------------
     try:
         persisted_ids = await store.store_batch(built)
+    except ValueError as exc:
+        # Schema-validation rejection from validate_metadata for one of the
+        # batched entries (e.g. a person entry missing metadata.expertise).
+        # store_batch validates all entries before persisting, so a single
+        # bad shape aborts the batch — surface it under INVALID_PARAMS with
+        # the original message rather than masking it as INTERNAL (issue #559).
+        return error_response("INVALID_PARAMS", str(exc))
     except EmbeddingProviderError as exc:
         logger.warning(
             "Upstream embedding provider failed during store_batch "
