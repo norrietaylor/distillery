@@ -6,10 +6,11 @@ Two tiers:
   against a hand-crafted fixture in ``tests/fixtures/longmemeval_mini.json``.
   No network, no HF SDK invocation. Designed for the regular CI unit suite.
 
-* ``@pytest.mark.integration`` — hits the real HuggingFace API on the first
-  run, downloads ~265 MB into the user-supplied cache, and verifies the file
-  SHA against :data:`DATASET_FILE_SHA256`. The second call exercises the
-  warm-cache offline path. Skipped under ``pytest -m unit``.
+* ``@pytest.mark.bench`` — opt-in, heavy: hits the real HuggingFace API on the
+  first run, downloads ~265 MB into the user-supplied cache, and verifies the
+  file SHA against :data:`DATASET_FILE_SHA256`. The second call exercises the
+  warm-cache offline path. Excluded from default CI (``pytest -m "not bench"``);
+  run by the dedicated ``bench-*.yml`` nightly workflows.
 """
 
 from __future__ import annotations
@@ -218,6 +219,41 @@ def test_load_and_verify_corrupt_file_e2e(tmp_path: Path, monkeypatch: pytest.Mo
 
 
 @pytest.mark.unit
+async def test_load_longmemeval_mocked_download_verifies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Drive the public ``load_longmemeval`` entry point without touching HF.
+
+    Mocks ``snapshot_download`` to lay the shipped fixture down in HF's
+    canonical snapshot layout and patches the expected digest to the fixture's
+    own SHA, exercising the download -> verify -> schema-validate path that the
+    opt-in ``bench`` network tests cover live. Keeps that path in the default
+    (hermetic) CI suite after the network tests moved to ``-m bench``.
+    """
+    fixture_sha = _sha256_bytes(FIXTURE_PATH.read_bytes())
+    monkeypatch.setattr(
+        "distillery.eval.longmemeval_dataset.DATASET_FILE_SHA256",
+        fixture_sha,
+    )
+
+    def fake_snapshot_download(*_args: Any, **_kwargs: Any) -> str:
+        snapshot_dir = tmp_path / "snapshots" / DATASET_REVISION_SHA
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy(FIXTURE_PATH, snapshot_dir / DATASET_FILENAME)
+        return str(snapshot_dir)
+
+    monkeypatch.setattr(
+        "huggingface_hub.snapshot_download",
+        fake_snapshot_download,
+    )
+
+    questions = await load_longmemeval(cache_dir=tmp_path)
+    assert isinstance(questions, list)
+    assert len(questions) >= 1
+    assert REQUIRED_QUESTION_KEYS.issubset(questions[0].keys())
+
+
+@pytest.mark.unit
 def test_pinned_constants_are_concrete() -> None:
     """Guard against shipping placeholder SHAs (rule 5)."""
     assert len(DATASET_REVISION_SHA) == 40, "Revision SHA must be a full 40-char hex"
@@ -231,11 +267,11 @@ def test_pinned_constants_are_concrete() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Integration tests — first call hits the network (~265 MB), second is offline.
+# Bench tests (opt-in) — first call hits the network (~265 MB), second offline.
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
+@pytest.mark.bench
 async def test_load_longmemeval_downloads_and_verifies(tmp_path: Path) -> None:
     """First call: downloads the SHA-pinned dataset and verifies its hash.
 
@@ -256,7 +292,7 @@ async def test_load_longmemeval_downloads_and_verifies(tmp_path: Path) -> None:
     assert len(first["answer_session_ids"]) >= 1
 
 
-@pytest.mark.integration
+@pytest.mark.bench
 async def test_load_longmemeval_warm_cache_offline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -271,7 +307,7 @@ async def test_load_longmemeval_warm_cache_offline(
     assert len(questions) == 500
 
 
-@pytest.mark.integration
+@pytest.mark.bench
 async def test_load_longmemeval_corrupt_cache_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
