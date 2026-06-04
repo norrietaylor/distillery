@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import re
+import signal
 import uuid
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
@@ -45,6 +46,21 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
+
+
+class EntriesIntegrityError(RuntimeError):
+    """Raised when a post-bulk-rewrite read-back of ``entries`` fails.
+
+    A bulk rewrite of the ``entries`` table (e.g. a dedup/merge that
+    UPDATEs or DELETE+INSERTs across the variable-length VARCHAR / embedding
+    columns) can produce on-disk corruption that ``SELECT COUNT(*)`` never
+    detects — the catalog row-group metadata still counts the rows even when
+    the data pages backing them are unreadable (issue #584).  Operations that
+    perform such rewrites call :meth:`DuckDBStore.verify_entries_readable`
+    afterwards; this exception signals that the verification materialised an
+    unreadable column and the caller must fail loud rather than report
+    success.
+    """
 
 
 def _sql_escape(value: str) -> str:
@@ -201,6 +217,16 @@ class DuckDBStore:
         # be instantiated outside an event loop (e.g. construction at
         # module import in tests); see ``_get_conn_lock``.
         self._conn_lock: asyncio.Lock | None = None
+        # Set when DuckDB raises a ``FatalException`` that permanently
+        # invalidates the connection (e.g. "database has been invalidated
+        # because of a previous fatal error").  Once set, the connection is
+        # dead for the life of the process: every subsequent operation raises
+        # the same fatal forever.  ``_run_sync`` sets this flag, logs at
+        # CRITICAL, and signals the supervisor (SIGTERM) so the process is
+        # restarted instead of looping 500s indefinitely (issue #583).  The
+        # MCP/webhook layer reads it to fail fast with ``503 Retry-After``
+        # and to report ``degraded`` status without waiting on a probe.
+        self._terminal_failure: BaseException | None = None
 
     # ------------------------------------------------------------------
     # Cloud path helpers
@@ -415,6 +441,73 @@ class DuckDBStore:
             # can see repeated failures, but don't raise — the caller has
             # already observed a successful write.
             logger.debug("CHECKPOINT after write failed (non-fatal): %s", exc)
+
+    def _sync_verify_entries_readable(self, entry_ids: Sequence[str]) -> None:
+        """Read-back verification after a bulk rewrite of ``entries`` (issue #584).
+
+        A dedup/merge that rewrites many rows across the variable-length
+        VARCHAR (``content``, ``metadata``, dictionary-encoded columns) and
+        ``embedding`` columns can leave the table corrupt in a way that
+        ``SELECT COUNT(*)`` never surfaces — the row-group metadata still
+        counts the rows while the data pages backing them are gone.  After such
+        a rewrite we therefore:
+
+        1. ``CHECKPOINT`` to flush the WAL and force re-encoding of the touched
+           row groups into the main database file.
+        2. Materialise the touched columns (``id``, ``content``, ``metadata``,
+           ``embedding``) for the affected ids, calling ``fetchall()`` so DuckDB
+           actually scans the data pages rather than returning catalog
+           statistics.  ``embedding`` (FLOAT[1024]) is a corruption target named
+           in issue #584, so it must be read back too — a torn rewrite isolated
+           to the embedding column would otherwise go undetected.
+        3. Run ``PRAGMA storage_info('entries')`` as a bounded integrity sweep
+           over the table's storage metadata.
+
+        Any failure in those steps raises :class:`EntriesIntegrityError` so the
+        caller fails loud instead of reporting a successful operation over a
+        corrupt table.  An empty ``entry_ids`` still runs the checkpoint and
+        the storage-info sweep.
+
+        Args:
+            entry_ids: UUID strings of the rows touched by the rewrite.
+
+        Raises:
+            EntriesIntegrityError: If the checkpoint, read-back, or storage
+                sweep errors — i.e. the table is no longer readable.
+        """
+        conn = self.connection
+        try:
+            conn.execute("CHECKPOINT")
+            ids = list(dict.fromkeys(entry_ids))
+            if ids:
+                # ``id = ANY(?)`` materialises the variable-length columns for
+                # the touched rows; ``fetchall()`` forces the scan of the data
+                # pages (a corrupt dictionary/raw page errors or SIGSEGVs here,
+                # whereas COUNT(*) would silently succeed).
+                conn.execute(
+                    "SELECT id, content, metadata, embedding FROM entries WHERE id = ANY(?)",
+                    [ids],
+                ).fetchall()
+            # Bounded integrity sweep over the storage metadata of the table.
+            conn.execute("PRAGMA storage_info('entries')").fetchall()
+        except Exception as exc:  # noqa: BLE001 — surface ANY read-back failure
+            raise EntriesIntegrityError(
+                f"entries table read-back failed after bulk rewrite "
+                f"({len(list(entry_ids))} ids touched): {exc}"
+            ) from exc
+
+    async def verify_entries_readable(self, entry_ids: Sequence[str]) -> None:
+        """Verify the ``entries`` table is readable after a bulk rewrite.
+
+        Call this after any operation that bulk-rewrites ``entries`` across the
+        variable-length VARCHAR / embedding columns (dedup, merge, batch
+        rewrite).  It checkpoints, reads back the touched rows, and runs a
+        storage-info sweep; see :meth:`_sync_verify_entries_readable`.
+
+        Raises:
+            EntriesIntegrityError: If the post-rewrite read-back fails.
+        """
+        await self._run_sync(self._sync_verify_entries_readable, entry_ids)
 
     def _setup_httpfs(self, conn: duckdb.DuckDBPyConnection) -> None:
         """Install and load the httpfs extension, then configure S3 credentials.
@@ -1023,6 +1116,30 @@ class DuckDBStore:
         async with self._get_conn_lock():
             try:
                 return await asyncio.to_thread(fn, *args, **kwargs)
+            except duckdb.FatalException as exc:
+                # A ``FatalException`` carrying "has been invalidated"
+                # permanently poisons the connection: every later operation
+                # raises the same fatal forever, so a ``ROLLBACK`` cannot
+                # recover it.  Rather than loop 500s indefinitely (one
+                # incident ran 7.5 days writing 32 MB of identical stacks —
+                # issue #583), record the failure, log at CRITICAL, and ask
+                # the supervisor (launchd/systemd) to restart us via SIGTERM.
+                # The fresh process either replays the WAL cleanly or fails
+                # visibly at startup.  Non-invalidating fatals fall through to
+                # the generic rollback path below.
+                if "has been invalidated" in str(exc):
+                    self._terminal_failure = exc
+                    logger.critical(
+                        "DuckDB connection terminally invalidated; signalling "
+                        "supervisor for restart (SIGTERM): %s",
+                        exc,
+                    )
+                    os.kill(os.getpid(), signal.SIGTERM)
+                    raise
+                conn = self._conn
+                if conn is not None:
+                    await asyncio.to_thread(self._rollback_quietly, conn)
+                raise
             except Exception:
                 # Catching ``Exception`` — not ``BaseException`` — so that
                 # ``asyncio.CancelledError`` does not trigger rollback.
@@ -1102,15 +1219,24 @@ class DuckDBStore:
         surfaces as an explicit error instead of a silent null in the
         status payload.
 
-        The probe runs ``SELECT COUNT(*) FROM entries`` against the
-        independent read handle (:meth:`_run_read`), so it never queues behind
-        a slow embedding-bound write holding ``_conn_lock`` (issue #558).
+        The probe runs ``SELECT id FROM entries ORDER BY id LIMIT 1`` against
+        the independent read handle (:meth:`_run_read`), so it never queues
+        behind a slow embedding-bound write holding ``_conn_lock`` (issue
+        #558).
+
+        ``COUNT(*)`` is deliberately *not* used: DuckDB answers it from
+        row-group metadata without touching any data page, so it returns
+        success even when every data page in ``entries`` is corrupt (issue
+        #582 — a DB stayed ``status: "ok"`` for ~30 days while every column
+        materialization segfaulted).  Materializing one row from a real
+        column is microseconds against ``id``'s primary-key index when
+        healthy, and forces the page reads that surface corruption.
         """
         if self._read_conn is None:
             return False, "store not initialized"
         try:
             await self._run_read(
-                lambda conn: conn.execute("SELECT COUNT(*) FROM entries").fetchone()
+                lambda conn: conn.execute("SELECT id FROM entries ORDER BY id LIMIT 1").fetchone()
             )
         except Exception as exc:  # noqa: BLE001
             return False, f"{type(exc).__name__}: {exc}"

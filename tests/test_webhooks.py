@@ -292,6 +292,67 @@ async def test_cooldown_persisted(store: DuckDBStore, monkeypatch: pytest.Monkey
 
 
 # ---------------------------------------------------------------------------
+# Terminal store-failure tests (issue #583)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("endpoint", ["poll", "rescore", "maintenance", "hooks/classify-batch"])
+async def test_terminal_failure_returns_503_with_retry_after(
+    store: DuckDBStore, monkeypatch: pytest.MonkeyPatch, endpoint: str
+) -> None:
+    """Issue #583: once the store is terminally invalidated, authenticated
+    webhook calls short-circuit with ``503`` + ``Retry-After`` instead of
+    enqueueing work or looping ``500`` against a dead DB connection.
+    """
+    import duckdb
+
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+    config = _make_config()
+    shared = _make_shared_state(store)
+    app = create_webhook_app(shared, config)
+
+    # Simulate the post-fatal state recorded by ``DuckDBStore._run_sync``.
+    store._terminal_failure = duckdb.FatalException(  # type: ignore[attr-defined]
+        "database has been invalidated because of a previous fatal error"
+    )
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        resp = client.post(f"/{endpoint}", headers=_AUTH_HEADER)
+
+    assert resp.status_code == 503, f"Expected 503, got {resp.status_code}: {resp.text}"
+    assert resp.headers.get("retry-after") == "30"
+    body = resp.json()
+    assert body["ok"] is False
+    assert body["error"] == "store_terminally_failed"
+
+
+@pytest.mark.unit
+async def test_terminal_failure_check_runs_after_auth(
+    store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unauthenticated request still gets 401, not 503 — the terminal
+    short-circuit must not leak the dead-store signal to anonymous callers.
+    """
+    import duckdb
+
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+    config = _make_config()
+    shared = _make_shared_state(store)
+    app = create_webhook_app(shared, config)
+
+    store._terminal_failure = duckdb.FatalException(  # type: ignore[attr-defined]
+        "database has been invalidated"
+    )
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        resp = client.post("/poll")  # no Authorization header
+
+    assert resp.status_code == 401
+    assert resp.json() == {"ok": False, "error": "unauthorized"}
+
+
+# ---------------------------------------------------------------------------
 # App composition tests
 # ---------------------------------------------------------------------------
 
@@ -606,6 +667,51 @@ async def test_maintenance_handler(store: DuckDBStore, monkeypatch: pytest.Monke
 
     # classify_batch sub-result is present (no pending entries → zeros).
     assert "classified" in data["classify_batch"]
+
+
+@pytest.mark.unit
+async def test_maintenance_halts_on_terminal_failure_after_poll(
+    store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #583: when the store is terminally invalidated mid-cycle (during
+    poll), ``_run_maintenance`` re-checks the flag between phases and returns
+    the 503 terminal payload immediately — it must NOT proceed to rescore or
+    classify-batch against the dead DB connection."""
+    import json as _json
+    from unittest.mock import AsyncMock, patch
+
+    import duckdb
+
+    from distillery.mcp.webhooks import _run_maintenance
+
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+    shared = _make_shared_state(store)
+
+    async def _poll_then_die(state: dict[str, Any]) -> JSONResponse:
+        # Simulate a fatal connection invalidation surfacing during poll.
+        store._terminal_failure = duckdb.FatalException(  # type: ignore[attr-defined]
+            "database has been invalidated because of a previous fatal error"
+        )
+        return JSONResponse({"ok": True, "data": {"sources_polled": 0}})
+
+    rescore_mock = AsyncMock()
+    classify_mock = AsyncMock()
+
+    with (
+        patch("distillery.mcp.webhooks._run_poll", side_effect=_poll_then_die),
+        patch("distillery.mcp.webhooks._run_rescore", rescore_mock),
+        patch("distillery.mcp.webhooks._run_classify_batch", classify_mock),
+    ):
+        resp = await _run_maintenance(shared)
+
+    assert resp.status_code == 503
+    assert resp.headers.get("retry-after") == "30"
+    body = _json.loads(bytes(resp.body).decode())
+    assert body == {"ok": False, "error": "store_terminally_failed"}
+
+    # The job halted after poll — neither downstream phase ran.
+    rescore_mock.assert_not_awaited()
+    classify_mock.assert_not_awaited()
 
 
 @pytest.mark.unit
