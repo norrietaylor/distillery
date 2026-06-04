@@ -7,6 +7,7 @@ deterministic while exercising the real DuckDB query paths.
 
 from __future__ import annotations
 
+import math
 from datetime import UTC, datetime
 
 import pytest
@@ -1552,6 +1553,151 @@ class TestConnectionLockSerialization:
         await s.list_entries(filters=None, limit=1, offset=0)
         assert s._conn_lock is not None  # noqa: SLF001
         await s.close()
+
+
+class _SlowEmbeddingProvider:
+    """Embedding provider whose ``embed``/``embed_batch`` sleep ``delay`` seconds.
+
+    Models a slow embedding HTTP backend (e.g. Jina under load) so tests can
+    assert that ``distillery_status`` health probes stay responsive and that
+    concurrent stores overlap their embedding round-trips (issue #558).  The
+    sleep happens in the worker thread ``asyncio.to_thread`` runs ``embed`` on,
+    so multiple stores can sleep concurrently.
+    """
+
+    _DIMS = 4
+
+    def __init__(self, delay: float) -> None:
+        self._delay = delay
+
+    def _vector_for(self, text: str) -> list[float]:
+        import time
+
+        time.sleep(self._delay)
+        h = hash(text) & 0xFFFFFFFF
+        parts = [(h >> (8 * i)) & 0xFF for i in range(self._DIMS)]
+        floats = [float(p) + 1.0 for p in parts]
+        magnitude = math.sqrt(sum(x * x for x in floats))
+        return [x / magnitude for x in floats]
+
+    def embed(self, text: str) -> list[float]:
+        return self._vector_for(text)
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        # One sleep per text so a batch of N costs N*delay, mirroring a real
+        # provider's per-item cost.
+        return [self._vector_for(t) for t in texts]
+
+    @property
+    def dimensions(self) -> int:
+        return self._DIMS
+
+    @property
+    def model_name(self) -> str:
+        return "slow-stub-4d"
+
+
+class TestStatusStaysResponsiveUnderWriteContention:
+    """Issue #558: health probes must not queue behind embedding-bound writes.
+
+    ``distillery_status`` calls ``count_entries`` / ``list_feed_sources`` /
+    ``probe_readiness``, which now run against an independent read handle that
+    bypasses ``_conn_lock``.  Stage 2 also moves embedding off the critical
+    section so parallel stores overlap their network round-trips.
+    """
+
+    async def test_status_probes_respond_while_writes_are_in_flight(self) -> None:
+        """count/feeds/probe answer in <1s while 10 slow writes hold the pool.
+
+        Acceptance: ``distillery_status`` returns within 1s while 10 concurrent
+        embedding-bound writes (500ms/embed) are in flight.
+        """
+        import asyncio
+
+        provider = _SlowEmbeddingProvider(delay=0.5)
+        store = DuckDBStore(db_path=":memory:", embedding_provider=provider)
+        await store.initialize()
+        try:
+            # Fire 10 embedding-bound writes; each holds a worker for ~500ms.
+            writers = [
+                asyncio.create_task(store.store(make_entry(content=f"slow write {i}")))
+                for i in range(10)
+            ]
+            # Give the writers a moment to start embedding off-thread.
+            await asyncio.sleep(0.05)
+
+            async def _status() -> None:
+                # The three operations ``distillery_status`` performs.
+                await store.count_entries(filters=None)
+                await store.list_feed_sources()
+                ready, _ = await store.probe_readiness()
+                assert ready is True
+
+            start = asyncio.get_event_loop().time()
+            await asyncio.wait_for(_status(), timeout=2.0)
+            elapsed = asyncio.get_event_loop().time() - start
+            assert elapsed < 1.0, f"status probes took {elapsed:.3f}s under write load"
+
+            await asyncio.gather(*writers)
+        finally:
+            await store.close()
+
+    async def test_concurrent_stores_overlap_embedding_calls(self) -> None:
+        """20 stores with a 500ms/embed stub finish in well under 20*500ms.
+
+        Acceptance: spawn 20 concurrent stores backed by a provider that sleeps
+        500ms per embed; assert total wall-time < 20 * 500ms (i.e. the embedding
+        round-trips overlap instead of serialising on ``_conn_lock``).
+        """
+        import asyncio
+
+        provider = _SlowEmbeddingProvider(delay=0.5)
+        store = DuckDBStore(db_path=":memory:", embedding_provider=provider)
+        await store.initialize()
+        try:
+            start = asyncio.get_event_loop().time()
+            await asyncio.gather(
+                *(store.store(make_entry(content=f"parallel {i}")) for i in range(20))
+            )
+            elapsed = asyncio.get_event_loop().time() - start
+            serial = 20 * 0.5
+            # Generous bound (well under serial) so the test is robust to a
+            # bounded default thread-pool while still failing if embedding ran
+            # under the lock (which would force ~10s of serial sleeps).
+            assert elapsed < serial * 0.5, (
+                f"20 stores took {elapsed:.2f}s; expected overlap (<{serial * 0.5:.1f}s)"
+            )
+
+            entries = await store.list_entries(filters=None, limit=100, offset=0)
+            assert len(entries) == 20
+        finally:
+            await store.close()
+
+    async def test_concurrent_status_probes_do_not_race_read_handle(
+        self, store: DuckDBStore
+    ) -> None:
+        """Many overlapping status probes are safe on the shared read handle.
+
+        The read handle is a single ``DuckDBPyConnection`` and is therefore not
+        thread-safe for concurrent use; ``_run_read`` serialises it with a
+        dedicated ``_read_lock``.  Without that lock, overlapping probes would
+        race two ``asyncio.to_thread`` workers on one connection (the issue #416
+        hazard, observed as a SIGSEGV).  This drives heavy contention to assert
+        the reads stay correct and never crash.
+        """
+        import asyncio
+
+        for i in range(10):
+            await store.store(make_entry(content=f"seed {i}"))
+
+        async def _probe() -> None:
+            for _ in range(20):
+                assert await store.count_entries(filters=None) == 10
+                await store.list_feed_sources()
+                ready, _ = await store.probe_readiness()
+                assert ready is True
+
+        await asyncio.gather(*(_probe() for _ in range(8)))
 
 
 class TestFTSRebuildRollback:
