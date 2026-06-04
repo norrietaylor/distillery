@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -163,6 +164,78 @@ class TestDistilleryStatus:
         )
         data = _parse(result)
         assert data["embedding_provider"] == "_Nameless"
+
+
+class TestDistilleryStatusTerminalFailure:
+    """Issue #583: a terminally-invalidated store must short-circuit to
+    ``degraded`` without issuing any further queries against the dead
+    connection."""
+
+    async def test_terminal_failure_short_circuits_without_probes(
+        self,
+        config: DistilleryConfig,
+    ) -> None:
+        """When ``_terminal_failure`` is set, ``_handle_status`` returns
+        ``degraded`` immediately and never calls the downstream
+        count/list/metadata/probe methods (which would block/re-raise on a
+        dead connection)."""
+        import duckdb
+
+        store = AsyncMock()
+        store._terminal_failure = duckdb.FatalException(
+            "database has been invalidated because of a previous fatal error"
+        )
+
+        result = await _handle_status(
+            store=store,
+            config=config,
+            embedding_provider=_FakeEmbeddingProvider(),
+            tool_count=16,
+            transport="stdio",
+            started_at=datetime.now(UTC) - timedelta(seconds=5),
+        )
+        data = _parse(result)
+
+        # Short-circuited to degraded with the terminal reason.
+        assert data["status"] == "degraded"
+        assert "store_terminally_failed" in data["degraded_reasons"]
+        # entry_count is reported as unknown rather than queried.
+        assert data["store"]["entry_count"] is None
+
+        # None of the dead-DB probes were invoked.
+        store.count_entries.assert_not_called()
+        store.list_feed_sources.assert_not_called()
+        store.get_metadata.assert_not_called()
+        store.probe_readiness.assert_not_called()
+
+    async def test_terminal_failure_short_circuits_even_when_probes_raise(
+        self,
+        config: DistilleryConfig,
+    ) -> None:
+        """Even if every downstream probe would raise, the terminal
+        short-circuit returns ``degraded`` rather than propagating the
+        fatal."""
+        import duckdb
+
+        store = AsyncMock()
+        store._terminal_failure = duckdb.FatalException("database has been invalidated")
+        store.count_entries.side_effect = AssertionError("count_entries must not be called")
+        store.list_feed_sources.side_effect = AssertionError("list_feed_sources must not be called")
+        store.get_metadata.side_effect = AssertionError("get_metadata must not be called")
+        store.probe_readiness.side_effect = AssertionError("probe_readiness must not be called")
+
+        result = await _handle_status(
+            store=store,
+            config=config,
+            embedding_provider=_FakeEmbeddingProvider(),
+            tool_count=16,
+            transport="stdio",
+            started_at=None,
+        )
+        data = _parse(result)
+        assert data["status"] == "degraded"
+        assert data["degraded_reasons"] == ["store_terminally_failed"]
+        assert data["embedding_provider"] == "fake-embed-v1"
 
 
 class TestDistilleryStatusRegistration:

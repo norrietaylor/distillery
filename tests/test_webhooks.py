@@ -670,6 +670,51 @@ async def test_maintenance_handler(store: DuckDBStore, monkeypatch: pytest.Monke
 
 
 @pytest.mark.unit
+async def test_maintenance_halts_on_terminal_failure_after_poll(
+    store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #583: when the store is terminally invalidated mid-cycle (during
+    poll), ``_run_maintenance`` re-checks the flag between phases and returns
+    the 503 terminal payload immediately — it must NOT proceed to rescore or
+    classify-batch against the dead DB connection."""
+    import json as _json
+    from unittest.mock import AsyncMock, patch
+
+    import duckdb
+
+    from distillery.mcp.webhooks import _run_maintenance
+
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+    shared = _make_shared_state(store)
+
+    async def _poll_then_die(state: dict[str, Any]) -> JSONResponse:
+        # Simulate a fatal connection invalidation surfacing during poll.
+        store._terminal_failure = duckdb.FatalException(  # type: ignore[attr-defined]
+            "database has been invalidated because of a previous fatal error"
+        )
+        return JSONResponse({"ok": True, "data": {"sources_polled": 0}})
+
+    rescore_mock = AsyncMock()
+    classify_mock = AsyncMock()
+
+    with (
+        patch("distillery.mcp.webhooks._run_poll", side_effect=_poll_then_die),
+        patch("distillery.mcp.webhooks._run_rescore", rescore_mock),
+        patch("distillery.mcp.webhooks._run_classify_batch", classify_mock),
+    ):
+        resp = await _run_maintenance(shared)
+
+    assert resp.status_code == 503
+    assert resp.headers.get("retry-after") == "30"
+    body = _json.loads(bytes(resp.body).decode())
+    assert body == {"ok": False, "error": "store_terminally_failed"}
+
+    # The job halted after poll — neither downstream phase ran.
+    rescore_mock.assert_not_awaited()
+    classify_mock.assert_not_awaited()
+
+
+@pytest.mark.unit
 async def test_handler_error_surfaces_in_job(
     store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:

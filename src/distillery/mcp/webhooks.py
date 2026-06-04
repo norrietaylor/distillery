@@ -942,6 +942,14 @@ async def _run_maintenance(state: dict[str, Any]) -> JSONResponse:
         else {"ok": False, "error": poll_body.get("error", "poll failed")}
     )
 
+    # Re-check the terminal-failure flag between phases (issue #583): a fatal
+    # connection invalidation surfaced during poll must halt the job before it
+    # issues further queries against the dead DB, rather than looping each
+    # remaining phase through the same fatal.
+    terminal = _terminal_failure_response(store)
+    if terminal is not None:
+        return terminal
+
     # 2. Rescore — re-score existing entries.
     rescore_lock = _endpoint_locks.setdefault("rescore", asyncio.Lock())
     async with rescore_lock:
@@ -953,6 +961,12 @@ async def _run_maintenance(state: dict[str, Any]) -> JSONResponse:
         if rescore_body.get("ok")
         else {"ok": False, "error": rescore_body.get("error", "rescore failed")}
     )
+
+    # Re-check before classify-batch as well — a fatal raised during rescore
+    # must likewise halt the job rather than proceed against the dead DB.
+    terminal = _terminal_failure_response(store)
+    if terminal is not None:
+        return terminal
 
     # 3. Classify-batch — classify pending inbox entries.
     classify_lock = _endpoint_locks.setdefault("classify-batch", asyncio.Lock())

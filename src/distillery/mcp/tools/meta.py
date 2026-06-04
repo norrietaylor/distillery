@@ -111,9 +111,30 @@ async def _handle_status(
     # call raises the same fatal forever.  Surface ``degraded`` immediately
     # from the cached flag rather than letting count/probe queries each block
     # and re-raise — operators (and the /setup wizard) see the dead state at
-    # once instead of waiting on a probe timeout.
+    # once instead of waiting on a probe timeout.  Short-circuit BEFORE the
+    # downstream count_entries/list_feed_sources/get_metadata/probe_readiness
+    # calls so no further queries are issued against the dead connection.
     if isinstance(getattr(store, "_terminal_failure", None), BaseException):
         degraded_reasons.append("store_terminally_failed")
+        payload["status"] = "degraded"
+        payload["degraded_reasons"] = degraded_reasons
+        payload["embedding_provider"] = (
+            getattr(embedding_provider, "model_name", None) or type(embedding_provider).__name__
+        )
+        payload["store"] = {
+            "entry_count": None,
+            "db_size_bytes": _db_size_bytes(config),
+        }
+        if started_at is not None:
+            try:
+                if started_at.tzinfo is None:
+                    started_aware = started_at.replace(tzinfo=UTC)
+                else:
+                    started_aware = started_at
+                payload["uptime_seconds"] = int((datetime.now(UTC) - started_aware).total_seconds())
+            except Exception:  # noqa: BLE001
+                logger.debug("distillery_status: uptime calculation failed", exc_info=True)
+        return success_response(payload)
 
     # --- store stats ---------------------------------------------------------
     # Use the async protocol contract rather than poking at the DuckDB-specific
