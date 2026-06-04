@@ -18,6 +18,9 @@ behaviour.
 
 from __future__ import annotations
 
+from unittest import mock
+
+import duckdb
 import pytest
 
 from distillery.store.duckdb import DuckDBStore
@@ -25,6 +28,15 @@ from distillery.store.duckdb import DuckDBStore
 from .conftest import make_entry
 
 pytestmark = pytest.mark.unit
+
+
+def _fatal_invalidated() -> None:
+    """Sync hook that raises the terminal DuckDB invalidation fatal (issue #583)."""
+    raise duckdb.FatalException(
+        "FATAL Error: Failed: database has been invalidated because of a "
+        "previous fatal error. The database must be restarted prior to being "
+        "used again."
+    )
 
 
 class TestRunSyncRollback:
@@ -70,6 +82,60 @@ class TestRunSyncRollback:
 
         # Should not raise.
         DuckDBStore._rollback_quietly(DummyConn())  # type: ignore[arg-type]
+
+
+class TestTerminalFatalInvalidation:
+    """Issue #583: a FatalException carrying "has been invalidated" must
+    fail fast — set ``_terminal_failure``, log CRITICAL, request a SIGTERM
+    restart from the supervisor, and re-raise — instead of looping forever
+    against a permanently dead connection."""
+
+    async def test_fatal_invalidation_sets_flag_signals_sigterm_and_reraises(
+        self, store: DuckDBStore, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The invalidation fatal sets the flag, kills the process, and propagates."""
+        import logging
+        import os
+
+        assert store._terminal_failure is None  # type: ignore[attr-defined]
+
+        with (
+            mock.patch("distillery.store.duckdb.os.kill") as mock_kill,
+            caplog.at_level(logging.CRITICAL, logger="distillery.store.duckdb"),
+            pytest.raises(duckdb.FatalException, match="has been invalidated"),
+        ):
+            await store._run_sync(_fatal_invalidated)  # type: ignore[attr-defined]
+
+        # Flag recorded so MCP/webhook layers can fail fast on the next call.
+        assert store._terminal_failure is not None  # type: ignore[attr-defined]
+        assert "has been invalidated" in str(store._terminal_failure)  # type: ignore[attr-defined]
+
+        # Supervisor restart requested via SIGTERM to *our own* pid.
+        mock_kill.assert_called_once_with(os.getpid(), __import__("signal").SIGTERM)
+
+        # Operators get a CRITICAL log, not a silent 32 MB of stack traces.
+        assert any(r.levelno >= logging.CRITICAL for r in caplog.records)
+
+    async def test_non_invalidating_fatal_does_not_signal_or_set_flag(
+        self, store: DuckDBStore
+    ) -> None:
+        """A FatalException without the invalidation marker must NOT fail fast.
+
+        It rolls back like any other error and leaves the terminal flag unset
+        so the supervisor is not asked to restart on a recoverable fatal.
+        """
+
+        def other_fatal() -> None:
+            raise duckdb.FatalException("FATAL Error: some other transient fatal")
+
+        with (
+            mock.patch("distillery.store.duckdb.os.kill") as mock_kill,
+            pytest.raises(duckdb.FatalException, match="some other transient"),
+        ):
+            await store._run_sync(other_fatal)  # type: ignore[attr-defined]
+
+        mock_kill.assert_not_called()
+        assert store._terminal_failure is None  # type: ignore[attr-defined]
 
 
 class TestReadAfterWriteFailure:
@@ -187,6 +253,46 @@ class TestStatusDegraded:
         # ``exc_info``; ``caplog.text`` renders it so the raw message is
         # searchable there.
         assert "DB unreadable" in caplog.text
+
+    async def test_status_degraded_immediately_on_terminal_failure(
+        self,
+        store: DuckDBStore,
+        mock_embedding_provider: object,
+    ) -> None:
+        """Issue #583: once ``_terminal_failure`` is set, status reports
+        ``degraded`` from the cached flag — it must NOT depend on the readiness
+        probe running (which against a dead connection would block/re-raise).
+        """
+        from distillery.config import DistilleryConfig
+        from distillery.mcp.tools.meta import _handle_status
+
+        from .conftest import parse_mcp_response
+
+        # Simulate the post-fatal state recorded by ``_run_sync``.
+        store._terminal_failure = duckdb.FatalException(  # type: ignore[attr-defined]
+            "database has been invalidated because of a previous fatal error"
+        )
+
+        async def _fail_probe() -> tuple[bool, str | None]:
+            raise AssertionError("probe_readiness must not be relied upon for terminal status")
+
+        # Even if the probe is broken, status must already be degraded from the
+        # flag.  (We do not assert the probe is never called — only that the
+        # terminal reason is present regardless of probe outcome.)
+        store.probe_readiness = _fail_probe  # type: ignore[method-assign]
+
+        result = await _handle_status(
+            store=store,
+            config=DistilleryConfig(),
+            embedding_provider=mock_embedding_provider,
+            tool_count=16,
+            transport="http",
+            started_at=None,
+        )
+        payload = parse_mcp_response(result)
+
+        assert payload["status"] == "degraded"
+        assert "store_terminally_failed" in payload["degraded_reasons"]
 
 
 class _CorruptPagesConn:

@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import re
+import signal
 import uuid
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
@@ -198,6 +199,16 @@ class DuckDBStore:
         # be instantiated outside an event loop (e.g. construction at
         # module import in tests); see ``_get_conn_lock``.
         self._conn_lock: asyncio.Lock | None = None
+        # Set when DuckDB raises a ``FatalException`` that permanently
+        # invalidates the connection (e.g. "database has been invalidated
+        # because of a previous fatal error").  Once set, the connection is
+        # dead for the life of the process: every subsequent operation raises
+        # the same fatal forever.  ``_run_sync`` sets this flag, logs at
+        # CRITICAL, and signals the supervisor (SIGTERM) so the process is
+        # restarted instead of looping 500s indefinitely (issue #583).  The
+        # MCP/webhook layer reads it to fail fast with ``503 Retry-After``
+        # and to report ``degraded`` status without waiting on a probe.
+        self._terminal_failure: BaseException | None = None
 
     # ------------------------------------------------------------------
     # Cloud path helpers
@@ -1058,6 +1069,30 @@ class DuckDBStore:
         async with self._get_conn_lock():
             try:
                 return await asyncio.to_thread(fn, *args, **kwargs)
+            except duckdb.FatalException as exc:
+                # A ``FatalException`` carrying "has been invalidated"
+                # permanently poisons the connection: every later operation
+                # raises the same fatal forever, so a ``ROLLBACK`` cannot
+                # recover it.  Rather than loop 500s indefinitely (one
+                # incident ran 7.5 days writing 32 MB of identical stacks —
+                # issue #583), record the failure, log at CRITICAL, and ask
+                # the supervisor (launchd/systemd) to restart us via SIGTERM.
+                # The fresh process either replays the WAL cleanly or fails
+                # visibly at startup.  Non-invalidating fatals fall through to
+                # the generic rollback path below.
+                if "has been invalidated" in str(exc):
+                    self._terminal_failure = exc
+                    logger.critical(
+                        "DuckDB connection terminally invalidated; signalling "
+                        "supervisor for restart (SIGTERM): %s",
+                        exc,
+                    )
+                    os.kill(os.getpid(), signal.SIGTERM)
+                    raise
+                conn = self._conn
+                if conn is not None:
+                    await asyncio.to_thread(self._rollback_quietly, conn)
+                raise
             except Exception:
                 # Catching ``Exception`` — not ``BaseException`` — so that
                 # ``asyncio.CancelledError`` does not trigger rollback.
