@@ -118,6 +118,56 @@ async def test_verify_entries_readable_raises_on_unreadable_readback(
     assert "read-back failed" in str(exc_info.value)
 
 
+async def test_verify_entries_readable_materialises_embedding_column(
+    store: DuckDBStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The read-back SELECT materialises the ``embedding`` column (issue #584).
+
+    ``embedding`` (FLOAT[1024]) is a named corruption target, so a torn rewrite
+    isolated to that column must be scanned and caught by the guard.
+    """
+    entry_id = await store.store(make_entry(content="entry"))
+
+    captured: list[str] = []
+
+    class _Capturing:
+        def __init__(self, real: Any) -> None:
+            self._real = real
+
+        def execute(self, sql: str, *args: Any, **kwargs: Any) -> Any:
+            captured.append(sql)
+            return self._real.execute(sql, *args, **kwargs)
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._real, name)
+
+    monkeypatch.setattr(store, "_conn", _Capturing(store.connection))
+    await store.verify_entries_readable([entry_id])
+
+    readback = next(s for s in captured if "FROM entries WHERE id = ANY" in s)
+    assert "embedding" in readback
+
+
+async def test_verify_entries_readable_raises_on_unreadable_embedding(
+    store: DuckDBStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A torn embedding column surfaced during read-back fails loud."""
+    entry_id = await store.store(make_entry(content="entry"))
+
+    proxy = _FailOnSQLConnection(
+        store.connection,
+        marker="embedding FROM entries WHERE id = ANY",
+        message="IO Error: Failed to scan FLOAT[1024] embedding - corrupt data page",
+    )
+    monkeypatch.setattr(store, "_conn", proxy)
+
+    with pytest.raises(EntriesIntegrityError) as exc_info:
+        await store.verify_entries_readable([entry_id])
+    assert "read-back failed" in str(exc_info.value)
+
+
 async def test_verify_entries_readable_raises_on_storage_sweep_failure(
     store: DuckDBStore,
     monkeypatch: pytest.MonkeyPatch,
