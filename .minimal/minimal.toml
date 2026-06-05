@@ -1,0 +1,36 @@
+# Vendored from jtnkminimal/min-env minimal.toml @ d2877340
+[upstream]
+repo = "https://github.com/gominimal/pkgs"
+branch = "main"
+locked_commit = "b0b729b16c426f1f9daaadfe6d80adaea3f7e5a1"
+
+[stack]
+use = "shell"
+runtime_packages = []
+
+[defaults]
+state_key = "dev"
+
+[tasks.shell]
+interactive = true
+packages = ["base"]
+exec = "bash --noprofile -l"
+
+[tasks.claude]
+packages = ["base", "claude-code"]
+exec = "claude --dangerously-skip-permissions"
+patches.dir."~/.claude" = "read-write"
+patches.file."~/.claude.json" = "read-write"
+
+[tasks.dev]
+interactive = true
+packages = ["claude-code", "base", "fish", "vim", "zellij", "fd", "fzf", "ripgrep", "git", "jq"]
+patches.dir."~/.claude" = "read-write"
+patches.file."~/.claude.json" = "read-write"
+patches.file."~/.gitconfig" = "read-only"
+patches.file."~/.vimrc" = "read-write"
+exec = "/opt/min-env/scripts/setup-dev.sh"
+
+[tasks.menu]
+exec = "mintui"
+interactive = true
