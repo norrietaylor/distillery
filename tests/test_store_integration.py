@@ -310,6 +310,32 @@ class TestFindSimilarIntegration:
         results = await store.find_similar("similar item", threshold=0.0, limit=3)
         assert len(results) <= 3
 
+    async def test_find_similar_excludes_archived(
+        self,
+        store: DuckDBStore,
+        embedding_provider: DeterministicEmbeddingProvider,
+    ) -> None:
+        """Soft-deleted (archived) entries must not surface in find_similar.
+
+        find_similar drives pre-store deduplication: an archived entry is
+        conceptually removed, so it must not be returned as a near-duplicate
+        match (which would recommend SKIP/MERGE/LINK against dead content).
+        """
+        dup_vec = [1.0, 0.0, 0.0, 0.0]
+        text = "knowledge that will be archived"
+        embedding_provider.register(text, dup_vec)
+
+        entry = make_entry(content=text)
+        entry_id = await store.store(entry)
+
+        # Soft-delete it (sets status to archived).
+        assert await store.delete(entry_id) is True
+
+        # An archived entry must not be returned as a similarity match.
+        results = await store.find_similar(text, threshold=0.9, limit=10)
+        result_ids = [r.entry.id for r in results]
+        assert entry_id not in result_ids
+
 
 # ---------------------------------------------------------------------------
 # Full lifecycle: store -> update -> search reflects changes
