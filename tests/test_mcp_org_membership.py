@@ -369,6 +369,65 @@ class TestOrgMembershipCaching:
         assert second is False
         assert api_call_count == 1
 
+    async def test_transient_error_is_not_cached(self) -> None:
+        """A fail-closed transient error must NOT poison the cache.
+
+        A momentary GitHub outage (network error or 5xx) makes the check
+        fail closed (deny) for that request, which is correct.  But the
+        denial must not be cached: once GitHub recovers, a legitimate org
+        member must be admitted on the very next request rather than being
+        locked out for the full cache TTL.
+        """
+        import httpx
+
+        checker = OrgMembershipChecker(allowed_orgs=["acme"], cache_ttl_seconds=3600)
+        call_count = 0
+
+        async def fake_get(url: str, **kwargs: object) -> MagicMock:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # First check: GitHub is briefly unreachable -> fail closed.
+                raise httpx.ConnectError("timeout")
+            # GitHub has recovered: alice is a member.
+            return _mock_response(204)
+
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client = _make_async_client_mock()
+            mock_client.get = fake_get
+            mock_client_cls.return_value = mock_client
+
+            first = await checker.is_allowed("alice", hint_token="tok")
+            second = await checker.is_allowed("alice", hint_token="tok")
+
+        assert first is False  # transient error -> fail closed
+        assert second is True  # recovered -> member admitted (not stuck on cached False)
+        assert call_count == 2  # second request must re-hit the API, not the cache
+
+    async def test_unexpected_status_is_not_cached(self) -> None:
+        """A 5xx from the members endpoint must not be cached either."""
+        checker = OrgMembershipChecker(allowed_orgs=["acme"], cache_ttl_seconds=3600)
+        call_count = 0
+
+        async def fake_get(url: str, **kwargs: object) -> MagicMock:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _mock_response(503)  # transient upstream error
+            return _mock_response(204)
+
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client = _make_async_client_mock()
+            mock_client.get = fake_get
+            mock_client_cls.return_value = mock_client
+
+            first = await checker.is_allowed("alice", hint_token="tok")
+            second = await checker.is_allowed("alice", hint_token="tok")
+
+        assert first is False
+        assert second is True
+        assert call_count == 2
+
 
 # ---------------------------------------------------------------------------
 # Config parsing
