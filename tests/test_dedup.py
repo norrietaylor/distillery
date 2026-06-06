@@ -391,3 +391,23 @@ class TestHighestScore:
         result = await checker.check("Content")
 
         assert result.action == DeduplicationAction.MERGE
+
+
+# ---------------------------------------------------------------------------
+# Empty-content match does not crash
+# ---------------------------------------------------------------------------
+
+
+class TestEmptyContentMatch:
+    """A similar entry whose content is empty must not raise IndexError."""
+
+    async def test_empty_content_match_returns_result(self) -> None:
+        # An existing entry with empty content can be returned by find_similar.
+        # Extracting its first line must not crash the dedup check.
+        store = _make_mock_store([_make_search_result(0.97, content="")])
+        checker = _make_checker(store)
+
+        result = await checker.check("Some content")
+
+        assert result.action == DeduplicationAction.SKIP
+        assert result.highest_score == pytest.approx(0.97)
