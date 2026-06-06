@@ -351,6 +351,38 @@ class TestJinaRateLimitRetry:
         assert result[0] == [0.1, 0.2, 0.3, 0.4]
         assert result[1] == [0.5, 0.6, 0.7, 0.8]
 
+    def test_embed_batch_reorders_out_of_order_response(self) -> None:
+        """Embeddings are reordered by ``index`` to match input order.
+
+        The Jina API (like OpenAI's) does not guarantee the ``data`` array is
+        returned in request order; each item carries an ``index`` field. If the
+        provider trusts array order, a stored entry can silently receive another
+        entry's embedding, corrupting vector search.
+        """
+        vec_first = [0.1, 0.1, 0.1, 0.1]
+        vec_second = [0.9, 0.9, 0.9, 0.9]
+        # API returns the second input's embedding first (index out of order).
+        out_of_order_payload = {
+            "data": [
+                {"embedding": vec_second, "index": 1},
+                {"embedding": vec_first, "index": 0},
+            ]
+        }
+        good_response = _mock_httpx_response(200, out_of_order_payload)
+        good_response.raise_for_status.return_value = None
+
+        provider = JinaEmbeddingProvider(api_key="test-key", dimensions=4)
+
+        with patch("httpx.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client_cls.return_value.__enter__.return_value = mock_client
+            mock_client.post.return_value = good_response
+
+            result = provider.embed_batch(["first", "second"])
+
+        assert result[0] == vec_first
+        assert result[1] == vec_second
+
     def test_exhausted_5xx_raises_embedding_provider_error(self) -> None:
         """Exhausted 5xx retries raise EmbeddingProviderError (not rate limited).
 

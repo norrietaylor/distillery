@@ -278,8 +278,19 @@ class JinaEmbeddingProvider:
                 f"Jina API returned {len(items)} embeddings, expected {expected_count}."
             )
 
+        # The API does not guarantee ``data`` is returned in request order;
+        # each item carries an ``index`` field. Sort by it so the returned
+        # vectors line up with the input texts (mirrors the OpenAI provider).
+        # Items without a usable ``index`` fall back to their array position.
+        items = sorted(
+            enumerate(items),
+            key=lambda pair: pair[1].get("index", pair[0])
+            if isinstance(pair[1], dict)
+            else pair[0],
+        )
+
         embeddings: list[list[float]] = []
-        for i, item in enumerate(items):
+        for i, (_, item) in enumerate(items):
             if "embedding" not in item:
                 raise RuntimeError(
                     f"Jina API response item {i} missing 'embedding' field. "
