@@ -49,7 +49,9 @@ case GraphRAG-style global sensemaking wins on.
 ## Distillery primitives used vs. gaps found
 
 Used as-is: `store_batch`, `add_relation`, `list_relations` (full edge list),
-`search`, arbitrary node metadata, the native `person` type.
+`search`, arbitrary node metadata, the native `person` type. Distillery also
+ships `bridges` and `communities` graph metrics via `distillery_relations
+action="metrics"` — community detection is already built in.
 
 Gaps surfaced (build-on-top, per the architecture plan):
 
@@ -57,8 +59,8 @@ Gaps surfaced (build-on-top, per the architecture plan):
   only. Edge recency/weight (interest decay, engagement strength) had to live in
   node metadata or in-script (`DEMAND_RECENCY`). Bi-temporal edges (the
   Graphiti lesson) would need a schema extension.
-- **No built-in graph algorithms.** Community detection, Burt constraint, link
-  prediction all run in networkx on top — Distillery is the substrate, not the
-  analytics engine.
+- **Some graph algorithms not built in.** `bridges` and `communities` ship in
+  `distillery.graph.metrics`; the spikes' Burt constraint (structural holes) and
+  Adamic-Adar link prediction run in networkx on top here.
 - **No external-platform ingress.** Feeds are RSS/GitHub; an official-API/OAuth
   adapter is required (and is the compliance boundary).
