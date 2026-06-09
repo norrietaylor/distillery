@@ -473,6 +473,10 @@ class DistilleryStore(Protocol):
         from_id: str,
         to_id: str,
         relation_type: str,
+        weight: float | None = None,
+        valid_at: str | datetime | None = None,
+        invalid_at: str | datetime | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> str:
         """Create a typed relation between two entries and return its UUID.
 
@@ -481,9 +485,17 @@ class DistilleryStore(Protocol):
             to_id: UUID string of the target entry.
             relation_type: Freeform label for the relation (e.g. ``"link"``,
                 ``"blocks"``, ``"related"``).
+            weight: Optional edge strength (e.g. interest/engagement magnitude).
+            valid_at: Optional instant the relationship became true (datetime or
+                ISO 8601 string).
+            invalid_at: Optional instant it stopped being true (``None`` = still
+                valid) — the bi-temporal validity window.
+            metadata: Optional arbitrary per-edge attributes (JSON-serialisable).
 
         Returns:
-            The UUID string of the newly created relation row.
+            The UUID string of the relation row.  Idempotent on the
+            ``(from_id, to_id, relation_type)`` triple; on a re-assert the
+            supplied (non-``None``) attributes are upserted onto the existing row.
 
         Raises:
             ValueError: If either ``from_id`` or ``to_id`` does not exist in
@@ -528,7 +540,9 @@ class DistilleryStore(Protocol):
 
         Returns:
             List of dicts, each containing keys: ``id``, ``from_id``,
-            ``to_id``, ``relation_type``, ``created_at`` (ISO 8601 str).
+            ``to_id``, ``relation_type``, ``created_at`` (ISO 8601 str),
+            ``weight`` (float | None), ``valid_at`` / ``invalid_at`` (ISO 8601
+            str | None), ``metadata`` (dict | None).
             Ordered by ascending ``created_at``.
         """
         ...
@@ -554,8 +568,9 @@ class DistilleryStore(Protocol):
 
         Returns:
             List of dicts with keys: ``id``, ``from_id``, ``to_id``,
-            ``relation_type``, ``created_at`` (ISO 8601 str).  Ordered by
-            ascending ``created_at``.
+            ``relation_type``, ``created_at`` (ISO 8601 str), ``weight``
+            (float | None), ``valid_at`` / ``invalid_at`` (ISO 8601 str | None),
+            ``metadata`` (dict | None).  Ordered by ascending ``created_at``.
         """
         ...
 

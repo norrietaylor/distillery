@@ -3232,7 +3232,32 @@ class DuckDBStore:
 
         return diag
 
-    def _sync_add_relation(self, from_id: str, to_id: str, relation_type: str) -> str:
+    @staticmethod
+    def _coerce_relation_timestamp(value: str | datetime | None) -> datetime | None:
+        """Coerce a relation timestamp input to a tz-aware datetime (or None).
+
+        Accepts ``datetime`` objects, ISO 8601 strings (naive strings are
+        treated as UTC), or ``None``.
+        """
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value
+        dt = datetime.fromisoformat(value)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt
+
+    def _sync_add_relation(
+        self,
+        from_id: str,
+        to_id: str,
+        relation_type: str,
+        weight: float | None = None,
+        valid_at: str | datetime | None = None,
+        invalid_at: str | datetime | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
         """Synchronous implementation of add_relation(); called via asyncio.to_thread."""
         assert self._conn is not None
         # Validate that both entries exist (including archived — preserves historical links).
@@ -3259,19 +3284,57 @@ class DuckDBStore:
             "SELECT id FROM entry_relations WHERE from_id = ? AND to_id = ? AND relation_type = ?",
             [from_id, to_id, relation_type],
         ).fetchone()
+        valid_at_dt = self._coerce_relation_timestamp(valid_at)
+        invalid_at_dt = self._coerce_relation_timestamp(invalid_at)
+        metadata_json = json.dumps(metadata) if metadata is not None else None
         if existing is not None:
+            relation_id = str(existing[0])
+            # Re-asserting an edge with fresh attributes upserts the supplied
+            # (non-None) fields onto the existing row; the (from,to,type) triple
+            # stays idempotent.
+            set_parts: list[str] = []
+            set_params: list[Any] = []
+            if weight is not None:
+                set_parts.append("weight = ?")
+                set_params.append(weight)
+            if valid_at_dt is not None:
+                set_parts.append("valid_at = ?")
+                set_params.append(valid_at_dt)
+            if invalid_at_dt is not None:
+                set_parts.append("invalid_at = ?")
+                set_params.append(invalid_at_dt)
+            if metadata_json is not None:
+                set_parts.append("metadata = ?")
+                set_params.append(metadata_json)
+            if set_parts:
+                self._conn.execute(
+                    f"UPDATE entry_relations SET {', '.join(set_parts)} WHERE id = ?",
+                    [*set_params, relation_id],
+                )
             logger.debug(
-                "Relation already exists id=%s from=%s to=%s type=%s",
-                existing[0],
+                "Relation already exists id=%s from=%s to=%s type=%s (attrs upserted=%d)",
+                relation_id,
                 from_id,
                 to_id,
                 relation_type,
+                len(set_parts),
             )
-            return str(existing[0])
+            return relation_id
         relation_id = str(uuid.uuid4())
         self._conn.execute(
-            "INSERT INTO entry_relations (id, from_id, to_id, relation_type) VALUES (?, ?, ?, ?)",
-            [relation_id, from_id, to_id, relation_type],
+            "INSERT INTO entry_relations "
+            "(id, from_id, to_id, relation_type, weight, valid_at, invalid_at, metadata) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                relation_id,
+                from_id,
+                to_id,
+                relation_type,
+                weight,
+                valid_at_dt,
+                invalid_at_dt,
+                metadata_json,
+            ],
         )
         logger.debug(
             "Added relation id=%s from=%s to=%s type=%s",
@@ -3287,18 +3350,30 @@ class DuckDBStore:
         from_id: str,
         to_id: str,
         relation_type: str,
+        weight: float | None = None,
+        valid_at: str | datetime | None = None,
+        invalid_at: str | datetime | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> str:
         """Create a typed relation between two entries and return its UUID.
 
         The method is idempotent: if a relation with the same ``(from_id,
         to_id, relation_type)`` triple already exists, its existing UUID is
-        returned instead of creating a duplicate row.
+        returned.  When edge attributes are supplied on a re-assert, the
+        provided (non-None) ``weight`` / ``valid_at`` / ``invalid_at`` /
+        ``metadata`` fields are upserted onto the existing row.
 
         Args:
             from_id: UUID string of the source entry.
             to_id: UUID string of the target entry.
             relation_type: Freeform label for the relation (e.g. ``"link"``,
                 ``"blocks"``, ``"related"``).
+            weight: Optional edge strength (e.g. interest/engagement magnitude).
+            valid_at: Optional instant the relationship became true (datetime or
+                ISO 8601 string; naive strings treated as UTC).
+            invalid_at: Optional instant it stopped being true (NULL = still
+                valid) — the bi-temporal validity window.
+            metadata: Optional arbitrary per-edge attributes (JSON-serialisable).
 
         Returns:
             The UUID string of the relation row (existing or newly created).
@@ -3307,7 +3382,16 @@ class DuckDBStore:
             ValueError: If either ``from_id`` or ``to_id`` does not exist in
                 the store.
         """
-        return await self._run_sync(self._sync_add_relation, from_id, to_id, relation_type)
+        return await self._run_sync(
+            self._sync_add_relation,
+            from_id,
+            to_id,
+            relation_type,
+            weight=weight,
+            valid_at=valid_at,
+            invalid_at=invalid_at,
+            metadata=metadata,
+        )
 
     def _sync_apply_correction(
         self,
@@ -3407,6 +3491,44 @@ class DuckDBStore:
         """
         return await self._run_sync(self._sync_apply_correction, new_entry, wrong_entry_id)
 
+    # Column list shared by get_related / list_relations so both return the same
+    # shape. created_at / valid_at / invalid_at are TIMESTAMPTZ rendered as true
+    # UTC ISO 8601 with a 'Z' suffix (`AT TIME ZONE 'UTC'` normalises off the
+    # session tz before formatting; NULL -> NULL -> None); metadata is parsed
+    # from its JSON column.
+    _RELATION_SELECT_COLUMNS = (
+        "id, from_id, to_id, relation_type, "
+        "strftime(created_at AT TIME ZONE 'UTC', '%Y-%m-%dT%H:%M:%S') || 'Z', "
+        "weight, "
+        "strftime(valid_at AT TIME ZONE 'UTC', '%Y-%m-%dT%H:%M:%S') || 'Z', "
+        "strftime(invalid_at AT TIME ZONE 'UTC', '%Y-%m-%dT%H:%M:%S') || 'Z', "
+        "metadata"
+    )
+
+    @staticmethod
+    def _relation_row_to_dict(row: tuple[Any, ...]) -> dict[str, Any]:
+        """Map a row selected with ``_RELATION_SELECT_COLUMNS`` to a result dict."""
+        metadata_raw = row[8]
+        metadata: dict[str, Any] | None = None
+        if metadata_raw is not None:
+            try:
+                metadata = (
+                    json.loads(metadata_raw) if isinstance(metadata_raw, str) else metadata_raw
+                )
+            except (json.JSONDecodeError, TypeError):
+                metadata = None
+        return {
+            "id": row[0],
+            "from_id": row[1],
+            "to_id": row[2],
+            "relation_type": row[3],
+            "created_at": row[4],
+            "weight": row[5],
+            "valid_at": row[6],
+            "invalid_at": row[7],
+            "metadata": metadata,
+        }
+
     def _sync_get_related(
         self,
         entry_id: str,
@@ -3437,22 +3559,11 @@ class DuckDBStore:
 
         where_clause = " AND ".join(conditions)
         sql = (
-            f"SELECT id, from_id, to_id, relation_type, "
-            f"strftime(created_at, '%Y-%m-%dT%H:%M:%S') || 'Z' "
+            f"SELECT {self._RELATION_SELECT_COLUMNS} "
             f"FROM entry_relations WHERE {where_clause} ORDER BY created_at ASC"
         )
         result = self._conn.execute(sql, params)
-        rows = result.fetchall()
-        return [
-            {
-                "id": row[0],
-                "from_id": row[1],
-                "to_id": row[2],
-                "relation_type": row[3],
-                "created_at": row[4],
-            }
-            for row in rows
-        ]
+        return [self._relation_row_to_dict(row) for row in result.fetchall()]
 
     async def get_related(
         self,
@@ -3470,7 +3581,9 @@ class DuckDBStore:
 
         Returns:
             List of dicts with keys: ``id``, ``from_id``, ``to_id``,
-            ``relation_type``, ``created_at`` (ISO 8601 str).
+            ``relation_type``, ``created_at`` (ISO 8601 str), ``weight``
+            (float | None), ``valid_at`` / ``invalid_at`` (ISO 8601 str | None),
+            ``metadata`` (dict | None).
         """
         return await self._run_sync(self._sync_get_related, entry_id, direction, relation_type)
 
@@ -3501,20 +3614,9 @@ class DuckDBStore:
         """Synchronous implementation of list_relations(); called via asyncio.to_thread."""
         assert self._conn is not None
         rows = self._conn.execute(
-            "SELECT id, from_id, to_id, relation_type, "
-            "strftime(created_at, '%Y-%m-%dT%H:%M:%S') || 'Z' "
-            "FROM entry_relations ORDER BY created_at ASC"
+            f"SELECT {self._RELATION_SELECT_COLUMNS} FROM entry_relations ORDER BY created_at ASC"
         ).fetchall()
-        return [
-            {
-                "id": row[0],
-                "from_id": row[1],
-                "to_id": row[2],
-                "relation_type": row[3],
-                "created_at": row[4],
-            }
-            for row in rows
-        ]
+        return [self._relation_row_to_dict(row) for row in rows]
 
     async def list_relations(self) -> list[dict[str, Any]]:
         """Return every row from ``entry_relations`` as a list of dicts.
@@ -3527,8 +3629,9 @@ class DuckDBStore:
 
         Returns:
             List of dicts with keys: ``id``, ``from_id``, ``to_id``,
-            ``relation_type``, ``created_at`` (ISO 8601 str).  Ordered by
-            ascending ``created_at``.
+            ``relation_type``, ``created_at`` (ISO 8601 str), ``weight``
+            (float | None), ``valid_at`` / ``invalid_at`` (ISO 8601 str | None),
+            ``metadata`` (dict | None).  Ordered by ascending ``created_at``.
         """
         return await self._run_sync(self._sync_list_relations)
 
