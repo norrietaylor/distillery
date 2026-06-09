@@ -11,9 +11,36 @@ import pytest
 pytest.importorskip("networkx")
 
 from distillery.graph.builders import build_relations_graph  # noqa: E402
-from distillery.graph.metrics import bridges, communities  # noqa: E402
+from distillery.graph.metrics import (  # noqa: E402
+    bridges,
+    communities,
+    constraint,
+    link_prediction,
+)
 
 pytestmark = pytest.mark.unit
+
+
+def _bowtie() -> list[dict[str, str]]:
+    """M brokers two otherwise-disconnected pairs: {A,B} and {X,Y}."""
+    return [
+        {"from_id": "M", "to_id": "A", "relation_type": "link"},
+        {"from_id": "M", "to_id": "B", "relation_type": "link"},
+        {"from_id": "A", "to_id": "B", "relation_type": "link"},
+        {"from_id": "M", "to_id": "X", "relation_type": "link"},
+        {"from_id": "M", "to_id": "Y", "relation_type": "link"},
+        {"from_id": "X", "to_id": "Y", "relation_type": "link"},
+    ]
+
+
+def _shared_neighbors() -> list[dict[str, str]]:
+    """A and B share neighbours C, D but are not directly connected."""
+    return [
+        {"from_id": "A", "to_id": "C", "relation_type": "link"},
+        {"from_id": "A", "to_id": "D", "relation_type": "link"},
+        {"from_id": "B", "to_id": "C", "relation_type": "link"},
+        {"from_id": "B", "to_id": "D", "relation_type": "link"},
+    ]
 
 
 def test_bridges_star_graph_center_first() -> None:
@@ -54,3 +81,43 @@ def test_communities_two_clusters_with_bridge() -> None:
     assert len(comms) == 2
     members = sorted([sorted(c) for c in comms], key=lambda x: x[0])
     assert members == [["A", "B", "C"], ["X", "Y", "Z"]]
+
+
+def test_constraint_broker_has_lowest_score() -> None:
+    """In a bowtie, the broker M sits in a structural hole -> lowest constraint."""
+    g = build_relations_graph(_bowtie(), directed=True)
+    ranked = constraint(g, k=10)
+    assert ranked
+    assert ranked[0][0] == "M"
+    scores = dict(ranked)
+    # The broker is less constrained than a node embedded in a dense triangle.
+    assert scores["M"] < scores["A"]
+
+
+def test_constraint_empty_graph_returns_empty() -> None:
+    g = build_relations_graph([], directed=True)
+    assert constraint(g, k=10) == []
+
+
+def test_link_prediction_source_predicts_shared_neighbour() -> None:
+    """From A, the top Adamic-Adar candidate is B (they share C and D)."""
+    g = build_relations_graph(_shared_neighbors(), directed=True)
+    preds = link_prediction(g, source="A", k=5)
+    assert preds
+    src, tgt, score = preds[0]
+    assert src == "A"
+    assert tgt == "B"
+    assert score > 0
+
+
+def test_link_prediction_global_surfaces_shared_pair() -> None:
+    """With no source, the A-B (and C-D) non-edges are scored across the graph."""
+    g = build_relations_graph(_shared_neighbors(), directed=True)
+    preds = link_prediction(g, k=10)
+    pairs = {frozenset((u, v)) for u, v, _ in preds}
+    assert frozenset(("A", "B")) in pairs
+
+
+def test_link_prediction_unknown_source_returns_empty() -> None:
+    g = build_relations_graph(_shared_neighbors(), directed=True)
+    assert link_prediction(g, source="ZZZ", k=5) == []

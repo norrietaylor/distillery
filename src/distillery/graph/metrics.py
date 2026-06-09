@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from distillery.graph import nx
@@ -25,3 +26,64 @@ def communities(g: Any) -> list[set[str]]:
         return []
     undirected = g.to_undirected() if g.is_directed() else g
     return list(nx.community.louvain_communities(undirected))
+
+
+def constraint(g: Any, *, k: int = 10) -> list[tuple[str, float]]:
+    """Top-k structural-hole brokers by Burt's constraint (ascending).
+
+    Computed on the undirected projection. Burt's constraint is *low* for nodes
+    that bridge otherwise-disconnected neighbours (a structural hole / broker)
+    and *high* for nodes embedded in a dense, redundant clique. Results are
+    sorted ascending, so the first entries are the strongest brokers.
+
+    Nodes with no neighbours (constraint is NaN) are excluded.
+    """
+    _require_networkx()
+    if g.number_of_nodes() == 0:
+        return []
+    undirected = g.to_undirected() if g.is_directed() else g
+    raw = nx.constraint(undirected)
+    ranked = [
+        (node, float(value))
+        for node, value in raw.items()
+        if value is not None and not math.isnan(value)
+    ]
+    ranked.sort(key=lambda kv: kv[1])
+    return ranked[:k]
+
+
+def link_prediction(
+    g: Any, *, source: str | None = None, k: int = 10
+) -> list[tuple[str, str, float]]:
+    """Top-k predicted edges by the Adamic-Adar index (descending).
+
+    Adamic-Adar scores a candidate (non-existent) edge by its shared
+    neighbours, weighting each by ``1 / log(degree)`` so a connection through a
+    niche shared node counts more than one through a hub. Computed on the
+    undirected projection.
+
+    When *source* is given, only candidate edges from that node to its
+    non-neighbours are scored (emerging adjacencies for one entry); the source
+    must be a node in the graph or an empty list is returned. When *source* is
+    ``None``, all non-existent edges are scored — bound the graph first (e.g.
+    via ``scope="ego"``) since this is quadratic in node count.
+
+    Returns a list of ``(source, target, score)`` tuples.
+    """
+    _require_networkx()
+    if g.number_of_nodes() == 0:
+        return []
+    undirected = g.to_undirected() if g.is_directed() else g
+    ebunch: list[tuple[str, str]] | None
+    if source is not None:
+        if source not in undirected:
+            return []
+        excluded = set(undirected[source])
+        excluded.add(source)
+        ebunch = [(source, target) for target in undirected.nodes if target not in excluded]
+        if not ebunch:
+            return []
+    else:
+        ebunch = None
+    ranked = sorted(nx.adamic_adar_index(undirected, ebunch), key=lambda t: t[2], reverse=True)
+    return [(u, v, float(p)) for u, v, p in ranked[:k]]
