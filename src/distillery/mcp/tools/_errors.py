@@ -53,6 +53,10 @@ class ToolErrorCode(StrEnum):
         UPSTREAM_ERROR: An upstream dependency returned an error (5xx,
             transport failure) after internal retries were exhausted.
             Response ``details`` mirrors ``UPSTREAM_RATE_LIMITED``.
+        STORE_TRANSIENT: A transient database fault interrupted the
+            operation (e.g. aborted/poisoned transaction on the shared
+            DuckDB connection, file-lock contention). The server has
+            already rolled back; the request is retryable with backoff.
     """
 
     INVALID_PARAMS = "INVALID_PARAMS"
@@ -64,6 +68,7 @@ class ToolErrorCode(StrEnum):
     RATE_LIMITED = "RATE_LIMITED"
     UPSTREAM_RATE_LIMITED = "UPSTREAM_RATE_LIMITED"
     UPSTREAM_ERROR = "UPSTREAM_ERROR"
+    STORE_TRANSIENT = "STORE_TRANSIENT"
 
 
 def tool_error(code: ToolErrorCode | str, message: str) -> tuple[ToolErrorCode | str, str]:

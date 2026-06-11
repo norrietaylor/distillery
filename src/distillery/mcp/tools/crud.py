@@ -48,6 +48,29 @@ def _normalize_db_path(raw: str) -> str:
     return os.path.expanduser(raw)
 
 
+def _budget_check_error_response(exc: Exception) -> list[types.TextContent]:
+    """Categorize a non-budget ``record_and_check`` failure into an error response.
+
+    ``record_and_check`` is pure DuckDB bookkeeping — no embedding-provider
+    HTTP calls happen inside it — so non-budget failures here are either
+    transient database faults or genuine bugs (see issue #557). DuckDB
+    raises ``duckdb.OperationalError`` subclasses for the transient class:
+    ``TransactionException`` (aborted/poisoned transaction on the shared
+    connection — see issue #363), ``IOException`` (file-lock contention),
+    and ``SerializationException`` (write-write conflicts). Those are safe
+    to retry with backoff once the caller's rollback recovery has run, so
+    they map to ``STORE_TRANSIENT``; everything else stays ``INTERNAL``.
+    """
+    import duckdb
+
+    if isinstance(exc, duckdb.OperationalError):
+        return error_response(
+            "STORE_TRANSIENT",
+            "Embedding budget check failed (transient database error) — retry with backoff.",
+        )
+    return error_response("INTERNAL", "Embedding budget check failed (unexpected error)")
+
+
 # ---------------------------------------------------------------------------
 # CRUD-related constants
 # ---------------------------------------------------------------------------
@@ -358,11 +381,12 @@ async def _handle_store(
             )
         except EmbeddingBudgetError as exc:
             return error_response("BUDGET_EXCEEDED", str(exc))
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             # Any non-budget failure here (e.g. TransactionContext aborted on a
             # shared connection — see issue #363) would otherwise propagate as
             # a raw DuckDB message.  Roll back the connection and return a
-            # sanitised INTERNAL response so clients see a stable contract.
+            # sanitised, cause-categorized response so clients see a stable
+            # contract (see issue #557).
             logger.exception("Embedding budget check failed")
             rollback = getattr(store, "rollback", None)
             if callable(rollback):
@@ -370,7 +394,7 @@ async def _handle_store(
                     await rollback()
                 except Exception:  # noqa: BLE001
                     logger.debug("post-budget rollback skipped", exc_info=True)
-            return error_response("INTERNAL", "Failed to check embedding budget")
+            return _budget_check_error_response(exc)
 
     # --- parse verification ---------------------------------------------------
     verification_val = VerificationStatus.UNVERIFIED
@@ -909,7 +933,7 @@ async def _handle_store_batch(
             )
         except EmbeddingBudgetError as exc:
             return error_response("BUDGET_EXCEEDED", str(exc))
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             logger.exception("Embedding budget check failed (store_batch)")
             rollback = getattr(store, "rollback", None)
             if callable(rollback):
@@ -917,7 +941,7 @@ async def _handle_store_batch(
                     await rollback()
                 except Exception:  # noqa: BLE001
                     logger.debug("post-budget rollback skipped", exc_info=True)
-            return error_response("INTERNAL", "Failed to check embedding budget")
+            return _budget_check_error_response(exc)
 
     # --- persist ------------------------------------------------------------
     try:
@@ -1947,7 +1971,7 @@ async def _handle_correct(
             record_and_check(store.connection, cfg.rate_limit.embedding_budget_daily, count=1)
         except EmbeddingBudgetError as exc:
             return error_response("BUDGET_EXCEEDED", str(exc))
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             logger.exception("Embedding budget check failed (correct)")
             rollback = getattr(store, "rollback", None)
             if callable(rollback):
@@ -1955,7 +1979,7 @@ async def _handle_correct(
                     await rollback()
                 except Exception:  # noqa: BLE001
                     logger.debug("post-budget rollback skipped", exc_info=True)
-            return error_response("INTERNAL", "Failed to check embedding budget")
+            return _budget_check_error_response(exc)
 
     # --- atomically persist entry, relation, and archive original -----------
     try:
