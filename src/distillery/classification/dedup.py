@@ -123,7 +123,8 @@ class DeduplicationChecker:
         # Results are sorted by descending score; first is highest.
         highest = similar[0]
         score = highest.score
-        first_line = highest.entry.content.splitlines()[0][:80]
+        content_lines = highest.entry.content.splitlines()
+        first_line = content_lines[0][:80] if content_lines else ""
 
         action, reasoning = self._decide(score, first_line)
 
