@@ -34,15 +34,22 @@ ignore:
   # Active suppressions — confirmed against the CI scan of the python-3.14
   # runtime image (SBOM: python-3.14.4-r4 + glibc 2.43-r7, Chainguard
   # distroless `cgr.dev/chainguard/python` base, which is built on Wolfi).
-  # Refreshed: 2026-06-03 (issue #271, checking for new CVEs; individual CVE review dates in each entry's reason field).
+  # Refreshed: 2026-06-11 (python-3.14 3.14.6-r0 base-image rebuild; individual CVE review dates in each entry's reason field).
   # ---------------------------------------------------------------------
 
   - vulnerability: CVE-2026-7210
     package:
       name: python-3.14
-      version: 3.14.5-r2
+      version: 3.14.6-r0
       type: apk
-    reason: "CPython 3.14.5-r2 — CVSS Critical; base image bumped python-3.14 r1->r2 (Chainguard rebuild); same libexpat hash-flooding CVE, still DoS-only, still no upstream fix.  libexpat hash-flooding: xml.parsers.expat and xml.etree.ElementTree use insufficient entropy for hash-flooding protection, so a crafted XML document can trigger a hash-collision DoS.  Distillery parses feed XML, so this is a real but DoS-only exposure; defusedxml guards XXE / entity expansion but not expat's hash entropy.  No upstream fix available: full mitigation requires libexpat >= 2.8.0 plus a CPython patch, and neither Wolfi nor CPython has released a fixed python-3.14 build.  Grype matched via NVD CPE with no version constraint.  Revisit on the next Chainguard base-image rebuild.  Reviewed: 2026-06-03"
+    reason: "CPython 3.14.6-r0 — CVSS Critical; base image bumped python-3.14 3.14.5-r2 -> 3.14.6-r0 (Chainguard rebuild); same libexpat hash-flooding CVE, still DoS-only, still no upstream fix.  libexpat hash-flooding: xml.parsers.expat and xml.etree.ElementTree use insufficient entropy for hash-flooding protection, so a crafted XML document can trigger a hash-collision DoS.  Distillery parses feed XML, so this is a real but DoS-only exposure; defusedxml guards XXE / entity expansion but not expat's hash entropy.  No upstream fix available: full mitigation requires libexpat >= 2.8.0 plus a CPython patch, and neither Wolfi nor CPython has released a fixed python-3.14 build.  Grype matched via NVD CPE with no version constraint.  Revisit on the next Chainguard base-image rebuild.  Reviewed: 2026-06-11"
+
+  - vulnerability: CVE-2026-9669
+    package:
+      name: python-3.14
+      version: 3.14.6-r0
+      type: apk
+    reason: "CPython 3.14.6-r0 — High; bz2.BZ2Decompressor objects can be reused after a decompression error, leading to use-after-error if the application catches OSError and retries on the same object.  Not exploitable in Distillery: no bz2 usage anywhere in src/ or in declared dependencies (verified by grep on 2026-06-11) — the module merely ships in the base image's stdlib.  No fixed python-3.14 build released by Wolfi/CPython yet.  Revisit on the next Chainguard base-image rebuild.  Reviewed: 2026-06-11"
 
 
 # Fail on critical and high severity vulnerabilities.
