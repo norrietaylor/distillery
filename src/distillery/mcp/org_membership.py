@@ -82,6 +82,18 @@ class _CacheEntry:
     expires_at: float  # monotonic timestamp
 
 
+class _IndeterminateMembershipError(Exception):
+    """Raised when membership cannot be determined (transient/unknown error).
+
+    Distinguishes a *definitive* "not a member" (GitHub 404) from a
+    fail-closed denial caused by a transient condition — a network error or
+    an unexpected status such as 5xx / rate-limit.  The caller treats both as
+    "deny" for the current request, but only definitive results are cached:
+    caching a transient denial would lock a legitimate member out for the
+    full TTL after GitHub recovers.
+    """
+
+
 # ---------------------------------------------------------------------------
 # OrgMembershipChecker
 # ---------------------------------------------------------------------------
@@ -218,8 +230,14 @@ class OrgMembershipChecker:
                 )
                 return entry.is_member
 
-        # Fetch outside the lock to avoid blocking other coroutines.
-        result = await self._fetch_membership(token, username, org)
+        # Fetch outside the lock to avoid blocking other coroutines.  A
+        # transient/unknown error fails closed (deny) for *this* request but
+        # must NOT be cached — otherwise a momentary GitHub blip would lock a
+        # legitimate member out for the full TTL.
+        try:
+            result = await self._fetch_membership(token, username, org)
+        except _IndeterminateMembershipError:
+            return False
 
         async with self._lock:
             self._cache[key] = _CacheEntry(
@@ -254,7 +272,9 @@ class OrgMembershipChecker:
         * 302 — the token is not seen as an org member, so GitHub will only
           answer the public-membership endpoint; follow there via
           :meth:`_fetch_public_member`.
-        * anything else / network error — fail closed (deny).
+        * anything else / network error — indeterminate; raise
+          :class:`_IndeterminateMembershipError` so the caller fails closed for
+          this request *without* caching the denial.
         """
         headers: dict[str, str] = {
             "Accept": "application/vnd.github+json",
@@ -286,7 +306,7 @@ class OrgMembershipChecker:
                 username,
                 org,
             )
-            return False
+            raise _IndeterminateMembershipError
         except httpx.HTTPError as exc:
             logger.error(
                 "GitHub membership API error for %s in %s: %s",
@@ -294,7 +314,7 @@ class OrgMembershipChecker:
                 org,
                 exc,
             )
-            return False
+            raise _IndeterminateMembershipError from exc
 
     async def _fetch_public_member(self, username: str, org: str) -> bool:
         """Call ``GET /orgs/{org}/public_members/{username}``.
@@ -307,7 +327,9 @@ class OrgMembershipChecker:
         * 404 — not a public member. A *private* membership is invisible
           here; to gate private members, set ``GITHUB_ORG_CHECK_TOKEN`` (a
           ``read:org`` PAT) so the members endpoint answers 204/404 directly.
-        * anything else / network error — fail closed (deny).
+        * anything else / network error — indeterminate; raise
+          :class:`_IndeterminateMembershipError` so the caller fails closed for
+          this request *without* caching the denial.
         """
         headers = {
             "Accept": "application/vnd.github+json",
@@ -331,7 +353,7 @@ class OrgMembershipChecker:
                 username,
                 org,
             )
-            return False
+            raise _IndeterminateMembershipError
         except httpx.HTTPError as exc:
             logger.error(
                 "GitHub public_members API error for %s in %s: %s",
@@ -339,4 +361,4 @@ class OrgMembershipChecker:
                 org,
                 exc,
             )
-            return False
+            raise _IndeterminateMembershipError from exc
