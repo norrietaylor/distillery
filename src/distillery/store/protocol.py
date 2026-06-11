@@ -213,6 +213,7 @@ class DistilleryStore(Protocol):
         offset: int,
         *,
         stale_days: int | None = ...,
+        sort_by: str = ...,
         group_by: None = ...,
         output: None = ...,
     ) -> list[Entry]: ...
@@ -225,6 +226,7 @@ class DistilleryStore(Protocol):
         offset: int,
         *,
         stale_days: int | None = ...,
+        sort_by: str = ...,
         group_by: str | None = ...,
         output: str | None = ...,
     ) -> list[Entry] | dict[str, Any]: ...
@@ -236,15 +238,17 @@ class DistilleryStore(Protocol):
         offset: int,
         *,
         stale_days: int | None = None,
+        sort_by: str = "created_at",
         group_by: str | None = None,
         output: str | None = None,
     ) -> list[Entry] | dict[str, Any]:
         """
         List entries filtered by metadata with pagination.
 
-        Returns entries in insertion order (sorted by descending ``created_at``)
-        and does not perform semantic ranking.  When *group_by* or
-        *output="stats"* is specified the return type changes to a dict.
+        Returns entries sorted by *sort_by* (descending; default
+        ``created_at``, i.e. newest first) and does not perform semantic
+        ranking.  When *group_by* or *output="stats"* is specified the return
+        type changes to a dict.
 
         Parameters:
             filters: Optional metadata constraints. Supported keys:
@@ -258,6 +262,12 @@ class DistilleryStore(Protocol):
             stale_days: When set, restricts results to entries whose last
                 access (``COALESCE(accessed_at, updated_at)``) is older than
                 *stale_days* days.  Composes with all other filters.
+            sort_by: Ordering of returned entries (always descending).  One of
+                ``"created_at"`` (default), ``"updated_at"``, ``"accessed_at"``
+                (never-accessed entries sort last), or ``"relevance_score"``
+                (orders by ``metadata.relevance_score``; entries missing the
+                key sort last).  Unknown values raise ``ValueError``.  Ignored
+                in group_by / stats modes.
             group_by: When set, returns ``{"groups": [...], "total_groups": N,
                 "total_entries": N}`` instead of a list of entries.  Supported
                 values mirror ``aggregate_entries`` plus ``"tags"`` (unnests

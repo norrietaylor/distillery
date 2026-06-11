@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import math
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import duckdb
 import pytest
@@ -581,6 +581,89 @@ class TestListEntries:
         result = await store.list_entries(filters=None, limit=5, offset=0)
         for e in result:
             assert isinstance(e, Entry)
+
+
+# ---------------------------------------------------------------------------
+# list_entries() sort_by ordering (issue #163)
+# ---------------------------------------------------------------------------
+
+
+class TestListEntriesSortBy:
+    @staticmethod
+    def _backdate(store: DuckDBStore, entry_id: str, column: str, value: datetime) -> None:
+        """Set a timestamp column for *entry_id* directly via SQL."""
+        assert column in {"created_at", "updated_at", "accessed_at"}
+        store.connection.execute(
+            f"UPDATE entries SET {column} = ? WHERE id = ?", [value.isoformat(), entry_id]
+        )
+
+    async def test_sort_by_relevance_score_descending(self, store: DuckDBStore) -> None:
+        """Entries are ordered by metadata.relevance_score, highest first."""
+        low = make_entry(content="low score", metadata={"relevance_score": 0.6})
+        high = make_entry(content="high score", metadata={"relevance_score": 0.95})
+        mid = make_entry(content="mid score", metadata={"relevance_score": 0.8})
+        for e in (low, high, mid):
+            await store.store(e)
+        result = await store.list_entries(
+            filters=None, limit=10, offset=0, sort_by="relevance_score"
+        )
+        assert [e.id for e in result] == [high.id, mid.id, low.id]
+
+    async def test_sort_by_relevance_score_missing_key_sorts_last(self, store: DuckDBStore) -> None:
+        """Entries without metadata.relevance_score sort after scored ones."""
+        unscored = make_entry(content="no score at all")
+        scored = make_entry(content="scored", metadata={"relevance_score": 0.7})
+        await store.store(unscored)
+        await store.store(scored)
+        result = await store.list_entries(
+            filters=None, limit=10, offset=0, sort_by="relevance_score"
+        )
+        assert [e.id for e in result] == [scored.id, unscored.id]
+
+    async def test_sort_by_updated_at_descending(self, store: DuckDBStore) -> None:
+        now = datetime.now(UTC)
+        old = make_entry(content="updated long ago")
+        new = make_entry(content="updated recently")
+        await store.store(old)
+        await store.store(new)
+        self._backdate(store, old.id, "updated_at", now - timedelta(days=10))
+        self._backdate(store, new.id, "updated_at", now - timedelta(days=1))
+        result = await store.list_entries(filters=None, limit=10, offset=0, sort_by="updated_at")
+        assert [e.id for e in result] == [new.id, old.id]
+
+    async def test_sort_by_accessed_at_descending_nulls_last(self, store: DuckDBStore) -> None:
+        """accessed_at ordering is descending with never-accessed entries last."""
+        now = datetime.now(UTC)
+        older = make_entry(content="accessed long ago")
+        recent = make_entry(content="accessed recently")
+        never = make_entry(content="never accessed")
+        for e in (older, recent, never):
+            await store.store(e)
+        self._backdate(store, older.id, "accessed_at", now - timedelta(days=10))
+        self._backdate(store, recent.id, "accessed_at", now - timedelta(days=1))
+        result = await store.list_entries(filters=None, limit=10, offset=0, sort_by="accessed_at")
+        assert [e.id for e in result] == [recent.id, older.id, never.id]
+
+    async def test_default_sort_unchanged_created_at_descending(self, store: DuckDBStore) -> None:
+        """Omitting sort_by keeps created_at DESC even when scores disagree."""
+        now = datetime.now(UTC)
+        # The older entry has the higher relevance score — the default order
+        # must ignore it and return newest-created first.
+        older = make_entry(content="older but relevant", metadata={"relevance_score": 0.95})
+        newer = make_entry(content="newer but less relevant", metadata={"relevance_score": 0.6})
+        await store.store(older)
+        await store.store(newer)
+        self._backdate(store, older.id, "created_at", now - timedelta(days=10))
+        self._backdate(store, newer.id, "created_at", now - timedelta(days=1))
+        result = await store.list_entries(filters=None, limit=10, offset=0)
+        assert [e.id for e in result] == [newer.id, older.id]
+
+    async def test_sort_by_unknown_value_raises_value_error(self, store: DuckDBStore) -> None:
+        """Unknown sort_by values are rejected — never interpolated into SQL."""
+        with pytest.raises(ValueError, match="sort_by"):
+            await store.list_entries(
+                filters=None, limit=5, offset=0, sort_by="id; DROP TABLE entries--"
+            )
 
 
 # ---------------------------------------------------------------------------

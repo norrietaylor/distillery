@@ -1200,6 +1200,11 @@ async def _handle_update(
 _VALID_OUTPUT_MODES = frozenset({"full", "summary", "ids", "review"})
 _VALID_GROUP_BY_VALUES = frozenset({"entry_type", "status", "author", "project", "source", "tags"})
 
+# Allowed ``sort_by`` values for distillery_list.  Mirrors the store-level
+# whitelist (``DuckDBStore._SORT_BY_CLAUSES``) so invalid values fail with
+# INVALID_PARAMS at the tool boundary instead of an INTERNAL error.
+_VALID_SORT_BY_VALUES = frozenset({"created_at", "updated_at", "accessed_at", "relevance_score"})
+
 # Structural filters surface entries with anomalous graph properties relative
 # to ``entry_relations``.  ``"orphans"`` returns entries that do not appear as
 # either endpoint of any relation row.  Future values may include
@@ -1295,7 +1300,7 @@ async def _handle_list(
 
     Returns entries with optional metadata filtering and pagination.  Unlike
     ``distillery_search``, no semantic ranking is performed -- results are
-    ordered by ``created_at`` descending (newest first).
+    ordered by ``sort_by`` descending (default ``created_at``, newest first).
 
     Args:
         store: Initialised :class:`~distillery.store.duckdb.DuckDBStore`.
@@ -1370,6 +1375,17 @@ async def _handle_list(
         if output_raw != "stats":
             return error_response("INVALID_PARAMS", "Field 'output' only accepts 'stats'")
         output = output_raw
+
+    # --- validate sort_by ----------------------------------------------------
+    sort_by = arguments.get("sort_by", "created_at")
+    err_sort_by = validate_type(arguments, "sort_by", str, "string")
+    if err_sort_by:
+        return error_response("INVALID_PARAMS", err_sort_by)
+    if sort_by not in _VALID_SORT_BY_VALUES:
+        return error_response(
+            "INVALID_PARAMS",
+            f"Field 'sort_by' must be one of: {', '.join(sorted(_VALID_SORT_BY_VALUES))}",
+        )
 
     # --- validate structural -------------------------------------------------
     # Structural filters AND with the existing project/tags/status/date filters
@@ -1539,6 +1555,7 @@ async def _handle_list(
                 limit=_STRUCTURAL_FETCH_CAP,
                 offset=0,
                 stale_days=stale_days,
+                sort_by=sort_by,
             )
         except Exception:  # noqa: BLE001
             logger.exception("Error in distillery_list (structural fetch)")
@@ -1561,6 +1578,7 @@ async def _handle_list(
                 limit=limit,
                 offset=offset,
                 stale_days=stale_days,
+                sort_by=sort_by,
             )
         except Exception:  # noqa: BLE001
             logger.exception("Error in distillery_list")

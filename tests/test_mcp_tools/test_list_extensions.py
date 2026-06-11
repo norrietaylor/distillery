@@ -661,3 +661,65 @@ class TestMutualExclusivity:
         )
         data = parse_mcp_response(result)
         assert not data.get("error")
+
+
+# ---------------------------------------------------------------------------
+# sort_by parameter (issue #163)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestSortByValidation:
+    async def test_sort_by_not_string_returns_error(self, store: Any) -> None:
+        result = await _handle_list(store=store, arguments={"sort_by": 42})
+        data = parse_mcp_response(result)
+        assert data["error"] is True
+        assert data["code"] == "INVALID_PARAMS"
+        assert "sort_by" in data["message"]
+
+    async def test_sort_by_unknown_value_returns_error_listing_allowed(self, store: Any) -> None:
+        result = await _handle_list(store=store, arguments={"sort_by": "embedding"})
+        data = parse_mcp_response(result)
+        assert data["error"] is True
+        assert data["code"] == "INVALID_PARAMS"
+        for allowed in ("created_at", "updated_at", "accessed_at", "relevance_score"):
+            assert allowed in data["message"]
+
+    async def test_sort_by_valid_values_accepted(self, store: Any) -> None:
+        for value in ("created_at", "updated_at", "accessed_at", "relevance_score"):
+            result = await _handle_list(store=store, arguments={"sort_by": value, "limit": 5})
+            data = parse_mcp_response(result)
+            assert not data.get("error"), f"sort_by={value!r} unexpectedly rejected"
+            assert "entries" in data
+
+
+@pytest.mark.integration
+class TestSortByBehaviour:
+    async def test_sort_by_relevance_score_orders_descending(self, store: Any) -> None:
+        """sort_by=relevance_score returns highest-scored entries first."""
+        low = make_entry(content="low relevance", metadata={"relevance_score": 0.6})
+        high = make_entry(content="high relevance", metadata={"relevance_score": 0.95})
+        unscored = make_entry(content="no relevance score")
+        for e in (low, high, unscored):
+            await store.store(e)
+        result = await _handle_list(
+            store=store,
+            arguments={"sort_by": "relevance_score", "limit": 10},
+        )
+        data = parse_mcp_response(result)
+        assert not data.get("error")
+        ids = [e["id"] for e in data["entries"]]
+        assert ids == [high.id, low.id, unscored.id]
+
+    async def test_default_sort_unchanged_when_omitted(self, store: Any) -> None:
+        """Without sort_by the order is created_at DESC (newest first)."""
+        for e in (
+            make_entry(content="entry one"),
+            make_entry(content="entry two"),
+        ):
+            await store.store(e)
+        result = await _handle_list(store=store, arguments={"limit": 10})
+        data = parse_mcp_response(result)
+        assert not data.get("error")
+        created = [e["created_at"] for e in data["entries"]]
+        assert created == sorted(created, reverse=True)

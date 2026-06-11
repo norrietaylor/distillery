@@ -2196,6 +2196,20 @@ class DuckDBStore:
 
         return await self._run_sync(_sync)
 
+    # Whitelisted ORDER BY clauses for ``list_entries(sort_by=...)``.  The
+    # values are interpolated into SQL, so only keys present in this mapping
+    # are ever accepted — unknown values raise ``ValueError`` (same
+    # column-whitelist convention as ``_ALLOWED_UPDATE_COLUMNS``; raw caller
+    # input never reaches the SQL string).
+    _SORT_BY_CLAUSES = {
+        "created_at": "created_at DESC",
+        "updated_at": "updated_at DESC",
+        "accessed_at": "accessed_at DESC NULLS LAST",
+        "relevance_score": (
+            "CAST(json_extract(metadata, '$.relevance_score') AS DOUBLE) DESC NULLS LAST"
+        ),
+    }
+
     @overload
     async def list_entries(
         self,
@@ -2204,6 +2218,7 @@ class DuckDBStore:
         offset: int,
         *,
         stale_days: int | None = ...,
+        sort_by: str = ...,
         group_by: None = ...,
         output: None = ...,
     ) -> list[Entry]: ...
@@ -2216,6 +2231,7 @@ class DuckDBStore:
         offset: int,
         *,
         stale_days: int | None = ...,
+        sort_by: str = ...,
         group_by: str | None = ...,
         output: str | None = ...,
     ) -> list[Entry] | dict[str, Any]: ...
@@ -2227,11 +2243,12 @@ class DuckDBStore:
         offset: int,
         *,
         stale_days: int | None = None,
+        sort_by: str = "created_at",
         group_by: str | None = None,
         output: str | None = None,
     ) -> list[Entry] | dict[str, Any]:
         """
-        Retrieve entries matching optional filters, ordered by created_at descending.
+        Retrieve entries matching optional filters, ordered by *sort_by* descending.
 
         When *group_by* is set, delegates to :meth:`aggregate_entries` and
         returns grouped counts.  When *output="stats"*, returns aggregate
@@ -2246,12 +2263,23 @@ class DuckDBStore:
                 (ignored in group_by / stats modes).
             stale_days: Restrict to entries whose last access
                 (``COALESCE(accessed_at, updated_at)``) is older than N days.
+            sort_by: Ordering of returned entries (always descending).  One of
+                ``"created_at"`` (default), ``"updated_at"``, ``"accessed_at"``
+                (never-accessed entries sort last), or ``"relevance_score"``
+                (orders by ``metadata.relevance_score``; entries missing the
+                key sort last).  Unknown values raise ``ValueError``.  Ignored
+                in group_by / stats modes.
             group_by: Return grouped counts instead of entries.
             output: ``"stats"`` for aggregate statistics.
         """
         # ----- validate stale_days -----
         if stale_days is not None and stale_days < 0:
             raise ValueError("stale_days must be non-negative")
+
+        # ----- validate sort_by (whitelist — never interpolated raw) -----
+        order_by = self._SORT_BY_CLAUSES.get(sort_by)
+        if order_by is None:
+            raise ValueError(f"sort_by must be one of: {', '.join(sorted(self._SORT_BY_CLAUSES))}")
 
         # ----- reject mutually-exclusive modes -----
         # ``group_by`` and ``output`` return different shapes
@@ -2293,7 +2321,7 @@ class DuckDBStore:
                 f"SELECT {self._ENTRY_COLUMNS} "
                 f"FROM entries "
                 f"{where_sql} "
-                f"ORDER BY created_at DESC "
+                f"ORDER BY {order_by} "
                 f"LIMIT ? OFFSET ?"
             )
             all_params = params + [limit, offset]

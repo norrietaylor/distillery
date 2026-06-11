@@ -734,8 +734,9 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         published_before: str | None = None,
         include_evergreen: bool = False,
         structural: list[str] | None = None,
+        sort_by: str = "created_at",
     ) -> list[types.TextContent]:
-        """List knowledge entries with optional filters and pagination (newest first).
+        """List knowledge entries with optional filters and pagination (newest first by default).
 
         USE WHEN: browsing or filtering entries without a semantic query.
         Use distillery_search instead when you have a natural-language question.
@@ -800,6 +801,13 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             every other filter (project, tags, status, date range, stale_days,
             etc.) — orphans are first restricted by those filters, then the
             no-relations predicate is applied.
+          - sort_by (str, optional, default="created_at"): Ordering of returned
+            entries (always descending). Valid: [created_at, updated_at, accessed_at,
+            relevance_score]. "relevance_score" orders by metadata.relevance_score
+            (entries missing the key sort last) — use with entry_type="feed" to
+            surface the most relevant feed items rather than the newest (e.g. /radar).
+            "accessed_at" sorts never-accessed entries last. Ignored in
+            group_by / output="stats" modes.
 
         RETURNS (success): { entries: list, count: int, total_count: int, limit: int,
           offset: int, output_mode: str } — when ``structural`` is set, the payload
@@ -817,6 +825,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             output_mode=output_mode,
             include_archived=include_archived,
             include_evergreen=include_evergreen,
+            sort_by=sort_by,
             **_omit_none(
                 entry_type=entry_type,
                 author=author,
