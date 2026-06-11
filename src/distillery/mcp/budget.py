@@ -16,9 +16,15 @@ from __future__ import annotations
 
 import datetime
 import logging
+import threading
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# Serializes counter writes.  Per-call cursors are separate DuckDB
+# connections, so unserialized concurrent upserts of the same row hit
+# optimistic-concurrency conflicts ("Conflict on update!" / duplicate key).
+_write_lock = threading.Lock()
 
 
 class EmbeddingBudgetError(Exception):
@@ -48,7 +54,9 @@ def get_daily_usage(conn: Any) -> int:
         The number of embedding calls made today.
     """
     key = _today_key()
-    row = conn.execute("SELECT value FROM _meta WHERE key = ?", [key]).fetchone()
+    # Use a per-call cursor: another execute() on the shared connection would
+    # invalidate a pending result set ("No open result set") under concurrency.
+    row = conn.cursor().execute("SELECT value FROM _meta WHERE key = ?", [key]).fetchone()
     return int(row[0]) if row else 0
 
 
@@ -65,13 +73,24 @@ def increment_usage(conn: Any, count: int = 1) -> int:
     Returns:
         The new total for today.
     """
+    with _write_lock:
+        return _increment_locked(conn, count)
+
+
+def _increment_locked(conn: Any, count: int) -> int:
+    """Upsert today's counter and return the new total.  Caller holds ``_write_lock``."""
     key = _today_key()
-    conn.execute(
+    # Use a per-call cursor so concurrent callers don't invalidate each
+    # other's result sets on the shared connection; the write lock keeps
+    # concurrent upserts of the same row from conflicting.
+    cur = conn.cursor()
+    cur.execute(
         "INSERT INTO _meta (key, value) VALUES (?, ?) "
-        "ON CONFLICT (key) DO UPDATE SET value = CAST(CAST(_meta.value AS INTEGER) + ? AS VARCHAR)",
+        "ON CONFLICT (key) DO UPDATE SET "
+        "value = CAST(CAST(_meta.value AS INTEGER) + ? AS VARCHAR)",
         [key, str(count), count],
     )
-    row = conn.execute("SELECT value FROM _meta WHERE key = ?", [key]).fetchone()
+    row = cur.execute("SELECT value FROM _meta WHERE key = ?", [key]).fetchone()
     return int(row[0]) if row else count
 
 
@@ -112,5 +131,11 @@ def record_and_check(conn: Any, daily_limit: int, count: int = 1) -> int:
     """
     if daily_limit <= 0:
         return increment_usage(conn, count)  # unlimited, still track
-    check_budget(conn, daily_limit, count)
-    return increment_usage(conn, count)
+    # Check and increment under one lock: a check that releases the lock
+    # before the increment lets concurrent callers all pass the read and
+    # collectively overspend the cap.
+    with _write_lock:
+        used = get_daily_usage(conn)
+        if used + count > daily_limit:
+            raise EmbeddingBudgetError(used, daily_limit)
+        return _increment_locked(conn, count)

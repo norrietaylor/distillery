@@ -121,6 +121,115 @@ class TestRecordAndCheck:
 
 
 # ---------------------------------------------------------------------------
+# Unit tests: concurrency (issue #608)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestConcurrentAccess:
+    """Regression tests for the DuckDB result-set race (issue #608).
+
+    DuckDB invalidates a connection's pending result set when another
+    ``execute()`` runs on the same connection, so concurrent execute+fetch
+    on a shared connection raised ``InvalidInputException: No open result
+    set``.  Per-call cursors give each caller its own result set.
+    """
+
+    def test_concurrent_reads_and_writes_do_not_raise(
+        self, conn: duckdb.DuckDBPyConnection
+    ) -> None:
+        """Concurrent check/read/record calls on one shared connection succeed."""
+        import threading
+
+        n_threads = 8
+        iterations = 25
+        barrier = threading.Barrier(n_threads)
+        errors: list[Exception] = []
+
+        def worker() -> None:
+            barrier.wait()
+            try:
+                for _ in range(iterations):
+                    check_budget(conn, daily_limit=10_000_000)
+                    get_daily_usage(conn)
+                    record_and_check(conn, daily_limit=10_000_000)
+            except Exception as exc:  # pragma: no cover - only on regression
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker) for _ in range(n_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert errors == [], f"concurrent budget calls raised: {errors!r}"
+        assert get_daily_usage(conn) == n_threads * iterations
+
+    def test_concurrent_increments_count_correctly(self, conn: duckdb.DuckDBPyConnection) -> None:
+        """The _meta counter reflects every concurrent increment exactly once."""
+        import threading
+
+        n_threads = 6
+        iterations = 20
+        barrier = threading.Barrier(n_threads)
+        errors: list[Exception] = []
+
+        def worker() -> None:
+            barrier.wait()
+            try:
+                for _ in range(iterations):
+                    increment_usage(conn)
+            except Exception as exc:  # pragma: no cover - only on regression
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker) for _ in range(n_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert errors == [], f"concurrent increments raised: {errors!r}"
+        assert get_daily_usage(conn) == n_threads * iterations
+
+    def test_concurrent_record_and_check_cannot_overspend(
+        self, conn: duckdb.DuckDBPyConnection
+    ) -> None:
+        """Concurrent record_and_check calls never push usage past daily_limit."""
+        import threading
+
+        daily_limit = 10
+        n_threads = 8
+        iterations = 5  # 40 attempted calls against a limit of 10
+        barrier = threading.Barrier(n_threads)
+        errors: list[Exception] = []
+        successes: list[int] = []
+        lock = threading.Lock()
+
+        def worker() -> None:
+            barrier.wait()
+            for _ in range(iterations):
+                try:
+                    record_and_check(conn, daily_limit=daily_limit)
+                except EmbeddingBudgetError:
+                    pass  # expected once the cap is reached
+                except Exception as exc:  # pragma: no cover - only on regression
+                    errors.append(exc)
+                else:
+                    with lock:
+                        successes.append(1)
+
+        threads = [threading.Thread(target=worker) for _ in range(n_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert errors == [], f"concurrent record_and_check raised: {errors!r}"
+        assert len(successes) == daily_limit
+        assert get_daily_usage(conn) == daily_limit
+
+
+# ---------------------------------------------------------------------------
 # Unit tests: config
 # ---------------------------------------------------------------------------
 
