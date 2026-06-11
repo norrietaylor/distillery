@@ -1256,12 +1256,15 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
           - relation_id (str, required for remove): UUID of the relation to delete.
           - hops (int, optional for traverse, default=2): BFS depth, capped at [1, 3].
           - metric (str, required for metrics): Graph metric to compute.
-            Valid: [bridges, communities]. Requires the [graph] optional extra.
+            Valid: [bridges, communities, constraint, link_prediction]. Requires
+            the [graph] optional extra.
           - scope (str, optional for metrics, default="global"): Subgraph scope.
             Valid: [global, ego]. ``"ego"`` requires ``entry_id``.
-          - limit (int, optional for metrics, default=10): For ``metric="bridges"``
-            returns the top-k entries by betweenness centrality; for
-            ``metric="communities"`` returns the K largest communities.
+          - limit (int, optional for metrics, default=10): top-k results.
+            ``bridges`` = entries by betweenness centrality; ``communities`` = K
+            largest communities; ``constraint`` = entries by lowest Burt constraint
+            (strongest structural-hole brokers); ``link_prediction`` = top predicted
+            edges by Adamic-Adar (pass ``entry_id`` to score adjacencies for one entry).
           - project / tags / date_from / date_to (optional, metrics global scope):
             restrict the entries whose relations participate in the graph.
 

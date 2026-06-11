@@ -132,6 +132,69 @@ async def test_metrics_communities_global(store) -> None:  # type: ignore[no-unt
         assert isinstance(row["members"], list)
 
 
+async def _seed_bowtie(store):  # type: ignore[no-untyped-def]
+    """M brokers two otherwise-disconnected pairs {A,B} and {X,Y}. Returns id map."""
+    ids = {name: await _store_entry(store, content=f"entry {name}") for name in "MABXY"}
+    pairs = [("M", "A"), ("M", "B"), ("A", "B"), ("M", "X"), ("M", "Y"), ("X", "Y")]
+    for src, dst in pairs:
+        await store.add_relation(ids[src], ids[dst], "link")
+    return ids
+
+
+async def test_metrics_constraint_broker_first(store) -> None:  # type: ignore[no-untyped-def]
+    pytest.importorskip("networkx")
+
+    ids = await _seed_bowtie(store)
+    result = await _handle_relations(
+        store, {"action": "metrics", "metric": "constraint", "scope": "global"}
+    )
+    data = _parse(result)
+
+    assert data.get("error") is not True
+    assert data["metric"] == "constraint"
+    assert isinstance(data["results"], list) and data["results"]
+    for row in data["results"]:
+        assert "id" in row and "score" in row
+    # The broker M has the lowest Burt constraint -> ranked first.
+    assert data["results"][0]["id"] == ids["M"]
+
+
+async def test_metrics_link_prediction_with_source(store) -> None:  # type: ignore[no-untyped-def]
+    pytest.importorskip("networkx")
+
+    # A and B share neighbours C, D but are not directly connected.
+    ids = {name: await _store_entry(store, content=f"entry {name}") for name in "ABCD"}
+    for src, dst in [("A", "C"), ("A", "D"), ("B", "C"), ("B", "D")]:
+        await store.add_relation(ids[src], ids[dst], "link")
+
+    result = await _handle_relations(
+        store,
+        {"action": "metrics", "metric": "link_prediction", "scope": "global", "entry_id": ids["A"]},
+    )
+    data = _parse(result)
+
+    assert data.get("error") is not True
+    assert data["metric"] == "link_prediction"
+    assert isinstance(data["results"], list) and data["results"]
+    top = data["results"][0]
+    assert top["source"] == ids["A"]
+    assert top["target"] == ids["B"]
+    assert top["score"] > 0
+
+
+async def test_metrics_invalid_metric_rejected(store) -> None:  # type: ignore[no-untyped-def]
+    pytest.importorskip("networkx")
+
+    result = await _handle_relations(
+        store, {"action": "metrics", "metric": "pagerank", "scope": "global"}
+    )
+    data = _parse(result)
+    assert data.get("error") is True
+    assert data["code"] == "INVALID_PARAMS"
+    # Error message should enumerate the now-expanded metric set.
+    assert "constraint" in data["message"] and "link_prediction" in data["message"]
+
+
 async def test_metrics_invalid_metric_returns_invalid_params(store) -> None:  # type: ignore[no-untyped-def]
     pytest.importorskip("networkx")
 

@@ -36,7 +36,7 @@ _METRICS_EGO_HOPS = 2
 _GRAPH_METRICS_PAGE_SIZE = 1000
 _GRAPH_METRICS_MAX_IDS = 100_000
 
-_VALID_METRICS = {"bridges", "communities"}
+_VALID_METRICS = {"bridges", "communities", "constraint", "link_prediction"}
 _VALID_SCOPES = {"global", "ego"}
 
 # ---------------------------------------------------------------------------
@@ -582,7 +582,7 @@ async def _handle_metrics(  # noqa: PLR0911, PLR0912
     # ----- cache lookup -----
     from distillery.graph.builders import build_relations_graph
     from distillery.graph.cache import default_cache
-    from distillery.graph.metrics import bridges, communities
+    from distillery.graph.metrics import bridges, communities, constraint, link_prediction
 
     cache = default_cache()
     cache_key = (
@@ -634,6 +634,14 @@ async def _handle_metrics(  # noqa: PLR0911, PLR0912
             results: list[dict[str, Any]] = [
                 {"id": node, "score": round(score, 6)} for node, score in ranked
             ]
+        elif metric == "constraint":
+            # Ascending: lowest Burt constraint = strongest structural-hole broker.
+            ranked = constraint(g, k=limit)
+            results = [{"id": node, "score": round(score, 6)} for node, score in ranked]
+        elif metric == "link_prediction":
+            # entry_id (when given) is the source node — emerging adjacencies for it.
+            preds = link_prediction(g, source=entry_id_value, k=limit)
+            results = [{"source": u, "target": v, "score": round(p, 6)} for u, v, p in preds]
         else:  # metric == "communities"
             comms = communities(g)
             comms_sorted = sorted(comms, key=lambda c: len(c), reverse=True)[:limit]
