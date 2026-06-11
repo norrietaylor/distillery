@@ -12,6 +12,9 @@ Covers:
     handling, caching behaviour, disabled checker passthrough, non-HTTP scope
     passthrough, opaque token fail-closed
   - RequestIDMiddleware: echoes/generates X-Request-ID on responses
+  - build_cors_middleware / CORS in apply_http_middleware: restrictive
+    default (no origins allowed), configured-origin allow list, requests
+    without an Origin header unaffected
   - apply_http_middleware: composition of all middleware layers
   - _client_ip: extraction from scope client, X-Forwarded-For, trust_proxy
 """
@@ -34,6 +37,7 @@ from distillery.mcp.middleware import (
     RequestIDMiddleware,
     _client_ip,
     apply_http_middleware,
+    build_cors_middleware,
 )
 from distillery.mcp.org_membership import OrgMembershipChecker
 
@@ -922,3 +926,87 @@ class TestRequestIDMiddleware:
         rid = cap.headers.get("x-request-id", "")
         parsed = uuid.UUID(rid)
         assert parsed.version == 4, f"Expected UUID4 on 429 response, got {rid!r}"
+
+
+# ===================================================================
+# CORS (build_cors_middleware + apply_http_middleware wiring)
+# ===================================================================
+
+
+def _preflight_scope(origin: str, path: str = "/mcp") -> dict[str, Any]:
+    """Build an ASGI scope for a CORS preflight OPTIONS request."""
+    scope = _make_scope(
+        path=path,
+        headers=[
+            (b"origin", origin.encode()),
+            (b"access-control-request-method", b"POST"),
+        ],
+    )
+    scope["method"] = "OPTIONS"
+    return scope
+
+
+class TestCorsMiddleware:
+    """Tests for the explicit CORS policy on the HTTP transport."""
+
+    async def test_preflight_disallowed_origin_gets_no_allow_origin(self) -> None:
+        """Preflight from a non-allowlisted origin is rejected without ACAO header."""
+        app = build_cors_middleware(_dummy_app, [])
+        cap = _ResponseCapture()
+        await app(_preflight_scope("https://evil.example"), _noop_receive, cap)
+        assert "access-control-allow-origin" not in cap.headers
+        assert cap.status == 400
+
+    async def test_simple_request_disallowed_origin_gets_no_allow_origin(self) -> None:
+        """Non-preflight request from a disallowed origin reaches the app but
+        carries no Access-Control-Allow-Origin header (browser denies read)."""
+        app = build_cors_middleware(_dummy_app, [])
+        cap = _ResponseCapture()
+        scope = _make_scope(headers=[(b"origin", b"https://evil.example")])
+        await app(scope, _noop_receive, cap)
+        assert cap.status == 200
+        assert "access-control-allow-origin" not in cap.headers
+
+    async def test_preflight_configured_origin_is_allowed(self) -> None:
+        """Origins listed in cors_allowed_origins pass the preflight check."""
+        app = build_cors_middleware(_dummy_app, ["https://app.example.com"])
+        cap = _ResponseCapture()
+        await app(_preflight_scope("https://app.example.com"), _noop_receive, cap)
+        assert cap.status == 200
+        assert cap.headers["access-control-allow-origin"] == "https://app.example.com"
+
+    async def test_simple_request_configured_origin_gets_allow_origin(self) -> None:
+        """Allowed origins receive Access-Control-Allow-Origin on responses."""
+        app = build_cors_middleware(_dummy_app, ["https://app.example.com"])
+        cap = _ResponseCapture()
+        scope = _make_scope(headers=[(b"origin", b"https://app.example.com")])
+        await app(scope, _noop_receive, cap)
+        assert cap.status == 200
+        assert cap.headers["access-control-allow-origin"] == "https://app.example.com"
+
+    async def test_request_without_origin_unaffected(self) -> None:
+        """Non-browser MCP clients (no Origin header) pass through untouched."""
+        app = build_cors_middleware(_dummy_app, [])
+        cap = _ResponseCapture()
+        await app(_make_scope(), _noop_receive, cap)
+        assert cap.status == 200
+        assert "access-control-allow-origin" not in cap.headers
+
+    async def test_apply_http_middleware_default_denies_cross_origin(self) -> None:
+        """The composed stack is restrictive by default (no cors_allowed_origins)."""
+        app = apply_http_middleware(_dummy_app)
+        cap = _ResponseCapture()
+        await app(_preflight_scope("https://evil.example"), _noop_receive, cap)
+        assert "access-control-allow-origin" not in cap.headers
+        assert cap.status == 400
+
+    async def test_apply_http_middleware_configured_origin_allowed(self) -> None:
+        """cors_allowed_origins wires through the composed middleware stack."""
+        app = apply_http_middleware(
+            _dummy_app,
+            cors_allowed_origins=["https://app.example.com"],
+        )
+        cap = _ResponseCapture()
+        await app(_preflight_scope("https://app.example.com"), _noop_receive, cap)
+        assert cap.status == 200
+        assert cap.headers["access-control-allow-origin"] == "https://app.example.com"

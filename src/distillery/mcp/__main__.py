@@ -204,13 +204,14 @@ def main(argv: list[str] | None = None) -> int:
                 org_checker=org_checker,
                 token_verifier=auth.verify_token if auth is not None else None,
                 audit_callback=_auth_audit_cb,
+                cors_allowed_origins=rl.cors_allowed_origins,
             )
 
             from starlette.types import ASGIApp, Receive, Scope, Send
 
             final_app: ASGIApp = wrapped_app
             if config.server.webhooks.enabled and os.environ.get(config.server.webhooks.secret_env):
-                from distillery.mcp.middleware import BodySizeLimitMiddleware
+                from distillery.mcp.middleware import BodySizeLimitMiddleware, build_cors_middleware
                 from distillery.mcp.webhooks import create_webhook_app
 
                 webhook_app: ASGIApp = create_webhook_app(
@@ -219,6 +220,10 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 # Apply the same body-size guard as the MCP endpoint.
                 webhook_app = BodySizeLimitMiddleware(webhook_app, max_bytes=rl.max_body_bytes)
+                # Apply the same explicit CORS policy as the MCP endpoint —
+                # /api/* requests bypass wrapped_app, so the webhook app
+                # needs its own CORS layer.
+                webhook_app = build_cors_middleware(webhook_app, rl.cors_allowed_origins)
 
                 # Route /api/* to webhooks, everything else to MCP.
                 # Uses a thin ASGI dispatcher instead of Starlette Mount so

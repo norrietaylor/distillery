@@ -13,6 +13,7 @@ from distillery.config import (
     FeedsConfig,
     FeedSourceConfig,
     FeedsThresholdsConfig,
+    HttpRateLimitConfig,
     ServerAuthConfig,
     ServerConfig,
     TagsConfig,
@@ -1273,4 +1274,91 @@ class TestWebhookConfigParsing:
         """
         p = write_yaml(tmp_path, yaml_content)
         with pytest.raises(ValueError, match="server.webhooks must be a YAML mapping"):
+            load_config(str(p))
+
+
+class TestHttpRateLimitCorsConfig:
+    """Tests for server.http_rate_limit.cors_allowed_origins parsing."""
+
+    def test_cors_allowed_origins_dataclass_default_empty(self) -> None:
+        """HttpRateLimitConfig defaults to an empty (restrictive) origin list."""
+        rl = HttpRateLimitConfig()
+        assert rl.cors_allowed_origins == []
+
+    def test_cors_allowed_origins_default_when_absent(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """When no cors_allowed_origins key is present, the default is an empty list."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        cfg = load_config()
+        assert cfg.server.http_rate_limit.cors_allowed_origins == []
+
+    def test_cors_allowed_origins_parses_list(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A YAML list of origins parses into cors_allowed_origins."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        yaml_content = """\
+            server:
+              http_rate_limit:
+                cors_allowed_origins:
+                  - https://app.example.com
+                  - https://other.example.com
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.server.http_rate_limit.cors_allowed_origins == [
+            "https://app.example.com",
+            "https://other.example.com",
+        ]
+
+    def test_cors_allowed_origins_filters_blank_entries(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Blank or whitespace-only entries are dropped during parsing."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        yaml_content = """\
+            server:
+              http_rate_limit:
+                cors_allowed_origins:
+                  - "  https://app.example.com  "
+                  - ""
+                  - "   "
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.server.http_rate_limit.cors_allowed_origins == ["https://app.example.com"]
+
+    def test_cors_allowed_origins_string_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A scalar string value is rejected — must be a YAML list."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        yaml_content = """\
+            server:
+              http_rate_limit:
+                cors_allowed_origins: https://app.example.com
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="cors_allowed_origins must be a YAML list"):
+            load_config(str(p))
+
+    def test_cors_allowed_origins_mapping_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A YAML mapping value is rejected — must be a YAML list."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        yaml_content = """\
+            server:
+              http_rate_limit:
+                cors_allowed_origins:
+                  origin: https://app.example.com
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="cors_allowed_origins must be a YAML list"):
             load_config(str(p))

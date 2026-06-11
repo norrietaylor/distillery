@@ -406,6 +406,10 @@ class HttpRateLimitConfig:
             requests from loopback addresses (``127.0.0.1``, ``::1``,
             ``localhost``).  This prevents local concurrent workflows from
             being starved by the shared per-IP bucket.
+        cors_allowed_origins: Browser origins permitted to make cross-origin
+            requests to the HTTP transport (MCP and webhook endpoints).
+            Default is an empty list — no cross-origin browser access.
+            Non-browser MCP clients are unaffected by CORS.
     """
 
     requests_per_minute: int = 60

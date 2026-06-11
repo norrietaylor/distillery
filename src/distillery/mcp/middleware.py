@@ -20,6 +20,7 @@ from collections.abc import Awaitable, Callable, MutableMapping
 from typing import TYPE_CHECKING, Any
 
 from starlette.datastructures import Headers
+from starlette.middleware.cors import CORSMiddleware
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from distillery.mcp.types import AuditCallback
@@ -536,6 +537,51 @@ class OrgMembershipMiddleware:
 
 
 # ---------------------------------------------------------------------------
+# CORS
+# ---------------------------------------------------------------------------
+
+
+def build_cors_middleware(app: ASGIApp, allowed_origins: list[str]) -> ASGIApp:
+    """Wrap *app* in an explicit, restrictive CORS policy.
+
+    Uses Starlette's :class:`~starlette.middleware.cors.CORSMiddleware`
+    (starlette is already a direct dependency of the middleware stack).
+    The default ``allowed_origins`` of ``[]`` permits **no** cross-origin
+    browser access: preflight requests from any origin are rejected and
+    no ``Access-Control-Allow-Origin`` header is ever emitted.  Non-browser
+    MCP clients are unaffected — CORS only gates browsers.
+
+    When a deployment explicitly lists origins (``server.http_rate_limit.
+    cors_allowed_origins``), those origins may make credentialed requests
+    with the headers required by the MCP streamable-HTTP transport
+    (``Authorization``, ``Mcp-Session-Id``, ``MCP-Protocol-Version``, ...).
+
+    Args:
+        app: The wrapped ASGI application.
+        allowed_origins: Exact origins permitted to make cross-origin
+            requests.  An empty list (the default policy) denies all.
+
+    Returns:
+        The CORS-wrapped ASGI app.
+    """
+    return CORSMiddleware(
+        app=app,
+        allow_origins=allowed_origins,
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_headers=[
+            "Authorization",
+            "Content-Type",
+            "X-Request-ID",
+            "Mcp-Session-Id",
+            "MCP-Protocol-Version",
+            "Last-Event-ID",
+        ],
+        expose_headers=["Mcp-Session-Id", "X-Request-ID"],
+        allow_credentials=True,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Convenience factory
 # ---------------------------------------------------------------------------
 
@@ -550,17 +596,20 @@ def apply_http_middleware(
     org_checker: OrgMembershipChecker | None = None,
     token_verifier: Callable[[str], Awaitable[Any]] | None = None,
     audit_callback: AuditCallback | None = None,
+    cors_allowed_origins: list[str] | None = None,
 ) -> ASGIApp:
-    """Wrap *app* with rate-limit, body-size, request-ID, and org-membership middleware.
+    """Wrap *app* with CORS, rate-limit, body-size, request-ID, and org-membership middleware.
 
     Middleware is applied in outermost-to-innermost order:
     1. :class:`RequestIDMiddleware` (outermost — echoes ``X-Request-ID`` on
        *all* responses, including 429/403/413 rejections)
-    2. :class:`RateLimitMiddleware` (counts every request so denied requests
+    2. CORS (see :func:`build_cors_middleware` — answers preflights and
+       emits CORS headers; restrictive by default)
+    3. :class:`RateLimitMiddleware` (counts every request so denied requests
        still consume quota)
-    3. :class:`OrgMembershipMiddleware` (when *org_checker* is provided and
+    4. :class:`OrgMembershipMiddleware` (when *org_checker* is provided and
        enabled — blocks non-members before body is read)
-    4. :class:`BodySizeLimitMiddleware` (innermost — rejects oversized bodies)
+    5. :class:`BodySizeLimitMiddleware` (innermost — rejects oversized bodies)
 
     Args:
         app: The ASGI application to wrap.
@@ -578,6 +627,9 @@ def apply_http_middleware(
         audit_callback: Optional async callback for writing audit log entries
             when org membership checks deny access.  Signature:
             ``(user_id, operation, entry_id, action, outcome) -> Awaitable[None]``.
+        cors_allowed_origins: Origins permitted to make cross-origin browser
+            requests.  When empty or ``None`` (the default), no origins are
+            permitted (restrictive default).
 
     Returns:
         A new ASGI app with all requested middleware layers applied.
@@ -594,5 +646,6 @@ def apply_http_middleware(
         trust_proxy=trust_proxy,
         loopback_exempt=loopback_exempt,
     )
+    app = build_cors_middleware(app, cors_allowed_origins or [])
     app = RequestIDMiddleware(app)
     return app
