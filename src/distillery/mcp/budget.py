@@ -16,9 +16,15 @@ from __future__ import annotations
 
 import datetime
 import logging
+import threading
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# Serializes counter writes.  Per-call cursors are separate DuckDB
+# connections, so unserialized concurrent upserts of the same row hit
+# optimistic-concurrency conflicts ("Conflict on update!" / duplicate key).
+_write_lock = threading.Lock()
 
 
 class EmbeddingBudgetError(Exception):
@@ -48,7 +54,9 @@ def get_daily_usage(conn: Any) -> int:
         The number of embedding calls made today.
     """
     key = _today_key()
-    row = conn.execute("SELECT value FROM _meta WHERE key = ?", [key]).fetchone()
+    # Use a per-call cursor: another execute() on the shared connection would
+    # invalidate a pending result set ("No open result set") under concurrency.
+    row = conn.cursor().execute("SELECT value FROM _meta WHERE key = ?", [key]).fetchone()
     return int(row[0]) if row else 0
 
 
@@ -66,12 +74,18 @@ def increment_usage(conn: Any, count: int = 1) -> int:
         The new total for today.
     """
     key = _today_key()
-    conn.execute(
-        "INSERT INTO _meta (key, value) VALUES (?, ?) "
-        "ON CONFLICT (key) DO UPDATE SET value = CAST(CAST(_meta.value AS INTEGER) + ? AS VARCHAR)",
-        [key, str(count), count],
-    )
-    row = conn.execute("SELECT value FROM _meta WHERE key = ?", [key]).fetchone()
+    # Use a per-call cursor so concurrent callers don't invalidate each
+    # other's result sets on the shared connection, and hold the write lock
+    # so concurrent upserts of the same row don't conflict.
+    with _write_lock:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO _meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT (key) DO UPDATE SET "
+            "value = CAST(CAST(_meta.value AS INTEGER) + ? AS VARCHAR)",
+            [key, str(count), count],
+        )
+        row = cur.execute("SELECT value FROM _meta WHERE key = ?", [key]).fetchone()
     return int(row[0]) if row else count
 
 
