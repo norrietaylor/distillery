@@ -1234,6 +1234,10 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         tags: list[str] | None = None,
         date_from: str | None = None,
         date_to: str | None = None,
+        weight: float | None = None,
+        valid_at: str | None = None,
+        invalid_at: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> list[types.TextContent]:
         """Manage typed relations between knowledge entries.
 
@@ -1249,6 +1253,11 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
           - relation_type (str, required for add, optional for get/traverse): Relation type.
             Valid: [link, corrects, supersedes, related, blocks, depends_on, citation,
             duplicate, merge_source, sync_source].
+          - weight (float, optional for add): Edge strength (e.g. interest/engagement
+            magnitude). On a re-assert of an existing edge, supplied attributes are upserted.
+          - valid_at / invalid_at (str ISO 8601, optional for add): Bi-temporal validity
+            window — when the relationship became / stopped being true (invalid_at null = current).
+          - metadata (object, optional for add): Arbitrary per-edge attributes (JSON).
           - entry_id (str, required for get/traverse, required for metrics scope='ego'):
             Entry UUID to query relations for (BFS root for traverse / ego-graph).
           - direction (str, optional for get/traverse, default="both"): Filter direction.
@@ -1268,7 +1277,9 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
           - project / tags / date_from / date_to (optional, metrics global scope):
             restrict the entries whose relations participate in the graph.
 
-        RETURNS (success): { relation_id: str, from_id: str, to_id: str, relation_type: str } (add) or
+        RETURNS (success): { relation_id: str, from_id: str, to_id: str, relation_type: str,
+          weight: float | null, valid_at: str | null, invalid_at: str | null,
+          metadata: object | null } (add) or
           { entry_id: str, relations: list, count: int } (get) or
           { relation_id: str, removed: bool } (remove) or
           { action: "traverse", root: str, hops: int, direction: str, relation_type: str | null,
@@ -1301,6 +1312,10 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                     tags=tags,
                     date_from=date_from,
                     date_to=date_to,
+                    weight=weight,
+                    valid_at=valid_at,
+                    invalid_at=invalid_at,
+                    metadata=metadata,
                 ),
             ),
         )

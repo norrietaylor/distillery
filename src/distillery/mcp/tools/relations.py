@@ -121,8 +121,39 @@ async def _handle_relations(
                 f"Must be one of: {', '.join(sorted(_VALID_RELATION_TYPES))}.",
             )
 
+        # Optional edge attributes (migration 15): weight, bi-temporal validity,
+        # arbitrary metadata. All default to None ("unspecified").
+        weight_raw = arguments.get("weight")
+        weight: float | None = None
+        if weight_raw is not None:
+            if isinstance(weight_raw, bool) or not isinstance(weight_raw, (int, float)):
+                return error_response("INVALID_PARAMS", "weight must be a number")
+            weight = float(weight_raw)
+
+        valid_at, err = _validate_optional_timestamp(arguments, "valid_at")
+        if err is not None:
+            return err
+        invalid_at, err = _validate_optional_timestamp(arguments, "invalid_at")
+        if err is not None:
+            return err
+
+        metadata_raw = arguments.get("metadata")
+        metadata: dict[str, Any] | None = None
+        if metadata_raw is not None:
+            if not isinstance(metadata_raw, dict):
+                return error_response("INVALID_PARAMS", "metadata must be an object")
+            metadata = metadata_raw
+
         try:
-            relation_id = await store.add_relation(from_id, to_id, relation_type)
+            relation_id = await store.add_relation(
+                from_id,
+                to_id,
+                relation_type,
+                weight=weight,
+                valid_at=valid_at,
+                invalid_at=invalid_at,
+                metadata=metadata,
+            )
         except ValueError as exc:
             return error_response(
                 "NOT_FOUND",
@@ -138,6 +169,10 @@ async def _handle_relations(
                 "from_id": from_id,
                 "to_id": to_id,
                 "relation_type": relation_type,
+                "weight": weight,
+                "valid_at": valid_at,
+                "invalid_at": invalid_at,
+                "metadata": metadata,
             }
         )
 
@@ -389,6 +424,31 @@ def _validate_optional_str(
         )
     stripped = raw.strip()
     return (stripped or None), None
+
+
+def _validate_optional_timestamp(
+    arguments: dict[str, Any], field: str
+) -> tuple[str | None, list[types.TextContent] | None]:
+    """Return (ISO-8601-str-or-None, error-or-None) for an optional timestamp field."""
+    raw = arguments.get(field)
+    if raw is None:
+        return None, None
+    if not isinstance(raw, str):
+        return None, error_response(
+            "INVALID_PARAMS",
+            f"{field} must be an ISO 8601 string, got: {type(raw).__name__}",
+        )
+    stripped = raw.strip()
+    if not stripped:
+        return None, None
+    try:
+        datetime.fromisoformat(stripped)
+    except ValueError:
+        return None, error_response(
+            "INVALID_PARAMS",
+            f"{field} must be a valid ISO 8601 timestamp, got: {raw!r}",
+        )
+    return stripped, None
 
 
 def _validate_optional_str_list(

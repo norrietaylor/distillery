@@ -544,6 +544,36 @@ def add_feed_source_thresholds(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -
     logger.info("Migration 14: feed_sources threshold override columns added")
 
 
+_ADD_ENTRY_RELATION_ATTRIBUTE_COLUMNS = [
+    "ALTER TABLE entry_relations ADD COLUMN IF NOT EXISTS weight DOUBLE;",
+    "ALTER TABLE entry_relations ADD COLUMN IF NOT EXISTS valid_at TIMESTAMPTZ;",
+    "ALTER TABLE entry_relations ADD COLUMN IF NOT EXISTS invalid_at TIMESTAMPTZ;",
+    "ALTER TABLE entry_relations ADD COLUMN IF NOT EXISTS metadata JSON;",
+]
+
+
+def add_relation_attributes(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
+    """Migration 15: Add weight, temporal validity, and metadata to ``entry_relations``.
+
+    Adds four nullable columns so edges can carry strength and a bi-temporal
+    validity window in addition to their type:
+
+    - ``weight`` (DOUBLE) — edge strength (e.g. interest/engagement magnitude).
+    - ``valid_at`` (TIMESTAMPTZ) — when the relationship became true.
+    - ``invalid_at`` (TIMESTAMPTZ) — when it stopped being true (NULL = still
+      valid).
+    - ``metadata`` (JSON) — arbitrary per-edge attributes, mirroring
+      ``entries.metadata``.
+
+    All columns are nullable with no default, so existing edges and the
+    metadata/wikilink backfill paths (which omit them) remain valid; NULL means
+    "unspecified", preserving pre-migration behaviour.
+    """
+    for stmt in _ADD_ENTRY_RELATION_ATTRIBUTE_COLUMNS:
+        conn.execute(stmt)
+    logger.info("Migration 15: entry_relations weight/valid_at/invalid_at/metadata columns added")
+
+
 # ---------------------------------------------------------------------------
 # Migration registry
 # ---------------------------------------------------------------------------
@@ -563,6 +593,7 @@ MIGRATIONS: dict[int, MigrationFunc] = {
     12: add_feed_source_liveness,
     13: create_sync_jobs,
     14: add_feed_source_thresholds,
+    15: add_relation_attributes,
 }
 """Ordered mapping of schema version to migration function.
 

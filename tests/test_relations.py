@@ -317,12 +317,140 @@ async def test_get_related_row_structure(store) -> None:  # type: ignore[no-unty
     results = await store.get_related(a)
     assert len(results) == 1
     row = results[0]
-    assert set(row.keys()) == {"id", "from_id", "to_id", "relation_type", "created_at"}
+    assert set(row.keys()) == {
+        "id",
+        "from_id",
+        "to_id",
+        "relation_type",
+        "created_at",
+        "weight",
+        "valid_at",
+        "invalid_at",
+        "metadata",
+    }
     assert row["id"] == relation_id
     assert row["from_id"] == a
     assert row["to_id"] == b
     assert row["relation_type"] == "link"
     assert isinstance(row["created_at"], str)
+    # New edge attributes default to None when unspecified.
+    assert row["weight"] is None
+    assert row["valid_at"] is None
+    assert row["invalid_at"] is None
+    assert row["metadata"] is None
+
+
+@pytest.mark.unit
+async def test_add_relation_edge_attributes_round_trip(store) -> None:  # type: ignore[no-untyped-def]
+    """weight, valid_at, invalid_at, and metadata persist and read back."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+
+    await store.add_relation(
+        a,
+        b,
+        "related",
+        weight=0.75,
+        valid_at="2026-01-01T00:00:00",
+        invalid_at="2026-06-01T12:30:00",
+        metadata={"source": "spike", "n": 3},
+    )
+
+    (row,) = await store.get_related(a)
+    assert row["weight"] == 0.75
+    assert row["valid_at"] == "2026-01-01T00:00:00Z"
+    assert row["invalid_at"] == "2026-06-01T12:30:00Z"
+    assert row["metadata"] == {"source": "spike", "n": 3}
+
+    # list_relations returns the same shape.
+    (listed,) = await store.list_relations()
+    assert listed["weight"] == 0.75
+    assert listed["metadata"] == {"source": "spike", "n": 3}
+
+
+@pytest.mark.unit
+async def test_add_relation_rejects_inverted_validity_window(store) -> None:  # type: ignore[no-untyped-def]
+    """invalid_at earlier than valid_at is rejected."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+
+    with pytest.raises(ValueError, match="invalid_at must be greater than or equal to valid_at"):
+        await store.add_relation(
+            a,
+            b,
+            "related",
+            valid_at="2026-06-01T00:00:00",
+            invalid_at="2026-01-01T00:00:00",
+        )
+
+
+@pytest.mark.unit
+async def test_add_relation_reassert_upserts_attributes(store) -> None:  # type: ignore[no-untyped-def]
+    """Re-asserting an existing edge upserts supplied attrs, stays idempotent on the triple."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+
+    first = await store.add_relation(a, b, "related", weight=0.1)
+    second = await store.add_relation(a, b, "related", weight=0.9, invalid_at="2026-06-01T00:00:00")
+
+    assert first == second  # same row, no duplicate
+    (row,) = await store.get_related(a)
+    assert row["weight"] == 0.9  # upserted
+    assert row["invalid_at"] == "2026-06-01T00:00:00Z"
+
+
+@pytest.mark.unit
+async def test_relations_tool_add_with_edge_attributes(store) -> None:  # type: ignore[no-untyped-def]
+    """The MCP add action accepts and echoes weight/valid_at/invalid_at/metadata."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+
+    result = await _handle_relations(
+        store,
+        {
+            "action": "add",
+            "from_id": a,
+            "to_id": b,
+            "relation_type": "link",
+            "weight": 2.5,
+            "valid_at": "2026-03-01T00:00:00",
+            "metadata": {"k": "v"},
+        },
+    )
+    payload = json.loads(result[0].text)
+    assert payload["weight"] == 2.5
+    assert payload["valid_at"] == "2026-03-01T00:00:00"
+    assert payload["metadata"] == {"k": "v"}
+
+    (row,) = await store.get_related(a)
+    assert row["weight"] == 2.5
+    assert row["valid_at"] == "2026-03-01T00:00:00Z"
+    assert row["metadata"] == {"k": "v"}
+
+
+@pytest.mark.unit
+async def test_relations_tool_add_rejects_bad_attributes(store) -> None:  # type: ignore[no-untyped-def]
+    """Non-numeric weight and unparseable timestamps are rejected with INVALID_PARAMS."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+
+    bad_weight = await _handle_relations(
+        store,
+        {"action": "add", "from_id": a, "to_id": b, "relation_type": "link", "weight": "heavy"},
+    )
+    assert json.loads(bad_weight[0].text)["code"] == "INVALID_PARAMS"
+
+    bad_ts = await _handle_relations(
+        store,
+        {
+            "action": "add",
+            "from_id": a,
+            "to_id": b,
+            "relation_type": "link",
+            "valid_at": "not-a-date",
+        },
+    )
+    assert json.loads(bad_ts[0].text)["code"] == "INVALID_PARAMS"
 
 
 # ---------------------------------------------------------------------------
