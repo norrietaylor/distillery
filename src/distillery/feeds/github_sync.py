@@ -225,7 +225,11 @@ def _build_content(
     if body and body.strip():
         parts.append(body.strip())
     for comment in comments[:_MAX_COMMENTS]:
-        author = comment.get("user", {}).get("login", "unknown")
+        # GitHub returns ``"user": null`` for comments by deleted/ghost
+        # accounts; ``.get("user", {})`` yields ``None`` (the key exists), so
+        # coerce a missing/null user object to an empty dict before lookup.
+        user = comment.get("user") or {}
+        author = user.get("login", "unknown")
         comment_body = comment.get("body", "")
         if comment_body and comment_body.strip():
             parts.append(f"**{author}**: {comment_body.strip()}")

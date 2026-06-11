@@ -139,6 +139,21 @@ class TestBuildContent:
         assert "user9" in result
         assert "user10" not in result
 
+    @pytest.mark.unit
+    def test_comment_with_null_user(self) -> None:
+        # GitHub returns ``"user": null`` for comments by deleted/ghost
+        # accounts.  ``dict.get("user", {})`` returns ``None`` (not the
+        # default) because the key exists, so a naive ``.get("login")``
+        # crashes the whole sync for that issue/PR.
+        comments = [
+            {"user": None, "body": "Orphaned comment"},
+            {"user": {"login": "alice"}, "body": "Live comment"},
+        ]
+        result = _build_content("Title", "Body", comments)
+        assert "Orphaned comment" in result
+        assert "**unknown**: Orphaned comment" in result
+        assert "**alice**: Live comment" in result
+
 
 # ---------------------------------------------------------------------------
 # Mock GitHub API responses
