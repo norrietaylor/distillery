@@ -138,25 +138,29 @@ async def build_store() -> tuple[DuckDBStore, dict[str, str], str]:
         entry_type=EntryType.PERSON, source=EntrySource.MANUAL, author="owner",
         metadata={"expertise": MY_EXPERTISE, "role": "owner"},
     )
-    entries.append(me); id_of["me"] = me.id
+    entries.append(me)
+    id_of["me"] = me.id
 
     for comm, people in COMMUNITIES.items():
         for p in people:
             e = Entry(content=f"{p} — {comm} community.", entry_type=EntryType.PERSON,
                       source=EntrySource.IMPORT, author="seed",
                       metadata={"expertise": [comm], "community": comm})
-            entries.append(e); id_of[p] = e.id
+            entries.append(e)
+            id_of[p] = e.id
 
     for tid, content in TOPICS.items():
         e = Entry(content=content, entry_type=EntryType.REFERENCE, source=EntrySource.IMPORT,
                   author="seed", tags=["node/topic"], metadata={"topic_id": tid})
-        entries.append(e); id_of[tid] = e.id
+        entries.append(e)
+        id_of[tid] = e.id
 
     for i, (tid, author, age) in enumerate(POSTS):
         e = Entry(content=f"Post about {tid}.", entry_type=EntryType.SESSION,
                   source=EntrySource.IMPORT, author=author, tags=["node/post"],
                   metadata={"topic_id": tid, "age_days": age})
-        entries.append(e); id_of[f"post{i}"] = e.id
+        entries.append(e)
+        id_of[f"post{i}"] = e.id
 
     await store.store_batch(entries)
 
@@ -203,9 +207,11 @@ def build_metrics(relations: list[dict], id_of: dict[str, str]) -> dict:
         if fk is None or tk is None:
             continue
         if rel == "connected_to":
-            person_graph.add_edge(fk, tk); G.add_edge(fk, tk)
+            person_graph.add_edge(fk, tk)
+            G.add_edge(fk, tk)
         elif rel == "interested_in":
-            interest[tk].append(fk); G.add_edge(fk, tk)
+            interest[tk].append(fk)
+            G.add_edge(fk, tk)
         elif rel == "about":
             post_topic[fk] = tk
 
