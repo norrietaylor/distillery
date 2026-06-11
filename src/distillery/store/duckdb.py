@@ -2167,17 +2167,28 @@ class DuckDBStore:
         def _sync() -> list[SearchResult]:
             conn = self.connection
 
+            # Exclude archived (soft-deleted) entries: find_similar drives
+            # pre-store deduplication, so a conceptually-removed entry must not
+            # be returned as a near-duplicate match (which would recommend
+            # SKIP/MERGE/LINK against dead content). Mirrors _sync_get's default.
             sql = (
                 f"SELECT {self._ENTRY_COLUMNS}, "
                 f"array_cosine_similarity(embedding, ?::FLOAT[{self._embedding_provider.dimensions}]) AS score "
                 f"FROM entries "
-                f"WHERE array_cosine_similarity(embedding, ?::FLOAT[{self._embedding_provider.dimensions}]) >= ? "
+                f"WHERE status != ? "
+                f"AND array_cosine_similarity(embedding, ?::FLOAT[{self._embedding_provider.dimensions}]) >= ? "
                 f"ORDER BY score DESC "
                 f"LIMIT ?"
             )
             # Convert normalized [0, 1] threshold to raw [-1, 1] for SQL comparison
             raw_threshold = threshold * 2.0 - 1.0
-            params: list[Any] = [embedding, embedding, raw_threshold, limit]
+            params: list[Any] = [
+                embedding,
+                EntryStatus.ARCHIVED.value,
+                embedding,
+                raw_threshold,
+                limit,
+            ]
             result = conn.execute(sql, params)
             col_names = [desc[0] for desc in result.description]
 
