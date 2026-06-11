@@ -369,15 +369,29 @@ async def test_add_relation_edge_attributes_round_trip(store) -> None:  # type: 
 
 
 @pytest.mark.unit
+async def test_add_relation_rejects_inverted_validity_window(store) -> None:  # type: ignore[no-untyped-def]
+    """invalid_at earlier than valid_at is rejected."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+
+    with pytest.raises(ValueError, match="invalid_at must be greater than or equal to valid_at"):
+        await store.add_relation(
+            a,
+            b,
+            "related",
+            valid_at="2026-06-01T00:00:00",
+            invalid_at="2026-01-01T00:00:00",
+        )
+
+
+@pytest.mark.unit
 async def test_add_relation_reassert_upserts_attributes(store) -> None:  # type: ignore[no-untyped-def]
     """Re-asserting an existing edge upserts supplied attrs, stays idempotent on the triple."""
     a = await _store_entry(store, content="entry A")
     b = await _store_entry(store, content="entry B")
 
     first = await store.add_relation(a, b, "related", weight=0.1)
-    second = await store.add_relation(
-        a, b, "related", weight=0.9, invalid_at="2026-06-01T00:00:00"
-    )
+    second = await store.add_relation(a, b, "related", weight=0.9, invalid_at="2026-06-01T00:00:00")
 
     assert first == second  # same row, no duplicate
     (row,) = await store.get_related(a)
@@ -410,6 +424,7 @@ async def test_relations_tool_add_with_edge_attributes(store) -> None:  # type: 
 
     (row,) = await store.get_related(a)
     assert row["weight"] == 2.5
+    assert row["valid_at"] == "2026-03-01T00:00:00Z"
     assert row["metadata"] == {"k": "v"}
 
 
@@ -427,8 +442,13 @@ async def test_relations_tool_add_rejects_bad_attributes(store) -> None:  # type
 
     bad_ts = await _handle_relations(
         store,
-        {"action": "add", "from_id": a, "to_id": b, "relation_type": "link",
-         "valid_at": "not-a-date"},
+        {
+            "action": "add",
+            "from_id": a,
+            "to_id": b,
+            "relation_type": "link",
+            "valid_at": "not-a-date",
+        },
     )
     assert json.loads(bad_ts[0].text)["code"] == "INVALID_PARAMS"
 

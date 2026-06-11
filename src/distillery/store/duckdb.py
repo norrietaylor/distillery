@@ -3242,7 +3242,7 @@ class DuckDBStore:
         if value is None:
             return None
         if isinstance(value, datetime):
-            return value
+            return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
         dt = datetime.fromisoformat(value)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=UTC)
@@ -3286,6 +3286,11 @@ class DuckDBStore:
         ).fetchone()
         valid_at_dt = self._coerce_relation_timestamp(valid_at)
         invalid_at_dt = self._coerce_relation_timestamp(invalid_at)
+        if valid_at_dt is not None and invalid_at_dt is not None and invalid_at_dt < valid_at_dt:
+            raise ValueError(
+                f"invalid_at must be greater than or equal to valid_at "
+                f"(valid_at={valid_at!r}, invalid_at={invalid_at!r})"
+            )
         metadata_json = json.dumps(metadata) if metadata is not None else None
         if existing is not None:
             relation_id = str(existing[0])
