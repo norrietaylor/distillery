@@ -484,3 +484,135 @@ class TestWalRecoveryPreservesBytes:
                 "recovery path appears to have deleted the WAL outright."
             )
             assert backups[0].read_bytes() == b"pretend this is a dirty WAL"
+
+
+# ---------------------------------------------------------------------------
+# WAL stays flushed across every write path
+# ---------------------------------------------------------------------------
+
+
+class TestBackgroundWritesFlushWal:
+    """Every write path must flush the WAL, not just entry CRUD.
+
+    The 2026-06-12 local incident: ``search_log`` / ``feedback_log`` /
+    ``feed_sources`` / ``entry_relations`` / ``_meta`` / ``audit_log``
+    writes bypassed :meth:`DuckDBStore._checkpoint_after_write`, so a
+    server doing mostly background work (feed polls, search logging)
+    accumulated a multi-megabyte WAL.  With
+    ``hnsw_enable_experimental_persistence`` the WAL also carries HNSW
+    index entries, and replaying such a WAL on startup segfaulted DuckDB
+    — taking the database (and a day of backups) with it.  Checkpointing
+    after every write keeps the WAL near-empty so there is never a large
+    replay to poison.
+
+    A successful CHECKPOINT removes the ``.wal`` sidecar entirely, so the
+    assertion after each operation is simply that the sidecar is gone (or
+    empty).
+    """
+
+    async def test_background_write_paths_leave_no_wal(
+        self, tmp_path: Path, mock_embedding_provider
+    ) -> None:
+        from datetime import UTC, datetime
+
+        db_path = tmp_path / "flush.db"
+        store = DuckDBStore(db_path=str(db_path), embedding_provider=mock_embedding_provider)
+        await store.initialize()
+        wal = tmp_path / "flush.db.wal"
+
+        def wal_bytes() -> int:
+            return wal.stat().st_size if wal.exists() else 0
+
+        try:
+            e1 = make_entry(content="wal flush A")
+            e2 = make_entry(content="wal flush B")
+            await store.store(e1)
+            await store.store(e2)
+
+            await store.log_search("prune me", [e1.id], [0.5])
+            await store.prune_search_log(0)
+            assert wal_bytes() == 0, "prune_search_log left writes in the WAL"
+
+            search_id = await store.log_search("q", [e1.id], [0.9])
+            assert wal_bytes() == 0, "log_search left writes in the WAL"
+
+            await store.log_feedback(search_id, e1.id, "click")
+            assert wal_bytes() == 0, "log_feedback left writes in the WAL"
+
+            await store.add_feed_source("https://example.com/feed.xml", "rss")
+            assert wal_bytes() == 0, "add_feed_source left writes in the WAL"
+
+            await store.record_poll_status(
+                "https://example.com/feed.xml",
+                polled_at=datetime.now(tz=UTC),
+                item_count=3,
+                error=None,
+            )
+            assert wal_bytes() == 0, "record_poll_status left writes in the WAL"
+
+            await store.remove_feed_source("https://example.com/feed.xml")
+            assert wal_bytes() == 0, "remove_feed_source left writes in the WAL"
+
+            await store.set_metadata("wal-test-key", "value")
+            assert wal_bytes() == 0, "set_metadata left writes in the WAL"
+
+            relation_id = await store.add_relation(e1.id, e2.id, "link")
+            assert wal_bytes() == 0, "add_relation left writes in the WAL"
+
+            await store.add_relation(e1.id, e2.id, "link", weight=0.5)  # upsert path
+            assert wal_bytes() == 0, "add_relation upsert left writes in the WAL"
+
+            await store.remove_relation(relation_id)
+            assert wal_bytes() == 0, "remove_relation left writes in the WAL"
+
+            await store.write_audit_log("user", "tool", e1.id, "create", "ok")
+            assert wal_bytes() == 0, "write_audit_log left writes in the WAL"
+        finally:
+            await store.close()
+
+
+# ---------------------------------------------------------------------------
+# Persistent checkpoint failures are surfaced
+# ---------------------------------------------------------------------------
+
+
+class TestCheckpointFailureEscalation:
+    """Swallowed checkpoint failures escalate to WARNING after a streak.
+
+    ``_checkpoint_after_write`` deliberately never raises — but logging
+    every failure at DEBUG hid the 2026-06-12 incident's WAL growth until
+    replay was already poisoned.  Three consecutive failures now log at
+    WARNING; any success resets the streak.
+    """
+
+    class _FailingConn:
+        def execute(self, sql: str) -> None:
+            raise duckdb.Error("checkpoint refused")
+
+    class _OkConn:
+        def execute(self, sql: str) -> None:
+            return None
+
+    def test_warns_after_three_consecutive_failures(
+        self, mock_embedding_provider, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+
+        store = DuckDBStore(db_path=":memory:", embedding_provider=mock_embedding_provider)
+        with caplog.at_level(logging.DEBUG, logger="distillery.store.duckdb"):
+            store._checkpoint_after_write(self._FailingConn())  # type: ignore[arg-type]
+            store._checkpoint_after_write(self._FailingConn())  # type: ignore[arg-type]
+            warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+            assert warnings == [], "warned before the streak threshold"
+            store._checkpoint_after_write(self._FailingConn())  # type: ignore[arg-type]
+        warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+        assert len(warnings) == 1
+        assert "3 times in a row" in warnings[0].message
+
+    def test_success_resets_failure_streak(self, mock_embedding_provider) -> None:
+        store = DuckDBStore(db_path=":memory:", embedding_provider=mock_embedding_provider)
+        store._checkpoint_after_write(self._FailingConn())  # type: ignore[arg-type]
+        store._checkpoint_after_write(self._FailingConn())  # type: ignore[arg-type]
+        assert store._checkpoint_failures == 2
+        store._checkpoint_after_write(self._OkConn())  # type: ignore[arg-type]
+        assert store._checkpoint_failures == 0

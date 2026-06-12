@@ -198,6 +198,7 @@ class DuckDBStore:
         self._initialized: bool = False
         self._vss_available: bool = False
         self._fts_available: bool = False
+        self._checkpoint_failures: int = 0
         self._hybrid_search: bool = hybrid_search
         self._rrf_k: int = rrf_k
         self._recency_window_days: int = recency_window_days
@@ -436,11 +437,25 @@ class DuckDBStore:
         """
         try:
             conn.execute("CHECKPOINT")
+            self._checkpoint_failures = 0
         except duckdb.Error as exc:
             # Non-fatal: the row is already in the WAL.  Log so operators
             # can see repeated failures, but don't raise — the caller has
-            # already observed a successful write.
-            logger.debug("CHECKPOINT after write failed (non-fatal): %s", exc)
+            # already observed a successful write.  A persistent failure
+            # streak means the WAL is accumulating writes (including HNSW
+            # index entries under experimental persistence, whose replay
+            # has crashed on startup in production) — escalate so it is
+            # visible before the WAL becomes unreplayable.
+            self._checkpoint_failures += 1
+            if self._checkpoint_failures >= 3:
+                logger.warning(
+                    "CHECKPOINT after write failed %d times in a row — "
+                    "WAL is accumulating un-flushed writes (non-fatal): %s",
+                    self._checkpoint_failures,
+                    exc,
+                )
+            else:
+                logger.debug("CHECKPOINT after write failed (non-fatal): %s", exc)
 
     def _sync_verify_entries_readable(self, entry_ids: Sequence[str]) -> None:
         """Read-back verification after a bulk rewrite of ``entries`` (issue #584).
@@ -2569,6 +2584,7 @@ class DuckDBStore:
                 "VALUES (?, ?, ?, ?, ?, ?)",
                 [str(_uuid.uuid4()), user_id, tool, entry_id, action, outcome],
             )
+            self._checkpoint_after_write(conn)
 
         try:
             await self._run_sync(_sync)
@@ -2718,6 +2734,7 @@ class DuckDBStore:
             "VALUES (?, ?, ?, ?, ?)"
         )
         conn.execute(sql, [search_id, query, result_entry_ids, result_scores, session_id])
+        self._checkpoint_after_write(conn)
         logger.debug("Logged search id=%s query=%r", search_id, query)
         return search_id
 
@@ -2767,6 +2784,7 @@ class DuckDBStore:
         conn = self.connection
         sql = "INSERT INTO feedback_log (id, search_id, entry_id, signal) VALUES (?, ?, ?, ?)"
         conn.execute(sql, [feedback_id, search_id, entry_id, signal])
+        self._checkpoint_after_write(conn)
         logger.debug(
             "Logged feedback id=%s search_id=%s entry_id=%s signal=%r",
             feedback_id,
@@ -2922,6 +2940,7 @@ class DuckDBStore:
             )
         except duckdb.ConstraintException as exc:
             raise ValueError(f"Feed source with URL {url!r} already exists.") from exc
+        self._checkpoint_after_write(self._conn)
         return {
             "url": url,
             "source_type": source_type,
@@ -2936,7 +2955,10 @@ class DuckDBStore:
         """Remove a feed source by URL. Returns True if it existed."""
         assert self._conn is not None
         result = self._conn.execute("DELETE FROM feed_sources WHERE url = ? RETURNING url", [url])
-        return len(result.fetchall()) > 0
+        removed = len(result.fetchall()) > 0
+        if removed:
+            self._checkpoint_after_write(self._conn)
+        return removed
 
     # Maximum length of a persisted ``last_error`` string.  Longer errors are
     # truncated to keep the liveness payload small and to avoid storing
@@ -2980,7 +3002,10 @@ class DuckDBStore:
             "WHERE url = ? RETURNING url",
             [polled_at_naive, item_count_int, truncated, url],
         )
-        return len(result.fetchall()) > 0
+        updated = len(result.fetchall()) > 0
+        if updated:
+            self._checkpoint_after_write(self._conn)
+        return updated
 
     async def list_feed_sources(self) -> list[dict[str, Any]]:
         """Return all persisted feed sources as dicts."""
@@ -3062,6 +3087,7 @@ class DuckDBStore:
             "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
             [key, value],
         )
+        self._checkpoint_after_write(self._conn)
 
     async def get_metadata(self, key: str) -> str | None:
         """Read a value from the ``_meta`` key-value table."""
@@ -3098,6 +3124,8 @@ class DuckDBStore:
             "RETURNING id",
             [retention_days],
         ).fetchall()
+        if result:
+            self._checkpoint_after_write(self._conn)
         return len(result)
 
     async def prune_search_log(self, retention_days: int) -> int:
@@ -3327,6 +3355,8 @@ class DuckDBStore:
                     f"UPDATE entry_relations SET {', '.join(set_parts)} WHERE id = ?",
                     [*set_params, relation_id],
                 )
+            if set_parts:
+                self._checkpoint_after_write(self._conn)
             logger.debug(
                 "Relation already exists id=%s from=%s to=%s type=%s (attrs upserted=%d)",
                 relation_id,
@@ -3352,6 +3382,7 @@ class DuckDBStore:
                 metadata_json,
             ],
         )
+        self._checkpoint_after_write(self._conn)
         logger.debug(
             "Added relation id=%s from=%s to=%s type=%s",
             relation_id,
@@ -3487,8 +3518,11 @@ class DuckDBStore:
                 conn.execute("ROLLBACK")
             raise
 
-        # Rebuild FTS index outside the transaction (non-critical).
+        # Rebuild FTS index outside the transaction (non-critical).  The
+        # rebuild checkpoints when FTS is available; checkpoint explicitly
+        # too so the correction's write set is flushed either way.
         self._rebuild_fts_index(conn)
+        self._checkpoint_after_write(conn)
         logger.debug(
             "Applied correction: new=%s original=%s (archived)",
             new_entry.id,
@@ -3612,6 +3646,7 @@ class DuckDBStore:
         deleted = result.fetchall()
         found = len(deleted) > 0
         if found:
+            self._checkpoint_after_write(self._conn)
             logger.debug("Removed relation id=%s", relation_id)
         return found
 
