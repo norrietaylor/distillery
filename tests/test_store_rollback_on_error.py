@@ -138,6 +138,84 @@ class TestTerminalFatalInvalidation:
         assert store._terminal_failure is None  # type: ignore[attr-defined]
 
 
+def _stale_file_handle() -> None:
+    """Sync hook raising the GCS-FUSE stale-handle IO error.
+
+    Mirrors the production traceback: ``conn.execute`` on a ``.db`` file whose
+    backing FUSE object generation changed under the open handle.
+    """
+    raise duckdb.IOException(
+        'IO Error: Could not read from file "/data/distillery.db": Stale file handle'
+    )
+
+
+class TestStaleFileHandle:
+    """A stale FUSE file handle (IOException) must self-heal via supervisor
+    restart, the same way a terminally invalidated connection does — instead
+    of returning ``INTERNAL`` on every read until a human restarts the
+    instance."""
+
+    async def test_stale_handle_sets_flag_signals_sigterm_and_reraises(
+        self, store: DuckDBStore, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A stale-handle IOException sets the flag, SIGTERMs, and propagates."""
+        import logging
+        import os
+
+        assert store._terminal_failure is None  # type: ignore[attr-defined]
+
+        with (
+            mock.patch("distillery.store.duckdb.os.kill") as mock_kill,
+            caplog.at_level(logging.CRITICAL, logger="distillery.store.duckdb"),
+            pytest.raises(duckdb.IOException, match="Stale file handle"),
+        ):
+            await store._run_sync(_stale_file_handle)  # type: ignore[attr-defined]
+
+        assert store._terminal_failure is not None  # type: ignore[attr-defined]
+        assert "Stale file handle" in str(store._terminal_failure)  # type: ignore[attr-defined]
+        mock_kill.assert_called_once_with(os.getpid(), __import__("signal").SIGTERM)
+        assert any(r.levelno >= logging.CRITICAL for r in caplog.records)
+
+    async def test_stale_handle_on_read_path_signals_sigterm(
+        self, store: DuckDBStore
+    ) -> None:
+        """The read handle (``_run_read``) goes stale with the write handle and
+        must trigger the same restart — status probes use this path."""
+        import os
+
+        with (
+            mock.patch("distillery.store.duckdb.os.kill") as mock_kill,
+            pytest.raises(duckdb.IOException, match="Stale file handle"),
+        ):
+            await store._run_read(lambda conn: _stale_file_handle())  # type: ignore[attr-defined]
+
+        mock_kill.assert_called_once_with(os.getpid(), __import__("signal").SIGTERM)
+
+    async def test_non_stale_io_error_does_not_signal_and_rolls_back(
+        self, store: DuckDBStore
+    ) -> None:
+        """An IOException without the stale-handle marker must NOT restart.
+
+        It rolls back like any other error and leaves the terminal flag unset,
+        so an unrelated disk/IO error is not mistaken for a dead handle.
+        """
+        rollback_calls: list[str] = []
+        store._rollback_quietly = lambda conn: rollback_calls.append("called")  # type: ignore[attr-defined,method-assign]
+
+        def other_io_error() -> None:
+            raise duckdb.IOException("IO Error: disk quota exceeded while writing")
+
+        with (
+            mock.patch("distillery.store.duckdb.os.kill") as mock_kill,
+            pytest.raises(duckdb.IOException, match="disk quota"),
+        ):
+            await store._run_sync(other_io_error)  # type: ignore[attr-defined]
+
+        mock_kill.assert_not_called()
+        assert store._terminal_failure is None  # type: ignore[attr-defined]
+        assert rollback_calls == ["called"]
+
+
 class TestReadAfterWriteFailure:
     """The key scenario from issue #363: a failed write must not brick reads."""
 

@@ -9,6 +9,8 @@ This module contains common helpers used across multiple domain modules:
 from __future__ import annotations
 
 import json
+import logging
+import uuid
 from typing import Any
 
 from mcp import types
@@ -80,6 +82,40 @@ def error_response(
     if details:
         payload["details"] = details
     return [types.TextContent(type="text", text=json.dumps(payload, indent=2))]
+
+
+def internal_error_response(
+    *,
+    log: logging.Logger,
+    log_message: str,
+    client_message: str,
+    exc: BaseException,
+) -> list[types.TextContent]:
+    """Log *exc* with a correlation id and return a sanitized ``INTERNAL`` error.
+
+    The client-facing payload deliberately withholds the raw exception text
+    but carries an ``error_id`` and ``error_class`` so a failure observed by
+    the caller can be matched to the full server-side traceback — logged at
+    ``ERROR`` with the same ``error_id`` — without requiring log access just
+    to learn *what kind* of error occurred. Call from inside an ``except``
+    block so ``log.exception`` captures the active traceback.
+
+    Args:
+        log: The calling module's logger (keeps the log source accurate).
+        log_message: Message logged alongside the traceback.
+        client_message: Generic, non-sensitive message returned to the client.
+        exc: The caught exception; its class name is surfaced in ``details``.
+
+    Returns:
+        A single-element list of :class:`~mcp.types.TextContent`.
+    """
+    error_id = uuid.uuid4().hex[:12]
+    log.exception("%s [error_id=%s]", log_message, error_id)
+    return error_response(
+        "INTERNAL",
+        client_message,
+        details={"error_id": error_id, "error_class": type(exc).__name__},
+    )
 
 
 def success_response(data: dict[str, Any]) -> list[types.TextContent]:
