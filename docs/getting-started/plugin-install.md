@@ -12,10 +12,10 @@ claude plugin marketplace add norrietaylor/distillery
 claude plugin install distillery
 ```
 
-This installs the skill definitions globally and configures the MCP server to run **locally** via `uvx --from 'distillery-mcp[fastembed]>=0.6.0' distillery-mcp` — a private, self-contained knowledge base on your machine, with on-device `fastembed` embeddings as the install-time default (no API key required). Requires Python 3.11+ and [`uv`](https://docs.astral.sh/uv/) on your `PATH`.
+This installs the skill definitions globally. The plugin **does not configure an MCP server automatically** — run `/setup` (next step) to add one. The recommended setup is a private, self-contained local knowledge base via `uvx --from 'distillery-mcp[fastembed]>=0.6.0' distillery-mcp`, with on-device `fastembed` embeddings (no API key required). Requires Python 3.11+ and [`uv`](https://docs.astral.sh/uv/) on your `PATH`.
 
 !!! tip "Install uv"
-    `curl -LsSf https://astral.sh/uv/install.sh | sh` — or use `pip install 'distillery-mcp[fastembed]'` and override the plugin's default `command` to `distillery-mcp` (see [Troubleshooting](mcp-setup.md#troubleshooting)).
+    `curl -LsSf https://astral.sh/uv/install.sh | sh` — or use `pip install 'distillery-mcp[fastembed]'` and set the server `command` to `distillery-mcp` (see [Troubleshooting](mcp-setup.md#troubleshooting)).
 
 After installation, restart Claude Code and run the onboarding wizard:
 
@@ -23,7 +23,7 @@ After installation, restart Claude Code and run the onboarding wizard:
 /setup
 ```
 
-This verifies MCP connectivity, detects your transport, and configures auto-poll for ambient intelligence.
+This verifies MCP connectivity, prompts you to configure an MCP server if none is connected, detects your transport, and configures auto-poll for ambient intelligence.
 
 !!! note "Hosted demo (opt-in)"
     Want a zero-install evaluation? You can opt into the hosted demo at `distillery-mcp.fly.dev` instead — see [MCP Configuration](#mcp-configuration) below. The demo server is for **evaluation only**; do not store sensitive or confidential data.
@@ -62,11 +62,11 @@ ln -s ~/.claude/distillery/skills/setup     ~/.claude/skills/setup
 
 ## MCP Configuration
 
-The skills require the Distillery MCP server. The plugin's **default** is local stdio via `uvx distillery-mcp`. Hosted demo and self-hosted HTTP are opt-in alternatives.
+The skills require the Distillery MCP server, which you configure yourself — the plugin ships skills only. The **recommended** setup is local stdio via `uvx distillery-mcp`. Hosted demo and self-hosted HTTP are opt-in alternatives.
 
-### Default — Local stdio with uvx (fastembed)
+### Recommended — Local stdio with uvx (fastembed)
 
-`claude plugin install distillery` registers this configuration automatically. The plugin manifest declares:
+`/setup` prompts to add this when no server is connected, or add it manually to `~/.claude.json` (user scope) or `.mcp.json` (this project):
 
 ```json
 {

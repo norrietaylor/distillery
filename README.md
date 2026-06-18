@@ -74,7 +74,7 @@ claude plugin marketplace add norrietaylor/distillery
 claude plugin install distillery
 ```
 
-This installs all 14 skills and configures the MCP server to run **locally** via `uvx --from 'distillery-mcp[fastembed]>=0.6.0' distillery-mcp` — a private, self-contained knowledge base on your machine, with on-device `fastembed` embeddings as the install-time default (no API key required). Requires Python 3.11+ and [`uv`](https://docs.astral.sh/uv/) (install: `curl -LsSf https://astral.sh/uv/install.sh | sh`).
+This installs all 14 skills. The plugin **does not configure an MCP server automatically** — run `/setup` (below) to add one. The recommended setup runs **locally** via `uvx --from 'distillery-mcp[fastembed]>=0.6.0' distillery-mcp` — a private, self-contained knowledge base on your machine, with on-device `fastembed` embeddings (no API key required). Requires Python 3.11+ and [`uv`](https://docs.astral.sh/uv/) (install: `curl -LsSf https://astral.sh/uv/install.sh | sh`).
 
 ### Step 2 (Optional): Use Jina or OpenAI Instead
 
@@ -100,7 +100,7 @@ Restart Claude Code and run the onboarding wizard:
 
 ### Try the Hosted Demo (Opt-In)
 
-Want to evaluate without installing anything locally? Override the plugin default with the hosted demo at `distillery-mcp.fly.dev`:
+Want to evaluate without installing anything locally? Configure the hosted demo at `distillery-mcp.fly.dev` instead of a local server:
 
 ```bash
 claude mcp add distillery --scope user --transport http --url https://distillery-mcp.fly.dev/mcp

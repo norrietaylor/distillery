@@ -36,15 +36,6 @@ fail() {
   FAIL=$((FAIL + 1))
 }
 
-assert_eq() {
-  local name="$1" expected="$2" actual="$3"
-  if [[ "$actual" == "$expected" ]]; then
-    pass "$name"
-  else
-    fail "$name" "expected $(printf '%q' "$expected") got $(printf '%q' "$actual")"
-  fi
-}
-
 assert_empty() {
   local name="$1" actual="$2"
   if [[ -z "$actual" ]]; then
@@ -72,24 +63,6 @@ assert_exit_zero() {
   fi
 }
 
-assert_file_exists() {
-  local name="$1" path="$2"
-  if [[ -f "$path" ]]; then
-    pass "$name"
-  else
-    fail "$name" "file not found: ${path}"
-  fi
-}
-
-assert_file_absent() {
-  local name="$1" path="$2"
-  if [[ ! -f "$path" ]]; then
-    pass "$name"
-  else
-    fail "$name" "file should not exist: ${path}"
-  fi
-}
-
 # ── Helper: emit hook JSON ────────────────────────────────────────────────────
 hook_json() {
   local event="$1" session="${2:-test-session-$$}" cwd="${3:-/tmp}"
@@ -104,100 +77,6 @@ BASE_SESSION="test-$$"
 echo ""
 echo "distillery-hooks.sh — integration tests"
 echo "========================================"
-
-# ── T1: Counter file created on first prompt ──────────────────────────────────
-echo ""
-echo "T1: Counter file lifecycle"
-
-SESSION1="${BASE_SESSION}-t1"
-COUNTER1="/tmp/distillery-prompt-count-${SESSION1}"
-rm -f "$COUNTER1"
-
-hook_json UserPromptSubmit "$SESSION1" \
-  | DISTILLERY_NUDGE_INTERVAL=30 bash "$DISPATCHER" >/dev/null 2>&1
-
-assert_file_exists "counter file created on first prompt" "$COUNTER1"
-
-COUNT_VAL="$(cat "$COUNTER1" 2>/dev/null || echo "")"
-assert_eq "counter starts at 1" "1" "$COUNT_VAL"
-
-# Cleanup
-rm -f "$COUNTER1"
-assert_file_absent "counter file removed after cleanup" "$COUNTER1"
-
-# ── T2: Counter increments across prompts ─────────────────────────────────────
-echo ""
-echo "T2: Counter increments"
-
-SESSION2="${BASE_SESSION}-t2"
-COUNTER2="/tmp/distillery-prompt-count-${SESSION2}"
-rm -f "$COUNTER2"
-
-for i in 1 2 3; do
-  hook_json UserPromptSubmit "$SESSION2" \
-    | DISTILLERY_NUDGE_INTERVAL=30 bash "$DISPATCHER" >/dev/null 2>&1
-done
-
-FINAL_COUNT="$(cat "$COUNTER2" 2>/dev/null || echo "")"
-assert_eq "counter increments correctly (3 prompts -> 3)" "3" "$FINAL_COUNT"
-
-rm -f "$COUNTER2"
-
-# ── T3: Non-nudge prompts produce no output ───────────────────────────────────
-echo ""
-echo "T3: Non-nudge prompts are silent"
-
-SESSION3="${BASE_SESSION}-t3"
-COUNTER3="/tmp/distillery-prompt-count-${SESSION3}"
-rm -f "$COUNTER3"
-
-OUTPUT3="$(hook_json UserPromptSubmit "$SESSION3" \
-  | DISTILLERY_NUDGE_INTERVAL=30 bash "$DISPATCHER" 2>/dev/null)"
-
-assert_empty "first prompt (non-nudge) produces no stdout" "$OUTPUT3"
-
-rm -f "$COUNTER3"
-
-# ── T4: Nudge fires at configured interval ────────────────────────────────────
-echo ""
-echo "T4: Nudge fires at interval boundary"
-
-SESSION4="${BASE_SESSION}-t4"
-COUNTER4="/tmp/distillery-prompt-count-${SESSION4}"
-rm -f "$COUNTER4"
-
-# Use interval=3: first two prompts silent, third fires nudge
-OUTPUT4_1="$(hook_json UserPromptSubmit "$SESSION4" \
-  | DISTILLERY_NUDGE_INTERVAL=3 bash "$DISPATCHER" 2>/dev/null)"
-OUTPUT4_2="$(hook_json UserPromptSubmit "$SESSION4" \
-  | DISTILLERY_NUDGE_INTERVAL=3 bash "$DISPATCHER" 2>/dev/null)"
-OUTPUT4_3="$(hook_json UserPromptSubmit "$SESSION4" \
-  | DISTILLERY_NUDGE_INTERVAL=3 bash "$DISPATCHER" 2>/dev/null)"
-
-assert_empty "prompt 1 of 3 produces no output" "$OUTPUT4_1"
-assert_empty "prompt 2 of 3 produces no output" "$OUTPUT4_2"
-assert_contains "prompt 3 of 3 fires nudge" "[Distillery]" "$OUTPUT4_3"
-assert_contains "nudge mentions message count" "3 messages" "$OUTPUT4_3"
-
-rm -f "$COUNTER4"
-
-# ── T5: Interval=1 fires on every prompt ─────────────────────────────────────
-echo ""
-echo "T5: Interval=1 fires on every prompt"
-
-SESSION5="${BASE_SESSION}-t5"
-COUNTER5="/tmp/distillery-prompt-count-${SESSION5}"
-rm -f "$COUNTER5"
-
-OUTPUT5_1="$(hook_json UserPromptSubmit "$SESSION5" \
-  | DISTILLERY_NUDGE_INTERVAL=1 bash "$DISPATCHER" 2>/dev/null)"
-OUTPUT5_2="$(hook_json UserPromptSubmit "$SESSION5" \
-  | DISTILLERY_NUDGE_INTERVAL=1 bash "$DISPATCHER" 2>/dev/null)"
-
-assert_contains "interval=1, prompt 1 fires nudge" "[Distillery]" "$OUTPUT5_1"
-assert_contains "interval=1, prompt 2 fires nudge" "[Distillery]" "$OUTPUT5_2"
-
-rm -f "$COUNTER5"
 
 # ── T6: Unknown hook events exit 0 silently ───────────────────────────────────
 echo ""
@@ -239,17 +118,6 @@ elif [[ "$OUTPUT8" == *"[Distillery]"* ]]; then
 else
   fail "SessionStart output is non-empty but malformed: ${OUTPUT8:0:100}"
 fi
-
-# ── T9: Missing session_id handled gracefully ─────────────────────────────────
-echo ""
-echo "T9: Missing session_id handled gracefully"
-
-OUTPUT9="$(printf '{"hook_event_name":"UserPromptSubmit"}' \
-  | bash "$DISPATCHER" 2>/dev/null)"
-EXIT9=$?
-
-assert_exit_zero "UserPromptSubmit with no session_id exits 0" "$EXIT9"
-assert_empty "UserPromptSubmit with no session_id produces no output" "$OUTPUT9"
 
 # ── T10: Empty input handled gracefully ──────────────────────────────────────
 echo ""

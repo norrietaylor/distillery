@@ -77,13 +77,7 @@ Display:
 Distillery MCP Server Not Available
 
 The Distillery MCP server is not configured or not running.
-
-Quickest setup — install the plugin (configures local stdio by default):
-
-  claude plugin marketplace add norrietaylor/distillery
-  claude plugin install distillery
-
-Or add manually to ~/.claude.json:
+The plugin does not configure an MCP server automatically — add one now:
 
   {
     "mcpServers": {
@@ -96,6 +90,9 @@ Or add manually to ~/.claude.json:
       }
     }
   }
+
+Add this to ~/.claude.json (user scope, all projects) or .mcp.json
+(this project only).
 
 Get a free Jina API key at https://jina.ai
 Then restart Claude Code and run /setup again.
@@ -168,7 +165,7 @@ Scheduled tasks: skipped
 
 ### Step 5: Configure Session Hooks
 
-Plugin manifest hooks do not support `UserPromptSubmit` events. Manifest hooks support `SessionStart` and `Stop`, so `UserPromptSubmit` must be configured in `settings.json`. To enable the memory nudge (every 30 prompts) and full session lifecycle hooks via the dispatcher, the script must be configured in the appropriate settings.json based on plugin installation scope.
+The dispatcher provides `SessionStart` briefing context injection. To wire it via the dispatcher, the script must be configured in the appropriate settings.json based on plugin installation scope.
 
 **5a. Detect plugin installation scope:**
 
@@ -204,13 +201,12 @@ Skip to Step 6.
 
 **5c. Check existing hooks:**
 
-Read `SCOPE_FILE` and check whether **both** `hooks.UserPromptSubmit` and `hooks.SessionStart` reference `distillery-hooks.sh` (same dispatcher path).
+Read `SCOPE_FILE` and check whether `hooks.SessionStart` references `distillery-hooks.sh` (the dispatcher path).
 
-If both are already configured:
+If already configured:
 
 ```text
 Session hooks: active (<SCOPE_LABEL> scope)
-  Memory nudge:  every 30 prompts
   Session start: briefing context injection
 ```
 
@@ -222,7 +218,6 @@ Ask the user:
 
 ```text
 Enable session hooks? This configures hooks in <SCOPE_FILE> (<SCOPE_LABEL> scope).
-  • Memory nudge — reminder to /distill every 30 prompts
   • Session start — briefing context injection
 (yes / no)
 ```
@@ -232,16 +227,6 @@ If yes, merge the following hooks into `SCOPE_FILE` (do not overwrite other sett
 ```json
 {
   "hooks": {
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash <absolute-path-to>/scripts/hooks/distillery-hooks.sh"
-          }
-        ]
-      }
-    ],
     "SessionStart": [
       {
         "hooks": [
@@ -262,7 +247,6 @@ Display:
 Session hooks installed:
   Config:        <SCOPE_FILE> (<SCOPE_LABEL> scope)
   Dispatcher:    <absolute-path-to>/scripts/hooks/distillery-hooks.sh
-  Memory nudge:  every 30 prompts
   Session start: briefing context injection
 ```
 
@@ -291,7 +275,6 @@ Distillery Setup Complete
     KB maintenance:    <active (weekly routine) | inactive>
 
   Session Hooks:   <SCOPE_LABEL> scope
-    Memory nudge:  <active (every 30 prompts) | inactive | skipped>
     Session start: <active | inactive | skipped>
 
 Available skills:
