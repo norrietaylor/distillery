@@ -39,8 +39,9 @@ dependencies = [
     "httpx>=0.24.0,<1.0",
     "fastmcp>=2.12.0,<4.0",
     "defusedxml>=0.7.0,<1.0",
-    # Transitive via fastmcp/starlette; pin floor for GHSA-pp6c-gr5w-3c5g.
-    "python-multipart>=0.0.27",
+    # Transitive via fastmcp/starlette; pin floor for GHSA-pp6c-gr5w-3c5g
+    # and GHSA-5rvq-cxj2-64vf (fixed in 0.0.30).
+    "python-multipart>=0.0.30",
 ]
 
 [project.optional-dependencies]
