@@ -2,6 +2,7 @@
 name: pour
 description: "Synthesize multiple knowledge entries into a cohesive narrative with citations"
 allowed-tools:
+  - "mcp__*__distillery_status"
   - "mcp__*__distillery_search"
   - "mcp__*__distillery_get"
   - "mcp__*__distillery_store"

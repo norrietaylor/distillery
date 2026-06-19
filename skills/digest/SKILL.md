@@ -2,6 +2,7 @@
 name: digest
 description: "Generate a structured summary of internal team activity over a time window"
 allowed-tools:
+  - "mcp__*__distillery_status"
   - "mcp__*__distillery_list"
   - "mcp__*__distillery_search"
   - "mcp__*__distillery_store"

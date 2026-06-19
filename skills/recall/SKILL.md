@@ -2,6 +2,7 @@
 name: recall
 description: "Search the knowledge base using natural language and return matching entries with provenance"
 allowed-tools:
+  - "mcp__*__distillery_status"
   - "mcp__*__distillery_search"
   - "mcp__*__distillery_get"
 effort: low

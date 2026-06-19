@@ -2,6 +2,7 @@
 name: tune
 description: "Display and adjust feed relevance thresholds for alerts and digests"
 allowed-tools:
+  - "mcp__*__distillery_status"
   - "mcp__*__distillery_configure"
 effort: low
 model: haiku

@@ -2,6 +2,7 @@
 name: radar
 description: "Generate an ambient intelligence digest from recent feed activity with source suggestions"
 allowed-tools:
+  - "mcp__*__distillery_status"
   - "mcp__*__distillery_search"
   - "mcp__*__distillery_list"
   - "mcp__*__distillery_store"

@@ -2,6 +2,7 @@
 name: investigate
 description: "Compile deep context on a topic by combining semantic search with relationship traversal across 4 retrieval phases"
 allowed-tools:
+  - "mcp__*__distillery_status"
   - "mcp__*__distillery_search"
   - "mcp__*__distillery_get"
   - "mcp__*__distillery_relations"
