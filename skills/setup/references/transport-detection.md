@@ -38,7 +38,20 @@ Then skip to Step 6 (Summary) with `MCP Server: needs authentication`.
 
 ## Step 2: Transport Classification Table
 
-Read the `.mcp.json` file in the project root (or `~/.claude.json` if `.mcp.json` does not exist) to determine the Distillery MCP server configuration.
+Classify the transport from the `transport` field already returned by
+`distillery_status` in Step 1 — do NOT re-read or parse any config files for this.
+
+| `distillery_status.transport` | Transport | Mode    |
+|-------------------------------|-----------|---------|
+| `stdio`                       | Local     | `local` |
+| `http`                        | Hosted **or** Team HTTP (see below) | `hosted`/`team` |
+| `unknown` / missing           | unknown   | —       |
+
+The hosted-vs-team distinction is **cosmetic** and needs the server URL. It is
+optional: only resolve it if the URL is available with a single `Read` of one
+config file. Do NOT write shell pipelines, `python`/`jq`/`grep` one-liners, or
+any JSON-parsing script to extract it — use the `Read` tool, and if the entry
+isn't obvious in one read, label it `Hosted/Team HTTP` and move on.
 
 | URL Pattern | Transport | Mode |
 |-------------|-----------|------|
