@@ -324,4 +324,4 @@ The setup wizard uses a sequential, conversational format. Each step prints its 
 - Routine prompts use MCP tool calls — routines execute in Claude Code context with direct MCP access
 - The weekly maintenance routine stores its output as a digest entry — this creates a longitudinal record of KB health
 - Ask the user once about enabling scheduled tasks; their answer applies to all three tiers
-- Legacy CronCreate and webhook-based scheduling are deprecated — guide users to routines instead
+- Legacy CronCreate scheduling is deprecated. For local (stdio) deployments, guide users to Claude Code routines. Hosted/Team HTTP deployments instead rely on server-side webhooks (`distill_ops` GitHub Actions) — these are the supported mechanism for hosted, not deprecated.
