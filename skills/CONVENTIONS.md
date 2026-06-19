@@ -71,11 +71,15 @@ Skills that exceed 150 lines should move detailed or mode-specific content into 
 
 ## API Key Configuration
 
-API keys required by Distillery (embedding provider, GitHub OAuth) are declared in `plugin.json` under `userConfig`. Keys marked `sensitive: true` are stored in the OS keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service) via Claude Code's secure config system.
+API keys required by Distillery (embedding provider, GitHub OAuth) are supplied to the MCP server via environment variables: `JINA_API_KEY`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`.
 
-**Preferred method:** `userConfig` in `plugin.json` — keys are prompted on first use and stored securely.
+**Recommended (local):** run `/setup`, which configures the MCP server and writes its `env` block to `~/.claude.json` (see `skills/setup/SKILL.md`).
 
-**Fallback:** Environment variables (`JINA_API_KEY`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`) for CI or environments without keychain access.
+**Manual (local):** edit the MCP server's `env` block in `~/.claude.json` directly.
+
+**Hosted/CI:** export the variables in the deployment environment (container, cloud runtime, CI secrets) that runs `distillery-mcp`.
+
+The plugin no longer bundles or auto-configures an MCP server, so it declares no `userConfig` keys.
 
 ## Author & Project Resolution
 
