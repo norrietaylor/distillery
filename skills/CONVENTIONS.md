@@ -71,7 +71,13 @@ Skills that exceed 150 lines should move detailed or mode-specific content into 
 
 ## API Key Configuration
 
-API keys required by Distillery (embedding provider, GitHub OAuth) are supplied to the MCP server via environment variables: `JINA_API_KEY`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`. Set them in the MCP server's `env` block (added during `/setup` or manually in `~/.claude.json`) or export them in the deployment environment.
+API keys required by Distillery (embedding provider, GitHub OAuth) are supplied to the MCP server via environment variables: `JINA_API_KEY`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`.
+
+**Recommended (local):** run `/setup`, which configures the MCP server and writes its `env` block to `~/.claude.json` (see `skills/setup/SKILL.md`).
+
+**Manual (local):** edit the MCP server's `env` block in `~/.claude.json` directly.
+
+**Hosted/CI:** export the variables in the deployment environment (container, cloud runtime, CI secrets) that runs `distillery-mcp`.
 
 The plugin no longer bundles or auto-configures an MCP server, so it declares no `userConfig` keys.
 
