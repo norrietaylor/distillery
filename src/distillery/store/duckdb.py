@@ -1095,6 +1095,39 @@ class DuckDBStore:
             self._read_lock = asyncio.Lock()
         return self._read_lock
 
+    @staticmethod
+    def _is_stale_file_handle(exc: BaseException) -> bool:
+        """True when *exc* is a DuckDB IO error from a stale backing handle.
+
+        On a GCS FUSE mount the ``.db`` object's generation changes whenever
+        it is rewritten (a CHECKPOINT / write) or another client opens the
+        same bucket; an open handle to the previous generation then fails
+        every read with ``Stale file handle`` / ``Could not read from file``.
+        A ``ROLLBACK`` cannot recover this — the OS-level handle is dead and
+        the file must be re-opened — so we restart the process, the same
+        remedy issue #583 applies to a terminally invalidated connection.
+        """
+        msg = str(exc)
+        return "Stale file handle" in msg or "Could not read from file" in msg
+
+    def _signal_supervisor_restart(self, exc: BaseException, reason: str) -> None:
+        """Record *exc* as terminal and ask the supervisor to restart us.
+
+        Logs at CRITICAL and sends ``SIGTERM`` to our own process so the
+        supervisor (launchd / systemd, or Cloud Run's instance lifecycle)
+        replaces us with a fresh process that opens a clean connection and
+        file handle.  Mirrors the invalidated-connection path so a single
+        unrecoverable failure does not cascade into an indefinite 500 loop
+        (issue #583).
+        """
+        self._terminal_failure = exc
+        logger.critical(
+            "DuckDB %s; signalling supervisor for restart (SIGTERM): %s",
+            reason,
+            exc,
+        )
+        os.kill(os.getpid(), signal.SIGTERM)
+
     async def _run_sync(
         self,
         fn: Callable[..., _T],
@@ -1143,13 +1176,26 @@ class DuckDBStore:
                 # visibly at startup.  Non-invalidating fatals fall through to
                 # the generic rollback path below.
                 if "has been invalidated" in str(exc):
-                    self._terminal_failure = exc
-                    logger.critical(
-                        "DuckDB connection terminally invalidated; signalling "
-                        "supervisor for restart (SIGTERM): %s",
-                        exc,
+                    self._signal_supervisor_restart(
+                        exc, "connection terminally invalidated"
                     )
-                    os.kill(os.getpid(), signal.SIGTERM)
+                    raise
+                conn = self._conn
+                if conn is not None:
+                    await asyncio.to_thread(self._rollback_quietly, conn)
+                raise
+            except duckdb.IOException as exc:
+                # A stale file handle (the GCS FUSE object generation changed
+                # under our open handle — see ``_is_stale_file_handle``) cannot
+                # be recovered by ``ROLLBACK``: the OS-level handle is dead, so
+                # every later read fails identically until the file is
+                # re-opened.  Restart the process rather than loop 500s; the
+                # fresh instance opens a clean handle.  Other IO errors fall
+                # through to the generic rollback path below.
+                if self._is_stale_file_handle(exc):
+                    self._signal_supervisor_restart(
+                        exc, "file handle is stale (FUSE object generation changed)"
+                    )
                     raise
                 conn = self._conn
                 if conn is not None:
@@ -1202,7 +1248,19 @@ class DuckDBStore:
                 "DuckDBStore has not been initialized. Call 'await store.initialize()' first."
             )
         async with self._get_read_lock():
-            return await asyncio.to_thread(fn, read_conn)
+            try:
+                return await asyncio.to_thread(fn, read_conn)
+            except duckdb.IOException as exc:
+                # The read handle is a ``cursor()`` of ``_conn`` over the same
+                # backing file, so it goes stale together with it when the
+                # FUSE object generation changes.  No rollback (a SELECT never
+                # poisons the read handle); restart so a fresh process re-opens
+                # the file, then re-raise for this request.
+                if self._is_stale_file_handle(exc):
+                    self._signal_supervisor_restart(
+                        exc, "read handle is stale (FUSE object generation changed)"
+                    )
+                raise
 
     async def rollback(self) -> None:
         """Public rollback hook for non-store code paths that touch the connection.

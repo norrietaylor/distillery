@@ -9,9 +9,13 @@ payloads (issue #371).
 
 from __future__ import annotations
 
+import json
+import logging
+
 import pytest
 
 from distillery.mcp.tools._common import (
+    internal_error_response,
     validate_enum,
     validate_positive_int,
     validate_required,
@@ -157,3 +161,46 @@ class TestValidatePositiveInt:
         """``True`` is an int in Python — the validator must reject it anyway."""
         result = validate_positive_int({"limit": True}, "limit")
         assert isinstance(result, tuple)
+
+
+class TestInternalErrorResponse:
+    """``internal_error_response`` masks the raw exception from the client but
+    surfaces an ``error_id`` + ``error_class`` so a remote failure can be tied
+    to the server-side traceback without log access (the gap that made the
+    stale-FUSE-handle outage undiagnosable from the client)."""
+
+    def _invoke(self, log: logging.Logger):
+        try:
+            raise ValueError("raw secret detail that must not reach the client")
+        except ValueError as exc:
+            return internal_error_response(
+                log=log,
+                log_message="Error in distillery_search",
+                client_message="Search failed",
+                exc=exc,
+            )
+
+    def test_payload_carries_id_and_class_but_not_raw_detail(self) -> None:
+        log = logging.getLogger("test.internal_error")
+        payload = json.loads(self._invoke(log)[0].text)
+
+        assert payload["error"] is True
+        assert payload["code"] == "INTERNAL"
+        assert payload["message"] == "Search failed"
+        assert payload["details"]["error_class"] == "ValueError"
+        assert len(payload["details"]["error_id"]) == 12
+        # The raw exception text is never leaked to the client.
+        assert "raw secret detail" not in json.dumps(payload)
+
+    def test_log_message_includes_matching_error_id(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The id in the client payload must match the one in the server log
+        and the traceback must be captured at ERROR."""
+        log = logging.getLogger("test.internal_error.match")
+        with caplog.at_level(logging.ERROR, logger="test.internal_error.match"):
+            payload = json.loads(self._invoke(log)[0].text)
+
+        error_id = payload["details"]["error_id"]
+        record = next(r for r in caplog.records if error_id in r.getMessage())
+        assert record.exc_info is not None  # full traceback captured

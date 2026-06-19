@@ -18,6 +18,7 @@ from distillery.config import DistilleryConfig
 from distillery.embedding.errors import EmbeddingProviderError
 from distillery.mcp.tools._common import (
     error_response,
+    internal_error_response,
     success_response,
     validate_required,
     validate_type,
@@ -135,9 +136,13 @@ async def _handle_search(
             exc,
         )
         return upstream_error_response(exc)
-    except Exception:  # noqa: BLE001
-        logger.exception("Error in distillery_search")
-        return error_response("INTERNAL", "Search failed")
+    except Exception as exc:  # noqa: BLE001
+        return internal_error_response(
+            log=logger,
+            log_message="Error in distillery_search",
+            client_message="Search failed",
+            exc=exc,
+        )
 
     if not expand_graph:
         results = [

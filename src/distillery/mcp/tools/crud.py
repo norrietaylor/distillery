@@ -23,6 +23,7 @@ from distillery.config import DistilleryConfig
 from distillery.embedding.errors import EmbeddingProviderError
 from distillery.mcp.tools._common import (
     error_response,
+    internal_error_response,
     success_response,
     validate_required,
     validate_type,
@@ -1490,9 +1491,13 @@ async def _handle_list(
                 group_by=group_by,
                 stale_days=stale_days,
             )
-        except Exception:  # noqa: BLE001
-            logger.exception("Error in distillery_list (group_by mode)")
-            return error_response("INTERNAL", "list_entries failed")
+        except Exception as exc:  # noqa: BLE001
+            return internal_error_response(
+                log=logger,
+                log_message="Error in distillery_list (group_by mode)",
+                client_message="list_entries failed",
+                exc=exc,
+            )
         return success_response(result)
 
     # --- stats mode ----------------------------------------------------------
@@ -1505,9 +1510,13 @@ async def _handle_list(
                 stale_days=stale_days,
                 output="stats",
             )
-        except Exception:  # noqa: BLE001
-            logger.exception("Error in distillery_list (stats mode)")
-            return error_response("INTERNAL", "list_entries failed")
+        except Exception as exc:  # noqa: BLE001
+            return internal_error_response(
+                log=logger,
+                log_message="Error in distillery_list (stats mode)",
+                client_message="list_entries failed",
+                exc=exc,
+            )
         return success_response(result)
 
     # --- default list mode ---------------------------------------------------
@@ -1522,9 +1531,13 @@ async def _handle_list(
         # ask the caller to narrow filters instead.
         try:
             candidate_count = await store.count_entries(filters=filters, stale_days=stale_days)
-        except Exception:  # noqa: BLE001
-            logger.exception("Error in distillery_list (structural count)")
-            return error_response("INTERNAL", "count_entries failed")
+        except Exception as exc:  # noqa: BLE001
+            return internal_error_response(
+                log=logger,
+                log_message="Error in distillery_list (structural count)",
+                client_message="count_entries failed",
+                exc=exc,
+            )
         if candidate_count > _STRUCTURAL_FETCH_CAP:
             return error_response(
                 "INVALID_PARAMS",
@@ -1540,16 +1553,24 @@ async def _handle_list(
                 offset=0,
                 stale_days=stale_days,
             )
-        except Exception:  # noqa: BLE001
-            logger.exception("Error in distillery_list (structural fetch)")
-            return error_response("INTERNAL", "list_entries failed")
+        except Exception as exc:  # noqa: BLE001
+            return internal_error_response(
+                log=logger,
+                log_message="Error in distillery_list (structural fetch)",
+                client_message="list_entries failed",
+                exc=exc,
+            )
 
         if "orphans" in structural:
             try:
                 related_ids = await store.get_all_related_entry_ids()
-            except Exception:  # noqa: BLE001
-                logger.exception("Error in distillery_list (get_all_related_entry_ids)")
-                return error_response("INTERNAL", "get_all_related_entry_ids failed")
+            except Exception as exc:  # noqa: BLE001
+                return internal_error_response(
+                    log=logger,
+                    log_message="Error in distillery_list (get_all_related_entry_ids)",
+                    client_message="get_all_related_entry_ids failed",
+                    exc=exc,
+                )
             wide_entries = [e for e in wide_entries if e.id not in related_ids]
 
         total_count = len(wide_entries)
@@ -1562,9 +1583,13 @@ async def _handle_list(
                 offset=offset,
                 stale_days=stale_days,
             )
-        except Exception:  # noqa: BLE001
-            logger.exception("Error in distillery_list")
-            return error_response("INTERNAL", "list_entries failed")
+        except Exception as exc:  # noqa: BLE001
+            return internal_error_response(
+                log=logger,
+                log_message="Error in distillery_list",
+                client_message="list_entries failed",
+                exc=exc,
+            )
 
         try:
             total_count = await store.count_entries(filters=filters, stale_days=stale_days)
