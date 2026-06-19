@@ -2,6 +2,7 @@
 name: gh-sync
 description: "Sync GitHub issues and pull requests into the Distillery knowledge base as searchable, linkable entries"
 allowed-tools:
+  - "mcp__*__distillery_status"
   - "mcp__*__distillery_gh_sync"
   - "mcp__*__distillery_sync_status"
 context: fork

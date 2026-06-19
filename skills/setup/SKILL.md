@@ -13,6 +13,10 @@ allowed-tools:
   - "Bash(mkdir:*)"
   - "Bash(cp:*)"
   - "Bash(chmod:*)"
+  - "Read"
+  - "Edit(~/.claude/settings.json)"
+  - "Edit(.claude/settings.json)"
+  - "Edit(.claude/settings.local.json)"
 effort: low
 ---
 

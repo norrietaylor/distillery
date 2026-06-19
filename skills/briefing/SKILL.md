@@ -2,6 +2,7 @@
 name: briefing
 description: "Produce a knowledge dashboard with recent entries, corrections, expiring soon, stale knowledge, and unresolved items. In team mode, also shows team activity, related entries from teammates, and the review queue."
 allowed-tools:
+  - "mcp__*__distillery_status"
   - "mcp__*__distillery_list"
   - "mcp__*__distillery_relations"
   - "mcp__*__distillery_search"

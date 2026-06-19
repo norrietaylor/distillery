@@ -2,6 +2,7 @@
 name: minutes
 description: "Capture meeting notes or append updates to an existing meeting record"
 allowed-tools:
+  - "mcp__*__distillery_status"
   - "mcp__*__distillery_store"
   - "mcp__*__distillery_find_similar"
   - "mcp__*__distillery_search"

@@ -2,6 +2,7 @@
 name: distill
 description: "Capture decisions, insights, and action items from the current session into the knowledge base"
 allowed-tools:
+  - "mcp__*__distillery_status"
   - "mcp__*__distillery_store"
   - "mcp__*__distillery_find_similar"
   - "mcp__*__distillery_update"

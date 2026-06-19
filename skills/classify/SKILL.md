@@ -2,10 +2,12 @@
 name: classify
 description: "Classify knowledge entries by type and manage the manual review queue"
 allowed-tools:
+  - "mcp__*__distillery_status"
   - "mcp__*__distillery_classify"
   - "mcp__*__distillery_resolve_review"
   - "mcp__*__distillery_get"
   - "mcp__*__distillery_list"
+  - "Read"
 effort: medium
 ---
 
