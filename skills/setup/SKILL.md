@@ -2,6 +2,7 @@
 name: setup
 description: "Onboarding wizard — verify MCP connectivity, detect transport, and configure scheduled tasks via Claude Code routines"
 allowed-tools:
+  - "mcp__*__distillery_status"
   - "mcp__*__distillery_list"
   - "mcp__*__distillery_watch"
   - "Bash(test:*)"
@@ -38,7 +39,9 @@ This step determines the MCP server state: **connected**, **needs authentication
 
 Read `references/transport-detection.md` for server detection logic and the "Needs Authentication" auth flow instructions.
 
-Use `ToolSearch` to check whether any `distillery` MCP tools are available. Also read the plugin manifest (`.claude-plugin/plugin.json` in the plugin directory) and any `.mcp.json` or `~/.claude/settings.json` entries to determine if a Distillery MCP server is configured.
+Use `ToolSearch` to check whether any `distillery` MCP tools are available. If they are, call `distillery_status` / `distillery_list(limit=1)` and treat their success as proof the server is configured and connected — do NOT inspect any config files in that case.
+
+Only when the MCP tools are ABSENT, fall back to checking whether a server is merely configured-but-down: read (with the `Read` tool, not a shell or JSON-parsing script) the plugin manifest (`.claude-plugin/plugin.json`) and any `.mcp.json` or `~/.claude/settings.json` entries to determine if a Distillery MCP server is configured.
 
 **1b. Attempt connection:**
 
