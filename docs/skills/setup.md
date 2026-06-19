@@ -74,19 +74,18 @@ Routines run automatically in the background when Claude Code is active. They wo
 
 Configures session lifecycle hooks in the appropriate `settings.json` based on your plugin installation scope.
 
-!!! note "Plugin Hooks Limitation"
-    Plugin manifest hooks (`plugin.json`) support `SessionStart` and `Stop` events but **not** `UserPromptSubmit`. To enable the memory nudge and full session lifecycle hooks, they must be configured in `settings.json` via `/setup`.
+!!! note "Why settings.json"
+    The dispatcher resolves sibling scripts by absolute path, so `/setup` registers it in the scope-appropriate `settings.json` (user or project) where the briefing handler can locate `session-start-briefing.sh`.
 
 The wizard:
 
 1. **Detects plugin scope** — checks `enabledPlugins` in user (`~/.claude/settings.json`) or project (`.claude/settings.json`) settings
 2. **Locates the dispatcher** — finds `scripts/hooks/distillery-hooks.sh` in the repo or plugin cache
-3. **Checks existing hooks** — skips if both `UserPromptSubmit` and `SessionStart` already reference the dispatcher
+3. **Checks existing hooks** — skips if `SessionStart` already references the dispatcher
 4. **Installs hooks** — merges hook config into the scope-appropriate settings file
 
 | Hook | Behaviour |
 |------|-----------|
-| **UserPromptSubmit** | Memory nudge every 30 prompts — reminds you to `/distill` |
 | **SessionStart** | Injects a condensed briefing with recent entries and stale items |
 
 ### Step 6: Summary

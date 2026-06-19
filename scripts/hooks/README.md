@@ -8,29 +8,25 @@ Run `/setup` after installing the Distillery plugin. It detects your plugin
 installation scope (user or project) and configures hooks in the appropriate
 `settings.json` automatically.
 
-> **Why not plugin.json?** Plugin manifest hooks only support `SessionStart`
-> and `Stop` events. `UserPromptSubmit` is silently ignored by the plugin
-> system, so these hooks must be registered in `settings.json`.
+> **Why settings.json?** The dispatcher resolves sibling scripts by absolute
+> path and is registered in the scope-appropriate `settings.json` (user or
+> project) so the briefing handler can locate `session-start-briefing.sh`.
 
 ## distillery-hooks.sh
 
-A single **dispatcher script** that routes all Claude Code hook events to the
-appropriate Distillery handler. Register this one script for `UserPromptSubmit`,
-`PreCompact`, and `SessionStart` — no need to manage multiple hook entries.
+A single **dispatcher script** that routes Claude Code hook events to the
+appropriate Distillery handler. Register this one script for `SessionStart`.
 
 ### Hook Events
 
 | Hook Event | Behaviour |
 |---|---|
-| `UserPromptSubmit` | Outputs a memory nudge every N prompts (default 30) |
-| `PreCompact` | Placeholder — silently exits (future spec) |
 | `SessionStart` | Delegates to `session-start-briefing.sh` for briefing injection |
 
 ### Prerequisites
 
 - **HTTP mode**: Distillery MCP server running at a reachable URL (must be pre-started; the hook connects to it)
 - **stdio mode**: `distillery-mcp` installed and on PATH (the hook launches it as a subprocess — no pre-running server required)
-  _(required only for the `SessionStart` briefing; the `UserPromptSubmit` nudge works offline)_
 - Python 3.11+ available on the system PATH (for `SessionStart` briefing)
 - Claude Code with hook support
 
@@ -57,16 +53,6 @@ Choose the appropriate file based on desired scope:
 ```json
 {
   "hooks": {
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash /absolute/path/to/distillery/scripts/hooks/distillery-hooks.sh"
-          }
-        ]
-      }
-    ],
     "SessionStart": [
       {
         "hooks": [
@@ -90,8 +76,7 @@ installation.
 distillery-mcp --transport http --port 8000
 ```
 
-If the MCP server is not running, `SessionStart` exits silently and `UserPromptSubmit`
-nudges still work independently.
+If the MCP server is not running, `SessionStart` exits silently.
 
 ### Configuration
 
@@ -102,14 +87,12 @@ Configure all hooks via environment variables. Set these in your shell profile
 |---|---|---|
 | `DISTILLERY_MCP_URL` | _(auto-detect)_ | MCP HTTP endpoint URL (skips auto-detection) |
 | `DISTILLERY_MCP_COMMAND` | _(auto-detect)_ | MCP stdio command (skips auto-detection) |
-| `DISTILLERY_NUDGE_INTERVAL` | `30` | Prompts between memory nudge outputs |
 | `DISTILLERY_BRIEFING_LIMIT` | `5` | Recent entries in SessionStart briefing |
 | `DISTILLERY_BEARER_TOKEN` | _(empty)_ | Bearer token if OAuth is enabled |
 
-Example — nudge every 20 prompts, custom hosted URL:
+Example — custom hosted URL:
 
 ```bash
-export DISTILLERY_NUDGE_INTERVAL=20
 export DISTILLERY_MCP_URL="https://distillery-mcp.fly.dev/mcp"
 ```
 
@@ -126,27 +109,10 @@ export DISTILLERY_MCP_COMMAND="env DISTILLERY_CONFIG=/path/to/distillery.yaml di
 
 ### Expected Behaviour
 
-**UserPromptSubmit:** On each prompt, the dispatcher increments a per-session
-counter in `/tmp/distillery-prompt-count-<session_id>`. Every `DISTILLERY_NUDGE_INTERVAL`
-prompts it writes a reminder to stdout:
-
-```text
-[Distillery] You've exchanged 30 messages this session. Consider whether any decisions, insights, or corrections from this conversation should be stored with /distill.
-```
-
-All other prompts produce no output. The counter file is created automatically
-on the first prompt and cleaned up on reboot (lives in `/tmp`).
-
-**PreCompact:** Silently exits. Auto-extraction is planned for a future spec.
-
 **SessionStart:** Delegates to `session-start-briefing.sh` in the same directory.
 If that script is not present or not executable, exits silently with no output.
 
 ### Troubleshooting
-
-**Nudge never fires:**
-- Check `/tmp/distillery-prompt-count-<session_id>` exists and increments
-- Verify `DISTILLERY_NUDGE_INTERVAL` is a positive integer (non-zero, non-empty)
 
 **SessionStart produces no output:**
 - **HTTP transport**: Check the MCP server accepts JSON-RPC probes — the hook

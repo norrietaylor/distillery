@@ -28,15 +28,6 @@
       "sensitive": true
     }
   },
-  "mcpServers": {
-    "distillery": {
-      "command": "uvx",
-      "args": ["--from", "distillery-mcp[fastembed]>=0.6.0", "distillery-mcp"],
-      "env": {
-        "DISTILLERY_EMBEDDING_PROVIDER": "fastembed"
-      }
-    }
-  },
   "hooks": {
     "SessionStart": [
       {

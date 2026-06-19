@@ -165,7 +165,6 @@ class TestPluginManifestMetadata:
             "homepage",
             "repository",
             "keywords",
-            "mcpServers",
         }
         for key in required_keys:
             assert key in manifest, f"Required key '{key}' missing from .claude-plugin/plugin.json"
@@ -210,49 +209,20 @@ class TestPluginSkills:
 # ---------------------------------------------------------------------------
 
 
-class TestPluginMCPServers:
-    def test_mcp_servers_key_present(self) -> None:
-        """mcpServers field must be present."""
-        manifest = load_plugin_manifest()
-        assert "mcpServers" in manifest
+class TestPluginNoMCPServers:
+    """The plugin must NOT auto-declare an MCP server.
 
-    def test_distillery_server_declared(self) -> None:
-        """The 'distillery' MCP server must be declared."""
-        manifest = load_plugin_manifest()
-        assert "distillery" in manifest["mcpServers"]
+    Installing the plugin ships skills and the SessionStart briefing hook only.
+    The MCP server is configured by the user during /setup (or added manually),
+    so no server is silently registered on plugin install.
+    """
 
-    def test_distillery_server_uses_stdio_transport(self) -> None:
-        """The distillery server must use stdio transport (command, no url)."""
+    def test_no_mcp_servers_declared(self) -> None:
+        """plugin.json must not declare an mcpServers block."""
         manifest = load_plugin_manifest()
-        server = manifest["mcpServers"]["distillery"]
-        assert "command" in server, "stdio transport requires a 'command' field"
-        assert "url" not in server, "stdio transport must not include a 'url' field"
-
-    def test_distillery_server_command_is_uvx(self) -> None:
-        """The distillery server must launch via 'uvx distillery-mcp'."""
-        manifest = load_plugin_manifest()
-        server = manifest["mcpServers"]["distillery"]
-        assert server["command"] == "uvx"
-        assert "distillery-mcp" in server.get("args", [])
-
-    def test_distillery_server_no_url_field(self) -> None:
-        """The distillery server must not declare a hosted URL.
-
-        The plugin default is local stdio. Hosted demo is opt-in via:
-        claude mcp add distillery --scope user --transport http \
-            --url https://distillery-mcp.fly.dev/mcp
-        """
-        manifest = load_plugin_manifest()
-        server = manifest["mcpServers"]["distillery"]
-        assert "url" not in server
-
-    def test_distillery_server_no_unsupported_fields(self) -> None:
-        """The distillery server must not contain fields unsupported by the plugin schema."""
-        manifest = load_plugin_manifest()
-        server = manifest["mcpServers"]["distillery"]
-        unsupported = {"required", "description", "setup", "transports", "default_transport"}
-        found = unsupported & set(server.keys())
-        assert not found, f"Unsupported fields in mcpServers.distillery: {found}"
+        assert "mcpServers" not in manifest, (
+            "Plugin must not auto-configure an MCP server; configuration is /setup-driven"
+        )
 
 
 # ---------------------------------------------------------------------------
