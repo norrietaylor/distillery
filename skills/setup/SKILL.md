@@ -129,7 +129,19 @@ If sources exist, list them briefly (URL + label).
 
 ### Step 4: Scheduled Tasks Configuration
 
-Distillery uses three tiers of scheduled tasks, all configured as **Claude Code routines**:
+**Hosted deployments (HTTP transport) — skip this step.** If Step 2 detected an HTTP transport (Hosted or Team HTTP), the scheduled pipeline already runs server-side via webhooks (`POST /hooks/poll` for feed polling and `POST /api/maintenance` for the poll → rescore → classify-batch flow, both on the `distill_ops` GitHub Actions schedule). Claude Code routines would only duplicate that work, and they stop running whenever Claude Code is closed. So for hosted/team deployments, do **not** offer or configure routines.
+
+Display:
+
+```text
+Scheduled tasks: not needed (hosted deployment)
+  Polling and maintenance run server-side via webhooks (distill_ops GitHub Actions).
+  No Claude Code routines required.
+```
+
+Then skip to Step 5 (treat all routines as `n/a (hosted)` in the Step 6 summary).
+
+**Local deployments (stdio transport):** Distillery uses three tiers of scheduled tasks, all configured as **Claude Code routines** (there is no server-side scheduler for local deployments, so routines are how scheduling happens):
 
 | Tier | Frequency | Purpose |
 |------|-----------|---------|
@@ -277,9 +289,9 @@ Distillery Setup Complete
   Feed Sources:  <N> configured
 
   Scheduled Routines:
-    Feed health check: <active (hourly routine, status only) | inactive>
-    Stale check:       <active (daily routine) | inactive>
-    KB maintenance:    <active (weekly routine) | inactive>
+    Feed health check: <active (hourly routine, status only) | inactive | n/a (hosted)>
+    Stale check:       <active (daily routine) | inactive | n/a (hosted)>
+    KB maintenance:    <active (weekly routine) | inactive | n/a (hosted)>
 
   Session Hooks:   <SCOPE_LABEL> scope
     Session start: <active | inactive | skipped>
@@ -308,11 +320,12 @@ The setup wizard uses a sequential, conversational format. Each step prints its 
 - If hook scripts can't be found (not in repo or plugin cache), skip gracefully
 - The dispatcher uses `BASH_SOURCE[0]` to find sibling scripts — both files must be in the same directory
 - Use absolute paths to the dispatcher script in hook commands
-- Scheduling uses Claude Code routines for all transport modes (local and hosted)
-- If the user has no feed sources, skip feed poll and stale check but still offer weekly maintenance
+- Hosted/Team HTTP deployments do NOT need routines — polling and maintenance run server-side via webhooks (`distill_ops` GitHub Actions). Skip Step 4 entirely for HTTP transport and mark routines `n/a (hosted)` in the summary.
+- Claude Code routines are only for local (stdio) deployments, where there is no server-side scheduler
+- If the user has no feed sources (local deployments only), skip feed poll and stale check but still offer weekly maintenance
 - This skill is idempotent — before creating a routine, check if one with the same name already exists; if so, skip creation and report the existing routine
 - Use `distillery_list(limit=1)` for the MCP health check
 - Routine prompts use MCP tool calls — routines execute in Claude Code context with direct MCP access
 - The weekly maintenance routine stores its output as a digest entry — this creates a longitudinal record of KB health
 - Ask the user once about enabling scheduled tasks; their answer applies to all three tiers
-- Legacy CronCreate and webhook-based scheduling are deprecated — guide users to routines instead
+- Legacy CronCreate scheduling is deprecated. For local (stdio) deployments, guide users to Claude Code routines. Hosted/Team HTTP deployments instead rely on server-side webhooks (`distill_ops` GitHub Actions) — these are the supported mechanism for hosted, not deprecated.
