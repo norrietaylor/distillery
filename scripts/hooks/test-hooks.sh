@@ -89,17 +89,6 @@ EXIT6=$?
 assert_exit_zero "unknown event exits 0" "$EXIT6"
 assert_empty "unknown event produces no output" "$OUTPUT6"
 
-# ── T7: PreCompact exits 0 silently ──────────────────────────────────────────
-echo ""
-echo "T7: PreCompact exits 0 silently"
-
-OUTPUT7="$(hook_json PreCompact "${BASE_SESSION}-t7" \
-  | bash "$DISPATCHER" 2>/dev/null)"
-EXIT7=$?
-
-assert_exit_zero "PreCompact exits 0" "$EXIT7"
-assert_empty "PreCompact produces no output" "$OUTPUT7"
-
 # ── T8: SessionStart delegates or skips gracefully ───────────────────────────
 echo ""
 echo "T8: SessionStart delegates or skips gracefully"

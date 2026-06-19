@@ -77,7 +77,7 @@
 - [x] Extended `EntrySource` — added inference, documentation, external provenance values
 
 ### Session Hooks
-- [x] Hook dispatcher script (`distillery-hooks.sh`) — routes SessionStart, PreCompact
+- [x] Hook dispatcher script (`distillery-hooks.sh`) — routes SessionStart
 - [x] SessionStart briefing — automatic context injection via HTTP MCP
 - [x] Scope-aware `/setup` hook configuration — detects plugin install scope (user/project)
 

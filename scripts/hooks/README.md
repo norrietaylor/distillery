@@ -15,14 +15,12 @@ installation scope (user or project) and configures hooks in the appropriate
 ## distillery-hooks.sh
 
 A single **dispatcher script** that routes Claude Code hook events to the
-appropriate Distillery handler. Register this one script for `SessionStart`
-(and `PreCompact`) — no need to manage multiple hook entries.
+appropriate Distillery handler. Register this one script for `SessionStart`.
 
 ### Hook Events
 
 | Hook Event | Behaviour |
 |---|---|
-| `PreCompact` | Placeholder — silently exits (future spec) |
 | `SessionStart` | Delegates to `session-start-briefing.sh` for briefing injection |
 
 ### Prerequisites
@@ -110,8 +108,6 @@ export DISTILLERY_MCP_COMMAND="env DISTILLERY_CONFIG=/path/to/distillery.yaml di
 > these values. The hook scripts themselves contain no credentials.
 
 ### Expected Behaviour
-
-**PreCompact:** Silently exits. Auto-extraction is planned for a future spec.
 
 **SessionStart:** Delegates to `session-start-briefing.sh` in the same directory.
 If that script is not present or not executable, exits silently with no output.

@@ -31,13 +31,6 @@ if [[ -z "${CWD:-}" ]]; then
   CWD="$(pwd)"
 fi
 
-# ── Handler: PreCompact ───────────────────────────────────────────────────────
-handle_pre_compact() {
-  # PreCompact auto-extraction is deferred to a future spec.
-  # Placeholder: exits silently.
-  return 0
-}
-
 # ── Handler: SessionStart ─────────────────────────────────────────────────────
 handle_session_start() {
   # Delegate to the spec-14 briefing hook script.
@@ -53,9 +46,6 @@ handle_session_start() {
 
 # ── Dispatch ──────────────────────────────────────────────────────────────────
 case "${HOOK_EVENT:-}" in
-  PreCompact)
-    handle_pre_compact
-    ;;
   SessionStart)
     handle_session_start
     ;;
