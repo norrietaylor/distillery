@@ -137,6 +137,7 @@ class TestIngestIdempotency:
 
         def _stub(idx: int) -> Entry:
             return Entry(
+                id=f"entry-{idx}",
                 content=f"chunk {idx}",
                 entry_type=EntryType.REFERENCE,
                 source=EntrySource.IMPORT,
