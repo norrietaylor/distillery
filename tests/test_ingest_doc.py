@@ -127,6 +127,45 @@ class TestIngestIdempotency:
         )
         assert len(all_adrs) == 1
 
+    async def test_reingest_paginates_past_first_page(self, store: DuckDBStore) -> None:
+        # A re-ingest of a doc that produced more chunks than one page must
+        # return every existing entry_id, not just the first page's slice.
+        from distillery.mcp.tools import crud as crud_mod
+        from distillery.models import Entry, EntrySource, EntryType
+
+        page_size = 500
+
+        def _stub(idx: int) -> Entry:
+            return Entry(
+                content=f"chunk {idx}",
+                entry_type=EntryType.REFERENCE,
+                source=EntrySource.IMPORT,
+                author="a",
+                metadata={"external_id": "big-doc", "chunk_index": idx},
+            )
+
+        # Page 1: full (page_size rows) -> loop must request page 2.
+        # Page 2: partial (1 row) -> loop stops, but only after accumulating it.
+        all_entries = [_stub(i) for i in range(page_size + 1)]
+
+        async def fake_list_entries(
+            *, filters: object, limit: int, offset: int
+        ) -> list[Entry]:
+            return all_entries[offset : offset + limit]
+
+        # type: ignore[method-assign] — monkeypatch the bound method for this test.
+        store.list_entries = fake_list_entries  # type: ignore[assignment]
+
+        payload = parse_mcp_response(
+            await crud_mod._handle_ingest_doc(
+                store=store,
+                arguments={"text": "x", "author": "a", "external_id": "big-doc"},
+            )
+        )
+        assert payload["persisted"] is False
+        assert payload["count"] == page_size + 1
+        assert len(payload["entry_ids"]) == page_size + 1
+
     async def test_explicit_external_id_dedups(self, store: DuckDBStore) -> None:
         # Different text but same external_id -> treated as same document.
         first = parse_mcp_response(

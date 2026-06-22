@@ -1093,12 +1093,24 @@ async def _handle_ingest_doc(
         return error_response("INVALID_PARAMS", "Field 'external_id' must be a string.")
 
     # --- idempotency check: already ingested? -------------------------------
+    # Paginate to exhaustion so a re-ingest of a doc that produced >page_size
+    # chunks returns the full entry_ids list (and correct count), not a slice.
     try:
-        existing = await store.list_entries(
-            filters={"metadata.external_id": external_id},
-            limit=500,
-            offset=0,
-        )
+        existing: list[Any] = []
+        page_size = 500
+        offset = 0
+        while True:
+            page = await store.list_entries(
+                filters={"metadata.external_id": external_id},
+                limit=page_size,
+                offset=offset,
+            )
+            if not page:
+                break
+            existing.extend(page)
+            if len(page) < page_size:
+                break
+            offset += page_size
     except Exception:  # noqa: BLE001
         logger.exception("ingest_doc: external_id lookup failed for %r", external_id)
         return error_response("INTERNAL", "Failed to check for existing document")
@@ -1159,8 +1171,9 @@ async def _handle_ingest_doc(
     # --- persist (no semantic dedup; idempotency is handled above) ----------
     try:
         entry_ids = await store.store_batch(entries)
-    except ValueError as exc:
-        return error_response("INVALID_PARAMS", str(exc))
+    except ValueError:
+        logger.exception("ingest_doc: invalid params during batch store")
+        return error_response("INVALID_PARAMS", "Invalid ingestion parameters.")
     except EmbeddingProviderError as exc:
         logger.warning(
             "Upstream embedding provider failed during ingest_doc "
