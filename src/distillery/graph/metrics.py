@@ -9,6 +9,21 @@ from distillery.graph import nx
 from distillery.graph.builders import _require_networkx
 
 
+def orphan_rate(*, graph_node_count: int, total_entries: int) -> float:
+    """Fraction of entries that never appear in the relations graph.
+
+    Computed as ``1 - graph_node_count / total_entries``. The relations graph
+    only contains entries that are an endpoint of at least one relation, so an
+    entry with no relations is invisible to every graph metric. A high value
+    signals a near-empty graph (graph-health signal for operators).
+
+    Guards ``total_entries == 0`` -> ``0.0``.
+    """
+    if total_entries <= 0:
+        return 0.0
+    return 1.0 - graph_node_count / total_entries
+
+
 def bridges(g: Any, *, k: int = 10) -> list[tuple[str, float]]:
     """Top-k entries by betweenness centrality (descending)."""
     _require_networkx()

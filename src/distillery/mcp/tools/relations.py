@@ -36,7 +36,15 @@ _METRICS_EGO_HOPS = 2
 _GRAPH_METRICS_PAGE_SIZE = 1000
 _GRAPH_METRICS_MAX_IDS = 100_000
 
-_VALID_METRICS = {"bridges", "communities", "constraint", "link_prediction"}
+# Max number of unlinked entry IDs returned by metric="orphans" (a sample, not
+# the full set — feeds a linking / gap-scan pass without unbounded payloads).
+_ORPHANS_SAMPLE_CAP = 50
+
+# Statuses counted as "live" entries for graph-health totals. Archived entries
+# are soft-deleted and excluded from total_entries / orphan_rate.
+_NON_ARCHIVED_STATUSES = ["active", "pending_review"]
+
+_VALID_METRICS = {"bridges", "communities", "constraint", "link_prediction", "orphans"}
 _VALID_SCOPES = {"global", "ego"}
 
 # ---------------------------------------------------------------------------
@@ -567,6 +575,40 @@ async def _collect_ego_relations(
     return edges
 
 
+async def _sample_orphan_ids(
+    store: Any,
+    *,
+    graph_node_ids: set[str],
+    cap: int,
+) -> list[str]:
+    """Return up to *cap* non-archived entry IDs absent from the relations graph.
+
+    A sample — not the full orphan set — so the payload stays bounded on large
+    instances. Pages ``list_entries`` (non-archived only) and keeps the first
+    *cap* IDs that are not graph nodes.
+    """
+    filters = {"status": _NON_ARCHIVED_STATUSES}
+    orphans: list[str] = []
+    offset = 0
+    while len(orphans) < cap:
+        page = await store.list_entries(
+            filters=filters,
+            limit=_GRAPH_METRICS_PAGE_SIZE,
+            offset=offset,
+        )
+        if not page:
+            break
+        for entry in page:
+            if entry.id not in graph_node_ids:
+                orphans.append(entry.id)
+                if len(orphans) >= cap:
+                    break
+        if len(page) < _GRAPH_METRICS_PAGE_SIZE:
+            break
+        offset += _GRAPH_METRICS_PAGE_SIZE
+    return orphans
+
+
 async def _handle_metrics(  # noqa: PLR0911, PLR0912
     store: Any,
     arguments: dict[str, Any],
@@ -642,7 +684,13 @@ async def _handle_metrics(  # noqa: PLR0911, PLR0912
     # ----- cache lookup -----
     from distillery.graph.builders import build_relations_graph
     from distillery.graph.cache import default_cache
-    from distillery.graph.metrics import bridges, communities, constraint, link_prediction
+    from distillery.graph.metrics import (
+        bridges,
+        communities,
+        constraint,
+        link_prediction,
+        orphan_rate,
+    )
 
     cache = default_cache()
     cache_key = (
@@ -687,6 +735,22 @@ async def _handle_metrics(  # noqa: PLR0911, PLR0912
         logger.exception("distillery_relations metrics: failed to build graph")
         return error_response("INTERNAL", "Failed to build relations graph")
 
+    # ----- graph-health totals -----
+    # total_entries is the count of all non-archived entries; graph_node_count
+    # is how many of them are reachable via at least one relation. orphan_rate
+    # surfaces the gap (issue #635).
+    try:
+        total_entries = await store.count_entries(
+            filters={"status": _NON_ARCHIVED_STATUSES}
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("distillery_relations metrics: failed to count entries")
+        return error_response("INTERNAL", "Failed to count entries")
+
+    graph_node_count = g.number_of_nodes()
+    edge_count = g.number_of_edges()
+    rate = orphan_rate(graph_node_count=graph_node_count, total_entries=total_entries)
+
     # ----- compute metric -----
     try:
         if metric == "bridges":
@@ -702,6 +766,14 @@ async def _handle_metrics(  # noqa: PLR0911, PLR0912
             # entry_id (when given) is the source node — emerging adjacencies for it.
             preds = link_prediction(g, source=entry_id_value, k=limit)
             results = [{"source": u, "target": v, "score": round(p, 6)} for u, v, p in preds]
+        elif metric == "orphans":
+            # Sample of entries present in the store but absent from the
+            # relations graph (unlinked). Capped to bound the payload.
+            graph_node_ids = set(g.nodes())
+            orphan_ids = await _sample_orphan_ids(
+                store, graph_node_ids=graph_node_ids, cap=_ORPHANS_SAMPLE_CAP
+            )
+            results = [{"id": entry_id} for entry_id in orphan_ids]
         else:  # metric == "communities"
             comms = communities(g)
             comms_sorted = sorted(comms, key=lambda c: len(c), reverse=True)[:limit]
@@ -715,8 +787,11 @@ async def _handle_metrics(  # noqa: PLR0911, PLR0912
             "action": "metrics",
             "metric": metric,
             "scope": scope,
-            "node_count": g.number_of_nodes(),
-            "edge_count": g.number_of_edges(),
+            "node_count": graph_node_count,
+            "edge_count": edge_count,
+            "total_entries": total_entries,
+            "graph_node_count": graph_node_count,
+            "orphan_rate": round(rate, 6),
             "results": results,
             "count": len(results),
             "computed_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),

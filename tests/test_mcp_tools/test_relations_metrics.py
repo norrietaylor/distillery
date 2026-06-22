@@ -292,6 +292,94 @@ async def test_metrics_cache_hit_flips_on_second_call(store) -> None:  # type: i
 
 
 # ---------------------------------------------------------------------------
+# Graph-health: total_entries / graph_node_count / orphan_rate (issue #635).
+# ---------------------------------------------------------------------------
+
+
+async def test_metrics_includes_graph_health_fields(store) -> None:  # type: ignore[no-untyped-def]
+    """Metrics response carries total_entries, graph_node_count, edge_count,
+    orphan_rate (issue #635)."""
+    pytest.importorskip("networkx")
+
+    await _seed_star_relations(store)  # 4 entries, all linked
+
+    data = _parse(
+        await _handle_relations(
+            store, {"action": "metrics", "metric": "bridges", "scope": "global"}
+        )
+    )
+    assert data.get("error") is not True
+    assert data["total_entries"] == 4
+    assert data["graph_node_count"] == 4
+    assert data["edge_count"] == 3
+    # All 4 entries are linked -> no orphans.
+    assert data["orphan_rate"] == 0.0
+
+
+async def test_metrics_orphan_rate_high_when_few_linked(store) -> None:  # type: ignore[no-untyped-def]
+    """8 entries, only 2 linked -> orphan_rate 0.75 (issue #635 acceptance)."""
+    pytest.importorskip("networkx")
+
+    ids = [await _store_entry(store, content=f"entry {i}") for i in range(8)]
+    # Link only the first two; the remaining six are orphans.
+    await store.add_relation(ids[0], ids[1], "link")
+
+    data = _parse(
+        await _handle_relations(
+            store, {"action": "metrics", "metric": "bridges", "scope": "global"}
+        )
+    )
+    assert data.get("error") is not True
+    assert data["total_entries"] == 8
+    assert data["graph_node_count"] == 2
+    assert data["orphan_rate"] == 0.75
+
+
+async def test_metrics_orphans_returns_unlinked_ids(store) -> None:  # type: ignore[no-untyped-def]
+    """metric='orphans' returns entry IDs present in the store but absent
+    from the relations graph (issue #635)."""
+    pytest.importorskip("networkx")
+
+    ids = [await _store_entry(store, content=f"entry {i}") for i in range(5)]
+    # Link the first two; ids[2], ids[3], ids[4] are orphans.
+    await store.add_relation(ids[0], ids[1], "link")
+
+    data = _parse(
+        await _handle_relations(
+            store, {"action": "metrics", "metric": "orphans", "scope": "global"}
+        )
+    )
+    assert data.get("error") is not True
+    assert data["metric"] == "orphans"
+    returned = {row["id"] for row in data["results"]}
+    assert returned == {ids[2], ids[3], ids[4]}
+    # Graph-health fields are present alongside the orphan sample.
+    assert data["total_entries"] == 5
+    assert data["graph_node_count"] == 2
+    assert data["orphan_rate"] == 0.6
+
+
+async def test_metrics_orphans_sample_is_capped(store, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """metric='orphans' returns at most the sample cap of unlinked IDs."""
+    pytest.importorskip("networkx")
+
+    monkeypatch.setattr(
+        "distillery.mcp.tools.relations._ORPHANS_SAMPLE_CAP",
+        3,
+    )
+    for i in range(10):
+        await _store_entry(store, content=f"orphan {i}")
+
+    data = _parse(
+        await _handle_relations(
+            store, {"action": "metrics", "metric": "orphans", "scope": "global"}
+        )
+    )
+    assert data.get("error") is not True
+    assert len(data["results"]) == 3
+
+
+# ---------------------------------------------------------------------------
 # NetworkX missing — runs even without the [graph] extra installed.
 # ---------------------------------------------------------------------------
 

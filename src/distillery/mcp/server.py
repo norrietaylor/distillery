@@ -1353,15 +1353,17 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
           - relation_id (str, required for remove): UUID of the relation to delete.
           - hops (int, optional for traverse, default=2): BFS depth, capped at [1, 3].
           - metric (str, required for metrics): Graph metric to compute.
-            Valid: [bridges, communities, constraint, link_prediction]. Requires
-            the [graph] optional extra.
+            Valid: [bridges, communities, constraint, link_prediction, orphans].
+            Requires the [graph] optional extra.
           - scope (str, optional for metrics, default="global"): Subgraph scope.
             Valid: [global, ego]. ``"ego"`` requires ``entry_id``.
           - limit (int, optional for metrics, default=10): top-k results.
             ``bridges`` = entries by betweenness centrality; ``communities`` = K
             largest communities; ``constraint`` = entries by lowest Burt constraint
             (strongest structural-hole brokers); ``link_prediction`` = top predicted
-            edges by Adamic-Adar (pass ``entry_id`` to score adjacencies for one entry).
+            edges by Adamic-Adar (pass ``entry_id`` to score adjacencies for one entry);
+            ``orphans`` = sample (<=50) of entry IDs absent from the relations graph
+            (unlinked entries — feeds a linking / gap-scan pass).
           - project / tags / date_from / date_to (optional, metrics global scope):
             restrict the entries whose relations participate in the graph.
 
@@ -1374,7 +1376,10 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             nodes: [{id: str, depth: int}], edges: [{from_id, to_id, relation_type}],
             node_count: int, edge_count: int } (traverse) or
           { action: "metrics", metric: str, scope: str, node_count: int, edge_count: int,
+            total_entries: int, graph_node_count: int, orphan_rate: float,
             results: list, count: int, computed_at: str, cache_hit: bool } (metrics).
+            ``orphan_rate`` = 1 - graph_node_count/total_entries (graph-health signal;
+            0.0 when total_entries is 0).
         RETURNS (error): { error: true, code: "NOT_FOUND" | "INVALID_PARAMS" | "INTERNAL", message: "..." }
 
         RELATED: distillery_correct (creates 'corrects' relations automatically),
