@@ -585,6 +585,11 @@ class TestListEntries:
             assert "tag-a" in e.tags
             assert "tag-b" in e.tags
 
+    async def test_list_entries_tags_filter_rejects_non_list(self, store: DuckDBStore) -> None:
+        """A bare string tags filter must raise rather than iterate characters (#626)."""
+        with pytest.raises(ValueError, match="tags filter must be a list"):
+            await store.list_entries(filters={"tags": "tag-a"}, limit=10, offset=0)
+
     async def test_list_entries_filter_by_status(self, store: DuckDBStore) -> None:
         await store.store(make_entry(content="active", status=EntryStatus.ACTIVE))
         pending = make_entry(content="pending", status=EntryStatus.PENDING_REVIEW)

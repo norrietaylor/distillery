@@ -1851,6 +1851,10 @@ class DuckDBStore:
         if "tags" in filters:
             tag_list = filters["tags"]
             if tag_list:
+                if not isinstance(tag_list, list) or not all(
+                    isinstance(t, str) for t in tag_list
+                ):
+                    raise ValueError("tags filter must be a list[str]")
                 # AND semantics: an entry matches only if its tags array
                 # contains *every* requested tag (intersection, not union).
                 # One list_contains clause per tag, ANDed together.
