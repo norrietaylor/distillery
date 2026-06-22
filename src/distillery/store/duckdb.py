@@ -2920,7 +2920,7 @@ class DuckDBStore:
         result = conn.execute(
             "SELECT url, source_type, label, poll_interval_minutes, trust_weight, "
             "last_polled_at, last_item_count, last_error, "
-            "threshold_alert, threshold_digest "
+            "threshold_alert, threshold_digest, mode "
             "FROM feed_sources ORDER BY created_at"
         )
         rows = result.fetchall()
@@ -2964,6 +2964,7 @@ class DuckDBStore:
                     "threshold_digest": (
                         float(threshold_digest_raw) if threshold_digest_raw is not None else None
                     ),
+                    "mode": row[10] if row[10] is not None else "",
                 }
             )
         return sources
@@ -2977,6 +2978,7 @@ class DuckDBStore:
         trust_weight: float = 1.0,
         threshold_alert: float | None = None,
         threshold_digest: float | None = None,
+        mode: str = "",
     ) -> dict[str, Any]:
         """Add a feed source. Raises ValueError if URL already exists."""
         assert self._conn is not None
@@ -2984,8 +2986,8 @@ class DuckDBStore:
             self._conn.execute(
                 "INSERT INTO feed_sources "
                 "(url, source_type, label, poll_interval_minutes, trust_weight, "
-                "threshold_alert, threshold_digest) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "threshold_alert, threshold_digest, mode) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     url,
                     source_type,
@@ -2994,6 +2996,7 @@ class DuckDBStore:
                     trust_weight,
                     threshold_alert,
                     threshold_digest,
+                    mode,
                 ],
             )
         except duckdb.ConstraintException as exc:
@@ -3007,6 +3010,7 @@ class DuckDBStore:
             "trust_weight": trust_weight,
             "threshold_alert": threshold_alert,
             "threshold_digest": threshold_digest,
+            "mode": mode,
         }
 
     def _sync_remove_feed_source(self, url: str) -> bool:
@@ -3080,6 +3084,7 @@ class DuckDBStore:
         trust_weight: float = 1.0,
         threshold_alert: float | None = None,
         threshold_digest: float | None = None,
+        mode: str = "",
     ) -> dict[str, Any]:
         """Add a feed source. Raises ValueError if URL already exists."""
         return await self._run_sync(
@@ -3091,6 +3096,7 @@ class DuckDBStore:
             trust_weight,
             threshold_alert,
             threshold_digest,
+            mode,
         )
 
     async def remove_feed_source(self, url: str) -> bool:

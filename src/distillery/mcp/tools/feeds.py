@@ -30,6 +30,7 @@ from urllib.parse import urlparse
 from mcp import types
 
 from distillery.config import DistilleryConfig
+from distillery.feeds.github import VALID_MODES as _VALID_GITHUB_MODES
 from distillery.feeds.url_guard import UnsafeURLError, validate_public_url
 from distillery.mcp.tools._common import (
     error_response,
@@ -346,6 +347,27 @@ async def _handle_watch(
         except ValueError as exc:
             return error_response("INVALID_PARAMS", str(exc))
 
+        # Optional ``mode`` selects the content-bearing surface for github
+        # sources (#625). Defaults to '' = adapter default ('releases').
+        mode_raw = arguments.get("mode")
+        if mode_raw is not None and not isinstance(mode_raw, str):
+            return error_response(
+                "INVALID_PARAMS",
+                f"mode must be a string, got: {type(mode_raw).__name__}",
+            )
+        mode = str(mode_raw or "").strip().lower()
+        if mode:
+            if source_type != "github":
+                return error_response(
+                    "INVALID_PARAMS",
+                    f"mode is only supported for source_type='github', got: {source_type!r}",
+                )
+            if mode not in _VALID_GITHUB_MODES:
+                return error_response(
+                    "INVALID_PARAMS",
+                    f"mode must be one of {sorted(_VALID_GITHUB_MODES)}, got: {mode!r}",
+                )
+
         try:
             sync_history = _parse_bool_arg(arguments.get("sync_history"), default=False)
         except ValueError as exc:
@@ -423,6 +445,7 @@ async def _handle_watch(
                 trust_weight=trust_weight,
                 threshold_alert=threshold_alert,
                 threshold_digest=threshold_digest,
+                mode=mode,
             )
             db_sources = await store.list_feed_sources()
         except ValueError:

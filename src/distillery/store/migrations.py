@@ -574,6 +574,26 @@ def add_relation_attributes(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> N
     logger.info("Migration 15: entry_relations weight/valid_at/invalid_at/metadata columns added")
 
 
+# DuckDB's ALTER TABLE ADD COLUMN does not accept constraints (NOT NULL), so
+# add a plain nullable VARCHAR with a default of '' — matching migration 3's
+# ``created_by``/``last_modified_by`` pattern. The reader coalesces NULL to ''.
+_ADD_FEED_SOURCE_MODE_COLUMN = (
+    "ALTER TABLE feed_sources ADD COLUMN IF NOT EXISTS mode VARCHAR DEFAULT '';"
+)
+
+
+def add_feed_source_mode(conn: duckdb.DuckDBPyConnection, **kwargs: Any) -> None:
+    """Migration 16: Add the ``mode`` column to ``feed_sources``.
+
+    Selects which content-bearing surface a ``github`` source polls
+    (``'releases'`` by default, ``'events'`` opt-in).  Empty string means
+    "adapter default", preserving behaviour for ``rss`` sources and any rows
+    created before the migration ran (#625).
+    """
+    conn.execute(_ADD_FEED_SOURCE_MODE_COLUMN)
+    logger.info("Migration 16: feed_sources mode column added")
+
+
 # ---------------------------------------------------------------------------
 # Migration registry
 # ---------------------------------------------------------------------------
@@ -594,6 +614,7 @@ MIGRATIONS: dict[int, MigrationFunc] = {
     13: create_sync_jobs,
     14: add_feed_source_thresholds,
     15: add_relation_attributes,
+    16: add_feed_source_mode,
 }
 """Ordered mapping of schema version to migration function.
 

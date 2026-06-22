@@ -1430,3 +1430,115 @@ class TestReaderEnrichment:
 
         assert summary.total_items_enriched == 0
         assert reader.calls == []  # filtered out by candidate predicate
+
+
+# ---------------------------------------------------------------------------
+# GitHub releases mode — end-to-end against the real store + adapter (#625)
+# ---------------------------------------------------------------------------
+
+
+def _mock_releases_client(payload: object) -> MagicMock:
+    """Build a MagicMock httpx.Client whose GET returns *payload* as JSON."""
+    response = MagicMock()
+    response.json.return_value = payload
+    response.raise_for_status.return_value = None
+    client = MagicMock()
+    client.__enter__ = MagicMock(return_value=client)
+    client.__exit__ = MagicMock(return_value=False)
+    client.get.return_value = response
+    return client
+
+
+_RELEASES_PAYLOAD = [
+    {
+        "id": 1,
+        "tag_name": "v1.0.0",
+        "name": "First release",
+        "body": "Initial release notes body text.",
+        "prerelease": False,
+        "author": {"login": "releaser"},
+        "html_url": "https://github.com/owner/repo/releases/tag/v1.0.0",
+        "published_at": "2024-03-25T09:00:00Z",
+    },
+    {
+        "id": 2,
+        "tag_name": "v0.9.0",
+        "name": "Prerelease",
+        "body": "Earlier prerelease notes.",
+        "prerelease": True,
+        "author": {"login": "releaser"},
+        "html_url": "https://github.com/owner/repo/releases/tag/v0.9.0",
+        "published_at": "2024-03-20T09:00:00Z",
+    },
+]
+
+
+@pytest.mark.integration
+class TestGitHubReleasesPollEndToEnd:
+    """End-to-end: real DuckDB store + real GitHubAdapter, httpx mocked."""
+
+    async def _run_poll(self, store: object) -> object:
+        cfg = _make_config(sources=[], digest_threshold=0.0)
+        poller = FeedPoller(store=store, config=cfg)  # type: ignore[arg-type]
+        return await poller.poll()
+
+    async def test_releases_mode_yields_one_body_bearing_entry_per_release(
+        self, store: object
+    ) -> None:
+        await store.add_feed_source(  # type: ignore[attr-defined]
+            url="owner/repo", source_type="github", mode="releases"
+        )
+
+        with patch(
+            "distillery.feeds.github.httpx.Client",
+            return_value=_mock_releases_client(_RELEASES_PAYLOAD),
+        ):
+            summary = await self._run_poll(store)
+
+        assert summary.total_fetched == 2
+        assert summary.total_stored == 2
+
+        entries = await store.list_entries(  # type: ignore[attr-defined]
+            filters=None, limit=100, offset=0
+        )
+        ext_ids = {e.metadata.get("external_id") for e in entries}
+        assert ext_ids == {"owner/repo@v1.0.0", "owner/repo@v0.9.0"}
+        # Each entry carries the real release-notes body, not an event title.
+        bodies = {e.metadata.get("external_id"): e.content for e in entries}
+        assert "Initial release notes body text." in bodies["owner/repo@v1.0.0"]
+        # No contentless "*Event by ... on ..." stub titles.
+        assert all("Event by" not in (e.metadata.get("title") or "") for e in entries)
+
+    async def test_repoll_is_deduped(self, store: object) -> None:
+        await store.add_feed_source(  # type: ignore[attr-defined]
+            url="owner/repo", source_type="github", mode="releases"
+        )
+
+        with patch(
+            "distillery.feeds.github.httpx.Client",
+            return_value=_mock_releases_client(_RELEASES_PAYLOAD),
+        ):
+            first = await self._run_poll(store)
+            second = await self._run_poll(store)
+
+        assert first.total_stored == 2
+        # Re-poll of the same releases stores nothing new and skips via dedup.
+        assert second.total_stored == 0
+        assert second.total_skipped_dedup == 2
+
+        entries = await store.list_entries(  # type: ignore[attr-defined]
+            filters=None, limit=100, offset=0
+        )
+        assert len(entries) == 2  # no duplicates
+
+    async def test_default_mode_polls_releases_not_events(self, store: object) -> None:
+        # No explicit mode -> adapter default (releases). Verify the releases
+        # endpoint is hit and no event-stub entries are produced.
+        await store.add_feed_source(url="owner/repo", source_type="github")  # type: ignore[attr-defined]
+
+        client = _mock_releases_client(_RELEASES_PAYLOAD)
+        with patch("distillery.feeds.github.httpx.Client", return_value=client):
+            await self._run_poll(store)
+
+        called_url = client.get.call_args.args[0]
+        assert called_url.endswith("/repos/owner/repo/releases")

@@ -96,6 +96,7 @@ class FakeSourceStore:
         trust_weight: float = 1.0,
         threshold_alert: float | None = None,
         threshold_digest: float | None = None,
+        mode: str = "",
     ) -> dict[str, Any]:
         if any(s["url"] == url for s in self._sources):
             raise ValueError(f"Feed source with URL {url!r} already exists.")
@@ -111,6 +112,7 @@ class FakeSourceStore:
             "next_poll_at": None,
             "threshold_alert": threshold_alert,
             "threshold_digest": threshold_digest,
+            "mode": mode,
         }
         self._sources.append(entry)
         return entry
