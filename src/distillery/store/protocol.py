@@ -164,7 +164,8 @@ class DistilleryStore(Protocol):
             - ``entry_type`` (str | list[str])
             - ``author`` (str)
             - ``project`` (str)
-            - ``tags`` (list[str]) -- matches entries containing *any* tag
+            - ``tags`` (list[str]) -- matches entries containing *all* listed
+              tags (AND / intersection)
             - ``status`` (str)
             - ``verification`` (str) -- one of ``"unverified"``, ``"testing"``, ``"verified"``
             - ``date_from`` (datetime | str) -- inclusive lower bound on ``created_at``
@@ -248,8 +249,9 @@ class DistilleryStore(Protocol):
 
         Parameters:
             filters: Optional metadata constraints. Supported keys:
-                ``entry_type``, ``author``, ``project``, ``tags`` (matches any
-                tag), ``status`` (str or list[str] — a list matches any of the
+                ``entry_type``, ``author``, ``project``, ``tags`` (matches
+                entries containing all listed tags — AND / intersection),
+                ``status`` (str or list[str] — a list matches any of the
                 listed statuses via SQL ``IN``), ``verification`` (one of
                 "unverified", "testing", "verified"), ``date_from``, ``date_to``.
             limit: Maximum number of entries (or groups) to return.

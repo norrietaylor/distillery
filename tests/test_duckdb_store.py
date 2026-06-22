@@ -400,6 +400,21 @@ class TestSearch:
         for r in results:
             assert "important" in r.entry.tags
 
+    async def test_search_filter_by_multiple_tags_is_intersection(
+        self, store: DuckDBStore
+    ) -> None:
+        """Multi-tag search ANDs the tags: only entries with *both* match (#626)."""
+        await store.store(make_entry(content="entry only a", tags=["tag-a"]))
+        await store.store(make_entry(content="entry only b", tags=["tag-b"]))
+        await store.store(make_entry(content="entry both", tags=["tag-a", "tag-b"]))
+        results = await store.search("entry", filters={"tags": ["tag-a", "tag-b"]}, limit=10)
+        # Per-tag counts are 2 (tag-a) and 2 (tag-b); AND must return <= min == 2,
+        # and specifically only the single entry carrying both tags.
+        assert len(results) == 1
+        for r in results:
+            assert "tag-a" in r.entry.tags
+            assert "tag-b" in r.entry.tags
+
     async def test_search_filter_by_status(self, store: DuckDBStore) -> None:
         active_entry = make_entry(content="active entry", status=EntryStatus.ACTIVE)
         pending_entry = make_entry(content="pending entry", status=EntryStatus.PENDING_REVIEW)
@@ -550,6 +565,30 @@ class TestListEntries:
         result = await store.list_entries(filters={"tags": ["critical"]}, limit=10, offset=0)
         for e in result:
             assert "critical" in e.tags
+
+    async def test_list_entries_filter_by_multiple_tags_is_intersection(
+        self, store: DuckDBStore
+    ) -> None:
+        """Multi-tag list ANDs the tags: only entries with *both* match (#626)."""
+        await store.store(make_entry(content="only a", tags=["tag-a"]))
+        await store.store(make_entry(content="only a too", tags=["tag-a"]))
+        await store.store(make_entry(content="only b", tags=["tag-b"]))
+        await store.store(make_entry(content="both", tags=["tag-a", "tag-b"]))
+        result = await store.list_entries(
+            filters={"tags": ["tag-a", "tag-b"]}, limit=10, offset=0
+        )
+        # Per-tag counts: tag-a == 3, tag-b == 2; AND must return <= min == 2 and
+        # in fact only the single entry carrying both tags (proves intersection,
+        # not the union of 4 that the old list_has_any produced).
+        assert len(result) == 1
+        for e in result:
+            assert "tag-a" in e.tags
+            assert "tag-b" in e.tags
+
+    async def test_list_entries_tags_filter_rejects_non_list(self, store: DuckDBStore) -> None:
+        """A bare string tags filter must raise rather than iterate characters (#626)."""
+        with pytest.raises(ValueError, match="tags filter must be a list"):
+            await store.list_entries(filters={"tags": "tag-a"}, limit=10, offset=0)
 
     async def test_list_entries_filter_by_status(self, store: DuckDBStore) -> None:
         await store.store(make_entry(content="active", status=EntryStatus.ACTIVE))

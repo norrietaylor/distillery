@@ -1810,7 +1810,8 @@ class DuckDBStore:
         - ``entry_type`` (str | list[str])
         - ``author`` (str)
         - ``project`` (str)
-        - ``tags`` (list[str]) -- matches entries containing *any* listed tag
+        - ``tags`` (list[str]) -- matches entries containing *all* listed tags
+          (AND / intersection)
         - ``status`` (str)
         - ``verification`` (str) -- one of "unverified", "testing", "verified"
         - ``source`` (str) -- entry origin (e.g. "claude-code", "manual", "inference", etc.)
@@ -1850,10 +1851,16 @@ class DuckDBStore:
         if "tags" in filters:
             tag_list = filters["tags"]
             if tag_list:
-                # list_has_any checks whether the tags array shares any
-                # element with the provided list.
-                clauses.append("list_has_any(tags, ?)")
-                params.append(tag_list)
+                if not isinstance(tag_list, list) or not all(
+                    isinstance(t, str) for t in tag_list
+                ):
+                    raise ValueError("tags filter must be a list[str]")
+                # AND semantics: an entry matches only if its tags array
+                # contains *every* requested tag (intersection, not union).
+                # One list_contains clause per tag, ANDed together.
+                for tag in tag_list:
+                    clauses.append("list_contains(tags, ?)")
+                    params.append(tag)
 
         if "status" in filters:
             val = filters["status"]
