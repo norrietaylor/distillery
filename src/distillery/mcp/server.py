@@ -945,6 +945,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         include_evergreen: bool = False,
         expand_graph: bool = False,
         expand_hops: int = 1,
+        output_mode: str = "summary",
     ) -> list[types.TextContent]:
         """Search knowledge entries using semantic similarity (cosine distance, ranked descending).
 
@@ -997,8 +998,16 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             results.
           - expand_hops (int, optional, default=1): Depth of graph expansion when
             ``expand_graph=true``.  Must be 1 or 2.
+          - output_mode (str, optional, default="summary"): Response shape.
+            Valid: [summary, full, ids]. "summary" returns score plus a compact entry
+            (id/title/~200-char content_preview, no full body — default, keeps responses
+            small to conserve context). "full" returns score plus the entire entry
+            (pre-output_mode behaviour). "ids" returns score + id only.
 
-        RETURNS (success): { results: [{ score: float, entry: {...} }], count: int }.
+        RETURNS (success): { results: [{ score: float, ... }], count: int }.
+          Result shape follows ``output_mode``: "summary" (default) nests a compact
+          ``entry`` (no full content); "full" nests the complete ``entry``; "ids"
+          returns ``score`` + ``id`` only.
           When ``expand_graph=true`` each result also has ``provenance`` ("search" or
           "graph"); graph results additionally carry ``depth`` and ``parent_id``, and
           the envelope includes ``graph_expansion: { seed_count, expanded_count }``.
@@ -1015,6 +1024,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             include_evergreen=include_evergreen,
             expand_graph=expand_graph,
             expand_hops=expand_hops,
+            output_mode=output_mode,
             **_omit_none(
                 entry_type=entry_type,
                 author=author,
