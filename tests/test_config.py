@@ -1274,3 +1274,71 @@ class TestWebhookConfigParsing:
         p = write_yaml(tmp_path, yaml_content)
         with pytest.raises(ValueError, match="server.webhooks must be a YAML mapping"):
             load_config(str(p))
+
+
+class TestAutoLinkConfig:
+    """Semantic auto-link config parsing / defaults / validation (issue #629)."""
+
+    def test_defaults_disabled(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """No config file → auto-link is off, with default threshold and cap."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        cfg = load_config()
+        assert cfg.auto_link.enabled is False
+        assert cfg.auto_link.threshold == pytest.approx(0.85)
+        assert cfg.auto_link.max_links == 5
+
+    def test_loads_auto_link(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """All auto-link fields can be configured together."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        yaml_content = """\
+            auto_link:
+              enabled: true
+              threshold: 0.9
+              max_links: 3
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.auto_link.enabled is True
+        assert cfg.auto_link.threshold == pytest.approx(0.9)
+        assert cfg.auto_link.max_links == 3
+
+    def test_non_bool_enabled_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        yaml_content = """\
+            auto_link:
+              enabled: "yes"
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="auto_link.enabled"):
+            load_config(str(p))
+
+    def test_threshold_out_of_range_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        yaml_content = """\
+            auto_link:
+              threshold: 1.5
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="auto_link.threshold"):
+            load_config(str(p))
+
+    def test_non_positive_max_links_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        yaml_content = """\
+            auto_link:
+              max_links: 0
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="auto_link.max_links"):
+            load_config(str(p))
