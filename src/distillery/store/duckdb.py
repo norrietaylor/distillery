@@ -1411,8 +1411,10 @@ class DuckDBStore:
         wired into the write path (issue #629).  For the just-stored entry,
         finds up to ``self._auto_link_max_links`` non-archived neighbours whose
         normalised cosine similarity is at or above ``self._auto_link_threshold``
-        (excluding the entry itself and any target already linked via a
-        ``related`` edge) and inserts ``related`` rows into ``entry_relations``.
+        (excluding the entry itself and any target already linked to it in
+        either direction via any relation_type — matching the shipped
+        ``exclude_linked`` primitive) and inserts ``related`` rows into
+        ``entry_relations``.
 
         Idempotent via the unique ``(from_id, to_id, relation_type)`` index, so
         re-running ingest over an already-linked entry inserts nothing new.
@@ -1433,10 +1435,12 @@ class DuckDBStore:
 
         dims = self._embedding_provider.dimensions
         # Convert normalised [0, 1] threshold to raw [-1, 1] for SQL comparison,
-        # mirroring find_similar(). Exclude self, archived entries, and targets
-        # already linked via a ``related`` edge (exclude_linked semantics), and
-        # cap the candidate set at the throttle so we never scan more rows than
-        # the budget allows.
+        # mirroring find_similar(). Exclude self, archived entries, and any
+        # target already linked to ``from_id`` in either direction via any
+        # relation_type — matching the shipped exclude_linked primitive
+        # (mcp/tools/search.py, which calls get_related(direction="both") with
+        # no relation_type filter; PR #495 / issue #490 mechanism #2). Cap the
+        # candidate set at the throttle so we never scan more rows than budget.
         raw_threshold = self._auto_link_threshold * 2.0 - 1.0
         candidate_sql = (
             f"SELECT id FROM entries "
@@ -1444,8 +1448,9 @@ class DuckDBStore:
             f"AND status != ? "
             f"AND array_cosine_similarity(embedding, ?::FLOAT[{dims}]) >= ? "
             f"AND id NOT IN ("
-            f"  SELECT to_id FROM entry_relations "
-            f"  WHERE from_id = ? AND relation_type = 'related'"
+            f"  SELECT to_id FROM entry_relations WHERE from_id = ? "
+            f"  UNION "
+            f"  SELECT from_id FROM entry_relations WHERE to_id = ?"
             f") "
             f"ORDER BY array_cosine_similarity(embedding, ?::FLOAT[{dims}]) DESC "
             f"LIMIT ?"
@@ -1455,6 +1460,7 @@ class DuckDBStore:
             EntryStatus.ARCHIVED.value,
             embedding,
             raw_threshold,
+            from_id,
             from_id,
             embedding,
             self._auto_link_max_links,

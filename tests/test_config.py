@@ -1342,3 +1342,14 @@ class TestAutoLinkConfig:
         p = write_yaml(tmp_path, yaml_content)
         with pytest.raises(ValueError, match="auto_link.max_links"):
             load_config(str(p))
+
+    def test_non_mapping_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A non-mapping auto_link value raises a clear ValueError, not AttributeError."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        yaml_content = """\
+            auto_link: "enabled"
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="auto_link must be a YAML mapping"):
+            load_config(str(p))

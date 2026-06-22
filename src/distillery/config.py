@@ -764,10 +764,13 @@ def _parse_auto_link(raw: dict[str, Any]) -> AutoLinkConfig:
         A populated :class:`AutoLinkConfig` instance.
 
     Raises:
-        ValueError: If ``enabled`` is not a boolean, ``threshold`` is not a
-            float, or ``max_links`` is not an integer.  Range checks are
-            deferred to :func:`_validate`.
+        ValueError: If ``raw`` is not a mapping, ``enabled`` is not a boolean,
+            ``threshold`` is not a float, or ``max_links`` is not an integer.
+            Range checks are deferred to :func:`_validate`.
     """
+    if not isinstance(raw, dict):
+        raise ValueError(f"auto_link must be a YAML mapping, got: {type(raw).__name__}")
+
     enabled_raw = raw.get("enabled", False)
     if not isinstance(enabled_raw, bool):
         raise ValueError(f"auto_link.enabled must be a boolean, got: {enabled_raw!r}")

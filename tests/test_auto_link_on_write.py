@@ -142,6 +142,58 @@ async def test_auto_link_is_idempotent_on_re_store(
     assert len(rows_after) == 1
 
 
+async def test_auto_link_skips_targets_linked_in_any_direction_or_type(
+    auto_link_store: DuckDBStore,
+    controlled_embedding_provider: ControlledEmbeddingProvider,
+) -> None:
+    """exclude_linked matches the shipped primitive: incoming + non-``related`` edges suppress.
+
+    The shipped ``find_similar(exclude_linked=true)`` primitive
+    (mcp/tools/search.py) excludes any neighbour already linked to the source in
+    *either direction* via *any relation_type* (it calls
+    ``get_related(direction="both")`` with no relation_type filter). The
+    write-path hook must not be more permissive than that primitive.
+    """
+    controlled_embedding_provider.register("source", _NEAR)
+    controlled_embedding_provider.register("incoming nbr", _NEAR)
+    controlled_embedding_provider.register("typed nbr", _NEAR)
+    controlled_embedding_provider.register("fresh nbr", _NEAR)
+
+    # Seed entries + edges with the hook disabled so the only auto-link run is
+    # the one under test (otherwise each store() would link everything eagerly).
+    auto_link_store._auto_link_enabled = False
+    incoming = await auto_link_store.store(make_entry(content="incoming nbr"))
+    typed = await auto_link_store.store(make_entry(content="typed nbr"))
+    fresh = await auto_link_store.store(make_entry(content="fresh nbr"))
+    src_id = await auto_link_store.store(make_entry(content="source"))
+
+    # Pre-seed edges that the *narrow* (outgoing-``related``-only) filter would
+    # have missed: an INCOMING ``related`` edge and an outgoing non-``related``
+    # ("link") edge. Both must suppress an auto-link to that target.
+    await auto_link_store.add_relation(incoming, src_id, "related")
+    await auto_link_store.add_relation(src_id, typed, "link")
+    auto_link_store._auto_link_enabled = True
+
+    embedding = controlled_embedding_provider.embed("source")
+    inserted = await auto_link_store._run_sync(
+        auto_link_store._auto_link_semantic,
+        auto_link_store.connection,
+        src_id,
+        embedding,
+    )
+
+    # Only the un-linked ``fresh`` neighbour gets a new ``related`` edge.
+    assert inserted == 1
+    outgoing_related = {
+        r["to_id"]
+        for r in await auto_link_store.get_related(src_id, direction="outgoing")
+        if r["relation_type"] == "related"
+    }
+    assert outgoing_related == {fresh}
+    assert incoming not in outgoing_related
+    assert typed not in outgoing_related
+
+
 async def test_auto_link_respects_max_links_cap(
     controlled_embedding_provider: ControlledEmbeddingProvider,
 ) -> None:
