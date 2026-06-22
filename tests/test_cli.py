@@ -838,6 +838,202 @@ class TestExportCommand:
         assert rc == 1
 
 
+def _seed_export_db(db_path: str) -> None:
+    """Populate a DB with mixed entries + feed sources for filter tests."""
+    import asyncio
+
+    from distillery.models import EntrySource, EntryType
+    from distillery.store.duckdb import DuckDBStore
+    from tests.conftest import make_entry
+
+    async def _setup() -> None:
+        from distillery.mcp._stub_embedding import StubEmbeddingProvider
+
+        store = DuckDBStore(db_path=db_path, embedding_provider=StubEmbeddingProvider())
+        await store.initialize()
+        # Target row: session + both tags + claude-code origin.
+        await store.store(
+            make_entry(
+                content="session match",
+                entry_type=EntryType.SESSION,
+                source=EntrySource.CLAUDE_CODE,
+                tags=["domain/competitive", "team/eng"],
+            )
+        )
+        # Session but missing one of the AND tags.
+        await store.store(
+            make_entry(
+                content="session partial tags",
+                entry_type=EntryType.SESSION,
+                source=EntrySource.CLAUDE_CODE,
+                tags=["domain/competitive"],
+            )
+        )
+        # Right tags but wrong type.
+        await store.store(
+            make_entry(
+                content="inbox wrong type",
+                entry_type=EntryType.INBOX,
+                source=EntrySource.MANUAL,
+                tags=["domain/competitive", "team/eng"],
+            )
+        )
+        # Feed entry attributed to a feed URL via metadata.source_url.
+        await store.store(
+            make_entry(
+                content="feed item",
+                entry_type=EntryType.FEED,
+                source=EntrySource.MANUAL,
+                tags=[],
+                metadata={"source_type": "rss", "source_url": "https://eng.example.com/feed"},
+            )
+        )
+        await store.add_feed_source(
+            url="https://eng.example.com/feed", source_type="rss", label="eng"
+        )
+        await store.add_feed_source(
+            url="https://mkt.example.com/feed", source_type="rss", label="mkt"
+        )
+        await store.close()
+
+    asyncio.run(_setup())
+
+
+class TestExportFilters:
+    def test_type_and_tag_filter_keeps_only_matches(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """--type session --tag a --tag b exports only the row matching all."""
+        db_path = str(tmp_path / "test.db")
+        _seed_export_db(db_path)
+        cfg_path = write_config(tmp_path, db_path)
+        out_path = str(tmp_path / "eng.json")
+        rc = _cmd_export(
+            str(cfg_path),
+            "text",
+            out_path,
+            entry_types=["session"],
+            tags=["domain/competitive", "team/eng"],
+        )
+        assert rc == 0
+        data = json.loads(Path(out_path).read_text(encoding="utf-8"))
+        contents = [e["content"] for e in data["entries"]]
+        assert contents == ["session match"]
+
+    def test_no_filters_exports_whole_store(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """No filters reproduces the current whole-store output byte-for-byte."""
+        db_path = str(tmp_path / "test.db")
+        _seed_export_db(db_path)
+        cfg_path = write_config(tmp_path, db_path)
+        unfiltered = str(tmp_path / "all.json")
+        defaulted = str(tmp_path / "all_defaults.json")
+        rc1 = _cmd_export(str(cfg_path), "text", unfiltered)
+        rc2 = _cmd_export(
+            str(cfg_path),
+            "text",
+            defaulted,
+            entry_types=None,
+            tags=None,
+            sources=None,
+            status="any",
+        )
+        assert rc1 == 0
+        assert rc2 == 0
+        a = json.loads(Path(unfiltered).read_text(encoding="utf-8"))
+        b = json.loads(Path(defaulted).read_text(encoding="utf-8"))
+        # All four seeded entries and both feed sources present.
+        assert len(a["entries"]) == 4
+        assert len(a["feed_sources"]) == 2
+        # Explicit defaults match the bare call's structure (ignoring timestamp).
+        a.pop("exported_at")
+        b.pop("exported_at")
+        assert a == b
+
+    def test_source_filters_entries_and_feed_sources(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """--source keeps matching entries and only the matching feed sources."""
+        db_path = str(tmp_path / "test.db")
+        _seed_export_db(db_path)
+        cfg_path = write_config(tmp_path, db_path)
+        out_path = str(tmp_path / "feed.json")
+        rc = _cmd_export(
+            str(cfg_path),
+            "text",
+            out_path,
+            sources=["https://eng.example.com/feed"],
+        )
+        assert rc == 0
+        data = json.loads(Path(out_path).read_text(encoding="utf-8"))
+        # Only the feed entry whose metadata.source_url matches.
+        assert [e["content"] for e in data["entries"]] == ["feed item"]
+        # Feed-source export is limited to the selected URL.
+        assert [f["url"] for f in data["feed_sources"]] == ["https://eng.example.com/feed"]
+
+    def test_source_matches_origin_column(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """--source also matches the entry ``source`` (origin) column."""
+        db_path = str(tmp_path / "test.db")
+        _seed_export_db(db_path)
+        cfg_path = write_config(tmp_path, db_path)
+        out_path = str(tmp_path / "cc.json")
+        rc = _cmd_export(str(cfg_path), "text", out_path, sources=["claude-code"])
+        assert rc == 0
+        data = json.loads(Path(out_path).read_text(encoding="utf-8"))
+        contents = sorted(e["content"] for e in data["entries"])
+        assert contents == ["session match", "session partial tags"]
+
+    def test_status_filter_restricts_by_status(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """--status archived returns no rows when all seeded entries are active."""
+        db_path = str(tmp_path / "test.db")
+        _seed_export_db(db_path)
+        cfg_path = write_config(tmp_path, db_path)
+        out_path = str(tmp_path / "archived.json")
+        rc = _cmd_export(str(cfg_path), "text", out_path, status="archived")
+        assert rc == 0
+        data = json.loads(Path(out_path).read_text(encoding="utf-8"))
+        assert data["entries"] == []
+
+    def test_main_passes_filter_flags(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """The argparse layer wires --type/--tag/--source through to the export."""
+        db_path = str(tmp_path / "test.db")
+        _seed_export_db(db_path)
+        cfg_path = write_config(tmp_path, db_path)
+        out_path = str(tmp_path / "via_main.json")
+        with pytest.raises(SystemExit) as exc:
+            main(
+                [
+                    "export",
+                    "--config",
+                    str(cfg_path),
+                    "--output",
+                    out_path,
+                    "--type",
+                    "session",
+                    "--tag",
+                    "domain/competitive",
+                    "--tag",
+                    "team/eng",
+                ]
+            )
+        assert exc.value.code == 0
+        data = json.loads(Path(out_path).read_text(encoding="utf-8"))
+        assert [e["content"] for e in data["entries"]] == ["session match"]
+
+
 # ---------------------------------------------------------------------------
 # import subcommand
 # ---------------------------------------------------------------------------
