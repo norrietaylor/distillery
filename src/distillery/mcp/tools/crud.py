@@ -10,6 +10,7 @@ Implements the following tools:
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 from collections.abc import Mapping
@@ -1001,6 +1002,245 @@ async def _handle_store_batch(
             entry_ids_out.append(pid)
     return success_response(
         {"entry_ids": entry_ids_out, "results": results, "count": len(persisted_ids)}
+    )
+
+
+# ---------------------------------------------------------------------------
+# _handle_ingest_doc
+# ---------------------------------------------------------------------------
+
+# Valid doctype values for document ingestion.  These drive the
+# ``doctype/<value>`` tag convention and the ``metadata.doctype`` field so
+# specs/ADRs/decisions and customer feedback become faceted, queryable
+# entries without adding a new EntryType enum value (issue #627).
+_VALID_DOCTYPES = {"adr", "spec", "decision", "feedback", "doc"}
+
+# Approximate maximum characters per chunk when a document is split.  Chosen
+# so a chunk comfortably fits a single embedding call and stays well under
+# typical model context windows.  Splitting happens on paragraph boundaries
+# where possible; an oversized paragraph is hard-split.
+_DOC_CHUNK_CHARS = 4000
+
+
+def _content_hash(text: str) -> str:
+    """Return the SHA-256 hex digest of *text* (stable dedup key)."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _chunk_text(text: str, *, max_chars: int = _DOC_CHUNK_CHARS) -> list[str]:
+    """Split *text* into chunks no larger than *max_chars*.
+
+    Paragraph boundaries (blank lines) are preferred so chunks stay
+    semantically coherent.  A single paragraph longer than *max_chars* is
+    hard-split.  Returns at least one chunk for non-empty input.
+    """
+    if len(text) <= max_chars:
+        return [text]
+
+    chunks: list[str] = []
+    current = ""
+    for paragraph in text.split("\n\n"):
+        # Hard-split any single paragraph that exceeds the limit on its own.
+        if len(paragraph) > max_chars:
+            if current:
+                chunks.append(current)
+                current = ""
+            for i in range(0, len(paragraph), max_chars):
+                chunks.append(paragraph[i : i + max_chars])
+            continue
+        candidate = f"{current}\n\n{paragraph}" if current else paragraph
+        if len(candidate) > max_chars:
+            chunks.append(current)
+            current = paragraph
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+async def _handle_ingest_doc(
+    store: Any,
+    arguments: dict[str, Any],
+    cfg: DistilleryConfig | None = None,
+    created_by: str = "",
+) -> list[types.TextContent]:
+    """Ingest an arbitrary document (ADR/spec/decision/feedback) into the store.
+
+    Distinct from ``distillery_store`` (single entry, semantic-similarity
+    dedup) and the PreCompact-transcript path: this takes raw document text
+    plus provenance, chunks large text into multiple linked entries, and
+    deduplicates idempotently by content hash so re-ingesting identical
+    content creates no second entry (issue #627).
+
+    Args:
+        store: Initialised storage backend.
+        arguments: Tool arguments.  Required: ``text`` (str), ``author``
+            (str).  Optional: ``doctype`` (one of ``_VALID_DOCTYPES``,
+            default ``"doc"``), ``source`` (str — provenance label such as a
+            file path or Drive URL), ``external_id`` (str — explicit dedup
+            key; defaults to the content hash), ``title`` (str), ``project``
+            (str), ``tags`` (list[str]), ``metadata`` (dict).
+        cfg: Optional config (reserved for future budget checks; unused here
+            because ingestion runs through ``store_batch`` which has no dedup).
+        created_by: Ownership identifier from the auth layer.
+
+    Returns:
+        MCP content list with ``{entry_ids, count, doctype, external_id,
+        chunked, persisted, dedup_action}``.  On re-ingest of identical
+        content, ``persisted`` is ``False`` and ``dedup_action`` is
+        ``"skipped"`` with the existing ``entry_ids``.
+    """
+    from distillery.models import Entry, EntrySource, EntryType
+
+    err = validate_required(arguments, "text", "author")
+    if err:
+        return error_response("INVALID_PARAMS", err)
+
+    text = arguments["text"]
+    if not isinstance(text, str) or not text.strip():
+        return error_response("INVALID_PARAMS", "Field 'text' must be a non-empty string.")
+
+    doctype = arguments.get("doctype", "doc")
+    if doctype not in _VALID_DOCTYPES:
+        return error_response(
+            "INVALID_PARAMS",
+            f"Invalid doctype {doctype!r}. Must be one of: {', '.join(sorted(_VALID_DOCTYPES))}.",
+        )
+
+    tags_err = validate_type(arguments, "tags", list, "list of strings")
+    if tags_err:
+        return error_response("INVALID_PARAMS", tags_err)
+
+    metadata_err = validate_type(arguments, "metadata", dict, "object")
+    if metadata_err:
+        return error_response("INVALID_PARAMS", metadata_err)
+
+    source_raw = arguments.get("source")
+    title = arguments.get("title")
+
+    # Dedup key: caller-supplied external_id, else the content hash so
+    # re-ingesting identical text is idempotent.
+    external_id = arguments.get("external_id") or _content_hash(text)
+    if not isinstance(external_id, str):
+        return error_response("INVALID_PARAMS", "Field 'external_id' must be a string.")
+
+    # --- idempotency check: already ingested? -------------------------------
+    # Paginate to exhaustion so a re-ingest of a doc that produced >page_size
+    # chunks returns the full entry_ids list (and correct count), not a slice.
+    try:
+        existing: list[Any] = []
+        page_size = 500
+        offset = 0
+        while True:
+            page = await store.list_entries(
+                filters={"metadata.external_id": external_id},
+                limit=page_size,
+                offset=offset,
+            )
+            if not page:
+                break
+            existing.extend(page)
+            if len(page) < page_size:
+                break
+            offset += page_size
+    except Exception:  # noqa: BLE001
+        logger.exception("ingest_doc: external_id lookup failed for %r", external_id)
+        return error_response("INTERNAL", "Failed to check for existing document")
+
+    if existing:
+        existing_ids = [e.id for e in existing]
+        return success_response(
+            {
+                "entry_ids": existing_ids,
+                "count": len(existing_ids),
+                "doctype": doctype,
+                "external_id": external_id,
+                "chunked": len(existing_ids) > 1,
+                "persisted": False,
+                "dedup_action": "skipped",
+            }
+        )
+
+    # --- chunk large documents ----------------------------------------------
+    chunks = _chunk_text(text)
+    chunked = len(chunks) > 1
+
+    # ``doctype/<value>`` tag convention + caller tags (deduped, order-stable).
+    base_tags: list[str] = [f"doctype/{doctype}"]
+    for tag in arguments.get("tags") or []:
+        if tag not in base_tags:
+            base_tags.append(tag)
+
+    base_metadata: dict[str, Any] = dict(arguments.get("metadata") or {})
+    base_metadata["doctype"] = doctype
+    base_metadata["external_id"] = external_id
+    if source_raw is not None:
+        base_metadata["source"] = source_raw
+    if title is not None:
+        base_metadata["title"] = title
+
+    project = arguments.get("project")
+
+    entries: list[Entry] = []
+    for idx, chunk in enumerate(chunks):
+        chunk_metadata = dict(base_metadata)
+        if chunked:
+            chunk_metadata["chunk_index"] = idx
+            chunk_metadata["chunk_total"] = len(chunks)
+        entries.append(
+            Entry(
+                content=chunk,
+                entry_type=EntryType.REFERENCE,
+                source=EntrySource.IMPORT,
+                author=arguments["author"],
+                project=project,
+                tags=list(base_tags),
+                metadata=chunk_metadata,
+                created_by=created_by,
+            )
+        )
+
+    # --- persist (no semantic dedup; idempotency is handled above) ----------
+    try:
+        entry_ids = await store.store_batch(entries)
+    except ValueError:
+        logger.exception("ingest_doc: invalid params during batch store")
+        return error_response("INVALID_PARAMS", "Invalid ingestion parameters.")
+    except EmbeddingProviderError as exc:
+        logger.warning(
+            "Upstream embedding provider failed during ingest_doc "
+            "(provider=%s endpoint=%s status=%s retry_after=%s): %s",
+            exc.provider,
+            exc.endpoint,
+            exc.status_code,
+            exc.retry_after,
+            exc,
+        )
+        return upstream_error_response(exc)
+    except Exception:  # noqa: BLE001
+        logger.exception("Error ingesting document external_id=%s", external_id)
+        return error_response("INTERNAL", "Failed to ingest document")
+
+    # --- link chunks so they round-trip as one document ---------------------
+    if chunked:
+        head = entry_ids[0]
+        for tail in entry_ids[1:]:
+            try:
+                await store.add_relation(from_id=head, to_id=tail, relation_type="chunk")
+            except Exception:  # noqa: BLE001
+                logger.warning("ingest_doc: failed to link chunk %s -> %s", head, tail)
+
+    return success_response(
+        {
+            "entry_ids": entry_ids,
+            "count": len(entry_ids),
+            "doctype": doctype,
+            "external_id": external_id,
+            "chunked": chunked,
+            "persisted": True,
+            "dedup_action": "stored",
+        }
     )
 
 
@@ -2037,6 +2277,7 @@ async def _handle_correct(
 __all__ = [
     "_handle_store",
     "_handle_store_batch",
+    "_handle_ingest_doc",
     "_handle_get",
     "_handle_update",
     "_handle_correct",

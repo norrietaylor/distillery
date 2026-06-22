@@ -32,10 +32,11 @@ MCP_HEADERS = {
     "Accept": "application/json, text/event-stream",
 }
 
-# 16-tool API (15 prior + distillery_status from #313).
+# 17-tool API (16 prior + distillery_ingest_doc from #627).
 EXPECTED_TOOLS = {
     "distillery_store",
     "distillery_store_batch",
+    "distillery_ingest_doc",
     "distillery_get",
     "distillery_update",
     "distillery_correct",
@@ -145,7 +146,7 @@ class TestHttpServerStarts:
 
 class TestAllToolsAccessibleOverHttp:
     async def test_all_tools_accessible_over_http(self) -> None:
-        """All 16 tools appear in tools/list response over HTTP."""
+        """All 17 tools appear in tools/list response over HTTP."""
         port = _free_port()
         config = _make_server_config()
         uv_server, task = await _start_http_server(port, config)
@@ -162,7 +163,7 @@ class TestAllToolsAccessibleOverHttp:
             assert "result" in data, f"Expected result in: {data}"
             tools = data["result"]["tools"]
             tool_names = {t["name"] for t in tools}
-            assert len(tool_names) == 16, f"Expected 16 tools, got {len(tool_names)}: {tool_names}"
+            assert len(tool_names) == 17, f"Expected 17 tools, got {len(tool_names)}: {tool_names}"
             assert tool_names == EXPECTED_TOOLS, (
                 f"Tool mismatch.\nExpected: {EXPECTED_TOOLS}\nGot: {tool_names}"
             )

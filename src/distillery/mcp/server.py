@@ -42,6 +42,7 @@ from distillery.mcp.tools.configure import _handle_configure
 from distillery.mcp.tools.crud import (
     _handle_correct,
     _handle_get,
+    _handle_ingest_doc,
     _handle_list,
     _handle_store,
     _handle_update,
@@ -83,6 +84,7 @@ __all__ = [
     "_create_embedding_provider",
     "_handle_configure",
     "_handle_store",
+    "_handle_ingest_doc",
     "_handle_get",
     "_handle_update",
     "_handle_correct",
@@ -556,6 +558,80 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                                 "audit_log write failed for distillery_store_batch (ignored)",
                                 exc_info=True,
                             )
+        return result
+
+    @server.tool
+    async def distillery_ingest_doc(  # noqa: PLR0913
+        ctx: Context,
+        text: str,
+        author: str,
+        doctype: str | None = None,
+        source: str | None = None,
+        external_id: str | None = None,
+        title: str | None = None,
+        project: str | None = None,
+        tags: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[types.TextContent]:
+        """Ingest an arbitrary document (ADR, spec, decision, customer feedback).
+
+        USE WHEN: importing a standalone document — a markdown ADR/spec/RFC, a
+        design decision, or a customer-feedback transcript/doc — so it becomes
+        queryable knowledge with provenance. Distinct from distillery_store
+        (single entry, semantic dedup) and from PreCompact transcripts: this
+        chunks large text into multiple linked entries and deduplicates
+        idempotently by content hash, so re-ingesting identical content adds
+        no second entry.
+
+        PARAMS:
+          - text (str, required): The full document text. Large text is split
+            into multiple linked entries (relation_type="chunk").
+          - author (str, required): Who is ingesting / owns this document.
+          - doctype (str, optional, default="doc"): Document kind. Valid:
+            [adr, spec, decision, feedback, doc]. Applied as both a
+            "doctype/<value>" tag and metadata.doctype for faceted retrieval.
+          - source (str, optional): Provenance label (file path, Drive URL,
+            etc.). Stored in metadata.source.
+          - external_id (str, optional): Explicit dedup key. Defaults to the
+            SHA-256 hash of text, making re-ingest idempotent.
+          - title (str, optional): Human-readable title (stored in metadata.title).
+          - project (str, optional): Project scope.
+          - tags (list[str], optional): Extra namespaced tags.
+          - metadata (dict, optional): Arbitrary extra metadata.
+
+        RETURNS (success): { entry_ids: list[str], count: int, doctype: str,
+            external_id: str, chunked: bool, persisted: bool,
+            dedup_action: "stored" | "skipped" }
+            On re-ingest of identical content, persisted=false,
+            dedup_action="skipped", and entry_ids points at the existing entries.
+        RETURNS (error): { error: true, code: "INVALID_PARAMS" | "INTERNAL", message: "..." }
+
+        RELATED: distillery_store (single entry with semantic dedup),
+        distillery_search (to retrieve ingested documents)
+        """
+        c = _lc(ctx)
+        user = _get_authenticated_user()
+        args: dict[str, Any] = dict(
+            text=text,
+            author=author,
+            **_omit_none(
+                doctype=doctype,
+                source=source,
+                external_id=external_id,
+                title=title,
+                project=project,
+                tags=tags,
+                metadata=metadata,
+            ),
+        )
+        result = await _handle_ingest_doc(
+            store=c["store"], arguments=args, cfg=c["config"], created_by=user
+        )
+        rd = json.loads(result[0].text) if result else {}
+        ids = rd.get("entry_ids") or []
+        await _audit(
+            c, user, "distillery_ingest_doc", ids[0] if ids else "", "store", result
+        )
         return result
 
     @server.tool
