@@ -21,10 +21,11 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 from distillery.feeds.scorer import RelevanceScorer
+from distillery.feeds.tags import normalize_tag
 from distillery.feeds.truncation import truncate_content
 
 if TYPE_CHECKING:
-    from distillery.config import DistilleryConfig, FeedSourceConfig
+    from distillery.config import DistilleryConfig, FeedSourceConfig, TagsConfig
     from distillery.feeds.models import FeedItem
     from distillery.feeds.reader import JinaReaderClient
     from distillery.store.protocol import DistilleryStore
@@ -283,9 +284,14 @@ def build_keyword_map(vocabulary: dict[str, int]) -> dict[str, str]:
     For each tag in *vocabulary*:
 
     - Extracts the leaf segment (the last ``/``-separated part).
-    - Maps the leaf directly to the full tag path.
-    - Splits hyphenated leaves into individual words and maps each word longer
-      than 3 characters to the full tag path.
+    - Maps the **whole leaf phrase** (with hyphens treated as word boundaries)
+      to the full tag path.
+
+    Multi-word leaves are kept as a single phrase key — the individual words
+    are **not** mapped on their own.  This is a deliberate "strong signal"
+    requirement: a leaf like ``package-management`` must only match text that
+    contains the full phrase ``package management`` (in order, contiguous),
+    never a lone generic token like ``management`` (issue #628).
 
     When two tags produce the same keyword, the one with the higher occurrence
     count (or alphabetically first on tie) wins.
@@ -295,18 +301,18 @@ def build_keyword_map(vocabulary: dict[str, int]) -> dict[str, str]:
             by :meth:`~distillery.store.protocol.DistilleryStore.get_tag_vocabulary`.
 
     Returns:
-        A dict mapping lowercase keyword strings to full tag paths.
+        A dict mapping lowercase keyword/phrase strings (words separated by
+        single spaces) to full tag paths.
 
     Example::
 
-        vocab = {"domain/authentication": 5, "supply-chain-security": 2}
+        vocab = {"domain/authentication": 5, "tech/package-management": 2}
         kw_map = build_keyword_map(vocab)
-        # kw_map["authentication"]    == "domain/authentication"
-        # kw_map["supply"]            == "supply-chain-security"
-        # kw_map["chain"]             == "supply-chain-security"
-        # kw_map["security"]          == "supply-chain-security"
+        # kw_map["authentication"]      == "domain/authentication"
+        # kw_map["package management"]  == "tech/package-management"
+        # "management" is NOT a key on its own
     """
-    # keyword -> (full_tag_path, occurrence_count)
+    # keyword/phrase -> (full_tag_path, occurrence_count)
     best: dict[str, tuple[str, int]] = {}
 
     for tag, count in vocabulary.items():
@@ -314,21 +320,18 @@ def build_keyword_map(vocabulary: dict[str, int]) -> dict[str, str]:
         if tag.startswith("source/"):
             continue
         leaf = tag.rsplit("/", 1)[-1]
-        keywords: list[str] = [leaf]
-        # Split hyphenated leaf and keep words longer than 3 chars
-        for word in leaf.split("-"):
-            if len(word) > 3:
-                keywords.append(word)
-
-        for kw in keywords:
-            kw_lower = kw.lower()
-            if kw_lower not in best:
+        # Treat hyphens as word boundaries and normalise to a single-spaced
+        # phrase so matching can require the whole phrase (contiguous tokens).
+        kw_lower = " ".join(w for w in leaf.lower().split("-") if w)
+        if not kw_lower:
+            continue
+        if kw_lower not in best:
+            best[kw_lower] = (tag, count)
+        else:
+            existing_tag, existing_count = best[kw_lower]
+            # Higher count wins; alphabetical ordering breaks ties
+            if count > existing_count or (count == existing_count and tag < existing_tag):
                 best[kw_lower] = (tag, count)
-            else:
-                existing_tag, existing_count = best[kw_lower]
-                # Higher count wins; alphabetical ordering breaks ties
-                if count > existing_count or (count == existing_count and tag < existing_tag):
-                    best[kw_lower] = (tag, count)
 
     return {kw: tag for kw, (tag, _) in best.items()}
 
@@ -337,24 +340,45 @@ def match_topic_tags(text: str, keyword_map: dict[str, str]) -> list[str]:
     """Match feed item text against a keyword map to derive topic tags.
 
     Tokenises *text* into lowercase words (splitting on any non-alphanumeric
-    character) and looks each token up in *keyword_map*.  Duplicate tag paths
-    are collapsed so the returned list contains at most one entry per tag.
+    character) and looks each keyword/phrase up in *keyword_map*.  A
+    single-word keyword matches when that whole token is present; a multi-word
+    phrase matches only when its tokens appear contiguously, in order, as a
+    sub-sequence of the text tokens.  This whole-token / whole-phrase rule
+    avoids substring false-positives (e.g. a lone ``management`` token does
+    not fire ``tech/package-management``; see issue #628).  Duplicate tag
+    paths are collapsed so the returned list contains at most one entry per
+    tag.
 
     Args:
         text: The combined title + content text of a feed item.
-        keyword_map: A mapping of lowercase keyword → full tag path, as
+        keyword_map: A mapping of lowercase keyword/phrase → full tag path, as
             produced by :func:`build_keyword_map`.
 
     Returns:
         A deduplicated list of matched full tag paths; empty if nothing matched.
     """
+    if not keyword_map:
+        return []
+
+    tokens = [t for t in re.split(r"[^a-z0-9]+", text.lower()) if t]
+    if not tokens:
+        return []
+
+    token_set = set(tokens)
+    text_joined = " ".join(tokens)
+
     seen: set[str] = set()
     matched: list[str] = []
-    for token in re.split(r"[^a-z0-9]+", text.lower()):
-        if not token:
+    for keyword, full_tag in keyword_map.items():
+        if full_tag in seen:
             continue
-        full_tag = keyword_map.get(token)
-        if full_tag is not None and full_tag not in seen:
+        if " " in keyword:
+            # Multi-word phrase: require contiguous, in-order tokens.  Wrap in
+            # spaces so the match respects token boundaries (no partial-word hits).
+            if f" {keyword} " in f" {text_joined} ":
+                seen.add(full_tag)
+                matched.append(full_tag)
+        elif keyword in token_set:
             seen.add(full_tag)
             matched.append(full_tag)
 
@@ -365,6 +389,8 @@ def derive_all_tags(
     item: FeedItem,
     source_type: str,
     keyword_map: dict[str, str],
+    *,
+    tags_config: TagsConfig | None = None,
 ) -> list[str]:
     """Derive the complete tag list for a feed item.
 
@@ -376,6 +402,10 @@ def derive_all_tags(
         source_type: The adapter type string (e.g. ``'rss'``, ``'github'``).
         keyword_map: A mapping of lowercase keyword → full tag path as
             produced by :func:`build_keyword_map`.
+        tags_config: Optional :class:`~distillery.config.TagsConfig`.  When it
+            has ``enforce_namespaces=True``, reserved-prefix tags are
+            normalised on ingest so variant spellings collapse to one
+            canonical form (issue #628).
 
     Returns:
         A deduplicated list of validated tag paths; Tier-1 tags appear first.
@@ -385,13 +415,18 @@ def derive_all_tags(
     text = _item_text(item)
     topic_tags = match_topic_tags(text, keyword_map)
 
-    # Deduplicate preserving order (source tags first)
-    seen: set[str] = set(source_tags)
-    combined = list(source_tags)
-    for tag in topic_tags:
-        if tag not in seen:
-            seen.add(tag)
-            combined.append(tag)
+    # Deduplicate preserving order (source tags first), applying reserved-prefix
+    # normalisation when namespace enforcement is enabled so variant spellings
+    # collapse before dedup (issue #628).
+    normalize = bool(tags_config and tags_config.enforce_namespaces)
+    reserved = tags_config.reserved_prefixes if tags_config else []
+    seen: set[str] = set()
+    combined: list[str] = []
+    for tag in (*source_tags, *topic_tags):
+        canonical = normalize_tag(tag, reserved) if normalize else tag
+        if canonical not in seen:
+            seen.add(canonical)
+            combined.append(canonical)
 
     return combined
 
@@ -404,6 +439,7 @@ def _item_to_entry_kwargs(
     enriched_content: str | None = None,
     is_backfill: bool = False,
     is_alert: bool = False,
+    tags_config: TagsConfig | None = None,
 ) -> dict[str, Any]:
     """Convert a :class:`~distillery.feeds.models.FeedItem` to Entry constructor kwargs.
 
@@ -433,6 +469,9 @@ def _item_to_entry_kwargs(
             digest-eligible only.  See issue #472.  A downstream alert
             consumer (e.g. notification sink) is intentionally out of scope
             for this fix and is left to a follow-up.
+        tags_config: Optional :class:`~distillery.config.TagsConfig`.  When it
+            has ``enforce_namespaces=True``, reserved-prefix tags are
+            normalised so variant spellings collapse on ingest (issue #628).
 
     Returns:
         A dict of keyword arguments for :class:`~distillery.models.Entry`.
@@ -468,9 +507,18 @@ def _item_to_entry_kwargs(
         text = _item_text(item)
 
     if keyword_map is not None:
-        tags = derive_all_tags(item, item.source_type, keyword_map)
+        tags = derive_all_tags(item, item.source_type, keyword_map, tags_config=tags_config)
     else:
         tags = _derive_source_tags(item, item.source_type)
+        if tags_config and tags_config.enforce_namespaces:
+            seen: set[str] = set()
+            normalized: list[str] = []
+            for tag in tags:
+                canonical = normalize_tag(tag, tags_config.reserved_prefixes)
+                if canonical not in seen:
+                    seen.add(canonical)
+                    normalized.append(canonical)
+            tags = normalized
 
     # Use real author from source payload when available; fall back to tool name.
     # Treat None, empty, and whitespace-only authors as missing (#302).
@@ -554,6 +602,28 @@ class FeedPoller:
         # only logs once per poller instance instead of per item.
         self._alert_threshold_warning_emitted = False
         self._reader = reader
+        # Resolve the tags config once.  Reserved-prefix normalisation only
+        # activates when ``enforce_namespaces`` is a real ``True`` bool and
+        # ``reserved_prefixes`` is a real list — guards against MagicMock
+        # configs in unit tests (issue #628).
+        self._tags_config = self._resolve_tags_config(config)
+
+    @staticmethod
+    def _resolve_tags_config(config: DistilleryConfig) -> TagsConfig | None:
+        """Return ``config.tags`` only when it is usable for normalisation.
+
+        Reserved-prefix normalisation (issue #628) runs on the ingest hot path,
+        so a malformed ``tags`` section (or a ``MagicMock`` config in unit
+        tests) must never break stores.  Returns ``None`` unless
+        ``enforce_namespaces`` is a genuine ``True`` and ``reserved_prefixes``
+        is a genuine ``list`` — i.e. normalisation is both requested and safe.
+        """
+        tags = getattr(config, "tags", None)
+        enforce = getattr(tags, "enforce_namespaces", None)
+        prefixes = getattr(tags, "reserved_prefixes", None)
+        if enforce is True and isinstance(prefixes, list):
+            return tags
+        return None
 
     def _resolve_digest_threshold(self, source: FeedSourceConfig) -> float:
         """Return the effective digest threshold for *source*.
@@ -943,6 +1013,7 @@ class FeedPoller:
                     enriched_content=enriched,
                     is_backfill=is_backfill,
                     is_alert=is_alert,
+                    tags_config=self._tags_config,
                 )
                 entry = Entry(**kwargs)
                 await self._store.store(entry)
