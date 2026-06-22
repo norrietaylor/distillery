@@ -463,6 +463,152 @@ class TestStoreGaps:
         assert "error" not in data2
 
 
+class TestStoreBudgetErrorCategorization:
+    """Issue #557: distinct codes for budget vs transient-DB vs provider faults.
+
+    The budget check (``record_and_check``) touches the shared writer
+    connection, so transient DB faults and provider failures used to collapse
+    into one opaque ``INTERNAL: Failed to check embedding budget`` — even when
+    the budget was unlimited.  These tests pin the categorization.
+    """
+
+    async def test_distinct_codes_per_failure_mode(
+        self,
+        store: DuckDBStore,
+        config: DistilleryConfig,
+        budget_config: DistilleryConfig,
+    ) -> None:
+        """budget-exceeded vs DB-transient vs provider-unavailable map to 3 codes."""
+        import duckdb
+
+        from distillery.embedding.errors import EmbeddingProviderError
+        from distillery.mcp.budget import record_and_check
+
+        # 1) Genuine budget exhaustion -> BUDGET_EXCEEDED (unchanged behavior).
+        record_and_check(store.connection, budget_config.rate_limit.embedding_budget_daily)
+        budget_resp = await _handle_store(
+            store,
+            {"content": "over budget", "entry_type": "inbox", "author": "bob"},
+            cfg=budget_config,
+        )
+        budget_code = parse_mcp_response(budget_resp)["code"]
+
+        # 2) Transient DB fault (aborted/locked txn) -> STORE_TRANSIENT.
+        #    config has the default unlimited budget (embedding_budget_daily=0).
+        aborted = duckdb.TransactionException(
+            "TransactionContext Error: Current transaction is aborted (please ROLLBACK)"
+        )
+        with patch("distillery.mcp.budget.record_and_check", side_effect=aborted):
+            transient_resp = await _handle_store(
+                store,
+                {"content": "transient", "entry_type": "inbox", "author": "bob"},
+                cfg=config,
+            )
+        transient_code = parse_mcp_response(transient_resp)["code"]
+
+        # 3) Provider failure inside the counter path -> EMBEDDING_PROVIDER_UNAVAILABLE.
+        provider_exc = EmbeddingProviderError("timeout", provider="jina")
+        with patch("distillery.mcp.budget.record_and_check", side_effect=provider_exc):
+            provider_resp = await _handle_store(
+                store,
+                {"content": "provider down", "entry_type": "inbox", "author": "bob"},
+                cfg=config,
+            )
+        provider_code = parse_mcp_response(provider_resp)["code"]
+
+        assert budget_code == "BUDGET_EXCEEDED"
+        assert transient_code == "STORE_TRANSIENT"
+        assert provider_code == "EMBEDDING_PROVIDER_UNAVAILABLE"
+        assert len({budget_code, transient_code, provider_code}) == 3
+
+    async def test_poisoned_connection_returns_store_transient(
+        self, store: DuckDBStore, config: DistilleryConfig
+    ) -> None:
+        """A real aborted-transaction fault on the connection -> STORE_TRANSIENT.
+
+        Closing the connection makes ``record_and_check`` raise a genuine
+        ``duckdb.ConnectionException`` (a ``duckdb.OperationalError`` subclass,
+        the same family as an aborted/locked transaction).
+        """
+        import duckdb
+
+        from distillery.mcp.budget import record_and_check
+
+        store.connection.close()  # poison: connection-level transient fault
+        # Sanity-check the poison yields a genuine OperationalError (the family
+        # that includes aborted/locked transactions) before the handler runs.
+        with pytest.raises(duckdb.OperationalError):
+            record_and_check(store.connection, 0)
+
+        response = await _handle_store(
+            store,
+            {"content": "poisoned", "entry_type": "inbox", "author": "bob"},
+            cfg=config,
+        )
+        data = parse_mcp_response(response)
+        assert data["error"] is True
+        assert data["code"] == "STORE_TRANSIENT"
+        assert "budget" not in data["message"].lower()
+
+    async def test_provider_failure_returns_provider_unavailable(
+        self, store: DuckDBStore, config: DistilleryConfig
+    ) -> None:
+        """Provider HTTP/timeout surfacing in the counter path -> EMBEDDING_PROVIDER_UNAVAILABLE."""
+        from distillery.embedding.errors import EmbeddingProviderError
+
+        provider_exc = EmbeddingProviderError("read timeout", provider="openai")
+        with patch("distillery.mcp.budget.record_and_check", side_effect=provider_exc):
+            response = await _handle_store(
+                store,
+                {"content": "provider", "entry_type": "inbox", "author": "bob"},
+                cfg=config,
+            )
+        data = parse_mcp_response(response)
+        assert data["error"] is True
+        assert data["code"] == "EMBEDDING_PROVIDER_UNAVAILABLE"
+
+    async def test_opaque_string_gone_for_non_budget_failure(
+        self, store: DuckDBStore, config: DistilleryConfig
+    ) -> None:
+        """Non-budget failures never emit the misleading 'budget' string (unlimited budget)."""
+        from distillery.mcp.budget import record_and_check
+
+        # A genuine non-OperationalError fault: drop the counter table so the
+        # upsert hits a CatalogException -> INTERNAL fallback (not "budget").
+        store.connection.execute("DROP TABLE _meta")
+        with pytest.raises(Exception):  # noqa: B017,PT011 — proves the table is gone
+            record_and_check(store.connection, 0)
+
+        response = await _handle_store(
+            store,
+            {"content": "no meta", "entry_type": "inbox", "author": "bob"},
+            cfg=config,
+        )
+        data = parse_mcp_response(response)
+        assert data["error"] is True
+        assert data["code"] == "INTERNAL"
+        assert "Failed to check embedding budget" not in data["message"]
+
+    async def test_batch_path_categorizes_transient(
+        self, store: DuckDBStore, config: DistilleryConfig
+    ) -> None:
+        """The store_batch path uses the same categorization (STORE_TRANSIENT)."""
+        import duckdb
+
+        from distillery.mcp.tools.crud import _handle_store_batch
+
+        aborted = duckdb.TransactionException("Current transaction is aborted")
+        with patch("distillery.mcp.budget.record_and_check", side_effect=aborted):
+            response = await _handle_store_batch(
+                store,
+                {"entries": [{"content": "batch transient", "author": "bob"}]},
+                cfg=config,
+            )
+        data = parse_mcp_response(response)
+        assert data["error"] is True
+        assert data["code"] == "STORE_TRANSIENT"
+
+
 class TestGetGaps:
     """Cover feedback logging in _handle_get."""
 

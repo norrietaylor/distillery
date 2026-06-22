@@ -44,6 +44,13 @@ class ToolErrorCode(StrEnum):
             operation (e.g., ownership violation).
         BUDGET_EXCEEDED: A rate-limit or budget has been exhausted (e.g.,
             daily embedding budget, database size limit).
+        STORE_TRANSIENT: A transient storage fault (aborted/rolled-back
+            transaction, lock contention, IO error) that the caller should
+            retry with backoff. Distinct from ``INTERNAL`` so clients can
+            safely retry instead of treating it as a permanent failure.
+        EMBEDDING_PROVIDER_UNAVAILABLE: The embedding provider failed (HTTP
+            error, timeout) while recording the budget counter. Retryable
+            with backoff.
         RATE_LIMITED: The request was rejected due to rate limiting.
         UPSTREAM_RATE_LIMITED: An upstream dependency (e.g. embedding
             provider) rate-limited the request after internal retries were
@@ -61,6 +68,8 @@ class ToolErrorCode(StrEnum):
     INTERNAL = "INTERNAL"
     FORBIDDEN = "FORBIDDEN"
     BUDGET_EXCEEDED = "BUDGET_EXCEEDED"
+    STORE_TRANSIENT = "STORE_TRANSIENT"
+    EMBEDDING_PROVIDER_UNAVAILABLE = "EMBEDDING_PROVIDER_UNAVAILABLE"
     RATE_LIMITED = "RATE_LIMITED"
     UPSTREAM_RATE_LIMITED = "UPSTREAM_RATE_LIMITED"
     UPSTREAM_ERROR = "UPSTREAM_ERROR"

@@ -17,6 +17,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import duckdb
 from mcp import types
 
 from distillery.config import DistilleryConfig
@@ -47,6 +48,52 @@ def _normalize_db_path(raw: str) -> str:
     if _is_remote_db_path(raw):
         return raw
     return os.path.expanduser(raw)
+
+
+async def _budget_check_error_response(
+    exc: BaseException, store: Any, context: str
+) -> list[types.TextContent]:
+    """Categorize a non-budget failure from the embedding-budget check (issue #557).
+
+    ``record_and_check`` touches the shared writer connection, so any of three
+    distinct conditions can surface here.  Collapsing them all to one opaque
+    ``INTERNAL`` (with a misleading "budget" message) hid retryable faults from
+    clients.  Branch on the concrete exception type so clients can react:
+
+    * ``duckdb.OperationalError`` (aborted/rolled-back transaction, lock
+      contention, IO faults — all subclass it) -> ``STORE_TRANSIENT`` (retry
+      with backoff).
+    * :class:`~distillery.embedding.errors.EmbeddingProviderError` (provider
+      HTTP/timeout surfacing in the counter path) ->
+      ``EMBEDDING_PROVIDER_UNAVAILABLE`` (retry with backoff).
+    * anything else -> ``INTERNAL``.
+
+    ``EmbeddingBudgetError`` is handled by the caller before this is reached and
+    must not be passed here.  The connection is rolled back (best effort) for
+    every category so a poisoned write transaction doesn't break the next
+    request.
+    """
+    logger.exception("Embedding budget check failed (%s)", context)
+    rollback = getattr(store, "rollback", None)
+    if callable(rollback):
+        try:
+            await rollback()
+        except Exception:  # noqa: BLE001
+            logger.debug("post-budget rollback skipped", exc_info=True)
+
+    if isinstance(exc, duckdb.OperationalError):
+        return error_response(
+            "STORE_TRANSIENT",
+            "Storage temporarily unavailable (db transient: aborted/locked "
+            "transaction). Retry with backoff.",
+        )
+    if isinstance(exc, EmbeddingProviderError):
+        return error_response(
+            "EMBEDDING_PROVIDER_UNAVAILABLE",
+            "Embedding provider unavailable while recording usage. "
+            "Retry with backoff.",
+        )
+    return error_response("INTERNAL", f"Embedding budget check failed ({context}).")
 
 
 # ---------------------------------------------------------------------------
@@ -359,19 +406,12 @@ async def _handle_store(
             )
         except EmbeddingBudgetError as exc:
             return error_response("BUDGET_EXCEEDED", str(exc))
-        except Exception:  # noqa: BLE001
-            # Any non-budget failure here (e.g. TransactionContext aborted on a
-            # shared connection — see issue #363) would otherwise propagate as
-            # a raw DuckDB message.  Roll back the connection and return a
-            # sanitised INTERNAL response so clients see a stable contract.
-            logger.exception("Embedding budget check failed")
-            rollback = getattr(store, "rollback", None)
-            if callable(rollback):
-                try:
-                    await rollback()
-                except Exception:  # noqa: BLE001
-                    logger.debug("post-budget rollback skipped", exc_info=True)
-            return error_response("INTERNAL", "Failed to check embedding budget")
+        except Exception as exc:  # noqa: BLE001
+            # Non-budget failures (aborted txn on the shared connection — see
+            # issue #363, provider faults in the counter path) are categorized
+            # into distinct retryable codes rather than one opaque INTERNAL
+            # (issue #557).
+            return await _budget_check_error_response(exc, store, "store")
 
     # --- parse verification ---------------------------------------------------
     verification_val = VerificationStatus.UNVERIFIED
@@ -910,15 +950,8 @@ async def _handle_store_batch(
             )
         except EmbeddingBudgetError as exc:
             return error_response("BUDGET_EXCEEDED", str(exc))
-        except Exception:  # noqa: BLE001
-            logger.exception("Embedding budget check failed (store_batch)")
-            rollback = getattr(store, "rollback", None)
-            if callable(rollback):
-                try:
-                    await rollback()
-                except Exception:  # noqa: BLE001
-                    logger.debug("post-budget rollback skipped", exc_info=True)
-            return error_response("INTERNAL", "Failed to check embedding budget")
+        except Exception as exc:  # noqa: BLE001
+            return await _budget_check_error_response(exc, store, "store_batch")
 
     # --- persist ------------------------------------------------------------
     try:
@@ -1972,15 +2005,8 @@ async def _handle_correct(
             record_and_check(store.connection, cfg.rate_limit.embedding_budget_daily, count=1)
         except EmbeddingBudgetError as exc:
             return error_response("BUDGET_EXCEEDED", str(exc))
-        except Exception:  # noqa: BLE001
-            logger.exception("Embedding budget check failed (correct)")
-            rollback = getattr(store, "rollback", None)
-            if callable(rollback):
-                try:
-                    await rollback()
-                except Exception:  # noqa: BLE001
-                    logger.debug("post-budget rollback skipped", exc_info=True)
-            return error_response("INTERNAL", "Failed to check embedding budget")
+        except Exception as exc:  # noqa: BLE001
+            return await _budget_check_error_response(exc, store, "correct")
 
     # --- atomically persist entry, relation, and archive original -----------
     try:
