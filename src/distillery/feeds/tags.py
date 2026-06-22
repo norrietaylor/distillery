@@ -26,3 +26,43 @@ def sanitise_label(label: str) -> str | None:
     candidate = label.lower().replace(" ", "-").replace("_", "-")
     candidate = re.sub(r"-+", "-", candidate).strip("-")
     return candidate if _TAG_RE.fullmatch(candidate) else None
+
+
+def normalize_tag(tag: str, reserved_prefixes: list[str]) -> str:
+    """Collapse variant spellings of a reserved-prefix tag to a canonical form.
+
+    When namespace enforcement is enabled (``tags.enforce_namespaces``), tags
+    that share a reserved top-level prefix but differ only in how their
+    sub-segments are separated should resolve to a single canonical tag so the
+    same concept does not fragment across spellings (issue #628).  Examples
+    (with ``reserved_prefixes`` containing ``"source"`` / ``"entity"``)::
+
+        source/slack/links   -> source/slack-links
+        source/slack-links   -> source/slack-links   (already canonical)
+        source/slack-dms     -> source/slack-dms     (distinct concept, kept)
+        entity/cloudflare/workers -> entity/cloudflare-workers
+
+    The canonical form keeps the reserved top-level prefix verbatim and flattens
+    everything after it into a single hyphen-joined leaf, treating ``/`` and
+    ``-`` as equivalent separators.  Tags whose top-level segment is not a
+    reserved prefix, or that have no sub-segment, are returned unchanged.
+
+    Args:
+        tag: The full tag path (already lowercased / sanitised).
+        reserved_prefixes: Top-level prefixes eligible for normalisation, from
+            :class:`~distillery.config.TagsConfig.reserved_prefixes`.
+
+    Returns:
+        The canonical tag string (unchanged when no normalisation applies).
+    """
+    if "/" not in tag:
+        return tag
+    top, remainder = tag.split("/", 1)
+    if top not in reserved_prefixes or not remainder:
+        return tag
+    # Treat '/' and '-' after the prefix as equivalent separators; collapse the
+    # remainder into a single hyphen-joined leaf so variant spellings converge.
+    leaf = "-".join(seg for seg in re.split(r"[/-]+", remainder) if seg)
+    if not leaf:
+        return tag
+    return f"{top}/{leaf}"

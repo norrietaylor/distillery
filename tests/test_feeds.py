@@ -947,25 +947,25 @@ class TestBuildKeywordMap:
         kw_map = build_keyword_map({"domain/authentication": 5})
         assert kw_map.get("authentication") == "domain/authentication"
 
-    def test_hyphenated_leaf_splits_long_words(self) -> None:
-        """Hyphenated leaf segments produce individual words > 3 chars."""
+    def test_hyphenated_leaf_maps_whole_phrase(self) -> None:
+        """Hyphenated leaves map as a single spaced phrase, not individual words (#628)."""
         from distillery.feeds.poller import build_keyword_map
 
         kw_map = build_keyword_map({"security/supply-chain": 3})
-        # leaf = "supply-chain"; both "supply" and "chain" are > 3 chars
-        assert kw_map.get("supply") == "security/supply-chain"
-        assert kw_map.get("chain") == "security/supply-chain"
+        # leaf = "supply-chain" -> phrase key "supply chain"; the bare words
+        # "supply"/"chain" must NOT be standalone keys.
+        assert kw_map.get("supply chain") == "security/supply-chain"
+        assert "supply" not in kw_map
+        assert "chain" not in kw_map
 
-    def test_short_words_not_mapped(self) -> None:
-        """Words of 3 chars or fewer from hyphenated leaves are not mapped."""
+    def test_hyphenated_leaf_uses_space_separated_key(self) -> None:
+        """The whole hyphenated leaf maps via a single-spaced phrase key (#628)."""
         from distillery.feeds.poller import build_keyword_map
 
         kw_map = build_keyword_map({"ops/ci-cd": 1})
-        # leaf = "ci-cd"; "ci" (2 chars) and "cd" (2 chars) skipped
-        # The whole leaf "ci-cd" should still map
-        assert "ci" not in kw_map
-        assert "cd" not in kw_map
-        assert kw_map.get("ci-cd") == "ops/ci-cd"
+        # leaf = "ci-cd" -> phrase key "ci cd"; no hyphenated key.
+        assert "ci-cd" not in kw_map
+        assert kw_map.get("ci cd") == "ops/ci-cd"
 
     def test_higher_count_wins_on_collision(self) -> None:
         """When two tags produce the same keyword, the higher-count tag wins."""
@@ -1063,6 +1063,36 @@ class TestMatchTopicTags:
 
         result = match_topic_tags("authentication security python", {})
         assert result == []
+
+    def test_lone_generic_token_does_not_fire_phrase_tag(self) -> None:
+        """A lone 'management' token must NOT apply tech/package-management (#628)."""
+        from distillery.feeds.poller import build_keyword_map, match_topic_tags
+
+        kw_map = build_keyword_map({"tech/package-management": 3})
+        result = match_topic_tags("Effective management of remote teams", kw_map)
+        assert "tech/package-management" not in result
+
+    def test_full_phrase_fires_phrase_tag(self) -> None:
+        """The full 'package management' phrase DOES apply the tag (#628)."""
+        from distillery.feeds.poller import build_keyword_map, match_topic_tags
+
+        kw_map = build_keyword_map({"tech/package-management": 3})
+        # Both the spaced and hyphenated spellings tokenise to "package management".
+        assert "tech/package-management" in match_topic_tags(
+            "A guide to package management with uv", kw_map
+        )
+        assert "tech/package-management" in match_topic_tags(
+            "A guide to package-management with uv", kw_map
+        )
+
+    def test_phrase_requires_contiguous_in_order_tokens(self) -> None:
+        """Phrase tokens present but not contiguous/in-order do not match (#628)."""
+        from distillery.feeds.poller import build_keyword_map, match_topic_tags
+
+        kw_map = build_keyword_map({"tech/package-management": 3})
+        # "management" and "package" both present but reversed / non-adjacent.
+        result = match_topic_tags("management of every npm package", kw_map)
+        assert "tech/package-management" not in result
 
 
 # ---------------------------------------------------------------------------
@@ -1312,6 +1342,209 @@ class TestPollCycleTopicTagIntegration:
         assert "source/rss" in stored_tags
         # No topic tags since vocabulary fetch failed
         assert "domain/authentication" not in stored_tags
+
+
+# ---------------------------------------------------------------------------
+# Reserved-prefix namespace normalisation on ingest (issue #628)
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizeTag:
+    """Unit tests for normalize_tag() reserved-prefix canonicalisation (#628)."""
+
+    def test_slash_and_hyphen_variants_collapse(self) -> None:
+        from distillery.feeds.tags import normalize_tag
+
+        reserved = ["source"]
+        # Both spellings collapse to one canonical form.
+        assert normalize_tag("source/slack/links", reserved) == "source/slack-links"
+        assert normalize_tag("source/slack-links", reserved) == "source/slack-links"
+
+    def test_distinct_leaves_stay_distinct(self) -> None:
+        from distillery.feeds.tags import normalize_tag
+
+        reserved = ["source"]
+        assert normalize_tag("source/slack-dms", reserved) == "source/slack-dms"
+        assert normalize_tag("source/slack-links", reserved) != normalize_tag(
+            "source/slack-dms", reserved
+        )
+
+    def test_cloudflare_entity_variants_collapse(self) -> None:
+        from distillery.feeds.tags import normalize_tag
+
+        reserved = ["entity"]
+        assert normalize_tag("entity/cloudflare/workers", reserved) == "entity/cloudflare-workers"
+        assert normalize_tag("entity/cloudflare-workers", reserved) == "entity/cloudflare-workers"
+
+    def test_non_reserved_prefix_unchanged(self) -> None:
+        from distillery.feeds.tags import normalize_tag
+
+        reserved = ["source"]
+        assert normalize_tag("entity/cloudflare/workers", reserved) == "entity/cloudflare/workers"
+
+    def test_flat_tag_unchanged(self) -> None:
+        from distillery.feeds.tags import normalize_tag
+
+        assert normalize_tag("python", ["source"]) == "python"
+
+
+class TestEnforceNamespaceNormalizationOnIngest:
+    """derive_all_tags collapses variant spellings when enforce_namespaces=True (#628)."""
+
+    @staticmethod
+    def _make_item(content: str) -> FeedItem:
+        return FeedItem(
+            source_url="https://example.com/rss",
+            source_type="rss",
+            item_id="ns-1",
+            title="",
+            content=content,
+        )
+
+    def test_topic_tag_variants_collapse_under_enforcement(self) -> None:
+        from distillery.config import TagsConfig
+        from distillery.feeds.poller import build_keyword_map, derive_all_tags
+
+        # Vocabulary holds the slashed spelling; the keyword map yields the same
+        # slashed tag path, which normalisation flattens to one canonical form.
+        # ('source/' tags are excluded from the keyword map, so use 'entity/'.)
+        kw_map = build_keyword_map({"entity/cloudflare/workers": 5})
+        item = self._make_item("a post about cloudflare workers and more")
+        cfg = TagsConfig(enforce_namespaces=True, reserved_prefixes=["entity"])
+        tags = derive_all_tags(item, "rss", kw_map, tags_config=cfg)
+        assert "entity/cloudflare-workers" in tags
+        assert "entity/cloudflare/workers" not in tags
+
+    def test_no_normalization_when_disabled(self) -> None:
+        from distillery.config import TagsConfig
+        from distillery.feeds.poller import build_keyword_map, derive_all_tags
+
+        kw_map = build_keyword_map({"entity/cloudflare/workers": 5})
+        item = self._make_item("a post about cloudflare workers and more")
+        cfg = TagsConfig(enforce_namespaces=False, reserved_prefixes=["entity"])
+        tags = derive_all_tags(item, "rss", kw_map, tags_config=cfg)
+        # Off-by-default: the variant spelling is preserved verbatim.
+        assert "entity/cloudflare/workers" in tags
+
+    def test_item_to_entry_kwargs_normalizes_source_tags(self) -> None:
+        from distillery.config import TagsConfig
+        from distillery.feeds.poller import _item_to_entry_kwargs
+
+        # Source tags are already canonical; confirm enforcement path is safe
+        # and dedupes when keyword_map is None (source-only branch).
+        item = self._make_item("nothing topical here")
+        cfg = TagsConfig(enforce_namespaces=True, reserved_prefixes=["source"])
+        kwargs = _item_to_entry_kwargs(item, 0.5, None, tags_config=cfg)
+        assert "source/rss" in kwargs["tags"]
+
+
+# ---------------------------------------------------------------------------
+# relevance_score is computed and persisted per item (issue #628)
+# ---------------------------------------------------------------------------
+
+
+class TestRelevanceScorePersistedPerItem:
+    """The poll-ingest path stores the computed per-item score, not a 1.0 sentinel."""
+
+    @pytest.mark.asyncio
+    async def test_scored_batch_relevance_scores_vary(self) -> None:
+        """A scored batch yields varying relevance_score values (not all 1.0) (#628)."""
+        from distillery.config import (
+            ClassificationConfig,
+            DistilleryConfig,
+            EmbeddingConfig,
+            StorageConfig,
+        )
+        from distillery.feeds.poller import FeedPoller, _item_text
+        from distillery.models import Entry, EntrySource, EntryType
+        from distillery.store.duckdb import DuckDBStore
+        from tests.conftest import ControlledEmbeddingProvider
+
+        emb = ControlledEmbeddingProvider()
+        # One anchor entry the items will be scored against.
+        anchor_text = "Anchor: oauth authentication and session security"
+        emb.register(anchor_text, [1, 0, 0, 0, 0, 0, 0, 0])
+
+        store = DuckDBStore(db_path=":memory:", embedding_provider=emb)
+        await store.initialize()
+        await store.store(
+            Entry(
+                content=anchor_text,
+                entry_type=EntryType.REFERENCE,
+                source=EntrySource.MANUAL,
+                author="tester",
+            )
+        )
+
+        # Three feed items at deliberately different similarities to the anchor.
+        items = [
+            FeedItem(
+                source_url="https://example.com/rss",
+                source_type="rss",
+                item_id="hi",
+                title="High match",
+                content="hi-text",
+            ),
+            FeedItem(
+                source_url="https://example.com/rss",
+                source_type="rss",
+                item_id="mid",
+                title="Mid match",
+                content="mid-text",
+            ),
+            FeedItem(
+                source_url="https://example.com/rss",
+                source_type="rss",
+                item_id="lo",
+                title="Low match",
+                content="lo-text",
+            ),
+        ]
+        # Register embeddings for each item's combined title+content text.
+        emb.register(_item_text(items[0]), [0.95, 0.31, 0, 0, 0, 0, 0, 0])
+        emb.register(_item_text(items[1]), [0.6, 0.8, 0, 0, 0, 0, 0, 0])
+        emb.register(_item_text(items[2]), [0.1, 0.99, 0, 0, 0, 0, 0, 0])
+
+        config = DistilleryConfig(
+            storage=StorageConfig(database_path=":memory:"),
+            embedding=EmbeddingConfig(provider="", model="stub", dimensions=8),
+            classification=ClassificationConfig(confidence_threshold=0.6),
+        )
+        # Store everything regardless of score so the whole batch lands.
+        config.feeds.thresholds.digest = 0.0
+        config.feeds.thresholds.alert = 1.0
+
+        # Register the source in the store so poll() picks it up.
+        await store.add_feed_source(
+            url="https://example.com/rss",
+            source_type="rss",
+            poll_interval_minutes=60,
+            trust_weight=1.0,
+        )
+
+        with patch("distillery.feeds.poller._build_adapter") as mock_build_adapter:
+            mock_adapter = MagicMock()
+            mock_adapter.fetch.return_value = items
+            mock_build_adapter.return_value = mock_adapter
+
+            poller = FeedPoller(store=store, config=config)
+            summary = await poller.poll()
+
+        assert summary.total_stored == 3
+
+        # Pull the stored feed entries back and inspect their persisted scores.
+        feed_entries = await store.list_entries(
+            {"entry_type": "feed"}, limit=100, offset=0
+        )
+        scores = sorted(e.metadata["relevance_score"] for e in feed_entries)
+        assert len(scores) == 3
+        # The scores must vary — not all pinned at the 1.0 sentinel.
+        assert len(set(scores)) > 1
+        assert not all(s == 1.0 for s in scores)
+        # And they must be usable for ordering (strictly increasing once sorted).
+        assert scores[0] < scores[-1]
+
+        await store.close()
 
 
 # ---------------------------------------------------------------------------
