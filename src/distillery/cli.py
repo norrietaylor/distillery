@@ -205,6 +205,39 @@ def _build_parser() -> argparse.ArgumentParser:
         required=True,
         help="Path to write the exported JSON file",
     )
+    export_parser.add_argument(
+        "--type",
+        dest="entry_types",
+        metavar="ENTRY_TYPE",
+        action="append",
+        default=None,
+        help="Only export entries of this type (repeatable; ORed across values)",
+    )
+    export_parser.add_argument(
+        "--tag",
+        dest="tags",
+        metavar="TAG",
+        action="append",
+        default=None,
+        help="Only export entries carrying this tag (repeatable; ANDed across values)",
+    )
+    export_parser.add_argument(
+        "--source",
+        dest="sources",
+        metavar="ORIGIN|FEED_URL",
+        action="append",
+        default=None,
+        help=(
+            "Only export entries from this origin or feed URL, and limit feed "
+            "sources to matching URLs (repeatable; ORed across values)"
+        ),
+    )
+    export_parser.add_argument(
+        "--status",
+        choices=["active", "archived", "any"],
+        default="any",
+        help="Filter entries by status (default: any — current whole-store behaviour)",
+    )
 
     import_parser = subparsers.add_parser(
         "import",
@@ -963,12 +996,32 @@ def _cmd_gh_backfill(
 # ---------------------------------------------------------------------------
 
 
-def _cmd_export(config_path: str | None, fmt: str, output_path: str) -> int:
+def _cmd_export(
+    config_path: str | None,
+    fmt: str,
+    output_path: str,
+    entry_types: list[str] | None = None,
+    tags: list[str] | None = None,
+    sources: list[str] | None = None,
+    status: str = "any",
+) -> int:
     """Implement the ``export`` subcommand.
 
-    Queries all entries, feed sources, and _meta from the database and writes
-    a portable JSON snapshot to *output_path*.  Embeddings are omitted so the
+    Queries entries, feed sources, and _meta from the database and writes a
+    portable JSON snapshot to *output_path*.  Embeddings are omitted so the
     file can be safely imported on any instance.
+
+    Optional filters are ANDed together; when none are supplied the entire
+    store is exported (back-compatible behaviour):
+
+    - *entry_types*: keep entries whose ``entry_type`` is one of these values.
+    - *tags*: keep entries whose ``tags`` array contains *all* listed tags
+      (AND / intersection — mirrors the store ``list_entries`` semantics).
+    - *sources*: keep entries whose ``source`` column or
+      ``metadata.source_url`` matches one of these values, and limit the
+      exported feed sources to rows whose ``url`` matches one of them.
+    - *status*: ``"active"`` or ``"archived"`` restricts by status;
+      ``"any"`` (default) applies no status filter.
 
     Returns:
         Exit code (0 on success, 1 on error).
@@ -995,6 +1048,30 @@ def _cmd_export(config_path: str | None, fmt: str, output_path: str) -> int:
         if not resolved.exists():
             raise RuntimeError(f"Database file not found: {db_path}")
 
+        # Build the entry filter WHERE clause. Each group is ANDed; sources
+        # are ORed within their group so any matching origin/feed URL keeps
+        # the row.
+        entry_clauses: list[str] = []
+        entry_params: list[Any] = []
+        if entry_types:
+            placeholders = ", ".join("?" for _ in entry_types)
+            entry_clauses.append(f"entry_type IN ({placeholders})")
+            entry_params.extend(entry_types)
+        if tags:
+            for tag in tags:
+                entry_clauses.append("list_contains(tags, ?)")
+                entry_params.append(tag)
+        if sources:
+            ors: list[str] = []
+            for src in sources:
+                ors.append("(source = ? OR json_extract_string(metadata, '$.source_url') = ?)")
+                entry_params.extend([src, src])
+            entry_clauses.append("(" + " OR ".join(ors) + ")")
+        if status != "any":
+            entry_clauses.append("status = ?")
+            entry_params.append(status)
+        entry_where = f" WHERE {' AND '.join(entry_clauses)}" if entry_clauses else ""
+
         conn = _duckdb.connect(str(resolved), read_only=True)
         try:
             # Verify the entries table exists.
@@ -1008,7 +1085,8 @@ def _cmd_export(config_path: str | None, fmt: str, output_path: str) -> int:
             entry_rows = conn.execute(
                 "SELECT id, content, entry_type, source, status, tags, metadata, "
                 "version, project, author, created_at, updated_at, created_by, "
-                "last_modified_by, expires_at, session_id FROM entries"
+                "last_modified_by, expires_at, session_id FROM entries" + entry_where,
+                entry_params,
             ).fetchall()
             entry_cols = [
                 "id",
@@ -1050,8 +1128,15 @@ def _cmd_export(config_path: str | None, fmt: str, output_path: str) -> int:
                         entry[col] = val
                 entries.append(entry)
 
-            # Query feed_sources.
-            feed_rows = conn.execute("SELECT * FROM feed_sources").fetchall()
+            # Query feed_sources, limiting to selected URLs when --source given.
+            if sources:
+                feed_placeholders = ", ".join("?" for _ in sources)
+                feed_rows = conn.execute(
+                    f"SELECT * FROM feed_sources WHERE url IN ({feed_placeholders})",
+                    list(sources),
+                ).fetchall()
+            else:
+                feed_rows = conn.execute("SELECT * FROM feed_sources").fetchall()
             feed_cols = [desc[0] for desc in conn.description]
             feed_sources: list[dict[str, Any]] = []
             for row in feed_rows:
@@ -2137,6 +2222,10 @@ def main(argv: list[str] | None = None) -> None:
             config_path=config_path,
             fmt=fmt,
             output_path=args.output,
+            entry_types=args.entry_types,
+            tags=args.tags,
+            sources=args.sources,
+            status=args.status,
         )
     elif command == "import":
         exit_code = _cmd_import(
