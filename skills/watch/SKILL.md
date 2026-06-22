@@ -43,6 +43,7 @@ For `add`, parse:
 - **`--label LABEL`**: human-readable label (optional)
 - **`--interval N`**: poll interval in minutes (default: 60)
 - **`--trust N`**: trust weight in [0.0, 1.0] (default: 1.0)
+- **`--mode MODE`** (github only): content surface to poll. Valid: `releases` (default — one body-bearing entry per release with the changelog notes) or `events` (opt-in contentless events firehose). The default `releases` mode is the high-signal "what shipped" surface.
 
 If `add` is requested without a URL, ask the user before proceeding.
 
@@ -51,7 +52,7 @@ If `add` is requested without a URL, ask the user before proceeding.
 Call `distillery_watch` with the parsed arguments:
 
 - **list**: `distillery_watch(action="list")`
-- **add**: `distillery_watch(action="add", url=..., source_type=..., label=..., poll_interval_minutes=..., trust_weight=...)`
+- **add**: `distillery_watch(action="add", url=..., source_type=..., label=..., poll_interval_minutes=..., trust_weight=..., mode=...)` (`mode` is github-only; omit for `rss`)
 - **remove** (no purge): `distillery_watch(action="remove", url="<url>")`
 - **remove --purge** (requires explicit confirmation):
   1. Explain to the user that `--purge` will archive **all historic entries** previously ingested from `<url>`. This skill's allowlist only includes `mcp__*__distillery_watch`, so the exact count cannot be fetched here — describe the impact in-prompt instead of issuing a `distillery_list` call.

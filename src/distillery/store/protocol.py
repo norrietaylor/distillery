@@ -369,10 +369,11 @@ class DistilleryStore(Protocol):
         ``poll_interval_minutes``, ``trust_weight``, ``last_polled_at``
         (ISO 8601 string or ``None``), ``last_item_count`` (int),
         ``last_error`` (str or ``None``), ``next_poll_at``
-        (ISO 8601 string or ``None``), and per-source threshold
+        (ISO 8601 string or ``None``), per-source threshold
         overrides ``threshold_alert`` / ``threshold_digest`` (float in
         ``[0.0, 1.0]`` or ``None`` to fall back to the global
-        ``feeds.thresholds`` values).
+        ``feeds.thresholds`` values), and ``mode`` (adapter surface
+        selector; empty string means "adapter default").
 
         Returns:
             List of feed source dicts ordered by creation time.
@@ -388,6 +389,7 @@ class DistilleryStore(Protocol):
         trust_weight: float = 1.0,
         threshold_alert: float | None = None,
         threshold_digest: float | None = None,
+        mode: str = "",
     ) -> dict[str, Any]:
         """Persist a new feed source and return it as a dict.
 
@@ -403,6 +405,9 @@ class DistilleryStore(Protocol):
             threshold_digest: Optional per-source override of
                 ``feeds.thresholds.digest`` in ``[0.0, 1.0]``.  ``None``
                 falls back to the global value.
+            mode: Adapter-specific surface selector.  For ``github`` sources
+                ``"releases"`` (default) or ``"events"``.  Empty string means
+                "adapter default".
 
         Returns:
             Dict with the stored feed source fields.

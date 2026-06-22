@@ -23,7 +23,12 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from distillery.feeds.github import GitHubAdapter, _event_to_feed_item, _parse_github_url
+from distillery.feeds.github import (
+    GitHubAdapter,
+    _event_to_feed_item,
+    _parse_github_url,
+    _release_to_feed_item,
+)
 from distillery.feeds.models import FeedItem
 from distillery.feeds.rss import RSSAdapter, parse_feed_xml
 
@@ -273,7 +278,7 @@ class TestGitHubAdapter:
             mock_client.get.return_value = mock_response
             mock_client_cls.return_value = mock_client
 
-            adapter = GitHubAdapter("owner/repo")
+            adapter = GitHubAdapter("owner/repo", mode="events")
             items = adapter.fetch()
 
         assert len(items) == 1
@@ -356,7 +361,7 @@ class TestGitHubAdapter:
             mock_client.get.return_value = mock_response
             mock_client_cls.return_value = mock_client
 
-            adapter = GitHubAdapter("owner/repo")
+            adapter = GitHubAdapter("owner/repo", mode="events")
             items = adapter.fetch()
 
         # Only IssuesEvent should pass the default filter
@@ -386,7 +391,9 @@ class TestGitHubAdapter:
             mock_client_cls.return_value = mock_client
 
             # Pass empty frozenset to disable filtering
-            adapter = GitHubAdapter("owner/repo", include_event_types=frozenset())
+            adapter = GitHubAdapter(
+                "owner/repo", include_event_types=frozenset(), mode="events"
+            )
             items = adapter.fetch()
 
         # All events should pass when filter is empty
@@ -423,11 +430,154 @@ class TestGitHubAdapter:
             mock_client_cls.return_value = mock_client
 
             # Only allow WatchEvent
-            adapter = GitHubAdapter("owner/repo", include_event_types=frozenset({"WatchEvent"}))
+            adapter = GitHubAdapter(
+                "owner/repo", include_event_types=frozenset({"WatchEvent"}), mode="events"
+            )
             items = adapter.fetch()
 
         assert len(items) == 1
         assert items[0].item_id == "1"
+
+
+# ---------------------------------------------------------------------------
+# _release_to_feed_item + releases mode (#625)
+# ---------------------------------------------------------------------------
+
+
+def _mock_github_client(payload: object) -> object:
+    """Build a MagicMock httpx.Client whose GET returns *payload* as JSON."""
+    mock_response = MagicMock()
+    mock_response.json.return_value = payload
+    mock_response.raise_for_status.return_value = None
+    mock_client = MagicMock()
+    mock_client.__enter__ = MagicMock(return_value=mock_client)
+    mock_client.__exit__ = MagicMock(return_value=False)
+    mock_client.get.return_value = mock_response
+    return mock_client
+
+
+class TestReleaseToFeedItem:
+    _SOURCE_URL = "owner/repo"
+
+    def _make_release(self, **overrides: object) -> dict[str, object]:
+        release: dict[str, object] = {
+            "id": 99,
+            "tag_name": "v1.2.0",
+            "name": "Release 1.2.0",
+            "body": "## Changes\n- shipped a thing",
+            "prerelease": False,
+            "author": {"login": "releaser"},
+            "html_url": "https://github.com/owner/repo/releases/tag/v1.2.0",
+            "published_at": "2024-03-25T09:00:00Z",
+        }
+        release.update(overrides)
+        return release
+
+    def test_external_id_is_repo_at_tag(self) -> None:
+        item = _release_to_feed_item(self._make_release(), self._SOURCE_URL, "owner/repo")
+        assert item.item_id == "owner/repo@v1.2.0"
+
+    def test_content_is_release_body(self) -> None:
+        item = _release_to_feed_item(self._make_release(), self._SOURCE_URL, "owner/repo")
+        assert item.content == "## Changes\n- shipped a thing"
+
+    def test_title_uses_name(self) -> None:
+        item = _release_to_feed_item(self._make_release(), self._SOURCE_URL, "owner/repo")
+        assert item.title == "Release 1.2.0"
+
+    def test_extra_carries_tag_and_prerelease(self) -> None:
+        item = _release_to_feed_item(
+            self._make_release(prerelease=True), self._SOURCE_URL, "owner/repo"
+        )
+        assert item.extra["tag"] == "v1.2.0"
+        assert item.extra["prerelease"] is True
+        assert item.extra["mode"] == "releases"
+
+    def test_source_type_is_github(self) -> None:
+        item = _release_to_feed_item(self._make_release(), self._SOURCE_URL, "owner/repo")
+        assert item.source_type == "github"
+
+    def test_falls_back_to_id_when_no_tag(self) -> None:
+        item = _release_to_feed_item(
+            self._make_release(tag_name=None, name=None), self._SOURCE_URL, "owner/repo"
+        )
+        assert item.item_id == "owner/repo@99"
+
+    def test_empty_body_is_none(self) -> None:
+        item = _release_to_feed_item(self._make_release(body="  "), self._SOURCE_URL, "owner/repo")
+        assert item.content is None
+
+
+class TestGitHubAdapterReleasesMode:
+    def test_default_mode_is_releases(self) -> None:
+        adapter = GitHubAdapter("owner/repo")
+        assert adapter.mode == "releases"
+
+    def test_invalid_mode_raises(self) -> None:
+        with pytest.raises(ValueError, match="Unsupported GitHub feed mode"):
+            GitHubAdapter("owner/repo", mode="bogus")
+
+    def test_fetch_hits_releases_endpoint_by_default(self) -> None:
+        releases = [
+            {
+                "id": 1,
+                "tag_name": "v1.0.0",
+                "name": "First",
+                "body": "Initial release notes",
+                "prerelease": False,
+                "html_url": "https://github.com/owner/repo/releases/tag/v1.0.0",
+                "published_at": "2024-03-25T09:00:00Z",
+            }
+        ]
+        mock_client = _mock_github_client(releases)
+        with patch("distillery.feeds.github.httpx.Client", return_value=mock_client):
+            adapter = GitHubAdapter("owner/repo")
+            items = adapter.fetch()
+
+        # Must have polled the releases endpoint, not events.
+        called_url = mock_client.get.call_args.args[0]
+        assert called_url.endswith("/repos/owner/repo/releases")
+        # One body-bearing entry per release.
+        assert len(items) == 1
+        assert items[0].item_id == "owner/repo@v1.0.0"
+        assert items[0].content == "Initial release notes"
+
+    def test_default_does_not_emit_event_stubs(self) -> None:
+        # Feeding event-shaped payloads to releases mode must not produce the
+        # contentless "*Event by ... on ..." stubs the events firehose emits.
+        events = [
+            {
+                "id": "42",
+                "type": "PushEvent",
+                "actor": {"login": "bot"},
+                "repo": {"name": "owner/repo"},
+                "payload": {},
+            }
+        ]
+        mock_client = _mock_github_client(events)
+        with patch("distillery.feeds.github.httpx.Client", return_value=mock_client):
+            items = GitHubAdapter("owner/repo").fetch()
+        # No item should carry an event-style title.
+        assert all(not (it.title and "Event by" in it.title) for it in items)
+
+    def test_events_mode_is_opt_in(self) -> None:
+        events = [
+            {
+                "id": "42",
+                "type": "PushEvent",
+                "actor": {"login": "bob"},
+                "repo": {"name": "owner/repo"},
+                "payload": {"commits": [{"message": "fix"}]},
+                "created_at": "2024-03-25T09:00:00Z",
+            }
+        ]
+        mock_client = _mock_github_client(events)
+        with patch("distillery.feeds.github.httpx.Client", return_value=mock_client):
+            adapter = GitHubAdapter("owner/repo", mode="events")
+            items = adapter.fetch()
+        called_url = mock_client.get.call_args.args[0]
+        assert called_url.endswith("/repos/owner/repo/events")
+        assert items[0].item_id == "42"
 
 
 # ---------------------------------------------------------------------------

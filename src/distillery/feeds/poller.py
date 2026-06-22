@@ -195,7 +195,7 @@ def _build_adapter(source: FeedSourceConfig, *, user_agent: str | None = None) -
             logger.debug(
                 "_build_adapter: GitHub adapter using unauthenticated mode for %s", source.url
             )
-        return GitHubAdapter(url=source.url, token=token or None)
+        return GitHubAdapter(url=source.url, token=token or None, mode=source.mode or None)
     elif source.source_type == "rss":
         from distillery.feeds.rss import RSSAdapter
 
@@ -670,7 +670,14 @@ class FeedPoller:
         # that are not part of FeedSourceConfig — filter to the constructor
         # kwargs before instantiation.  Capture which sources have never been
         # polled so the first batch can be flagged as backfill (issue #444).
-        _cfg_fields = {"url", "source_type", "label", "poll_interval_minutes", "trust_weight"}
+        _cfg_fields = {
+            "url",
+            "source_type",
+            "label",
+            "poll_interval_minutes",
+            "trust_weight",
+            "mode",
+        }
         sources: list[FeedSourceConfig] = []
         for s in db_sources:
             kwargs = {k: v for k, v in s.items() if k in _cfg_fields}

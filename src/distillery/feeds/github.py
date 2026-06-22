@@ -1,11 +1,17 @@
-"""GitHub repository events adapter.
+"""GitHub repository feed adapter.
 
-Polls the GitHub REST API ``GET /repos/{owner}/{repo}/events`` endpoint and
-normalises each event to a :class:`~distillery.feeds.models.FeedItem`.
+Polls a content-bearing GitHub surface and normalises each item to a
+:class:`~distillery.feeds.models.FeedItem`.  Two modes are supported:
+
+- ``"releases"`` (default) — polls ``GET /repos/{owner}/{repo}/releases`` and
+  emits one item per release carrying the release-notes **body**, tag, name,
+  and prerelease flag.  This is the high-signal "what shipped" surface.
+- ``"events"`` (opt-in, back-compat) — polls the contentless public events
+  firehose ``GET /repos/{owner}/{repo}/events``.  Retained only for callers
+  that explicitly request it; it is no longer the default (#625).
 
 The adapter tracks ``last_polled_at`` so that callers can detect stale state
-and implement incremental polling (GitHub returns events in reverse-
-chronological order, newest first).
+and implement incremental polling (GitHub returns items newest-first).
 """
 
 from __future__ import annotations
@@ -46,6 +52,13 @@ _DEFAULT_INCLUDE_EVENT_TYPES: frozenset[str] = frozenset(
         "ReleaseEvent",
     }
 )
+
+# Default sync mode.  "releases" emits body-bearing release-notes entries;
+# the contentless "events" firehose is opt-in only (#625).
+DEFAULT_MODE = "releases"
+
+# Modes the adapter knows how to poll.
+VALID_MODES: frozenset[str] = frozenset({"releases", "events"})
 
 # Pattern that matches a bare "owner/repo" slug so callers may pass either
 # the full URL or the short slug form.
@@ -176,12 +189,84 @@ def _event_to_feed_item(event: dict[str, Any], source_url: str) -> FeedItem:
     )
 
 
-class GitHubAdapter:
-    """Feed adapter that polls GitHub repository events.
+def _release_to_feed_item(release: dict[str, Any], source_url: str, repo_slug: str) -> FeedItem:
+    """Convert a single GitHub releases API response object to a :class:`FeedItem`.
 
-    Uses the GitHub REST API ``GET /repos/{owner}/{repo}/events`` endpoint.
-    An optional personal access token (PAT) can be supplied to increase the
-    rate limit from 60 to 5000 requests/hour.
+    The emitted item carries the release-notes ``body`` (the real changelog
+    text, not an event title) so downstream embedding/search reflects what
+    actually shipped.  ``item_id`` is the stable ``owner/repo@tag`` external id
+    so re-polling the same release is deduped (#625).
+
+    Args:
+        release: Parsed JSON object from the GitHub releases endpoint.
+        source_url: The canonical feed URL (used as ``FeedItem.source_url``).
+        repo_slug: ``owner/repo`` slug used to build the external id.
+
+    Returns:
+        A normalised :class:`FeedItem`.
+    """
+    tag_raw = release.get("tag_name")
+    tag = tag_raw.strip() if isinstance(tag_raw, str) else ""
+    # Fall back to the numeric release id when no tag is present so the
+    # external id stays stable and unique.
+    release_ref = tag or str(release.get("id", ""))
+    external_id = f"{repo_slug}@{release_ref}"
+
+    name_raw = release.get("name")
+    name = name_raw.strip() if isinstance(name_raw, str) and name_raw.strip() else tag
+    # A release with no name and no tag still gets a usable title.
+    title = name or release_ref or repo_slug
+
+    body_raw = release.get("body")
+    body = body_raw.strip() if isinstance(body_raw, str) and body_raw.strip() else None
+
+    author_info: dict[str, Any] = release.get("author") or {}
+    author_login_raw = author_info.get("login")
+    author_login = author_login_raw.strip() if isinstance(author_login_raw, str) else ""
+
+    item_url_raw = release.get("html_url")
+    item_url = item_url_raw if isinstance(item_url_raw, str) and item_url_raw else None
+
+    prerelease = bool(release.get("prerelease", False))
+
+    published_at: datetime | None = None
+    for key in ("published_at", "created_at"):
+        ts_raw = release.get(key)
+        if isinstance(ts_raw, str):
+            try:
+                published_at = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
+                break
+            except ValueError:
+                continue
+
+    return FeedItem(
+        source_url=source_url,
+        source_type="github",
+        item_id=external_id,
+        title=title,
+        url=item_url,
+        content=body,
+        author=author_login or None,
+        published_at=published_at,
+        raw=release,
+        extra={
+            "mode": "releases",
+            "repo": repo_slug,
+            "tag": tag,
+            "prerelease": prerelease,
+        },
+    )
+
+
+class GitHubAdapter:
+    """Feed adapter that polls a content-bearing GitHub surface.
+
+    In the default ``"releases"`` mode the adapter uses the GitHub REST API
+    ``GET /repos/{owner}/{repo}/releases`` endpoint and emits one body-bearing
+    item per release.  The opt-in ``"events"`` mode polls the contentless
+    public events firehose ``GET /repos/{owner}/{repo}/events`` (back-compat
+    only — see #625).  An optional personal access token (PAT) can be supplied
+    to increase the rate limit from 60 to 5000 requests/hour.
 
     Parameters
     ----------
@@ -192,12 +277,16 @@ class GitHubAdapter:
         Optional GitHub personal access token.  When omitted the adapter
         checks the ``GITHUB_TOKEN`` environment variable.
     per_page:
-        Number of events to retrieve per API call (1-100).  Defaults to 30.
+        Number of items to retrieve per API call (1-100).  Defaults to 30.
+    mode:
+        Which surface to poll: ``"releases"`` (default) or ``"events"``.
+        An empty/``None`` value falls back to :data:`DEFAULT_MODE`.
 
     Raises
     ------
     ValueError
-        If *url* cannot be parsed as a valid GitHub repository reference.
+        If *url* cannot be parsed as a valid GitHub repository reference, or
+        if *mode* is not one of :data:`VALID_MODES`.
     """
 
     def __init__(
@@ -206,6 +295,7 @@ class GitHubAdapter:
         token: str | None = None,
         per_page: int = _DEFAULT_PER_PAGE,
         include_event_types: frozenset[str] | None = None,
+        mode: str | None = None,
     ) -> None:
         self._owner, self._repo = _parse_github_url(url)
         self._source_url = url
@@ -214,6 +304,13 @@ class GitHubAdapter:
         self._include_event_types = (
             include_event_types if include_event_types is not None else _DEFAULT_INCLUDE_EVENT_TYPES
         )
+        resolved_mode = (mode or DEFAULT_MODE).strip().lower()
+        if resolved_mode not in VALID_MODES:
+            raise ValueError(
+                f"Unsupported GitHub feed mode {mode!r}. "
+                f"Expected one of {sorted(VALID_MODES)}."
+            )
+        self._mode = resolved_mode
         self.last_polled_at: datetime | None = None
 
     # ------------------------------------------------------------------
@@ -235,21 +332,20 @@ class GitHubAdapter:
         """Repository name extracted from *url*."""
         return self._repo
 
-    def fetch(self) -> list[FeedItem]:
-        """Poll the GitHub events endpoint and return normalised items.
+    @property
+    def mode(self) -> str:
+        """The resolved poll mode (``"releases"`` or ``"events"``)."""
+        return self._mode
 
-        Updates :attr:`last_polled_at` on every successful call (even when
-        the response is an empty list).
+    def _get_json(self, api_url: str) -> Any:
+        """Issue a GET against *api_url* and return the parsed JSON body.
 
-        Returns:
-            A list of :class:`~distillery.feeds.models.FeedItem` objects,
-            ordered newest-first as returned by the GitHub API.
+        Updates :attr:`last_polled_at` on every successful call.
 
         Raises:
             httpx.HTTPStatusError: On non-2xx responses.
             httpx.RequestError: On network-level failures.
         """
-        api_url = f"{_GITHUB_API_BASE}/repos/{self._owner}/{self._repo}/events"
         params: dict[str, str | int] = {"per_page": self._per_page}
         headers: dict[str, str] = {
             "Accept": "application/vnd.github+json",
@@ -265,8 +361,56 @@ class GitHubAdapter:
             response.raise_for_status()
 
         self.last_polled_at = datetime.now(tz=UTC)
+        return response.json()
 
-        events: list[dict[str, Any]] = response.json()
+    def fetch(self) -> list[FeedItem]:
+        """Poll the configured GitHub surface and return normalised items.
+
+        Dispatches on :attr:`mode`: ``"releases"`` (default) emits one
+        body-bearing item per release; ``"events"`` polls the contentless
+        events firehose (back-compat only).
+
+        Updates :attr:`last_polled_at` on every successful call (even when
+        the response is an empty list).
+
+        Returns:
+            A list of :class:`~distillery.feeds.models.FeedItem` objects,
+            ordered newest-first as returned by the GitHub API.
+
+        Raises:
+            httpx.HTTPStatusError: On non-2xx responses.
+            httpx.RequestError: On network-level failures.
+        """
+        if self._mode == "events":
+            return self._fetch_events()
+        return self._fetch_releases()
+
+    def _fetch_releases(self) -> list[FeedItem]:
+        """Poll ``/repos/{owner}/{repo}/releases`` and normalise each release."""
+        api_url = f"{_GITHUB_API_BASE}/repos/{self._owner}/{self._repo}/releases"
+        repo_slug = f"{self._owner}/{self._repo}"
+        releases = self._get_json(api_url)
+        if not isinstance(releases, list):
+            logger.warning("GitHubAdapter: unexpected response type %s", type(releases).__name__)
+            return []
+
+        items: list[FeedItem] = []
+        for release in releases:
+            try:
+                if not isinstance(release, dict):
+                    continue
+                items.append(_release_to_feed_item(release, self._source_url, repo_slug))
+            except Exception:
+                logger.exception(
+                    "GitHubAdapter: failed to convert release %r",
+                    release.get("id") if isinstance(release, dict) else release,
+                )
+        return items
+
+    def _fetch_events(self) -> list[FeedItem]:
+        """Poll the contentless events firehose (opt-in back-compat mode)."""
+        api_url = f"{_GITHUB_API_BASE}/repos/{self._owner}/{self._repo}/events"
+        events = self._get_json(api_url)
         if not isinstance(events, list):
             logger.warning("GitHubAdapter: unexpected response type %s", type(events).__name__)
             return []

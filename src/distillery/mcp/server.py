@@ -242,6 +242,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                             trust_weight=src.trust_weight,
                             threshold_alert=src.thresholds.alert,
                             threshold_digest=src.thresholds.digest,
+                            mode=src.mode,
                         )
                 await store.set_metadata("feeds_seeded", "true")
             # Wire the sync-job tracker to the store and reconcile any
@@ -1230,6 +1231,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         purge: bool = False,
         probe: bool = True,
         force: bool = False,
+        mode: str | None = None,
     ) -> list[types.TextContent]:
         """Manage monitored feed sources for ambient intelligence.
 
@@ -1262,6 +1264,9 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
           - force (bool, optional, default=false): When adding, persist the source
             even if the reachability probe fails (useful for sites that block HEAD
             but work via the poller).
+          - mode (str, optional, github only): Which content-bearing surface to poll.
+            Valid: [releases, events]. Defaults to "releases" (one body-bearing
+            entry per release). "events" is the opt-in contentless firehose.
 
         RETURNS (success): { sources: list, count: int } (list) or
           { added: dict, sources: list, sync_job?: dict } (add) or
@@ -1288,6 +1293,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                     thresholds=thresholds,
                     sync_history=sync_history or None,
                     purge=purge or None,
+                    mode=mode,
                 ),
             ),
         )

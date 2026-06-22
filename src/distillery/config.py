@@ -222,6 +222,11 @@ class FeedSourceConfig:
             noisy aggregators (HN, Lobsters, Reddit) that ``trust_weight``
             cannot separate from vendor blogs because ``trust_weight`` only
             attenuates downward.
+        mode: Adapter-specific surface selector.  For ``github`` sources this
+            chooses which surface to poll: ``'releases'`` (default,
+            body-bearing release notes) or ``'events'`` (opt-in contentless
+            firehose).  Ignored by ``rss`` sources.  Empty string means
+            "adapter default".
     """
 
     url: str = ""
@@ -230,6 +235,7 @@ class FeedSourceConfig:
     poll_interval_minutes: int = 60
     trust_weight: float = 1.0
     thresholds: FeedSourceThresholdsConfig = field(default_factory=FeedSourceThresholdsConfig)
+    mode: str = ""
 
 
 @dataclass
@@ -815,6 +821,19 @@ def _parse_feed_source(raw: dict[str, Any], index: int) -> FeedSourceConfig:
 
     thresholds = _parse_feed_source_thresholds(raw.get("thresholds"), index)
 
+    mode = str(raw.get("mode", "")).strip().lower()
+    if mode:
+        if source_type != "github":
+            raise ValueError(
+                f"feeds.sources[{index}].mode is only supported for source_type='github', "
+                f"got: {source_type!r}"
+            )
+        valid_modes = {"releases", "events"}
+        if mode not in valid_modes:
+            raise ValueError(
+                f"feeds.sources[{index}].mode must be one of {sorted(valid_modes)}, got: {mode!r}"
+            )
+
     return FeedSourceConfig(
         url=url,
         source_type=source_type,
@@ -822,6 +841,7 @@ def _parse_feed_source(raw: dict[str, Any], index: int) -> FeedSourceConfig:
         poll_interval_minutes=poll_interval,
         trust_weight=trust_weight,
         thresholds=thresholds,
+        mode=mode,
     )
 
 

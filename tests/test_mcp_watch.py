@@ -48,6 +48,7 @@ class FakeSourceStore:
         trust_weight: float = 1.0,
         threshold_alert: float | None = None,
         threshold_digest: float | None = None,
+        mode: str = "",
     ) -> dict[str, Any]:
         if any(s["url"] == url for s in self._sources):
             raise ValueError(f"Feed source with URL {url!r} already exists.")
@@ -59,6 +60,7 @@ class FakeSourceStore:
             "trust_weight": trust_weight,
             "threshold_alert": threshold_alert,
             "threshold_digest": threshold_digest,
+            "mode": mode,
         }
         self._sources.append(entry)
         return entry
@@ -153,6 +155,75 @@ class TestInvalidUrlRejected:
                 "action": "add",
                 "url": "owner/repo",
                 "source_type": "rss",
+                "probe": False,
+            },
+        )
+        data = _parse(result)
+        assert data["error"] is True
+        assert data["code"] == "INVALID_PARAMS"
+
+
+# ---------------------------------------------------------------------------
+# github mode param (#625)
+# ---------------------------------------------------------------------------
+
+
+class TestGitHubModeParam:
+    async def test_mode_releases_persisted(self) -> None:
+        store = FakeSourceStore()
+        result = await _handle_watch(
+            store=store,
+            arguments={
+                "action": "add",
+                "url": "owner/repo",
+                "source_type": "github",
+                "mode": "releases",
+            },
+        )
+        data = _parse(result)
+        assert "error" not in data
+        assert data["added"]["mode"] == "releases"
+
+    async def test_mode_defaults_to_empty_when_omitted(self) -> None:
+        # Omitting mode persists '' so the adapter applies its own default
+        # (releases). The contentless events firehose is never the default.
+        store = FakeSourceStore()
+        result = await _handle_watch(
+            store=store,
+            arguments={
+                "action": "add",
+                "url": "owner/repo",
+                "source_type": "github",
+            },
+        )
+        data = _parse(result)
+        assert data["added"]["mode"] == ""
+
+    async def test_invalid_mode_rejected(self) -> None:
+        store = FakeSourceStore()
+        result = await _handle_watch(
+            store=store,
+            arguments={
+                "action": "add",
+                "url": "owner/repo",
+                "source_type": "github",
+                "mode": "bogus",
+            },
+        )
+        data = _parse(result)
+        assert data["error"] is True
+        assert data["code"] == "INVALID_PARAMS"
+        assert await store.list_feed_sources() == []
+
+    async def test_mode_rejected_for_rss(self) -> None:
+        store = FakeSourceStore()
+        result = await _handle_watch(
+            store=store,
+            arguments={
+                "action": "add",
+                "url": "https://example.com/feed",
+                "source_type": "rss",
+                "mode": "releases",
                 "probe": False,
             },
         )
