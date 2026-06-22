@@ -159,9 +159,12 @@ class TestApplyDefaultStatusFilter:
 @pytest.mark.unit
 class TestSearchDefaultExcludesArchived:
     async def test_default_search_excludes_archived(self, status_mixed_store) -> None:
+        # output_mode="full" so the entry payload carries ``status`` (the
+        # summary default introduced by #631 omits it). The archived-exclusion
+        # contract under test is independent of output_mode.
         result = await _handle_search(
             store=status_mixed_store,
-            arguments={"query": "entry content", "limit": 50},
+            arguments={"query": "entry content", "limit": 50, "output_mode": "full"},
         )
         data = parse_mcp_response(result)
         statuses = {r["entry"]["status"] for r in data["results"]}
@@ -170,7 +173,12 @@ class TestSearchDefaultExcludesArchived:
     async def test_search_status_any_includes_archived(self, status_mixed_store) -> None:
         result = await _handle_search(
             store=status_mixed_store,
-            arguments={"query": "entry content", "limit": 50, "status": "any"},
+            arguments={
+                "query": "entry content",
+                "limit": 50,
+                "status": "any",
+                "output_mode": "full",
+            },
         )
         data = parse_mcp_response(result)
         statuses = {r["entry"]["status"] for r in data["results"]}
@@ -183,6 +191,7 @@ class TestSearchDefaultExcludesArchived:
                 "query": "entry content",
                 "limit": 50,
                 "include_archived": True,
+                "output_mode": "full",
             },
         )
         data = parse_mcp_response(result)
@@ -196,6 +205,7 @@ class TestSearchDefaultExcludesArchived:
                 "query": "entry content",
                 "limit": 50,
                 "status": "archived",
+                "output_mode": "full",
             },
         )
         data = parse_mcp_response(result)

@@ -27,9 +27,16 @@ from distillery.mcp.tools._errors import upstream_error_response, validate_limit
 from distillery.mcp.tools.crud import (
     _apply_default_status_filter,
     _build_filters_from_arguments,
+    _entry_to_summary_dict,
 )
 
 logger = logging.getLogger(__name__)
+
+# Valid ``output_mode`` values for ``distillery_search`` (issue #631). Mirrors
+# the ``distillery_list`` precedent (#78) minus ``"review"`` (review is a
+# list-only concept). ``"summary"`` is the default to cut token cost on
+# agentic retrieval; ``"full"`` is the back-compat escape hatch.
+_VALID_SEARCH_OUTPUT_MODES = frozenset({"summary", "full", "ids"})
 
 # Maps ``distillery_find_similar(accept_action=...)`` values to the
 # ``entry_relations.relation_type`` written when the caller accepts a match
@@ -40,6 +47,42 @@ _ACCEPT_ACTION_TO_RELATION_TYPE: dict[str, str] = {
     "merge": "merge_source",
     "duplicate": "duplicate",
 }
+
+# ---------------------------------------------------------------------------
+# Output-mode shaping (issue #631)
+# ---------------------------------------------------------------------------
+
+
+def _shape_search_result(
+    entry: Any,
+    score: float,
+    output_mode: str,
+    *,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Shape a single search hit per ``output_mode`` (issue #631).
+
+    * ``full``: ``{"score", "entry": <full to_dict()>}`` — the pre-#631
+      behaviour, preserved exactly as the back-compat escape hatch.
+    * ``summary``: ``{"score", "entry": <_entry_to_summary_dict()>}`` — id /
+      title / ~200-char ``content_preview`` (no full content body). Reuses the
+      ``distillery_list`` summary helper so the shapes stay consistent.
+    * ``ids``: ``{"score", "id"}`` — id + score only.
+
+    ``extra`` carries graph-expansion annotations (``provenance``, ``depth``,
+    ``parent_id``) that are merged onto the result dict for every mode.
+    """
+    result: dict[str, Any]
+    if output_mode == "ids":
+        result = {"score": round(score, 6), "id": entry.id}
+    elif output_mode == "summary":
+        result = {"score": round(score, 6), "entry": _entry_to_summary_dict(entry)}
+    else:  # "full"
+        result = {"score": round(score, 6), "entry": entry.to_dict()}
+    if extra:
+        result.update(extra)
+    return result
+
 
 # ---------------------------------------------------------------------------
 # _handle_search
@@ -73,15 +116,19 @@ async def _handle_search(
         store: Initialised :class:`~distillery.store.duckdb.DuckDBStore`.
         arguments: Dictionary containing at minimum the key `query` (str). May include
             optional filter keys (e.g., `entry_type`, `author`, `project`, `tags`,
-            `status`, `date_from`, `date_to`), `limit` (int), and the additive
-            graph-expansion params `expand_graph` (bool) and `expand_hops` (int, 1 or 2).
+            `status`, `date_from`, `date_to`), `limit` (int), the additive
+            graph-expansion params `expand_graph` (bool) and `expand_hops` (int, 1 or 2),
+            and `output_mode` (str: "summary" | "full" | "ids", default "summary").
         cfg: Optional configuration used to enforce embedding budget.
 
     Returns:
-        MCP content list containing a single JSON object with `results` (list of objects
-        each with `score` and `entry`) and `count` (int) describing the number of results
-        returned.  When ``expand_graph=True`` results also include ``provenance`` and the
-        envelope includes a ``graph_expansion`` field.
+        MCP content list containing a single JSON object with `results` (list of objects)
+        and `count` (int).  Result shape follows ``output_mode`` (issue #631): "summary"
+        (default) returns `score` plus a compact `entry` (id/title/~200-char
+        content_preview, no full body); "full" returns `score` plus the full `entry`
+        (pre-#631 behaviour); "ids" returns `score` and `id` only.  When
+        ``expand_graph=True`` results also include ``provenance`` and the envelope
+        includes a ``graph_expansion`` field.
     """
     from distillery.mcp.budget import EmbeddingBudgetError, record_and_check
 
@@ -108,6 +155,18 @@ async def _handle_search(
     expand_hops: int = expand_hops_raw
     if expand_hops not in (1, 2):
         return error_response("INVALID_PARAMS", "expand_hops must be 1 or 2")
+
+    # --- output_mode (issue #631) ------------------------------------------
+    output_mode: str = arguments.get("output_mode", "summary")
+    err_output_mode = validate_type(arguments, "output_mode", str, "string")
+    if err_output_mode:
+        return error_response("INVALID_PARAMS", err_output_mode)
+    if output_mode not in _VALID_SEARCH_OUTPUT_MODES:
+        return error_response(
+            "INVALID_PARAMS",
+            f"Field 'output_mode' must be one of: "
+            f"{', '.join(sorted(_VALID_SEARCH_OUTPUT_MODES))}",
+        )
 
     # --- embedding budget check (1 embed call per search) -------------------
     if cfg is not None:
@@ -145,9 +204,7 @@ async def _handle_search(
         )
 
     if not expand_graph:
-        results = [
-            {"score": round(sr.score, 6), "entry": sr.entry.to_dict()} for sr in search_results
-        ]
+        results = [_shape_search_result(sr.entry, sr.score, output_mode) for sr in search_results]
 
         # Log the search event to search_log for later implicit-feedback correlation.
         search_logging = cfg is None or cfg.rate_limit.search_logging_enabled
@@ -176,7 +233,7 @@ async def _handle_search(
     allowed_statuses: set[str] | None = _allowed_statuses_from_filters(filters)
     try:
         merged_results, seed_count, expanded_count = await _expand_search_with_graph(
-            store, search_results, expand_hops, limit, allowed_statuses
+            store, search_results, expand_hops, limit, allowed_statuses, output_mode
         )
     except Exception:  # noqa: BLE001
         logger.exception("Error during graph expansion in distillery_search")
@@ -234,6 +291,7 @@ async def _expand_search_with_graph(
     expand_hops: int,
     limit: int,
     allowed_statuses: set[str] | None = None,
+    output_mode: str = "full",
 ) -> tuple[list[dict[str, Any]], int, int]:
     """BFS-expand the seed search results via ``store.get_related``.
 
@@ -248,6 +306,10 @@ async def _expand_search_with_graph(
     merge — preventing archived (or otherwise-filtered) entries from
     leaking into the result via graph expansion.  When ``None`` no
     status-based filtering is applied to expanded entries.
+
+    ``output_mode`` (issue #631) controls per-hit shaping ("summary" | "full"
+    | "ids") via :func:`_shape_search_result`; graph annotations
+    (``provenance``/``depth``/``parent_id``) are preserved in every mode.
     """
     seed_ids: set[str] = {sr.entry.id for sr in search_results}
     seed_score_by_id: dict[str, float] = {sr.entry.id: float(sr.score) for sr in search_results}
@@ -306,21 +368,25 @@ async def _expand_search_with_graph(
             # filtered) entries never leak in via BFS.
             continue
         expanded_results.append(
-            {
-                "score": round(info["_score"], 6),
-                "entry": entry.to_dict(),
-                "provenance": "graph",
-                "depth": info["_depth"],
-                "parent_id": info["_parent_id"],
-            }
+            _shape_search_result(
+                entry,
+                info["_score"],
+                output_mode,
+                extra={
+                    "provenance": "graph",
+                    "depth": info["_depth"],
+                    "parent_id": info["_parent_id"],
+                },
+            )
         )
 
     seed_dicts: list[dict[str, Any]] = [
-        {
-            "score": round(sr.score, 6),
-            "entry": sr.entry.to_dict(),
-            "provenance": "search",
-        }
+        _shape_search_result(
+            sr.entry,
+            sr.score,
+            output_mode,
+            extra={"provenance": "search"},
+        )
         for sr in search_results
     ]
 
