@@ -746,14 +746,20 @@ async def _handle_metrics(  # noqa: PLR0911, PLR0912
     # rate (e.g. a zero-orphan project reads as 0.833). Ego scope passes no
     # entry-side filters, so the count stays over all non-archived entries.
     total_filters: dict[str, Any] = {"status": _NON_ARCHIVED_STATUSES}
-    if project is not None:
-        total_filters["project"] = project
-    if tags:
-        total_filters["tags"] = tags
-    if date_from is not None:
-        total_filters["date_from"] = date_from
-    if date_to is not None:
-        total_filters["date_to"] = date_to
+    # Only global scope applies the entry-side filters to the graph (see the
+    # _collect_global_relations call above); ego scope ignores them and builds
+    # the subgraph around the root. Gate the denominator the same way so the
+    # population behind total_entries / orphan_rate / metric="orphans" matches
+    # the population behind the graph.
+    if scope == "global":
+        if project is not None:
+            total_filters["project"] = project
+        if tags:
+            total_filters["tags"] = tags
+        if date_from is not None:
+            total_filters["date_from"] = date_from
+        if date_to is not None:
+            total_filters["date_to"] = date_to
     try:
         total_entries = await store.count_entries(filters=total_filters)
     except Exception:  # noqa: BLE001

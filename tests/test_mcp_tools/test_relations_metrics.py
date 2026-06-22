@@ -390,6 +390,44 @@ async def test_metrics_orphan_rate_filtered_uses_scoped_denominator(store) -> No
     assert data["orphan_rate"] == 0.0
 
 
+async def test_metrics_ego_scope_ignores_entry_filters_for_denominator(store) -> None:  # type: ignore[no-untyped-def]
+    """Ego scope builds the subgraph around the root and ignores the entry-side
+    filters (project/tags/date_*); total_entries / orphan_rate must use the same
+    unfiltered, all-non-archived population so the rate stays consistent with the
+    graph (issue #635 review: filtered denominator over an unfiltered ego graph).
+    """
+    pytest.importorskip("networkx")
+
+    # Ego root + neighbour share a project; a third unrelated entry has none.
+    root = await _store_entry(store, content="root", project="proj-x")
+    neighbour = await _store_entry(store, content="neighbour", project="proj-x")
+    await store.add_relation(root, neighbour, "link")
+    await _store_entry(store, content="unrelated", project="proj-y")
+
+    data = _parse(
+        await _handle_relations(
+            store,
+            {
+                "action": "metrics",
+                "metric": "bridges",
+                "scope": "ego",
+                "entry_id": root,
+                # A filter that, if (incorrectly) applied to the denominator,
+                # would shrink total_entries to the 2 proj-x entries.
+                "project": "proj-x",
+            },
+        )
+    )
+    assert data.get("error") is not True
+    assert data["scope"] == "ego"
+    # Ego graph = root + its 1-hop neighbour (2 nodes), filters ignored.
+    assert data["graph_node_count"] == 2
+    # Denominator ignores the project filter too: all 3 non-archived entries.
+    assert data["total_entries"] == 3
+    # orphan_rate = (3 - 2) / 3, consistent with the unfiltered ego population.
+    assert data["orphan_rate"] == round(1 / 3, 6)
+
+
 async def test_metrics_orphans_returns_unlinked_ids(store) -> None:  # type: ignore[no-untyped-def]
     """metric='orphans' returns entry IDs present in the store but absent
     from the relations graph (issue #635)."""
