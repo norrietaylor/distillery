@@ -160,6 +160,38 @@ class ClassificationConfig:
 
 
 @dataclass
+class AutoLinkConfig:
+    """Semantic auto-link configuration for the write path (issue #629).
+
+    When :attr:`enabled` is ``True``, every newly stored entry (via
+    ``store`` / ``store_batch``, including feed poll-ingest) is linked to its
+    embedding-neighbours whose cosine similarity is at or above
+    :attr:`threshold`, persisting ``related`` edges in ``entry_relations``.
+    This is the automatic counterpart to ``distillery_find_similar(
+    accept_action="link")`` (issue #490 mechanism #2): it wires that primitive
+    into the write path so feed-heavy instances stop accumulating graph
+    orphans.  Idempotent via the unique ``(from_id, to_id, relation_type)``
+    index, and capped at :attr:`max_links` edges per entry to respect the
+    embedding/query budget.
+
+    Disabled by default — with :attr:`enabled` ``False`` the write path
+    behaves exactly as before (no semantic edges are created).
+
+    Attributes:
+        enabled: Whether to create semantic ``related`` edges on ingest.
+            Defaults to ``False``.
+        threshold: Normalised cosine similarity score in ``[0.0, 1.0]`` at or
+            above which a neighbour is linked.  Defaults to ``0.85``.
+        max_links: Maximum number of ``related`` edges to create per stored
+            entry (throttle).  Must be a positive integer.  Defaults to ``5``.
+    """
+
+    enabled: bool = False
+    threshold: float = 0.85
+    max_links: int = 5
+
+
+@dataclass
 class TagsConfig:
     """Tag namespace configuration.
 
@@ -461,6 +493,7 @@ class DistilleryConfig:
         team: Team-level metadata settings.
         defaults: Handler-level operational defaults.
         classification: Classification threshold settings.
+        auto_link: Semantic auto-link settings for the write path.
         tags: Tag namespace enforcement settings.
         feeds: Ambient feed monitoring settings.
         rate_limit: Rate limiting and resource budget settings.
@@ -472,6 +505,7 @@ class DistilleryConfig:
     team: TeamConfig = field(default_factory=TeamConfig)
     defaults: DefaultsConfig = field(default_factory=DefaultsConfig)
     classification: ClassificationConfig = field(default_factory=ClassificationConfig)
+    auto_link: AutoLinkConfig = field(default_factory=AutoLinkConfig)
     tags: TagsConfig = field(default_factory=TagsConfig)
     feeds: FeedsConfig = field(default_factory=FeedsConfig)
     rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
@@ -720,6 +754,42 @@ def _parse_classification(raw: dict[str, Any]) -> ClassificationConfig:
         stale_days=stale_days,
         conflict_threshold=conflict_threshold,
         mode=mode,
+    )
+
+
+def _parse_auto_link(raw: dict[str, Any]) -> AutoLinkConfig:
+    """Parse the ``auto_link`` section from a raw YAML mapping (issue #629).
+
+    Parameters:
+        raw: Mapping (typically from YAML) containing any of:
+            - ``enabled`` (bool, default ``False``)
+            - ``threshold`` (float, default ``0.85``)
+            - ``max_links`` (int or int-string, default ``5``)
+
+    Returns:
+        A populated :class:`AutoLinkConfig` instance.
+
+    Raises:
+        ValueError: If ``raw`` is not a mapping, ``enabled`` is not a boolean,
+            ``threshold`` is not a float, or ``max_links`` is not an integer.
+            Range checks are deferred to :func:`_validate`.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError(f"auto_link must be a YAML mapping, got: {type(raw).__name__}")
+
+    enabled_raw = raw.get("enabled", False)
+    if not isinstance(enabled_raw, bool):
+        raise ValueError(f"auto_link.enabled must be a boolean, got: {enabled_raw!r}")
+
+    threshold = _parse_float_field(raw, "threshold", 0.85, "auto_link.threshold")
+
+    max_links_raw = raw.get("max_links", 5)
+    max_links = _parse_strict_int(max_links_raw, "auto_link.max_links")
+
+    return AutoLinkConfig(
+        enabled=enabled_raw,
+        threshold=threshold,
+        max_links=max_links,
     )
 
 
@@ -1273,6 +1343,8 @@ def _validate(config: DistilleryConfig) -> None:
             - classification.feedback_window_minutes is not greater than 0.
             - classification.stale_days is not greater than 0.
             - classification.conflict_threshold is not between 0.0 and 1.0.
+            - auto_link.threshold is not between 0.0 and 1.0.
+            - auto_link.max_links is not greater than 0.
             - Any entry in tags.reserved_prefixes is not a valid tag segment.
             - feeds.thresholds.alert is not between 0.0 and 1.0.
             - feeds.thresholds.digest is not between 0.0 and 1.0.
@@ -1357,6 +1429,17 @@ def _validate(config: DistilleryConfig) -> None:
     if not (0.0 <= conflict <= 1.0):
         raise ValueError(
             f"classification.conflict_threshold must be between 0.0 and 1.0, got: {conflict}"
+        )
+
+    # Validate auto_link settings (issue #629).
+    auto_link_threshold = config.auto_link.threshold
+    if not (0.0 <= auto_link_threshold <= 1.0):
+        raise ValueError(
+            f"auto_link.threshold must be between 0.0 and 1.0, got: {auto_link_threshold}"
+        )
+    if config.auto_link.max_links <= 0:
+        raise ValueError(
+            f"auto_link.max_links must be a positive integer, got: {config.auto_link.max_links}"
         )
 
     # Validate reserved_prefixes: each must be a valid single tag segment.
@@ -1484,6 +1567,7 @@ def load_config(config_path: str | None = None) -> DistilleryConfig:
     team_raw = raw.get("team", {}) or {}
     defaults_raw = raw.get("defaults", {}) or {}
     classification_raw = raw.get("classification", {}) or {}
+    auto_link_raw = raw.get("auto_link", {}) or {}
     tags_raw = raw.get("tags", {}) or {}
     feeds_raw = raw.get("feeds", {}) or {}
     rate_limit_raw = raw.get("rate_limit", {}) or {}
@@ -1497,6 +1581,7 @@ def load_config(config_path: str | None = None) -> DistilleryConfig:
         team=_parse_team(team_raw),
         defaults=_parse_defaults(defaults_raw),
         classification=_parse_classification(classification_raw),
+        auto_link=_parse_auto_link(auto_link_raw),
         tags=_parse_tags(tags_raw),
         feeds=_parse_feeds(feeds_raw),
         rate_limit=_parse_rate_limit(rate_limit_raw),

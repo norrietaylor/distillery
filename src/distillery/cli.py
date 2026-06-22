@@ -653,6 +653,9 @@ def _cmd_poll(config_path: str | None, fmt: str, source_url: str | None) -> int:
             rrf_k=cfg.defaults.rrf_k,
             recency_window_days=cfg.defaults.recency_window_days,
             recency_min_weight=cfg.defaults.recency_min_weight,
+            auto_link_enabled=cfg.auto_link.enabled,
+            auto_link_threshold=cfg.auto_link.threshold,
+            auto_link_max_links=cfg.auto_link.max_links,
         )
         await store.initialize()
 
@@ -806,6 +809,9 @@ def _cmd_retag(
             rrf_k=cfg.defaults.rrf_k,
             recency_window_days=cfg.defaults.recency_window_days,
             recency_min_weight=cfg.defaults.recency_min_weight,
+            auto_link_enabled=cfg.auto_link.enabled,
+            auto_link_threshold=cfg.auto_link.threshold,
+            auto_link_max_links=cfg.auto_link.max_links,
         )
         await store.initialize()
 
@@ -928,6 +934,9 @@ def _cmd_gh_backfill(
             rrf_k=cfg.defaults.rrf_k,
             recency_window_days=cfg.defaults.recency_window_days,
             recency_min_weight=cfg.defaults.recency_min_weight,
+            auto_link_enabled=cfg.auto_link.enabled,
+            auto_link_threshold=cfg.auto_link.threshold,
+            auto_link_max_links=cfg.auto_link.max_links,
         )
         await store.initialize()
         try:
@@ -1196,6 +1205,9 @@ def _cmd_import(
             rrf_k=cfg.defaults.rrf_k,
             recency_window_days=cfg.defaults.recency_window_days,
             recency_min_weight=cfg.defaults.recency_min_weight,
+            auto_link_enabled=cfg.auto_link.enabled,
+            auto_link_threshold=cfg.auto_link.threshold,
+            auto_link_max_links=cfg.auto_link.max_links,
         )
         await store.initialize()
 
@@ -1894,6 +1906,9 @@ def _cmd_maintenance_classify(
             rrf_k=cfg.defaults.rrf_k,
             recency_window_days=cfg.defaults.recency_window_days,
             recency_min_weight=cfg.defaults.recency_min_weight,
+            auto_link_enabled=cfg.auto_link.enabled,
+            auto_link_threshold=cfg.auto_link.threshold,
+            auto_link_max_links=cfg.auto_link.max_links,
         )
         try:
             await store.initialize()

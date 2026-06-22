@@ -171,6 +171,9 @@ class DuckDBStore:
         rrf_k: int = 60,
         recency_window_days: int = 90,
         recency_min_weight: float = 0.5,
+        auto_link_enabled: bool = False,
+        auto_link_threshold: float = 0.85,
+        auto_link_max_links: int = 5,
     ) -> None:
         self._db_path = db_path
         self._embedding_provider = embedding_provider
@@ -203,6 +206,11 @@ class DuckDBStore:
         self._rrf_k: int = rrf_k
         self._recency_window_days: int = recency_window_days
         self._recency_min_weight: float = recency_min_weight
+        # Semantic auto-link on the write path (issue #629). OFF by default so
+        # the store behaves byte-for-byte as before unless a deployment opts in.
+        self._auto_link_enabled: bool = auto_link_enabled
+        self._auto_link_threshold: float = auto_link_threshold
+        self._auto_link_max_links: int = auto_link_max_links
         # Serializes access to the shared ``DuckDBPyConnection``.  DuckDB
         # connections are **not** thread-safe for concurrent use, but every
         # store operation funnels through ``asyncio.to_thread`` which runs
@@ -1391,6 +1399,88 @@ class DuckDBStore:
                 inserted += 1
         return inserted
 
+    def _auto_link_semantic(
+        self,
+        conn: duckdb.DuckDBPyConnection,
+        from_id: str,
+        embedding: list[float],
+    ) -> int:
+        """Link *from_id* to its embedding-neighbours above the auto-link threshold.
+
+        Mechanism #2 from issue #490 (``find_similar(accept_action="link")``)
+        wired into the write path (issue #629).  For the just-stored entry,
+        finds up to ``self._auto_link_max_links`` non-archived neighbours whose
+        normalised cosine similarity is at or above ``self._auto_link_threshold``
+        (excluding the entry itself and any target already linked to it in
+        either direction via any relation_type — matching the shipped
+        ``exclude_linked`` primitive) and inserts ``related`` rows into
+        ``entry_relations``.
+
+        Idempotent via the unique ``(from_id, to_id, relation_type)`` index, so
+        re-running ingest over an already-linked entry inserts nothing new.
+
+        No-op when ``self._auto_link_enabled`` is ``False`` — preserving the
+        prior write-path behaviour exactly.
+
+        Args:
+            conn: Active DuckDB connection (caller manages the transaction).
+            from_id: UUID of the source entry just stored.
+            embedding: The source entry's embedding vector.
+
+        Returns:
+            Number of ``related`` rows actually inserted.
+        """
+        if not self._auto_link_enabled:
+            return 0
+
+        dims = self._embedding_provider.dimensions
+        # Convert normalised [0, 1] threshold to raw [-1, 1] for SQL comparison,
+        # mirroring find_similar(). Exclude self, archived entries, and any
+        # target already linked to ``from_id`` in either direction via any
+        # relation_type — matching the shipped exclude_linked primitive
+        # (mcp/tools/search.py, which calls get_related(direction="both") with
+        # no relation_type filter; PR #495 / issue #490 mechanism #2). Cap the
+        # candidate set at the throttle so we never scan more rows than budget.
+        raw_threshold = self._auto_link_threshold * 2.0 - 1.0
+        candidate_sql = (
+            f"SELECT id FROM entries "
+            f"WHERE id != ? "
+            f"AND status != ? "
+            f"AND array_cosine_similarity(embedding, ?::FLOAT[{dims}]) >= ? "
+            f"AND id NOT IN ("
+            f"  SELECT to_id FROM entry_relations WHERE from_id = ? "
+            f"  UNION "
+            f"  SELECT from_id FROM entry_relations WHERE to_id = ?"
+            f") "
+            f"ORDER BY array_cosine_similarity(embedding, ?::FLOAT[{dims}]) DESC "
+            f"LIMIT ?"
+        )
+        candidate_params: list[Any] = [
+            from_id,
+            EntryStatus.ARCHIVED.value,
+            embedding,
+            raw_threshold,
+            from_id,
+            from_id,
+            embedding,
+            self._auto_link_max_links,
+        ]
+        rows = conn.execute(candidate_sql, candidate_params).fetchall()
+
+        inserted = 0
+        for row in rows:
+            to_id = row[0]
+            relation_id = str(uuid.uuid4())
+            result = conn.execute(
+                "INSERT OR IGNORE INTO entry_relations "
+                "(id, from_id, to_id, relation_type) "
+                "VALUES (?, ?, ?, 'related') RETURNING id",
+                [relation_id, from_id, to_id],
+            ).fetchone()
+            if result is not None:
+                inserted += 1
+        return inserted
+
     def _sync_store(self, entry: Entry, embedding: list[float]) -> str:
         """Synchronous implementation of store(); called via asyncio.to_thread.
 
@@ -1436,6 +1526,10 @@ class DuckDBStore:
         # error surface to the caller (mirrors transactional intent — caller's
         # outer retry/abort logic decides how to handle).
         self._fan_out_related_entries(conn, entry.id, entry.metadata)
+        # Semantic auto-link on ingest (issue #629): when enabled, link the new
+        # entry to its embedding-neighbours above threshold so feed-heavy
+        # instances stop accumulating graph orphans. No-op when disabled.
+        self._auto_link_semantic(conn, entry.id, embedding)
         # Rebuild FTS index so new content is searchable via BM25.
         self._rebuild_fts_index(conn)
         # Flush WAL so the new row survives ungraceful termination.
@@ -1522,6 +1616,15 @@ class DuckDBStore:
             # transactional view.
             for entry in entries:
                 self._fan_out_related_entries(conn, entry.id, entry.metadata)
+            # Semantic auto-link on ingest (issue #629): when enabled, link each
+            # batched entry to its embedding-neighbours above threshold inside
+            # the same transaction as the inserts so a partial run rolls back
+            # together. No-op when disabled. Entries earlier in this batch are
+            # visible via the in-flight transactional view, so a batch can form
+            # internal edges. Run after the inserts so the candidate pool sees
+            # every row in the batch.
+            for entry, embedding in zip(entries, embeddings, strict=True):
+                self._auto_link_semantic(conn, entry.id, embedding)
             conn.commit()
         except Exception:
             conn.rollback()

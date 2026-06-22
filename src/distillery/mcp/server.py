@@ -180,6 +180,9 @@ def _build_background_store_factory(
             embedding_provider=ep,
             s3_region=config.storage.s3_region,
             s3_endpoint=config.storage.s3_endpoint,
+            auto_link_enabled=config.auto_link.enabled,
+            auto_link_threshold=config.auto_link.threshold,
+            auto_link_max_links=config.auto_link.max_links,
         )
         await store.initialize()
         return store
@@ -229,6 +232,9 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 embedding_provider=ep,
                 s3_region=config.storage.s3_region,
                 s3_endpoint=config.storage.s3_endpoint,
+                auto_link_enabled=config.auto_link.enabled,
+                auto_link_threshold=config.auto_link.threshold,
+                auto_link_max_links=config.auto_link.max_links,
             )
             await store.initialize()
             if await store.get_metadata("feeds_seeded") != "true":
