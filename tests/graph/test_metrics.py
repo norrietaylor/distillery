@@ -16,6 +16,7 @@ from distillery.graph.metrics import (  # noqa: E402
     communities,
     constraint,
     link_prediction,
+    orphan_rate,
 )
 
 pytestmark = pytest.mark.unit
@@ -121,3 +122,23 @@ def test_link_prediction_global_surfaces_shared_pair() -> None:
 def test_link_prediction_unknown_source_returns_empty() -> None:
     g = build_relations_graph(_shared_neighbors(), directed=True)
     assert link_prediction(g, source="ZZZ", k=5) == []
+
+
+def test_orphan_rate_partial() -> None:
+    """8 entries with 2 in the graph -> orphan_rate 0.75 (issue #635)."""
+    assert orphan_rate(graph_node_count=2, total_entries=8) == 0.75
+
+
+def test_orphan_rate_all_linked() -> None:
+    assert orphan_rate(graph_node_count=4, total_entries=4) == 0.0
+
+
+def test_orphan_rate_zero_total_is_guarded() -> None:
+    """total_entries == 0 -> orphan_rate 0.0 (no division by zero)."""
+    assert orphan_rate(graph_node_count=0, total_entries=0) == 0.0
+
+
+def test_orphan_rate_clamps_when_nodes_exceed_total() -> None:
+    """graph_node_count > total_entries (archived-but-linked nodes) clamps to
+    0.0 instead of going negative (issue #635 review)."""
+    assert orphan_rate(graph_node_count=2, total_entries=1) == 0.0

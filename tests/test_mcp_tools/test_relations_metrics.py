@@ -292,6 +292,187 @@ async def test_metrics_cache_hit_flips_on_second_call(store) -> None:  # type: i
 
 
 # ---------------------------------------------------------------------------
+# Graph-health: total_entries / graph_node_count / orphan_rate (issue #635).
+# ---------------------------------------------------------------------------
+
+
+async def test_metrics_includes_graph_health_fields(store) -> None:  # type: ignore[no-untyped-def]
+    """Metrics response carries total_entries, graph_node_count, edge_count,
+    orphan_rate (issue #635)."""
+    pytest.importorskip("networkx")
+
+    await _seed_star_relations(store)  # 4 entries, all linked
+
+    data = _parse(
+        await _handle_relations(
+            store, {"action": "metrics", "metric": "bridges", "scope": "global"}
+        )
+    )
+    assert data.get("error") is not True
+    assert data["total_entries"] == 4
+    assert data["graph_node_count"] == 4
+    assert data["edge_count"] == 3
+    # All 4 entries are linked -> no orphans.
+    assert data["orphan_rate"] == 0.0
+
+
+async def test_metrics_orphan_rate_high_when_few_linked(store) -> None:  # type: ignore[no-untyped-def]
+    """8 entries, only 2 linked -> orphan_rate 0.75 (issue #635 acceptance)."""
+    pytest.importorskip("networkx")
+
+    ids = [await _store_entry(store, content=f"entry {i}") for i in range(8)]
+    # Link only the first two; the remaining six are orphans.
+    await store.add_relation(ids[0], ids[1], "link")
+
+    data = _parse(
+        await _handle_relations(
+            store, {"action": "metrics", "metric": "bridges", "scope": "global"}
+        )
+    )
+    assert data.get("error") is not True
+    assert data["total_entries"] == 8
+    assert data["graph_node_count"] == 2
+    assert data["orphan_rate"] == 0.75
+
+
+async def test_metrics_orphan_rate_never_negative_with_archived_linked(store) -> None:  # type: ignore[no-untyped-def]
+    """An archived-but-still-linked entry is a graph node but not counted in
+    total_entries; orphan_rate must clamp to >= 0.0 rather than go negative
+    (issue #635 review: reproduced orphan_rate=-1.0)."""
+    pytest.importorskip("networkx")
+
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+    await store.add_relation(a, b, "link")
+    # Archive one endpoint: it stays in the graph (the relation still exists)
+    # but drops out of total_entries -> graph_node_count (2) > total_entries (1).
+    await store.update(a, {"status": "archived"})
+
+    data = _parse(
+        await _handle_relations(
+            store, {"action": "metrics", "metric": "bridges", "scope": "global"}
+        )
+    )
+    assert data.get("error") is not True
+    assert data["total_entries"] == 1
+    assert data["graph_node_count"] == 2
+    assert data["orphan_rate"] >= 0.0
+    assert data["orphan_rate"] == 0.0
+
+
+async def test_metrics_orphan_rate_filtered_uses_scoped_denominator(store) -> None:  # type: ignore[no-untyped-def]
+    """With a project filter, total_entries must be scoped to that project too,
+    so a fully-linked project reads orphan_rate 0.0 — not inflated by unrelated
+    entries (issue #635 review: reproduced 0.833 for a zero-orphan project)."""
+    pytest.importorskip("networkx")
+
+    p1 = await _store_entry(store, content="P1", project="proj-x")
+    p2 = await _store_entry(store, content="P2", project="proj-x")
+    await store.add_relation(p1, p2, "link")
+    # Ten unrelated entries with no project — must NOT inflate proj-x's rate.
+    for i in range(10):
+        await _store_entry(store, content=f"other {i}")
+
+    data = _parse(
+        await _handle_relations(
+            store,
+            {
+                "action": "metrics",
+                "metric": "bridges",
+                "scope": "global",
+                "project": "proj-x",
+            },
+        )
+    )
+    assert data.get("error") is not True
+    assert data["total_entries"] == 2
+    assert data["graph_node_count"] == 2
+    assert data["orphan_rate"] == 0.0
+
+
+async def test_metrics_ego_scope_ignores_entry_filters_for_denominator(store) -> None:  # type: ignore[no-untyped-def]
+    """Ego scope builds the subgraph around the root and ignores the entry-side
+    filters (project/tags/date_*); total_entries / orphan_rate must use the same
+    unfiltered, all-non-archived population so the rate stays consistent with the
+    graph (issue #635 review: filtered denominator over an unfiltered ego graph).
+    """
+    pytest.importorskip("networkx")
+
+    # Ego root + neighbour share a project; a third unrelated entry has none.
+    root = await _store_entry(store, content="root", project="proj-x")
+    neighbour = await _store_entry(store, content="neighbour", project="proj-x")
+    await store.add_relation(root, neighbour, "link")
+    await _store_entry(store, content="unrelated", project="proj-y")
+
+    data = _parse(
+        await _handle_relations(
+            store,
+            {
+                "action": "metrics",
+                "metric": "bridges",
+                "scope": "ego",
+                "entry_id": root,
+                # A filter that, if (incorrectly) applied to the denominator,
+                # would shrink total_entries to the 2 proj-x entries.
+                "project": "proj-x",
+            },
+        )
+    )
+    assert data.get("error") is not True
+    assert data["scope"] == "ego"
+    # Ego graph = root + its 1-hop neighbour (2 nodes), filters ignored.
+    assert data["graph_node_count"] == 2
+    # Denominator ignores the project filter too: all 3 non-archived entries.
+    assert data["total_entries"] == 3
+    # orphan_rate = (3 - 2) / 3, consistent with the unfiltered ego population.
+    assert data["orphan_rate"] == round(1 / 3, 6)
+
+
+async def test_metrics_orphans_returns_unlinked_ids(store) -> None:  # type: ignore[no-untyped-def]
+    """metric='orphans' returns entry IDs present in the store but absent
+    from the relations graph (issue #635)."""
+    pytest.importorskip("networkx")
+
+    ids = [await _store_entry(store, content=f"entry {i}") for i in range(5)]
+    # Link the first two; ids[2], ids[3], ids[4] are orphans.
+    await store.add_relation(ids[0], ids[1], "link")
+
+    data = _parse(
+        await _handle_relations(
+            store, {"action": "metrics", "metric": "orphans", "scope": "global"}
+        )
+    )
+    assert data.get("error") is not True
+    assert data["metric"] == "orphans"
+    returned = {row["id"] for row in data["results"]}
+    assert returned == {ids[2], ids[3], ids[4]}
+    # Graph-health fields are present alongside the orphan sample.
+    assert data["total_entries"] == 5
+    assert data["graph_node_count"] == 2
+    assert data["orphan_rate"] == 0.6
+
+
+async def test_metrics_orphans_sample_is_capped(store, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """metric='orphans' returns at most the sample cap of unlinked IDs."""
+    pytest.importorskip("networkx")
+
+    monkeypatch.setattr(
+        "distillery.mcp.tools.relations._ORPHANS_SAMPLE_CAP",
+        3,
+    )
+    for i in range(10):
+        await _store_entry(store, content=f"orphan {i}")
+
+    data = _parse(
+        await _handle_relations(
+            store, {"action": "metrics", "metric": "orphans", "scope": "global"}
+        )
+    )
+    assert data.get("error") is not True
+    assert len(data["results"]) == 3
+
+
+# ---------------------------------------------------------------------------
 # NetworkX missing — runs even without the [graph] extra installed.
 # ---------------------------------------------------------------------------
 
