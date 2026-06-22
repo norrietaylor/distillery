@@ -687,10 +687,11 @@ class TestCreateServer:
         tools = await server.list_tools()
         tool_names = {t.name for t in tools}
 
-        # 16-tool consolidated API (15 prior + distillery_status from #313)
+        # 17-tool consolidated API (16 prior + distillery_ingest_doc from #627)
         expected = {
             "distillery_store",
             "distillery_store_batch",
+            "distillery_ingest_doc",
             "distillery_get",
             "distillery_update",
             "distillery_correct",
@@ -771,13 +772,13 @@ class TestRemovedTools:
             )
 
     async def test_removed_tools_count_unchanged(self) -> None:
-        """Exactly 16 tools must be registered — consolidated analytics tools + status."""
+        """Exactly 17 tools must be registered — 16 prior + distillery_ingest_doc (#627)."""
         config = DistilleryConfig(
             storage=StorageConfig(database_path=":memory:"),
             embedding=EmbeddingConfig(provider="", model="stub", dimensions=4),
         )
         server = create_server(config)
         tools = await server.list_tools()
-        assert len(tools) == 16, (
-            f"Expected 16 registered tools, got {len(tools)}: {sorted(t.name for t in tools)}"
+        assert len(tools) == 17, (
+            f"Expected 17 registered tools, got {len(tools)}: {sorted(t.name for t in tools)}"
         )
