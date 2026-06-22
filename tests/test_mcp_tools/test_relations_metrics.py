@@ -335,6 +335,61 @@ async def test_metrics_orphan_rate_high_when_few_linked(store) -> None:  # type:
     assert data["orphan_rate"] == 0.75
 
 
+async def test_metrics_orphan_rate_never_negative_with_archived_linked(store) -> None:  # type: ignore[no-untyped-def]
+    """An archived-but-still-linked entry is a graph node but not counted in
+    total_entries; orphan_rate must clamp to >= 0.0 rather than go negative
+    (issue #635 review: reproduced orphan_rate=-1.0)."""
+    pytest.importorskip("networkx")
+
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+    await store.add_relation(a, b, "link")
+    # Archive one endpoint: it stays in the graph (the relation still exists)
+    # but drops out of total_entries -> graph_node_count (2) > total_entries (1).
+    await store.update(a, {"status": "archived"})
+
+    data = _parse(
+        await _handle_relations(
+            store, {"action": "metrics", "metric": "bridges", "scope": "global"}
+        )
+    )
+    assert data.get("error") is not True
+    assert data["total_entries"] == 1
+    assert data["graph_node_count"] == 2
+    assert data["orphan_rate"] >= 0.0
+    assert data["orphan_rate"] == 0.0
+
+
+async def test_metrics_orphan_rate_filtered_uses_scoped_denominator(store) -> None:  # type: ignore[no-untyped-def]
+    """With a project filter, total_entries must be scoped to that project too,
+    so a fully-linked project reads orphan_rate 0.0 — not inflated by unrelated
+    entries (issue #635 review: reproduced 0.833 for a zero-orphan project)."""
+    pytest.importorskip("networkx")
+
+    p1 = await _store_entry(store, content="P1", project="proj-x")
+    p2 = await _store_entry(store, content="P2", project="proj-x")
+    await store.add_relation(p1, p2, "link")
+    # Ten unrelated entries with no project — must NOT inflate proj-x's rate.
+    for i in range(10):
+        await _store_entry(store, content=f"other {i}")
+
+    data = _parse(
+        await _handle_relations(
+            store,
+            {
+                "action": "metrics",
+                "metric": "bridges",
+                "scope": "global",
+                "project": "proj-x",
+            },
+        )
+    )
+    assert data.get("error") is not True
+    assert data["total_entries"] == 2
+    assert data["graph_node_count"] == 2
+    assert data["orphan_rate"] == 0.0
+
+
 async def test_metrics_orphans_returns_unlinked_ids(store) -> None:  # type: ignore[no-untyped-def]
     """metric='orphans' returns entry IDs present in the store but absent
     from the relations graph (issue #635)."""

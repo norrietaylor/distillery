@@ -580,14 +580,16 @@ async def _sample_orphan_ids(
     *,
     graph_node_ids: set[str],
     cap: int,
+    filters: dict[str, Any],
 ) -> list[str]:
-    """Return up to *cap* non-archived entry IDs absent from the relations graph.
+    """Return up to *cap* entry IDs matching *filters* but absent from the graph.
 
     A sample — not the full orphan set — so the payload stays bounded on large
-    instances. Pages ``list_entries`` (non-archived only) and keeps the first
+    instances. *filters* carries the non-archived status plus any entry-side
+    filters (project/tags/date_*) so the sample is scoped consistently with the
+    graph and ``total_entries``. Pages ``list_entries`` and keeps the first
     *cap* IDs that are not graph nodes.
     """
-    filters = {"status": _NON_ARCHIVED_STATUSES}
     orphans: list[str] = []
     offset = 0
     while len(orphans) < cap:
@@ -736,13 +738,24 @@ async def _handle_metrics(  # noqa: PLR0911, PLR0912
         return error_response("INTERNAL", "Failed to build relations graph")
 
     # ----- graph-health totals -----
-    # total_entries is the count of all non-archived entries; graph_node_count
-    # is how many of them are reachable via at least one relation. orphan_rate
-    # surfaces the gap (issue #635).
+    # total_entries is the count of non-archived entries; graph_node_count is
+    # how many of them are reachable via at least one relation. orphan_rate
+    # surfaces the gap (issue #635). The denominator MUST carry the same
+    # entry-side filters (project/tags/date_*) that scope the graph in global
+    # scope, otherwise a filtered graph over an unfiltered total inflates the
+    # rate (e.g. a zero-orphan project reads as 0.833). Ego scope passes no
+    # entry-side filters, so the count stays over all non-archived entries.
+    total_filters: dict[str, Any] = {"status": _NON_ARCHIVED_STATUSES}
+    if project is not None:
+        total_filters["project"] = project
+    if tags:
+        total_filters["tags"] = tags
+    if date_from is not None:
+        total_filters["date_from"] = date_from
+    if date_to is not None:
+        total_filters["date_to"] = date_to
     try:
-        total_entries = await store.count_entries(
-            filters={"status": _NON_ARCHIVED_STATUSES}
-        )
+        total_entries = await store.count_entries(filters=total_filters)
     except Exception:  # noqa: BLE001
         logger.exception("distillery_relations metrics: failed to count entries")
         return error_response("INTERNAL", "Failed to count entries")
@@ -771,7 +784,10 @@ async def _handle_metrics(  # noqa: PLR0911, PLR0912
             # relations graph (unlinked). Capped to bound the payload.
             graph_node_ids = set(g.nodes())
             orphan_ids = await _sample_orphan_ids(
-                store, graph_node_ids=graph_node_ids, cap=_ORPHANS_SAMPLE_CAP
+                store,
+                graph_node_ids=graph_node_ids,
+                cap=_ORPHANS_SAMPLE_CAP,
+                filters=total_filters,
             )
             results = [{"id": entry_id} for entry_id in orphan_ids]
         else:  # metric == "communities"

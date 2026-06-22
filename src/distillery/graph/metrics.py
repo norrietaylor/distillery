@@ -17,11 +17,15 @@ def orphan_rate(*, graph_node_count: int, total_entries: int) -> float:
     entry with no relations is invisible to every graph metric. A high value
     signals a near-empty graph (graph-health signal for operators).
 
-    Guards ``total_entries == 0`` -> ``0.0``.
+    Guards ``total_entries == 0`` -> ``0.0`` and clamps the result to ``[0, 1]``:
+    the graph is built from unfiltered relations and may contain archived-but-
+    still-linked nodes that are excluded from ``total_entries``, so
+    ``graph_node_count`` can exceed the denominator (a documented rate must
+    never be negative; issue #635).
     """
     if total_entries <= 0:
         return 0.0
-    return 1.0 - graph_node_count / total_entries
+    return max(0.0, min(1.0, 1.0 - graph_node_count / total_entries))
 
 
 def bridges(g: Any, *, k: int = 10) -> list[tuple[str, float]]:

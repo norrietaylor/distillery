@@ -136,3 +136,9 @@ def test_orphan_rate_all_linked() -> None:
 def test_orphan_rate_zero_total_is_guarded() -> None:
     """total_entries == 0 -> orphan_rate 0.0 (no division by zero)."""
     assert orphan_rate(graph_node_count=0, total_entries=0) == 0.0
+
+
+def test_orphan_rate_clamps_when_nodes_exceed_total() -> None:
+    """graph_node_count > total_entries (archived-but-linked nodes) clamps to
+    0.0 instead of going negative (issue #635 review)."""
+    assert orphan_rate(graph_node_count=2, total_entries=1) == 0.0
