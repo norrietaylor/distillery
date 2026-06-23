@@ -31,7 +31,8 @@ from urllib.parse import unquote, urlparse
 
 import duckdb
 
-from distillery.models import Entry, EntryStatus, validate_metadata
+from distillery.feeds.tags import normalize_tag
+from distillery.models import Entry, EntrySource, EntryStatus, EntryType, validate_metadata
 from distillery.store.migrations import (
     _CREATE_META_TABLE,
     backfill_relations_from_metadata,
@@ -1364,9 +1365,7 @@ class DuckDBStore:
                 # visibly at startup.  Non-invalidating fatals fall through to
                 # the generic rollback path below.
                 if "has been invalidated" in str(exc):
-                    self._signal_supervisor_restart(
-                        exc, "connection terminally invalidated"
-                    )
+                    self._signal_supervisor_restart(exc, "connection terminally invalidated")
                     raise
                 conn = self._conn
                 if conn is not None:
@@ -2134,9 +2133,7 @@ class DuckDBStore:
         if "tags" in filters:
             tag_list = filters["tags"]
             if tag_list:
-                if not isinstance(tag_list, list) or not all(
-                    isinstance(t, str) for t in tag_list
-                ):
+                if not isinstance(tag_list, list) or not all(isinstance(t, str) for t in tag_list):
                     raise ValueError("tags filter must be a list[str]")
                 # AND semantics: an entry matches only if its tags array
                 # contains *every* requested tag (intersection, not union).
@@ -4093,6 +4090,192 @@ class DuckDBStore:
             will contribute additional fields).
         """
         return await self._run_sync(self._sync_reconcile_relations)
+
+    # ------------------------------------------------------------------
+    # Entity-node promotion (issue #653 step 1)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _canonical_name_from_tag(canonical_tag: str) -> str:
+        """Derive a human-readable entity name from a canonical ``prefix/leaf`` tag.
+
+        ``entity/cloudflare-workers`` -> ``cloudflare workers``.  Falls back to
+        the whole tag when no ``/`` is present.
+        """
+        leaf = canonical_tag.split("/", 1)[1] if "/" in canonical_tag else canonical_tag
+        return leaf.replace("-", " ")
+
+    def _sync_promote_entities_plan(
+        self,
+        threshold: int,
+        reserved_prefixes: list[str],
+    ) -> tuple[dict[str, list[str]], dict[str, str]]:
+        """Read-only first pass: compute the promotion plan.
+
+        Returns ``(canonical_members, existing_nodes)`` where
+        ``canonical_members`` maps each qualifying canonical tag to the sorted
+        list of entry IDs carrying it, and ``existing_nodes`` maps a canonical
+        ``source_tag`` to the id of an already-stored entity node.
+        """
+        assert self._conn is not None
+        rows = self._conn.execute(
+            "SELECT id, tags FROM entries WHERE status != 'archived'"
+        ).fetchall()
+        members: dict[str, set[str]] = {}
+        for entry_id, tags_col in rows:
+            if not tags_col:
+                continue
+            for tag in tags_col:
+                if not (tag.startswith("entity/") or tag.startswith("tech/")):
+                    continue
+                canonical = normalize_tag(tag, reserved_prefixes)
+                members.setdefault(canonical, set()).add(entry_id)
+
+        canonical_members = {
+            canonical: sorted(ids) for canonical, ids in members.items() if len(ids) >= threshold
+        }
+
+        existing_nodes: dict[str, str] = {}
+        node_rows = self._conn.execute(
+            "SELECT id, metadata FROM entries WHERE entry_type = 'entity'"
+        ).fetchall()
+        for node_id, metadata_raw in node_rows:
+            try:
+                meta = json.loads(metadata_raw) if isinstance(metadata_raw, str) else metadata_raw
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if not isinstance(meta, dict):
+                continue
+            source_tag = meta.get("source_tag")
+            if isinstance(source_tag, str) and source_tag:
+                existing_nodes[source_tag] = node_id
+
+        return canonical_members, existing_nodes
+
+    def _sync_promote_entities_write(
+        self,
+        canonical_members: dict[str, list[str]],
+        embeddings: dict[str, list[float]],
+    ) -> dict[str, int]:
+        """Write pass: find-or-create entity nodes and ``mentions`` edges.
+
+        Re-checks node existence inside the transaction so a node created
+        concurrently (or on a prior run) is reused rather than duplicated.
+        """
+        assert self._conn is not None
+        conn = self._conn
+        entities_created = 0
+        entities_reused = 0
+        mentions_created = 0
+        try:
+            conn.execute("BEGIN TRANSACTION")
+            for canonical in sorted(canonical_members):
+                member_ids = canonical_members[canonical]
+                # Find-or-create the entity node keyed on the canonical tag.
+                existing = conn.execute(
+                    "SELECT id FROM entries WHERE entry_type = 'entity' "
+                    "AND json_extract_string(metadata, '$.source_tag') = ?",
+                    [canonical],
+                ).fetchone()
+                if existing is not None:
+                    node_id = str(existing[0])
+                    entities_reused += 1
+                else:
+                    name = self._canonical_name_from_tag(canonical)
+                    node = Entry(
+                        content=name,
+                        entry_type=EntryType.ENTITY,
+                        source=EntrySource.INFERENCE,
+                        author="distillery",
+                        tags=[canonical],
+                        metadata={"canonical_name": name, "source_tag": canonical},
+                    )
+                    embedding = embeddings[canonical]
+                    conn.execute(
+                        "INSERT INTO entries "
+                        "(id, content, entry_type, source, author, project, tags, status, "
+                        " verification, metadata, created_at, updated_at, version, embedding, "
+                        " created_by, last_modified_by, expires_at, session_id) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        [
+                            node.id,
+                            node.content,
+                            node.entry_type.value,
+                            node.source.value,
+                            node.author,
+                            node.project,
+                            list(node.tags),
+                            node.status.value,
+                            node.verification.value,
+                            json.dumps(node.metadata),
+                            node.created_at,
+                            node.updated_at,
+                            node.version,
+                            embedding,
+                            node.created_by,
+                            node.last_modified_by,
+                            node.expires_at,
+                            node.session_id,
+                        ],
+                    )
+                    node_id = node.id
+                    entities_created += 1
+
+                # Link every entry carrying the canonical tag to the node.
+                for from_id in member_ids:
+                    if from_id == node_id:
+                        continue
+                    inserted = conn.execute(
+                        "INSERT OR IGNORE INTO entry_relations "
+                        "(id, from_id, to_id, relation_type) "
+                        "VALUES (?, ?, ?, 'mentions') RETURNING id",
+                        [str(uuid.uuid4()), from_id, node_id],
+                    ).fetchone()
+                    if inserted:
+                        mentions_created += 1
+            conn.execute("COMMIT")
+        except Exception:
+            with contextlib.suppress(Exception):
+                conn.execute("ROLLBACK")
+            raise
+        # New entity nodes changed the content corpus; rebuild FTS and flush WAL
+        # so the nodes survive ungraceful termination (issue #346 semantics).
+        if entities_created:
+            self._rebuild_fts_index(conn)
+        self._checkpoint_after_write(conn)
+        return {
+            "entities_created": entities_created,
+            "entities_reused": entities_reused,
+            "mentions_created": mentions_created,
+        }
+
+    async def promote_entities(
+        self,
+        threshold: int,
+        reserved_prefixes: list[str] | None = None,
+    ) -> dict[str, int]:
+        """Promote recurring ``entity/*`` and ``tech/*`` tags to entity nodes.
+
+        See :meth:`distillery.store.protocol.DistilleryStore.promote_entities`.
+        """
+        # ``entity`` and ``tech`` must always normalise so variant spellings of
+        # a promotion-target tag collapse to one canonical node regardless of
+        # the configured reserved prefixes.
+        prefixes = sorted({*(reserved_prefixes or []), "entity", "tech"})
+        canonical_members, existing_nodes = await self._run_sync(
+            self._sync_promote_entities_plan, threshold, prefixes
+        )
+        # Embed the canonical names for nodes that don't yet exist, off the SQL
+        # lock (issue #558 pattern).
+        embeddings: dict[str, list[float]] = {}
+        for canonical in canonical_members:
+            if canonical in existing_nodes:
+                continue
+            name = self._canonical_name_from_tag(canonical)
+            embeddings[canonical] = await asyncio.to_thread(self._embedding_provider.embed, name)
+        return await self._run_sync(
+            self._sync_promote_entities_write, canonical_members, embeddings
+        )
 
     def _sync_get_all_related_entry_ids(self) -> set[str]:
         """Synchronous implementation of get_all_related_entry_ids()."""

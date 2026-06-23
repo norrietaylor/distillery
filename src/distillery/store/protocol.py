@@ -581,6 +581,45 @@ class DistilleryStore(Protocol):
         """
         ...
 
+    async def promote_entities(
+        self,
+        threshold: int,
+        reserved_prefixes: list[str] | None = None,
+    ) -> dict[str, int]:
+        """Promote recurring ``entity/*`` and ``tech/*`` tags to entity nodes.
+
+        Scans the tag vocabulary, normalises each ``entity/*`` and ``tech/*``
+        tag through the existing ``normalize_tag`` path so variant spellings
+        (``entity/cloudflare/workers`` vs ``entity/cloudflare-workers``)
+        collapse to one canonical key, and for every canonical tag appearing on
+        at least *threshold* entries:
+
+          * finds-or-creates exactly one ``entity`` entry keyed idempotently on
+            the canonical tag (stored as ``metadata.source_tag``); no duplicate
+            node is created on re-run.
+          * for every entry carrying the (canonical) tag, creates a
+            ``mentions`` edge from that entry to the entity node, idempotent on
+            the ``(from_id, to_id, relation_type)`` unique index.
+
+        Fully idempotent: a second consecutive run creates zero nodes and zero
+        edges.
+
+        Args:
+            threshold: Minimum number of entries a canonical tag must appear on
+                before it is promoted.
+            reserved_prefixes: Tag namespace prefixes eligible for
+                ``normalize_tag`` collapsing (typically
+                ``config.tags.reserved_prefixes``).  ``entity`` and ``tech`` are
+                always treated as reserved for promotion regardless of this
+                argument.  ``None`` is treated as an empty list.
+
+        Returns:
+            Dict with ``entities_created`` (new entity nodes inserted),
+            ``entities_reused`` (qualifying tags whose node already existed),
+            and ``mentions_created`` (``mentions`` edges inserted).
+        """
+        ...
+
     async def reconcile_relations(self) -> dict[str, int]:
         """Re-run idempotent edge-population mechanisms and return insert counts.
 
