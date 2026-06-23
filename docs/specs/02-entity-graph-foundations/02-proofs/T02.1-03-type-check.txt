@@ -1,0 +1,10 @@
+Type: lint
+Description: mypy strict type checking on config.py
+Command: mypy --strict src/distillery/config.py
+Expected: No issues found
+Timestamp: 2026-06-23T00:00:00Z
+Status: PASS
+
+Output:
+=======
+mypy: No issues found

@@ -1,0 +1,26 @@
+Type: integration
+Description: YAML config loading tests for entity_promotion_threshold
+Command: python3 /tmp/test_config_yaml.py
+Expected: All YAML loading tests pass with proper defaults and validation
+Timestamp: 2026-06-23T00:00:00Z
+Status: PASS
+
+Test Results:
+=============
+Test 1: Load config with entity_promotion_threshold
+  entity_promotion_threshold: 5
+  PASS
+
+Test 2: Load config without entity_promotion_threshold
+  entity_promotion_threshold: 3
+  PASS
+
+Test 3: Load config with invalid threshold (0)
+  Correctly raised ValueError: tags.entity_promotion_threshold must be a positive integer, got: 0
+  PASS
+
+Test 4: Load config with empty tags section
+  entity_promotion_threshold: 3
+  PASS
+
+All YAML config tests passed!

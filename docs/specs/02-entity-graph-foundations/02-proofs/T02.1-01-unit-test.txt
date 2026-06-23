@@ -1,0 +1,42 @@
+Type: unit
+Description: Unit tests for TagsConfig.entity_promotion_threshold field
+Command: python3 /tmp/test_tags_config.py
+Expected: All tests pass with proper validation of default (3), custom values, and error cases
+Timestamp: 2026-06-23T00:00:00Z
+Status: PASS
+
+Test Results:
+=============
+Test 1: Default TagsConfig instantiation
+  entity_promotion_threshold: 3
+  PASS
+
+Test 2: Custom TagsConfig
+  entity_promotion_threshold: 5
+  PASS
+
+Test 3: _parse_tags with empty dict
+  entity_promotion_threshold: 3
+  PASS
+
+Test 4: _parse_tags with custom value
+  entity_promotion_threshold: 7
+  PASS
+
+Test 5: _parse_tags with string value
+  entity_promotion_threshold: 4
+  PASS
+
+Test 6: _parse_tags with invalid value (0)
+  Correctly raised ValueError: tags.entity_promotion_threshold must be a positive integer, got: 0
+  PASS
+
+Test 7: _parse_tags with invalid value (-1)
+  Correctly raised ValueError: tags.entity_promotion_threshold must be a positive integer, got: -1
+  PASS
+
+Test 8: _parse_tags with invalid type (dict)
+  Correctly raised ValueError: tags.entity_promotion_threshold must be an integer, got: {'foo': 'bar'}
+  PASS
+
+All tests passed!
