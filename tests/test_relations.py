@@ -803,3 +803,86 @@ async def test_handle_relations_remove_unexpected_error() -> None:
     data = _parse(result)
     assert data["error"] is True
     assert data["code"] == "INTERNAL"
+
+
+# ---------------------------------------------------------------------------
+# mentions relation type
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_add_relation_mentions_type(store) -> None:  # type: ignore[no-untyped-def]
+    """add_relation accepts 'mentions' relation type."""
+    from distillery.models import EntryType
+
+    # Create a regular entry and an entity entry
+    from_id = await _store_entry(store, content="entry A")
+    entity_entry = make_entry(
+        entry_type=EntryType.ENTITY,
+        metadata={"canonical_name": "Cloudflare", "source_tag": "entity/cloudflare"},
+        content="Cloudflare entity node",
+    )
+    await store.store(entity_entry)
+    to_id = entity_entry.id
+
+    # Add a mentions relation
+    relation_id = await store.add_relation(from_id, to_id, "mentions")
+
+    assert isinstance(relation_id, str)
+    assert len(relation_id) > 0
+
+    # Verify the relation was stored correctly
+    related = await store.get_related(from_id, direction="outgoing")
+    assert len(related) == 1
+    assert related[0]["relation_type"] == "mentions"
+    assert related[0]["to_id"] == to_id
+
+
+@pytest.mark.unit
+async def test_handle_relations_add_mentions(store) -> None:  # type: ignore[no-untyped-def]
+    """MCP tool accepts 'mentions' relation type in add action."""
+    from distillery.models import EntryType
+
+    a = await _store_entry(store, content="entry A")
+    entity_entry = make_entry(
+        entry_type=EntryType.ENTITY,
+        metadata={"canonical_name": "Cloudflare", "source_tag": "entity/cloudflare"},
+        content="Cloudflare entity",
+    )
+    await store.store(entity_entry)
+    b = entity_entry.id
+
+    result = await _handle_relations(
+        store,
+        {"action": "add", "from_id": a, "to_id": b, "relation_type": "mentions"},
+    )
+    data = _parse(result)
+    assert "error" not in data or data.get("error") is False
+    assert data["relation_type"] == "mentions"
+
+
+@pytest.mark.unit
+async def test_all_preexisting_relation_types_still_work(store) -> None:  # type: ignore[no-untyped-def]
+    """All pre-existing relation types continue to work unchanged."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+
+    # Test all pre-existing types
+    preexisting_types = {
+        "link",
+        "corrects",
+        "supersedes",
+        "related",
+        "blocks",
+        "depends_on",
+        "citation",
+        "duplicate",
+        "merge_source",
+        "sync_source",
+    }
+
+    for rel_type in preexisting_types:
+        # Each type should be accepted
+        relation_id = await store.add_relation(a, b, rel_type)
+        assert isinstance(relation_id, str)
+        assert len(relation_id) > 0

@@ -62,6 +62,7 @@ Pick exactly one *entry_type* (the artifact form):
 - digest: A periodic digest or summary covering a date range.
 - github: A GitHub artifact reference (issue, PR, discussion, or release).
 - feed: An ambient feed item captured from a monitored source (RSS, GitHub, Hacker News).
+- entity: A first-class graph node representing a recurring entity or concept (auto-created by promotion).
 - inbox: Cannot be classified (use as a fallback).
 
 Pick exactly one *kind* (the content-type axis, orthogonal to entry_type):

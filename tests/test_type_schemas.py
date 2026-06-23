@@ -114,6 +114,39 @@ class TestValidateMetadata:
                 {"repo": "org/repo", "ref_type": "invalid", "ref_number": 1},
             )
 
+    def test_entity_valid(self) -> None:
+        """Entity entry with required fields passes."""
+        validate_metadata(
+            "entity",
+            {"canonical_name": "Cloudflare", "source_tag": "entity/cloudflare"},
+        )
+
+    def test_entity_valid_with_aliases(self) -> None:
+        """Entity entry with required + optional aliases passes."""
+        validate_metadata(
+            "entity",
+            {
+                "canonical_name": "Cloudflare",
+                "source_tag": "entity/cloudflare",
+                "aliases": ["cf", "cloudflare-inc"],
+            },
+        )
+
+    def test_entity_missing_canonical_name_raises(self) -> None:
+        """Entity entry missing canonical_name raises ValueError."""
+        with pytest.raises(ValueError, match="canonical_name"):
+            validate_metadata("entity", {"source_tag": "entity/cloudflare"})
+
+    def test_entity_missing_source_tag_raises(self) -> None:
+        """Entity entry missing source_tag raises ValueError."""
+        with pytest.raises(ValueError, match="source_tag"):
+            validate_metadata("entity", {"canonical_name": "Cloudflare"})
+
+    def test_entity_empty_metadata_raises(self) -> None:
+        """Entity entry with empty metadata raises ValueError."""
+        with pytest.raises(ValueError, match="canonical_name"):
+            validate_metadata("entity", {})
+
     def test_legacy_types_accept_any_metadata(self) -> None:
         """Session, bookmark, etc. accept arbitrary metadata without error."""
         validate_metadata("session", {"arbitrary_key": "any_value"})
@@ -162,9 +195,24 @@ class TestTypeMetadataSchemasRegistry:
         assert "period_start" in schema["required"]
         assert "period_end" in schema["required"]
 
-    def test_all_four_typed_schemas_present(self) -> None:
-        for et in ("person", "project", "digest", "github"):
+    def test_all_typed_schemas_present(self) -> None:
+        for et in ("person", "project", "digest", "github", "entity"):
             assert et in TYPE_METADATA_SCHEMAS, f"{et!r} not in TYPE_METADATA_SCHEMAS"
+
+    def test_entity_schema_has_canonical_name_required(self) -> None:
+        schema = TYPE_METADATA_SCHEMAS["entity"]
+        assert "canonical_name" in schema["required"]
+        assert schema["required"]["canonical_name"] == "str"
+
+    def test_entity_schema_has_source_tag_required(self) -> None:
+        schema = TYPE_METADATA_SCHEMAS["entity"]
+        assert "source_tag" in schema["required"]
+        assert schema["required"]["source_tag"] == "str"
+
+    def test_entity_schema_has_aliases_optional(self) -> None:
+        schema = TYPE_METADATA_SCHEMAS["entity"]
+        assert "aliases" in schema["optional"]
+        assert schema["optional"]["aliases"] == "list[str]"
 
 
 # ---------------------------------------------------------------------------
@@ -178,10 +226,13 @@ class TestNewEntryTypes:
         assert EntryType.PROJECT.value == "project"
         assert EntryType.DIGEST.value == "digest"
         assert EntryType.GITHUB.value == "github"
+        assert EntryType.ENTITY.value == "entity"
 
     def test_new_entry_types_are_str_subclasses(self) -> None:
         assert isinstance(EntryType.PERSON, str)
         assert EntryType.PERSON == "person"
+        assert isinstance(EntryType.ENTITY, str)
+        assert EntryType.ENTITY == "entity"
 
     def test_new_entry_types_constructible_from_string(self) -> None:
         assert EntryType("person") is EntryType.PERSON
