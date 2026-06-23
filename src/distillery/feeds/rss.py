@@ -24,7 +24,7 @@ import httpx
 
 from distillery import __version__
 from distillery.feeds.models import FeedItem
-from distillery.feeds.url_guard import fetch_feed_bytes
+from distillery.feeds.url_guard import MAX_RESPONSE_BYTES, fetch_feed_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -373,6 +373,11 @@ class RSSAdapter:
     ----------
     url:
         Full URL of the RSS or Atom feed.
+    max_bytes:
+        Maximum accepted response body size in bytes. Defaults to
+        :data:`~distillery.feeds.url_guard.MAX_RESPONSE_BYTES` (5 MiB);
+        the poller threads ``config.feeds.max_feed_bytes`` (10 MiB default)
+        so full-content feeds are not rejected.
 
     Raises
     ------
@@ -380,7 +385,13 @@ class RSSAdapter:
         If *url* is empty.
     """
 
-    def __init__(self, url: str, *, user_agent: str | None = None) -> None:
+    def __init__(
+        self,
+        url: str,
+        *,
+        user_agent: str | None = None,
+        max_bytes: int = MAX_RESPONSE_BYTES,
+    ) -> None:
         if not url.strip():
             raise ValueError("RSSAdapter requires a non-empty feed URL.")
         raw = url.strip()
@@ -392,6 +403,7 @@ class RSSAdapter:
         # "use the default" so misconfigured deployments still send a sane UA.
         ua = (user_agent or "").strip()
         self._user_agent = ua or DEFAULT_USER_AGENT
+        self._max_bytes = max_bytes
         self.last_polled_at: datetime | None = None
 
     # ------------------------------------------------------------------
@@ -434,7 +446,7 @@ class RSSAdapter:
         # ``fetch_feed_bytes`` follows redirects manually, re-validating the
         # host at every hop, and streams the body under a fixed size cap.
         with httpx.Client(timeout=_REQUEST_TIMEOUT, verify=True) as client:
-            content = fetch_feed_bytes(client, self._fetch_url, headers)
+            content = fetch_feed_bytes(client, self._fetch_url, headers, max_bytes=self._max_bytes)
 
         self.last_polled_at = datetime.now(tz=UTC)
 

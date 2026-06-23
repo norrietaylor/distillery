@@ -916,6 +916,46 @@ class TestBuildAdapterGitHubToken:
             )
 
 
+class TestBuildAdapterMaxFeedBytes:
+    """_build_adapter() and the poller thread feeds.max_feed_bytes into RSS."""
+
+    def test_default_max_bytes_is_library_cap(self) -> None:
+        from distillery.feeds.poller import _build_adapter
+        from distillery.feeds.url_guard import MAX_RESPONSE_BYTES
+
+        src = FeedSourceConfig(url="https://example.com/rss", source_type="rss")
+        adapter = _build_adapter(src)
+        assert adapter._max_bytes == MAX_RESPONSE_BYTES  # noqa: SLF001
+
+    def test_threads_configured_cap_into_rss_adapter(self) -> None:
+        from distillery.feeds.poller import _build_adapter
+
+        src = FeedSourceConfig(url="https://example.com/rss", source_type="rss")
+        adapter = _build_adapter(src, max_feed_bytes=10 * 1024 * 1024)
+        assert adapter._max_bytes == 10 * 1024 * 1024  # noqa: SLF001
+
+    async def test_poller_threads_config_max_feed_bytes(self) -> None:
+        """The poller must pass cfg.feeds.max_feed_bytes to the RSS adapter."""
+        src = FeedSourceConfig(url="https://example.com/rss", source_type="rss")
+        store = _make_store(feed_sources=[_source_to_dict(src)])
+        cfg = _make_config(sources=[src], digest_threshold=0.0)
+        cfg.feeds.max_feed_bytes = 7 * 1024 * 1024
+
+        captured: dict[str, int] = {}
+
+        def _capture(source: FeedSourceConfig, *, max_feed_bytes: int, **_: object) -> MagicMock:
+            captured["max_feed_bytes"] = max_feed_bytes
+            adapter = MagicMock()
+            adapter.fetch.return_value = []
+            return adapter
+
+        with patch("distillery.feeds.poller._build_adapter", side_effect=_capture):
+            poller = FeedPoller(store=store, config=cfg)
+            await poller.poll()
+
+        assert captured["max_feed_bytes"] == 7 * 1024 * 1024
+
+
 # ---------------------------------------------------------------------------
 # FeedPoller._persist_poll_status — persists liveness metadata per poll
 # ---------------------------------------------------------------------------
