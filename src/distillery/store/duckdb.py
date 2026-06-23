@@ -47,6 +47,19 @@ logger = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
 
+# Consecutive plain-``CHECKPOINT`` failures after which we escalate to
+# ``FORCE CHECKPOINT``.  Plain CHECKPOINT fails with "there are other write
+# transactions active" under concurrent writers; left uncorrected the WAL
+# grows without bound and fills the volume (issue #648).  FORCE CHECKPOINT is
+# DuckDB's own hint for flushing regardless of active transactions.
+_FORCE_CHECKPOINT_AFTER_FAILURES = 3
+
+# Free space on the database filesystem (bytes) below which we emit a
+# backpressure WARNING before the WAL can fill the volume (issue #648).
+# ``rate_limit.max_db_size_mb`` only measures the main DB file, not the WAL,
+# so a bloating WAL under checkpoint starvation is invisible to it.
+_DISK_BACKPRESSURE_FREE_BYTES = 256 * 1024 * 1024
+
 
 class EntriesIntegrityError(RuntimeError):
     """Raised when a post-bulk-rewrite read-back of ``entries`` fails.
@@ -442,7 +455,22 @@ class DuckDBStore:
         has already been committed to the WAL, so returning success to
         the caller is still correct.  A failed checkpoint just means the
         WAL stays slightly larger than usual.
+
+        Under *concurrent* write transactions (e.g. a feed poller and a
+        doc-sync writing at once) a plain ``CHECKPOINT`` fails with
+        "Cannot CHECKPOINT: there are other write transactions active.
+        Try using FORCE CHECKPOINT".  Left uncorrected the WAL grows
+        without bound and fills the volume (``No space left on device``),
+        which then truncates the WAL into an unbootable database (issue
+        #648).  So once the consecutive-failure streak crosses
+        :data:`_FORCE_CHECKPOINT_AFTER_FAILURES` we escalate to
+        ``FORCE CHECKPOINT`` — DuckDB's own hint — to flush the WAL
+        regardless of the active transactions.  A free-space guard
+        (:meth:`_check_disk_backpressure`) also warns before the volume
+        fills, since ``rate_limit.max_db_size_mb`` only measures the main
+        DB file and never the WAL.
         """
+        self._check_disk_backpressure()
         try:
             conn.execute("CHECKPOINT")
             self._checkpoint_failures = 0
@@ -455,15 +483,94 @@ class DuckDBStore:
             # has crashed on startup in production) — escalate so it is
             # visible before the WAL becomes unreplayable.
             self._checkpoint_failures += 1
-            if self._checkpoint_failures >= 3:
-                logger.warning(
-                    "CHECKPOINT after write failed %d times in a row — "
-                    "WAL is accumulating un-flushed writes (non-fatal): %s",
-                    self._checkpoint_failures,
-                    exc,
+            if self._checkpoint_failures >= _FORCE_CHECKPOINT_AFTER_FAILURES:
+                # FORCE CHECKPOINT aborts active write transactions, so it is
+                # only appropriate for the writer-contention case it is meant
+                # to clear (issue #648).  For unrelated failures (disk-full,
+                # permissions) forcing aborts concurrent writers for no
+                # benefit and does not fix the failure — log and wait instead.
+                message = str(exc)
+                is_contention = (
+                    "other write transactions active" in message
+                    or "Try using FORCE CHECKPOINT" in message
                 )
+                if is_contention:
+                    logger.warning(
+                        "CHECKPOINT after write failed %d times in a row — "
+                        "WAL is accumulating un-flushed writes; forcing checkpoint "
+                        "(non-fatal): %s",
+                        self._checkpoint_failures,
+                        exc,
+                    )
+                    self._force_checkpoint(conn)
+                else:
+                    logger.warning(
+                        "CHECKPOINT after write failed %d times in a row — "
+                        "WAL is accumulating un-flushed writes; not forcing "
+                        "(non-contention failure, non-fatal): %s",
+                        self._checkpoint_failures,
+                        exc,
+                    )
             else:
                 logger.debug("CHECKPOINT after write failed (non-fatal): %s", exc)
+
+    def _force_checkpoint(self, conn: duckdb.DuckDBPyConnection) -> None:
+        """Issue ``FORCE CHECKPOINT`` to flush the WAL despite active writers.
+
+        ``FORCE CHECKPOINT`` is DuckDB's documented escape hatch when a
+        plain ``CHECKPOINT`` is blocked by concurrent write transactions.
+        It aborts those transactions so the WAL can be flushed to the main
+        database file, bounding WAL growth (issue #648).  On success the
+        consecutive-failure streak resets to 0; its own failure is logged
+        and swallowed, keeping the streak so the next write retries.
+        """
+        try:
+            conn.execute("FORCE CHECKPOINT")
+            logger.info(
+                "FORCE CHECKPOINT flushed the WAL after %d failed plain checkpoints",
+                self._checkpoint_failures,
+            )
+            self._checkpoint_failures = 0
+        except duckdb.Error as exc:
+            logger.warning(
+                "FORCE CHECKPOINT also failed (WAL still accumulating, non-fatal): %s",
+                exc,
+            )
+
+    def _check_disk_backpressure(self) -> None:
+        """Warn when the database filesystem is running low on free space.
+
+        ``rate_limit.max_db_size_mb`` (config) caps the *main* DB file but
+        never the WAL, so a WAL bloating under checkpoint starvation is
+        invisible to it until the volume fills and DuckDB crashes mid-write
+        (issue #648).  This lightweight ``os.statvfs`` probe on the DB
+        directory surfaces a WARNING before that happens.
+
+        It is best-effort and never raises: in-memory / non-local databases
+        have no filesystem path (skip), and platforms without ``statvfs``
+        or that error on the call are skipped quietly.
+        """
+        db_file = self._resolve_local_db_path()
+        if db_file is None:
+            # In-memory or remote (S3/MotherDuck) DB — no local WAL to fill.
+            return
+        statvfs = getattr(os, "statvfs", None)
+        if statvfs is None:
+            # Platform without statvfs (e.g. Windows) — skip quietly.
+            return
+        try:
+            stat = statvfs(str(db_file.parent))
+        except OSError as exc:
+            logger.debug("Disk backpressure check skipped (statvfs failed): %s", exc)
+            return
+        free_bytes = stat.f_bavail * stat.f_frsize
+        if free_bytes < _DISK_BACKPRESSURE_FREE_BYTES:
+            logger.warning(
+                "Low free space on database filesystem: %.0f MB free at %s — "
+                "WAL growth may fill the volume (issue #648)",
+                free_bytes / (1024 * 1024),
+                db_file.parent,
+            )
 
     def _sync_verify_entries_readable(self, entry_ids: Sequence[str]) -> None:
         """Read-back verification after a bulk rewrite of ``entries`` (issue #584).

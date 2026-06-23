@@ -16,7 +16,7 @@ import duckdb
 import pytest
 
 from distillery.models import Entry, EntrySource, EntryStatus, EntryType
-from distillery.store.duckdb import DuckDBStore
+from distillery.store.duckdb import _FORCE_CHECKPOINT_AFTER_FAILURES, DuckDBStore
 from distillery.store.protocol import SearchResult
 from tests.conftest import make_entry
 
@@ -2082,6 +2082,200 @@ class TestHybridGracefulFallback:
     ) -> None:
         """_fts_available should be False when hybrid_search is disabled."""
         assert vector_only_store._fts_available is False  # noqa: SLF001
+
+
+class TestCheckpointBackpressure:
+    """CHECKPOINT starvation guards: FORCE CHECKPOINT + disk backpressure (issue #648).
+
+    Plain ``CHECKPOINT`` after each write fails under concurrent write
+    transactions ("there are other write transactions active"); left
+    uncorrected the WAL grows without bound and fills the volume.  These
+    tests drive the *mechanism* (a mock connection whose ``CHECKPOINT``
+    raises that error; a monkeypatched ``os.statvfs``) rather than real
+    concurrency / a real full disk.  A file-backed DB under ``tmp_path``
+    is used wherever a real local path is required.
+    """
+
+    @staticmethod
+    def _file_store(tmp_path, mock_embedding_provider) -> DuckDBStore:
+        return DuckDBStore(
+            db_path=str(tmp_path / "distillery.db"),
+            embedding_provider=mock_embedding_provider,
+        )
+
+    async def test_force_checkpoint_issued_after_failure_streak(
+        self, tmp_path, mock_embedding_provider
+    ) -> None:
+        """Once the streak crosses the threshold, FORCE CHECKPOINT is issued."""
+        from unittest.mock import MagicMock, call
+
+        s = self._file_store(tmp_path, mock_embedding_provider)
+
+        active = duckdb.Error(
+            "Cannot CHECKPOINT: there are other write transactions active. "
+            "Try using FORCE CHECKPOINT"
+        )
+
+        def _execute(sql: str) -> None:
+            if sql == "CHECKPOINT":
+                raise active
+            # FORCE CHECKPOINT succeeds.
+
+        mock_conn = MagicMock()
+        mock_conn.execute.side_effect = _execute
+
+        # Below the threshold: only plain CHECKPOINT is attempted, no force.
+        for _ in range(_FORCE_CHECKPOINT_AFTER_FAILURES - 1):
+            s._checkpoint_after_write(mock_conn)  # noqa: SLF001
+        assert call("FORCE CHECKPOINT") not in mock_conn.execute.call_args_list
+        assert s._checkpoint_failures == _FORCE_CHECKPOINT_AFTER_FAILURES - 1  # noqa: SLF001
+
+        # Crossing the threshold issues FORCE CHECKPOINT, which succeeds and
+        # resets the streak to 0.
+        s._checkpoint_after_write(mock_conn)  # noqa: SLF001
+        assert call("FORCE CHECKPOINT") in mock_conn.execute.call_args_list
+        assert s._checkpoint_failures == 0  # noqa: SLF001
+
+    async def test_force_checkpoint_own_failure_keeps_streak(
+        self, tmp_path, mock_embedding_provider
+    ) -> None:
+        """If FORCE CHECKPOINT also fails, the streak is preserved (not reset)."""
+        from unittest.mock import MagicMock
+
+        s = self._file_store(tmp_path, mock_embedding_provider)
+        mock_conn = MagicMock()
+        # Both plain and forced checkpoints fail.  The plain CHECKPOINT must
+        # raise the writer-contention error so FORCE CHECKPOINT is attempted.
+        mock_conn.execute.side_effect = duckdb.Error(
+            "Cannot CHECKPOINT: there are other write transactions active. "
+            "Try using FORCE CHECKPOINT"
+        )
+
+        for _ in range(_FORCE_CHECKPOINT_AFTER_FAILURES):
+            s._checkpoint_after_write(mock_conn)  # noqa: SLF001
+
+        # FORCE CHECKPOINT was attempted on the threshold-crossing call ...
+        assert any(
+            c.args == ("FORCE CHECKPOINT",) for c in mock_conn.execute.call_args_list
+        )
+        # ... but since it also failed the streak is NOT reset.
+        assert s._checkpoint_failures == _FORCE_CHECKPOINT_AFTER_FAILURES  # noqa: SLF001
+
+    async def test_non_contention_failure_does_not_force_checkpoint(
+        self, tmp_path, mock_embedding_provider
+    ) -> None:
+        """A generic (non-contention) failure past the threshold never forces.
+
+        FORCE CHECKPOINT aborts active write transactions, so it is reserved
+        for the writer-contention case (issue #648).  An unrelated failure
+        (disk-full, permissions) must not escalate to FORCE CHECKPOINT even
+        once the streak crosses the threshold.
+        """
+        from unittest.mock import MagicMock, call
+
+        s = self._file_store(tmp_path, mock_embedding_provider)
+        mock_conn = MagicMock()
+        # A non-contention failure (e.g. disk-full / permissions) on every
+        # plain CHECKPOINT.
+        mock_conn.execute.side_effect = duckdb.Error("IO Error: No space left on device")
+
+        for _ in range(_FORCE_CHECKPOINT_AFTER_FAILURES + 1):
+            s._checkpoint_after_write(mock_conn)  # noqa: SLF001
+
+        # FORCE CHECKPOINT must never be issued for a non-contention failure,
+        # even though the streak has crossed the threshold.
+        assert call("FORCE CHECKPOINT") not in mock_conn.execute.call_args_list
+        assert (
+            s._checkpoint_failures == _FORCE_CHECKPOINT_AFTER_FAILURES + 1  # noqa: SLF001
+        )
+
+    async def test_disk_backpressure_warns_when_free_space_low(
+        self, tmp_path, mock_embedding_provider, monkeypatch, caplog
+    ) -> None:
+        """A low-free-space statvfs report emits a WARNING for a file-backed DB."""
+        import os as _os
+
+        s = self._file_store(tmp_path, mock_embedding_provider)
+
+        class _Stat:
+            f_bavail = 1
+            f_frsize = 4096  # ~4 KB free — well below the threshold.
+
+        monkeypatch.setattr(_os, "statvfs", lambda _path: _Stat())
+
+        with caplog.at_level("WARNING", logger="distillery.store.duckdb"):
+            s._check_disk_backpressure()  # noqa: SLF001
+
+        assert any("Low free space" in r.message for r in caplog.records)
+
+    async def test_disk_backpressure_silent_when_space_ample(
+        self, tmp_path, mock_embedding_provider, monkeypatch, caplog
+    ) -> None:
+        """Ample free space produces no WARNING."""
+        import os as _os
+
+        s = self._file_store(tmp_path, mock_embedding_provider)
+
+        class _Stat:
+            f_bavail = 10_000_000
+            f_frsize = 4096  # ~40 GB free.
+
+        monkeypatch.setattr(_os, "statvfs", lambda _path: _Stat())
+
+        with caplog.at_level("WARNING", logger="distillery.store.duckdb"):
+            s._check_disk_backpressure()  # noqa: SLF001
+
+        assert not any("Low free space" in r.message for r in caplog.records)
+
+    async def test_disk_backpressure_skipped_for_in_memory(
+        self, mock_embedding_provider, monkeypatch, caplog
+    ) -> None:
+        """In-memory DBs have no local path — the statvfs guard is skipped."""
+        import os as _os
+
+        s = DuckDBStore(db_path=":memory:", embedding_provider=mock_embedding_provider)
+
+        def _fail(_path):
+            raise AssertionError("statvfs must not be called for in-memory DB")
+
+        monkeypatch.setattr(_os, "statvfs", _fail)
+
+        with caplog.at_level("WARNING", logger="distillery.store.duckdb"):
+            s._check_disk_backpressure()  # noqa: SLF001  — must not raise
+
+        assert not any("Low free space" in r.message for r in caplog.records)
+
+    async def test_disk_backpressure_skipped_when_statvfs_unavailable(
+        self, tmp_path, mock_embedding_provider, monkeypatch, caplog
+    ) -> None:
+        """Platforms without ``os.statvfs`` (e.g. Windows) skip the guard cleanly."""
+        import os as _os
+
+        s = self._file_store(tmp_path, mock_embedding_provider)
+        monkeypatch.delattr(_os, "statvfs", raising=False)
+
+        with caplog.at_level("WARNING", logger="distillery.store.duckdb"):
+            s._check_disk_backpressure()  # noqa: SLF001  — must not raise
+
+        assert not any("Low free space" in r.message for r in caplog.records)
+
+    async def test_disk_backpressure_skipped_when_statvfs_errors(
+        self, tmp_path, mock_embedding_provider, monkeypatch, caplog
+    ) -> None:
+        """A statvfs OSError is swallowed (no WARNING, no raise)."""
+        import os as _os
+
+        s = self._file_store(tmp_path, mock_embedding_provider)
+
+        def _raise(_path):
+            raise OSError("unsupported")
+
+        monkeypatch.setattr(_os, "statvfs", _raise)
+
+        with caplog.at_level("WARNING", logger="distillery.store.duckdb"):
+            s._check_disk_backpressure()  # noqa: SLF001  — must not raise
+
+        assert not any("Low free space" in r.message for r in caplog.records)
 
 
 # ---------------------------------------------------------------------------
