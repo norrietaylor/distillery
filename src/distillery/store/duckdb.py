@@ -60,6 +60,21 @@ _FORCE_CHECKPOINT_AFTER_FAILURES = 3
 # so a bloating WAL under checkpoint starvation is invisible to it.
 _DISK_BACKPRESSURE_FREE_BYTES = 256 * 1024 * 1024
 
+# Valid relation types — must match the set in mcp/tools/relations.py.
+_VALID_RELATION_TYPES = {
+    "link",
+    "corrects",
+    "supersedes",
+    "related",
+    "blocks",
+    "depends_on",
+    "citation",
+    "duplicate",
+    "merge_source",
+    "sync_source",
+    "mentions",
+}
+
 
 class EntriesIntegrityError(RuntimeError):
     """Raised when a post-bulk-rewrite read-back of ``entries`` fails.
@@ -3638,6 +3653,12 @@ class DuckDBStore:
     ) -> str:
         """Synchronous implementation of add_relation(); called via asyncio.to_thread."""
         assert self._conn is not None
+        # Validate relation_type against the fixed set of valid types.
+        if relation_type not in _VALID_RELATION_TYPES:
+            raise ValueError(
+                f"Invalid relation_type {relation_type!r}. "
+                f"Must be one of: {', '.join(sorted(_VALID_RELATION_TYPES))}."
+            )
         # Validate that both entries exist (including archived — preserves historical links).
         # Routes through :meth:`_sync_entry_exists` so this lookup uses the same SQL shape
         # as every other existence check; see issue #515 for the asymmetry this prevents.
