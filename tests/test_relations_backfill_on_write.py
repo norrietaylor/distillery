@@ -868,3 +868,4 @@ async def test_reconcile_handler_still_reports_legacy_keys(store: DuckDBStore) -
     payload = parse_mcp_response(await _handle_relations(store, {"action": "reconcile"}))
     assert "metadata_links" in payload
     assert "wikilink_links" in payload
+    assert "content_ref_links" in payload
