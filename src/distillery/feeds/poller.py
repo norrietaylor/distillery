@@ -23,6 +23,7 @@ from urllib.parse import urlparse
 from distillery.feeds.scorer import RelevanceScorer
 from distillery.feeds.tags import normalize_tag
 from distillery.feeds.truncation import truncate_content
+from distillery.feeds.url_guard import MAX_RESPONSE_BYTES
 
 if TYPE_CHECKING:
     from distillery.config import DistilleryConfig, FeedSourceConfig, TagsConfig
@@ -162,7 +163,12 @@ def _enriched_item_text(item: FeedItem, enriched_content: str | None) -> str:
     return truncate_content("\n".join(parts))
 
 
-def _build_adapter(source: FeedSourceConfig, *, user_agent: str | None = None) -> Any:
+def _build_adapter(
+    source: FeedSourceConfig,
+    *,
+    user_agent: str | None = None,
+    max_feed_bytes: int = MAX_RESPONSE_BYTES,
+) -> Any:
     """Instantiate the correct adapter for *source*.
 
     For GitHub sources the ``GITHUB_TOKEN`` environment variable is read and
@@ -174,6 +180,9 @@ def _build_adapter(source: FeedSourceConfig, *, user_agent: str | None = None) -
         user_agent: Optional User-Agent override forwarded to RSS adapters.
             ``None`` / empty string lets the adapter pick its default
             (project name + version + contact URL).
+        max_feed_bytes: Maximum accepted feed response body size in bytes,
+            forwarded to RSS adapters. Defaults to the library cap
+            (:data:`~distillery.feeds.url_guard.MAX_RESPONSE_BYTES`).
 
     Returns:
         An adapter instance with a ``.fetch()`` method.
@@ -199,7 +208,7 @@ def _build_adapter(source: FeedSourceConfig, *, user_agent: str | None = None) -
     elif source.source_type == "rss":
         from distillery.feeds.rss import RSSAdapter
 
-        return RSSAdapter(url=source.url, user_agent=user_agent)
+        return RSSAdapter(url=source.url, user_agent=user_agent, max_bytes=max_feed_bytes)
     else:
         raise ValueError(
             f"Unsupported source_type {source.source_type!r} for url {source.url!r}. "
@@ -909,7 +918,11 @@ class FeedPoller:
         """
         # Build adapter
         try:
-            adapter = _build_adapter(source, user_agent=self._config.feeds.user_agent or None)
+            adapter = _build_adapter(
+                source,
+                user_agent=self._config.feeds.user_agent or None,
+                max_feed_bytes=self._config.feeds.max_feed_bytes,
+            )
         except ValueError as exc:
             result.errors.append(f"Failed to build adapter: {exc}")
             logger.warning("FeedPoller: %s", exc)

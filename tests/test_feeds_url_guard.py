@@ -200,6 +200,31 @@ class TestFetchFeedBytes:
     def test_default_size_cap_is_five_mib(self) -> None:
         assert MAX_RESPONSE_BYTES == 5 * 1024 * 1024
 
+    def test_six_mib_body_rejected_under_five_mib_cap(self) -> None:
+        # A ~6 MiB feed (e.g. northflank.com/blog/rss, ~6.90 MB) exceeds the
+        # library default of 5 MiB and must be rejected when that cap applies.
+        body = b"x" * (6 * 1024 * 1024)
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=body)
+
+        with _client(handler) as client, pytest.raises(ResponseTooLargeError):
+            fetch_feed_bytes(client, f"http://{_PUBLIC}/feed", {}, max_bytes=5 * 1024 * 1024)
+
+    def test_six_mib_body_accepted_under_ten_mib_cap(self) -> None:
+        # The same ~6 MiB feed is accepted once the configurable cap is raised
+        # to 10 MiB (the FeedsConfig default), proving the cap is honoured.
+        body = b"x" * (6 * 1024 * 1024)
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=body)
+
+        with _client(handler) as client:
+            fetched = fetch_feed_bytes(
+                client, f"http://{_PUBLIC}/feed", {}, max_bytes=10 * 1024 * 1024
+            )
+        assert len(fetched) == len(body)
+
     def test_http_error_propagates(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(503)

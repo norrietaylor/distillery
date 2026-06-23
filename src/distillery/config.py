@@ -364,6 +364,11 @@ class FeedsConfig:
             override in :func:`~distillery.feeds.rss._normalise_feed_url`
             still wins for ``reddit.com`` hosts.
         digest: ``/radar`` candidate-set settings (look-back window, etc.).
+        max_feed_bytes: Maximum accepted feed response body size in bytes.
+            Defaults to ``10 * 1024 * 1024`` (10 MiB).  Full-content feeds can
+            exceed the library default of 5 MiB
+            (:data:`~distillery.feeds.url_guard.MAX_RESPONSE_BYTES`); raise this
+            to accept larger feeds.  Must be a positive integer.
     """
 
     sources: list[FeedSourceConfig] = field(default_factory=list)
@@ -371,6 +376,7 @@ class FeedsConfig:
     reader: ReaderConfig = field(default_factory=ReaderConfig)
     user_agent: str = ""
     digest: DigestConfig = field(default_factory=DigestConfig)
+    max_feed_bytes: int = 10 * 1024 * 1024
 
 
 @dataclass
@@ -996,6 +1002,7 @@ def _parse_feeds(raw: dict[str, Any]) -> FeedsConfig:
         raw: Mapping (typically from YAML) containing any of the following keys:
             - ``sources`` (list of feed source mappings, default ``[]``)
             - ``thresholds`` (mapping with ``alert`` and ``digest`` keys)
+            - ``max_feed_bytes`` (int, default ``10 * 1024 * 1024``)
 
     Returns:
         A populated :class:`FeedsConfig` instance.
@@ -1033,6 +1040,10 @@ def _parse_feeds(raw: dict[str, Any]) -> FeedsConfig:
         raise ValueError(f"feeds.user_agent must be a string, got: {type(user_agent_raw).__name__}")
     user_agent = user_agent_raw.strip()
 
+    max_feed_bytes = _parse_strict_int(
+        raw.get("max_feed_bytes", 10 * 1024 * 1024), "feeds.max_feed_bytes"
+    )
+
     digest_raw = raw.get("digest", {}) or {}
     if not isinstance(digest_raw, dict):
         raise ValueError(f"feeds.digest must be a YAML mapping, got: {type(digest_raw).__name__}")
@@ -1044,6 +1055,7 @@ def _parse_feeds(raw: dict[str, Any]) -> FeedsConfig:
         reader=reader,
         user_agent=user_agent,
         digest=digest_cfg,
+        max_feed_bytes=max_feed_bytes,
     )
 
 
@@ -1349,6 +1361,7 @@ def _validate(config: DistilleryConfig) -> None:
             - feeds.thresholds.alert is not between 0.0 and 1.0.
             - feeds.thresholds.digest is not between 0.0 and 1.0.
             - feeds.thresholds.digest exceeds feeds.thresholds.alert.
+            - feeds.max_feed_bytes is not a positive integer.
     """
     valid_backends = {"duckdb", "motherduck"}
     if config.storage.backend not in valid_backends:
@@ -1462,6 +1475,11 @@ def _validate(config: DistilleryConfig) -> None:
     if digest > alert:
         raise ValueError(
             f"feeds.thresholds.digest ({digest}) must not exceed feeds.thresholds.alert ({alert})"
+        )
+    if config.feeds.max_feed_bytes <= 0:
+        raise ValueError(
+            "feeds.max_feed_bytes must be a positive integer, "
+            f"got: {config.feeds.max_feed_bytes}"
         )
 
     # Validate rate_limit settings.

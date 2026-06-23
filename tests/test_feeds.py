@@ -829,6 +829,50 @@ class TestRSSAdapter:
         with _mock_rss_http(handler), pytest.raises(ResponseTooLargeError):
             RSSAdapter("https://example.com/rss").fetch()
 
+    def test_default_max_bytes_is_library_cap(self) -> None:
+        from distillery.feeds.url_guard import MAX_RESPONSE_BYTES
+
+        adapter = RSSAdapter("https://example.com/rss")
+        assert adapter._max_bytes == MAX_RESPONSE_BYTES
+
+    def test_fetch_passes_max_bytes_through(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # The adapter must forward its configured cap to ``fetch_feed_bytes``.
+        captured: dict[str, int] = {}
+
+        def _fake_fetch(
+            client: httpx.Client, url: str, headers: dict[str, str], *, max_bytes: int, **_: object
+        ) -> bytes:
+            captured["max_bytes"] = max_bytes
+            return _RSS_XML
+
+        monkeypatch.setattr("distillery.feeds.rss.fetch_feed_bytes", _fake_fetch)
+        RSSAdapter("https://example.com/rss", max_bytes=10 * 1024 * 1024).fetch()
+        assert captured["max_bytes"] == 10 * 1024 * 1024
+
+    def test_fetch_accepts_six_mib_body_under_ten_mib_cap(self) -> None:
+        # A ~6 MiB full-content feed (e.g. northflank.com/blog/rss ~6.90 MB,
+        # smallcultfollowing.com/babysteps/atom.xml ~6.66 MB) is rejected under
+        # the 5 MiB library default but accepted once the adapter cap is raised
+        # to 10 MiB — proving the size cap is honoured and configurable.
+        from distillery.feeds.url_guard import ResponseTooLargeError
+
+        # A valid RSS document padded to ~6 MiB so parsing succeeds once the
+        # body is accepted.
+        padding = "y" * (6 * 1024 * 1024)
+        big_feed = _RSS_XML.replace(b"Content of first post", padding.encode())
+        assert len(big_feed) > 5 * 1024 * 1024
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=big_feed)
+
+        with _mock_rss_http(handler), pytest.raises(ResponseTooLargeError):
+            RSSAdapter("https://example.com/rss").fetch()
+
+        with _mock_rss_http(handler):
+            adapter = RSSAdapter("https://example.com/rss", max_bytes=10 * 1024 * 1024)
+            items = adapter.fetch()
+        assert len(items) == 2
+
     def test_pin_dns_overrides_getaddrinfo_within_scope(self) -> None:
         """``_pin_dns`` must force ``socket.getaddrinfo`` to return the pinned
         IP for the target host and only for the duration of the context.
