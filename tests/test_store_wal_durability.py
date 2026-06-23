@@ -577,12 +577,13 @@ class TestBackgroundWritesFlushWal:
 
 
 class TestCheckpointFailureEscalation:
-    """Swallowed checkpoint failures escalate to WARNING after a streak.
+    """Swallowed checkpoint failures escalate to WARNING + FORCE CHECKPOINT.
 
     ``_checkpoint_after_write`` deliberately never raises — but logging
     every failure at DEBUG hid the 2026-06-12 incident's WAL growth until
     replay was already poisoned.  Three consecutive failures now log at
-    WARNING; any success resets the streak.
+    WARNING and escalate to ``FORCE CHECKPOINT`` to flush the WAL despite
+    active writers (issue #648); any success resets the streak.
     """
 
     class _FailingConn:
@@ -606,8 +607,11 @@ class TestCheckpointFailureEscalation:
             assert warnings == [], "warned before the streak threshold"
             store._checkpoint_after_write(self._FailingConn())  # type: ignore[arg-type]
         warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
-        assert len(warnings) == 1
-        assert "3 times in a row" in warnings[0].message
+        messages = [r.message for r in warnings]
+        # The streak warning fires, and the threshold-crossing call escalates to
+        # FORCE CHECKPOINT — which here also fails on _FailingConn (issue #648).
+        assert any("3 times in a row" in m for m in messages)
+        assert any("FORCE CHECKPOINT also failed" in m for m in messages)
 
     def test_success_resets_failure_streak(self, mock_embedding_provider) -> None:
         store = DuckDBStore(db_path=":memory:", embedding_provider=mock_embedding_provider)
