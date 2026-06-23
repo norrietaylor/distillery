@@ -130,7 +130,7 @@ async def _handle_search(
         ``expand_graph=True`` results also include ``provenance`` and the envelope
         includes a ``graph_expansion`` field.
     """
-    from distillery.mcp.budget import EmbeddingBudgetError, record_and_check
+    from distillery.mcp.budget import EmbeddingBudgetError
 
     err = validate_required(arguments, "query")
     if err:
@@ -171,7 +171,9 @@ async def _handle_search(
     # --- embedding budget check (1 embed call per search) -------------------
     if cfg is not None:
         try:
-            record_and_check(store.connection, cfg.rate_limit.embedding_budget_daily)
+            await store.record_embedding_usage(
+                count=1, daily_limit=cfg.rate_limit.embedding_budget_daily
+            )
         except EmbeddingBudgetError as exc:
             return error_response("BUDGET_EXCEEDED", str(exc))
 
@@ -453,7 +455,7 @@ async def _handle_find_similar(
     Returns:
         MCP content list with a JSON payload of ``results`` and ``count``.
     """
-    from distillery.mcp.budget import EmbeddingBudgetError, record_and_check
+    from distillery.mcp.budget import EmbeddingBudgetError
 
     # --- new graph-extension parameters (parsed first so we can use them
     # when validating content/source_entry_id requirements below) ---------
@@ -555,7 +557,9 @@ async def _handle_find_similar(
     # --- embedding budget check (1 embed call) ----------------------------
     if cfg is not None:
         try:
-            record_and_check(store.connection, cfg.rate_limit.embedding_budget_daily)
+            await store.record_embedding_usage(
+                count=1, daily_limit=cfg.rate_limit.embedding_budget_daily
+            )
         except EmbeddingBudgetError as exc:
             return error_response("BUDGET_EXCEEDED", str(exc))
 

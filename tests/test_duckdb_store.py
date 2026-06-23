@@ -2233,6 +2233,88 @@ class TestCheckpointBackpressure:
         assert not any("Low free space" in r.message for r in caplog.records)
 
 
+class TestEmbeddingBudgetCounterDoesNotStarveCheckpoint:
+    """Issue #655 RC1: the budget counter must not race writes / CHECKPOINT.
+
+    The MCP store path increments the embedding-budget counter on every
+    store/store_batch/find_similar.  Before the fix that increment ran on the
+    shared writer connection *outside* ``_conn_lock``, racing the store's
+    serialized writes on a non-thread-safe ``DuckDBPyConnection``.  That
+    corrupted transaction state and left a transaction active across the
+    store's ``CHECKPOINT``, so plain ``CHECKPOINT`` failed with "there are
+    other write transactions active" — the WAL never flushed and grew without
+    bound, degrading every read.  Routing the counter through
+    :meth:`DuckDBStore.record_embedding_usage` (under ``_conn_lock``) fixes it.
+    """
+
+    async def test_concurrent_stores_and_budget_counter_keep_wal_bounded(
+        self, tmp_path, deterministic_embedding_provider
+    ) -> None:
+        """Concurrent store/store_batch + budget increments never abort a txn and
+        leave the WAL bounded (CHECKPOINT is not starved)."""
+        import asyncio
+
+        db_path = str(tmp_path / "budget_race.db")
+        store = DuckDBStore(
+            db_path=db_path,
+            embedding_provider=deterministic_embedding_provider,
+        )
+        await store.initialize()
+        errors: list[BaseException] = []
+
+        # daily_limit > 0 so the check+increment path actually runs.
+        daily_limit = 100_000
+
+        async def single_writer(n: int) -> None:
+            try:
+                # Mirror the MCP store path: budget increment then the write.
+                await store.record_embedding_usage(count=3, daily_limit=daily_limit)
+                await store.store(make_entry(content=f"single {n}"))
+            except BaseException as exc:  # noqa: BLE001  — capture any race fallout
+                errors.append(exc)
+
+        async def batch_writer(n: int) -> None:
+            try:
+                entries = [make_entry(content=f"batch {n}-{i}") for i in range(3)]
+                await store.record_embedding_usage(count=len(entries), daily_limit=daily_limit)
+                await store.store_batch(entries)
+            except BaseException as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        try:
+            await asyncio.gather(
+                *(single_writer(i) for i in range(20)),
+                *(batch_writer(i) for i in range(20)),
+            )
+
+            # (a) No transaction corruption surfaced anywhere.
+            assert errors == [], f"concurrent budget+store raised: {errors!r}"
+            transaction_markers = (
+                "other write transactions active",
+                "transaction is aborted",
+                "Conflict on update",
+                "within a transaction",
+            )
+            for exc in errors:
+                msg = str(exc)
+                assert not any(m in msg for m in transaction_markers), (
+                    f"transaction race surfaced: {exc!r}"
+                )
+
+            # (b) CHECKPOINT was never starved: the WAL sidecar stays bounded.
+            # Every write checkpoints, so the WAL is flushed; an active txn left
+            # by the racing counter would block CHECKPOINT and let it bloat.
+            wal_path = Path(db_path + ".wal")
+            if wal_path.exists():
+                wal_size = wal_path.stat().st_size
+                assert wal_size < 256 * 1024, (
+                    f"WAL grew to {wal_size} bytes — CHECKPOINT appears starved "
+                    "(budget counter racing writes, issue #655 RC1)"
+                )
+        finally:
+            await store.close()
+
+
 # ---------------------------------------------------------------------------
 # _sanitise_last_error helper
 #

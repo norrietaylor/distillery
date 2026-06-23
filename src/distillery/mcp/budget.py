@@ -16,15 +16,16 @@ from __future__ import annotations
 
 import datetime
 import logging
-import threading
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Serializes counter writes.  Per-call cursors are separate DuckDB
-# connections, so unserialized concurrent upserts of the same row hit
-# optimistic-concurrency conflicts ("Conflict on update!" / duplicate key).
-_write_lock = threading.Lock()
+# Counter writes are serialized by the store's ``_conn_lock``: production
+# callers reach this module only via ``DuckDBStore.record_embedding_usage``,
+# which runs the upsert under that lock (issue #655).  No module-level lock is
+# needed — adding one would let the budget write race the store's serialized
+# writes/CHECKPOINT on the non-thread-safe connection, which is the very bug
+# the store-side serialization fixes.
 
 
 class EmbeddingBudgetError(Exception):
@@ -73,16 +74,18 @@ def increment_usage(conn: Any, count: int = 1) -> int:
     Returns:
         The new total for today.
     """
-    with _write_lock:
-        return _increment_locked(conn, count)
+    return _increment_locked(conn, count)
 
 
 def _increment_locked(conn: Any, count: int) -> int:
-    """Upsert today's counter and return the new total.  Caller holds ``_write_lock``."""
+    """Upsert today's counter and return the new total.
+
+    Callers must already serialize access to *conn* (production goes through
+    the store's ``_conn_lock`` via ``DuckDBStore.record_embedding_usage``).
+    """
     key = _today_key()
-    # Use a per-call cursor so concurrent callers don't invalidate each
-    # other's result sets on the shared connection; the write lock keeps
-    # concurrent upserts of the same row from conflicting.
+    # Use a per-call cursor so a pending result set on the shared connection
+    # is not invalidated mid-fetch.
     cur = conn.cursor()
     cur.execute(
         "INSERT INTO _meta (key, value) VALUES (?, ?) "
@@ -131,11 +134,10 @@ def record_and_check(conn: Any, daily_limit: int, count: int = 1) -> int:
     """
     if daily_limit <= 0:
         return increment_usage(conn, count)  # unlimited, still track
-    # Check and increment under one lock: a check that releases the lock
-    # before the increment lets concurrent callers all pass the read and
-    # collectively overspend the cap.
-    with _write_lock:
-        used = get_daily_usage(conn)
-        if used + count > daily_limit:
-            raise EmbeddingBudgetError(used, daily_limit)
-        return _increment_locked(conn, count)
+    # Check then increment in one critical section so concurrent callers can't
+    # all pass the read and collectively overspend the cap.  The caller
+    # serializes access to *conn* (production: the store's ``_conn_lock``).
+    used = get_daily_usage(conn)
+    if used + count > daily_limit:
+        raise EmbeddingBudgetError(used, daily_limit)
+    return _increment_locked(conn, count)

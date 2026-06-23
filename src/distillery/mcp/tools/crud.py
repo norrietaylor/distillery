@@ -56,8 +56,9 @@ async def _budget_check_error_response(
 ) -> list[types.TextContent]:
     """Categorize a non-budget failure from the embedding-budget check (issue #557).
 
-    ``record_and_check`` touches the shared writer connection, so any of three
-    distinct conditions can surface here.  Collapsing them all to one opaque
+    ``store.record_embedding_usage`` touches the shared writer connection, so
+    any of three distinct conditions can surface here.  Collapsing them all to
+    one opaque
     ``INTERNAL`` (with a misleading "budget" message) hid retryable faults from
     clients.  Branch on the concrete exception type so clients can react:
 
@@ -305,7 +306,7 @@ async def _handle_store(
             omitted by default to keep store responses small; see issue #348.
           - `conflict_message`: guidance message when conflict candidates are returned.
     """
-    from distillery.mcp.budget import EmbeddingBudgetError, record_and_check
+    from distillery.mcp.budget import EmbeddingBudgetError
     from distillery.models import Entry, EntrySource, EntryType, VerificationStatus
 
     # --- input validation ---------------------------------------------------
@@ -402,8 +403,8 @@ async def _handle_store(
     embed_count = 1 if output_mode == "summary" else 3
     if cfg is not None:
         try:
-            record_and_check(
-                store.connection, cfg.rate_limit.embedding_budget_daily, count=embed_count
+            await store.record_embedding_usage(
+                count=embed_count, daily_limit=cfg.rate_limit.embedding_budget_daily
             )
         except EmbeddingBudgetError as exc:
             return error_response("BUDGET_EXCEEDED", str(exc))
@@ -881,7 +882,7 @@ async def _handle_store_batch(
             "stored"}``.  Failed items carry ``{"entry_id": null,
             "persisted": false, "error": {"code", "message", "details"?}}``.
     """
-    from distillery.mcp.budget import EmbeddingBudgetError, record_and_check
+    from distillery.mcp.budget import EmbeddingBudgetError
     from distillery.models import Entry
 
     entries_raw = arguments.get("entries")
@@ -946,8 +947,8 @@ async def _handle_store_batch(
     # rather than the raw input length.
     if cfg is not None:
         try:
-            record_and_check(
-                store.connection, cfg.rate_limit.embedding_budget_daily, count=len(built)
+            await store.record_embedding_usage(
+                count=len(built), daily_limit=cfg.rate_limit.embedding_budget_daily
             )
         except EmbeddingBudgetError as exc:
             return error_response("BUDGET_EXCEEDED", str(exc))
@@ -2239,10 +2240,12 @@ async def _handle_correct(
                 pass  # can't stat, skip check
 
     if cfg is not None:
-        from distillery.mcp.budget import EmbeddingBudgetError, record_and_check
+        from distillery.mcp.budget import EmbeddingBudgetError
 
         try:
-            record_and_check(store.connection, cfg.rate_limit.embedding_budget_daily, count=1)
+            await store.record_embedding_usage(
+                count=1, daily_limit=cfg.rate_limit.embedding_budget_daily
+            )
         except EmbeddingBudgetError as exc:
             return error_response("BUDGET_EXCEEDED", str(exc))
         except Exception as exc:  # noqa: BLE001
