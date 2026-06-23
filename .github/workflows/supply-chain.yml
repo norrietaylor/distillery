@@ -293,3 +293,15 @@ jobs:
             -f image_tag=sha-${{ steps.tags.outputs.short_sha }}
         env:
           GH_TOKEN: ${{ secrets.DISTILL_OPS_DEPLOY_TOKEN }}
+
+      - name: Trigger deploy in gominimal/distillery-gominimal
+        run: |
+          # The downstream fly-deploy.yml is a matrix over both Fly apps
+          # (distillery-mcp-gominimal + distillery-mcp-marketing), so a single
+          # container-published dispatch deploys both. Using repository_dispatch
+          # (not workflow_dispatch) also fires fly-image-smoke.yml in that repo,
+          # validating the new image's runtime contract alongside the deploy.
+          echo '{"event_type":"container-published","client_payload":{"image_tag":"sha-${{ steps.tags.outputs.short_sha }}"}}' \
+            | gh api repos/gominimal/distillery-gominimal/dispatches --input -
+        env:
+          GH_TOKEN: ${{ secrets.GOMINIMAL_DEPLOY_TOKEN }}
