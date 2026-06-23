@@ -1342,6 +1342,75 @@ class TestCorruptWalQuarantine:
         finally:
             recovered.close()
 
+    async def test_reopen_failure_surfaces_when_wal_restore_also_fails(
+        self,
+        deterministic_embedding_provider: object,
+        tmp_path,
+        monkeypatch,
+        caplog,
+    ) -> None:
+        """If reopen fails AND the WAL restore fails, surface — never swallow.
+
+        Normal reopen-failure behaviour restores the quarantined WAL and
+        re-raises the original replay error so the real failure surfaces.
+        But if that restore ``rename`` ALSO fails, suppressing the OSError
+        would leave the WAL missing — a later startup could then proceed
+        WITHOUT the unreplayed bytes (silent data loss).  This drives both
+        failures and asserts the original error surfaces (chaining the
+        restore error) and the quarantine sidecar is left in place for
+        manual recovery.
+        """
+        db_path = str(tmp_path / "restore_fail.db")
+        conn = duckdb.connect(db_path)
+        conn.close()
+
+        wal_path = Path(db_path + ".wal")
+        wal_path.write_bytes(b"unreplayed-bytes")
+
+        store = DuckDBStore(
+            db_path=db_path,
+            embedding_provider=deterministic_embedding_provider,
+            hybrid_search=False,
+        )
+
+        # Force reopen-after-quarantine to fail so we enter the restore branch.
+        def _fail_reopen() -> object:
+            raise duckdb.Error("reopen still fails")
+
+        monkeypatch.setattr(store, "_open_connection", _fail_reopen)
+
+        # Let the quarantine rename (wal -> *.corrupt.*) succeed via the real
+        # implementation, but make the restore rename (*.corrupt.* -> wal) fail.
+        real_rename = Path.rename
+
+        def _rename(self: Path, target):  # type: ignore[no-untyped-def]
+            if self.name.endswith(".wal"):
+                return real_rename(self, target)
+            raise OSError("restore rename refused")
+
+        monkeypatch.setattr(Path, "rename", _rename)
+
+        replay_error = duckdb.Error(
+            "Failure while replaying WAL file: serialization error"
+        )
+        with caplog.at_level("ERROR"):  # noqa: SIM117
+            with pytest.raises(duckdb.Error, match="replaying WAL"):
+                store._recover_from_wal_replay_failure(replay_error)  # noqa: SLF001
+
+        # The quarantine sidecar must remain — it now holds the only copy of
+        # the unreplayed bytes — and the original WAL must NOT be back.
+        backups = list(tmp_path.glob("*.wal.corrupt.*"))
+        assert len(backups) == 1, f"quarantine sidecar must remain, got {backups}"
+        assert backups[0].read_bytes() == b"unreplayed-bytes"
+        assert not wal_path.exists(), "WAL must not be silently restored"
+
+        # A loud ERROR points the operator at the surviving sidecar.
+        errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
+        assert any("WAL restore FAILED" in m for m in errors), (
+            "a restore failure must log a loud ERROR, not be swallowed"
+        )
+        assert any(str(backups[0]) in m for m in errors)
+
 
 # ---------------------------------------------------------------------------
 # Hybrid search (BM25 + vector RRF fusion with recency decay)

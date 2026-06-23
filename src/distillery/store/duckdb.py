@@ -783,8 +783,30 @@ class DuckDBStore:
             # Reopening still failed: the WAL was not the problem.  Restore
             # it so we do not leave a misleading ``.corrupt`` sidecar, then
             # re-raise the original error so the real failure surfaces.
-            with contextlib.suppress(OSError):
+            try:
                 backup_path.rename(wal_path)
+            except OSError as restore_exc:
+                # Restoring the WAL failed too: the quarantine sidecar now
+                # holds the only copy of the unreplayed bytes.  Silently
+                # suppressing this would leave the WAL missing, so a later
+                # startup could proceed WITHOUT those bytes — the exact
+                # silent-data-loss path the rollback-on-reopen-failure
+                # guarantee exists to prevent.  Fail loud and tell the
+                # operator where the bytes are.
+                logger.error(
+                    "WAL restore FAILED after reopen also failed: could not "
+                    "move quarantined WAL %s back to %s for database %s. The "
+                    "unreplayed bytes remain ONLY in the quarantine sidecar "
+                    "%s — restore it manually before reopening to avoid "
+                    "silent data loss. Original replay failure: %s",
+                    backup_path,
+                    wal_path,
+                    self._db_path,
+                    backup_path,
+                    exc,
+                    exc_info=True,
+                )
+                raise exc from restore_exc
             raise exc from None
 
         if is_fts_replay_failure:
