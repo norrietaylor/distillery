@@ -484,14 +484,33 @@ class DuckDBStore:
             # visible before the WAL becomes unreplayable.
             self._checkpoint_failures += 1
             if self._checkpoint_failures >= _FORCE_CHECKPOINT_AFTER_FAILURES:
-                logger.warning(
-                    "CHECKPOINT after write failed %d times in a row — "
-                    "WAL is accumulating un-flushed writes; forcing checkpoint "
-                    "(non-fatal): %s",
-                    self._checkpoint_failures,
-                    exc,
+                # FORCE CHECKPOINT aborts active write transactions, so it is
+                # only appropriate for the writer-contention case it is meant
+                # to clear (issue #648).  For unrelated failures (disk-full,
+                # permissions) forcing aborts concurrent writers for no
+                # benefit and does not fix the failure — log and wait instead.
+                message = str(exc)
+                is_contention = (
+                    "other write transactions active" in message
+                    or "Try using FORCE CHECKPOINT" in message
                 )
-                self._force_checkpoint(conn)
+                if is_contention:
+                    logger.warning(
+                        "CHECKPOINT after write failed %d times in a row — "
+                        "WAL is accumulating un-flushed writes; forcing checkpoint "
+                        "(non-fatal): %s",
+                        self._checkpoint_failures,
+                        exc,
+                    )
+                    self._force_checkpoint(conn)
+                else:
+                    logger.warning(
+                        "CHECKPOINT after write failed %d times in a row — "
+                        "WAL is accumulating un-flushed writes; not forcing "
+                        "(non-contention failure, non-fatal): %s",
+                        self._checkpoint_failures,
+                        exc,
+                    )
             else:
                 logger.debug("CHECKPOINT after write failed (non-fatal): %s", exc)
 

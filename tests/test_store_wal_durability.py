@@ -584,11 +584,18 @@ class TestCheckpointFailureEscalation:
     replay was already poisoned.  Three consecutive failures now log at
     WARNING and escalate to ``FORCE CHECKPOINT`` to flush the WAL despite
     active writers (issue #648); any success resets the streak.
+
+    FORCE CHECKPOINT aborts active write transactions, so escalation only
+    happens for the writer-contention failure it is meant to clear — hence
+    ``_FailingConn`` raises that specific error.
     """
 
     class _FailingConn:
         def execute(self, sql: str) -> None:
-            raise duckdb.Error("checkpoint refused")
+            raise duckdb.Error(
+                "Cannot CHECKPOINT: there are other write transactions active. "
+                "Try using FORCE CHECKPOINT"
+            )
 
     class _OkConn:
         def execute(self, sql: str) -> None:

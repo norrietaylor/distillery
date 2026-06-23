@@ -1897,8 +1897,12 @@ class TestCheckpointBackpressure:
 
         s = self._file_store(tmp_path, mock_embedding_provider)
         mock_conn = MagicMock()
-        # Both plain and forced checkpoints fail.
-        mock_conn.execute.side_effect = duckdb.Error("checkpoint blocked")
+        # Both plain and forced checkpoints fail.  The plain CHECKPOINT must
+        # raise the writer-contention error so FORCE CHECKPOINT is attempted.
+        mock_conn.execute.side_effect = duckdb.Error(
+            "Cannot CHECKPOINT: there are other write transactions active. "
+            "Try using FORCE CHECKPOINT"
+        )
 
         for _ in range(_FORCE_CHECKPOINT_AFTER_FAILURES):
             s._checkpoint_after_write(mock_conn)  # noqa: SLF001
@@ -1909,6 +1913,34 @@ class TestCheckpointBackpressure:
         )
         # ... but since it also failed the streak is NOT reset.
         assert s._checkpoint_failures == _FORCE_CHECKPOINT_AFTER_FAILURES  # noqa: SLF001
+
+    async def test_non_contention_failure_does_not_force_checkpoint(
+        self, tmp_path, mock_embedding_provider
+    ) -> None:
+        """A generic (non-contention) failure past the threshold never forces.
+
+        FORCE CHECKPOINT aborts active write transactions, so it is reserved
+        for the writer-contention case (issue #648).  An unrelated failure
+        (disk-full, permissions) must not escalate to FORCE CHECKPOINT even
+        once the streak crosses the threshold.
+        """
+        from unittest.mock import MagicMock, call
+
+        s = self._file_store(tmp_path, mock_embedding_provider)
+        mock_conn = MagicMock()
+        # A non-contention failure (e.g. disk-full / permissions) on every
+        # plain CHECKPOINT.
+        mock_conn.execute.side_effect = duckdb.Error("IO Error: No space left on device")
+
+        for _ in range(_FORCE_CHECKPOINT_AFTER_FAILURES + 1):
+            s._checkpoint_after_write(mock_conn)  # noqa: SLF001
+
+        # FORCE CHECKPOINT must never be issued for a non-contention failure,
+        # even though the streak has crossed the threshold.
+        assert call("FORCE CHECKPOINT") not in mock_conn.execute.call_args_list
+        assert (
+            s._checkpoint_failures == _FORCE_CHECKPOINT_AFTER_FAILURES + 1  # noqa: SLF001
+        )
 
     async def test_disk_backpressure_warns_when_free_space_low(
         self, tmp_path, mock_embedding_provider, monkeypatch, caplog
