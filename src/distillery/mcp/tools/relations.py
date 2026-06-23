@@ -65,6 +65,7 @@ _VALID_RELATION_TYPES = {
     "merge_source",
     "sync_source",
     "mentions",
+    "chunk",
 }
 
 
