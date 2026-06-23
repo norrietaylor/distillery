@@ -51,6 +51,7 @@ dev = [
     "mypy>=1.0",
     "ruff>=0.1.0",
     "pytest-cov>=4.0",
+    "pytest-timeout>=2.1.0",
     "types-PyYAML>=6.0",
     "types-defusedxml>=0.7.0",
     "pytest-httpx>=0.30.0",
@@ -87,6 +88,13 @@ packages = ["src/distillery"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = ["-v", "--strict-markers", "--tb=short"]
+# Per-test wall-clock cap so a single deadlocked test can never hang CI for the
+# 6-hour job default. 120s is far above the slowest real test (~seconds) yet
+# well below a hang. ``thread`` method reliably fires even when the hang is
+# inside a C extension (DuckDB) that ignores SIGALRM, and dumps every thread's
+# stack on expiry so the culprit is identifiable.
+timeout = 120
+timeout_method = "thread"
 markers = [
     "unit: unit tests",
     "integration: integration tests",
