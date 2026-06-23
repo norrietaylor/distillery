@@ -71,6 +71,7 @@ _VALID_RELATION_TYPES = {
 async def _handle_relations(
     store: Any,
     arguments: dict[str, Any],
+    cfg: Any = None,
 ) -> list[types.TextContent]:
     """Handle the ``distillery_relations`` tool.
 
@@ -80,6 +81,7 @@ async def _handle_relations(
     Args:
         store: An initialised storage backend with relation methods.
         arguments: Parsed tool arguments dict.
+        cfg: Optional DistilleryConfig — required for action='promote_entities'.
 
     Returns:
         A structured MCP success or error response.
@@ -92,11 +94,11 @@ async def _handle_relations(
         )
     action = action_raw.strip().lower()
 
-    if action not in ("add", "get", "remove", "traverse", "metrics", "reconcile"):
+    if action not in ("add", "get", "remove", "traverse", "metrics", "reconcile", "promote_entities"):
         return error_response(
             "INVALID_PARAMS",
             "action must be one of 'add', 'get', 'remove', 'traverse', 'metrics', "
-            f"'reconcile'; got: {action!r}",
+            f"'reconcile', 'promote_entities'; got: {action!r}",
         )
 
     # ------------------------------------------------------------------
@@ -387,6 +389,33 @@ async def _handle_relations(
                 "metadata_links": counts.get("metadata_links", 0),
                 "wikilink_links": counts.get("wikilink_links", 0),
                 "total": counts.get("total", 0),
+            }
+        )
+
+    # ------------------------------------------------------------------
+    # action == "promote_entities"
+    # ------------------------------------------------------------------
+    if action == "promote_entities":
+        threshold = 3  # default
+        reserved_prefixes: list[str] | None = None
+        if cfg is not None:
+            tags_cfg = getattr(cfg, "tags", None)
+            if tags_cfg is not None:
+                threshold = getattr(tags_cfg, "entity_promotion_threshold", threshold)
+                reserved_prefixes = getattr(tags_cfg, "reserved_prefixes", None)
+        try:
+            counts = await store.promote_entities(threshold, reserved_prefixes)
+        except Exception:  # noqa: BLE001
+            logger.exception("distillery_relations promote_entities: unexpected error")
+            return error_response("INTERNAL", "Failed to promote entities")
+
+        return success_response(
+            {
+                "action": "promote_entities",
+                "entities_created": counts.get("entities_created", 0),
+                "entities_reused": counts.get("entities_reused", 0),
+                "mentions_created": counts.get("mentions_created", 0),
+                "threshold": threshold,
             }
         )
 
