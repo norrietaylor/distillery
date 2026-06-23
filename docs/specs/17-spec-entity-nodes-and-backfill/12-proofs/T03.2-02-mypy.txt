@@ -1,0 +1,7 @@
+Type: cli
+Command: mypy --strict src/distillery/feeds/github_sync.py
+Expected: no type errors
+Timestamp: 2026-06-23T00:00:00Z
+Status: PASS
+
+Success: no issues found in 1 source file

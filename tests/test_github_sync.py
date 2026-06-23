@@ -927,6 +927,206 @@ class TestBackfillGithubMetadataIntegration:
 
 
 # ---------------------------------------------------------------------------
+# T03.2 — Materialize citation/depends_on structural edges during gh-sync
+# ---------------------------------------------------------------------------
+
+
+class TestStructuralEdgeMaterialization:
+    """Typed structural edges (citation / depends_on) during gh-sync (R3.1, R3.2, R3.3)."""
+
+    @pytest.mark.integration
+    async def test_pr_citation_edge_to_stored_issue(self, store, httpx_mock) -> None:  # type: ignore[no-untyped-def]
+        """R3.1: A synced PR with a closing keyword creates a citation edge to the issue.
+
+        Scenario:
+          - Issue #42 is already stored.
+          - PR #10 has "Closes #42" in its body.
+          - After sync, a ``citation`` edge PR -> issue must exist.
+        """
+        # 1. Store issue #42 first (sync it in).
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/owner/repo/issues\?.*"),
+            json=[_mock_issue(number=42, title="Issue to fix", body="A known bug")],
+        )
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/owner/repo/issues/42/comments.*"),
+            json=[],
+        )
+        adapter = GitHubSyncAdapter(store=store, url="owner/repo")
+        await adapter.sync()
+
+        # 2. Sync the PR that closes #42.
+        pr_payload = _mock_issue(
+            number=10,
+            title="Fix the bug",
+            body="Closes #42",
+            is_pr=True,
+        )
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/owner/repo/issues\?.*"),
+            json=[pr_payload],
+        )
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/owner/repo/issues/10/comments.*"),
+            json=[],
+        )
+        result = await adapter.sync()
+
+        # relations_created includes the new citation edge.
+        assert result.relations_created >= 1
+
+        # Locate the PR and issue entries.
+        entries = await store.list_entries(filters={"entry_type": "github"}, limit=10, offset=0)
+        pr_entry = next(e for e in entries if e.metadata["ref_number"] == 10)
+        issue_entry = next(e for e in entries if e.metadata["ref_number"] == 42)
+
+        # Verify the citation edge exists.
+        relations = await store.get_related(pr_entry.id, direction="outgoing")
+        citation_rels = [r for r in relations if r["relation_type"] == "citation"]
+        assert len(citation_rels) == 1
+        assert citation_rels[0]["to_id"] == issue_entry.id
+
+    @pytest.mark.integration
+    async def test_sub_issue_depends_on_edge_to_stored_epic(self, store, httpx_mock) -> None:  # type: ignore[no-untyped-def]
+        """R3.2: A synced sub-issue with tracked-by creates a depends_on edge to the epic.
+
+        Scenario:
+          - Epic #653 is already stored.
+          - Sub-issue #100 has "Tracked by #653" in its body.
+          - After sync, a ``depends_on`` edge sub-issue -> epic must exist.
+        """
+        # 1. Store epic #653 first.
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/owner/repo/issues\?.*"),
+            json=[_mock_issue(number=653, title="Epic: entity graph", body="The big epic")],
+        )
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/owner/repo/issues/653/comments.*"),
+            json=[],
+        )
+        adapter = GitHubSyncAdapter(store=store, url="owner/repo")
+        await adapter.sync()
+
+        # 2. Sync the sub-issue that is tracked by #653.
+        sub_issue_payload = _mock_issue(
+            number=100,
+            title="Sub-task",
+            body="Tracked by #653",
+        )
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/owner/repo/issues\?.*"),
+            json=[sub_issue_payload],
+        )
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/owner/repo/issues/100/comments.*"),
+            json=[],
+        )
+        result = await adapter.sync()
+
+        assert result.relations_created >= 1
+
+        entries = await store.list_entries(filters={"entry_type": "github"}, limit=10, offset=0)
+        sub_entry = next(e for e in entries if e.metadata["ref_number"] == 100)
+        epic_entry = next(e for e in entries if e.metadata["ref_number"] == 653)
+
+        relations = await store.get_related(sub_entry.id, direction="outgoing")
+        depends_on_rels = [r for r in relations if r["relation_type"] == "depends_on"]
+        assert len(depends_on_rels) == 1
+        assert depends_on_rels[0]["to_id"] == epic_entry.id
+
+    @pytest.mark.integration
+    async def test_missing_target_skips_silently(self, store, httpx_mock) -> None:  # type: ignore[no-untyped-def]
+        """R3.3: When the referenced issue is not in the store, sync completes without error.
+
+        Scenario:
+          - No entry exists for issue #999.
+          - A PR references "Closes #999".
+          - gh-sync should not raise; no edge to #999 is created.
+        """
+        pr_payload = _mock_issue(
+            number=5,
+            title="PR with missing target",
+            body="Closes #999",
+            is_pr=True,
+        )
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/owner/repo/issues\?.*"),
+            json=[pr_payload],
+        )
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/owner/repo/issues/5/comments.*"),
+            json=[],
+        )
+        adapter = GitHubSyncAdapter(store=store, url="owner/repo")
+        result = await adapter.sync()
+
+        # Sync should succeed.
+        assert result.created == 1
+
+        entries = await store.list_entries(filters={"entry_type": "github"}, limit=10, offset=0)
+        pr_entry = entries[0]
+
+        # No edges to a non-existent target.
+        relations = await store.get_related(pr_entry.id, direction="outgoing")
+        citation_rels = [r for r in relations if r["relation_type"] == "citation"]
+        assert citation_rels == []
+
+    @pytest.mark.integration
+    async def test_structural_edges_are_idempotent(self, store, httpx_mock) -> None:  # type: ignore[no-untyped-def]
+        """R3.3: Re-syncing does not duplicate structural edges.
+
+        Scenario:
+          - Issue #42 is stored and PR #10 closes it.
+          - First sync creates the citation edge.
+          - Second sync of the same PR does NOT add a second citation edge.
+        """
+        # Store issue #42.
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/owner/repo/issues\?.*"),
+            json=[_mock_issue(number=42, title="Issue to fix")],
+        )
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/owner/repo/issues/42/comments.*"),
+            json=[],
+        )
+        adapter = GitHubSyncAdapter(store=store, url="owner/repo")
+        await adapter.sync()
+
+        pr_payload = _mock_issue(number=10, title="Fix", body="Closes #42", is_pr=True)
+
+        # First sync of the PR.
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/owner/repo/issues\?.*"),
+            json=[pr_payload],
+        )
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/owner/repo/issues/10/comments.*"),
+            json=[],
+        )
+        result1 = await adapter.sync()
+        assert result1.relations_created >= 1
+
+        # Second sync of the same PR.
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/owner/repo/issues\?.*"),
+            json=[pr_payload],
+        )
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/owner/repo/issues/10/comments.*"),
+            json=[],
+        )
+        await adapter.sync()
+
+        entries = await store.list_entries(filters={"entry_type": "github"}, limit=10, offset=0)
+        pr_entry = next(e for e in entries if e.metadata["ref_number"] == 10)
+
+        relations = await store.get_related(pr_entry.id, direction="outgoing")
+        citation_rels = [r for r in relations if r["relation_type"] == "citation"]
+        # Exactly one citation edge, not two.
+        assert len(citation_rels) == 1
+
+
+# ---------------------------------------------------------------------------
 # Static audit — defense-in-depth per PR #112: every httpx.AsyncClient site
 # must pin verify=True explicitly so a future default change cannot silently
 # disable TLS verification (regression guard for #368).
