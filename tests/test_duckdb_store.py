@@ -16,7 +16,7 @@ import duckdb
 import pytest
 
 from distillery.models import Entry, EntrySource, EntryStatus, EntryType
-from distillery.store.duckdb import _FORCE_CHECKPOINT_AFTER_FAILURES, DuckDBStore
+from distillery.store.duckdb import _WARN_AFTER_CHECKPOINT_FAILURES, DuckDBStore
 from distillery.store.protocol import SearchResult
 from tests.conftest import make_entry
 
@@ -2085,15 +2085,19 @@ class TestHybridGracefulFallback:
 
 
 class TestCheckpointBackpressure:
-    """CHECKPOINT starvation guards: FORCE CHECKPOINT + disk backpressure (issue #648).
+    """CHECKPOINT starvation guards: WARNING + disk backpressure (issue #648).
 
     Plain ``CHECKPOINT`` after each write fails under concurrent write
     transactions ("there are other write transactions active"); left
-    uncorrected the WAL grows without bound and fills the volume.  These
-    tests drive the *mechanism* (a mock connection whose ``CHECKPOINT``
-    raises that error; a monkeypatched ``os.statvfs``) rather than real
-    concurrency / a real full disk.  A file-backed DB under ``tmp_path``
-    is used wherever a real local path is required.
+    uncorrected the WAL grows without bound and fills the volume.  We
+    surface that via a WARNING (and the disk-backpressure guard) but
+    deliberately do **not** escalate to ``FORCE CHECKPOINT``: it blocks
+    indefinitely when another connection/process holds a write transaction,
+    which would hold ``_conn_lock`` forever and hang the process (regression
+    from #648).  These tests drive the *mechanism* (a mock connection whose
+    ``CHECKPOINT`` raises that error; a monkeypatched ``os.statvfs``) rather
+    than real concurrency / a real full disk.  A file-backed DB under
+    ``tmp_path`` is used wherever a real local path is required.
     """
 
     @staticmethod
@@ -2103,90 +2107,41 @@ class TestCheckpointBackpressure:
             embedding_provider=mock_embedding_provider,
         )
 
-    async def test_force_checkpoint_issued_after_failure_streak(
-        self, tmp_path, mock_embedding_provider
+    async def test_failure_streak_warns_but_never_forces_checkpoint(
+        self, tmp_path, mock_embedding_provider, caplog
     ) -> None:
-        """Once the streak crosses the threshold, FORCE CHECKPOINT is issued."""
-        from unittest.mock import MagicMock, call
+        """Crossing the threshold logs a WARNING but never issues FORCE CHECKPOINT.
 
-        s = self._file_store(tmp_path, mock_embedding_provider)
-
-        active = duckdb.Error(
-            "Cannot CHECKPOINT: there are other write transactions active. "
-            "Try using FORCE CHECKPOINT"
-        )
-
-        def _execute(sql: str) -> None:
-            if sql == "CHECKPOINT":
-                raise active
-            # FORCE CHECKPOINT succeeds.
-
-        mock_conn = MagicMock()
-        mock_conn.execute.side_effect = _execute
-
-        # Below the threshold: only plain CHECKPOINT is attempted, no force.
-        for _ in range(_FORCE_CHECKPOINT_AFTER_FAILURES - 1):
-            s._checkpoint_after_write(mock_conn)  # noqa: SLF001
-        assert call("FORCE CHECKPOINT") not in mock_conn.execute.call_args_list
-        assert s._checkpoint_failures == _FORCE_CHECKPOINT_AFTER_FAILURES - 1  # noqa: SLF001
-
-        # Crossing the threshold issues FORCE CHECKPOINT, which succeeds and
-        # resets the streak to 0.
-        s._checkpoint_after_write(mock_conn)  # noqa: SLF001
-        assert call("FORCE CHECKPOINT") in mock_conn.execute.call_args_list
-        assert s._checkpoint_failures == 0  # noqa: SLF001
-
-    async def test_force_checkpoint_own_failure_keeps_streak(
-        self, tmp_path, mock_embedding_provider
-    ) -> None:
-        """If FORCE CHECKPOINT also fails, the streak is preserved (not reset)."""
-        from unittest.mock import MagicMock
-
-        s = self._file_store(tmp_path, mock_embedding_provider)
-        mock_conn = MagicMock()
-        # Both plain and forced checkpoints fail.  The plain CHECKPOINT must
-        # raise the writer-contention error so FORCE CHECKPOINT is attempted.
-        mock_conn.execute.side_effect = duckdb.Error(
-            "Cannot CHECKPOINT: there are other write transactions active. "
-            "Try using FORCE CHECKPOINT"
-        )
-
-        for _ in range(_FORCE_CHECKPOINT_AFTER_FAILURES):
-            s._checkpoint_after_write(mock_conn)  # noqa: SLF001
-
-        # FORCE CHECKPOINT was attempted on the threshold-crossing call ...
-        assert any(
-            c.args == ("FORCE CHECKPOINT",) for c in mock_conn.execute.call_args_list
-        )
-        # ... but since it also failed the streak is NOT reset.
-        assert s._checkpoint_failures == _FORCE_CHECKPOINT_AFTER_FAILURES  # noqa: SLF001
-
-    async def test_non_contention_failure_does_not_force_checkpoint(
-        self, tmp_path, mock_embedding_provider
-    ) -> None:
-        """A generic (non-contention) failure past the threshold never forces.
-
-        FORCE CHECKPOINT aborts active write transactions, so it is reserved
-        for the writer-contention case (issue #648).  An unrelated failure
-        (disk-full, permissions) must not escalate to FORCE CHECKPOINT even
-        once the streak crosses the threshold.
+        ``FORCE CHECKPOINT`` can block indefinitely when another
+        connection/process holds a write transaction, which under
+        ``_conn_lock`` would hang the process (regression from #648), so it
+        must never be issued — even under sustained writer contention.
         """
         from unittest.mock import MagicMock, call
 
         s = self._file_store(tmp_path, mock_embedding_provider)
         mock_conn = MagicMock()
-        # A non-contention failure (e.g. disk-full / permissions) on every
-        # plain CHECKPOINT.
-        mock_conn.execute.side_effect = duckdb.Error("IO Error: No space left on device")
+        # The writer-contention error on every plain CHECKPOINT — the exact
+        # condition that previously triggered the (now-removed) force path.
+        mock_conn.execute.side_effect = duckdb.Error(
+            "Cannot CHECKPOINT: there are other write transactions active. "
+            "Try using FORCE CHECKPOINT"
+        )
 
-        for _ in range(_FORCE_CHECKPOINT_AFTER_FAILURES + 1):
-            s._checkpoint_after_write(mock_conn)  # noqa: SLF001
+        with caplog.at_level("WARNING", logger="distillery.store.duckdb"):
+            for _ in range(_WARN_AFTER_CHECKPOINT_FAILURES + 1):
+                s._checkpoint_after_write(mock_conn)  # noqa: SLF001
 
-        # FORCE CHECKPOINT must never be issued for a non-contention failure,
-        # even though the streak has crossed the threshold.
+        # FORCE CHECKPOINT must never be issued, even under sustained contention.
         assert call("FORCE CHECKPOINT") not in mock_conn.execute.call_args_list
+        # The streak keeps climbing (no reset) and a WARNING is surfaced.
         assert (
-            s._checkpoint_failures == _FORCE_CHECKPOINT_AFTER_FAILURES + 1  # noqa: SLF001
+            s._checkpoint_failures == _WARN_AFTER_CHECKPOINT_FAILURES + 1  # noqa: SLF001
+        )
+        assert any(
+            "WAL is accumulating un-flushed writes" in r.message
+            for r in caplog.records
+            if r.levelname == "WARNING"
         )
 
     async def test_disk_backpressure_warns_when_free_space_low(

@@ -577,17 +577,19 @@ class TestBackgroundWritesFlushWal:
 
 
 class TestCheckpointFailureEscalation:
-    """Swallowed checkpoint failures escalate to WARNING + FORCE CHECKPOINT.
+    """Swallowed checkpoint failures are surfaced via WARNING (we do not force).
 
     ``_checkpoint_after_write`` deliberately never raises — but logging
     every failure at DEBUG hid the 2026-06-12 incident's WAL growth until
     replay was already poisoned.  Three consecutive failures now log at
-    WARNING and escalate to ``FORCE CHECKPOINT`` to flush the WAL despite
-    active writers (issue #648); any success resets the streak.
+    WARNING so persistent WAL growth is visible (issue #648); any success
+    resets the streak.
 
-    FORCE CHECKPOINT aborts active write transactions, so escalation only
-    happens for the writer-contention failure it is meant to clear — hence
-    ``_FailingConn`` raises that specific error.
+    We deliberately do **not** escalate to ``FORCE CHECKPOINT``: it blocks
+    indefinitely when another connection/process holds a write transaction,
+    which under ``_conn_lock`` would hang the process (regression from
+    #648).  ``_FailingConn`` raises the writer-contention error to exercise
+    exactly that previously-forcing path and confirm it now only warns.
     """
 
     class _FailingConn:
@@ -615,10 +617,9 @@ class TestCheckpointFailureEscalation:
             store._checkpoint_after_write(self._FailingConn())  # type: ignore[arg-type]
         warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
         messages = [r.message for r in warnings]
-        # The streak warning fires, and the threshold-crossing call escalates to
-        # FORCE CHECKPOINT — which here also fails on _FailingConn (issue #648).
+        # The streak warning fires once the threshold is crossed; we no longer
+        # escalate to FORCE CHECKPOINT (it could deadlock the writer, #648).
         assert any("3 times in a row" in m for m in messages)
-        assert any("FORCE CHECKPOINT also failed" in m for m in messages)
 
     def test_success_resets_failure_streak(self, mock_embedding_provider) -> None:
         store = DuckDBStore(db_path=":memory:", embedding_provider=mock_embedding_provider)

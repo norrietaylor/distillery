@@ -47,12 +47,16 @@ logger = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
 
-# Consecutive plain-``CHECKPOINT`` failures after which we escalate to
-# ``FORCE CHECKPOINT``.  Plain CHECKPOINT fails with "there are other write
-# transactions active" under concurrent writers; left uncorrected the WAL
-# grows without bound and fills the volume (issue #648).  FORCE CHECKPOINT is
-# DuckDB's own hint for flushing regardless of active transactions.
-_FORCE_CHECKPOINT_AFTER_FAILURES = 3
+# Consecutive plain-``CHECKPOINT`` failures after which we emit an operator
+# WARNING.  Plain CHECKPOINT fails with "there are other write transactions
+# active" under concurrent writers; left uncorrected the WAL grows without
+# bound and fills the volume (issue #648).  We deliberately do NOT escalate to
+# ``FORCE CHECKPOINT`` here: it blocks indefinitely when another connection or
+# process holds an active write transaction, and running it under
+# ``_conn_lock`` would hang the writer (CI deadlock on slow cells, regression
+# from #648).  Persistent failures are surfaced via this WARNING and the
+# disk-backpressure guard instead.
+_WARN_AFTER_CHECKPOINT_FAILURES = 3
 
 # Free space on the database filesystem (bytes) below which we emit a
 # backpressure WARNING before the WAL can fill the volume (issue #648).
@@ -462,13 +466,20 @@ class DuckDBStore:
         Try using FORCE CHECKPOINT".  Left uncorrected the WAL grows
         without bound and fills the volume (``No space left on device``),
         which then truncates the WAL into an unbootable database (issue
-        #648).  So once the consecutive-failure streak crosses
-        :data:`_FORCE_CHECKPOINT_AFTER_FAILURES` we escalate to
-        ``FORCE CHECKPOINT`` — DuckDB's own hint — to flush the WAL
-        regardless of the active transactions.  A free-space guard
-        (:meth:`_check_disk_backpressure`) also warns before the volume
-        fills, since ``rate_limit.max_db_size_mb`` only measures the main
-        DB file and never the WAL.
+        #648).  Persistent failures are surfaced via a WARNING (once the
+        consecutive-failure streak crosses
+        :data:`_WARN_AFTER_CHECKPOINT_FAILURES`) plus the free-space guard
+        (:meth:`_check_disk_backpressure`), which warns before the volume
+        fills since ``rate_limit.max_db_size_mb`` only measures the main DB
+        file and never the WAL.
+
+        We deliberately do **not** escalate to ``FORCE CHECKPOINT``:
+        DuckDB cannot abort a write transaction held by another connection
+        or process, so ``FORCE CHECKPOINT`` blocks indefinitely under exactly
+        the sustained contention that triggers this path.  Because this runs
+        inside ``_run_sync`` while holding ``_conn_lock``, a blocked force
+        would hold that lock forever and starve every other write and status
+        probe — i.e. hang the process (CI deadlock regression from #648).
         """
         self._check_disk_backpressure()
         try:
@@ -480,62 +491,18 @@ class DuckDBStore:
             # already observed a successful write.  A persistent failure
             # streak means the WAL is accumulating writes (including HNSW
             # index entries under experimental persistence, whose replay
-            # has crashed on startup in production) — escalate so it is
-            # visible before the WAL becomes unreplayable.
+            # has crashed on startup in production) — warn so it is visible
+            # before the WAL becomes unreplayable.
             self._checkpoint_failures += 1
-            if self._checkpoint_failures >= _FORCE_CHECKPOINT_AFTER_FAILURES:
-                # FORCE CHECKPOINT aborts active write transactions, so it is
-                # only appropriate for the writer-contention case it is meant
-                # to clear (issue #648).  For unrelated failures (disk-full,
-                # permissions) forcing aborts concurrent writers for no
-                # benefit and does not fix the failure — log and wait instead.
-                message = str(exc)
-                is_contention = (
-                    "other write transactions active" in message
-                    or "Try using FORCE CHECKPOINT" in message
+            if self._checkpoint_failures >= _WARN_AFTER_CHECKPOINT_FAILURES:
+                logger.warning(
+                    "CHECKPOINT after write failed %d times in a row — "
+                    "WAL is accumulating un-flushed writes (non-fatal): %s",
+                    self._checkpoint_failures,
+                    exc,
                 )
-                if is_contention:
-                    logger.warning(
-                        "CHECKPOINT after write failed %d times in a row — "
-                        "WAL is accumulating un-flushed writes; forcing checkpoint "
-                        "(non-fatal): %s",
-                        self._checkpoint_failures,
-                        exc,
-                    )
-                    self._force_checkpoint(conn)
-                else:
-                    logger.warning(
-                        "CHECKPOINT after write failed %d times in a row — "
-                        "WAL is accumulating un-flushed writes; not forcing "
-                        "(non-contention failure, non-fatal): %s",
-                        self._checkpoint_failures,
-                        exc,
-                    )
             else:
                 logger.debug("CHECKPOINT after write failed (non-fatal): %s", exc)
-
-    def _force_checkpoint(self, conn: duckdb.DuckDBPyConnection) -> None:
-        """Issue ``FORCE CHECKPOINT`` to flush the WAL despite active writers.
-
-        ``FORCE CHECKPOINT`` is DuckDB's documented escape hatch when a
-        plain ``CHECKPOINT`` is blocked by concurrent write transactions.
-        It aborts those transactions so the WAL can be flushed to the main
-        database file, bounding WAL growth (issue #648).  On success the
-        consecutive-failure streak resets to 0; its own failure is logged
-        and swallowed, keeping the streak so the next write retries.
-        """
-        try:
-            conn.execute("FORCE CHECKPOINT")
-            logger.info(
-                "FORCE CHECKPOINT flushed the WAL after %d failed plain checkpoints",
-                self._checkpoint_failures,
-            )
-            self._checkpoint_failures = 0
-        except duckdb.Error as exc:
-            logger.warning(
-                "FORCE CHECKPOINT also failed (WAL still accumulating, non-fatal): %s",
-                exc,
-            )
 
     def _check_disk_backpressure(self) -> None:
         """Warn when the database filesystem is running low on free space.
