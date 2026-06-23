@@ -697,16 +697,29 @@ class DuckDBStore:
             )
 
     def _recover_from_wal_replay_failure(self, exc: duckdb.Error) -> duckdb.DuckDBPyConnection:
-        """Recover from a WAL replay failure caused by FTS schema DDL.
+        """Recover from an un-replayable WAL by quarantining it.
 
-        Replay is known to fail for FTS-related DDL when the process was
-        killed between an FTS index rebuild and the subsequent checkpoint
-        (see issue #349).  Recovery moves the WAL file aside to a
-        timestamped backup so any uncommitted data is preserved for manual
-        inspection, then retries the connection.
+        Two failure classes are handled:
 
-        Only local file paths are eligible for recovery; in-memory,
-        S3, and MotherDuck URIs re-raise the original error.
+        * The FTS-schema-DDL replay failure (``Cannot drop entry
+          "fts_main_entries"``) seen when a process was killed between an
+          FTS index rebuild and the subsequent checkpoint (issue #349).
+        * Any other un-replayable WAL — serialization, truncation, or
+          corruption (e.g. ``SerializationException: not enough data in
+          file to deserialize result`` when a volume fills and DuckDB
+          truncates the WAL mid-write, issue #647).
+
+        In both cases recovery renames the ``.wal`` file aside to a
+        timestamped ``<db>.wal.corrupt.<timestamp>`` backup so any
+        uncommitted bytes are preserved for offline forensics, then
+        reopens the main database file (now without the WAL).  An instance
+        must never be permanently bricked by a bad WAL — re-raising on a
+        truncated WAL produced an unbootable crash loop in production.
+
+        Only local file paths with a ``.wal`` sidecar are eligible; if
+        quarantining the WAL does not let the database reopen, the original
+        error is re-raised (the WAL was not the cause) so unrelated
+        failures still surface instead of being silently swallowed.
 
         Returns
         -------
@@ -716,19 +729,18 @@ class DuckDBStore:
         Raises
         ------
         duckdb.Error
-            Re-raised when the error is not WAL/FTS-related, when the path
-            is not a recoverable local file, or when no ``.wal`` sidecar
-            exists on disk.
+            Re-raised when the path is not a recoverable local file, when
+            no ``.wal`` sidecar exists on disk, or when reopening after
+            quarantine still fails.
         """
         exc_msg = str(exc)
-        # Match only the specific replay-failure signature.  A broader
-        # substring match on "WAL" would also trigger on unrelated WAL
-        # open errors, silently moving user data aside.
+        # The FTS-DDL replay failure (#349) gets a tailored warning so the
+        # log explains the index will be rebuilt; every other un-replayable
+        # WAL (serialization/truncation/corruption, #647) is quarantined
+        # under the generic path below rather than re-raised.
         is_fts_replay_failure = "Failure while replaying WAL file" in exc_msg and (
             "fts_main_entries" in exc_msg or "Cannot drop entry" in exc_msg
         )
-        if not is_fts_replay_failure:
-            raise exc
 
         # Resolve _db_path to a real filesystem path.  urlparse treats
         # Windows drive letters (``C:\...``) as URI schemes, and file://
@@ -740,6 +752,8 @@ class DuckDBStore:
 
         wal_path = Path(str(db_file) + ".wal")
         if not wal_path.exists():
+            # No WAL sidecar means the WAL cannot be the culprit (e.g. a
+            # genuinely unrelated open error); surface the original error.
             raise exc
 
         # Move the WAL aside with a timestamped suffix so operators can
@@ -763,15 +777,59 @@ class DuckDBStore:
             )
             raise exc from rename_exc
 
-        logger.warning(
-            "Database WAL appears corrupt (FTS-related): %s. "
-            "Moved WAL aside to %s and retrying — uncommitted data has "
-            "been preserved for manual recovery but will NOT be replayed. "
-            "The FTS index will be rebuilt from scratch during init.",
-            exc,
-            backup_path,
-        )
-        return self._open_connection()
+        try:
+            conn = self._open_connection()
+        except duckdb.Error:
+            # Reopening still failed: the WAL was not the problem.  Restore
+            # it so we do not leave a misleading ``.corrupt`` sidecar, then
+            # re-raise the original error so the real failure surfaces.
+            try:
+                backup_path.rename(wal_path)
+            except OSError as restore_exc:
+                # Restoring the WAL failed too: the quarantine sidecar now
+                # holds the only copy of the unreplayed bytes.  Silently
+                # suppressing this would leave the WAL missing, so a later
+                # startup could proceed WITHOUT those bytes — the exact
+                # silent-data-loss path the rollback-on-reopen-failure
+                # guarantee exists to prevent.  Fail loud and tell the
+                # operator where the bytes are.
+                logger.error(
+                    "WAL restore FAILED after reopen also failed: could not "
+                    "move quarantined WAL %s back to %s for database %s. The "
+                    "unreplayed bytes remain ONLY in the quarantine sidecar "
+                    "%s — restore it manually before reopening to avoid "
+                    "silent data loss. Original replay failure: %s",
+                    backup_path,
+                    wal_path,
+                    self._db_path,
+                    backup_path,
+                    exc,
+                    exc_info=True,
+                )
+                raise exc from restore_exc
+            raise exc from None
+
+        if is_fts_replay_failure:
+            logger.warning(
+                "Database WAL appears corrupt (FTS-related): %s. "
+                "Moved WAL aside to %s and retrying — uncommitted data has "
+                "been preserved for manual recovery but will NOT be replayed. "
+                "The FTS index will be rebuilt from scratch during init.",
+                exc,
+                backup_path,
+            )
+        else:
+            logger.warning(
+                "Database WAL is un-replayable (corrupt/truncated): %s. "
+                "Quarantined the WAL to %s and reopened the last-checkpointed "
+                "main database WITHOUT it — any un-checkpointed writes still in "
+                "that WAL are LOST. The bytes are preserved at the quarantine "
+                "path for manual forensics. Booting to avoid a crash loop "
+                "(#647).",
+                exc,
+                backup_path,
+            )
+        return conn
 
     def _resolve_local_db_path(self) -> Path | None:
         """Return the filesystem path for ``self._db_path`` if it's local.

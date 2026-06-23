@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import math
 from datetime import UTC, datetime
+from pathlib import Path
 
 import duckdb
 import pytest
@@ -1163,6 +1164,252 @@ class TestWalFtsReplayHardening:
             # Either outcome is acceptable; what matters is that the DB is
             # openable at all — before the fix, it was not.
             assert b"COUNT=" in r_proc.stdout
+
+
+# ---------------------------------------------------------------------------
+# Corrupt / truncated WAL quarantine (issue #647)
+# ---------------------------------------------------------------------------
+
+
+class TestCorruptWalQuarantine:
+    """An un-replayable WAL must never permanently brick startup (#647).
+
+    Before the fix, ``_recover_from_wal_replay_failure`` only quarantined
+    the WAL for the FTS-schema-DDL replay failure (#349); every other
+    replay failure re-raised, so a truncated/corrupt WAL (e.g. a full
+    volume truncating the WAL mid-write) crash-looped the process forever.
+    The fix quarantines ANY un-replayable WAL — rename it aside, reopen the
+    last-checkpointed main DB without it, and log a loud warning.
+    """
+
+    @staticmethod
+    def _plant_corrupt_wal(db_path: str) -> Path:
+        """Leave a real, un-replayable WAL on disk next to ``db_path``.
+
+        Writes uncheckpointed rows so the WAL has genuine content, abandons
+        the connection (with checkpoint-on-shutdown disabled) so the WAL
+        survives, then overwrites a span in the middle with garbage to
+        corrupt a record's checksum.  Reopening DuckDB then fails replay
+        with a ``Failure while replaying WAL file`` error that is NOT the
+        FTS-DDL signature — exactly the production #647 case.
+        """
+        import gc
+        import uuid
+
+        conn = duckdb.connect(db_path)
+        conn.execute("PRAGMA disable_checkpoint_on_shutdown")
+        # Insert directly into the existing ``entries`` table so the WAL
+        # carries real, replayable records.
+        for _ in range(500):
+            conn.execute(
+                "INSERT INTO entries (id, content, embedding, entry_type, "
+                "source, author, project, tags, status, metadata, "
+                "created_at, updated_at, version) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    str(uuid.uuid4()),
+                    "x" * 1000,
+                    [0.1, 0.2, 0.3, 0.4],
+                    "reference",
+                    "claude_code",
+                    "wal-bloat",
+                    None,
+                    [],
+                    "active",
+                    "{}",
+                    datetime.now(tz=UTC),
+                    datetime.now(tz=UTC),
+                    1,
+                ],
+            )
+        # Abandon the connection without an explicit checkpoint so the WAL
+        # is left on disk (close()/GC would otherwise flush it).
+        del conn
+        gc.collect()
+
+        wal_path = Path(db_path + ".wal")
+        size = wal_path.stat().st_size
+        assert size > 0, "expected a non-empty WAL to corrupt"
+        with open(wal_path, "r+b") as fh:
+            fh.seek(size // 3)
+            fh.write(b"\xff\xff\xff\xff" * 256)
+        return wal_path
+
+    async def test_corrupt_wal_quarantined_and_boots(
+        self,
+        deterministic_embedding_provider: object,
+        tmp_path,
+        caplog,
+    ) -> None:
+        """A corrupt WAL must boot on the last checkpoint, not crash-loop.
+
+        Acceptance for #647: create a store + checkpointed entry (so a main
+        DB exists), corrupt the ``.wal`` on disk, then reopen.  The store
+        must boot on the last-checkpointed main DB, the WAL must be moved
+        aside to a ``*.wal.corrupt.*`` sidecar (and the original ``.wal``
+        gone), a WARNING must be logged, and NO exception may be raised.
+        """
+        import uuid as _uuid
+
+        db_path = str(tmp_path / "distillery.db")
+
+        # 1. Create a store and write a checkpointed entry — main DB exists.
+        s1 = DuckDBStore(
+            db_path=db_path,
+            embedding_provider=deterministic_embedding_provider,
+        )
+        await s1.initialize()
+        keep_id = str(_uuid.uuid4())
+        await s1.store(make_entry(id=keep_id, content="this entry is checkpointed"))
+        await s1.close()
+
+        # 2. Corrupt/truncate the WAL on disk.
+        wal_path = self._plant_corrupt_wal(db_path)
+        assert wal_path.exists()
+
+        # 3. Reopen — must boot without raising and quarantine the WAL.
+        s2 = DuckDBStore(
+            db_path=db_path,
+            embedding_provider=deterministic_embedding_provider,
+        )
+        with caplog.at_level("WARNING"):
+            await s2.initialize()
+        try:
+            # Booted on the last-checkpointed main DB: the one checkpointed
+            # entry is present; the 500 un-checkpointed WAL rows are gone.
+            count = s2.connection.execute("SELECT COUNT(*) FROM entries").fetchone()
+            assert count is not None and count[0] == 1
+            kept = await s2.get(keep_id)
+            assert kept is not None
+        finally:
+            await s2.close()
+
+        # The original WAL was moved aside, not left in place.
+        assert not wal_path.exists(), "corrupt WAL should have been quarantined"
+        backups = list(tmp_path.glob("*.wal.corrupt.*"))
+        assert len(backups) == 1, f"expected one quarantine sidecar, got {backups}"
+
+        # A loud WARNING names the dropped path and the data-loss risk.
+        warnings = [
+            r.getMessage()
+            for r in caplog.records
+            if r.levelname == "WARNING" and "un-replayable" in r.getMessage()
+        ]
+        assert warnings, "expected a WARNING about the un-replayable WAL"
+        assert str(backups[0]) in warnings[0]
+        assert "LOST" in warnings[0]
+
+    async def test_fts_ddl_recovery_path_untouched(
+        self,
+        deterministic_embedding_provider: object,
+        tmp_path,
+        caplog,
+    ) -> None:
+        """The FTS-DDL recovery branch (#349) must not regress.
+
+        Drives the recovery helper directly with the exact FTS replay
+        signature and asserts it still quarantines the WAL and emits its
+        tailored "(FTS-related)" warning rather than the generic message.
+        """
+        db_path = str(tmp_path / "fts.db")
+        # Create a live DB file so reopening after quarantine succeeds.
+        conn = duckdb.connect(db_path)
+        conn.close()
+
+        wal_path = Path(db_path + ".wal")
+        wal_path.write_bytes(b"pretend-fts-wal")
+
+        store = DuckDBStore(
+            db_path=db_path,
+            embedding_provider=deterministic_embedding_provider,
+            hybrid_search=False,
+        )
+        fts_error = duckdb.Error(
+            "Dependency Error: Failure while replaying WAL file: Cannot drop "
+            'entry "fts_main_entries" because there are entries that depend on it.'
+        )
+        with caplog.at_level("WARNING"):
+            recovered = store._recover_from_wal_replay_failure(fts_error)  # noqa: SLF001
+        try:
+            assert not wal_path.exists()
+            backups = list(tmp_path.glob("*.wal.corrupt.*"))
+            assert len(backups) == 1
+            assert backups[0].read_bytes() == b"pretend-fts-wal"
+            messages = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+            assert any("FTS-related" in m for m in messages), (
+                "FTS-DDL recovery must keep its tailored warning (#349)"
+            )
+        finally:
+            recovered.close()
+
+    async def test_reopen_failure_surfaces_when_wal_restore_also_fails(
+        self,
+        deterministic_embedding_provider: object,
+        tmp_path,
+        monkeypatch,
+        caplog,
+    ) -> None:
+        """If reopen fails AND the WAL restore fails, surface — never swallow.
+
+        Normal reopen-failure behaviour restores the quarantined WAL and
+        re-raises the original replay error so the real failure surfaces.
+        But if that restore ``rename`` ALSO fails, suppressing the OSError
+        would leave the WAL missing — a later startup could then proceed
+        WITHOUT the unreplayed bytes (silent data loss).  This drives both
+        failures and asserts the original error surfaces (chaining the
+        restore error) and the quarantine sidecar is left in place for
+        manual recovery.
+        """
+        db_path = str(tmp_path / "restore_fail.db")
+        conn = duckdb.connect(db_path)
+        conn.close()
+
+        wal_path = Path(db_path + ".wal")
+        wal_path.write_bytes(b"unreplayed-bytes")
+
+        store = DuckDBStore(
+            db_path=db_path,
+            embedding_provider=deterministic_embedding_provider,
+            hybrid_search=False,
+        )
+
+        # Force reopen-after-quarantine to fail so we enter the restore branch.
+        def _fail_reopen() -> object:
+            raise duckdb.Error("reopen still fails")
+
+        monkeypatch.setattr(store, "_open_connection", _fail_reopen)
+
+        # Let the quarantine rename (wal -> *.corrupt.*) succeed via the real
+        # implementation, but make the restore rename (*.corrupt.* -> wal) fail.
+        real_rename = Path.rename
+
+        def _rename(self: Path, target):  # type: ignore[no-untyped-def]
+            if self.name.endswith(".wal"):
+                return real_rename(self, target)
+            raise OSError("restore rename refused")
+
+        monkeypatch.setattr(Path, "rename", _rename)
+
+        replay_error = duckdb.Error(
+            "Failure while replaying WAL file: serialization error"
+        )
+        with caplog.at_level("ERROR"):  # noqa: SIM117
+            with pytest.raises(duckdb.Error, match="replaying WAL"):
+                store._recover_from_wal_replay_failure(replay_error)  # noqa: SLF001
+
+        # The quarantine sidecar must remain — it now holds the only copy of
+        # the unreplayed bytes — and the original WAL must NOT be back.
+        backups = list(tmp_path.glob("*.wal.corrupt.*"))
+        assert len(backups) == 1, f"quarantine sidecar must remain, got {backups}"
+        assert backups[0].read_bytes() == b"unreplayed-bytes"
+        assert not wal_path.exists(), "WAL must not be silently restored"
+
+        # A loud ERROR points the operator at the surviving sidecar.
+        errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
+        assert any("WAL restore FAILED" in m for m in errors), (
+            "a restore failure must log a loud ERROR, not be swallowed"
+        )
+        assert any(str(backups[0]) in m for m in errors)
 
 
 # ---------------------------------------------------------------------------
