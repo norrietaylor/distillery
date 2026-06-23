@@ -15,12 +15,14 @@ import distillery.feeds.github_sync as github_sync_module
 from distillery.feeds.github_sync import (
     _MAX_RETRIES,
     GitHubSyncAdapter,
+    StructuralRef,
     SyncResult,
     _build_content,
     _build_github_tags,
     _compute_backfill_updates,
     _derive_state_tag_value,
     _extract_cross_refs,
+    _extract_structural_refs,
     _make_external_id,
     _parse_github_url,
     _sanitize_tag_segment,
@@ -106,6 +108,116 @@ class TestExtractCrossRefs:
     @pytest.mark.unit
     def test_no_refs(self) -> None:
         assert _extract_cross_refs("No references here") == []
+
+
+class TestExtractStructuralRefs:
+    """Tests for _extract_structural_refs — typed structural ref extraction."""
+
+    # -- PR closing-keyword refs (citation) --
+
+    @pytest.mark.unit
+    def test_pr_closing_keyword_closes(self) -> None:
+        issue = {"pull_request": {}}
+        refs = _extract_structural_refs(issue, "Closes #42")
+        assert refs == [StructuralRef(number=42, kind="citation")]
+
+    @pytest.mark.unit
+    def test_pr_closing_keyword_fixes(self) -> None:
+        issue = {"pull_request": {}}
+        refs = _extract_structural_refs(issue, "Fixes #10")
+        assert refs == [StructuralRef(number=10, kind="citation")]
+
+    @pytest.mark.unit
+    def test_pr_closing_keyword_resolves(self) -> None:
+        issue = {"pull_request": {}}
+        refs = _extract_structural_refs(issue, "Resolves #99")
+        assert refs == [StructuralRef(number=99, kind="citation")]
+
+    @pytest.mark.unit
+    def test_pr_multiple_closing_keywords(self) -> None:
+        issue = {"pull_request": {}}
+        refs = _extract_structural_refs(issue, "Closes #1, fixes #2, resolves #3")
+        assert refs == [
+            StructuralRef(number=1, kind="citation"),
+            StructuralRef(number=2, kind="citation"),
+            StructuralRef(number=3, kind="citation"),
+        ]
+
+    @pytest.mark.unit
+    def test_pr_deduplicates_closing_refs(self) -> None:
+        issue = {"pull_request": {}}
+        refs = _extract_structural_refs(issue, "Closes #42 and closes #42")
+        assert refs == [StructuralRef(number=42, kind="citation")]
+
+    @pytest.mark.unit
+    def test_pr_plain_mention_not_returned(self) -> None:
+        """Plain #N without closing keyword should NOT produce a citation ref."""
+        issue = {"pull_request": {}}
+        refs = _extract_structural_refs(issue, "See #123 for context")
+        assert refs == []
+
+    @pytest.mark.unit
+    def test_pr_case_insensitive(self) -> None:
+        issue = {"pull_request": {}}
+        refs = _extract_structural_refs(issue, "CLOSES #7")
+        assert refs == [StructuralRef(number=7, kind="citation")]
+
+    # -- Sub-issue tracked-by refs (depends_on) --
+
+    @pytest.mark.unit
+    def test_issue_tracked_by_text(self) -> None:
+        """Tracked by #N in body → depends_on ref."""
+        issue: dict = {}
+        refs = _extract_structural_refs(issue, "Tracked by #653")
+        assert refs == [StructuralRef(number=653, kind="depends_on")]
+
+    @pytest.mark.unit
+    def test_issue_tracked_by_case_insensitive(self) -> None:
+        issue: dict = {}
+        refs = _extract_structural_refs(issue, "tracked by #100")
+        assert refs == [StructuralRef(number=100, kind="depends_on")]
+
+    @pytest.mark.unit
+    def test_issue_parent_api_field(self) -> None:
+        """GitHub sub-issues REST API ``parent`` field → depends_on ref."""
+        issue = {"parent": {"number": 200, "title": "Epic title"}}
+        refs = _extract_structural_refs(issue, "")
+        assert refs == [StructuralRef(number=200, kind="depends_on")]
+
+    @pytest.mark.unit
+    def test_issue_parent_and_tracked_by_deduped(self) -> None:
+        """Parent field + matching tracked-by text should yield one ref, not two."""
+        issue = {"parent": {"number": 50}}
+        refs = _extract_structural_refs(issue, "Tracked by #50")
+        assert refs == [StructuralRef(number=50, kind="depends_on")]
+
+    @pytest.mark.unit
+    def test_issue_plain_mention_not_returned(self) -> None:
+        """Plain #N in a non-PR body should NOT produce a depends_on ref."""
+        issue: dict = {}
+        refs = _extract_structural_refs(issue, "Related to #42")
+        assert refs == []
+
+    @pytest.mark.unit
+    def test_issue_closing_keyword_not_returned(self) -> None:
+        """Closing keywords on a plain issue body should NOT produce citation refs."""
+        issue: dict = {}
+        refs = _extract_structural_refs(issue, "Closes #10")
+        assert refs == []
+
+    # -- Edge cases --
+
+    @pytest.mark.unit
+    def test_empty_body_no_refs(self) -> None:
+        issue = {"pull_request": {}}
+        assert _extract_structural_refs(issue, "") == []
+
+    @pytest.mark.unit
+    def test_sorted_by_number_then_kind(self) -> None:
+        issue = {"pull_request": {}}
+        refs = _extract_structural_refs(issue, "Closes #5, closes #2, fixes #1")
+        numbers = [r.number for r in refs]
+        assert numbers == sorted(numbers)
 
 
 class TestBuildContent:

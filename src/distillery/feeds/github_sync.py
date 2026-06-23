@@ -27,7 +27,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 
@@ -62,6 +62,23 @@ _MAX_CONTENT_LENGTH = 8000
 # Matches: #123, Closes #123, Fixes #123, Resolves #123, closes #123, etc.
 _XREF_PATTERN = re.compile(
     r"(?:(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+)?#(\d+)",
+    re.IGNORECASE,
+)
+
+# Pattern for PR closing keywords — these indicate a PR closes/fixes an issue,
+# i.e. a structural "citation" relationship (the PR cites/resolves the issue).
+# Matches: "Closes #42", "Fixes #42", "Resolves #42", "close #42", etc.
+_CLOSING_KEYWORD_PATTERN = re.compile(
+    r"(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)",
+    re.IGNORECASE,
+)
+
+# Pattern for tracked-by references in sub-issue bodies.
+# GitHub inserts "Tracked by #<number>" or "tracked by owner/repo#<number>"
+# when an issue is a sub-issue of an epic tracked via GitHub's task list.
+# We match the local-repo form (#N) since cross-repo sub-issues are rare.
+_TRACKED_BY_PATTERN = re.compile(
+    r"tracked\s+by\s+#(\d+)",
     re.IGNORECASE,
 )
 
@@ -213,6 +230,102 @@ def _extract_cross_refs(text: str) -> list[int]:
         return []
     numbers = {int(m.group(1)) for m in _XREF_PATTERN.finditer(text)}
     return sorted(numbers)
+
+
+# Literal type for the two structural edge kinds emitted by gh-sync.
+StructuralRefKind = Literal["citation", "depends_on"]
+
+
+@dataclass(frozen=True)
+class StructuralRef:
+    """A typed cross-reference extracted from a GitHub payload.
+
+    Carries enough information to choose the correct edge type when
+    materializing relations in a downstream step (T03.2).
+
+    Attributes
+    ----------
+    number:
+        The referenced issue/PR number within the same repository.
+    kind:
+        ``"citation"`` — PR closing-keyword reference to an issue (PR → issue).
+        ``"depends_on"`` — sub-issue tracked-by / parent reference to an epic
+        (sub-issue → epic).
+    """
+
+    number: int
+    kind: StructuralRefKind
+
+
+def _extract_structural_refs(
+    issue: dict[str, Any],
+    body_text: str,
+) -> list[StructuralRef]:
+    """Extract typed structural references from a GitHub payload.
+
+    Two relationship types are recognised from fields already present in the
+    payload — no additional GitHub API calls are made:
+
+    **PR → issue (citation)**
+        When the payload has a ``pull_request`` key (i.e. the item is a PR),
+        closing keywords (``Closes``, ``Fixes``, ``Resolves`` and their
+        conjugations) in ``body_text`` indicate that the PR resolves the
+        referenced issue.  Each such reference yields a
+        ``StructuralRef(number=N, kind="citation")``.
+
+    **Sub-issue → epic (depends_on)**
+        When the payload includes a ``parent`` key (GitHub sub-issues REST
+        API) or ``body_text`` contains ``"Tracked by #N"`` (GitHub inserts
+        this text in sub-issue bodies), the referenced number is the parent
+        epic.  Each such reference yields a
+        ``StructuralRef(number=N, kind="depends_on")``.
+
+    Plain ``#N`` mentions (no closing keyword, no tracked-by) are *not*
+    returned here — they continue to be handled by :func:`_extract_cross_refs`
+    as ``link`` relations.
+
+    Parameters
+    ----------
+    issue:
+        Parsed JSON from the GitHub issues/PRs endpoint.
+    body_text:
+        The combined body text to scan (usually the pre-built entry content
+        or the raw ``issue["body"]``).
+
+    Returns
+    -------
+    list[StructuralRef]
+        Deduplicated, sorted (by number, then kind) list of structural refs.
+        Empty list when none are found.
+    """
+    seen: set[tuple[int, str]] = set()
+    refs: list[StructuralRef] = []
+
+    def _add(number: int, kind: StructuralRefKind) -> None:
+        key = (number, kind)
+        if key not in seen:
+            seen.add(key)
+            refs.append(StructuralRef(number=number, kind=kind))
+
+    is_pr = "pull_request" in issue
+
+    if is_pr:
+        # Closing-keyword refs in the PR body → citation edges.
+        for m in _CLOSING_KEYWORD_PATTERN.finditer(body_text):
+            _add(int(m.group(1)), "citation")
+    else:
+        # Sub-issue parent via REST API ``parent`` field (GitHub sub-issues).
+        parent = issue.get("parent")
+        if isinstance(parent, dict):
+            parent_number = parent.get("number")
+            if isinstance(parent_number, int):
+                _add(parent_number, "depends_on")
+
+        # Sub-issue tracked-by text in the body (GitHub task list).
+        for m in _TRACKED_BY_PATTERN.finditer(body_text):
+            _add(int(m.group(1)), "depends_on")
+
+    return sorted(refs, key=lambda r: (r.number, r.kind))
 
 
 def _build_content(
