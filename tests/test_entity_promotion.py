@@ -7,6 +7,9 @@ Covers:
   - tags below the frequency threshold are not promoted (R2.1).
   - promote_entities is idempotent: a second consecutive run inserts zero new
     nodes and zero new edges (R2.2/R2.3).
+  - concurrent deletion: if a node's embedding is absent from the plan-time
+    dict (simulating a node created then deleted between plan and write), the
+    write pass skips without raising KeyError (regression for issue #653).
 """
 
 from __future__ import annotations
@@ -102,3 +105,33 @@ async def test_promote_entities_is_idempotent(store) -> None:  # type: ignore[no
 
     nodes = await store.list_entries({"entry_type": EntryType.ENTITY.value}, limit=10, offset=0)
     assert len(nodes) == 1
+
+
+async def test_promote_entities_missing_embedding_does_not_raise(store) -> None:  # type: ignore[no-untyped-def]
+    """Regression: missing embedding (concurrent deletion) is skipped, not KeyError.
+
+    Simulates the race where a node existed at plan time, was deleted between
+    plan and write, so its embedding was never computed.  The write pass must
+    skip gracefully rather than raising KeyError.
+    """
+    for i in range(3):
+        await _store_entry(store, content=f"concurrent {i}", tags=["entity/acme"])
+
+    # Obtain the canonical set by calling the plan step, then strip the
+    # embedding so the write step sees the concurrent-deletion scenario.
+    canonical_members, _ = await store._run_sync(
+        store._sync_promote_entities_plan, 3, ["entity", "tech"]
+    )
+    # Deliberately omit the embedding for "entity/acme" to reproduce the race.
+    empty_embeddings: dict[str, list[float]] = {}
+
+    # Must not raise KeyError.
+    result = await store._run_sync(
+        store._sync_promote_entities_write, canonical_members, empty_embeddings
+    )
+
+    # The canonical was skipped — no entity node created in this pass.
+    assert result["entities_created"] == 0
+    assert result["entities_reused"] == 0
+    nodes = await store.list_entries({"entry_type": EntryType.ENTITY.value}, limit=10, offset=0)
+    assert nodes == []

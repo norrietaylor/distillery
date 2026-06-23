@@ -4197,7 +4197,13 @@ class DuckDBStore:
                         tags=[canonical],
                         metadata={"canonical_name": name, "source_tag": canonical},
                     )
-                    embedding = embeddings[canonical]
+                    embedding = embeddings.get(canonical)
+                    if embedding is None:
+                        # The node existed at plan time but was deleted between
+                        # plan and write (concurrent deletion).  Skip and defer
+                        # to the next promotion run — we cannot re-embed inside
+                        # the sync transaction.
+                        continue
                     conn.execute(
                         "INSERT INTO entries "
                         "(id, content, entry_type, source, author, project, tags, status, "

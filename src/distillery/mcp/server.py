@@ -1350,7 +1350,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
           - to_id (str, required for add): Target entry UUID.
           - relation_type (str, required for add, optional for get/traverse): Relation type.
             Valid: [link, corrects, supersedes, related, blocks, depends_on, citation,
-            duplicate, merge_source, sync_source].
+            duplicate, merge_source, sync_source, mentions, chunk].
           - weight (float, optional for add): Edge strength (e.g. interest/engagement
             magnitude). On a re-assert of an existing edge, supplied attributes are upserted.
           - valid_at / invalid_at (str ISO 8601, optional for add): Bi-temporal validity
