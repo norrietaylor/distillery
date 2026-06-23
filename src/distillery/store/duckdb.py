@@ -35,6 +35,7 @@ from distillery.feeds.tags import normalize_tag
 from distillery.models import Entry, EntrySource, EntryStatus, EntryType, validate_metadata
 from distillery.store.migrations import (
     _CREATE_META_TABLE,
+    backfill_relations_from_content_refs,
     backfill_relations_from_metadata,
     backfill_relations_from_wikilinks,
     run_pending_migrations,
@@ -4054,6 +4055,7 @@ class DuckDBStore:
             conn.execute("BEGIN TRANSACTION")
             inserted_metadata = backfill_relations_from_metadata(conn)
             inserted_wikilinks = backfill_relations_from_wikilinks(conn)
+            inserted_content_refs = backfill_relations_from_content_refs(conn)
             conn.execute("COMMIT")
         except Exception:
             with contextlib.suppress(Exception):
@@ -4066,18 +4068,22 @@ class DuckDBStore:
         return {
             "metadata_links": inserted_metadata,
             "wikilink_links": inserted_wikilinks,
-            "total": inserted_metadata + inserted_wikilinks,
+            "content_ref_links": inserted_content_refs,
+            "total": inserted_metadata + inserted_wikilinks + inserted_content_refs,
         }
 
     async def reconcile_relations(self) -> dict[str, int]:
         """Re-run the entry_relations backfill mechanisms and return counts.
 
         Idempotent recovery hook for issue #490 mechanism #9 plus issue
-        #496 mechanism #8.  Currently runs two passes:
+        #496 mechanism #8 and issue #653 step 4.  Currently runs three passes:
 
           * ``metadata.related_entries`` fan-out (mechanism #1).
           * Inline ``[[entry-<8-hex>]]`` wikilink parsing in ``content``
             (mechanism #8 from issue #496).
+          * In-content URL / ``#<number>`` references resolved to entries via
+            ``metadata.external_id``, materialised as ``citation`` edges
+            (issue #653 step 4).
 
         Existing rows are left alone via the unique ``(from_id, to_id,
         relation_type)`` index, so re-running never duplicates edges.
@@ -4085,9 +4091,9 @@ class DuckDBStore:
         Returns:
             Dict with ``metadata_links`` (rows inserted from
             ``metadata.related_entries``), ``wikilink_links`` (rows inserted
-            from inline ``[[entry-<8-hex>]]`` references) and ``total`` (sum
-            across all mechanisms — future mechanisms #3-#7 in issue #496
-            will contribute additional fields).
+            from inline ``[[entry-<8-hex>]]`` references), ``content_ref_links``
+            (``citation`` rows inserted from in-content URL / ``#<number>``
+            references) and ``total`` (sum across all mechanisms).
         """
         return await self._run_sync(self._sync_reconcile_relations)
 

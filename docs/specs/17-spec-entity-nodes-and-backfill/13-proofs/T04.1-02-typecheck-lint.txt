@@ -1,0 +1,13 @@
+Type: cli (typecheck + lint)
+Command: mypy --strict + ruff check on store/migrations.py, store/duckdb.py
+Expected: mypy Success, ruff All checks passed
+Timestamp: 2026-06-23T22:21:57Z
+----------------------------------------
+$ mypy --strict src/distillery/store/migrations.py src/distillery/store/duckdb.py
+Success: no issues found in 2 source files
+
+$ ruff check (migrations.py duckdb.py tests)
+All checks passed!
+
+$ ruff format --check
+3 files already formatted
