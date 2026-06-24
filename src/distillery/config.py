@@ -1446,6 +1446,11 @@ def _validate(config: DistilleryConfig) -> None:
             - classification.conflict_threshold is not between 0.0 and 1.0.
             - auto_link.threshold is not between 0.0 and 1.0.
             - auto_link.max_links is not greater than 0.
+            - link_suggestion.auto_create_threshold is not between 0.0 and 1.0.
+            - link_suggestion.review_floor is not between 0.0 and 1.0.
+            - link_suggestion.review_floor exceeds
+              link_suggestion.auto_create_threshold.
+            - link_suggestion.max_candidates_per_run is not greater than 0.
             - Any entry in tags.reserved_prefixes is not a valid tag segment.
             - feeds.thresholds.alert is not between 0.0 and 1.0.
             - feeds.thresholds.digest is not between 0.0 and 1.0.
