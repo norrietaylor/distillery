@@ -293,6 +293,151 @@ def backfill_relations_from_wikilinks(conn: duckdb.DuckDBPyConnection) -> int:
     return inserted
 
 
+# Matches absolute http(s) URLs embedded in entry content.  Trailing
+# punctuation (``.``, ``,``, ``)``, ``]``, ``>``) is excluded so a URL at the
+# end of a sentence resolves cleanly against a stored ``external_id``.
+_CONTENT_URL_PATTERN = re.compile(r"https?://[^\s<>\")\]]+")
+
+# Matches bare ``#<number>`` references (issue/PR shorthand) in content.  The
+# leading boundary forbids a preceding word char so ``foo#7`` (e.g. a fragment
+# of an existing external_id pasted verbatim) is not double-counted here.
+_CONTENT_HASH_REF_PATTERN = re.compile(r"(?<![\w#])#(\d+)\b")
+
+# Extracts the trailing issue/PR number from an external_id fragment such as
+# ``owner/repo#issue-7``, ``owner/repo#pr-12`` or the bare ``owner/repo#7``.
+_EXTERNAL_ID_NUMBER_PATTERN = re.compile(r"#(?:issue-|pr-)?(\d+)$")
+
+
+def backfill_relations_from_content_refs(conn: duckdb.DuckDBPyConnection) -> int:
+    """Scan ``entries.content`` for URLs / ``#<number>`` refs and insert ``citation`` rows.
+
+    Resolves each in-content reference to a stored entry via its
+    ``metadata.external_id`` and materialises a ``citation`` edge from the
+    scanning entry to the resolved entry.  Two reference shapes are handled:
+
+      * **Absolute URLs** (``https?://…``) are matched exactly against the set
+        of stored ``external_id`` values — so an entry whose ``external_id`` is
+        ``https://github.com/owner/repo/pull/12`` is linked when another
+        entry's content contains that URL verbatim.
+      * **Bare ``#<number>`` refs** are resolved against the trailing number of
+        ``external_id`` values shaped like ``owner/repo#issue-7``,
+        ``owner/repo#pr-12`` or ``owner/repo#7``.  When two or more entries map
+        to the same number the reference is ambiguous and skipped entirely.
+
+    Idempotent: relies on the ``idx_entry_relations_unique`` unique index on
+    ``(from_id, to_id, relation_type)`` so re-running never produces
+    duplicates.  Self-edges and references to absent targets are skipped.
+    Returns the number of rows actually inserted.
+
+    This is mechanism for in-content reference resolution (issue #653 step 4).
+    The caller is responsible for transaction management — this function
+    assumes ``entry_relations`` (and its unique index) already exist.
+    """
+    import json
+    import uuid
+
+    all_ids: set[str] = set()
+    # external_id (URL form) -> entry_id, for exact URL matching.  URLs that
+    # map to two distinct entries are tracked as ambiguous and excluded so the
+    # backfill stays deterministic and idempotent across runs.
+    url_to_id: dict[str, str] = {}
+    ambiguous_urls: set[str] = set()
+    # issue/PR number -> entry_id, for ``#<number>`` matching.  Numbers that
+    # map to two distinct entries are tracked as ambiguous and excluded.
+    number_to_id: dict[int, str] = {}
+    ambiguous_numbers: set[int] = set()
+
+    rows = conn.execute("SELECT id, metadata FROM entries WHERE metadata IS NOT NULL").fetchall()
+    for entry_id, metadata_raw in rows:
+        if not isinstance(entry_id, str):
+            continue
+        all_ids.add(entry_id)
+        try:
+            if isinstance(metadata_raw, str):
+                meta = json.loads(metadata_raw)
+            elif isinstance(metadata_raw, dict):
+                meta = metadata_raw
+            else:
+                continue
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(meta, dict):
+            continue
+        external_id = meta.get("external_id")
+        if not isinstance(external_id, str) or not external_id:
+            continue
+        # Deterministic handling of duplicate URLs: once a URL maps to two
+        # distinct entries it is ambiguous and excluded from resolution.
+        if external_id.startswith(("http://", "https://")) and external_id not in ambiguous_urls:
+            existing_url_target = url_to_id.get(external_id)
+            if existing_url_target is None:
+                url_to_id[external_id] = entry_id
+            elif existing_url_target != entry_id:
+                ambiguous_urls.add(external_id)
+                del url_to_id[external_id]
+                logger.debug(
+                    "Content-ref backfill: URL %s maps to multiple entries; skipping",
+                    external_id,
+                )
+        number_match = _EXTERNAL_ID_NUMBER_PATTERN.search(external_id)
+        if number_match:
+            number = int(number_match.group(1))
+            if number in ambiguous_numbers:
+                continue
+            existing = number_to_id.get(number)
+            if existing is None:
+                number_to_id[number] = entry_id
+            elif existing != entry_id:
+                ambiguous_numbers.add(number)
+                del number_to_id[number]
+                logger.debug("Content-ref backfill: #%d maps to multiple entries; skipping", number)
+
+    # Capture entries that carry no metadata too — they can still cite others.
+    for (entry_id,) in conn.execute("SELECT id FROM entries WHERE metadata IS NULL").fetchall():
+        if isinstance(entry_id, str):
+            all_ids.add(entry_id)
+
+    content_rows = conn.execute(
+        "SELECT id, content FROM entries WHERE content IS NOT NULL"
+    ).fetchall()
+    inserted = 0
+    for entry_id, content in content_rows:
+        if not isinstance(entry_id, str) or not isinstance(content, str) or not content:
+            continue
+        # Dedupe resolved targets per source entry — the unique index would
+        # catch repeats anyway, but this avoids redundant round-trips.
+        targets: set[str] = set()
+        for url_match in _CONTENT_URL_PATTERN.finditer(content):
+            # Strip trailing punctuation (e.g. a sentence-final ``.``/``,`` or a
+            # closing ``)``/``]``/``>``) so a URL at the end of a sentence still
+            # resolves against the stored ``external_id``.
+            raw_url = url_match.group(0).rstrip(".,)]>")
+            to_id = url_to_id.get(raw_url)
+            if to_id is not None:
+                targets.add(to_id)
+        for hash_match in _CONTENT_HASH_REF_PATTERN.finditer(content):
+            to_id = number_to_id.get(int(hash_match.group(1)))
+            if to_id is not None:
+                targets.add(to_id)
+
+        for to_id in targets:
+            if to_id == entry_id:
+                # Self-citations are not meaningful.
+                continue
+            if to_id not in all_ids:
+                continue
+            relation_id = str(uuid.uuid4())
+            row = conn.execute(
+                "INSERT OR IGNORE INTO entry_relations (id, from_id, to_id, relation_type) "
+                "VALUES (?, ?, ?, 'citation') RETURNING id",
+                [relation_id, entry_id, to_id],
+            ).fetchone()
+            if row:
+                inserted += 1
+
+    return inserted
+
+
 def backfill_relations_from_metadata(conn: duckdb.DuckDBPyConnection) -> int:
     """Scan ``entries.metadata.related_entries`` and insert missing ``entry_relations`` rows.
 

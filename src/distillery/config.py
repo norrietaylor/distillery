@@ -207,10 +207,15 @@ class TagsConfig:
             assigned by the classifier; user-supplied ``kind/*`` tags via
             ``distillery_store`` are rejected so the axis remains a single
             source of truth.
+        entity_promotion_threshold: Minimum number of entries on which a tag
+            must appear before it qualifies for entity promotion. Entity/*
+            and tech/* tags appearing on at least this many entries are
+            candidates for promotion to entity nodes. Defaults to ``3``.
     """
 
     enforce_namespaces: bool = False
     reserved_prefixes: list[str] = field(default_factory=lambda: ["kind"])
+    entity_promotion_threshold: int = 3
 
 
 @dataclass
@@ -808,13 +813,17 @@ def _parse_tags(raw: dict[str, Any]) -> TagsConfig:
             - ``reserved_prefixes`` (list[str]) — when absent, falls back to
               the :class:`TagsConfig` dataclass default (``["kind"]``); when
               present (including ``[]``), the explicit value wins.
+            - ``entity_promotion_threshold`` (int, default ``3``) — minimum
+              number of entries on which a tag must appear before qualifying
+              for entity promotion.
 
     Returns:
         A populated :class:`TagsConfig` instance.
 
     Raises:
-        ValueError: If ``enforce_namespaces`` is not a boolean or
-            ``reserved_prefixes`` is not a list.
+        ValueError: If ``enforce_namespaces`` is not a boolean,
+            ``reserved_prefixes`` is not a list, or
+            ``entity_promotion_threshold`` is not a positive integer.
     """
     if not isinstance(raw, dict):
         raise ValueError(f"tags must be a YAML mapping, got: {type(raw).__name__}")
@@ -822,6 +831,13 @@ def _parse_tags(raw: dict[str, Any]) -> TagsConfig:
     enforce_raw = raw.get("enforce_namespaces", False)
     if not isinstance(enforce_raw, bool):
         raise ValueError(f"tags.enforce_namespaces must be a boolean, got: {enforce_raw!r}")
+
+    threshold_raw = raw.get("entity_promotion_threshold", 3)
+    threshold = _parse_strict_int(threshold_raw, "tags.entity_promotion_threshold")
+    if threshold <= 0:
+        raise ValueError(
+            f"tags.entity_promotion_threshold must be a positive integer, got: {threshold}"
+        )
 
     if "reserved_prefixes" in raw:
         prefixes_raw = raw["reserved_prefixes"]
@@ -833,10 +849,11 @@ def _parse_tags(raw: dict[str, Any]) -> TagsConfig:
         return TagsConfig(
             enforce_namespaces=enforce_raw,
             reserved_prefixes=reserved_prefixes,
+            entity_promotion_threshold=threshold,
         )
 
     # Absent ``reserved_prefixes`` → use dataclass default (``["kind"]``).
-    return TagsConfig(enforce_namespaces=enforce_raw)
+    return TagsConfig(enforce_namespaces=enforce_raw, entity_promotion_threshold=threshold)
 
 
 def _parse_feed_source(raw: dict[str, Any], index: int) -> FeedSourceConfig:
@@ -1464,6 +1481,14 @@ def _validate(config: DistilleryConfig) -> None:
                 "Each prefix must match [a-z0-9][a-z0-9-]* "
                 "(lowercase alphanumeric plus internal hyphens only)."
             )
+
+    # Validate entity_promotion_threshold.
+    threshold = config.tags.entity_promotion_threshold
+    if not isinstance(threshold, int) or isinstance(threshold, bool) or threshold <= 0:
+        raise ValueError(
+            "tags.entity_promotion_threshold must be a positive integer, "
+            f"got: {threshold}"
+        )
 
     # Validate feeds thresholds.
     alert = config.feeds.thresholds.alert

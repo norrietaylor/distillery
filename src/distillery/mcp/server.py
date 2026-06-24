@@ -1345,12 +1345,12 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         graph metrics (bridges, communities) on the relations subgraph.
 
         PARAMS:
-          - action (str, required): Operation. Valid: [add, get, remove, traverse, metrics].
+          - action (str, required): Operation. Valid: [add, get, remove, traverse, metrics, promote_entities].
           - from_id (str, required for add): Source entry UUID.
           - to_id (str, required for add): Target entry UUID.
           - relation_type (str, required for add, optional for get/traverse): Relation type.
             Valid: [link, corrects, supersedes, related, blocks, depends_on, citation,
-            duplicate, merge_source, sync_source].
+            duplicate, merge_source, sync_source, mentions, chunk].
           - weight (float, optional for add): Edge strength (e.g. interest/engagement
             magnitude). On a re-assert of an existing edge, supplied attributes are upserted.
           - valid_at / invalid_at (str ISO 8601, optional for add): Bi-temporal validity
@@ -1389,7 +1389,12 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             total_entries: int, graph_node_count: int, orphan_rate: float,
             results: list, count: int, computed_at: str, cache_hit: bool } (metrics).
             ``orphan_rate`` = 1 - graph_node_count/total_entries (graph-health signal;
-            0.0 when total_entries is 0).
+            0.0 when total_entries is 0). Or
+          { action: "promote_entities", entities_created: int, entities_reused: int,
+            mentions_created: int, threshold: int } (promote_entities).
+            Scans ``entity/*`` and ``tech/*`` tags and promotes any canonical tag
+            meeting the configured ``tags.entity_promotion_threshold`` to an ENTITY
+            entry node, linking each tagged entry with a ``mentions`` edge. Idempotent.
         RETURNS (error): { error: true, code: "NOT_FOUND" | "INVALID_PARAMS" | "INTERNAL", message: "..." }
 
         RELATED: distillery_correct (creates 'corrects' relations automatically),
@@ -1421,6 +1426,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                     metadata=metadata,
                 ),
             ),
+            cfg=c["config"],
         )
 
     @server.tool

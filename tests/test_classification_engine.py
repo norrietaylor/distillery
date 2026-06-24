@@ -296,12 +296,18 @@ class TestPromptBuilding:
         assert content in prompt
         assert len(prompt) > len(content)
 
-    def test_prompt_lists_all_entry_types(self) -> None:
+    def test_prompt_lists_classifier_entry_types(self) -> None:
         engine = _make_engine()
         prompt = engine.build_prompt("anything")
 
+        # ``entity`` is an auto-promotion-only node type that requires
+        # ``canonical_name``/``source_tag`` metadata the classifier cannot
+        # produce, so it is deliberately excluded from classifier choices.
         for et in EntryType:
-            assert et.value in prompt
+            if et is EntryType.ENTITY:
+                assert et.value not in prompt
+            else:
+                assert et.value in prompt
 
     def test_prompt_requests_json_format(self) -> None:
         engine = _make_engine()

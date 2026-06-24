@@ -191,6 +191,27 @@ class TestTypeSpecificMetadata:
         )
         assert e.metadata["meeting_id"] == "mtg-456"
 
+    def test_entity_metadata_required_fields(self) -> None:
+        e = make_entry(
+            entry_type=EntryType.ENTITY,
+            metadata={"canonical_name": "Cloudflare", "source_tag": "entity/cloudflare"},
+        )
+        assert e.metadata["canonical_name"] == "Cloudflare"
+        assert e.metadata["source_tag"] == "entity/cloudflare"
+
+    def test_entity_metadata_with_aliases(self) -> None:
+        e = make_entry(
+            entry_type=EntryType.ENTITY,
+            metadata={
+                "canonical_name": "Cloudflare",
+                "source_tag": "entity/cloudflare",
+                "aliases": ["cf", "cloudflare-inc"],
+            },
+        )
+        assert e.metadata["canonical_name"] == "Cloudflare"
+        assert e.metadata["source_tag"] == "entity/cloudflare"
+        assert e.metadata["aliases"] == ["cf", "cloudflare-inc"]
+
 
 # ---------------------------------------------------------------------------
 # Serialisation: to_dict

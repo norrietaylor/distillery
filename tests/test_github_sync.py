@@ -15,12 +15,14 @@ import distillery.feeds.github_sync as github_sync_module
 from distillery.feeds.github_sync import (
     _MAX_RETRIES,
     GitHubSyncAdapter,
+    StructuralRef,
     SyncResult,
     _build_content,
     _build_github_tags,
     _compute_backfill_updates,
     _derive_state_tag_value,
     _extract_cross_refs,
+    _extract_structural_refs,
     _make_external_id,
     _parse_github_url,
     _sanitize_tag_segment,
@@ -106,6 +108,116 @@ class TestExtractCrossRefs:
     @pytest.mark.unit
     def test_no_refs(self) -> None:
         assert _extract_cross_refs("No references here") == []
+
+
+class TestExtractStructuralRefs:
+    """Tests for _extract_structural_refs — typed structural ref extraction."""
+
+    # -- PR closing-keyword refs (citation) --
+
+    @pytest.mark.unit
+    def test_pr_closing_keyword_closes(self) -> None:
+        issue = {"pull_request": {}}
+        refs = _extract_structural_refs(issue, "Closes #42")
+        assert refs == [StructuralRef(number=42, kind="citation")]
+
+    @pytest.mark.unit
+    def test_pr_closing_keyword_fixes(self) -> None:
+        issue = {"pull_request": {}}
+        refs = _extract_structural_refs(issue, "Fixes #10")
+        assert refs == [StructuralRef(number=10, kind="citation")]
+
+    @pytest.mark.unit
+    def test_pr_closing_keyword_resolves(self) -> None:
+        issue = {"pull_request": {}}
+        refs = _extract_structural_refs(issue, "Resolves #99")
+        assert refs == [StructuralRef(number=99, kind="citation")]
+
+    @pytest.mark.unit
+    def test_pr_multiple_closing_keywords(self) -> None:
+        issue = {"pull_request": {}}
+        refs = _extract_structural_refs(issue, "Closes #1, fixes #2, resolves #3")
+        assert refs == [
+            StructuralRef(number=1, kind="citation"),
+            StructuralRef(number=2, kind="citation"),
+            StructuralRef(number=3, kind="citation"),
+        ]
+
+    @pytest.mark.unit
+    def test_pr_deduplicates_closing_refs(self) -> None:
+        issue = {"pull_request": {}}
+        refs = _extract_structural_refs(issue, "Closes #42 and closes #42")
+        assert refs == [StructuralRef(number=42, kind="citation")]
+
+    @pytest.mark.unit
+    def test_pr_plain_mention_not_returned(self) -> None:
+        """Plain #N without closing keyword should NOT produce a citation ref."""
+        issue = {"pull_request": {}}
+        refs = _extract_structural_refs(issue, "See #123 for context")
+        assert refs == []
+
+    @pytest.mark.unit
+    def test_pr_case_insensitive(self) -> None:
+        issue = {"pull_request": {}}
+        refs = _extract_structural_refs(issue, "CLOSES #7")
+        assert refs == [StructuralRef(number=7, kind="citation")]
+
+    # -- Sub-issue tracked-by refs (depends_on) --
+
+    @pytest.mark.unit
+    def test_issue_tracked_by_text(self) -> None:
+        """Tracked by #N in body → depends_on ref."""
+        issue: dict = {}
+        refs = _extract_structural_refs(issue, "Tracked by #653")
+        assert refs == [StructuralRef(number=653, kind="depends_on")]
+
+    @pytest.mark.unit
+    def test_issue_tracked_by_case_insensitive(self) -> None:
+        issue: dict = {}
+        refs = _extract_structural_refs(issue, "tracked by #100")
+        assert refs == [StructuralRef(number=100, kind="depends_on")]
+
+    @pytest.mark.unit
+    def test_issue_parent_api_field(self) -> None:
+        """GitHub sub-issues REST API ``parent`` field → depends_on ref."""
+        issue = {"parent": {"number": 200, "title": "Epic title"}}
+        refs = _extract_structural_refs(issue, "")
+        assert refs == [StructuralRef(number=200, kind="depends_on")]
+
+    @pytest.mark.unit
+    def test_issue_parent_and_tracked_by_deduped(self) -> None:
+        """Parent field + matching tracked-by text should yield one ref, not two."""
+        issue = {"parent": {"number": 50}}
+        refs = _extract_structural_refs(issue, "Tracked by #50")
+        assert refs == [StructuralRef(number=50, kind="depends_on")]
+
+    @pytest.mark.unit
+    def test_issue_plain_mention_not_returned(self) -> None:
+        """Plain #N in a non-PR body should NOT produce a depends_on ref."""
+        issue: dict = {}
+        refs = _extract_structural_refs(issue, "Related to #42")
+        assert refs == []
+
+    @pytest.mark.unit
+    def test_issue_closing_keyword_not_returned(self) -> None:
+        """Closing keywords on a plain issue body should NOT produce citation refs."""
+        issue: dict = {}
+        refs = _extract_structural_refs(issue, "Closes #10")
+        assert refs == []
+
+    # -- Edge cases --
+
+    @pytest.mark.unit
+    def test_empty_body_no_refs(self) -> None:
+        issue = {"pull_request": {}}
+        assert _extract_structural_refs(issue, "") == []
+
+    @pytest.mark.unit
+    def test_sorted_by_number_then_kind(self) -> None:
+        issue = {"pull_request": {}}
+        refs = _extract_structural_refs(issue, "Closes #5, closes #2, fixes #1")
+        numbers = [r.number for r in refs]
+        assert numbers == sorted(numbers)
 
 
 class TestBuildContent:
@@ -812,6 +924,206 @@ class TestBackfillGithubMetadataIntegration:
         second = await backfill_github_metadata(store)
         assert first == 1
         assert second == 0
+
+
+# ---------------------------------------------------------------------------
+# T03.2 — Materialize citation/depends_on structural edges during gh-sync
+# ---------------------------------------------------------------------------
+
+
+class TestStructuralEdgeMaterialization:
+    """Typed structural edges (citation / depends_on) during gh-sync (R3.1, R3.2, R3.3)."""
+
+    @pytest.mark.integration
+    async def test_pr_citation_edge_to_stored_issue(self, store, httpx_mock) -> None:  # type: ignore[no-untyped-def]
+        """R3.1: A synced PR with a closing keyword creates a citation edge to the issue.
+
+        Scenario:
+          - Issue #42 is already stored.
+          - PR #10 has "Closes #42" in its body.
+          - After sync, a ``citation`` edge PR -> issue must exist.
+        """
+        # 1. Store issue #42 first (sync it in).
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/owner/repo/issues\?.*"),
+            json=[_mock_issue(number=42, title="Issue to fix", body="A known bug")],
+        )
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/owner/repo/issues/42/comments.*"),
+            json=[],
+        )
+        adapter = GitHubSyncAdapter(store=store, url="owner/repo")
+        await adapter.sync()
+
+        # 2. Sync the PR that closes #42.
+        pr_payload = _mock_issue(
+            number=10,
+            title="Fix the bug",
+            body="Closes #42",
+            is_pr=True,
+        )
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/owner/repo/issues\?.*"),
+            json=[pr_payload],
+        )
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/owner/repo/issues/10/comments.*"),
+            json=[],
+        )
+        result = await adapter.sync()
+
+        # relations_created includes the new citation edge.
+        assert result.relations_created >= 1
+
+        # Locate the PR and issue entries.
+        entries = await store.list_entries(filters={"entry_type": "github"}, limit=10, offset=0)
+        pr_entry = next(e for e in entries if e.metadata["ref_number"] == 10)
+        issue_entry = next(e for e in entries if e.metadata["ref_number"] == 42)
+
+        # Verify the citation edge exists.
+        relations = await store.get_related(pr_entry.id, direction="outgoing")
+        citation_rels = [r for r in relations if r["relation_type"] == "citation"]
+        assert len(citation_rels) == 1
+        assert citation_rels[0]["to_id"] == issue_entry.id
+
+    @pytest.mark.integration
+    async def test_sub_issue_depends_on_edge_to_stored_epic(self, store, httpx_mock) -> None:  # type: ignore[no-untyped-def]
+        """R3.2: A synced sub-issue with tracked-by creates a depends_on edge to the epic.
+
+        Scenario:
+          - Epic #653 is already stored.
+          - Sub-issue #100 has "Tracked by #653" in its body.
+          - After sync, a ``depends_on`` edge sub-issue -> epic must exist.
+        """
+        # 1. Store epic #653 first.
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/owner/repo/issues\?.*"),
+            json=[_mock_issue(number=653, title="Epic: entity graph", body="The big epic")],
+        )
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/owner/repo/issues/653/comments.*"),
+            json=[],
+        )
+        adapter = GitHubSyncAdapter(store=store, url="owner/repo")
+        await adapter.sync()
+
+        # 2. Sync the sub-issue that is tracked by #653.
+        sub_issue_payload = _mock_issue(
+            number=100,
+            title="Sub-task",
+            body="Tracked by #653",
+        )
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/owner/repo/issues\?.*"),
+            json=[sub_issue_payload],
+        )
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/owner/repo/issues/100/comments.*"),
+            json=[],
+        )
+        result = await adapter.sync()
+
+        assert result.relations_created >= 1
+
+        entries = await store.list_entries(filters={"entry_type": "github"}, limit=10, offset=0)
+        sub_entry = next(e for e in entries if e.metadata["ref_number"] == 100)
+        epic_entry = next(e for e in entries if e.metadata["ref_number"] == 653)
+
+        relations = await store.get_related(sub_entry.id, direction="outgoing")
+        depends_on_rels = [r for r in relations if r["relation_type"] == "depends_on"]
+        assert len(depends_on_rels) == 1
+        assert depends_on_rels[0]["to_id"] == epic_entry.id
+
+    @pytest.mark.integration
+    async def test_missing_target_skips_silently(self, store, httpx_mock) -> None:  # type: ignore[no-untyped-def]
+        """R3.3: When the referenced issue is not in the store, sync completes without error.
+
+        Scenario:
+          - No entry exists for issue #999.
+          - A PR references "Closes #999".
+          - gh-sync should not raise; no edge to #999 is created.
+        """
+        pr_payload = _mock_issue(
+            number=5,
+            title="PR with missing target",
+            body="Closes #999",
+            is_pr=True,
+        )
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/owner/repo/issues\?.*"),
+            json=[pr_payload],
+        )
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/owner/repo/issues/5/comments.*"),
+            json=[],
+        )
+        adapter = GitHubSyncAdapter(store=store, url="owner/repo")
+        result = await adapter.sync()
+
+        # Sync should succeed.
+        assert result.created == 1
+
+        entries = await store.list_entries(filters={"entry_type": "github"}, limit=10, offset=0)
+        pr_entry = entries[0]
+
+        # No edges to a non-existent target.
+        relations = await store.get_related(pr_entry.id, direction="outgoing")
+        citation_rels = [r for r in relations if r["relation_type"] == "citation"]
+        assert citation_rels == []
+
+    @pytest.mark.integration
+    async def test_structural_edges_are_idempotent(self, store, httpx_mock) -> None:  # type: ignore[no-untyped-def]
+        """R3.3: Re-syncing does not duplicate structural edges.
+
+        Scenario:
+          - Issue #42 is stored and PR #10 closes it.
+          - First sync creates the citation edge.
+          - Second sync of the same PR does NOT add a second citation edge.
+        """
+        # Store issue #42.
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/owner/repo/issues\?.*"),
+            json=[_mock_issue(number=42, title="Issue to fix")],
+        )
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/owner/repo/issues/42/comments.*"),
+            json=[],
+        )
+        adapter = GitHubSyncAdapter(store=store, url="owner/repo")
+        await adapter.sync()
+
+        pr_payload = _mock_issue(number=10, title="Fix", body="Closes #42", is_pr=True)
+
+        # First sync of the PR.
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/owner/repo/issues\?.*"),
+            json=[pr_payload],
+        )
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/owner/repo/issues/10/comments.*"),
+            json=[],
+        )
+        result1 = await adapter.sync()
+        assert result1.relations_created >= 1
+
+        # Second sync of the same PR.
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/owner/repo/issues\?.*"),
+            json=[pr_payload],
+        )
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/owner/repo/issues/10/comments.*"),
+            json=[],
+        )
+        await adapter.sync()
+
+        entries = await store.list_entries(filters={"entry_type": "github"}, limit=10, offset=0)
+        pr_entry = next(e for e in entries if e.metadata["ref_number"] == 10)
+
+        relations = await store.get_related(pr_entry.id, direction="outgoing")
+        citation_rels = [r for r in relations if r["relation_type"] == "citation"]
+        # Exactly one citation edge, not two.
+        assert len(citation_rels) == 1
 
 
 # ---------------------------------------------------------------------------
