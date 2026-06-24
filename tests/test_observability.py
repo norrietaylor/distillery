@@ -27,13 +27,27 @@ def test_disabled_with_no_env():
     assert observability._configured is False
 
 
-@pytest.mark.parametrize(
-    "var",
-    ["LOGFIRE_TOKEN", "OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"],
-)
+@pytest.mark.parametrize("var", ["LOGFIRE_TOKEN", "OTEL_EXPORTER_OTLP_ENDPOINT"])
 def test_enabled_flag_tracks_env(monkeypatch, var):
     monkeypatch.setenv(var, "x")
     assert observability.observability_enabled() is True
+
+
+def test_traces_only_endpoint_does_not_enable(monkeypatch):
+    """A traces-only OTLP endpoint is not a standalone trigger: logfire exports
+    metrics only for the generic endpoint, so we require it (avoids collecting
+    metrics that export nowhere)."""
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://x/v1/traces")
+    assert observability.observability_enabled() is False
+
+
+def test_resolve_version_returns_str():
+    assert isinstance(observability._resolve_version(), str)
+
+
+def test_configure_is_idempotent_when_already_configured(monkeypatch):
+    monkeypatch.setattr(observability, "_configured", True)
+    assert observability.configure_observability() is True
 
 
 def test_span_is_noop_when_disabled():

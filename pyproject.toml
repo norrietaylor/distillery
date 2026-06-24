@@ -81,8 +81,11 @@ fastembed = [
 # is set. Logfire is the OTLP SDK + UI; the otlp exporter enables dual-export
 # to a self-hosted collector (e.g. the GCP Cloud Run otel-collector).
 otel = [
-    "logfire[asgi,httpx,system-metrics]>=2.0",
-    "opentelemetry-exporter-otlp>=1.20",
+    # Upper-bounded: the secret-scrubbing defaults and the env-driven OTLP
+    # export behaviour observability.py relies on are logfire internals that
+    # can shift across majors, so a major bump is a deliberate, reviewed change.
+    "logfire[asgi,httpx,system-metrics]>=2.0,<5",
+    "opentelemetry-exporter-otlp>=1.20,<2",
 ]
 
 [project.scripts]
@@ -184,6 +187,9 @@ known-first-party = ["distillery"]
 source = ["src/distillery"]
 omit = [
     "src/distillery/mcp/__main__.py",
+    # Telemetry wiring: its active branches require the optional [otel] extra,
+    # which CI does not install, so they can't be covered (like __main__.py).
+    "src/distillery/observability.py",
     "src/distillery/mcp/middleware.py",
     "src/distillery/mcp/server.py",
     "src/distillery/store/__main__.py",
