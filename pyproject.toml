@@ -76,6 +76,17 @@ fastembed = [
     # update in bench/results/.
     "fastembed==0.8.0",
 ]
+# Observability. Optional: the server runs unchanged without it, and even
+# when installed it stays dark until LOGFIRE_TOKEN / OTEL_EXPORTER_OTLP_ENDPOINT
+# is set. Logfire is the OTLP SDK + UI; the otlp exporter enables dual-export
+# to a self-hosted collector (e.g. the GCP Cloud Run otel-collector).
+otel = [
+    # Upper-bounded: the secret-scrubbing defaults and the env-driven OTLP
+    # export behaviour observability.py relies on are logfire internals that
+    # can shift across majors, so a major bump is a deliberate, reviewed change.
+    "logfire[asgi,httpx,system-metrics]>=2.0,<5",
+    "opentelemetry-exporter-otlp>=1.20,<2",
+]
 
 [project.scripts]
 distillery = "distillery.cli:main"
@@ -150,6 +161,17 @@ module = [
 ]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+# logfire + opentelemetry are gated behind the optional [otel] extra and are
+# not installed in the base dev/CI environment. observability.py guards every
+# import; treat them as untyped so mypy --strict passes without the extra.
+module = [
+    "logfire",
+    "logfire.*",
+    "opentelemetry.*",
+]
+ignore_missing_imports = true
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
@@ -165,6 +187,9 @@ known-first-party = ["distillery"]
 source = ["src/distillery"]
 omit = [
     "src/distillery/mcp/__main__.py",
+    # Telemetry wiring: its active branches require the optional [otel] extra,
+    # which CI does not install, so they can't be covered (like __main__.py).
+    "src/distillery/observability.py",
     "src/distillery/mcp/middleware.py",
     "src/distillery/mcp/server.py",
     "src/distillery/store/__main__.py",

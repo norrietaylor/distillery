@@ -43,16 +43,18 @@ ENV UV_LINK_MODE=copy \
 WORKDIR /app
 
 # 1. Install dependencies first using only lockfile + project metadata.
-#    This layer is cached unless dependencies change.
+#    This layer is cached unless dependencies change. The [otel] extra ships
+#    the Logfire/OpenTelemetry deps into the image; they stay dark until
+#    telemetry env vars are set at runtime.
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project --no-dev
+    uv sync --frozen --no-install-project --no-dev --extra otel
 
 # 2. Install the project itself in non-editable mode.
 COPY src ./src
 COPY README.md ./README.md
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-editable --no-dev
+    uv sync --frozen --no-editable --no-dev --extra otel
 
 # 3. Pre-install the DuckDB VSS extension into a directory the runtime user
 #    will own. The runtime stage has no shell to execute RUN commands, so
