@@ -1212,3 +1212,114 @@ async def test_handle_relations_resolve_candidate_reject_nonexistent_is_noop(sto
     data = _parse(result)
     assert "error" not in data or data.get("error") is False
     assert data["removed"] is False
+
+
+# ---------------------------------------------------------------------------
+# get_link_suggestion_seeds (T03.1)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_get_link_suggestion_seeds_returns_orphans_first(store) -> None:  # type: ignore[no-untyped-def]
+    """Orphan entries (no relations) appear before connected nodes."""
+    # Store three entries: two will be connected, one stays orphan.
+    connected_a = await _store_entry(store, content="connected entry A")
+    connected_b = await _store_entry(store, content="connected entry B")
+    orphan = await _store_entry(store, content="orphan entry")
+
+    # Create a relation between connected_a and connected_b.
+    await store.add_relation(connected_a, connected_b, "related")
+
+    seeds = await store.get_link_suggestion_seeds(10)
+
+    # All three entries should be included.
+    assert set(seeds) == {connected_a, connected_b, orphan}
+    # The orphan (degree 0) must appear before the connected entries.
+    assert seeds[0] == orphan
+
+
+@pytest.mark.unit
+async def test_get_link_suggestion_seeds_respects_limit(store) -> None:  # type: ignore[no-untyped-def]
+    """Result is bounded by the given limit."""
+    for i in range(5):
+        await _store_entry(store, content=f"entry {i}")
+
+    seeds = await store.get_link_suggestion_seeds(3)
+
+    assert len(seeds) == 3
+
+
+@pytest.mark.unit
+async def test_get_link_suggestion_seeds_excludes_archived(store) -> None:  # type: ignore[no-untyped-def]
+    """Archived entries are not included in seeds."""
+    active = await _store_entry(store, content="active entry")
+    archived = await _store_entry(store, content="archived entry")
+    await store.delete(archived)
+
+    seeds = await store.get_link_suggestion_seeds(10)
+
+    assert active in seeds
+    assert archived not in seeds
+
+
+@pytest.mark.unit
+async def test_get_link_suggestion_seeds_empty_store(store) -> None:  # type: ignore[no-untyped-def]
+    """Returns an empty list when the store has no active entries."""
+    seeds = await store.get_link_suggestion_seeds(10)
+    assert seeds == []
+
+
+@pytest.mark.unit
+async def test_get_link_suggestion_seeds_lower_degree_first(store) -> None:  # type: ignore[no-untyped-def]
+    """Entries with fewer relations appear before those with more."""
+    hub = await _store_entry(store, content="hub entry")
+    spoke1 = await _store_entry(store, content="spoke entry 1")
+    spoke2 = await _store_entry(store, content="spoke entry 2")
+    leaf = await _store_entry(store, content="leaf entry")
+
+    # hub has degree 2 (connected to both spokes), spokes have degree 1, leaf has degree 0.
+    await store.add_relation(hub, spoke1, "related")
+    await store.add_relation(hub, spoke2, "related")
+
+    seeds = await store.get_link_suggestion_seeds(10)
+
+    # leaf (degree 0) must appear before spoke1/spoke2 (degree 1) which must
+    # appear before hub (degree 2).
+    leaf_idx = seeds.index(leaf)
+    spoke1_idx = seeds.index(spoke1)
+    spoke2_idx = seeds.index(spoke2)
+    hub_idx = seeds.index(hub)
+
+    assert leaf_idx < spoke1_idx
+    assert leaf_idx < spoke2_idx
+    assert spoke1_idx < hub_idx
+    assert spoke2_idx < hub_idx
+
+
+# ---------------------------------------------------------------------------
+# LinkSuggestionConfig (T03.1)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_link_suggestion_config_defaults() -> None:
+    """LinkSuggestionConfig has the correct defaults."""
+    from distillery.config import LinkSuggestionConfig
+
+    cfg = LinkSuggestionConfig()
+    assert cfg.enabled is True
+    assert cfg.auto_create_threshold == 0.85
+    assert cfg.review_floor == 0.60
+    assert cfg.max_candidates_per_run == 200
+
+
+@pytest.mark.unit
+def test_distillery_config_has_link_suggestion() -> None:
+    """DistilleryConfig exposes link_suggestion with correct defaults."""
+    from distillery.config import DistilleryConfig
+
+    cfg = DistilleryConfig()
+    assert cfg.link_suggestion.enabled is True
+    assert cfg.link_suggestion.auto_create_threshold == 0.85
+    assert cfg.link_suggestion.review_floor == 0.60
+    assert cfg.link_suggestion.max_candidates_per_run == 200

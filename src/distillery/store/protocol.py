@@ -683,6 +683,29 @@ class DistilleryStore(Protocol):
         """
         ...
 
+    async def get_link_suggestion_seeds(self, limit: int) -> list[str]:
+        """Return entry IDs for low-degree / orphan nodes to seed the link-suggestion sweep.
+
+        Selects active (non-archived) entries that are structural candidates for
+        edge creation: true orphans (no row in ``entry_relations`` as either
+        endpoint) first, then low-degree nodes (fewest relations), both ordered
+        so the most-neglected entries are swept first.  The result is bounded by
+        *limit* to prevent runaway scans on large graphs.
+
+        The caller passes ``config.link_suggestion.max_candidates_per_run`` as
+        *limit*; this method never scores all non-existent edges globally.
+
+        Args:
+            limit: Maximum number of entry IDs to return.  Must be a positive
+                integer.
+
+        Returns:
+            List of entry UUID strings, length at most *limit*, ordered by
+            ascending relation-degree then ascending ``created_at`` (oldest
+            orphan / lowest-degree node first).  Never includes archived entries.
+        """
+        ...
+
     async def query_audit_log(
         self,
         filters: dict[str, Any] | None,

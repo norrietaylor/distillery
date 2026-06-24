@@ -4236,3 +4236,52 @@ class DuckDBStore:
             ``to_id`` in at least one row of ``entry_relations``.
         """
         return await self._run_sync(self._sync_get_all_related_entry_ids)
+
+    def _sync_get_link_suggestion_seeds(self, limit: int) -> list[str]:
+        """Synchronous implementation of get_link_suggestion_seeds(); via asyncio.to_thread."""
+        assert self._conn is not None
+        # Rank every active entry by its relation-degree (number of edges in
+        # which it appears as either endpoint), lowest first.  True orphans
+        # (degree 0) surface first, then sparsely-connected nodes.  Bounded by
+        # LIMIT to prevent full-table scans on large graphs.
+        #
+        # The LEFT JOIN ensures entries with zero relations (orphans) appear
+        # with degree = 0 rather than being dropped.  pending candidates are
+        # included in the degree count so we don't re-target nodes that already
+        # have queued work.
+        rows = self._conn.execute(
+            """
+            SELECT e.id
+            FROM entries e
+            LEFT JOIN (
+                SELECT node_id, COUNT(*) AS degree
+                FROM (
+                    SELECT from_id AS node_id FROM entry_relations
+                    UNION ALL
+                    SELECT to_id   AS node_id FROM entry_relations
+                ) sub
+                GROUP BY node_id
+            ) deg ON deg.node_id = e.id
+            WHERE e.status != 'archived'
+            ORDER BY COALESCE(deg.degree, 0) ASC, e.created_at ASC
+            LIMIT ?
+            """,
+            [limit],
+        ).fetchall()
+        return [row[0] for row in rows]
+
+    async def get_link_suggestion_seeds(self, limit: int) -> list[str]:
+        """Return entry IDs for low-degree / orphan nodes to seed the link-suggestion sweep.
+
+        Selects active (non-archived) entries ranked by ascending relation-degree
+        (true orphans first, then nodes with the fewest edges), bounded by *limit*
+        so the sweep never scores all non-existent edges globally.
+
+        Args:
+            limit: Maximum number of entry IDs to return.
+
+        Returns:
+            List of entry UUID strings, length at most *limit*, ordered by
+            ascending degree then ascending ``created_at``.
+        """
+        return await self._run_sync(self._sync_get_link_suggestion_seeds, limit)

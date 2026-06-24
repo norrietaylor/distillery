@@ -192,6 +192,45 @@ class AutoLinkConfig:
 
 
 @dataclass
+class LinkSuggestionConfig:
+    """Scheduled link-suggestion job configuration (issue #653 step 3).
+
+    When :attr:`enabled` is ``True``, the scheduled ``suggest_links`` action
+    sweeps low-degree / orphan nodes, scores candidate edges via Adamic-Adar
+    graph prediction and cosine similarity over stored embeddings, and routes
+    them by threshold:
+
+    * ``score >= auto_create_threshold`` → auto-created ``related`` edge
+    * ``review_floor <= score < auto_create_threshold`` → queued as pending
+      candidate for human review
+    * ``score < review_floor`` → discarded (counted)
+
+    All writes are idempotent on the unique ``(from_id, to_id, relation_type)``
+    index.  No LLM inference is performed; the job runs safely headless inside
+    ``/api/maintenance``.
+
+    Attributes:
+        enabled: Whether the scheduled link-suggestion job is active.
+            Defaults to ``True``.
+        auto_create_threshold: Normalised cosine similarity score at or above
+            which a candidate pair is auto-created as a live ``related`` edge.
+            Defaults to ``0.85`` (mirrors :attr:`AutoLinkConfig.threshold`).
+        review_floor: Minimum score for a candidate to be queued for review
+            rather than discarded.  Must be ``<= auto_create_threshold``.
+            Defaults to ``0.60`` (mirrors
+            :attr:`ClassificationConfig.dedup_link_threshold`).
+        max_candidates_per_run: Upper bound on the number of source nodes
+            swept in a single run.  Prevents runaway scans on large graphs.
+            Must be a positive integer.  Defaults to ``200``.
+    """
+
+    enabled: bool = True
+    auto_create_threshold: float = 0.85
+    review_floor: float = 0.60
+    max_candidates_per_run: int = 200
+
+
+@dataclass
 class TagsConfig:
     """Tag namespace configuration.
 
@@ -500,6 +539,7 @@ class DistilleryConfig:
         defaults: Handler-level operational defaults.
         classification: Classification threshold settings.
         auto_link: Semantic auto-link settings for the write path.
+        link_suggestion: Scheduled link-suggestion job settings.
         tags: Tag namespace enforcement settings.
         feeds: Ambient feed monitoring settings.
         rate_limit: Rate limiting and resource budget settings.
@@ -512,6 +552,7 @@ class DistilleryConfig:
     defaults: DefaultsConfig = field(default_factory=DefaultsConfig)
     classification: ClassificationConfig = field(default_factory=ClassificationConfig)
     auto_link: AutoLinkConfig = field(default_factory=AutoLinkConfig)
+    link_suggestion: LinkSuggestionConfig = field(default_factory=LinkSuggestionConfig)
     tags: TagsConfig = field(default_factory=TagsConfig)
     feeds: FeedsConfig = field(default_factory=FeedsConfig)
     rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
@@ -796,6 +837,54 @@ def _parse_auto_link(raw: dict[str, Any]) -> AutoLinkConfig:
         enabled=enabled_raw,
         threshold=threshold,
         max_links=max_links,
+    )
+
+
+def _parse_link_suggestion(raw: dict[str, Any]) -> LinkSuggestionConfig:
+    """Parse the ``link_suggestion`` section from a raw YAML mapping (issue #653).
+
+    Parameters:
+        raw: Mapping (typically from YAML) containing any of:
+            - ``enabled`` (bool, default ``True``)
+            - ``auto_create_threshold`` (float, default ``0.85``)
+            - ``review_floor`` (float, default ``0.60``)
+            - ``max_candidates_per_run`` (int or int-string, default ``200``)
+
+    Returns:
+        A populated :class:`LinkSuggestionConfig` instance.
+
+    Raises:
+        ValueError: If ``raw`` is not a mapping, ``enabled`` is not a boolean,
+            ``auto_create_threshold`` or ``review_floor`` is not a float, or
+            ``max_candidates_per_run`` is not an integer.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError(f"link_suggestion must be a YAML mapping, got: {type(raw).__name__}")
+
+    enabled_raw = raw.get("enabled", True)
+    if not isinstance(enabled_raw, bool):
+        raise ValueError(
+            f"link_suggestion.enabled must be a boolean, got: {enabled_raw!r}"
+        )
+
+    auto_create_threshold = _parse_float_field(
+        raw, "auto_create_threshold", 0.85, "link_suggestion.auto_create_threshold"
+    )
+
+    review_floor = _parse_float_field(
+        raw, "review_floor", 0.60, "link_suggestion.review_floor"
+    )
+
+    max_candidates_per_run_raw = raw.get("max_candidates_per_run", 200)
+    max_candidates_per_run = _parse_strict_int(
+        max_candidates_per_run_raw, "link_suggestion.max_candidates_per_run"
+    )
+
+    return LinkSuggestionConfig(
+        enabled=enabled_raw,
+        auto_create_threshold=auto_create_threshold,
+        review_floor=review_floor,
+        max_candidates_per_run=max_candidates_per_run,
     )
 
 
@@ -1455,6 +1544,28 @@ def _validate(config: DistilleryConfig) -> None:
             f"auto_link.max_links must be a positive integer, got: {config.auto_link.max_links}"
         )
 
+    # Validate link_suggestion settings (issue #653 step 3).
+    ls = config.link_suggestion
+    if not (0.0 <= ls.auto_create_threshold <= 1.0):
+        raise ValueError(
+            "link_suggestion.auto_create_threshold must be between 0.0 and 1.0, "
+            f"got: {ls.auto_create_threshold}"
+        )
+    if not (0.0 <= ls.review_floor <= 1.0):
+        raise ValueError(
+            f"link_suggestion.review_floor must be between 0.0 and 1.0, got: {ls.review_floor}"
+        )
+    if ls.review_floor > ls.auto_create_threshold:
+        raise ValueError(
+            f"link_suggestion.review_floor ({ls.review_floor}) must be <= "
+            f"auto_create_threshold ({ls.auto_create_threshold})"
+        )
+    if ls.max_candidates_per_run <= 0:
+        raise ValueError(
+            "link_suggestion.max_candidates_per_run must be a positive integer, "
+            f"got: {ls.max_candidates_per_run}"
+        )
+
     # Validate reserved_prefixes: each must be a valid single tag segment.
     _segment_re = re.compile(r"^[a-z0-9][a-z0-9\-]*$")
     for prefix in config.tags.reserved_prefixes:
@@ -1585,6 +1696,7 @@ def load_config(config_path: str | None = None) -> DistilleryConfig:
     defaults_raw = raw.get("defaults", {}) or {}
     classification_raw = raw.get("classification", {}) or {}
     auto_link_raw = raw.get("auto_link", {}) or {}
+    link_suggestion_raw = raw.get("link_suggestion", {}) or {}
     tags_raw = raw.get("tags", {}) or {}
     feeds_raw = raw.get("feeds", {}) or {}
     rate_limit_raw = raw.get("rate_limit", {}) or {}
@@ -1599,6 +1711,7 @@ def load_config(config_path: str | None = None) -> DistilleryConfig:
         defaults=_parse_defaults(defaults_raw),
         classification=_parse_classification(classification_raw),
         auto_link=_parse_auto_link(auto_link_raw),
+        link_suggestion=_parse_link_suggestion(link_suggestion_raw),
         tags=_parse_tags(tags_raw),
         feeds=_parse_feeds(feeds_raw),
         rate_limit=_parse_rate_limit(rate_limit_raw),
