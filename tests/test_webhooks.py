@@ -1550,3 +1550,145 @@ async def test_maintenance_link_suggestion_phase_non_fatal(
     assert body["data"]["poll"]["ok"] is True
     assert body["data"]["rescore"]["ok"] is True
     assert body["data"]["classify_batch"]["ok"] is True
+
+
+# ---------------------------------------------------------------------------
+# T04.2 tests — response-shape and disabled-gating requirements
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_maintenance_route_link_suggestion_response_shape(
+    store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R4.3 (route-level): POST /maintenance with link_suggestion.enabled=True
+    returns a job whose result contains link_suggestion with all four T03 count
+    keys (edges_created, candidates_queued, discarded, nodes_scanned).
+
+    Asserts through the actual /maintenance route + GET /jobs/{id} path to
+    cover bearer auth and the full async dispatch pipeline.
+    """
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from distillery.config import LinkSuggestionConfig
+    from distillery.feeds.poller import PollerSummary, PollResult
+
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+
+    config = _make_config()
+    config.link_suggestion = LinkSuggestionConfig(enabled=True)
+    shared: dict[str, Any] = {"store": store, "config": config, "embedding_provider": None}
+
+    # Stub FeedPoller so poll/rescore don't touch the network.
+    mock_poller = MagicMock()
+    mock_poller.poll = AsyncMock(
+        return_value=PollerSummary(
+            results=[PollResult(source_url="https://x.com/f", source_type="rss")],
+            total_fetched=0,
+            total_stored=0,
+            sources_polled=0,
+        )
+    )
+    mock_poller.rescore = AsyncMock(return_value={"rescored": 0, "upgraded": 0, "downgraded": 0})
+
+    suggest_mock = AsyncMock(
+        return_value={
+            "edges_created": 4,
+            "candidates_queued": 7,
+            "discarded": 2,
+            "nodes_scanned": 15,
+        }
+    )
+
+    with (
+        patch("distillery.mcp.webhooks.FeedPoller", return_value=mock_poller),
+        patch.object(store, "suggest_links", suggest_mock),
+    ):
+        app = create_webhook_app(shared, config)
+        with TestClient(app, raise_server_exceptions=False) as client:
+            resp = client.post("/maintenance", headers=_AUTH_HEADER)
+            assert resp.status_code == 202, f"Expected 202, got {resp.status_code}: {resp.text}"
+            final = _wait_for_job(client, resp.json()["job_id"])
+
+    assert final["state"] == "succeeded", final
+    data = final["result"]
+
+    assert "link_suggestion" in data, "link_suggestion key missing from maintenance result"
+    ls = data["link_suggestion"]
+    assert ls["ok"] is True
+    assert ls["enabled"] is True
+    # All four T03 count keys must be present with the expected values.
+    assert ls["edges_created"] == 4
+    assert ls["candidates_queued"] == 7
+    assert ls["discarded"] == 2
+    assert ls["nodes_scanned"] == 15
+
+    suggest_mock.assert_awaited_once()
+
+
+@pytest.mark.unit
+async def test_maintenance_link_suggestion_disabled_skips_phase(
+    store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R4.3 (disabled gating): with link_suggestion.enabled=False the
+    link-suggestion phase is omitted — link_suggestion.enabled is False and
+    suggest_links is never called — while poll, rescore, and classify-batch
+    still run normally."""
+    from unittest.mock import AsyncMock, patch
+
+    from distillery.config import LinkSuggestionConfig
+    from distillery.mcp.webhooks import _run_maintenance
+
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+
+    config = _make_config()
+    config.link_suggestion = LinkSuggestionConfig(enabled=False)
+    shared: dict[str, Any] = {"store": store, "config": config, "embedding_provider": None}
+
+    suggest_mock = AsyncMock()
+
+    with (
+        patch(
+            "distillery.mcp.webhooks._run_poll",
+            AsyncMock(return_value=JSONResponse({"ok": True, "data": {"sources_polled": 0}})),
+        ),
+        patch(
+            "distillery.mcp.webhooks._run_rescore",
+            AsyncMock(
+                return_value=JSONResponse(
+                    {"ok": True, "data": {"rescored": 0, "upgraded": 0, "downgraded": 0}}
+                )
+            ),
+        ),
+        patch(
+            "distillery.mcp.webhooks._run_classify_batch",
+            AsyncMock(
+                return_value=JSONResponse(
+                    {"ok": True, "data": {"classified": 0, "pending_review": 0, "errors": 0, "by_type": {}}}
+                )
+            ),
+        ),
+        patch.object(store, "suggest_links", suggest_mock),
+    ):
+        resp = await _run_maintenance(shared)
+
+    import json as _json
+
+    assert resp.status_code == 200
+    body = _json.loads(bytes(resp.body).decode())
+    assert body["ok"] is True
+
+    # Phase was skipped: enabled=False, no count keys.
+    ls = body["data"]["link_suggestion"]
+    assert ls["ok"] is True
+    assert ls["enabled"] is False
+    assert "edges_created" not in ls
+    assert "candidates_queued" not in ls
+
+    # suggest_links must never be called when the phase is disabled.
+    suggest_mock.assert_not_awaited()
+
+    # Other phases still ran.
+    assert body["data"]["poll"]["ok"] is True
+    assert body["data"]["rescore"]["ok"] is True
+    assert body["data"]["classify_batch"]["ok"] is True
