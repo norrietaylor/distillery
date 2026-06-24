@@ -457,6 +457,23 @@ class TestGroupBy:
         by_tag = {g["value"]: g["count"] for g in data["groups"]}
         assert by_tag.get("api") == 3
 
+    async def test_group_by_tags_entry_type_list(self, store: Any) -> None:
+        """entry_type as a list aggregates group_by across several types in one
+        call — radar's 6-call tag-mine collapses to one round-trip (#654)."""
+        await store.store(make_entry(content="s", entry_type=EntryType.SESSION, tags=["topic"]))
+        await store.store(make_entry(content="r", entry_type=EntryType.REFERENCE, tags=["topic"]))
+        await store.store(make_entry(content="b", entry_type=EntryType.BOOKMARK, tags=["topic"]))
+
+        result = await _handle_list(
+            store=store,
+            arguments={"group_by": "tags", "entry_type": ["session", "reference"], "limit": 50},
+        )
+        data = parse_mcp_response(result)
+        assert not data.get("error")
+        by_tag = {g["value"]: g["count"] for g in data["groups"]}
+        # Only the session + reference entries count; the bookmark is excluded.
+        assert by_tag.get("topic") == 2
+
     async def test_group_by_tags_with_tag_prefix(self, store: Any) -> None:
         """group_by=tags with tag_prefix limits the grouping to matching tags.
 

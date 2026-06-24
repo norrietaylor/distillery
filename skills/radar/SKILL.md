@@ -80,10 +80,10 @@ proceed to 3b. Report: `Using <N> user-supplied topic(s): <comma-separated>.`
 
 *Path 2 — Namespace-diverse interest profile (default):*
 
-Build an interest profile that excludes feed-ingested content. Make separate
-`distillery_list(group_by="tags", entry_type=<type>)` calls for curated
-types: `session`, `reference`, `bookmark`, `idea`, `note`, and `minutes`.
-Merge the group counts across all responses to obtain a combined count map.
+Build an interest profile that excludes feed-ingested content. Make a single
+`distillery_list(group_by="tags", entry_type=["session", "reference", "bookmark", "idea", "note", "minutes"])`
+call across the curated types — the grouped counts are already merged across all
+six types into one combined count map (one round-trip instead of six).
 
 Then select **5 namespace-diverse tags**, *not* the raw top-5 by count. A
 tag's namespace is its hierarchical path with the leaf segment removed,
