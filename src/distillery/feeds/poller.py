@@ -46,6 +46,16 @@ _DEFAULT_RELEVANCE_THRESHOLD = 0.0
 # skipped entirely — the external_id guarantee is sufficient.
 _AUTHORITATIVE_EXTERNAL_ID_TYPES: frozenset[str] = frozenset({"github", "rss"})
 
+# Maximum number of feed sources fetched + scored + stored concurrently per
+# poll cycle.  A poll over ~79 sources previously fanned out with an unbounded
+# ``asyncio.gather``, saturating the thread pool and the single DuckDB writer
+# lock for tens of seconds and self-inflicting upstream 429/502s (issue #655).
+# Bounding the fan-out with a semaphore keeps every source processed while
+# capping peak CPU / thread-pool / writer-lock pressure.  Five is a small,
+# conservative default; raise it only if the writer is no longer the
+# bottleneck.
+_DEFAULT_MAX_CONCURRENT_SOURCES = 5
+
 
 @dataclass
 class PollResult:
@@ -594,9 +604,14 @@ class FeedPoller:
         *,
         relevance_threshold: float | None = None,
         reader: JinaReaderClient | None = None,
+        max_concurrent_sources: int = _DEFAULT_MAX_CONCURRENT_SOURCES,
     ) -> None:
         self._store = store
         self._config = config
+        # Bound the per-cycle fan-out: at most ``max_concurrent_sources`` sources
+        # are fetched + scored + stored at once (issue #655).  Values < 1 are
+        # clamped to 1 so a misconfiguration can never deadlock the poll.
+        self._max_concurrent_sources = max(1, max_concurrent_sources)
         self._threshold = (
             relevance_threshold
             if relevance_threshold is not None
@@ -739,21 +754,29 @@ class FeedPoller:
         except Exception:  # noqa: BLE001
             logger.debug("FeedPoller: keyword map build failed — topic tagging disabled")
 
-        # Poll all sources concurrently — each ``_poll_source`` persists its
-        # own liveness (``last_polled_at``) before returning so a partial
+        # Poll sources concurrently but bounded — each ``_poll_source`` persists
+        # its own liveness (``last_polled_at``) before returning so a partial
         # cycle (e.g. the webhook background task is cancelled mid-gather)
         # still advances the per-source timestamps for sources that did
         # complete (issue #404).
-        results = await asyncio.gather(
-            *(
-                self._poll_source(
+        #
+        # A semaphore caps how many sources are in flight at once: an
+        # unbounded fan-out over ~79 sources saturated the thread pool and the
+        # single DuckDB writer lock for tens of seconds (issue #655).  Every
+        # source is still polled — only the peak concurrency is limited.
+        semaphore = asyncio.Semaphore(self._max_concurrent_sources)
+
+        async def _poll_source_bounded(source: FeedSourceConfig) -> PollResult:
+            async with semaphore:
+                return await self._poll_source(
                     source,
                     scorer,
                     keyword_map=keyword_map,
                     is_backfill=source.url in first_poll_urls,
                 )
-                for source in sources
-            ),
+
+        results = await asyncio.gather(
+            *(_poll_source_bounded(source) for source in sources),
             return_exceptions=True,
         )
 
