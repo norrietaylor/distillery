@@ -72,6 +72,7 @@ _COOLDOWN_SECONDS: dict[str, int] = {
     "rescore": 3600,  # 1 hour
     "maintenance": 21600,  # 6 hours
     "classify-batch": 300,  # 5 minutes
+    "link-suggestion": 3600,  # 1 hour
 }
 
 # Per-endpoint locks to serialize dispatch and prevent TOCTOU races on
@@ -987,6 +988,13 @@ async def _run_maintenance(state: dict[str, Any]) -> JSONResponse:
         if classify_body.get("ok")
         else {"ok": False, "error": classify_body.get("error", "classify-batch failed")}
     )
+
+    # Re-check before link-suggestion — a fatal raised during classify-batch
+    # must halt the job rather than open a fresh DuckDB connection for the
+    # sweep against a dead store.
+    terminal = _terminal_failure_response(store)
+    if terminal is not None:
+        return terminal
 
     # 4. Link suggestion — sweep low-degree / orphan nodes and score candidate
     # edges.  Gated by config.link_suggestion.enabled; non-fatal so a failure
