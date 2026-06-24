@@ -651,3 +651,25 @@ class TestFindSimilarStoredEmbedding:
         # Handler self-excludes the source; the twin remains.
         assert "seed" not in contents
         assert "near" in contents
+
+    async def test_stored_path_reserves_budget_for_dedup(
+        self,
+        store: DuckDBStore,
+        embedding_provider: ControlledEmbeddingProvider,
+        cfg: DistilleryConfig,
+    ) -> None:
+        """source_entry_id + dedup_action still reserves budget on the stored
+        path (the dedup pass embeds content), so BUDGET_EXCEEDED is enforced and
+        not bypassed by the stored-vector fast path (#666 review)."""
+        embedding_provider.register("seed", _UNIT_A)
+        src_id = await store.store(make_entry(content="seed"))
+        cfg.rate_limit.embedding_budget_daily = 1
+        await store.record_embedding_usage(count=1, daily_limit=1)  # exhaust the budget
+
+        response = await _handle_find_similar(
+            store,
+            {"source_entry_id": src_id, "dedup_action": True},
+            cfg=cfg,
+        )
+        data = parse_mcp_response(response)
+        assert data.get("code") == "BUDGET_EXCEEDED"

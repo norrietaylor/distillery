@@ -206,6 +206,30 @@ class DistilleryStore(Protocol):
         """
         ...
 
+    async def find_similar_by_id(
+        self,
+        source_entry_id: str,
+        threshold: float,
+        limit: int,
+    ) -> list[SearchResult] | None:
+        """Find entries similar to *source_entry_id* using its STORED embedding.
+
+        Reuses the vector already persisted for the entry instead of
+        re-embedding its content (no embedding-provider round-trip, no budget
+        spend). Returns ``None`` when the entry has no stored embedding so the
+        caller can fall back to embedding fresh text.
+
+        Args:
+            source_entry_id: UUID of the entry whose stored vector is the probe.
+            threshold: Minimum cosine similarity (inclusive) for a result.
+            limit: Maximum number of results to return.
+
+        Returns:
+            ``SearchResult`` objects with ``score >= threshold`` (the source is
+            not self-excluded here), or ``None`` if no stored embedding exists.
+        """
+        ...
+
     @overload
     async def list_entries(
         self,

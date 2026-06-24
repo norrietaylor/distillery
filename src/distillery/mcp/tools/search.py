@@ -164,8 +164,7 @@ async def _handle_search(
     if output_mode not in _VALID_SEARCH_OUTPUT_MODES:
         return error_response(
             "INVALID_PARAMS",
-            f"Field 'output_mode' must be one of: "
-            f"{', '.join(sorted(_VALID_SEARCH_OUTPUT_MODES))}",
+            f"Field 'output_mode' must be one of: {', '.join(sorted(_VALID_SEARCH_OUTPUT_MODES))}",
         )
 
     # --- embedding budget check (1 embed call per search) -------------------
@@ -566,12 +565,22 @@ async def _handle_find_similar(
                 source_entry_id, threshold=threshold, limit=limit
             )
         if search_results is None:
+            # Embed path: find_similar embeds `content` (one embedding).
             if cfg is not None:
                 await store.record_embedding_usage(
                     count=1, daily_limit=cfg.rate_limit.embedding_budget_daily
                 )
             search_results = await store.find_similar(
                 content=content, threshold=threshold, limit=limit
+            )
+        elif (dedup_action or conflict_check) and cfg is not None:
+            # Stored-vector path spent no embedding for the similarity probe,
+            # but dedup_action / conflict_check below still embed `content`
+            # (run_dedup_check / run_conflict_* -> store.find_similar(content)),
+            # so reserve that embedding here — otherwise the stored path bypasses
+            # the BUDGET_EXCEEDED guard the pre-#666 single reservation provided.
+            await store.record_embedding_usage(
+                count=1, daily_limit=cfg.rate_limit.embedding_budget_daily
             )
     except EmbeddingBudgetError:
         return error_response("BUDGET_EXCEEDED", "Embedding budget exceeded")
