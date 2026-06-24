@@ -2382,7 +2382,7 @@ class TestIdleCheckpoint:
     """
 
     async def test_idle_checkpoint_once_flushes_wal(
-        self, tmp_path, deterministic_embedding_provider
+        self, tmp_path, deterministic_embedding_provider, caplog
     ) -> None:
         db_path = str(tmp_path / "idle_ckpt.db")
         store = DuckDBStore(
@@ -2391,18 +2391,21 @@ class TestIdleCheckpoint:
         )
         await store.initialize()
         try:
-            # Suppress per-write checkpoints so the WAL actually accumulates,
-            # isolating the idle sweep as the thing that flushes it.
+            # Suppress per-write checkpoints so the idle sweep is the thing that
+            # flushes the WAL.
             with patch.object(store, "_checkpoint_after_write", lambda *_a, **_k: None):
                 for i in range(5):
                     await store.store(make_entry(content=f"idle-{i}"))
-            wal_path = Path(db_path + ".wal")
-            wal_before = wal_path.stat().st_size if wal_path.exists() else 0
 
-            await store._idle_checkpoint_once()  # noqa: SLF001
+            # Assert the sweep actually executed the CHECKPOINT success path
+            # (and did not silently skip) via its debug log — WAL file size is
+            # environment-flaky and let the old assertion pass vacuously when the
+            # WAL was already 0 (#671 review).
+            import logging
 
-            wal_after = wal_path.stat().st_size if wal_path.exists() else 0
-            assert wal_after < wal_before or wal_after == 0
+            with caplog.at_level(logging.DEBUG, logger="distillery.store.duckdb"):
+                await store._idle_checkpoint_once()  # noqa: SLF001
+            assert "Idle checkpoint flushed WAL" in caplog.text
         finally:
             await store.close()
 

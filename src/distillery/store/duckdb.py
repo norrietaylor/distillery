@@ -1294,8 +1294,18 @@ class DuckDBStore:
         while True:
             try:
                 await asyncio.sleep(self._idle_checkpoint_interval)
-                await self._idle_checkpoint_once()
             except asyncio.CancelledError:
+                raise
+            # Shield the sweep so a cancel (from stop_idle_checkpoint/close)
+            # waits for any in-flight CHECKPOINT worker to finish instead of
+            # releasing _conn_lock mid-checkpoint and leaving an orphan thread
+            # racing close()'s connection teardown (issue #416).
+            sweep = asyncio.ensure_future(self._idle_checkpoint_once())
+            try:
+                await asyncio.shield(sweep)
+            except asyncio.CancelledError:
+                with contextlib.suppress(Exception):
+                    await sweep
                 raise
             except Exception:  # noqa: BLE001 — a stray error must not kill the loop
                 logger.debug("Idle checkpoint sweep failed (non-fatal)", exc_info=True)
