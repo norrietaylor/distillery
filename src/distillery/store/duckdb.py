@@ -4650,12 +4650,23 @@ class DuckDBStore:
         # 2. Build the live-edge adjacency once for Adamic-Adar prediction.
         #    Pending candidates carry review_status="pending" in metadata and
         #    are excluded so they don't pollute the structural signal.
+        #    The graph extra (networkx) is optional: when it is absent the
+        #    Adamic-Adar candidate source is skipped and the sweep runs on the
+        #    cosine (stored-embedding) source alone — the authoritative routing
+        #    score anyway — so suggest_links still works without [graph].
         live_relations = [
             r
             for r in self._sync_list_relations()
             if (r.get("metadata") or {}).get("review_status") != "pending"
         ]
-        graph = build_relations_graph(live_relations, directed=True)
+        try:
+            graph = build_relations_graph(live_relations, directed=True)
+        except RuntimeError:
+            graph = None
+            logger.info(
+                "suggest_links: networkx unavailable; using cosine candidates only "
+                "(install distillery-mcp[graph] to enable the link_prediction source)"
+            )
 
         edges_created = 0
         candidates_queued = 0
@@ -4670,7 +4681,7 @@ class DuckDBStore:
             # 2a. Candidate targets from the graph (Adamic-Adar) — only when
             #     the seed is a node in the live adjacency.
             graph_targets: set[str] = set()
-            if seed in graph:
+            if graph is not None and seed in graph:
                 for _u, target, _score in link_prediction(
                     graph, source=seed, k=max_neighbours_per_seed
                 ):

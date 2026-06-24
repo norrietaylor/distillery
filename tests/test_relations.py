@@ -1408,6 +1408,36 @@ async def _store_with_vector(store, provider, content: str, vector: list[float])
 
 
 @pytest.mark.unit
+async def test_suggest_links_without_networkx_uses_cosine_only(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """suggest_links degrades to the cosine source when networkx is absent.
+
+    The graph extra is optional and CI installs `.[dev]` without it.  Forcing
+    build_relations_graph to raise (as it does when networkx is missing) must
+    not abort the sweep: the cosine source — the authoritative routing score —
+    still surfaces and auto-creates the high-confidence pair.
+    """
+    import distillery.graph.builders as builders
+
+    def _no_networkx(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        raise RuntimeError("NetworkX not installed; run: pip install distillery-mcp[graph]")
+
+    monkeypatch.setattr(builders, "build_relations_graph", _no_networkx)
+
+    store, provider = await _controlled_store()
+    try:
+        seed = await _store_with_vector(store, provider, "seed", _unit_vec_with_cosine(1.0))
+        high = await _store_with_vector(store, provider, "high", _unit_vec_with_cosine(0.95))
+
+        counts = await store.suggest_links()
+
+        assert counts["edges_created"] >= 1
+        related = await store.get_related(seed)
+        assert any(high in (r["from_id"], r["to_id"]) for r in related)
+    finally:
+        await store.close()
+
+
+@pytest.mark.unit
 async def test_suggest_links_auto_creates_high_confidence_pair() -> None:
     """A single above-threshold pair becomes one live ``related`` edge."""
     store, provider = await _controlled_store()
