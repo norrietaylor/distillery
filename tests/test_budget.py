@@ -127,106 +127,89 @@ class TestRecordAndCheck:
 
 @pytest.mark.unit
 class TestConcurrentAccess:
-    """Regression tests for the DuckDB result-set race (issue #608).
+    """Regression tests for the concurrent budget-counter write race.
 
-    DuckDB invalidates a connection's pending result set when another
-    ``execute()`` runs on the same connection, so concurrent execute+fetch
-    on a shared connection raised ``InvalidInputException: No open result
-    set``.  Per-call cursors give each caller its own result set.
+    Originally (issue #608) a module-level ``_write_lock`` serialized direct
+    multithreaded calls to the budget functions on one shared connection.  The
+    #655 fix moves that serialization to the store: production callers reach the
+    counter only via :meth:`DuckDBStore.record_embedding_usage`, which runs the
+    upsert under the store's ``_conn_lock``.  These tests exercise that path —
+    concurrent ``record_embedding_usage`` calls must never raise
+    ``Conflict on update`` / duplicate-key / aborted-transaction errors, must
+    count exactly, and must not overspend the cap.
     """
 
-    def test_concurrent_reads_and_writes_do_not_raise(
-        self, conn: duckdb.DuckDBPyConnection
-    ) -> None:
-        """Concurrent check/read/record calls on one shared connection succeed."""
-        import threading
+    async def test_concurrent_record_usage_does_not_raise(self, store: object) -> None:
+        """Concurrent record_embedding_usage calls through the store succeed."""
+        import asyncio
 
-        n_threads = 8
+        n_tasks = 8
         iterations = 25
-        barrier = threading.Barrier(n_threads)
-        errors: list[Exception] = []
 
-        def worker() -> None:
-            barrier.wait()
-            try:
-                for _ in range(iterations):
-                    check_budget(conn, daily_limit=10_000_000)
-                    get_daily_usage(conn)
-                    record_and_check(conn, daily_limit=10_000_000)
-            except Exception as exc:  # pragma: no cover - only on regression
-                errors.append(exc)
+        async def worker() -> None:
+            for _ in range(iterations):
+                await store.record_embedding_usage(count=1, daily_limit=10_000_000)
 
-        threads = [threading.Thread(target=worker) for _ in range(n_threads)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
+        await asyncio.gather(*(worker() for _ in range(n_tasks)))
 
-        assert errors == [], f"concurrent budget calls raised: {errors!r}"
-        assert get_daily_usage(conn) == n_threads * iterations
+        assert get_daily_usage(store.connection) == n_tasks * iterations
 
-    def test_concurrent_increments_count_correctly(self, conn: duckdb.DuckDBPyConnection) -> None:
+    async def test_concurrent_increments_count_correctly(self, store: object) -> None:
         """The _meta counter reflects every concurrent increment exactly once."""
-        import threading
+        import asyncio
 
-        n_threads = 6
+        n_tasks = 6
         iterations = 20
-        barrier = threading.Barrier(n_threads)
-        errors: list[Exception] = []
 
-        def worker() -> None:
-            barrier.wait()
-            try:
-                for _ in range(iterations):
-                    increment_usage(conn)
-            except Exception as exc:  # pragma: no cover - only on regression
-                errors.append(exc)
+        async def worker() -> None:
+            for _ in range(iterations):
+                await store.record_embedding_usage(count=1, daily_limit=0)
 
-        threads = [threading.Thread(target=worker) for _ in range(n_threads)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
+        await asyncio.gather(*(worker() for _ in range(n_tasks)))
 
-        assert errors == [], f"concurrent increments raised: {errors!r}"
-        assert get_daily_usage(conn) == n_threads * iterations
+        assert get_daily_usage(store.connection) == n_tasks * iterations
 
-    def test_concurrent_record_and_check_cannot_overspend(
-        self, conn: duckdb.DuckDBPyConnection
-    ) -> None:
-        """Concurrent record_and_check calls never push usage past daily_limit."""
-        import threading
+    async def test_concurrent_record_usage_cannot_overspend(self, store: object) -> None:
+        """Concurrent record_embedding_usage calls never push usage past daily_limit."""
+        import asyncio
 
         daily_limit = 10
-        n_threads = 8
+        n_tasks = 8
         iterations = 5  # 40 attempted calls against a limit of 10
-        barrier = threading.Barrier(n_threads)
-        errors: list[Exception] = []
         successes: list[int] = []
-        lock = threading.Lock()
 
-        def worker() -> None:
-            barrier.wait()
+        async def worker() -> None:
             for _ in range(iterations):
                 try:
-                    record_and_check(conn, daily_limit=daily_limit)
+                    await store.record_embedding_usage(count=1, daily_limit=daily_limit)
                 except EmbeddingBudgetError:
                     pass  # expected once the cap is reached
-                except Exception as exc:  # pragma: no cover - only on regression
-                    errors.append(exc)
                 else:
-                    with lock:
-                        successes.append(1)
+                    successes.append(1)
 
-        threads = [threading.Thread(target=worker) for _ in range(n_threads)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
+        await asyncio.gather(*(worker() for _ in range(n_tasks)))
 
-        assert errors == [], f"concurrent record_and_check raised: {errors!r}"
         assert len(successes) == daily_limit
-        assert get_daily_usage(conn) == daily_limit
+        assert get_daily_usage(store.connection) == daily_limit
+
+
+@pytest.mark.unit
+class TestStoreRecordEmbeddingUsage:
+    """The serialized store wrapper increments and still enforces the budget (#655)."""
+
+    async def test_increments_counter(self, store: object) -> None:
+        """record_embedding_usage adds to today's counter and returns the total."""
+        total = await store.record_embedding_usage(count=3, daily_limit=100)
+        assert total == 3
+        assert get_daily_usage(store.connection) == 3
+        total = await store.record_embedding_usage(count=2, daily_limit=100)
+        assert total == 5
+
+    async def test_propagates_budget_error_when_over_limit(self, store: object) -> None:
+        """EmbeddingBudgetError still propagates unchanged through the store path."""
+        await store.record_embedding_usage(count=10, daily_limit=10)
+        with pytest.raises(EmbeddingBudgetError):
+            await store.record_embedding_usage(count=1, daily_limit=10)
 
 
 # ---------------------------------------------------------------------------

@@ -1405,11 +1405,12 @@ class DuckDBStore:
     async def rollback(self) -> None:
         """Public rollback hook for non-store code paths that touch the connection.
 
-        The MCP tool layer occasionally issues raw ``conn.execute`` calls
-        (e.g. the per-request embedding-budget counter in
-        :mod:`distillery.mcp.budget`) that bypass :meth:`_run_sync`.  Those
-        call sites can invoke ``await store.rollback()`` in their exception
-        handlers to clear an aborted transaction before the next request.
+        The MCP tool layer occasionally issues raw ``conn.execute`` calls that
+        bypass :meth:`_run_sync` (the per-request embedding-budget counter no
+        longer does — it now goes through the serialized ``_run_sync`` /
+        ``_conn_lock`` write path).  Those remaining call sites can invoke
+        ``await store.rollback()`` in their exception handlers to clear an
+        aborted transaction before the next request.
 
         Holds ``_conn_lock`` so the rollback cannot race a concurrent
         ``_run_sync`` worker still mutating the connection (issue #416).
@@ -3402,6 +3403,53 @@ class DuckDBStore:
     async def set_metadata(self, key: str, value: str) -> None:
         """Write a value to the ``_meta`` key-value table (upsert)."""
         await self._run_sync(self._sync_set_metadata, key, value)
+
+    def _sync_record_embedding_usage(self, count: int, daily_limit: int) -> int:
+        """Increment + budget-check today's embedding counter on ``_conn``.
+
+        Runs inside :meth:`_run_sync` under ``_conn_lock``; delegates the SQL to
+        :func:`distillery.mcp.budget.record_and_check`.  Lets
+        :class:`~distillery.mcp.budget.EmbeddingBudgetError` and any
+        ``duckdb.Error`` propagate unchanged so the MCP layer can categorize
+        them (issue #557).
+        """
+        from distillery.mcp.budget import record_and_check
+
+        assert self._conn is not None
+        total = record_and_check(self._conn, daily_limit, count)
+        self._checkpoint_after_write(self._conn)
+        return total
+
+    async def record_embedding_usage(self, count: int, daily_limit: int) -> int:
+        """Serialize the embedding-budget counter write under ``_conn_lock``.
+
+        The per-request embedding-budget counter is an ``INSERT … ON CONFLICT
+        UPDATE`` on ``_meta``.  Previously the MCP tool layer ran it directly
+        against the shared writer connection, *outside* ``_conn_lock``, racing
+        the store's serialized writes on a non-thread-safe ``DuckDBPyConnection``.
+        That corrupted transaction state and left a transaction active across the
+        store's ``CHECKPOINT``, so plain ``CHECKPOINT`` failed with "there are
+        other write transactions active", the WAL never flushed and grew without
+        bound, and every read replayed an ever-larger WAL — degrading query
+        latency monotonically (issue #655 root cause 1; same race underlies the
+        #557 aborted-transaction misclassification).
+
+        Routing the counter through :meth:`_run_sync` makes it share the single
+        ``_conn_lock`` that serializes every other write, so it can never touch
+        the connection concurrently with a write or checkpoint.
+
+        Args:
+            count: Number of embedding calls about to be made.
+            daily_limit: Maximum calls per day; ``0`` means unlimited.
+
+        Returns:
+            The new total for today.
+
+        Raises:
+            EmbeddingBudgetError: If the budget would be exceeded.
+            duckdb.Error: Propagated unchanged for caller categorization (#557).
+        """
+        return await self._run_sync(self._sync_record_embedding_usage, count, daily_limit)
 
     def _sync_prune_search_log(self, retention_days: int) -> int:
         """Delete ``search_log`` rows older than *retention_days*.
