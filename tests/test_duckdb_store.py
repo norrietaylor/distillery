@@ -665,6 +665,8 @@ class TestAccessedAt:
         assert len(results) >= 1
         returned_ids = [r.entry.id for r in results]
         assert entry.id in returned_ids
+        # accessed_at is deferred off the read path (issue #663); flush first.
+        await store._flush_accessed()
         row = store.connection.execute(
             "SELECT accessed_at FROM entries WHERE id = ?", [entry.id]
         ).fetchone()
@@ -1043,7 +1045,7 @@ class TestWalFtsReplayHardening:
                 assert count is not None
                 assert count[0] == 5
                 # And FTS must still function after reopen.
-                results = s2._bm25_search("duckdb", limit=10)  # noqa: SLF001
+                results = s2._bm25_search(s2.connection, "duckdb", limit=10)  # noqa: SLF001
                 assert len(results) >= 1
             finally:
                 await s2.close()
@@ -1495,14 +1497,14 @@ class TestBM25Search:
         self, vector_only_store: DuckDBStore
     ) -> None:
         """BM25 search returns [] when FTS is not loaded."""
-        result = vector_only_store._bm25_search("anything", limit=10)  # noqa: SLF001
+        result = vector_only_store._bm25_search(vector_only_store.connection, "anything", limit=10)  # noqa: SLF001
         assert result == []
 
     async def test_bm25_returns_matching_entries(self, hybrid_store: DuckDBStore) -> None:
         """BM25 search returns ranked results for matching content."""
         await hybrid_store.store(make_entry(content="The quick brown fox jumps over the lazy dog"))
         await hybrid_store.store(make_entry(content="A slow red cat sleeps under a busy table"))
-        results = hybrid_store._bm25_search("quick fox", limit=10)  # noqa: SLF001
+        results = hybrid_store._bm25_search(hybrid_store.connection, "quick fox", limit=10)  # noqa: SLF001
         assert len(results) >= 1
         # First result should be rank 1.
         assert results[0][1] == 1
@@ -1513,13 +1515,13 @@ class TestBM25Search:
             await hybrid_store.store(
                 make_entry(content=f"Document number {i} about machine learning algorithms")
             )
-        results = hybrid_store._bm25_search("machine learning", limit=2)  # noqa: SLF001
+        results = hybrid_store._bm25_search(hybrid_store.connection, "machine learning", limit=2)  # noqa: SLF001
         assert len(results) <= 2
 
     async def test_bm25_returns_empty_for_no_match(self, hybrid_store: DuckDBStore) -> None:
         """BM25 returns [] when no content matches the query."""
         await hybrid_store.store(make_entry(content="The quick brown fox jumps over the lazy dog"))
-        results = hybrid_store._bm25_search("xylophone", limit=10)  # noqa: SLF001
+        results = hybrid_store._bm25_search(hybrid_store.connection, "xylophone", limit=10)  # noqa: SLF001
         assert results == []
 
 
@@ -1747,7 +1749,9 @@ class TestFTSRebuildOnMutation:
         await hybrid_store.store(
             make_entry(content="Kubernetes container orchestration platform overview")
         )
-        results = hybrid_store._bm25_search("kubernetes container", limit=10)  # noqa: SLF001
+        results = hybrid_store._bm25_search(
+            hybrid_store.connection, "kubernetes container", limit=10
+        )  # noqa: SLF001
         assert len(results) >= 1
 
     async def test_updated_content_searchable_via_bm25(self, hybrid_store: DuckDBStore) -> None:
@@ -1757,7 +1761,9 @@ class TestFTSRebuildOnMutation:
         await hybrid_store.update(
             entry.id, {"content": "Terraform infrastructure provisioning automation"}
         )
-        results = hybrid_store._bm25_search("terraform infrastructure", limit=10)  # noqa: SLF001
+        results = hybrid_store._bm25_search(
+            hybrid_store.connection, "terraform infrastructure", limit=10
+        )  # noqa: SLF001
         assert len(results) >= 1
         # The updated entry should be in the results.
         result_ids = [eid for eid, _rank in results]

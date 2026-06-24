@@ -2324,6 +2324,7 @@ class DuckDBStore:
 
     def _bm25_search(
         self,
+        conn: duckdb.DuckDBPyConnection,
         query: str,
         limit: int,
     ) -> list[tuple[str, int]]:
@@ -2345,7 +2346,6 @@ class DuckDBStore:
         """
         if not self._fts_available:
             return []
-        conn = self.connection
         try:
             sql = (
                 "SELECT id, fts_main_entries.match_bm25(id, ?) AS bm25 "
@@ -2414,9 +2414,7 @@ class DuckDBStore:
         embedding = await asyncio.to_thread(self._embedding_provider.embed, query)
         use_hybrid = self._hybrid_search and self._fts_available
 
-        def _sync() -> list[SearchResult]:
-            conn = self.connection
-
+        def _sync(conn: duckdb.DuckDBPyConnection) -> list[SearchResult]:
             where_clauses, params = self._build_filter_clauses(filters)
             where_sql = ""
             if where_clauses:
@@ -2468,11 +2466,10 @@ class DuckDBStore:
                     eid = row_dict["id"]
                     results.append(SearchResult(entry=entry_map[eid], score=cosine_score[eid]))
                     returned_ids.append(eid)
-                self._touch_accessed(conn, returned_ids)
                 return results
 
             # --- BM25 search ---
-            bm25_results = self._bm25_search(query, vector_limit)
+            bm25_results = self._bm25_search(conn, query, vector_limit)
             bm25_ranks: dict[str, int] = dict(bm25_results)
 
             # Fetch entries found by BM25 but not by the vector search so we
@@ -2541,10 +2538,14 @@ class DuckDBStore:
                 results.append(SearchResult(entry=entry_map[eid], score=cosine_score.get(eid, 0.0)))
                 returned_ids.append(eid)
 
-            self._touch_accessed(conn, returned_ids)
             return results
 
-        return await self._run_sync(_sync)
+        # Reads run on the independent read handle so a search never queues
+        # behind a write on ``_conn_lock`` (#663 follow-up). ``accessed_at`` is
+        # stamped out of band via the deferred flusher.
+        results = await self._run_read(_sync)
+        self._mark_accessed(r.entry.id for r in results)
+        return results
 
     @staticmethod
     def _touch_accessed(conn: duckdb.DuckDBPyConnection, entry_ids: list[str]) -> None:
@@ -2578,9 +2579,7 @@ class DuckDBStore:
         # loop free to service the Fly health check under concurrent load.
         embedding = await asyncio.to_thread(self._embedding_provider.embed, content)
 
-        def _sync() -> list[SearchResult]:
-            conn = self.connection
-
+        def _sync(conn: duckdb.DuckDBPyConnection) -> list[SearchResult]:
             # Exclude archived (soft-deleted) entries: find_similar drives
             # pre-store deduplication, so a conceptually-removed entry must not
             # be returned as a near-duplicate match (which would recommend
@@ -2619,7 +2618,9 @@ class DuckDBStore:
                 results.append(SearchResult(entry=entry, score=score))
             return results
 
-        return await self._run_sync(_sync)
+        # find_similar is a pure read (no accessed_at touch); run it on the
+        # independent read handle so it never queues behind a write (#663).
+        return await self._run_read(_sync)
 
     @overload
     async def list_entries(
