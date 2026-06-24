@@ -165,6 +165,33 @@ async def test_expand_graph_one_hop(
     assert b_result["parent_id"] == a_id
 
 
+async def test_expand_graph_carries_relation_type(
+    store: DuckDBStore,
+    embedding_provider: ControlledEmbeddingProvider,
+    cfg: DistilleryConfig,
+) -> None:
+    """Graph-expanded entries carry ``relation_type`` — the edge type linking
+    them to their parent — so /investigate can render a typed Relationship Map
+    from a single expand_graph call (#651)."""
+    embedding_provider.register("seed match a", _UNIT_A)
+    embedding_provider.register("query a", _UNIT_A)
+    embedding_provider.register("unrelated text b", _UNIT_B)
+
+    a_id = await _store_entry(store, "seed match a", tags=["seed"])
+    b_id = await _store_entry(store, "unrelated text b", tags=["neighbour"])
+    await store.add_relation(a_id, b_id, "citation")
+
+    response = await _handle_search(
+        store,
+        {"query": "query a", "tags": ["seed"], "expand_graph": True, "expand_hops": 1},
+        cfg=cfg,
+    )
+    data = parse_mcp_response(response)
+    b_result = next(r for r in data["results"] if r["entry"]["id"] == b_id)
+    assert b_result["provenance"] == "graph"
+    assert b_result["relation_type"] == "citation"
+
+
 # ===========================================================================
 # 2-hop expansion
 # ===========================================================================

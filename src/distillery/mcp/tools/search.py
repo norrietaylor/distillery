@@ -70,7 +70,8 @@ def _shape_search_result(
     * ``ids``: ``{"score", "id"}`` — id + score only.
 
     ``extra`` carries graph-expansion annotations (``provenance``, ``depth``,
-    ``parent_id``) that are merged onto the result dict for every mode.
+    ``parent_id``, ``relation_type``) that are merged onto the result dict for
+    every mode.
     """
     result: dict[str, Any]
     if output_mode == "ids":
@@ -107,7 +108,8 @@ async def _handle_search(
     their entries, scores them with a ``0.5 ** depth`` discount of the parent score, and
     merges them into a single result list sorted by descending score and capped at
     ``limit``.  Each result then carries a ``provenance`` flag (``"search"`` or
-    ``"graph"``) and graph entries additionally carry ``depth`` and ``parent_id``.  The
+    ``"graph"``) and graph entries additionally carry ``depth``, ``parent_id``,
+    and ``relation_type`` (the edge type linking the entry to its parent).  The
     response envelope gains a ``graph_expansion`` summary (``seed_count``,
     ``expanded_count``).  When ``expand_graph=False`` (default) the existing behaviour
     and envelope are unchanged.
@@ -300,7 +302,8 @@ async def _expand_search_with_graph(
     Returns ``(merged_results, seed_count, expanded_count)`` where
     ``merged_results`` is a list of result dicts already sorted by descending
     score and truncated to ``limit``.  Each dict carries a ``provenance``
-    field; graph-only entries also carry ``depth`` and ``parent_id``.
+    field; graph-only entries also carry ``depth``, ``parent_id``, and
+    ``relation_type`` (the edge type from the parent, ``None`` if unknown).
 
     ``allowed_statuses`` mirrors the status-visibility contract that the
     seed ``store.search`` call applied.  When provided, BFS-expanded
@@ -335,6 +338,7 @@ async def _expand_search_with_graph(
                 "_score": score,
                 "_depth": 1,
                 "_parent_id": seed_id,
+                "_relation_type": rel.get("relation_type"),
             }
             depth1_score_by_id[other_id] = score
 
@@ -351,6 +355,7 @@ async def _expand_search_with_graph(
                     "_score": score,
                     "_depth": 2,
                     "_parent_id": parent_id,
+                    "_relation_type": rel.get("relation_type"),
                 }
 
     # Fetch entries for all expanded ids; skip any that have been deleted
@@ -378,6 +383,7 @@ async def _expand_search_with_graph(
                     "provenance": "graph",
                     "depth": info["_depth"],
                     "parent_id": info["_parent_id"],
+                    "relation_type": info["_relation_type"],
                 },
             )
         )
