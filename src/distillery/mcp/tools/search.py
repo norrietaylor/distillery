@@ -554,17 +554,27 @@ async def _handle_find_similar(
             "Field 'llm_responses' requires conflict_check=true",
         )
 
-    # --- embedding budget check (1 embed call) ----------------------------
-    if cfg is not None:
-        try:
-            await store.record_embedding_usage(
-                count=1, daily_limit=cfg.rate_limit.embedding_budget_daily
-            )
-        except EmbeddingBudgetError:
-            return error_response("BUDGET_EXCEEDED", "Embedding budget exceeded")
-
+    # When the similarity probe is an existing entry's own content
+    # (source_entry_id with no explicit content), reuse its stored embedding
+    # instead of re-embedding it — no Jina round-trip and no budget spend. This
+    # is the /investigate Phase 2b hot path: one find_similar per seed (#663
+    # follow-up). Only the embed path below costs an embedding against budget.
     try:
-        search_results = await store.find_similar(content=content, threshold=threshold, limit=limit)
+        search_results = None
+        if source_entry_id is not None and not content_provided:
+            search_results = await store.find_similar_by_id(
+                source_entry_id, threshold=threshold, limit=limit
+            )
+        if search_results is None:
+            if cfg is not None:
+                await store.record_embedding_usage(
+                    count=1, daily_limit=cfg.rate_limit.embedding_budget_daily
+                )
+            search_results = await store.find_similar(
+                content=content, threshold=threshold, limit=limit
+            )
+    except EmbeddingBudgetError:
+        return error_response("BUDGET_EXCEEDED", "Embedding budget exceeded")
     except EmbeddingProviderError as exc:
         logger.warning(
             "Upstream embedding provider failed during find_similar "
