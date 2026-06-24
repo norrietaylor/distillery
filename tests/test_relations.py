@@ -981,3 +981,234 @@ async def test_get_related_still_returns_live_edges_when_candidate_also_exists(s
     to_ids = {r["to_id"] for r in related}
     assert b in to_ids
     assert c not in to_ids
+
+
+# ===========================================================================
+# T02.2: MCP list_candidates + resolve_candidate actions (R2.3)
+# ===========================================================================
+
+
+@pytest.mark.unit
+async def test_handle_relations_list_candidates_empty(store) -> None:  # type: ignore[no-untyped-def]
+    """list_candidates returns an empty list when no pending candidates exist."""
+    result = await _handle_relations(store, {"action": "list_candidates"})
+    data = _parse(result)
+    assert "error" not in data or data.get("error") is False
+    assert data["action"] == "list_candidates"
+    assert data["candidates"] == []
+    assert data["count"] == 0
+
+
+@pytest.mark.unit
+async def test_handle_relations_list_candidates_returns_pending_rows(store) -> None:  # type: ignore[no-untyped-def]
+    """list_candidates returns pending rows sorted by score descending (R2.3)."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+    c = await _store_entry(store, content="entry C")
+
+    await store.add_relation_candidate(a, b, "related", 0.65)
+    await store.add_relation_candidate(a, c, "related", 0.80)
+
+    result = await _handle_relations(store, {"action": "list_candidates"})
+    data = _parse(result)
+    assert data["count"] == 2
+    # Ordered by score descending.
+    assert data["candidates"][0]["suggestion_score"] == 0.80
+    assert data["candidates"][1]["suggestion_score"] == 0.65
+
+
+@pytest.mark.unit
+async def test_handle_relations_list_candidates_excludes_live_edges(store) -> None:  # type: ignore[no-untyped-def]
+    """list_candidates does not return live edges, only pending candidates."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+    c = await _store_entry(store, content="entry C")
+
+    await store.add_relation(a, b, "related")  # live edge
+    await store.add_relation_candidate(a, c, "related", 0.75)  # pending
+
+    result = await _handle_relations(store, {"action": "list_candidates"})
+    data = _parse(result)
+    assert data["count"] == 1
+    assert data["candidates"][0]["to_id"] == c
+
+
+@pytest.mark.unit
+async def test_handle_relations_list_candidates_unexpected_error() -> None:
+    """list_candidates propagates unexpected store errors as INTERNAL."""
+    fake_store = AsyncMock()
+    fake_store.list_relation_candidates.side_effect = RuntimeError("db exploded")
+
+    result = await _handle_relations(fake_store, {"action": "list_candidates"})
+    data = _parse(result)
+    assert data["error"] is True
+    assert data["code"] == "INTERNAL"
+
+
+@pytest.mark.unit
+async def test_handle_relations_resolve_candidate_missing_relation_id() -> None:
+    """resolve_candidate without relation_id returns INVALID_PARAMS."""
+    result = await _handle_relations(AsyncMock(), {"action": "resolve_candidate", "decision": "accept"})
+    data = _parse(result)
+    assert data["error"] is True
+    assert data["code"] == "INVALID_PARAMS"
+    assert "relation_id" in data["message"]
+
+
+@pytest.mark.unit
+async def test_handle_relations_resolve_candidate_missing_decision() -> None:
+    """resolve_candidate without decision returns INVALID_PARAMS."""
+    result = await _handle_relations(
+        AsyncMock(), {"action": "resolve_candidate", "relation_id": "some-id"}
+    )
+    data = _parse(result)
+    assert data["error"] is True
+    assert data["code"] == "INVALID_PARAMS"
+    assert "decision" in data["message"]
+
+
+@pytest.mark.unit
+async def test_handle_relations_resolve_candidate_invalid_decision() -> None:
+    """resolve_candidate with unknown decision returns INVALID_PARAMS."""
+    result = await _handle_relations(
+        AsyncMock(),
+        {"action": "resolve_candidate", "relation_id": "some-id", "decision": "maybe"},
+    )
+    data = _parse(result)
+    assert data["error"] is True
+    assert data["code"] == "INVALID_PARAMS"
+    assert "decision" in data["message"]
+
+
+@pytest.mark.unit
+async def test_handle_relations_resolve_candidate_reject(store) -> None:  # type: ignore[no-untyped-def]
+    """resolve_candidate(decision=reject) deletes the pending row."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+
+    relation_id = await store.add_relation_candidate(a, b, "related", 0.75)
+
+    result = await _handle_relations(
+        store,
+        {"action": "resolve_candidate", "relation_id": relation_id, "decision": "reject"},
+    )
+    data = _parse(result)
+    assert "error" not in data or data.get("error") is False
+    assert data["decision"] == "reject"
+    assert data["removed"] is True
+
+    # Candidate is gone.
+    candidates = await store.list_relation_candidates()
+    assert candidates == []
+
+
+@pytest.mark.unit
+async def test_handle_relations_resolve_candidate_reject_idempotent(store) -> None:  # type: ignore[no-untyped-def]
+    """resolve_candidate(decision=reject) is a no-op on already-rejected candidate (returns removed=False)."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+
+    relation_id = await store.add_relation_candidate(a, b, "related", 0.75)
+
+    # Reject once.
+    await _handle_relations(
+        store,
+        {"action": "resolve_candidate", "relation_id": relation_id, "decision": "reject"},
+    )
+    # Reject again — should be a no-op success.
+    result = await _handle_relations(
+        store,
+        {"action": "resolve_candidate", "relation_id": relation_id, "decision": "reject"},
+    )
+    data = _parse(result)
+    assert "error" not in data or data.get("error") is False
+    assert data["removed"] is False
+
+
+@pytest.mark.unit
+async def test_handle_relations_resolve_candidate_accept(store) -> None:  # type: ignore[no-untyped-def]
+    """resolve_candidate(decision=accept) promotes the candidate to a live edge."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+
+    relation_id = await store.add_relation_candidate(a, b, "related", 0.75)
+
+    result = await _handle_relations(
+        store,
+        {"action": "resolve_candidate", "relation_id": relation_id, "decision": "accept"},
+    )
+    data = _parse(result)
+    assert "error" not in data or data.get("error") is False
+    assert data["decision"] == "accept"
+    assert data["promoted"] is True
+    assert data["from_id"] == a
+    assert data["to_id"] == b
+    assert data["relation_type"] == "related"
+
+    # The edge is now live: get_related returns it.
+    related = await store.get_related(a)
+    assert len(related) == 1
+    assert related[0]["to_id"] == b
+
+    # No more pending candidates.
+    candidates = await store.list_relation_candidates()
+    assert candidates == []
+
+
+@pytest.mark.unit
+async def test_handle_relations_resolve_candidate_accept_idempotent(store) -> None:  # type: ignore[no-untyped-def]
+    """resolve_candidate(decision=accept) is a no-op when candidate is already accepted."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+
+    relation_id = await store.add_relation_candidate(a, b, "related", 0.75)
+
+    # Accept once.
+    await _handle_relations(
+        store,
+        {"action": "resolve_candidate", "relation_id": relation_id, "decision": "accept"},
+    )
+    # Accept again — candidate no longer in pending list; should return promoted=False.
+    result = await _handle_relations(
+        store,
+        {"action": "resolve_candidate", "relation_id": relation_id, "decision": "accept"},
+    )
+    data = _parse(result)
+    assert "error" not in data or data.get("error") is False
+    assert data["promoted"] is False
+
+    # Live edge is still there.
+    related = await store.get_related(a)
+    assert len(related) == 1
+
+
+@pytest.mark.unit
+async def test_handle_relations_resolve_candidate_accept_nonexistent_is_noop(store) -> None:  # type: ignore[no-untyped-def]
+    """resolve_candidate(decision=accept) for a nonexistent ID is a no-op success."""
+    result = await _handle_relations(
+        store,
+        {
+            "action": "resolve_candidate",
+            "relation_id": "00000000-0000-0000-0000-000000000000",
+            "decision": "accept",
+        },
+    )
+    data = _parse(result)
+    assert "error" not in data or data.get("error") is False
+    assert data["promoted"] is False
+
+
+@pytest.mark.unit
+async def test_handle_relations_resolve_candidate_reject_nonexistent_is_noop(store) -> None:  # type: ignore[no-untyped-def]
+    """resolve_candidate(decision=reject) for a nonexistent ID is a no-op success (removed=False)."""
+    result = await _handle_relations(
+        store,
+        {
+            "action": "resolve_candidate",
+            "relation_id": "00000000-0000-0000-0000-000000000000",
+            "decision": "reject",
+        },
+    )
+    data = _parse(result)
+    assert "error" not in data or data.get("error") is False
+    assert data["removed"] is False

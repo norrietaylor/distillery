@@ -91,11 +91,20 @@ async def _handle_relations(
         )
     action = action_raw.strip().lower()
 
-    if action not in ("add", "get", "remove", "traverse", "metrics", "reconcile"):
+    if action not in (
+        "add",
+        "get",
+        "remove",
+        "traverse",
+        "metrics",
+        "reconcile",
+        "list_candidates",
+        "resolve_candidate",
+    ):
         return error_response(
             "INVALID_PARAMS",
             "action must be one of 'add', 'get', 'remove', 'traverse', 'metrics', "
-            f"'reconcile'; got: {action!r}",
+            f"'reconcile', 'list_candidates', 'resolve_candidate'; got: {action!r}",
         )
 
     # ------------------------------------------------------------------
@@ -386,6 +395,123 @@ async def _handle_relations(
                 "metadata_links": counts.get("metadata_links", 0),
                 "wikilink_links": counts.get("wikilink_links", 0),
                 "total": counts.get("total", 0),
+            }
+        )
+
+    # ------------------------------------------------------------------
+    # action == "list_candidates"
+    # ------------------------------------------------------------------
+    if action == "list_candidates":
+        try:
+            candidates = await store.list_relation_candidates()
+        except Exception:  # noqa: BLE001
+            logger.exception("distillery_relations list_candidates: unexpected error")
+            return error_response("INTERNAL", "Failed to list relation candidates")
+
+        return success_response(
+            {
+                "action": "list_candidates",
+                "candidates": candidates,
+                "count": len(candidates),
+            }
+        )
+
+    # ------------------------------------------------------------------
+    # action == "resolve_candidate"
+    # ------------------------------------------------------------------
+    if action == "resolve_candidate":
+        resolve_relation_id_raw = arguments.get("relation_id")
+        if resolve_relation_id_raw is None or not isinstance(resolve_relation_id_raw, str):
+            return error_response(
+                "INVALID_PARAMS", "relation_id is required for action='resolve_candidate'"
+            )
+        resolve_relation_id = resolve_relation_id_raw.strip()
+        if not resolve_relation_id:
+            return error_response(
+                "INVALID_PARAMS", "relation_id must be a non-empty string"
+            )
+
+        decision_raw = arguments.get("decision")
+        if decision_raw is None or not isinstance(decision_raw, str):
+            return error_response(
+                "INVALID_PARAMS",
+                "decision is required for action='resolve_candidate' (accept or reject)",
+            )
+        decision = decision_raw.strip().lower()
+        if decision not in ("accept", "reject"):
+            return error_response(
+                "INVALID_PARAMS",
+                f"decision must be 'accept' or 'reject', got: {decision_raw!r}",
+            )
+
+        if decision == "reject":
+            # remove_relation returns False if not found — treat as idempotent no-op.
+            try:
+                removed = await store.remove_relation(resolve_relation_id)
+            except Exception:  # noqa: BLE001
+                logger.exception("distillery_relations resolve_candidate reject: unexpected error")
+                return error_response("INTERNAL", "Failed to reject relation candidate")
+
+            return success_response(
+                {
+                    "action": "resolve_candidate",
+                    "relation_id": resolve_relation_id,
+                    "decision": "reject",
+                    "removed": removed,
+                }
+            )
+
+        # decision == "accept": promote the pending candidate to a live edge by
+        # clearing review_status from its metadata.  We locate the candidate via
+        # list_relation_candidates so we can retrieve from_id/to_id/relation_type,
+        # then call add_relation(metadata={}) which upserts the row, overwriting
+        # the pending metadata with an empty dict (no review_status → live edge).
+        # If the candidate is not found it is already resolved (or never existed);
+        # return a no-op success.
+        try:
+            candidates = await store.list_relation_candidates()
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "distillery_relations resolve_candidate accept: error listing candidates"
+            )
+            return error_response("INTERNAL", "Failed to look up relation candidate")
+
+        candidate = next(
+            (c for c in candidates if c["id"] == resolve_relation_id), None
+        )
+        if candidate is None:
+            # Already accepted, rejected, or never existed — idempotent no-op.
+            return success_response(
+                {
+                    "action": "resolve_candidate",
+                    "relation_id": resolve_relation_id,
+                    "decision": "accept",
+                    "promoted": False,
+                }
+            )
+
+        try:
+            await store.add_relation(
+                candidate["from_id"],
+                candidate["to_id"],
+                candidate["relation_type"],
+                metadata={},
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "distillery_relations resolve_candidate accept: error promoting candidate"
+            )
+            return error_response("INTERNAL", "Failed to accept relation candidate")
+
+        return success_response(
+            {
+                "action": "resolve_candidate",
+                "relation_id": resolve_relation_id,
+                "decision": "accept",
+                "promoted": True,
+                "from_id": candidate["from_id"],
+                "to_id": candidate["to_id"],
+                "relation_type": candidate["relation_type"],
             }
         )
 
