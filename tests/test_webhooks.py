@@ -1447,3 +1447,106 @@ async def test_startup_hook_clears_stale_pointer_on_app_boot(
 
     assert stale.state == "failed"
     assert "poll" not in _webhooks._active_job_by_endpoint
+
+
+# ---------------------------------------------------------------------------
+# T04.1 smoke test — link-suggestion maintenance phase
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_maintenance_link_suggestion_phase_runs(
+    store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Smoke test (T04.1): when link_suggestion.enabled is True, _run_maintenance
+    calls store.suggest_links and the response contains a link_suggestion key."""
+    import json as _json
+    from unittest.mock import AsyncMock, patch
+
+    from distillery.config import LinkSuggestionConfig
+    from distillery.mcp.webhooks import _run_maintenance
+
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+
+    # Build a config with link_suggestion explicitly enabled.
+    config = _make_config()
+    config.link_suggestion = LinkSuggestionConfig(enabled=True)
+    shared: dict[str, Any] = {
+        "store": store,
+        "config": config,
+        "embedding_provider": None,
+    }
+
+    suggest_mock = AsyncMock(
+        return_value={
+            "edges_created": 2,
+            "candidates_queued": 3,
+            "discarded": 1,
+            "nodes_scanned": 10,
+        }
+    )
+
+    with (
+        patch("distillery.mcp.webhooks._run_poll", AsyncMock(return_value=JSONResponse({"ok": True, "data": {}}))),
+        patch("distillery.mcp.webhooks._run_rescore", AsyncMock(return_value=JSONResponse({"ok": True, "data": {}}))),
+        patch("distillery.mcp.webhooks._run_classify_batch", AsyncMock(return_value=JSONResponse({"ok": True, "data": {}}))),
+        patch.object(store, "suggest_links", suggest_mock),
+    ):
+        resp = await _run_maintenance(shared)
+
+    assert resp.status_code == 200
+    body = _json.loads(bytes(resp.body).decode())
+    assert body["ok"] is True
+
+    ls = body["data"]["link_suggestion"]
+    assert ls["ok"] is True
+    assert ls["enabled"] is True
+    assert ls["edges_created"] == 2
+    assert ls["candidates_queued"] == 3
+    assert ls["nodes_scanned"] == 10
+
+    suggest_mock.assert_awaited_once()
+
+
+@pytest.mark.unit
+async def test_maintenance_link_suggestion_phase_non_fatal(
+    store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T04.1: a failure in the link-suggestion phase is non-fatal — the
+    response still has ok=True and the other phases are present."""
+    import json as _json
+    from unittest.mock import AsyncMock, patch
+
+    from distillery.config import LinkSuggestionConfig
+    from distillery.mcp.webhooks import _run_maintenance
+
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+
+    config = _make_config()
+    config.link_suggestion = LinkSuggestionConfig(enabled=True)
+    shared: dict[str, Any] = {
+        "store": store,
+        "config": config,
+        "embedding_provider": None,
+    }
+
+    with (
+        patch("distillery.mcp.webhooks._run_poll", AsyncMock(return_value=JSONResponse({"ok": True, "data": {}}))),
+        patch("distillery.mcp.webhooks._run_rescore", AsyncMock(return_value=JSONResponse({"ok": True, "data": {}}))),
+        patch("distillery.mcp.webhooks._run_classify_batch", AsyncMock(return_value=JSONResponse({"ok": True, "data": {}}))),
+        patch.object(store, "suggest_links", AsyncMock(side_effect=RuntimeError("db explosion"))),
+    ):
+        resp = await _run_maintenance(shared)
+
+    assert resp.status_code == 200
+    body = _json.loads(bytes(resp.body).decode())
+    # Top-level ok is still True — maintenance is best-effort.
+    assert body["ok"] is True
+
+    ls = body["data"]["link_suggestion"]
+    assert ls["ok"] is False
+    assert "error" in ls
+    # The other phases succeeded and are present.
+    assert body["data"]["poll"]["ok"] is True
+    assert body["data"]["rescore"]["ok"] is True
+    assert body["data"]["classify_batch"]["ok"] is True
