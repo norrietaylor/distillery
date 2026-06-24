@@ -581,6 +581,52 @@ class DistilleryStore(Protocol):
         """
         ...
 
+    async def add_relation_candidate(
+        self,
+        from_id: str,
+        to_id: str,
+        relation_type: str,
+        suggestion_score: float,
+    ) -> str:
+        """Persist a pending relation candidate as an ``entry_relations`` row.
+
+        Writes the candidate with ``metadata.review_status = "pending"`` and
+        ``metadata.suggestion_score = suggestion_score``.  Idempotent: if a row
+        for the same ``(from_id, to_id, relation_type)`` already exists (as a
+        live edge or an existing pending candidate) the existing row's UUID is
+        returned without modification.  No new database table is introduced.
+
+        Args:
+            from_id: UUID string of the source entry.
+            to_id: UUID string of the target entry.
+            relation_type: Relation type label (e.g. ``"related"``).
+            suggestion_score: Confidence score from the suggester (0.0–1.0).
+
+        Returns:
+            The UUID string of the relation row (existing or newly created).
+
+        Raises:
+            ValueError: If either ``from_id`` or ``to_id`` does not exist in
+                the store.
+        """
+        ...
+
+    async def list_relation_candidates(self) -> list[dict[str, Any]]:
+        """Return all pending relation candidates ordered by score descending.
+
+        Pending candidates are ``entry_relations`` rows whose metadata carries
+        ``review_status = "pending"``.  Only such rows are returned; live edges
+        (no ``review_status`` or ``review_status != "pending"``) are excluded.
+
+        Returns:
+            List of dicts with keys: ``id``, ``from_id``, ``to_id``,
+            ``relation_type``, ``suggestion_score`` (float), ``created_at``
+            (ISO 8601 str), ``weight`` (float | None), ``metadata``
+            (dict | None).  Ordered by ``suggestion_score`` descending (ties
+            broken by ascending ``created_at``).
+        """
+        ...
+
     async def reconcile_relations(self) -> dict[str, int]:
         """Re-run idempotent edge-population mechanisms and return insert counts.
 

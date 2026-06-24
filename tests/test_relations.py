@@ -803,3 +803,181 @@ async def test_handle_relations_remove_unexpected_error() -> None:
     data = _parse(result)
     assert data["error"] is True
     assert data["code"] == "INTERNAL"
+
+
+# ===========================================================================
+# T02.1: Store-layer pending candidates (R2.1 / R2.2 / R2.4)
+# ===========================================================================
+
+
+@pytest.mark.unit
+async def test_add_relation_candidate_returns_uuid(store) -> None:  # type: ignore[no-untyped-def]
+    """add_relation_candidate persists a pending row and returns a UUID (R2.1)."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+
+    relation_id = await store.add_relation_candidate(a, b, "related", 0.72)
+
+    assert isinstance(relation_id, str)
+    assert len(relation_id) > 0
+
+
+@pytest.mark.unit
+async def test_add_relation_candidate_metadata_fields(store) -> None:  # type: ignore[no-untyped-def]
+    """Pending candidate row carries review_status='pending' and suggestion_score (R2.1)."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+
+    relation_id = await store.add_relation_candidate(a, b, "related", 0.72)
+
+    conn = store.connection
+    row = conn.execute(
+        "SELECT metadata FROM entry_relations WHERE id = ?", [relation_id]
+    ).fetchone()
+    assert row is not None
+    meta = json.loads(row[0])
+    assert meta["review_status"] == "pending"
+    assert meta["suggestion_score"] == 0.72
+
+
+@pytest.mark.unit
+async def test_add_relation_candidate_no_new_table(store) -> None:  # type: ignore[no-untyped-def]
+    """Pending candidates use entry_relations — no new table is created (R2.1)."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+
+    await store.add_relation_candidate(a, b, "related", 0.65)
+
+    conn = store.connection
+    tables = {row[0] for row in conn.execute("SHOW TABLES").fetchall()}
+    assert "entry_relations" in tables
+    assert not any("candidate" in t for t in tables)
+
+
+@pytest.mark.unit
+async def test_add_relation_candidate_idempotent(store) -> None:  # type: ignore[no-untyped-def]
+    """Calling add_relation_candidate twice for the same triple returns same id (R2.1)."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+
+    first = await store.add_relation_candidate(a, b, "related", 0.72)
+    second = await store.add_relation_candidate(a, b, "related", 0.80)
+
+    assert first == second
+
+
+@pytest.mark.unit
+async def test_add_relation_candidate_idempotent_when_live_edge_exists(store) -> None:  # type: ignore[no-untyped-def]
+    """add_relation_candidate is a no-op when a live edge already exists (R2.1)."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+
+    live_id = await store.add_relation(a, b, "related")
+    candidate_id = await store.add_relation_candidate(a, b, "related", 0.90)
+
+    assert live_id == candidate_id
+
+
+@pytest.mark.unit
+async def test_add_relation_candidate_invalid_from_id(store) -> None:  # type: ignore[no-untyped-def]
+    """add_relation_candidate raises ValueError when from_id does not exist."""
+    b = await _store_entry(store, content="entry B")
+
+    with pytest.raises(ValueError, match="from_id"):
+        await store.add_relation_candidate("nonexistent-id", b, "related", 0.72)
+
+
+@pytest.mark.unit
+async def test_add_relation_candidate_invalid_to_id(store) -> None:  # type: ignore[no-untyped-def]
+    """add_relation_candidate raises ValueError when to_id does not exist."""
+    a = await _store_entry(store, content="entry A")
+
+    with pytest.raises(ValueError, match="to_id"):
+        await store.add_relation_candidate(a, "nonexistent-id", "related", 0.72)
+
+
+@pytest.mark.unit
+async def test_list_relation_candidates_returns_pending_only(store) -> None:  # type: ignore[no-untyped-def]
+    """list_relation_candidates returns only pending rows, not live edges (R2.2)."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+    c = await _store_entry(store, content="entry C")
+
+    await store.add_relation_candidate(a, b, "related", 0.72)
+    await store.add_relation(a, c, "related")
+
+    candidates = await store.list_relation_candidates()
+
+    assert len(candidates) == 1
+    assert candidates[0]["from_id"] == a
+    assert candidates[0]["to_id"] == b
+
+
+@pytest.mark.unit
+async def test_list_relation_candidates_ordered_by_score_descending(store) -> None:  # type: ignore[no-untyped-def]
+    """list_relation_candidates returns candidates ordered by score descending (R2.2)."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+    c = await _store_entry(store, content="entry C")
+
+    await store.add_relation_candidate(a, b, "related", 0.65)
+    await store.add_relation_candidate(a, c, "related", 0.72)
+
+    candidates = await store.list_relation_candidates()
+
+    assert len(candidates) == 2
+    assert candidates[0]["suggestion_score"] == 0.72
+    assert candidates[1]["suggestion_score"] == 0.65
+    assert candidates[0]["to_id"] == c
+    assert candidates[1]["to_id"] == b
+
+
+@pytest.mark.unit
+async def test_list_relation_candidates_fields(store) -> None:  # type: ignore[no-untyped-def]
+    """Each candidate dict has the expected fields including suggestion_score (R2.2)."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+
+    await store.add_relation_candidate(a, b, "related", 0.75)
+
+    candidates = await store.list_relation_candidates()
+    assert len(candidates) == 1
+    row = candidates[0]
+    assert "id" in row
+    assert row["from_id"] == a
+    assert row["to_id"] == b
+    assert row["relation_type"] == "related"
+    assert row["suggestion_score"] == 0.75
+    assert "created_at" in row
+
+
+@pytest.mark.unit
+async def test_get_related_excludes_pending_candidates(store) -> None:  # type: ignore[no-untyped-def]
+    """get_related (default) does not return pending candidates (R2.4)."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+
+    await store.add_relation_candidate(a, b, "related", 0.72)
+
+    related = await store.get_related(a)
+    assert related == []
+
+    candidates = await store.list_relation_candidates()
+    assert len(candidates) == 1
+    assert candidates[0]["from_id"] == a
+
+
+@pytest.mark.unit
+async def test_get_related_still_returns_live_edges_when_candidate_also_exists(store) -> None:  # type: ignore[no-untyped-def]
+    """Live edges appear in get_related even when a pending candidate exists for a different pair."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+    c = await _store_entry(store, content="entry C")
+
+    await store.add_relation(a, b, "related")
+    await store.add_relation_candidate(a, c, "related", 0.72)
+
+    related = await store.get_related(a)
+    to_ids = {r["to_id"] for r in related}
+    assert b in to_ids
+    assert c not in to_ids

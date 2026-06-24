@@ -3961,6 +3961,14 @@ class DuckDBStore:
             conditions.append("relation_type = ?")
             params.append(relation_type)
 
+        # Exclude pending relation candidates (R2.4): rows whose metadata carries
+        # review_status="pending" are not yet live edges and must not appear in
+        # normal traversal results.
+        conditions.append(
+            "(metadata IS NULL OR "
+            "json_extract_string(metadata, '$.review_status') IS DISTINCT FROM 'pending')"
+        )
+
         where_clause = " AND ".join(conditions)
         sql = (
             f"SELECT {self._RELATION_SELECT_COLUMNS} "
@@ -4039,6 +4047,123 @@ class DuckDBStore:
             ``metadata`` (dict | None).  Ordered by ascending ``created_at``.
         """
         return await self._run_sync(self._sync_list_relations)
+
+    def _sync_add_relation_candidate(
+        self,
+        from_id: str,
+        to_id: str,
+        relation_type: str,
+        suggestion_score: float,
+    ) -> str:
+        """Synchronous implementation of add_relation_candidate(); via asyncio.to_thread."""
+        assert self._conn is not None
+        # Validate both entries exist (same permissive check as add_relation).
+        if not self._sync_entry_exists(from_id):
+            diag = self._sync_diagnose_missing_entry(from_id)
+            raise ValueError(f"Entry not found: from_id={from_id!r} (diagnostic={diag})")
+        if not self._sync_entry_exists(to_id):
+            diag = self._sync_diagnose_missing_entry(to_id)
+            raise ValueError(f"Entry not found: to_id={to_id!r} (diagnostic={diag})")
+        # Idempotent: if a row for this triple already exists (live or pending)
+        # return its id without modification.
+        existing = self._conn.execute(
+            "SELECT id FROM entry_relations WHERE from_id = ? AND to_id = ? AND relation_type = ?",
+            [from_id, to_id, relation_type],
+        ).fetchone()
+        if existing is not None:
+            return str(existing[0])
+        relation_id = str(uuid.uuid4())
+        metadata_json = json.dumps(
+            {"review_status": "pending", "suggestion_score": suggestion_score}
+        )
+        self._conn.execute(
+            "INSERT INTO entry_relations "
+            "(id, from_id, to_id, relation_type, metadata) "
+            "VALUES (?, ?, ?, ?, ?)",
+            [relation_id, from_id, to_id, relation_type, metadata_json],
+        )
+        self._checkpoint_after_write(self._conn)
+        logger.debug(
+            "Added relation candidate id=%s from=%s to=%s type=%s score=%.3f",
+            relation_id,
+            from_id,
+            to_id,
+            relation_type,
+            suggestion_score,
+        )
+        return relation_id
+
+    async def add_relation_candidate(
+        self,
+        from_id: str,
+        to_id: str,
+        relation_type: str,
+        suggestion_score: float,
+    ) -> str:
+        """Persist a pending relation candidate as an ``entry_relations`` row.
+
+        Writes the candidate with ``metadata.review_status = "pending"`` and
+        ``metadata.suggestion_score = suggestion_score``.  Idempotent: if a row
+        for the same ``(from_id, to_id, relation_type)`` already exists (as a
+        live edge or an existing pending candidate) the existing row's UUID is
+        returned without modification.  Pending candidates are excluded from
+        normal :meth:`get_related` results until accepted.
+
+        Args:
+            from_id: UUID string of the source entry.
+            to_id: UUID string of the target entry.
+            relation_type: Relation type label (e.g. ``"related"``).
+            suggestion_score: Confidence score from the suggester (0.0–1.0).
+
+        Returns:
+            The UUID string of the relation row (existing or newly created).
+
+        Raises:
+            ValueError: If either ``from_id`` or ``to_id`` does not exist in
+                the store.
+        """
+        return await self._run_sync(
+            self._sync_add_relation_candidate,
+            from_id,
+            to_id,
+            relation_type,
+            suggestion_score,
+        )
+
+    def _sync_list_relation_candidates(self) -> list[dict[str, Any]]:
+        """Synchronous implementation of list_relation_candidates(); via asyncio.to_thread."""
+        assert self._conn is not None
+        rows = self._conn.execute(
+            f"SELECT {self._RELATION_SELECT_COLUMNS} "
+            "FROM entry_relations "
+            "WHERE json_extract_string(metadata, '$.review_status') = 'pending' "
+            "ORDER BY CAST(json_extract_string(metadata, '$.suggestion_score') AS DOUBLE) DESC, "
+            "created_at ASC"
+        ).fetchall()
+        results = []
+        for row in rows:
+            d = self._relation_row_to_dict(row)
+            # Promote suggestion_score to a top-level float for convenience.
+            meta = d.get("metadata") or {}
+            d["suggestion_score"] = float(meta.get("suggestion_score", 0.0))
+            results.append(d)
+        return results
+
+    async def list_relation_candidates(self) -> list[dict[str, Any]]:
+        """Return all pending relation candidates ordered by score descending.
+
+        Pending candidates are ``entry_relations`` rows whose metadata carries
+        ``review_status = "pending"``.  Only such rows are returned; live edges
+        are excluded.
+
+        Returns:
+            List of dicts with keys: ``id``, ``from_id``, ``to_id``,
+            ``relation_type``, ``suggestion_score`` (float), ``created_at``
+            (ISO 8601 str), ``weight`` (float | None), ``metadata``
+            (dict | None).  Ordered by ``suggestion_score`` descending (ties
+            broken by ascending ``created_at``).
+        """
+        return await self._run_sync(self._sync_list_relation_candidates)
 
     def _sync_reconcile_relations(self) -> dict[str, int]:
         """Synchronous implementation of reconcile_relations(); via asyncio.to_thread."""
