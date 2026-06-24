@@ -315,9 +315,10 @@ class TestAccessedAtUpdates:
         ids_before = [e["id"] for e in before["entries"]]
         assert entry.id in ids_before
 
-        # Access via get() — this should update accessed_at to now.
+        # Access via get() — queues a deferred accessed_at update (issue #663).
         retrieved = await store.get(entry.id)
         assert retrieved is not None
+        await store._flush_accessed()
 
         # Should no longer appear stale.
         after = await _stale(store, config, days=30)
@@ -336,9 +337,10 @@ class TestAccessedAtUpdates:
         ids_before = [e["id"] for e in before["entries"]]
         assert entry.id in ids_before
 
-        # Access via search().
+        # Access via search() — queues a deferred accessed_at update (issue #663).
         results = await store.search("stale search marker content xyz", None, limit=5)
         assert any(r.entry.id == entry.id for r in results)
+        await store._flush_accessed()
 
         # Should no longer appear stale.
         after = await _stale(store, config, days=30)
