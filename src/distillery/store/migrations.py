@@ -337,8 +337,11 @@ def backfill_relations_from_content_refs(conn: duckdb.DuckDBPyConnection) -> int
     import uuid
 
     all_ids: set[str] = set()
-    # external_id (URL form) -> entry_id, for exact URL matching.
+    # external_id (URL form) -> entry_id, for exact URL matching.  URLs that
+    # map to two distinct entries are tracked as ambiguous and excluded so the
+    # backfill stays deterministic and idempotent across runs.
     url_to_id: dict[str, str] = {}
+    ambiguous_urls: set[str] = set()
     # issue/PR number -> entry_id, for ``#<number>`` matching.  Numbers that
     # map to two distinct entries are tracked as ambiguous and excluded.
     number_to_id: dict[int, str] = {}
@@ -363,10 +366,19 @@ def backfill_relations_from_content_refs(conn: duckdb.DuckDBPyConnection) -> int
         external_id = meta.get("external_id")
         if not isinstance(external_id, str) or not external_id:
             continue
-        if external_id.startswith(("http://", "https://")):
-            # Last writer wins for duplicate URLs — pathological but harmless;
-            # the unique index still guards against duplicate edges.
-            url_to_id[external_id] = entry_id
+        # Deterministic handling of duplicate URLs: once a URL maps to two
+        # distinct entries it is ambiguous and excluded from resolution.
+        if external_id.startswith(("http://", "https://")) and external_id not in ambiguous_urls:
+            existing_url_target = url_to_id.get(external_id)
+            if existing_url_target is None:
+                url_to_id[external_id] = entry_id
+            elif existing_url_target != entry_id:
+                ambiguous_urls.add(external_id)
+                del url_to_id[external_id]
+                logger.debug(
+                    "Content-ref backfill: URL %s maps to multiple entries; skipping",
+                    external_id,
+                )
         number_match = _EXTERNAL_ID_NUMBER_PATTERN.search(external_id)
         if number_match:
             number = int(number_match.group(1))
@@ -396,7 +408,11 @@ def backfill_relations_from_content_refs(conn: duckdb.DuckDBPyConnection) -> int
         # catch repeats anyway, but this avoids redundant round-trips.
         targets: set[str] = set()
         for url_match in _CONTENT_URL_PATTERN.finditer(content):
-            to_id = url_to_id.get(url_match.group(0))
+            # Strip trailing punctuation (e.g. a sentence-final ``.``/``,`` or a
+            # closing ``)``/``]``/``>``) so a URL at the end of a sentence still
+            # resolves against the stored ``external_id``.
+            raw_url = url_match.group(0).rstrip(".,)]>")
+            to_id = url_to_id.get(raw_url)
             if to_id is not None:
                 targets.add(to_id)
         for hash_match in _CONTENT_HASH_REF_PATTERN.finditer(content):

@@ -4133,9 +4133,11 @@ class DuckDBStore:
             if not tags_col:
                 continue
             for tag in tags_col:
-                if not (tag.startswith("entity/") or tag.startswith("tech/")):
+                if not isinstance(tag, str):
                     continue
                 canonical = normalize_tag(tag, reserved_prefixes)
+                if not (canonical.startswith("entity/") or canonical.startswith("tech/")):
+                    continue
                 members.setdefault(canonical, set()).add(entry_id)
 
         canonical_members = {
