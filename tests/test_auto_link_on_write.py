@@ -105,9 +105,7 @@ async def test_flag_off_creates_no_semantic_edges(
     rows = await no_auto_link_store.get_related(src_id, direction="outgoing")
     assert rows == []
     # And the relations table itself is empty (no incoming edges either).
-    total = no_auto_link_store.connection.execute(
-        "SELECT COUNT(*) FROM entry_relations"
-    ).fetchone()
+    total = no_auto_link_store.connection.execute("SELECT COUNT(*) FROM entry_relations").fetchone()
     assert total is not None and total[0] == 0
 
 
@@ -245,3 +243,107 @@ async def test_store_batch_auto_links_each_entry(
     assert anchor_id in {r["to_id"] for r in rows2}
     assert {r["relation_type"] for r in rows1} == {"related"}
     assert {r["relation_type"] for r in rows2} == {"related"}
+
+
+async def test_default_config_enables_auto_link(
+    controlled_embedding_provider: ControlledEmbeddingProvider,
+) -> None:
+    """Store instantiated with defaults (no args) has auto_link enabled (edge-by-default)."""
+    controlled_embedding_provider.register("source", _NEAR)
+    controlled_embedding_provider.register("near one", _NEAR)
+
+    # Instantiate with no explicit auto_link arguments — should use defaults
+    # from DuckDBStore.__init__ signature (auto_link_enabled=False param default).
+    # However, the config module now defaults AutoLinkConfig.enabled to True,
+    # and when a config is loaded (or created with defaults), the server passes
+    # enabled=True to DuckDBStore. This test verifies that default-construction
+    # preserves backwards-compat: no args → enabled=False (store layer default).
+    # But when created via config (the production path), enabled=True (config default).
+
+    # For this test, we verify the store-level default (no args) is still False
+    # to ensure we don't break stateless unit tests that rely on the old behaviour.
+    default_store = DuckDBStore(
+        db_path=":memory:",
+        embedding_provider=controlled_embedding_provider,
+    )
+    await default_store.initialize()
+    try:
+        # Verify the store-level default is still False (for test compatibility)
+        assert default_store._auto_link_enabled is False
+    finally:
+        await default_store.close()
+
+    # But when config loads with defaults, it now returns enabled=True
+    from distillery.config import AutoLinkConfig
+
+    cfg = AutoLinkConfig()
+    assert cfg.enabled is True
+
+
+async def test_config_default_enabled_true_creates_edges(
+    controlled_embedding_provider: ControlledEmbeddingProvider,
+) -> None:
+    """With config default (enabled=True), a store created via config creates edges."""
+    controlled_embedding_provider.register("source", _NEAR)
+    controlled_embedding_provider.register("near one", _NEAR)
+
+    # Simulate what the MCP server does: load config (which now defaults
+    # enabled=True), then pass it to DuckDBStore.
+    from distillery.config import AutoLinkConfig
+
+    cfg = AutoLinkConfig()
+    assert cfg.enabled is True
+
+    # Create store with config-provided value
+    store = DuckDBStore(
+        db_path=":memory:",
+        embedding_provider=controlled_embedding_provider,
+        auto_link_enabled=cfg.enabled,
+        auto_link_threshold=cfg.threshold,
+        auto_link_max_links=cfg.max_links,
+    )
+    await store.initialize()
+    try:
+        n1 = await store.store(make_entry(content="near one"))
+        src_id = await store.store(make_entry(content="source"))
+
+        rows = await store.get_related(src_id, direction="outgoing")
+        to_ids = {r["to_id"] for r in rows}
+        assert to_ids == {n1}
+        assert {r["relation_type"] for r in rows} == {"related"}
+    finally:
+        await store.close()
+
+
+async def test_config_default_disabled_creates_no_edges(
+    controlled_embedding_provider: ControlledEmbeddingProvider,
+) -> None:
+    """With config.enabled=False (kill switch), no edges are created."""
+    controlled_embedding_provider.register("source", _NEAR)
+    controlled_embedding_provider.register("near one", _NEAR)
+
+    # Load config and explicitly disable auto_link (the kill switch)
+    from distillery.config import AutoLinkConfig
+
+    cfg = AutoLinkConfig()
+    cfg.enabled = False
+
+    store = DuckDBStore(
+        db_path=":memory:",
+        embedding_provider=controlled_embedding_provider,
+        auto_link_enabled=cfg.enabled,
+        auto_link_threshold=cfg.threshold,
+        auto_link_max_links=cfg.max_links,
+    )
+    await store.initialize()
+    try:
+        await store.store(make_entry(content="near one"))
+        src_id = await store.store(make_entry(content="source"))
+
+        rows = await store.get_related(src_id, direction="outgoing")
+        assert rows == []
+
+        total = store.connection.execute("SELECT COUNT(*) FROM entry_relations").fetchone()
+        assert total is not None and total[0] == 0
+    finally:
+        await store.close()

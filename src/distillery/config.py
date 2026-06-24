@@ -174,19 +174,19 @@ class AutoLinkConfig:
     index, and capped at :attr:`max_links` edges per entry to respect the
     embedding/query budget.
 
-    Disabled by default — with :attr:`enabled` ``False`` the write path
-    behaves exactly as before (no semantic edges are created).
+    Enabled by default — set :attr:`enabled` ``False`` to disable semantic
+    edge creation so the write path behaves exactly as before.
 
     Attributes:
         enabled: Whether to create semantic ``related`` edges on ingest.
-            Defaults to ``False``.
+            Defaults to ``True``.
         threshold: Normalised cosine similarity score in ``[0.0, 1.0]`` at or
             above which a neighbour is linked.  Defaults to ``0.85``.
         max_links: Maximum number of ``related`` edges to create per stored
             entry (throttle).  Must be a positive integer.  Defaults to ``5``.
     """
 
-    enabled: bool = False
+    enabled: bool = True
     threshold: float = 0.85
     max_links: int = 5
 
@@ -1478,8 +1478,7 @@ def _validate(config: DistilleryConfig) -> None:
         )
     if config.feeds.max_feed_bytes <= 0:
         raise ValueError(
-            "feeds.max_feed_bytes must be a positive integer, "
-            f"got: {config.feeds.max_feed_bytes}"
+            f"feeds.max_feed_bytes must be a positive integer, got: {config.feeds.max_feed_bytes}"
         )
 
     # Validate rate_limit settings.

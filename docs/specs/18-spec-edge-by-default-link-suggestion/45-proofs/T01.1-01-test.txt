@@ -1,0 +1,43 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.13, pytest-9.1.1, pluggy-1.6.0 -- /Users/norrie/code/distillery/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /Users/norrie/code/distillery
+configfile: pyproject.toml
+plugins: anyio-4.14.0, cov-7.1.0, timeout-2.4.0, asyncio-1.4.0, httpx-0.36.2
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 9 items
+
+tests/test_auto_link_on_write.py::test_flag_on_links_to_neighbours_above_threshold PASSED
+tests/test_auto_link_on_write.py::test_flag_off_creates_no_semantic_edges PASSED
+tests/test_auto_link_on_write.py::test_auto_link_is_idempotent_on_re_store PASSED
+tests/test_auto_link_on_write.py::test_auto_link_skips_targets_linked_in_any_direction_or_type PASSED
+tests/test_auto_link_on_write.py::test_auto_link_respects_max_links_cap PASSED
+tests/test_auto_link_on_write.py::test_store_batch_auto_links_each_entry PASSED
+tests/test_auto_link_on_write.py::test_default_config_enables_auto_link PASSED
+tests/test_auto_link_on_write.py::test_config_default_enabled_true_creates_edges PASSED
+tests/test_auto_link_on_write.py::test_config_default_disabled_creates_no_edges PASSED
+
+============================== 9 passed in 0.70s ===============================
+============================= test session starts ==============================
+platform darwin -- Python 3.13.13, pytest-9.1.1, pluggy-1.6.0 -- /Users/norrie/code/distillery/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /Users/norrie/code/distillery
+configfile: pyproject.toml
+plugins: anyio-4.14.0, cov-7.1.0, timeout-2.4.0, asyncio-1.4.0, httpx-0.36.2
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 6 items
+
+tests/test_config.py::TestAutoLinkConfig::test_defaults_enabled PASSED
+tests/test_config.py::TestAutoLinkConfig::test_loads_auto_link PASSED
+tests/test_config.py::TestAutoLinkConfig::test_non_bool_enabled_raises PASSED
+tests/test_config.py::TestAutoLinkConfig::test_threshold_out_of_range_raises PASSED
+tests/test_config.py::TestAutoLinkConfig::test_non_positive_max_links_raises PASSED
+tests/test_config.py::TestAutoLinkConfig::test_non_mapping_raises PASSED
+
+============================== 6 passed in 0.21s ===============================
