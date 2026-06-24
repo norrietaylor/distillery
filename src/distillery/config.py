@@ -1483,10 +1483,11 @@ def _validate(config: DistilleryConfig) -> None:
             )
 
     # Validate entity_promotion_threshold.
-    if config.tags.entity_promotion_threshold <= 0:
+    threshold = config.tags.entity_promotion_threshold
+    if not isinstance(threshold, int) or isinstance(threshold, bool) or threshold <= 0:
         raise ValueError(
             "tags.entity_promotion_threshold must be a positive integer, "
-            f"got: {config.tags.entity_promotion_threshold}"
+            f"got: {threshold}"
         )
 
     # Validate feeds thresholds.
