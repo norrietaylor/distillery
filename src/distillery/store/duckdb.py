@@ -2544,6 +2544,81 @@ class DuckDBStore:
 
         return await self._run_sync(_sync)
 
+    def _similar_from_embedding(
+        self,
+        conn: Any,
+        embedding: list[float],
+        threshold: float,
+        limit: int,
+    ) -> list[SearchResult]:
+        """Run the cosine-similarity query for a precomputed *embedding*.
+
+        Shared similarity core for :meth:`find_similar_by_id`. Excludes
+        archived entries, mirroring ``find_similar``/``_sync_get`` defaults.
+        Runs under ``_conn_lock`` (the caller wraps it in ``_run_sync``).
+        """
+        from distillery.store.protocol import SearchResult
+
+        sql = (
+            f"SELECT {self._ENTRY_COLUMNS}, "
+            f"array_cosine_similarity(embedding, ?::FLOAT[{self._embedding_provider.dimensions}]) AS score "
+            f"FROM entries "
+            f"WHERE status != ? "
+            f"AND array_cosine_similarity(embedding, ?::FLOAT[{self._embedding_provider.dimensions}]) >= ? "
+            f"ORDER BY score DESC "
+            f"LIMIT ?"
+        )
+        raw_threshold = threshold * 2.0 - 1.0
+        params: list[Any] = [
+            embedding,
+            EntryStatus.ARCHIVED.value,
+            embedding,
+            raw_threshold,
+            limit,
+        ]
+        result = conn.execute(sql, params)
+        col_names = [desc[0] for desc in result.description]
+        rows = result.fetchall()
+        results: list[SearchResult] = []
+        for row in rows:
+            row_dict = dict(zip(col_names, row, strict=True))
+            raw_score = float(row_dict.pop("score"))
+            score = (raw_score + 1.0) / 2.0
+            entry = self._row_to_entry(tuple(row_dict.values()), list(row_dict.keys()))
+            results.append(SearchResult(entry=entry, score=score))
+        return results
+
+    async def find_similar_by_id(
+        self,
+        source_entry_id: str,
+        threshold: float,
+        limit: int,
+    ) -> list[SearchResult] | None:
+        """Find entries similar to *source_entry_id* using its STORED embedding.
+
+        Reuses the vector already persisted for the entry instead of
+        re-embedding its content — no embedding-provider round-trip and no
+        budget spend. This is the ``/investigate`` Phase 2b hot path (one
+        similarity probe per seed, ``source_entry_id`` set, no fresh content).
+
+        Returns ``None`` when the entry has no stored embedding so the caller
+        can fall back to embedding text. The source entry is not self-excluded
+        here; callers filter it (and linked entries) as before.
+        """
+
+        def _sync() -> list[SearchResult] | None:
+            conn = self.connection
+            row = conn.execute(
+                "SELECT embedding FROM entries WHERE id = ?",
+                [source_entry_id],
+            ).fetchone()
+            if row is None or row[0] is None:
+                return None
+            embedding: list[float] = list(row[0])
+            return self._similar_from_embedding(conn, embedding, threshold, limit)
+
+        return await self._run_sync(_sync)
+
     @overload
     async def list_entries(
         self,

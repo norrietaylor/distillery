@@ -585,3 +585,91 @@ class TestFindSimilarCombinedModes:
         assert "dedup" in data
         assert "conflict_evaluation" in data
         assert data["conflict_evaluation"]["has_conflicts"] is True
+
+
+# ===========================================================================
+# Stored-embedding reuse: source_entry_id without content (#663 follow-up)
+# ===========================================================================
+
+
+class TestFindSimilarStoredEmbedding:
+    """A source_entry_id probe with no fresh content reuses the stored vector
+    instead of re-embedding — verified by asserting embed() is never called."""
+
+    async def test_find_similar_by_id_uses_stored_vector(
+        self,
+        store: DuckDBStore,
+        embedding_provider: ControlledEmbeddingProvider,
+    ) -> None:
+        embedding_provider.register("source", _UNIT_A)
+        embedding_provider.register("twin", _UNIT_A)
+        embedding_provider.register("orthogonal", _UNIT_B)
+        src_id = await store.store(make_entry(content="source"))
+        await store.store(make_entry(content="twin"))
+        await store.store(make_entry(content="orthogonal"))
+
+        with patch.object(
+            embedding_provider, "embed", side_effect=AssertionError("must not embed")
+        ):
+            results = await store.find_similar_by_id(src_id, threshold=0.9, limit=10)
+
+        assert results is not None
+        contents = {r.entry.content for r in results}
+        # Both A-vectors clear the threshold; the store layer does not
+        # self-exclude, so the source itself is present. The B-vector does not.
+        assert "source" in contents
+        assert "twin" in contents
+        assert "orthogonal" not in contents
+
+    async def test_find_similar_by_id_missing_entry_returns_none(self, store: DuckDBStore) -> None:
+        missing = "00000000-0000-0000-0000-000000000000"
+        assert await store.find_similar_by_id(missing, threshold=0.5, limit=10) is None
+
+    async def test_handler_source_entry_id_skips_embedding(
+        self,
+        store: DuckDBStore,
+        embedding_provider: ControlledEmbeddingProvider,
+        cfg: DistilleryConfig,
+    ) -> None:
+        embedding_provider.register("seed", _UNIT_A)
+        embedding_provider.register("near", _UNIT_A)
+        src_id = await store.store(make_entry(content="seed"))
+        await store.store(make_entry(content="near"))
+
+        with patch.object(
+            embedding_provider, "embed", side_effect=AssertionError("must not embed")
+        ):
+            response = await _handle_find_similar(
+                store,
+                {"source_entry_id": src_id, "threshold": 0.9, "limit": 10},
+                cfg=cfg,
+            )
+
+        data = parse_mcp_response(response)
+        assert "error" not in data
+        contents = {r["entry"]["content"] for r in data["results"]}
+        # Handler self-excludes the source; the twin remains.
+        assert "seed" not in contents
+        assert "near" in contents
+
+    async def test_stored_path_reserves_budget_for_dedup(
+        self,
+        store: DuckDBStore,
+        embedding_provider: ControlledEmbeddingProvider,
+        cfg: DistilleryConfig,
+    ) -> None:
+        """source_entry_id + dedup_action still reserves budget on the stored
+        path (the dedup pass embeds content), so BUDGET_EXCEEDED is enforced and
+        not bypassed by the stored-vector fast path (#666 review)."""
+        embedding_provider.register("seed", _UNIT_A)
+        src_id = await store.store(make_entry(content="seed"))
+        cfg.rate_limit.embedding_budget_daily = 1
+        await store.record_embedding_usage(count=1, daily_limit=1)  # exhaust the budget
+
+        response = await _handle_find_similar(
+            store,
+            {"source_entry_id": src_id, "dedup_action": True},
+            cfg=cfg,
+        )
+        data = parse_mcp_response(response)
+        assert data.get("code") == "BUDGET_EXCEEDED"
