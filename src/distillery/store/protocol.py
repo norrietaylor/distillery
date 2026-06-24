@@ -706,6 +706,38 @@ class DistilleryStore(Protocol):
         """
         ...
 
+    async def suggest_links(
+        self,
+        *,
+        auto_create_threshold: float = 0.85,
+        review_floor: float = 0.60,
+        max_candidates_per_run: int = 200,
+        max_neighbours_per_seed: int = 10,
+    ) -> dict[str, int]:
+        """Sweep low-degree nodes, score candidate edges, and route by threshold.
+
+        The headless link-suggestion core (issue #653 step 3).  Generates
+        candidate edges for each seed node, routes by stored-embedding cosine
+        score, and returns count totals.  Performs no LLM or embedding
+        inference.  All writes are idempotent, so a second consecutive run
+        reports ``edges_created == 0`` and ``candidates_queued == 0``.
+
+        Args:
+            auto_create_threshold: Score at/above which a pair becomes a live
+                edge.  Defaults to ``0.85``.
+            review_floor: Minimum score for a pair to be queued for review
+                rather than discarded.  Defaults to ``0.60``.
+            max_candidates_per_run: Upper bound on the number of seed nodes
+                swept in a single run.  Defaults to ``200``.
+            max_neighbours_per_seed: Cap on candidate targets considered per
+                seed from each source.  Defaults to ``10``.
+
+        Returns:
+            Counts dict with keys ``edges_created``, ``candidates_queued``,
+            ``discarded``, and ``nodes_scanned``.
+        """
+        ...
+
     async def query_audit_log(
         self,
         filters: dict[str, Any] | None,

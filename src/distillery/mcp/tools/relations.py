@@ -70,6 +70,7 @@ _VALID_RELATION_TYPES = {
 async def _handle_relations(
     store: Any,
     arguments: dict[str, Any],
+    config: Any = None,
 ) -> list[types.TextContent]:
     """Handle the ``distillery_relations`` tool.
 
@@ -100,11 +101,12 @@ async def _handle_relations(
         "reconcile",
         "list_candidates",
         "resolve_candidate",
+        "suggest_links",
     ):
         return error_response(
             "INVALID_PARAMS",
             "action must be one of 'add', 'get', 'remove', 'traverse', 'metrics', "
-            f"'reconcile', 'list_candidates', 'resolve_candidate'; got: {action!r}",
+            f"'reconcile', 'list_candidates', 'resolve_candidate', 'suggest_links'; got: {action!r}",
         )
 
     # ------------------------------------------------------------------
@@ -413,6 +415,58 @@ async def _handle_relations(
                 "action": "list_candidates",
                 "candidates": candidates,
                 "count": len(candidates),
+            }
+        )
+
+    # ------------------------------------------------------------------
+    # action == "suggest_links"
+    # ------------------------------------------------------------------
+    if action == "suggest_links":
+        from distillery.config import LinkSuggestionConfig, load_config
+
+        # Resolve LinkSuggestionConfig: prefer injected config, fall back to
+        # loading from disk so the action works with the default call signature
+        # (no config kwarg) and inside the scheduled maintenance webhook.
+        if config is not None:
+            ls_cfg: LinkSuggestionConfig = config.link_suggestion
+        else:
+            try:
+                loaded = load_config()
+                ls_cfg = loaded.link_suggestion
+            except Exception:  # noqa: BLE001
+                logger.exception("distillery_relations suggest_links: failed to load config")
+                ls_cfg = LinkSuggestionConfig()
+
+        if not ls_cfg.enabled:
+            return success_response(
+                {
+                    "action": "suggest_links",
+                    "enabled": False,
+                    "edges_created": 0,
+                    "candidates_queued": 0,
+                    "discarded": 0,
+                    "nodes_scanned": 0,
+                }
+            )
+
+        try:
+            counts = await store.suggest_links(
+                auto_create_threshold=ls_cfg.auto_create_threshold,
+                review_floor=ls_cfg.review_floor,
+                max_candidates_per_run=ls_cfg.max_candidates_per_run,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("distillery_relations suggest_links: unexpected error")
+            return error_response("INTERNAL", "Failed to run link suggestion sweep")
+
+        return success_response(
+            {
+                "action": "suggest_links",
+                "enabled": True,
+                "edges_created": counts.get("edges_created", 0),
+                "candidates_queued": counts.get("candidates_queued", 0),
+                "discarded": counts.get("discarded", 0),
+                "nodes_scanned": counts.get("nodes_scanned", 0),
             }
         )
 

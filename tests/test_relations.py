@@ -1559,3 +1559,95 @@ async def test_suggest_links_returns_all_count_keys() -> None:
         }
     finally:
         await store.close()
+
+
+# ---------------------------------------------------------------------------
+# distillery_relations action="suggest_links" MCP handler (T03.3)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_handle_relations_suggest_links_returns_four_counts() -> None:
+    """suggest_links action returns all four count keys in the MCP response."""
+    from distillery.config import LinkSuggestionConfig
+
+    store, provider = await _controlled_store()
+    try:
+        await _store_with_vector(store, provider, "a", _unit_vec_with_cosine(1.0))
+        await _store_with_vector(store, provider, "b", _unit_vec_with_cosine(0.95))
+
+        cfg_stub = type("C", (), {"link_suggestion": LinkSuggestionConfig(), "enabled": True})()
+        result = await _handle_relations(store, {"action": "suggest_links"}, config=cfg_stub)
+        data = _parse(result)
+
+        assert "error" not in data or data.get("error") is False
+        assert data["action"] == "suggest_links"
+        assert "edges_created" in data
+        assert "candidates_queued" in data
+        assert "discarded" in data
+        assert "nodes_scanned" in data
+    finally:
+        await store.close()
+
+
+@pytest.mark.unit
+async def test_handle_relations_suggest_links_convergence() -> None:
+    """A second immediate run reports edges_created=0 and candidates_queued=0 (R3.5)."""
+    from distillery.config import LinkSuggestionConfig
+
+    store, provider = await _controlled_store()
+    try:
+        await _store_with_vector(store, provider, "seed", _unit_vec_with_cosine(1.0))
+        await _store_with_vector(store, provider, "high", _unit_vec_with_cosine(0.95))
+        await _store_with_vector(store, provider, "mid", _unit_vec_with_cosine(0.50))
+
+        cfg_stub = type("C", (), {"link_suggestion": LinkSuggestionConfig()})()
+
+        first = await _handle_relations(store, {"action": "suggest_links"}, config=cfg_stub)
+        first_data = _parse(first)
+        assert first_data["edges_created"] + first_data["candidates_queued"] >= 1
+
+        second = await _handle_relations(store, {"action": "suggest_links"}, config=cfg_stub)
+        second_data = _parse(second)
+        assert second_data["edges_created"] == 0
+        assert second_data["candidates_queued"] == 0
+    finally:
+        await store.close()
+
+
+@pytest.mark.unit
+async def test_handle_relations_suggest_links_disabled_returns_zero_counts() -> None:
+    """When link_suggestion.enabled=False the action returns zeros without calling store."""
+    from unittest.mock import AsyncMock
+
+    from distillery.config import LinkSuggestionConfig
+
+    fake_store = AsyncMock()
+    disabled_cfg = LinkSuggestionConfig(enabled=False)
+    cfg_stub = type("C", (), {"link_suggestion": disabled_cfg})()
+
+    result = await _handle_relations(fake_store, {"action": "suggest_links"}, config=cfg_stub)
+    data = _parse(result)
+
+    assert data["enabled"] is False
+    assert data["edges_created"] == 0
+    assert data["candidates_queued"] == 0
+    fake_store.suggest_links.assert_not_awaited()
+
+
+@pytest.mark.unit
+async def test_handle_relations_suggest_links_store_error_returns_internal() -> None:
+    """An unexpected store error from suggest_links returns INTERNAL code."""
+    from unittest.mock import AsyncMock
+
+    from distillery.config import LinkSuggestionConfig
+
+    fake_store = AsyncMock()
+    fake_store.suggest_links.side_effect = RuntimeError("db exploded")
+    cfg_stub = type("C", (), {"link_suggestion": LinkSuggestionConfig()})()
+
+    result = await _handle_relations(fake_store, {"action": "suggest_links"}, config=cfg_stub)
+    data = _parse(result)
+
+    assert data["error"] is True
+    assert data["code"] == "INTERNAL"
