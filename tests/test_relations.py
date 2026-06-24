@@ -1048,7 +1048,9 @@ async def test_handle_relations_list_candidates_unexpected_error() -> None:
 @pytest.mark.unit
 async def test_handle_relations_resolve_candidate_missing_relation_id() -> None:
     """resolve_candidate without relation_id returns INVALID_PARAMS."""
-    result = await _handle_relations(AsyncMock(), {"action": "resolve_candidate", "decision": "accept"})
+    result = await _handle_relations(
+        AsyncMock(), {"action": "resolve_candidate", "decision": "accept"}
+    )
     data = _parse(result)
     assert data["error"] is True
     assert data["code"] == "INVALID_PARAMS"
@@ -1323,3 +1325,237 @@ def test_distillery_config_has_link_suggestion() -> None:
     assert cfg.link_suggestion.auto_create_threshold == 0.85
     assert cfg.link_suggestion.review_floor == 0.60
     assert cfg.link_suggestion.max_candidates_per_run == 200
+
+
+# ---------------------------------------------------------------------------
+# suggest_links: candidate generation + threshold routing (T03.2)
+# ---------------------------------------------------------------------------
+
+
+async def _controlled_store():  # type: ignore[no-untyped-def]
+    """Build an in-memory store backed by an 8D controlled embedding provider.
+
+    Returns ``(store, provider)``; the caller is responsible for closing.
+    """
+    from distillery.store.duckdb import DuckDBStore
+    from tests.conftest import ControlledEmbeddingProvider
+
+    provider = ControlledEmbeddingProvider()
+    s = DuckDBStore(db_path=":memory:", embedding_provider=provider)
+    await s.initialize()
+    return s, provider
+
+
+def _unit_vec_with_cosine(c: float) -> list[float]:
+    """8D unit vector whose cosine against ``[1,0,...,0]`` equals *c*."""
+    import math
+
+    rest = math.sqrt(max(0.0, 1.0 - c * c))
+    return [c, rest, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+
+async def _store_with_vector(store, provider, content: str, vector: list[float]) -> str:  # type: ignore[no-untyped-def]
+    """Register *vector* for *content*, store an entry with it, return its id."""
+    provider.register(content, vector)
+    return await _store_entry(store, content=content)
+
+
+@pytest.mark.unit
+async def test_suggest_links_auto_creates_high_confidence_pair() -> None:
+    """A single above-threshold pair becomes one live ``related`` edge."""
+    store, provider = await _controlled_store()
+    try:
+        seed = await _store_with_vector(store, provider, "seed", _unit_vec_with_cosine(1.0))
+        # raw cosine 0.95 -> normalised 0.975 (>= auto_create_threshold 0.85).
+        high = await _store_with_vector(store, provider, "high", _unit_vec_with_cosine(0.95))
+
+        counts = await store.suggest_links()
+
+        assert counts["edges_created"] == 1
+        assert counts["candidates_queued"] == 0
+
+        # The pair is a live "related" edge, not a pending candidate.
+        live = await store.get_related(seed, relation_type="related")
+        live_targets = {r["to_id"] for r in live} | {r["from_id"] for r in live}
+        assert high in live_targets
+        assert await store.list_relation_candidates() == []
+    finally:
+        await store.close()
+
+
+@pytest.mark.unit
+async def test_suggest_links_queues_mid_band_pair() -> None:
+    """A single review-band pair becomes one pending candidate, no live edge."""
+    store, provider = await _controlled_store()
+    try:
+        seed = await _store_with_vector(store, provider, "seed", _unit_vec_with_cosine(1.0))
+        # raw cosine 0.50 -> normalised 0.75 (within [0.60, 0.85)).
+        mid = await _store_with_vector(store, provider, "mid", _unit_vec_with_cosine(0.50))
+
+        counts = await store.suggest_links()
+
+        assert counts["edges_created"] == 0
+        assert counts["candidates_queued"] == 1
+
+        # No live "related" edge for the pair.
+        live = await store.get_related(seed, relation_type="related")
+        assert all(mid not in (r["from_id"], r["to_id"]) for r in live)
+        # The pair is a pending candidate.
+        candidates = await store.list_relation_candidates()
+        cand_pairs = {(c["from_id"], c["to_id"]) for c in candidates}
+        assert (seed, mid) in cand_pairs or (mid, seed) in cand_pairs
+    finally:
+        await store.close()
+
+
+@pytest.mark.unit
+async def test_suggest_links_discards_sub_floor() -> None:
+    """Pairs below review_floor create no edge and no candidate; they are counted."""
+    store, provider = await _controlled_store()
+    try:
+        seed = await _store_with_vector(store, provider, "seed", _unit_vec_with_cosine(1.0))
+        # raw cosine 0.05 -> normalised 0.525 (< review_floor 0.60).
+        low = await _store_with_vector(store, provider, "low", _unit_vec_with_cosine(0.05))
+
+        counts = await store.suggest_links()
+
+        assert counts["edges_created"] == 0
+        assert counts["candidates_queued"] == 0
+        assert counts["discarded"] >= 1
+
+        live = await store.get_related(seed)
+        assert all(low not in (r["from_id"], r["to_id"]) for r in live)
+        candidates = await store.list_relation_candidates()
+        assert all(low not in (c["from_id"], c["to_id"]) for c in candidates)
+    finally:
+        await store.close()
+
+
+@pytest.mark.unit
+async def test_suggest_links_performs_no_embedding_inference() -> None:
+    """suggest_links scores over stored embeddings only — no embed() calls."""
+    store, provider = await _controlled_store()
+    try:
+        await _store_with_vector(store, provider, "seed", _unit_vec_with_cosine(1.0))
+        await _store_with_vector(store, provider, "near", _unit_vec_with_cosine(0.95))
+
+        # Spy on the provider: any embed/embed_batch call during the sweep is a
+        # violation (R3.2 forbids inference).
+        calls = {"embed": 0, "embed_batch": 0}
+        orig_embed = provider.embed
+        orig_batch = provider.embed_batch
+
+        def _spy_embed(text: str) -> list[float]:
+            calls["embed"] += 1
+            return orig_embed(text)
+
+        def _spy_batch(texts: list[str]) -> list[list[float]]:
+            calls["embed_batch"] += 1
+            return orig_batch(texts)
+
+        provider.embed = _spy_embed  # type: ignore[method-assign]
+        provider.embed_batch = _spy_batch  # type: ignore[method-assign]
+
+        await store.suggest_links()
+
+        assert calls["embed"] == 0
+        assert calls["embed_batch"] == 0
+    finally:
+        await store.close()
+
+
+@pytest.mark.unit
+async def test_suggest_links_respects_candidate_bound() -> None:
+    """The sweep stops at max_candidates_per_run seed nodes."""
+    store, provider = await _controlled_store()
+    try:
+        # Five entries, all mutually near, but the bound caps the seed set at 2.
+        for i in range(5):
+            await _store_with_vector(
+                store, provider, f"n{i}", _unit_vec_with_cosine(0.95 - i * 0.001)
+            )
+
+        counts = await store.suggest_links(max_candidates_per_run=2)
+
+        assert counts["nodes_scanned"] == 2
+    finally:
+        await store.close()
+
+
+@pytest.mark.unit
+async def test_suggest_links_skips_existing_pending_candidate() -> None:
+    """A pair with an existing pending row is not re-queued."""
+    store, provider = await _controlled_store()
+    try:
+        seed = await _store_with_vector(store, provider, "seed", _unit_vec_with_cosine(1.0))
+        mid = await _store_with_vector(store, provider, "mid", _unit_vec_with_cosine(0.50))
+
+        # Pre-seed the pending candidate (simulating a prior run / T02.1 path).
+        await store.add_relation_candidate(seed, mid, "related", 0.72)
+        before = await store.list_relation_candidates()
+        assert len(before) == 1
+
+        counts = await store.suggest_links()
+
+        after = await store.list_relation_candidates()
+        # No second pending row for the same pair.
+        assert len(after) == 1
+        assert counts["candidates_queued"] == 0
+    finally:
+        await store.close()
+
+
+@pytest.mark.unit
+async def test_suggest_links_skips_existing_live_edge_reverse_direction() -> None:
+    """A pair already linked live (even reverse direction) is not re-created/queued."""
+    store, provider = await _controlled_store()
+    try:
+        seed = await _store_with_vector(store, provider, "seed", _unit_vec_with_cosine(1.0))
+        high = await _store_with_vector(store, provider, "high", _unit_vec_with_cosine(0.95))
+
+        # Live edge already exists in the reverse direction.
+        await store.add_relation(high, seed, "related")
+
+        counts = await store.suggest_links()
+
+        assert counts["edges_created"] == 0
+        candidates = await store.list_relation_candidates()
+        assert all(high not in (c["from_id"], c["to_id"]) for c in candidates)
+    finally:
+        await store.close()
+
+
+@pytest.mark.unit
+async def test_suggest_links_second_run_converges_to_zero() -> None:
+    """A second consecutive run reports zero new edges and zero new candidates."""
+    store, provider = await _controlled_store()
+    try:
+        await _store_with_vector(store, provider, "seed", _unit_vec_with_cosine(1.0))
+        await _store_with_vector(store, provider, "high", _unit_vec_with_cosine(0.95))
+        await _store_with_vector(store, provider, "mid", _unit_vec_with_cosine(0.50))
+
+        first = await store.suggest_links()
+        assert first["edges_created"] + first["candidates_queued"] >= 1
+
+        second = await store.suggest_links()
+        assert second["edges_created"] == 0
+        assert second["candidates_queued"] == 0
+    finally:
+        await store.close()
+
+
+@pytest.mark.unit
+async def test_suggest_links_returns_all_count_keys() -> None:
+    """The counts dict exposes the keys T03.3 needs to assemble the response."""
+    store, provider = await _controlled_store()
+    try:
+        await _store_with_vector(store, provider, "solo", _unit_vec_with_cosine(1.0))
+        counts = await store.suggest_links()
+        assert set(counts) == {
+            "edges_created",
+            "candidates_queued",
+            "discarded",
+            "nodes_scanned",
+        }
+    finally:
+        await store.close()

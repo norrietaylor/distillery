@@ -1316,9 +1316,7 @@ class DuckDBStore:
                 # visibly at startup.  Non-invalidating fatals fall through to
                 # the generic rollback path below.
                 if "has been invalidated" in str(exc):
-                    self._signal_supervisor_restart(
-                        exc, "connection terminally invalidated"
-                    )
+                    self._signal_supervisor_restart(exc, "connection terminally invalidated")
                     raise
                 conn = self._conn
                 if conn is not None:
@@ -2087,9 +2085,7 @@ class DuckDBStore:
         if "tags" in filters:
             tag_list = filters["tags"]
             if tag_list:
-                if not isinstance(tag_list, list) or not all(
-                    isinstance(t, str) for t in tag_list
-                ):
+                if not isinstance(tag_list, list) or not all(isinstance(t, str) for t in tag_list):
                     raise ValueError("tags filter must be a list[str]")
                 # AND semantics: an entry matches only if its tags array
                 # contains *every* requested tag (intersection, not union).
@@ -4285,3 +4281,247 @@ class DuckDBStore:
             ascending degree then ascending ``created_at``.
         """
         return await self._run_sync(self._sync_get_link_suggestion_seeds, limit)
+
+    def _sync_pair_has_edge(self, a_id: str, b_id: str) -> bool:
+        """True if a live or pending ``entry_relations`` row links *a* and *b* either way.
+
+        Used by the link-suggestion sweep to skip any pair that already has an
+        edge (live edge *or* pending candidate) in either direction, matching
+        the ``exclude_linked`` primitive used on the write path.
+        """
+        assert self._conn is not None
+        row = self._conn.execute(
+            "SELECT 1 FROM entry_relations "
+            "WHERE (from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?) "
+            "LIMIT 1",
+            [a_id, b_id, b_id, a_id],
+        ).fetchone()
+        return row is not None
+
+    def _sync_cosine_candidates(
+        self,
+        seed_id: str,
+        limit: int,
+    ) -> list[tuple[str, float]]:
+        """Top-*limit* stored-embedding cosine neighbours of *seed_id*.
+
+        Reads the seed's **already-stored** embedding vector and scores it
+        against every other non-archived entry's stored embedding via DuckDB's
+        ``array_cosine_similarity`` — no embedding inference is issued (issue
+        #653 R3.2).  Returns the *limit* nearest ``(target_id,
+        normalised_score)`` pairs, highest first.  No score floor is applied
+        here: the caller routes by threshold, so the sub-floor neighbours that
+        do come back are exactly the candidates it counts as *discarded*.
+        """
+        assert self._conn is not None
+        seed_row = self._conn.execute(
+            "SELECT embedding FROM entries WHERE id = ?", [seed_id]
+        ).fetchone()
+        if seed_row is None or seed_row[0] is None:
+            return []
+        embedding = list(seed_row[0])
+        dims = self._embedding_provider.dimensions
+        rows = self._conn.execute(
+            f"SELECT id, array_cosine_similarity(embedding, ?::FLOAT[{dims}]) AS score "
+            f"FROM entries "
+            f"WHERE id != ? "
+            f"AND status != ? "
+            f"ORDER BY score DESC "
+            f"LIMIT ?",
+            [embedding, seed_id, EntryStatus.ARCHIVED.value, limit],
+        ).fetchall()
+        # Re-normalise the raw [-1, 1] score back to [0, 1] for threshold routing.
+        return [(row[0], (float(row[1]) + 1.0) / 2.0) for row in rows]
+
+    def _sync_suggest_links(
+        self,
+        *,
+        auto_create_threshold: float,
+        review_floor: float,
+        max_candidates_per_run: int,
+        max_neighbours_per_seed: int,
+    ) -> dict[str, int]:
+        """Synchronous implementation of suggest_links(); via asyncio.to_thread.
+
+        Implements the candidate-generation + threshold-routing core (issue
+        #653 R3.1/R3.2/R3.3).  For each low-degree / orphan seed node it:
+
+          1. Generates candidate targets from two stored-data sources — the
+             Adamic-Adar :func:`link_prediction` over the live-edge adjacency
+             and cosine similarity over already-stored embeddings.  No LLM or
+             embedding inference is performed.
+          2. Scores every candidate pair by stored-embedding cosine (a single
+             comparable [0, 1] score — the same scale as the thresholds) and
+             routes it:
+
+               * ``score >= auto_create_threshold`` -> idempotent live
+                 ``related`` edge (:meth:`_sync_add_relation`).
+               * ``review_floor <= score < auto_create_threshold`` -> pending
+                 candidate (:meth:`_sync_add_relation_candidate`), skipping any
+                 pair that already has a live or pending edge either way.
+               * ``score < review_floor`` -> discarded and counted.
+
+        Each unordered pair is processed once per run.  All writes are
+        idempotent on the unique ``(from_id, to_id, relation_type)`` index, so a
+        second consecutive run converges to zero new edges / candidates.
+
+        Returns a counts dict: ``edges_created``, ``candidates_queued``,
+        ``discarded``, ``nodes_scanned``.
+        """
+        assert self._conn is not None
+
+        # Imported lazily: the graph extra (networkx) is optional, so the store
+        # must remain importable without it.  Both helpers raise a clear
+        # RuntimeError with install guidance when networkx is absent.
+        from distillery.graph.builders import build_relations_graph
+        from distillery.graph.metrics import link_prediction
+
+        # 1. Select seed nodes, bounded so the sweep never scores all
+        #    non-existent edges globally.  Detect truncation for the log.
+        seeds = self._sync_get_link_suggestion_seeds(max_candidates_per_run)
+        total_active = self._conn.execute(
+            "SELECT COUNT(*) FROM entries WHERE status != ?",
+            [EntryStatus.ARCHIVED.value],
+        ).fetchone()
+        if total_active is not None and total_active[0] > max_candidates_per_run:
+            logger.info(
+                "suggest_links: bound truncated the sweep at max_candidates_per_run=%d "
+                "(%d active entries)",
+                max_candidates_per_run,
+                total_active[0],
+            )
+
+        # 2. Build the live-edge adjacency once for Adamic-Adar prediction.
+        #    Pending candidates carry review_status="pending" in metadata and
+        #    are excluded so they don't pollute the structural signal.
+        live_relations = [
+            r
+            for r in self._sync_list_relations()
+            if (r.get("metadata") or {}).get("review_status") != "pending"
+        ]
+        graph = build_relations_graph(live_relations, directed=True)
+
+        edges_created = 0
+        candidates_queued = 0
+        discarded = 0
+        # Track unordered pairs already handled this run so the same pair is
+        # never routed twice (e.g. surfaced by both seeds, or by both the
+        # graph and embedding sources).
+        seen_pairs: set[tuple[str, str]] = set()
+
+        for seed in seeds:
+            # 2a. Candidate targets from the graph (Adamic-Adar) — only when
+            #     the seed is a node in the live adjacency.
+            graph_targets: set[str] = set()
+            if seed in graph:
+                for _u, target, _score in link_prediction(
+                    graph, source=seed, k=max_neighbours_per_seed
+                ):
+                    graph_targets.add(target)
+
+            # 2b. Candidate targets + scores from stored embeddings.  This is
+            #     also the authoritative score source for routing.
+            cosine_scores = dict(self._sync_cosine_candidates(seed, max_neighbours_per_seed))
+
+            # Graph-only candidates still need a stored-embedding score to
+            # route on the [0, 1] threshold scale; look theirs up directly.
+            for target in graph_targets:
+                if target not in cosine_scores:
+                    score = self._sync_pair_cosine(seed, target)
+                    if score is not None:
+                        cosine_scores[target] = score
+
+            for target, score in cosine_scores.items():
+                if target == seed:
+                    continue
+                pair = (seed, target) if seed < target else (target, seed)
+                if pair in seen_pairs:
+                    continue
+                seen_pairs.add(pair)
+
+                if score >= auto_create_threshold:
+                    if self._sync_pair_has_edge(seed, target):
+                        continue
+                    self._sync_add_relation(seed, target, "related")
+                    edges_created += 1
+                elif score >= review_floor:
+                    if self._sync_pair_has_edge(seed, target):
+                        continue
+                    self._sync_add_relation_candidate(seed, target, "related", score)
+                    candidates_queued += 1
+                else:
+                    discarded += 1
+
+        return {
+            "edges_created": edges_created,
+            "candidates_queued": candidates_queued,
+            "discarded": discarded,
+            "nodes_scanned": len(seeds),
+        }
+
+    def _sync_pair_cosine(self, a_id: str, b_id: str) -> float | None:
+        """Normalised [0, 1] cosine similarity between two stored embeddings.
+
+        Reads both stored vectors and compares them in SQL; issues no embedding
+        inference.  Returns ``None`` if either embedding is missing.
+        """
+        assert self._conn is not None
+        dims = self._embedding_provider.dimensions
+        row = self._conn.execute(
+            "SELECT array_cosine_similarity("
+            "  (SELECT embedding FROM entries WHERE id = ?),"
+            f"  (SELECT embedding FROM entries WHERE id = ?)::FLOAT[{dims}]"
+            ")",
+            [a_id, b_id],
+        ).fetchone()
+        if row is None or row[0] is None:
+            return None
+        return (float(row[0]) + 1.0) / 2.0
+
+    async def suggest_links(
+        self,
+        *,
+        auto_create_threshold: float = 0.85,
+        review_floor: float = 0.60,
+        max_candidates_per_run: int = 200,
+        max_neighbours_per_seed: int = 10,
+    ) -> dict[str, int]:
+        """Sweep low-degree nodes, score candidate edges, and route by threshold.
+
+        The headless link-suggestion core (issue #653 step 3).  Generates
+        candidate edges for the seed nodes from the Adamic-Adar
+        :func:`link_prediction` over the live-edge adjacency **and** cosine
+        similarity over already-stored embeddings, then routes each pair by its
+        stored-embedding cosine score:
+
+        * ``score >= auto_create_threshold`` -> idempotent live ``related`` edge.
+        * ``review_floor <= score < auto_create_threshold`` -> pending candidate
+          (skipping pairs that already have a live or pending edge either way).
+        * ``score < review_floor`` -> discarded and counted.
+
+        Performs **no** LLM or embedding inference — every score is computed
+        over data already in the store.  All writes are idempotent, so a second
+        consecutive run reports ``edges_created == 0`` and
+        ``candidates_queued == 0``.
+
+        Args:
+            auto_create_threshold: Score at/above which a pair becomes a live
+                edge.  Defaults to ``0.85``.
+            review_floor: Minimum score for a pair to be queued for review
+                rather than discarded.  Defaults to ``0.60``.
+            max_candidates_per_run: Upper bound on the number of seed nodes
+                swept in a single run.  Defaults to ``200``.
+            max_neighbours_per_seed: Cap on candidate targets considered per
+                seed from each source.  Defaults to ``10``.
+
+        Returns:
+            Counts dict with keys ``edges_created``, ``candidates_queued``,
+            ``discarded``, and ``nodes_scanned``.
+        """
+        return await self._run_sync(
+            self._sync_suggest_links,
+            auto_create_threshold=auto_create_threshold,
+            review_floor=review_floor,
+            max_candidates_per_run=max_candidates_per_run,
+            max_neighbours_per_seed=max_neighbours_per_seed,
+        )
