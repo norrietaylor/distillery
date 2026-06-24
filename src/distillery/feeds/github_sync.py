@@ -69,7 +69,7 @@ _XREF_PATTERN = re.compile(
 # i.e. a structural "citation" relationship (the PR cites/resolves the issue).
 # Matches: "Closes #42", "Fixes #42", "Resolves #42", "close #42", etc.
 _CLOSING_KEYWORD_PATTERN = re.compile(
-    r"(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)",
+    r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)\b",
     re.IGNORECASE,
 )
 
@@ -78,7 +78,7 @@ _CLOSING_KEYWORD_PATTERN = re.compile(
 # when an issue is a sub-issue of an epic tracked via GitHub's task list.
 # We match the local-repo form (#N) since cross-repo sub-issues are rare.
 _TRACKED_BY_PATTERN = re.compile(
-    r"tracked\s+by\s+#(\d+)",
+    r"\btracked\s+by\s+#(\d+)\b",
     re.IGNORECASE,
 )
 
