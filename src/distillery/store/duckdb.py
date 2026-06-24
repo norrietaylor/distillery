@@ -4326,6 +4326,7 @@ class DuckDBStore:
             f"FROM entries "
             f"WHERE id != ? "
             f"AND status != ? "
+            f"AND embedding IS NOT NULL "
             f"ORDER BY score DESC "
             f"LIMIT ?",
             [embedding, seed_id, EntryStatus.ARCHIVED.value, limit],

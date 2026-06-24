@@ -1561,6 +1561,47 @@ async def test_suggest_links_returns_all_count_keys() -> None:
         await store.close()
 
 
+@pytest.mark.unit
+async def test_suggest_links_tolerates_null_embedding() -> None:
+    """suggest_links completes when some entries have a NULL stored embedding.
+
+    Regression for FIX-REVIEW #57: _sync_cosine_candidates must filter out
+    rows whose embedding IS NULL so that array_cosine_similarity never
+    receives NULL and no TypeError is raised on the score conversion.
+
+    Setup: one seed and one validly-embedded neighbour (fewer than the
+    default limit), plus one entry whose embedding is nulled out directly
+    in the DB to simulate an entry stored before embedding inference ran.
+    The sweep must finish without error and must only route the validly-
+    embedded neighbour — not the NULL-embedding entry.
+    """
+    store, provider = await _controlled_store()
+    try:
+        seed = await _store_with_vector(store, provider, "seed-null-test", _unit_vec_with_cosine(1.0))
+        # One valid neighbour in the review band (ensures the candidate pool is non-empty).
+        await _store_with_vector(store, provider, "mid-null-test", _unit_vec_with_cosine(0.50))
+        # A third entry stored normally, then its embedding is nulled directly.
+        null_entry = await _store_with_vector(store, provider, "null-emb", _unit_vec_with_cosine(0.90))
+        store.connection.execute("UPDATE entries SET embedding = NULL WHERE id = ?", [null_entry])
+
+        # Must not raise TypeError (or any exception).
+        counts = await store.suggest_links()
+
+        # The NULL-embedding entry must not appear as a candidate or live edge.
+        candidates = await store.list_relation_candidates()
+        candidate_ids = {c["from_id"] for c in candidates} | {c["to_id"] for c in candidates}
+        assert null_entry not in candidate_ids
+
+        live = await store.get_related(seed)
+        live_ids = {r["from_id"] for r in live} | {r["to_id"] for r in live}
+        assert null_entry not in live_ids
+
+        # The validly-embedded mid entry was still considered.
+        assert counts["nodes_scanned"] >= 1
+    finally:
+        await store.close()
+
+
 # ---------------------------------------------------------------------------
 # distillery_relations action="suggest_links" MCP handler (T03.3)
 # ---------------------------------------------------------------------------

@@ -1,0 +1,15 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.13, pytest-9.1.1, pluggy-1.6.0 -- /Users/norrie/code/distillery/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /Users/norrie/code/distillery
+configfile: pyproject.toml
+plugins: anyio-4.14.0, cov-7.1.0, timeout-2.4.0, asyncio-1.4.0, httpx-0.36.2
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 1 item
+
+tests/test_relations.py::test_suggest_links_tolerates_null_embedding PASSED [100%]
+
+============================== 1 passed in 0.23s ===============================
