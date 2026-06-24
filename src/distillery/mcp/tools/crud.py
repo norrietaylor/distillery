@@ -406,8 +406,8 @@ async def _handle_store(
             await store.record_embedding_usage(
                 count=embed_count, daily_limit=cfg.rate_limit.embedding_budget_daily
             )
-        except EmbeddingBudgetError as exc:
-            return error_response("BUDGET_EXCEEDED", str(exc))
+        except EmbeddingBudgetError:
+            return error_response("BUDGET_EXCEEDED", "Embedding budget exceeded")
         except Exception as exc:  # noqa: BLE001
             # Non-budget failures (aborted txn on the shared connection — see
             # issue #363, provider faults in the counter path) are categorized
@@ -950,8 +950,8 @@ async def _handle_store_batch(
             await store.record_embedding_usage(
                 count=len(built), daily_limit=cfg.rate_limit.embedding_budget_daily
             )
-        except EmbeddingBudgetError as exc:
-            return error_response("BUDGET_EXCEEDED", str(exc))
+        except EmbeddingBudgetError:
+            return error_response("BUDGET_EXCEEDED", "Embedding budget exceeded")
         except Exception as exc:  # noqa: BLE001
             return await _budget_check_error_response(exc, store, "store_batch")
 
@@ -2246,8 +2246,8 @@ async def _handle_correct(
             await store.record_embedding_usage(
                 count=1, daily_limit=cfg.rate_limit.embedding_budget_daily
             )
-        except EmbeddingBudgetError as exc:
-            return error_response("BUDGET_EXCEEDED", str(exc))
+        except EmbeddingBudgetError:
+            return error_response("BUDGET_EXCEEDED", "Embedding budget exceeded")
         except Exception as exc:  # noqa: BLE001
             return await _budget_check_error_response(exc, store, "correct")
 

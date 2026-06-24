@@ -174,8 +174,8 @@ async def _handle_search(
             await store.record_embedding_usage(
                 count=1, daily_limit=cfg.rate_limit.embedding_budget_daily
             )
-        except EmbeddingBudgetError as exc:
-            return error_response("BUDGET_EXCEEDED", str(exc))
+        except EmbeddingBudgetError:
+            return error_response("BUDGET_EXCEEDED", "Embedding budget exceeded")
 
     filters = _build_filters_from_arguments(arguments)
     filter_result = _apply_default_status_filter(filters, arguments)
@@ -560,8 +560,8 @@ async def _handle_find_similar(
             await store.record_embedding_usage(
                 count=1, daily_limit=cfg.rate_limit.embedding_budget_daily
             )
-        except EmbeddingBudgetError as exc:
-            return error_response("BUDGET_EXCEEDED", str(exc))
+        except EmbeddingBudgetError:
+            return error_response("BUDGET_EXCEEDED", "Embedding budget exceeded")
 
     try:
         search_results = await store.find_similar(content=content, threshold=threshold, limit=limit)

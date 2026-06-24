@@ -1405,11 +1405,12 @@ class DuckDBStore:
     async def rollback(self) -> None:
         """Public rollback hook for non-store code paths that touch the connection.
 
-        The MCP tool layer occasionally issues raw ``conn.execute`` calls
-        (e.g. the per-request embedding-budget counter in
-        :mod:`distillery.mcp.budget`) that bypass :meth:`_run_sync`.  Those
-        call sites can invoke ``await store.rollback()`` in their exception
-        handlers to clear an aborted transaction before the next request.
+        The MCP tool layer occasionally issues raw ``conn.execute`` calls that
+        bypass :meth:`_run_sync` (the per-request embedding-budget counter no
+        longer does — it now goes through the serialized ``_run_sync`` /
+        ``_conn_lock`` write path).  Those remaining call sites can invoke
+        ``await store.rollback()`` in their exception handlers to clear an
+        aborted transaction before the next request.
 
         Holds ``_conn_lock`` so the rollback cannot race a concurrent
         ``_run_sync`` worker still mutating the connection (issue #416).
@@ -3415,7 +3416,9 @@ class DuckDBStore:
         from distillery.mcp.budget import record_and_check
 
         assert self._conn is not None
-        return record_and_check(self._conn, daily_limit, count)
+        total = record_and_check(self._conn, daily_limit, count)
+        self._checkpoint_after_write(self._conn)
+        return total
 
     async def record_embedding_usage(self, count: int, daily_limit: int) -> int:
         """Serialize the embedding-budget counter write under ``_conn_lock``.
