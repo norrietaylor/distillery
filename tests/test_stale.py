@@ -315,9 +315,10 @@ class TestAccessedAtUpdates:
         ids_before = [e["id"] for e in before["entries"]]
         assert entry.id in ids_before
 
-        # Access via get() — this should update accessed_at to now.
+        # Access via get() — queues a deferred accessed_at update (issue #663).
         retrieved = await store.get(entry.id)
         assert retrieved is not None
+        await store._flush_accessed()
 
         # Should no longer appear stale.
         after = await _stale(store, config, days=30)

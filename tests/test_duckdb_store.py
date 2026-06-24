@@ -401,9 +401,7 @@ class TestSearch:
         for r in results:
             assert "important" in r.entry.tags
 
-    async def test_search_filter_by_multiple_tags_is_intersection(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_search_filter_by_multiple_tags_is_intersection(self, store: DuckDBStore) -> None:
         """Multi-tag search ANDs the tags: only entries with *both* match (#626)."""
         await store.store(make_entry(content="entry only a", tags=["tag-a"]))
         await store.store(make_entry(content="entry only b", tags=["tag-b"]))
@@ -575,9 +573,7 @@ class TestListEntries:
         await store.store(make_entry(content="only a too", tags=["tag-a"]))
         await store.store(make_entry(content="only b", tags=["tag-b"]))
         await store.store(make_entry(content="both", tags=["tag-a", "tag-b"]))
-        result = await store.list_entries(
-            filters={"tags": ["tag-a", "tag-b"]}, limit=10, offset=0
-        )
+        result = await store.list_entries(filters={"tags": ["tag-a", "tag-b"]}, limit=10, offset=0)
         # Per-tag counts: tag-a == 3, tag-b == 2; AND must return <= min == 2 and
         # in fact only the single entry carrying both tags (proves intersection,
         # not the union of 4 that the old list_has_any produced).
@@ -646,7 +642,9 @@ class TestAccessedAt:
         await store.store(entry)
         fetched = await store.get(entry.id)
         assert fetched is not None
-        # accessed_at should be set in the DB after get().
+        # accessed_at is deferred off the read path (issue #663); flush to make
+        # the update deterministic before asserting.
+        await store._flush_accessed()
         row = store.connection.execute(
             "SELECT accessed_at FROM entries WHERE id = ?", [entry.id]
         ).fetchone()
@@ -686,12 +684,33 @@ class TestAccessedAt:
         """Entry returned by get() after access should have accessed_at populated."""
         entry = make_entry(content="check returned value")
         await store.store(entry)
-        await store.get(entry.id)  # triggers accessed_at update
+        await store.get(entry.id)  # queues a deferred accessed_at update
+        await store._flush_accessed()  # make the deferred update deterministic
         # Second get() should return the entry with accessed_at set.
         fetched = await store.get(entry.id)
         assert fetched is not None
         assert fetched.accessed_at is not None
         assert isinstance(fetched.accessed_at, datetime)
+
+    async def test_get_defers_accessed_at_until_flush(self, store: DuckDBStore) -> None:
+        """get() keeps accessed_at off the read path: the touch is queued in
+        memory and only written by the deferred flusher (issue #663)."""
+        entry = make_entry(content="deferred touch")
+        await store.store(entry)
+        await store.get(entry.id)
+        # Not written yet — the touch is pending, so the read never took the
+        # writer lock.
+        row = store.connection.execute(
+            "SELECT accessed_at FROM entries WHERE id = ?", [entry.id]
+        ).fetchone()
+        assert row is not None
+        assert row[0] is None
+        # Flushing applies the batched UPDATE.
+        await store._flush_accessed()
+        row = store.connection.execute(
+            "SELECT accessed_at FROM entries WHERE id = ?", [entry.id]
+        ).fetchone()
+        assert row[0] is not None
 
 
 class TestClose:
@@ -1390,9 +1409,7 @@ class TestCorruptWalQuarantine:
 
         monkeypatch.setattr(Path, "rename", _rename)
 
-        replay_error = duckdb.Error(
-            "Failure while replaying WAL file: serialization error"
-        )
+        replay_error = duckdb.Error("Failure while replaying WAL file: serialization error")
         with caplog.at_level("ERROR"):  # noqa: SIM117
             with pytest.raises(duckdb.Error, match="replaying WAL"):
                 store._recover_from_wal_replay_failure(replay_error)  # noqa: SLF001
