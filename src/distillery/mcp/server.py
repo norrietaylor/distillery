@@ -237,6 +237,13 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 auto_link_max_links=config.auto_link.max_links,
             )
             await store.initialize()
+            # Flush the WAL during quiet windows so it never grows unbounded
+            # under continuous concurrent writers (poller + gh-sync) — the root
+            # cause of read-latency degradation in issue #655.  Plain CHECKPOINT
+            # only; skipped whenever the writer is busy, so it never blocks.
+            start_idle = getattr(store, "start_idle_checkpoint", None)
+            if callable(start_idle):
+                start_idle()
             if await store.get_metadata("feeds_seeded") != "true":
                 for src in config.feeds.sources:
                     with contextlib.suppress(ValueError):

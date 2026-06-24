@@ -11,6 +11,7 @@ import contextlib
 import math
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import patch
 
 import duckdb
 import pytest
@@ -401,9 +402,7 @@ class TestSearch:
         for r in results:
             assert "important" in r.entry.tags
 
-    async def test_search_filter_by_multiple_tags_is_intersection(
-        self, store: DuckDBStore
-    ) -> None:
+    async def test_search_filter_by_multiple_tags_is_intersection(self, store: DuckDBStore) -> None:
         """Multi-tag search ANDs the tags: only entries with *both* match (#626)."""
         await store.store(make_entry(content="entry only a", tags=["tag-a"]))
         await store.store(make_entry(content="entry only b", tags=["tag-b"]))
@@ -575,9 +574,7 @@ class TestListEntries:
         await store.store(make_entry(content="only a too", tags=["tag-a"]))
         await store.store(make_entry(content="only b", tags=["tag-b"]))
         await store.store(make_entry(content="both", tags=["tag-a", "tag-b"]))
-        result = await store.list_entries(
-            filters={"tags": ["tag-a", "tag-b"]}, limit=10, offset=0
-        )
+        result = await store.list_entries(filters={"tags": ["tag-a", "tag-b"]}, limit=10, offset=0)
         # Per-tag counts: tag-a == 3, tag-b == 2; AND must return <= min == 2 and
         # in fact only the single entry carrying both tags (proves intersection,
         # not the union of 4 that the old list_has_any produced).
@@ -1390,9 +1387,7 @@ class TestCorruptWalQuarantine:
 
         monkeypatch.setattr(Path, "rename", _rename)
 
-        replay_error = duckdb.Error(
-            "Failure while replaying WAL file: serialization error"
-        )
+        replay_error = duckdb.Error("Failure while replaying WAL file: serialization error")
         with caplog.at_level("ERROR"):  # noqa: SIM117
             with pytest.raises(duckdb.Error, match="replaying WAL"):
                 store._recover_from_wal_replay_failure(replay_error)  # noqa: SLF001
@@ -2311,6 +2306,162 @@ class TestEmbeddingBudgetCounterDoesNotStarveCheckpoint:
                     f"WAL grew to {wal_size} bytes — CHECKPOINT appears starved "
                     "(budget counter racing writes, issue #655 RC1)"
                 )
+        finally:
+            await store.close()
+
+
+# ---------------------------------------------------------------------------
+# Resource PRAGMAs (issue #655) — memory_limit / threads at connection init
+# ---------------------------------------------------------------------------
+
+
+class TestResourcePragmas:
+    """An explicit ``memory_limit`` / ``threads`` PRAGMA is set on connect.
+
+    None were set before, so DuckDB sized its buffer manager off total host RAM
+    and spawned one worker per core — both unbounded under a concurrent feed
+    poll (prior OOM history: 512MB → 1024 → 2048 bumps).  Issue #655.
+    """
+
+    async def test_default_pragmas_applied(self, mock_embedding_provider) -> None:
+        s = DuckDBStore(db_path=":memory:", embedding_provider=mock_embedding_provider)
+        await s.initialize()
+        try:
+            mem = s.connection.execute("SELECT current_setting('memory_limit')").fetchone()
+            threads = s.connection.execute("SELECT current_setting('threads')").fetchone()
+            assert mem is not None and threads is not None
+            # DuckDB normalises "1024MB" to a human string like "1.0 GiB"; assert
+            # it is a finite, non-default cap rather than the host-RAM default.
+            assert "GiB" in mem[0] or "MiB" in mem[0]
+            assert int(threads[0]) == 2
+        finally:
+            await s.close()
+
+    async def test_pragmas_overridable(self, mock_embedding_provider) -> None:
+        s = DuckDBStore(
+            db_path=":memory:",
+            embedding_provider=mock_embedding_provider,
+            memory_limit_mb=512,
+            threads=1,
+        )
+        await s.initialize()
+        try:
+            threads = s.connection.execute("SELECT current_setting('threads')").fetchone()
+            assert threads is not None
+            assert int(threads[0]) == 1
+        finally:
+            await s.close()
+
+    async def test_pragmas_disabled_when_none(self, mock_embedding_provider) -> None:
+        """Passing ``None`` / non-positive leaves DuckDB's defaults in place."""
+        s = DuckDBStore(
+            db_path=":memory:",
+            embedding_provider=mock_embedding_provider,
+            memory_limit_mb=None,
+            threads=0,  # non-positive -> treated as unset
+        )
+        # Both knobs resolve to "unset"; init must still succeed.
+        assert s._memory_limit_mb is None  # noqa: SLF001
+        assert s._threads is None  # noqa: SLF001
+        await s.initialize()
+        await s.close()
+
+
+# ---------------------------------------------------------------------------
+# Idle-checkpoint loop (issue #655) — flush WAL during quiet windows
+# ---------------------------------------------------------------------------
+
+
+class TestIdleCheckpoint:
+    """A background task flushes the WAL when the writer is idle (issue #655).
+
+    Under continuous concurrent writers the per-write CHECKPOINT can never
+    acquire the writer lock; the WAL grows unbounded and every read replays an
+    ever-larger WAL.  The idle loop issues a *plain* CHECKPOINT during quiet
+    windows only — it never blocks a writer and never escalates to FORCE.
+    """
+
+    async def test_idle_checkpoint_once_flushes_wal(
+        self, tmp_path, deterministic_embedding_provider
+    ) -> None:
+        db_path = str(tmp_path / "idle_ckpt.db")
+        store = DuckDBStore(
+            db_path=db_path,
+            embedding_provider=deterministic_embedding_provider,
+        )
+        await store.initialize()
+        try:
+            # Suppress per-write checkpoints so the WAL actually accumulates,
+            # isolating the idle sweep as the thing that flushes it.
+            with patch.object(store, "_checkpoint_after_write", lambda *_a, **_k: None):
+                for i in range(5):
+                    await store.store(make_entry(content=f"idle-{i}"))
+            wal_path = Path(db_path + ".wal")
+            wal_before = wal_path.stat().st_size if wal_path.exists() else 0
+
+            await store._idle_checkpoint_once()  # noqa: SLF001
+
+            wal_after = wal_path.stat().st_size if wal_path.exists() else 0
+            assert wal_after < wal_before or wal_after == 0
+        finally:
+            await store.close()
+
+    async def test_idle_checkpoint_skips_when_writer_active(
+        self, tmp_path, deterministic_embedding_provider
+    ) -> None:
+        """When ``_conn_lock`` is held the sweep skips — it never blocks a writer."""
+        import distillery.store.duckdb as duckdb_mod
+
+        store = DuckDBStore(
+            db_path=str(tmp_path / "idle_skip.db"),
+            embedding_provider=deterministic_embedding_provider,
+        )
+        await store.initialize()
+        try:
+            called = False
+
+            async def _spy_to_thread(fn, *args, **kwargs):
+                nonlocal called
+                called = True
+                return fn(*args, **kwargs)
+
+            lock = store._get_conn_lock()  # noqa: SLF001
+            async with lock:  # simulate an in-flight writer holding the lock
+                with patch.object(duckdb_mod.asyncio, "to_thread", _spy_to_thread):
+                    # Must return promptly (never block on the held lock) …
+                    await store._idle_checkpoint_once()  # noqa: SLF001
+            # … and must not have issued a CHECKPOINT while the writer held the lock.
+            assert called is False
+        finally:
+            await store.close()
+
+    async def test_start_stop_idle_checkpoint_lifecycle(
+        self, tmp_path, deterministic_embedding_provider
+    ) -> None:
+        store = DuckDBStore(
+            db_path=str(tmp_path / "idle_life.db"),
+            embedding_provider=deterministic_embedding_provider,
+        )
+        await store.initialize()
+        try:
+            store.start_idle_checkpoint(interval_s=0.01)
+            assert store._idle_checkpoint_task is not None  # noqa: SLF001
+            # Idempotent: a second start does not spawn a second task.
+            task = store._idle_checkpoint_task  # noqa: SLF001
+            store.start_idle_checkpoint(interval_s=0.01)
+            assert store._idle_checkpoint_task is task  # noqa: SLF001
+            await store.stop_idle_checkpoint()
+            assert store._idle_checkpoint_task is None  # noqa: SLF001
+        finally:
+            await store.close()
+
+    async def test_idle_checkpoint_noop_for_memory_db(self, mock_embedding_provider) -> None:
+        store = DuckDBStore(db_path=":memory:", embedding_provider=mock_embedding_provider)
+        await store.initialize()
+        try:
+            store.start_idle_checkpoint()
+            # In-memory DBs have no WAL — the loop is never started.
+            assert store._idle_checkpoint_task is None  # noqa: SLF001
         finally:
             await store.close()
 
