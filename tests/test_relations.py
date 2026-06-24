@@ -874,6 +874,20 @@ async def test_add_relation_candidate_metadata_fields(store) -> None:  # type: i
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("bad_score", [-0.1, 1.5, 2.0])
+async def test_add_relation_candidate_rejects_out_of_range_score(store, bad_score) -> None:  # type: ignore[no-untyped-def]
+    """suggestion_score outside 0.0–1.0 is rejected at the write boundary (CR #661)."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+
+    with pytest.raises(ValueError, match="suggestion_score must be between 0.0 and 1.0"):
+        await store.add_relation_candidate(a, b, "related", bad_score)
+
+    # Nothing was persisted.
+    assert await store.list_relation_candidates() == []
+
+
+@pytest.mark.unit
 async def test_add_relation_candidate_no_new_table(store) -> None:  # type: ignore[no-untyped-def]
     """Pending candidates use entry_relations — no new table is created (R2.1)."""
     a = await _store_entry(store, content="entry A")

@@ -4093,6 +4093,12 @@ class DuckDBStore:
         to batch the WAL flush (issue #653 NOTE-1).
         """
         assert self._conn is not None
+        # Reject out-of-range scores at the write boundary — suggestion_score is
+        # ordering-critical metadata and the public contract is 0.0–1.0.
+        if not 0.0 <= suggestion_score <= 1.0:
+            raise ValueError(
+                f"suggestion_score must be between 0.0 and 1.0, got: {suggestion_score}"
+            )
         # Validate both entries exist (same permissive check as add_relation).
         if not self._sync_entry_exists(from_id):
             diag = self._sync_diagnose_missing_entry(from_id)
@@ -4156,8 +4162,8 @@ class DuckDBStore:
             The UUID string of the relation row (existing or newly created).
 
         Raises:
-            ValueError: If either ``from_id`` or ``to_id`` does not exist in
-                the store.
+            ValueError: If ``suggestion_score`` is outside ``0.0–1.0``, or if
+                either ``from_id`` or ``to_id`` does not exist in the store.
         """
         return await self._run_sync(
             self._sync_add_relation_candidate,

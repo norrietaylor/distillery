@@ -606,8 +606,8 @@ class DistilleryStore(Protocol):
             The UUID string of the relation row (existing or newly created).
 
         Raises:
-            ValueError: If either ``from_id`` or ``to_id`` does not exist in
-                the store.
+            ValueError: If ``suggestion_score`` is outside ``0.0–1.0``, or if
+                either ``from_id`` or ``to_id`` does not exist in the store.
         """
         ...
 

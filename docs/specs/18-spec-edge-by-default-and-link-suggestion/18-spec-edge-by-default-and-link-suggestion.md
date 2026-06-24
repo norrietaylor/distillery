@@ -4,7 +4,7 @@
 
 Spec 17 promoted recurring entity tags to nodes and backfilled stranded edges (epic [#653](https://github.com/norrietaylor/distillery/issues/653) steps 1–2). This spec covers steps 3–4: make **edge creation the default at ingestion** so new entries stop entering the graph as orphans, and add a **scheduled link-suggestion job** that auto-creates high-confidence `related` edges and routes low-confidence candidates to a review queue. Together these keep `orphan_rate` trending down after the one-time backfill, rather than re-accumulating orphans on every feed poll.
 
-The primitives already exist but are dormant: `AutoLinkConfig.enabled` defaults to `False` (`config.py:189`), and the `link_prediction` metric (`graph/metrics.py:74`) plus `find_similar(accept_action="link")` (`search.py:41`) are never scheduled. The auto-create path requires **no LLM inference** — `link_prediction` is Adamic-Adar graph math and `find_similar` runs cosine over already-stored embeddings — so it runs safely headless in `/api/maintenance`.
+The primitives existed but were dormant before this spec: `AutoLinkConfig.enabled` shipped `False`, and the `link_prediction` metric (`graph/metrics.py:74`) plus `find_similar(accept_action="link")` (`search.py:41`) were never scheduled. This spec makes auto-link the **default-on** ingestion behaviour and schedules the link-suggestion sweep. The auto-create path requires **no LLM inference** — `link_prediction` is Adamic-Adar graph math and `find_similar` runs cosine over already-stored embeddings — so it runs safely headless in `/api/maintenance`.
 
 ## Goals
 

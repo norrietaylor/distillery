@@ -17,10 +17,10 @@ Feature: Wire link-suggestion into /api/maintenance
     Then the poll, rescore, and classify-batch phases complete before the link-suggestion phase
     And the link-suggestion phase output appears alongside the other phase results
 
-  Scenario: A disabled link-suggestion phase is skipped while other phases run
+  Scenario: A disabled link-suggestion phase reports enabled false while other phases run
     Given link_suggestion.enabled is False
     When an authenticated POST request is sent to /api/maintenance
-    Then the response omits or skips the link_suggestion phase
+    Then the response "link_suggestion" block reports "enabled" is False with no sweep performed
     And the poll, rescore, and classify-batch phases still complete
 
   Scenario: A failure in the link-suggestion phase does not abort completed phases
