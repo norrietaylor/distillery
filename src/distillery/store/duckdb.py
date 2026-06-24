@@ -3646,8 +3646,17 @@ class DuckDBStore:
         valid_at: str | datetime | None = None,
         invalid_at: str | datetime | None = None,
         metadata: dict[str, Any] | None = None,
+        *,
+        checkpoint: bool = True,
     ) -> str:
-        """Synchronous implementation of add_relation(); called via asyncio.to_thread."""
+        """Synchronous implementation of add_relation(); called via asyncio.to_thread.
+
+        ``checkpoint`` defaults to ``True`` (the durable per-write behaviour).
+        Bounded-loop callers (e.g. :meth:`_sync_suggest_links`) pass ``False``
+        to suppress the per-row checkpoint and flush once at the end of the
+        batch, avoiding a CHECKPOINT storm under ``_conn_lock`` (issue #653
+        NOTE-1).
+        """
         assert self._conn is not None
         # Validate that both entries exist (including archived — preserves historical links).
         # Routes through :meth:`_sync_entry_exists` so this lookup uses the same SQL shape
@@ -3705,7 +3714,7 @@ class DuckDBStore:
                     f"UPDATE entry_relations SET {', '.join(set_parts)} WHERE id = ?",
                     [*set_params, relation_id],
                 )
-            if set_parts:
+            if set_parts and checkpoint:
                 self._checkpoint_after_write(self._conn)
             logger.debug(
                 "Relation already exists id=%s from=%s to=%s type=%s (attrs upserted=%d)",
@@ -3732,7 +3741,8 @@ class DuckDBStore:
                 metadata_json,
             ],
         )
-        self._checkpoint_after_write(self._conn)
+        if checkpoint:
+            self._checkpoint_after_write(self._conn)
         logger.debug(
             "Added relation id=%s from=%s to=%s type=%s",
             relation_id,
@@ -4050,8 +4060,14 @@ class DuckDBStore:
         to_id: str,
         relation_type: str,
         suggestion_score: float,
+        *,
+        checkpoint: bool = True,
     ) -> str:
-        """Synchronous implementation of add_relation_candidate(); via asyncio.to_thread."""
+        """Synchronous implementation of add_relation_candidate(); via asyncio.to_thread.
+
+        ``checkpoint`` defaults to ``True``; bounded-loop callers pass ``False``
+        to batch the WAL flush (issue #653 NOTE-1).
+        """
         assert self._conn is not None
         # Validate both entries exist (same permissive check as add_relation).
         if not self._sync_entry_exists(from_id):
@@ -4078,7 +4094,8 @@ class DuckDBStore:
             "VALUES (?, ?, ?, ?, ?)",
             [relation_id, from_id, to_id, relation_type, metadata_json],
         )
-        self._checkpoint_after_write(self._conn)
+        if checkpoint:
+            self._checkpoint_after_write(self._conn)
         logger.debug(
             "Added relation candidate id=%s from=%s to=%s type=%s score=%.3f",
             relation_id,
@@ -4321,15 +4338,24 @@ class DuckDBStore:
             return []
         embedding = list(seed_row[0])
         dims = self._embedding_provider.dimensions
+        # Exclude neighbours already linked to the seed (live edge or pending
+        # candidate, either direction) so the bounded LIMIT slots are spent on
+        # novel pairs rather than candidates the router would only discard via
+        # _sync_pair_has_edge — raising each sweep's yield (issue #653 NOTE-2).
         rows = self._conn.execute(
             f"SELECT id, array_cosine_similarity(embedding, ?::FLOAT[{dims}]) AS score "
             f"FROM entries "
             f"WHERE id != ? "
             f"AND status != ? "
             f"AND embedding IS NOT NULL "
+            f"AND NOT EXISTS ("
+            f"    SELECT 1 FROM entry_relations r "
+            f"    WHERE (r.from_id = ? AND r.to_id = entries.id) "
+            f"       OR (r.from_id = entries.id AND r.to_id = ?)"
+            f") "
             f"ORDER BY score DESC "
             f"LIMIT ?",
-            [embedding, seed_id, EntryStatus.ARCHIVED.value, limit],
+            [embedding, seed_id, EntryStatus.ARCHIVED.value, seed_id, seed_id, limit],
         ).fetchall()
         # Re-normalise the raw [-1, 1] score back to [0, 1] for threshold routing.
         return [(row[0], (float(row[1]) + 1.0) / 2.0) for row in rows]
@@ -4405,6 +4431,7 @@ class DuckDBStore:
         edges_created = 0
         candidates_queued = 0
         discarded = 0
+        wrote = False
         # Track unordered pairs already handled this run so the same pair is
         # never routed twice (e.g. surfaced by both seeds, or by both the
         # graph and embedding sources).
@@ -4440,18 +4467,31 @@ class DuckDBStore:
                     continue
                 seen_pairs.add(pair)
 
+                # Skip pairs that already have a live edge or a pending
+                # candidate (either direction): they are neither newly created,
+                # queued, nor genuinely "discarded".  Guarding here — rather
+                # than only in the create/queue branches — keeps the discarded
+                # count to truly novel sub-floor pairs (issue #653 NOTE-3).
+                if self._sync_pair_has_edge(seed, target):
+                    continue
+
                 if score >= auto_create_threshold:
-                    if self._sync_pair_has_edge(seed, target):
-                        continue
-                    self._sync_add_relation(seed, target, "related")
+                    self._sync_add_relation(seed, target, "related", checkpoint=False)
                     edges_created += 1
+                    wrote = True
                 elif score >= review_floor:
-                    if self._sync_pair_has_edge(seed, target):
-                        continue
-                    self._sync_add_relation_candidate(seed, target, "related", score)
+                    self._sync_add_relation_candidate(
+                        seed, target, "related", score, checkpoint=False
+                    )
                     candidates_queued += 1
+                    wrote = True
                 else:
                     discarded += 1
+
+        # Flush the batch's write set once rather than per row, keeping the
+        # _conn_lock critical section short (issue #653 NOTE-1).
+        if wrote:
+            self._checkpoint_after_write(self._conn)
 
         return {
             "edges_created": edges_created,

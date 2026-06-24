@@ -1483,6 +1483,33 @@ async def test_suggest_links_respects_candidate_bound() -> None:
 
 
 @pytest.mark.unit
+async def test_suggest_links_already_linked_sub_floor_not_discarded() -> None:
+    """An already-linked sub-floor neighbour is skipped entirely, not counted.
+
+    Regression for issue #653 NOTE-2/NOTE-3: a pair that already has a live
+    edge must not occupy a cosine slot nor inflate ``discarded``.  Before the
+    fix the sub-floor neighbour was returned by the candidate query and counted
+    as discarded even though it was already linked.
+    """
+    store, provider = await _controlled_store()
+    try:
+        seed = await _store_with_vector(store, provider, "seed", _unit_vec_with_cosine(1.0))
+        # raw cosine 0.05 -> normalised 0.525 (< review_floor 0.60).
+        low = await _store_with_vector(store, provider, "low", _unit_vec_with_cosine(0.05))
+
+        # Pre-link the pair; it should now be excluded from the sweep entirely.
+        await store.add_relation(seed, low, "related")
+
+        counts = await store.suggest_links()
+
+        assert counts["edges_created"] == 0
+        assert counts["candidates_queued"] == 0
+        assert counts["discarded"] == 0
+    finally:
+        await store.close()
+
+
+@pytest.mark.unit
 async def test_suggest_links_skips_existing_pending_candidate() -> None:
     """A pair with an existing pending row is not re-queued."""
     store, provider = await _controlled_store()
