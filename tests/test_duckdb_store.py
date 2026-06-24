@@ -746,6 +746,41 @@ class TestClose:
         await store.close()
         await store.close()  # should be a no-op
 
+    async def test_close_flushes_pending_accessed(
+        self, deterministic_embedding_provider: object
+    ) -> None:
+        """close() flushes queued accessed_at touches before teardown so a
+        deferred touch is not lost at shutdown (issue #663 / CR review #670)."""
+        import tempfile
+        from pathlib import Path
+
+        import duckdb
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "test.db")
+            store = DuckDBStore(
+                db_path=db_path, embedding_provider=deterministic_embedding_provider
+            )
+            await store.initialize()
+            entry = make_entry(content="persist me")
+            await store.store(entry)
+            await store.get(entry.id)  # queues a deferred accessed_at touch
+            assert store._pending_accessed  # not yet written
+            await store.close()  # final flush must persist it
+
+            conn = duckdb.connect(db_path, read_only=True)
+            row = conn.execute(
+                "SELECT accessed_at FROM entries WHERE id = ?", [entry.id]
+            ).fetchone()
+            conn.close()
+            assert row is not None and row[0] is not None
+
+    async def test_mark_accessed_noop_once_closing(self, store: DuckDBStore) -> None:
+        """Once close() begins, reads stop enqueuing deferred touches (#670)."""
+        store._closing = True
+        store._mark_accessed(["any-id"])
+        assert store._pending_accessed == set()
+
 
 class TestFeedSourceLiveness:
     """DuckDBStore surfaces liveness metadata alongside feed sources."""

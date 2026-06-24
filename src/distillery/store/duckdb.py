@@ -272,6 +272,9 @@ class DuckDBStore:
         self._pending_accessed: set[str] = set()
         self._accessed_flush_task: asyncio.Task[None] | None = None
         self._accessed_flush_interval_s: float = 30.0
+        # Set once close() begins so in-flight reads stop enqueuing deferred
+        # touches that the final flush would miss.
+        self._closing: bool = False
         # Set when DuckDB raises a ``FatalException`` that permanently
         # invalidates the connection (e.g. "database has been invalidated
         # because of a previous fatal error").  Once set, the connection is
@@ -1164,6 +1167,7 @@ class DuckDBStore:
         if self._initialized:
             return
         await asyncio.to_thread(self._sync_initialize)
+        self._closing = False
         # Start the deferred accessed_at flusher now the connection exists.
         if self._accessed_flush_task is None:
             self._accessed_flush_task = asyncio.create_task(self._accessed_flush_loop())
@@ -1176,6 +1180,9 @@ class DuckDBStore:
         """
         if self._conn is None:
             return
+        # Once shutdown begins, stop accepting new deferred touches so a read
+        # racing close() cannot enqueue a touch the final flush would miss.
+        self._closing = True
         # Stop the deferred-accessed flusher and flush any pending touches
         # before taking ``_conn_lock`` for the checkpoint/close — the flush
         # itself acquires ``_conn_lock`` via ``_run_sync``, so it must run
@@ -1415,8 +1422,12 @@ class DuckDBStore:
         concurrent reads are serialised by the *separate* ``_read_lock`` (a
         single ``DuckDBPyConnection`` is not safe to touch from two worker
         threads at once — the same hazard issue #416 fixed on ``_conn``).
-        Read ops are millisecond-scale, so this serialisation never
-        reintroduces the "looks dead" symptom.
+        The health probes / ``count_entries`` are millisecond-scale; ``search``
+        and ``find_similar`` also run here now and are NOT guaranteed
+        millisecond-scale (HNSW/BM25/RRF SQL — the network embed stays off-lock),
+        so a slow search can delay a concurrent read or the readiness probe.
+        That is still far better than the writer-lock block it replaces; revisit
+        with a dedicated read handle if probe latency under search load matters.
 
         *fn* must be read-only.  Any error leaves the read handle untouched
         (no rollback): a SELECT cannot poison ``_read_conn`` the way a failed
@@ -1452,7 +1463,11 @@ class DuckDBStore:
         Called from the read paths on the event-loop thread: a plain set
         update with no lock and no await, so a read never waits on the writer.
         :meth:`_flush_accessed` drains the set under ``_conn_lock`` out of band.
+        No-op once :meth:`close` has begun, so a read racing shutdown does not
+        enqueue a touch that the final flush would miss.
         """
+        if self._closing:
+            return
         self._pending_accessed.update(entry_ids)
 
     async def _flush_accessed(self) -> None:
@@ -1481,8 +1496,18 @@ class DuckDBStore:
         while True:
             try:
                 await asyncio.sleep(self._accessed_flush_interval_s)
-                await self._flush_accessed()
             except asyncio.CancelledError:
+                raise
+            # Shield the flush so a cancel (from close()) waits for the in-flight
+            # DuckDB worker to finish instead of releasing _conn_lock mid-UPDATE
+            # and leaving an orphan thread racing close()'s CHECKPOINT/close on
+            # the same _conn (issue #416).
+            flush = asyncio.ensure_future(self._flush_accessed())
+            try:
+                await asyncio.shield(flush)
+            except asyncio.CancelledError:
+                with contextlib.suppress(Exception):
+                    await flush
                 raise
             except Exception:  # noqa: BLE001 — never let the flusher die
                 logger.debug("accessed_at flush loop iteration failed (continuing)")
@@ -2459,13 +2484,11 @@ class DuckDBStore:
                 # No min-max rescaling — score represents true similarity to the
                 # query, identical regardless of any metadata filter (issue #370).
                 results: list[SearchResult] = []
-                returned_ids: list[str] = []
                 for row in rows[:limit]:
                     row_dict = dict(zip(col_names, row, strict=True))
                     row_dict.pop("score")
                     eid = row_dict["id"]
                     results.append(SearchResult(entry=entry_map[eid], score=cosine_score[eid]))
-                    returned_ids.append(eid)
                 return results
 
             # --- BM25 search ---
@@ -2533,10 +2556,8 @@ class DuckDBStore:
             # would make the value meaningless under metadata filters because
             # the per-scope min/max changes with the filter (issue #370).
             results = []
-            returned_ids = []
             for eid, _rrf in scored[:limit]:
                 results.append(SearchResult(entry=entry_map[eid], score=cosine_score.get(eid, 0.0)))
-                returned_ids.append(eid)
 
             return results
 
@@ -2549,17 +2570,21 @@ class DuckDBStore:
 
     @staticmethod
     def _touch_accessed(conn: duckdb.DuckDBPyConnection, entry_ids: list[str]) -> None:
-        """Best-effort update of ``accessed_at`` for the given entry IDs."""
+        """Update ``accessed_at`` for the given entry IDs.
+
+        Deliberately NOT best-effort here: it runs inside ``_run_sync`` (its only
+        caller is the deferred flusher), so a failure must propagate to let
+        ``_run_sync`` roll back the aborted transaction rather than leaving
+        ``_conn`` poisoned. :meth:`_flush_accessed` swallows the error *after*
+        that rollback, since ``accessed_at`` is a soft signal.
+        """
         if not entry_ids:
             return
-        try:
-            placeholders = ", ".join("?" for _ in entry_ids)
-            conn.execute(
-                f"UPDATE entries SET accessed_at = current_timestamp WHERE id IN ({placeholders})",
-                entry_ids,
-            )
-        except Exception:  # pragma: no cover
-            logger.debug("accessed_at bulk update failed (ignored)")
+        placeholders = ", ".join("?" for _ in entry_ids)
+        conn.execute(
+            f"UPDATE entries SET accessed_at = current_timestamp WHERE id IN ({placeholders})",
+            entry_ids,
+        )
 
     async def find_similar(
         self,
