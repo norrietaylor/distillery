@@ -474,6 +474,15 @@ class TestGroupBy:
         # Only the session + reference entries count; the bookmark is excluded.
         assert by_tag.get("topic") == 2
 
+    async def test_group_by_tags_empty_entry_type_list_errors_cleanly(self, store: Any) -> None:
+        """An empty entry_type list is rejected with a clean error, not a raw
+        ParserException from `entry_type IN ()` (#667 review)."""
+        result = await _handle_list(
+            store=store, arguments={"group_by": "tags", "entry_type": []}
+        )
+        data = parse_mcp_response(result)
+        assert data.get("error")
+
     async def test_group_by_tags_with_tag_prefix(self, store: Any) -> None:
         """group_by=tags with tag_prefix limits the grouping to matching tags.
 
