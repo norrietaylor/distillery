@@ -72,6 +72,7 @@ _COOLDOWN_SECONDS: dict[str, int] = {
     "rescore": 3600,  # 1 hour
     "maintenance": 21600,  # 6 hours
     "classify-batch": 300,  # 5 minutes
+    "link-suggestion": 3600,  # 1 hour
 }
 
 # Per-endpoint locks to serialize dispatch and prevent TOCTOU races on
@@ -885,18 +886,20 @@ async def _parse_rescore_params(
 async def _run_maintenance(state: dict[str, Any]) -> JSONResponse:
     """Core maintenance logic invoked by the background job runner.
 
-    Sequentially orchestrates three sub-operations:
+    Sequentially orchestrates four sub-operations:
 
     1. **poll** -- fetch new items from all configured feed sources.
     2. **rescore** -- re-score existing feed entries against the current
        interest profile (up to 200 entries).
     3. **classify-batch** -- classify pending inbox entries using the
        configured classification mode.
+    4. **link-suggestion** -- sweep low-degree nodes and score candidate
+       edges (gated by ``config.link_suggestion.enabled``).
 
     Each sub-operation is invoked via its internal ``_run_*`` helper so that
     no HTTP self-calls are made.  Each sub-operation returns its result dict;
-    all three are merged into the combined response under ``poll``,
-    ``rescore``, and ``classify_batch`` keys.
+    all four are merged into the combined response under ``poll``,
+    ``rescore``, ``classify_batch``, and ``link_suggestion`` keys.
 
     Sub-phase cooldowns are reserved briefly (under the phase endpoint lock)
     BEFORE the long-running phase work runs, so a direct ``POST /hooks/poll``
@@ -914,13 +917,16 @@ async def _run_maintenance(state: dict[str, Any]) -> JSONResponse:
 
     Returns:
         JSON response with ``{"ok": true, "data": {"poll": {...},
-        "rescore": {...}, "classify_batch": {...}}}``.  The top-level
-        ``ok`` is ``true`` even when individual sub-operations fail so that
-        the caller always receives the combined report.  A status 500 is
-        returned only when maintenance cannot start at all (e.g. store
+        "rescore": {...}, "classify_batch": {...}, "link_suggestion": {...}}}``.
+        The top-level ``ok`` is ``true`` even when individual sub-operations
+        fail so that the caller always receives the combined report.  A status
+        500 is returned only when maintenance cannot start at all (e.g. store
         unavailable).
     """
-    logger.info("Webhook maintenance: starting maintenance cycle (poll → rescore → classify-batch)")
+    logger.info(
+        "Webhook maintenance: starting maintenance cycle "
+        "(poll → rescore → classify-batch → link-suggestion)"
+    )
 
     def _extract(response: JSONResponse) -> dict[str, Any]:
         try:
@@ -983,9 +989,54 @@ async def _run_maintenance(state: dict[str, Any]) -> JSONResponse:
         else {"ok": False, "error": classify_body.get("error", "classify-batch failed")}
     )
 
-    # 4. Search log retention — prune old search_log rows.
-    retention_result: dict[str, Any] = {"ok": True, "deleted": 0}
+    # Re-check before link-suggestion — a fatal raised during classify-batch
+    # must halt the job rather than open a fresh DuckDB connection for the
+    # sweep against a dead store.
+    terminal = _terminal_failure_response(store)
+    if terminal is not None:
+        return terminal
+
+    # 4. Link suggestion — sweep low-degree / orphan nodes and score candidate
+    # edges.  Gated by config.link_suggestion.enabled; non-fatal so a failure
+    # does not abort the already-completed phases above.
     config = state.get("config")
+    link_suggestion_result: dict[str, Any]
+    if config is not None and config.link_suggestion.enabled:
+        ls_cfg = config.link_suggestion
+        link_lock = _endpoint_locks.setdefault("link-suggestion", asyncio.Lock())
+        async with link_lock:
+            await _set_cooldown(store, "link-suggestion")
+        try:
+            counts = await store.suggest_links(
+                auto_create_threshold=ls_cfg.auto_create_threshold,
+                review_floor=ls_cfg.review_floor,
+                max_candidates_per_run=ls_cfg.max_candidates_per_run,
+            )
+            link_suggestion_result = {
+                "ok": True,
+                "enabled": True,
+                "edges_created": counts.get("edges_created", 0),
+                "candidates_queued": counts.get("candidates_queued", 0),
+                "discarded": counts.get("discarded", 0),
+                "nodes_scanned": counts.get("nodes_scanned", 0),
+            }
+            logger.info(
+                "Maintenance: link-suggestion complete — edges_created=%d "
+                "candidates_queued=%d nodes_scanned=%d",
+                link_suggestion_result["edges_created"],
+                link_suggestion_result["candidates_queued"],
+                link_suggestion_result["nodes_scanned"],
+            )
+        except Exception:  # noqa: BLE001
+            # Non-fatal: log server-side details; report failure in response
+            # without aborting the already-completed phases.
+            link_suggestion_result = {"ok": False, "error": "link-suggestion failed"}
+            logger.exception("Maintenance: link-suggestion phase failed")
+    else:
+        link_suggestion_result = {"ok": True, "enabled": False}
+
+    # 5. Search log retention — prune old search_log rows.
+    retention_result: dict[str, Any] = {"ok": True, "deleted": 0}
     if config is not None and config.rate_limit.search_log_retention_days > 0:
         retention_days = config.rate_limit.search_log_retention_days
         try:
@@ -1007,10 +1058,12 @@ async def _run_maintenance(state: dict[str, Any]) -> JSONResponse:
             logger.exception("Maintenance: search_log retention failed")
 
     logger.info(
-        "Webhook maintenance: completed — poll_ok=%s rescore_ok=%s classify_ok=%s",
+        "Webhook maintenance: completed — poll_ok=%s rescore_ok=%s classify_ok=%s "
+        "link_suggestion_ok=%s",
         poll_body.get("ok"),
         rescore_body.get("ok"),
         classify_body.get("ok"),
+        link_suggestion_result.get("ok"),
     )
     return JSONResponse(
         {
@@ -1019,6 +1072,7 @@ async def _run_maintenance(state: dict[str, Any]) -> JSONResponse:
                 "poll": poll_result,
                 "rescore": rescore_result,
                 "classify_batch": classify_result,
+                "link_suggestion": link_suggestion_result,
                 "search_log_retention": retention_result,
             },
         }

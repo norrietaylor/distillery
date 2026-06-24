@@ -1,0 +1,11 @@
+Type: cli
+Command: ruff check + ruff format --check + mypy --strict (src/distillery)
+Expected: all clean
+Timestamp: 2026-06-24T17:35:58Z
+----------------------------------------------------------------------
+$ ruff check src/distillery/store/duckdb.py tests/test_relations.py
+All checks passed!
+$ ruff format --check src/distillery/store/duckdb.py tests/test_relations.py
+2 files already formatted
+$ mypy --strict src/distillery/
+Success: no issues found in 72 source files

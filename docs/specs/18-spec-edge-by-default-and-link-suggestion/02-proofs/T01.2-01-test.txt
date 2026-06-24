@@ -1,0 +1,25 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.13, pytest-9.1.1, pluggy-1.6.0 -- /Users/norrie/code/distillery/.venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /Users/norrie/code/distillery
+configfile: pyproject.toml
+plugins: anyio-4.14.0, cov-7.1.0, timeout-2.4.0, asyncio-1.4.0, httpx-0.36.2
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 10 items
+
+tests/test_auto_link_on_write.py::test_flag_on_links_to_neighbours_above_threshold PASSED [ 10%]
+tests/test_auto_link_on_write.py::test_flag_off_creates_no_semantic_edges PASSED [ 20%]
+tests/test_auto_link_on_write.py::test_auto_link_is_idempotent_on_re_store PASSED [ 30%]
+tests/test_auto_link_on_write.py::test_auto_link_skips_targets_linked_in_any_direction_or_type PASSED [ 40%]
+tests/test_auto_link_on_write.py::test_auto_link_respects_max_links_cap PASSED [ 50%]
+tests/test_auto_link_on_write.py::test_store_batch_auto_links_each_entry PASSED [ 60%]
+tests/test_auto_link_on_write.py::test_default_config_enables_auto_link PASSED [ 70%]
+tests/test_auto_link_on_write.py::test_config_default_enabled_true_creates_edges PASSED [ 80%]
+tests/test_auto_link_on_write.py::test_config_default_disabled_creates_no_edges PASSED [ 90%]
+tests/test_auto_link_on_write.py::test_feed_poll_ingest_auto_links PASSED [100%]
+
+============================== 10 passed in 0.65s ==============================
+exit code: 0

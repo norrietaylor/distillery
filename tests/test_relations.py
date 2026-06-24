@@ -805,6 +805,23 @@ async def test_handle_relations_remove_unexpected_error() -> None:
     assert data["code"] == "INTERNAL"
 
 
+# ===========================================================================
+# T02.1: Store-layer pending candidates (R2.1 / R2.2 / R2.4)
+# ===========================================================================
+
+
+@pytest.mark.unit
+async def test_add_relation_candidate_returns_uuid(store) -> None:  # type: ignore[no-untyped-def]
+    """add_relation_candidate persists a pending row and returns a UUID (R2.1)."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+
+    relation_id = await store.add_relation_candidate(a, b, "related", 0.72)
+
+    assert isinstance(relation_id, str)
+    assert len(relation_id) > 0
+
+
 # ---------------------------------------------------------------------------
 # mentions relation type
 # ---------------------------------------------------------------------------
@@ -836,6 +853,949 @@ async def test_add_relation_mentions_type(store) -> None:  # type: ignore[no-unt
     assert len(related) == 1
     assert related[0]["relation_type"] == "mentions"
     assert related[0]["to_id"] == to_id
+
+
+@pytest.mark.unit
+async def test_add_relation_candidate_metadata_fields(store) -> None:  # type: ignore[no-untyped-def]
+    """Pending candidate row carries review_status='pending' and suggestion_score (R2.1)."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+
+    relation_id = await store.add_relation_candidate(a, b, "related", 0.72)
+
+    conn = store.connection
+    row = conn.execute(
+        "SELECT metadata FROM entry_relations WHERE id = ?", [relation_id]
+    ).fetchone()
+    assert row is not None
+    meta = json.loads(row[0])
+    assert meta["review_status"] == "pending"
+    assert meta["suggestion_score"] == 0.72
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("bad_score", [-0.1, 1.5, 2.0])
+async def test_add_relation_candidate_rejects_out_of_range_score(store, bad_score) -> None:  # type: ignore[no-untyped-def]
+    """suggestion_score outside 0.0–1.0 is rejected at the write boundary (CR #661)."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+
+    with pytest.raises(ValueError, match="suggestion_score must be between 0.0 and 1.0"):
+        await store.add_relation_candidate(a, b, "related", bad_score)
+
+    # Nothing was persisted.
+    assert await store.list_relation_candidates() == []
+
+
+@pytest.mark.unit
+async def test_add_relation_candidate_no_new_table(store) -> None:  # type: ignore[no-untyped-def]
+    """Pending candidates use entry_relations — no new table is created (R2.1)."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+
+    await store.add_relation_candidate(a, b, "related", 0.65)
+
+    conn = store.connection
+    tables = {row[0] for row in conn.execute("SHOW TABLES").fetchall()}
+    assert "entry_relations" in tables
+    assert not any("candidate" in t for t in tables)
+
+
+@pytest.mark.unit
+async def test_add_relation_candidate_idempotent(store) -> None:  # type: ignore[no-untyped-def]
+    """Calling add_relation_candidate twice for the same triple returns same id (R2.1)."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+
+    first = await store.add_relation_candidate(a, b, "related", 0.72)
+    second = await store.add_relation_candidate(a, b, "related", 0.80)
+
+    assert first == second
+
+
+@pytest.mark.unit
+async def test_add_relation_candidate_idempotent_when_live_edge_exists(store) -> None:  # type: ignore[no-untyped-def]
+    """add_relation_candidate is a no-op when a live edge already exists (R2.1)."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+
+    live_id = await store.add_relation(a, b, "related")
+    candidate_id = await store.add_relation_candidate(a, b, "related", 0.90)
+
+    assert live_id == candidate_id
+
+
+@pytest.mark.unit
+async def test_add_relation_candidate_invalid_from_id(store) -> None:  # type: ignore[no-untyped-def]
+    """add_relation_candidate raises ValueError when from_id does not exist."""
+    b = await _store_entry(store, content="entry B")
+
+    with pytest.raises(ValueError, match="from_id"):
+        await store.add_relation_candidate("nonexistent-id", b, "related", 0.72)
+
+
+@pytest.mark.unit
+async def test_add_relation_candidate_invalid_to_id(store) -> None:  # type: ignore[no-untyped-def]
+    """add_relation_candidate raises ValueError when to_id does not exist."""
+    a = await _store_entry(store, content="entry A")
+
+    with pytest.raises(ValueError, match="to_id"):
+        await store.add_relation_candidate(a, "nonexistent-id", "related", 0.72)
+
+
+@pytest.mark.unit
+async def test_list_relation_candidates_returns_pending_only(store) -> None:  # type: ignore[no-untyped-def]
+    """list_relation_candidates returns only pending rows, not live edges (R2.2)."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+    c = await _store_entry(store, content="entry C")
+
+    await store.add_relation_candidate(a, b, "related", 0.72)
+    await store.add_relation(a, c, "related")
+
+    candidates = await store.list_relation_candidates()
+
+    assert len(candidates) == 1
+    assert candidates[0]["from_id"] == a
+    assert candidates[0]["to_id"] == b
+
+
+@pytest.mark.unit
+async def test_list_relation_candidates_ordered_by_score_descending(store) -> None:  # type: ignore[no-untyped-def]
+    """list_relation_candidates returns candidates ordered by score descending (R2.2)."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+    c = await _store_entry(store, content="entry C")
+
+    await store.add_relation_candidate(a, b, "related", 0.65)
+    await store.add_relation_candidate(a, c, "related", 0.72)
+
+    candidates = await store.list_relation_candidates()
+
+    assert len(candidates) == 2
+    assert candidates[0]["suggestion_score"] == 0.72
+    assert candidates[1]["suggestion_score"] == 0.65
+    assert candidates[0]["to_id"] == c
+    assert candidates[1]["to_id"] == b
+
+
+@pytest.mark.unit
+async def test_list_relation_candidates_fields(store) -> None:  # type: ignore[no-untyped-def]
+    """Each candidate dict has the expected fields including suggestion_score (R2.2)."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+
+    await store.add_relation_candidate(a, b, "related", 0.75)
+
+    candidates = await store.list_relation_candidates()
+    assert len(candidates) == 1
+    row = candidates[0]
+    assert "id" in row
+    assert row["from_id"] == a
+    assert row["to_id"] == b
+    assert row["relation_type"] == "related"
+    assert row["suggestion_score"] == 0.75
+    assert "created_at" in row
+
+
+@pytest.mark.unit
+async def test_get_related_excludes_pending_candidates(store) -> None:  # type: ignore[no-untyped-def]
+    """get_related (default) does not return pending candidates (R2.4)."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+
+    await store.add_relation_candidate(a, b, "related", 0.72)
+
+    related = await store.get_related(a)
+    assert related == []
+
+    candidates = await store.list_relation_candidates()
+    assert len(candidates) == 1
+    assert candidates[0]["from_id"] == a
+
+
+@pytest.mark.unit
+async def test_get_related_still_returns_live_edges_when_candidate_also_exists(store) -> None:  # type: ignore[no-untyped-def]
+    """Live edges appear in get_related even when a pending candidate exists for a different pair."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+    c = await _store_entry(store, content="entry C")
+
+    await store.add_relation(a, b, "related")
+    await store.add_relation_candidate(a, c, "related", 0.72)
+
+    related = await store.get_related(a)
+    to_ids = {r["to_id"] for r in related}
+    assert b in to_ids
+    assert c not in to_ids
+
+
+# ===========================================================================
+# T02.2: MCP list_candidates + resolve_candidate actions (R2.3)
+# ===========================================================================
+
+
+@pytest.mark.unit
+async def test_handle_relations_list_candidates_empty(store) -> None:  # type: ignore[no-untyped-def]
+    """list_candidates returns an empty list when no pending candidates exist."""
+    result = await _handle_relations(store, {"action": "list_candidates"})
+    data = _parse(result)
+    assert "error" not in data or data.get("error") is False
+    assert data["action"] == "list_candidates"
+    assert data["candidates"] == []
+    assert data["count"] == 0
+
+
+@pytest.mark.unit
+async def test_handle_relations_list_candidates_returns_pending_rows(store) -> None:  # type: ignore[no-untyped-def]
+    """list_candidates returns pending rows sorted by score descending (R2.3)."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+    c = await _store_entry(store, content="entry C")
+
+    await store.add_relation_candidate(a, b, "related", 0.65)
+    await store.add_relation_candidate(a, c, "related", 0.80)
+
+    result = await _handle_relations(store, {"action": "list_candidates"})
+    data = _parse(result)
+    assert data["count"] == 2
+    # Ordered by score descending.
+    assert data["candidates"][0]["suggestion_score"] == 0.80
+    assert data["candidates"][1]["suggestion_score"] == 0.65
+
+
+@pytest.mark.unit
+async def test_handle_relations_list_candidates_excludes_live_edges(store) -> None:  # type: ignore[no-untyped-def]
+    """list_candidates does not return live edges, only pending candidates."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+    c = await _store_entry(store, content="entry C")
+
+    await store.add_relation(a, b, "related")  # live edge
+    await store.add_relation_candidate(a, c, "related", 0.75)  # pending
+
+    result = await _handle_relations(store, {"action": "list_candidates"})
+    data = _parse(result)
+    assert data["count"] == 1
+    assert data["candidates"][0]["to_id"] == c
+
+
+@pytest.mark.unit
+async def test_handle_relations_list_candidates_unexpected_error() -> None:
+    """list_candidates propagates unexpected store errors as INTERNAL."""
+    fake_store = AsyncMock()
+    fake_store.list_relation_candidates.side_effect = RuntimeError("db exploded")
+
+    result = await _handle_relations(fake_store, {"action": "list_candidates"})
+    data = _parse(result)
+    assert data["error"] is True
+    assert data["code"] == "INTERNAL"
+
+
+@pytest.mark.unit
+async def test_handle_relations_resolve_candidate_missing_relation_id() -> None:
+    """resolve_candidate without relation_id returns INVALID_PARAMS."""
+    result = await _handle_relations(
+        AsyncMock(), {"action": "resolve_candidate", "decision": "accept"}
+    )
+    data = _parse(result)
+    assert data["error"] is True
+    assert data["code"] == "INVALID_PARAMS"
+    assert "relation_id" in data["message"]
+
+
+@pytest.mark.unit
+async def test_handle_relations_resolve_candidate_missing_decision() -> None:
+    """resolve_candidate without decision returns INVALID_PARAMS."""
+    result = await _handle_relations(
+        AsyncMock(), {"action": "resolve_candidate", "relation_id": "some-id"}
+    )
+    data = _parse(result)
+    assert data["error"] is True
+    assert data["code"] == "INVALID_PARAMS"
+    assert "decision" in data["message"]
+
+
+@pytest.mark.unit
+async def test_handle_relations_resolve_candidate_invalid_decision() -> None:
+    """resolve_candidate with unknown decision returns INVALID_PARAMS."""
+    result = await _handle_relations(
+        AsyncMock(),
+        {"action": "resolve_candidate", "relation_id": "some-id", "decision": "maybe"},
+    )
+    data = _parse(result)
+    assert data["error"] is True
+    assert data["code"] == "INVALID_PARAMS"
+    assert "decision" in data["message"]
+
+
+@pytest.mark.unit
+async def test_handle_relations_resolve_candidate_reject(store) -> None:  # type: ignore[no-untyped-def]
+    """resolve_candidate(decision=reject) deletes the pending row."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+
+    relation_id = await store.add_relation_candidate(a, b, "related", 0.75)
+
+    result = await _handle_relations(
+        store,
+        {"action": "resolve_candidate", "relation_id": relation_id, "decision": "reject"},
+    )
+    data = _parse(result)
+    assert "error" not in data or data.get("error") is False
+    assert data["decision"] == "reject"
+    assert data["removed"] is True
+
+    # Candidate is gone.
+    candidates = await store.list_relation_candidates()
+    assert candidates == []
+
+
+@pytest.mark.unit
+async def test_handle_relations_resolve_candidate_reject_idempotent(store) -> None:  # type: ignore[no-untyped-def]
+    """resolve_candidate(decision=reject) is a no-op on already-rejected candidate (returns removed=False)."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+
+    relation_id = await store.add_relation_candidate(a, b, "related", 0.75)
+
+    # Reject once.
+    await _handle_relations(
+        store,
+        {"action": "resolve_candidate", "relation_id": relation_id, "decision": "reject"},
+    )
+    # Reject again — should be a no-op success.
+    result = await _handle_relations(
+        store,
+        {"action": "resolve_candidate", "relation_id": relation_id, "decision": "reject"},
+    )
+    data = _parse(result)
+    assert "error" not in data or data.get("error") is False
+    assert data["removed"] is False
+
+
+@pytest.mark.unit
+async def test_handle_relations_resolve_candidate_accept(store) -> None:  # type: ignore[no-untyped-def]
+    """resolve_candidate(decision=accept) promotes the candidate to a live edge."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+
+    relation_id = await store.add_relation_candidate(a, b, "related", 0.75)
+
+    result = await _handle_relations(
+        store,
+        {"action": "resolve_candidate", "relation_id": relation_id, "decision": "accept"},
+    )
+    data = _parse(result)
+    assert "error" not in data or data.get("error") is False
+    assert data["decision"] == "accept"
+    assert data["promoted"] is True
+    assert data["from_id"] == a
+    assert data["to_id"] == b
+    assert data["relation_type"] == "related"
+
+    # The edge is now live: get_related returns it.
+    related = await store.get_related(a)
+    assert len(related) == 1
+    assert related[0]["to_id"] == b
+
+    # No more pending candidates.
+    candidates = await store.list_relation_candidates()
+    assert candidates == []
+
+
+@pytest.mark.unit
+async def test_handle_relations_resolve_candidate_accept_idempotent(store) -> None:  # type: ignore[no-untyped-def]
+    """resolve_candidate(decision=accept) is a no-op when candidate is already accepted."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+
+    relation_id = await store.add_relation_candidate(a, b, "related", 0.75)
+
+    # Accept once.
+    await _handle_relations(
+        store,
+        {"action": "resolve_candidate", "relation_id": relation_id, "decision": "accept"},
+    )
+    # Accept again — candidate no longer in pending list; should return promoted=False.
+    result = await _handle_relations(
+        store,
+        {"action": "resolve_candidate", "relation_id": relation_id, "decision": "accept"},
+    )
+    data = _parse(result)
+    assert "error" not in data or data.get("error") is False
+    assert data["promoted"] is False
+
+    # Live edge is still there.
+    related = await store.get_related(a)
+    assert len(related) == 1
+
+
+@pytest.mark.unit
+async def test_handle_relations_resolve_candidate_accept_nonexistent_is_noop(store) -> None:  # type: ignore[no-untyped-def]
+    """resolve_candidate(decision=accept) for a nonexistent ID is a no-op success."""
+    result = await _handle_relations(
+        store,
+        {
+            "action": "resolve_candidate",
+            "relation_id": "00000000-0000-0000-0000-000000000000",
+            "decision": "accept",
+        },
+    )
+    data = _parse(result)
+    assert "error" not in data or data.get("error") is False
+    assert data["promoted"] is False
+
+
+@pytest.mark.unit
+async def test_handle_relations_resolve_candidate_reject_nonexistent_is_noop(store) -> None:  # type: ignore[no-untyped-def]
+    """resolve_candidate(decision=reject) for a nonexistent ID is a no-op success (removed=False)."""
+    result = await _handle_relations(
+        store,
+        {
+            "action": "resolve_candidate",
+            "relation_id": "00000000-0000-0000-0000-000000000000",
+            "decision": "reject",
+        },
+    )
+    data = _parse(result)
+    assert "error" not in data or data.get("error") is False
+    assert data["removed"] is False
+
+
+# ---------------------------------------------------------------------------
+# get_link_suggestion_seeds (T03.1)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_get_link_suggestion_seeds_returns_orphans_first(store) -> None:  # type: ignore[no-untyped-def]
+    """Orphan entries (no relations) appear before connected nodes."""
+    # Store three entries: two will be connected, one stays orphan.
+    connected_a = await _store_entry(store, content="connected entry A")
+    connected_b = await _store_entry(store, content="connected entry B")
+    orphan = await _store_entry(store, content="orphan entry")
+
+    # Create a relation between connected_a and connected_b.
+    await store.add_relation(connected_a, connected_b, "related")
+
+    seeds = await store.get_link_suggestion_seeds(10)
+
+    # All three entries should be included.
+    assert set(seeds) == {connected_a, connected_b, orphan}
+    # The orphan (degree 0) must appear before the connected entries.
+    assert seeds[0] == orphan
+
+
+@pytest.mark.unit
+async def test_get_link_suggestion_seeds_respects_limit(store) -> None:  # type: ignore[no-untyped-def]
+    """Result is bounded by the given limit."""
+    for i in range(5):
+        await _store_entry(store, content=f"entry {i}")
+
+    seeds = await store.get_link_suggestion_seeds(3)
+
+    assert len(seeds) == 3
+
+
+@pytest.mark.unit
+async def test_get_link_suggestion_seeds_excludes_archived(store) -> None:  # type: ignore[no-untyped-def]
+    """Archived entries are not included in seeds."""
+    active = await _store_entry(store, content="active entry")
+    archived = await _store_entry(store, content="archived entry")
+    await store.delete(archived)
+
+    seeds = await store.get_link_suggestion_seeds(10)
+
+    assert active in seeds
+    assert archived not in seeds
+
+
+@pytest.mark.unit
+async def test_get_link_suggestion_seeds_empty_store(store) -> None:  # type: ignore[no-untyped-def]
+    """Returns an empty list when the store has no active entries."""
+    seeds = await store.get_link_suggestion_seeds(10)
+    assert seeds == []
+
+
+@pytest.mark.unit
+async def test_get_link_suggestion_seeds_lower_degree_first(store) -> None:  # type: ignore[no-untyped-def]
+    """Entries with fewer relations appear before those with more."""
+    hub = await _store_entry(store, content="hub entry")
+    spoke1 = await _store_entry(store, content="spoke entry 1")
+    spoke2 = await _store_entry(store, content="spoke entry 2")
+    leaf = await _store_entry(store, content="leaf entry")
+
+    # hub has degree 2 (connected to both spokes), spokes have degree 1, leaf has degree 0.
+    await store.add_relation(hub, spoke1, "related")
+    await store.add_relation(hub, spoke2, "related")
+
+    seeds = await store.get_link_suggestion_seeds(10)
+
+    # leaf (degree 0) must appear before spoke1/spoke2 (degree 1) which must
+    # appear before hub (degree 2).
+    leaf_idx = seeds.index(leaf)
+    spoke1_idx = seeds.index(spoke1)
+    spoke2_idx = seeds.index(spoke2)
+    hub_idx = seeds.index(hub)
+
+    assert leaf_idx < spoke1_idx
+    assert leaf_idx < spoke2_idx
+    assert spoke1_idx < hub_idx
+    assert spoke2_idx < hub_idx
+
+
+# ---------------------------------------------------------------------------
+# LinkSuggestionConfig (T03.1)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_link_suggestion_config_defaults() -> None:
+    """LinkSuggestionConfig has the correct defaults."""
+    from distillery.config import LinkSuggestionConfig
+
+    cfg = LinkSuggestionConfig()
+    assert cfg.enabled is True
+    assert cfg.auto_create_threshold == 0.85
+    assert cfg.review_floor == 0.60
+    assert cfg.max_candidates_per_run == 200
+
+
+@pytest.mark.unit
+def test_distillery_config_has_link_suggestion() -> None:
+    """DistilleryConfig exposes link_suggestion with correct defaults."""
+    from distillery.config import DistilleryConfig
+
+    cfg = DistilleryConfig()
+    assert cfg.link_suggestion.enabled is True
+    assert cfg.link_suggestion.auto_create_threshold == 0.85
+    assert cfg.link_suggestion.review_floor == 0.60
+    assert cfg.link_suggestion.max_candidates_per_run == 200
+
+
+# ---------------------------------------------------------------------------
+# suggest_links: candidate generation + threshold routing (T03.2)
+# ---------------------------------------------------------------------------
+
+
+async def _controlled_store():  # type: ignore[no-untyped-def]
+    """Build an in-memory store backed by an 8D controlled embedding provider.
+
+    Returns ``(store, provider)``; the caller is responsible for closing.
+    """
+    from distillery.store.duckdb import DuckDBStore
+    from tests.conftest import ControlledEmbeddingProvider
+
+    provider = ControlledEmbeddingProvider()
+    s = DuckDBStore(db_path=":memory:", embedding_provider=provider)
+    await s.initialize()
+    return s, provider
+
+
+def _unit_vec_with_cosine(c: float) -> list[float]:
+    """8D unit vector whose cosine against ``[1,0,...,0]`` equals *c*."""
+    import math
+
+    rest = math.sqrt(max(0.0, 1.0 - c * c))
+    return [c, rest, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+
+async def _store_with_vector(store, provider, content: str, vector: list[float]) -> str:  # type: ignore[no-untyped-def]
+    """Register *vector* for *content*, store an entry with it, return its id."""
+    provider.register(content, vector)
+    return await _store_entry(store, content=content)
+
+
+@pytest.mark.unit
+async def test_suggest_links_without_networkx_uses_cosine_only(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """suggest_links degrades to the cosine source when networkx is absent.
+
+    The graph extra is optional and CI installs `.[dev]` without it.  Forcing
+    build_relations_graph to raise (as it does when networkx is missing) must
+    not abort the sweep: the cosine source — the authoritative routing score —
+    still surfaces and auto-creates the high-confidence pair.
+    """
+    import distillery.graph.builders as builders
+
+    def _no_networkx(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        raise RuntimeError("NetworkX not installed; run: pip install distillery-mcp[graph]")
+
+    monkeypatch.setattr(builders, "build_relations_graph", _no_networkx)
+
+    store, provider = await _controlled_store()
+    try:
+        seed = await _store_with_vector(store, provider, "seed", _unit_vec_with_cosine(1.0))
+        high = await _store_with_vector(store, provider, "high", _unit_vec_with_cosine(0.95))
+
+        counts = await store.suggest_links()
+
+        assert counts["edges_created"] >= 1
+        related = await store.get_related(seed)
+        assert any(high in (r["from_id"], r["to_id"]) for r in related)
+    finally:
+        await store.close()
+
+
+@pytest.mark.unit
+async def test_suggest_links_auto_creates_high_confidence_pair() -> None:
+    """A single above-threshold pair becomes one live ``related`` edge."""
+    store, provider = await _controlled_store()
+    try:
+        seed = await _store_with_vector(store, provider, "seed", _unit_vec_with_cosine(1.0))
+        # raw cosine 0.95 -> normalised 0.975 (>= auto_create_threshold 0.85).
+        high = await _store_with_vector(store, provider, "high", _unit_vec_with_cosine(0.95))
+
+        counts = await store.suggest_links()
+
+        assert counts["edges_created"] == 1
+        assert counts["candidates_queued"] == 0
+
+        # The pair is a live "related" edge, not a pending candidate.
+        live = await store.get_related(seed, relation_type="related")
+        live_targets = {r["to_id"] for r in live} | {r["from_id"] for r in live}
+        assert high in live_targets
+        assert await store.list_relation_candidates() == []
+    finally:
+        await store.close()
+
+
+@pytest.mark.unit
+async def test_suggest_links_queues_mid_band_pair() -> None:
+    """A single review-band pair becomes one pending candidate, no live edge."""
+    store, provider = await _controlled_store()
+    try:
+        seed = await _store_with_vector(store, provider, "seed", _unit_vec_with_cosine(1.0))
+        # raw cosine 0.50 -> normalised 0.75 (within [0.60, 0.85)).
+        mid = await _store_with_vector(store, provider, "mid", _unit_vec_with_cosine(0.50))
+
+        counts = await store.suggest_links()
+
+        assert counts["edges_created"] == 0
+        assert counts["candidates_queued"] == 1
+
+        # No live "related" edge for the pair.
+        live = await store.get_related(seed, relation_type="related")
+        assert all(mid not in (r["from_id"], r["to_id"]) for r in live)
+        # The pair is a pending candidate.
+        candidates = await store.list_relation_candidates()
+        cand_pairs = {(c["from_id"], c["to_id"]) for c in candidates}
+        assert (seed, mid) in cand_pairs or (mid, seed) in cand_pairs
+    finally:
+        await store.close()
+
+
+@pytest.mark.unit
+async def test_suggest_links_discards_sub_floor() -> None:
+    """Pairs below review_floor create no edge and no candidate; they are counted."""
+    store, provider = await _controlled_store()
+    try:
+        seed = await _store_with_vector(store, provider, "seed", _unit_vec_with_cosine(1.0))
+        # raw cosine 0.05 -> normalised 0.525 (< review_floor 0.60).
+        low = await _store_with_vector(store, provider, "low", _unit_vec_with_cosine(0.05))
+
+        counts = await store.suggest_links()
+
+        assert counts["edges_created"] == 0
+        assert counts["candidates_queued"] == 0
+        assert counts["discarded"] >= 1
+
+        live = await store.get_related(seed)
+        assert all(low not in (r["from_id"], r["to_id"]) for r in live)
+        candidates = await store.list_relation_candidates()
+        assert all(low not in (c["from_id"], c["to_id"]) for c in candidates)
+    finally:
+        await store.close()
+
+
+@pytest.mark.unit
+async def test_suggest_links_performs_no_embedding_inference() -> None:
+    """suggest_links scores over stored embeddings only — no embed() calls."""
+    store, provider = await _controlled_store()
+    try:
+        await _store_with_vector(store, provider, "seed", _unit_vec_with_cosine(1.0))
+        await _store_with_vector(store, provider, "near", _unit_vec_with_cosine(0.95))
+
+        # Spy on the provider: any embed/embed_batch call during the sweep is a
+        # violation (R3.2 forbids inference).
+        calls = {"embed": 0, "embed_batch": 0}
+        orig_embed = provider.embed
+        orig_batch = provider.embed_batch
+
+        def _spy_embed(text: str) -> list[float]:
+            calls["embed"] += 1
+            return orig_embed(text)
+
+        def _spy_batch(texts: list[str]) -> list[list[float]]:
+            calls["embed_batch"] += 1
+            return orig_batch(texts)
+
+        provider.embed = _spy_embed  # type: ignore[method-assign]
+        provider.embed_batch = _spy_batch  # type: ignore[method-assign]
+
+        await store.suggest_links()
+
+        assert calls["embed"] == 0
+        assert calls["embed_batch"] == 0
+    finally:
+        await store.close()
+
+
+@pytest.mark.unit
+async def test_suggest_links_respects_candidate_bound() -> None:
+    """The sweep stops at max_candidates_per_run seed nodes."""
+    store, provider = await _controlled_store()
+    try:
+        # Five entries, all mutually near, but the bound caps the seed set at 2.
+        for i in range(5):
+            await _store_with_vector(
+                store, provider, f"n{i}", _unit_vec_with_cosine(0.95 - i * 0.001)
+            )
+
+        counts = await store.suggest_links(max_candidates_per_run=2)
+
+        assert counts["nodes_scanned"] == 2
+    finally:
+        await store.close()
+
+
+@pytest.mark.unit
+async def test_suggest_links_already_linked_sub_floor_not_discarded() -> None:
+    """An already-linked sub-floor neighbour is skipped entirely, not counted.
+
+    Regression for issue #653 NOTE-2/NOTE-3: a pair that already has a live
+    edge must not occupy a cosine slot nor inflate ``discarded``.  Before the
+    fix the sub-floor neighbour was returned by the candidate query and counted
+    as discarded even though it was already linked.
+    """
+    store, provider = await _controlled_store()
+    try:
+        seed = await _store_with_vector(store, provider, "seed", _unit_vec_with_cosine(1.0))
+        # raw cosine 0.05 -> normalised 0.525 (< review_floor 0.60).
+        low = await _store_with_vector(store, provider, "low", _unit_vec_with_cosine(0.05))
+
+        # Pre-link the pair; it should now be excluded from the sweep entirely.
+        await store.add_relation(seed, low, "related")
+
+        counts = await store.suggest_links()
+
+        assert counts["edges_created"] == 0
+        assert counts["candidates_queued"] == 0
+        assert counts["discarded"] == 0
+    finally:
+        await store.close()
+
+
+@pytest.mark.unit
+async def test_suggest_links_skips_existing_pending_candidate() -> None:
+    """A pair with an existing pending row is not re-queued."""
+    store, provider = await _controlled_store()
+    try:
+        seed = await _store_with_vector(store, provider, "seed", _unit_vec_with_cosine(1.0))
+        mid = await _store_with_vector(store, provider, "mid", _unit_vec_with_cosine(0.50))
+
+        # Pre-seed the pending candidate (simulating a prior run / T02.1 path).
+        await store.add_relation_candidate(seed, mid, "related", 0.72)
+        before = await store.list_relation_candidates()
+        assert len(before) == 1
+
+        counts = await store.suggest_links()
+
+        after = await store.list_relation_candidates()
+        # No second pending row for the same pair.
+        assert len(after) == 1
+        assert counts["candidates_queued"] == 0
+    finally:
+        await store.close()
+
+
+@pytest.mark.unit
+async def test_suggest_links_skips_existing_live_edge_reverse_direction() -> None:
+    """A pair already linked live (even reverse direction) is not re-created/queued."""
+    store, provider = await _controlled_store()
+    try:
+        seed = await _store_with_vector(store, provider, "seed", _unit_vec_with_cosine(1.0))
+        high = await _store_with_vector(store, provider, "high", _unit_vec_with_cosine(0.95))
+
+        # Live edge already exists in the reverse direction.
+        await store.add_relation(high, seed, "related")
+
+        counts = await store.suggest_links()
+
+        assert counts["edges_created"] == 0
+        candidates = await store.list_relation_candidates()
+        assert all(high not in (c["from_id"], c["to_id"]) for c in candidates)
+    finally:
+        await store.close()
+
+
+@pytest.mark.unit
+async def test_suggest_links_second_run_converges_to_zero() -> None:
+    """A second consecutive run reports zero new edges and zero new candidates."""
+    store, provider = await _controlled_store()
+    try:
+        await _store_with_vector(store, provider, "seed", _unit_vec_with_cosine(1.0))
+        await _store_with_vector(store, provider, "high", _unit_vec_with_cosine(0.95))
+        await _store_with_vector(store, provider, "mid", _unit_vec_with_cosine(0.50))
+
+        first = await store.suggest_links()
+        assert first["edges_created"] + first["candidates_queued"] >= 1
+
+        second = await store.suggest_links()
+        assert second["edges_created"] == 0
+        assert second["candidates_queued"] == 0
+    finally:
+        await store.close()
+
+
+@pytest.mark.unit
+async def test_suggest_links_returns_all_count_keys() -> None:
+    """The counts dict exposes the keys T03.3 needs to assemble the response."""
+    store, provider = await _controlled_store()
+    try:
+        await _store_with_vector(store, provider, "solo", _unit_vec_with_cosine(1.0))
+        counts = await store.suggest_links()
+        assert set(counts) == {
+            "edges_created",
+            "candidates_queued",
+            "discarded",
+            "nodes_scanned",
+        }
+    finally:
+        await store.close()
+
+
+@pytest.mark.unit
+async def test_suggest_links_tolerates_null_embedding() -> None:
+    """suggest_links completes when some entries have a NULL stored embedding.
+
+    Regression for FIX-REVIEW #57: _sync_cosine_candidates must filter out
+    rows whose embedding IS NULL so that array_cosine_similarity never
+    receives NULL and no TypeError is raised on the score conversion.
+
+    Setup: one seed and one validly-embedded neighbour (fewer than the
+    default limit), plus one entry whose embedding is nulled out directly
+    in the DB to simulate an entry stored before embedding inference ran.
+    The sweep must finish without error and must only route the validly-
+    embedded neighbour — not the NULL-embedding entry.
+    """
+    store, provider = await _controlled_store()
+    try:
+        seed = await _store_with_vector(store, provider, "seed-null-test", _unit_vec_with_cosine(1.0))
+        # One valid neighbour in the review band (ensures the candidate pool is non-empty).
+        await _store_with_vector(store, provider, "mid-null-test", _unit_vec_with_cosine(0.50))
+        # A third entry stored normally, then its embedding is nulled directly.
+        null_entry = await _store_with_vector(store, provider, "null-emb", _unit_vec_with_cosine(0.90))
+        store.connection.execute("UPDATE entries SET embedding = NULL WHERE id = ?", [null_entry])
+
+        # Must not raise TypeError (or any exception).
+        counts = await store.suggest_links()
+
+        # The NULL-embedding entry must not appear as a candidate or live edge.
+        candidates = await store.list_relation_candidates()
+        candidate_ids = {c["from_id"] for c in candidates} | {c["to_id"] for c in candidates}
+        assert null_entry not in candidate_ids
+
+        live = await store.get_related(seed)
+        live_ids = {r["from_id"] for r in live} | {r["to_id"] for r in live}
+        assert null_entry not in live_ids
+
+        # The validly-embedded mid entry was still considered.
+        assert counts["nodes_scanned"] >= 1
+    finally:
+        await store.close()
+
+
+# ---------------------------------------------------------------------------
+# distillery_relations action="suggest_links" MCP handler (T03.3)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_handle_relations_suggest_links_returns_four_counts() -> None:
+    """suggest_links action returns all four count keys in the MCP response."""
+    from distillery.config import LinkSuggestionConfig
+
+    store, provider = await _controlled_store()
+    try:
+        await _store_with_vector(store, provider, "a", _unit_vec_with_cosine(1.0))
+        await _store_with_vector(store, provider, "b", _unit_vec_with_cosine(0.95))
+
+        cfg_stub = type("C", (), {"link_suggestion": LinkSuggestionConfig(), "enabled": True})()
+        result = await _handle_relations(store, {"action": "suggest_links"}, cfg=cfg_stub)
+        data = _parse(result)
+
+        assert "error" not in data or data.get("error") is False
+        assert data["action"] == "suggest_links"
+        assert "edges_created" in data
+        assert "candidates_queued" in data
+        assert "discarded" in data
+        assert "nodes_scanned" in data
+    finally:
+        await store.close()
+
+
+@pytest.mark.unit
+async def test_handle_relations_suggest_links_convergence() -> None:
+    """A second immediate run reports edges_created=0 and candidates_queued=0 (R3.5)."""
+    from distillery.config import LinkSuggestionConfig
+
+    store, provider = await _controlled_store()
+    try:
+        await _store_with_vector(store, provider, "seed", _unit_vec_with_cosine(1.0))
+        await _store_with_vector(store, provider, "high", _unit_vec_with_cosine(0.95))
+        await _store_with_vector(store, provider, "mid", _unit_vec_with_cosine(0.50))
+
+        cfg_stub = type("C", (), {"link_suggestion": LinkSuggestionConfig()})()
+
+        first = await _handle_relations(store, {"action": "suggest_links"}, cfg=cfg_stub)
+        first_data = _parse(first)
+        assert first_data["edges_created"] + first_data["candidates_queued"] >= 1
+
+        second = await _handle_relations(store, {"action": "suggest_links"}, cfg=cfg_stub)
+        second_data = _parse(second)
+        assert second_data["edges_created"] == 0
+        assert second_data["candidates_queued"] == 0
+    finally:
+        await store.close()
+
+
+@pytest.mark.unit
+async def test_handle_relations_suggest_links_disabled_returns_zero_counts() -> None:
+    """When link_suggestion.enabled=False the action returns zeros without calling store."""
+    from unittest.mock import AsyncMock
+
+    from distillery.config import LinkSuggestionConfig
+
+    fake_store = AsyncMock()
+    disabled_cfg = LinkSuggestionConfig(enabled=False)
+    cfg_stub = type("C", (), {"link_suggestion": disabled_cfg})()
+
+    result = await _handle_relations(fake_store, {"action": "suggest_links"}, cfg=cfg_stub)
+    data = _parse(result)
+
+    assert data["enabled"] is False
+    assert data["edges_created"] == 0
+    assert data["candidates_queued"] == 0
+    fake_store.suggest_links.assert_not_awaited()
+
+
+@pytest.mark.unit
+async def test_handle_relations_suggest_links_store_error_returns_internal() -> None:
+    """An unexpected store error from suggest_links returns INTERNAL code."""
+    from unittest.mock import AsyncMock
+
+    from distillery.config import LinkSuggestionConfig
+
+    fake_store = AsyncMock()
+    fake_store.suggest_links.side_effect = RuntimeError("db exploded")
+    cfg_stub = type("C", (), {"link_suggestion": LinkSuggestionConfig()})()
+
+    result = await _handle_relations(fake_store, {"action": "suggest_links"}, cfg=cfg_stub)
+    data = _parse(result)
+
+    assert data["error"] is True
+    assert data["code"] == "INTERNAL"
 
 
 @pytest.mark.unit

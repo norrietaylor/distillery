@@ -82,7 +82,9 @@ async def _handle_relations(
     Args:
         store: An initialised storage backend with relation methods.
         arguments: Parsed tool arguments dict.
-        cfg: Optional DistilleryConfig — required for action='promote_entities'.
+        cfg: Optional DistilleryConfig — used by action='promote_entities'
+            (tags.entity_promotion_threshold) and action='suggest_links'
+            (link_suggestion.*); falls back to load_config() when omitted.
 
     Returns:
         A structured MCP success or error response.
@@ -95,11 +97,23 @@ async def _handle_relations(
         )
     action = action_raw.strip().lower()
 
-    if action not in ("add", "get", "remove", "traverse", "metrics", "reconcile", "promote_entities"):
+    if action not in (
+        "add",
+        "get",
+        "remove",
+        "traverse",
+        "metrics",
+        "reconcile",
+        "list_candidates",
+        "resolve_candidate",
+        "suggest_links",
+        "promote_entities",
+    ):
         return error_response(
             "INVALID_PARAMS",
             "action must be one of 'add', 'get', 'remove', 'traverse', 'metrics', "
-            f"'reconcile', 'promote_entities'; got: {action!r}",
+            "'reconcile', 'list_candidates', 'resolve_candidate', 'suggest_links', "
+            f"'promote_entities'; got: {action!r}",
         )
 
     # ------------------------------------------------------------------
@@ -391,6 +405,175 @@ async def _handle_relations(
                 "wikilink_links": counts.get("wikilink_links", 0),
                 "content_ref_links": counts.get("content_ref_links", 0),
                 "total": counts.get("total", 0),
+            }
+        )
+
+    # ------------------------------------------------------------------
+    # action == "list_candidates"
+    # ------------------------------------------------------------------
+    if action == "list_candidates":
+        try:
+            candidates = await store.list_relation_candidates()
+        except Exception:  # noqa: BLE001
+            logger.exception("distillery_relations list_candidates: unexpected error")
+            return error_response("INTERNAL", "Failed to list relation candidates")
+
+        return success_response(
+            {
+                "action": "list_candidates",
+                "candidates": candidates,
+                "count": len(candidates),
+            }
+        )
+
+    # ------------------------------------------------------------------
+    # action == "suggest_links"
+    # ------------------------------------------------------------------
+    if action == "suggest_links":
+        from distillery.config import LinkSuggestionConfig, load_config
+
+        # Resolve LinkSuggestionConfig: prefer injected config, fall back to
+        # loading from disk so the action works with the default call signature
+        # (no cfg kwarg) and inside the scheduled maintenance webhook.
+        if cfg is not None:
+            ls_cfg: LinkSuggestionConfig = cfg.link_suggestion
+        else:
+            try:
+                loaded = load_config()
+                ls_cfg = loaded.link_suggestion
+            except Exception:  # noqa: BLE001
+                logger.exception("distillery_relations suggest_links: failed to load config")
+                ls_cfg = LinkSuggestionConfig()
+
+        if not ls_cfg.enabled:
+            return success_response(
+                {
+                    "action": "suggest_links",
+                    "enabled": False,
+                    "edges_created": 0,
+                    "candidates_queued": 0,
+                    "discarded": 0,
+                    "nodes_scanned": 0,
+                }
+            )
+
+        try:
+            counts = await store.suggest_links(
+                auto_create_threshold=ls_cfg.auto_create_threshold,
+                review_floor=ls_cfg.review_floor,
+                max_candidates_per_run=ls_cfg.max_candidates_per_run,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("distillery_relations suggest_links: unexpected error")
+            return error_response("INTERNAL", "Failed to run link suggestion sweep")
+
+        return success_response(
+            {
+                "action": "suggest_links",
+                "enabled": True,
+                "edges_created": counts.get("edges_created", 0),
+                "candidates_queued": counts.get("candidates_queued", 0),
+                "discarded": counts.get("discarded", 0),
+                "nodes_scanned": counts.get("nodes_scanned", 0),
+            }
+        )
+
+    # ------------------------------------------------------------------
+    # action == "resolve_candidate"
+    # ------------------------------------------------------------------
+    if action == "resolve_candidate":
+        resolve_relation_id_raw = arguments.get("relation_id")
+        if resolve_relation_id_raw is None or not isinstance(resolve_relation_id_raw, str):
+            return error_response(
+                "INVALID_PARAMS", "relation_id is required for action='resolve_candidate'"
+            )
+        resolve_relation_id = resolve_relation_id_raw.strip()
+        if not resolve_relation_id:
+            return error_response(
+                "INVALID_PARAMS", "relation_id must be a non-empty string"
+            )
+
+        decision_raw = arguments.get("decision")
+        if decision_raw is None or not isinstance(decision_raw, str):
+            return error_response(
+                "INVALID_PARAMS",
+                "decision is required for action='resolve_candidate' (accept or reject)",
+            )
+        decision = decision_raw.strip().lower()
+        if decision not in ("accept", "reject"):
+            return error_response(
+                "INVALID_PARAMS",
+                f"decision must be 'accept' or 'reject', got: {decision_raw!r}",
+            )
+
+        if decision == "reject":
+            # remove_relation returns False if not found — treat as idempotent no-op.
+            try:
+                removed = await store.remove_relation(resolve_relation_id)
+            except Exception:  # noqa: BLE001
+                logger.exception("distillery_relations resolve_candidate reject: unexpected error")
+                return error_response("INTERNAL", "Failed to reject relation candidate")
+
+            return success_response(
+                {
+                    "action": "resolve_candidate",
+                    "relation_id": resolve_relation_id,
+                    "decision": "reject",
+                    "removed": removed,
+                }
+            )
+
+        # decision == "accept": promote the pending candidate to a live edge by
+        # clearing review_status from its metadata.  We locate the candidate via
+        # list_relation_candidates so we can retrieve from_id/to_id/relation_type,
+        # then call add_relation(metadata={}) which upserts the row, overwriting
+        # the pending metadata with an empty dict (no review_status → live edge).
+        # If the candidate is not found it is already resolved (or never existed);
+        # return a no-op success.
+        try:
+            candidates = await store.list_relation_candidates()
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "distillery_relations resolve_candidate accept: error listing candidates"
+            )
+            return error_response("INTERNAL", "Failed to look up relation candidate")
+
+        candidate = next(
+            (c for c in candidates if c["id"] == resolve_relation_id), None
+        )
+        if candidate is None:
+            # Already accepted, rejected, or never existed — idempotent no-op.
+            return success_response(
+                {
+                    "action": "resolve_candidate",
+                    "relation_id": resolve_relation_id,
+                    "decision": "accept",
+                    "promoted": False,
+                }
+            )
+
+        try:
+            await store.add_relation(
+                candidate["from_id"],
+                candidate["to_id"],
+                candidate["relation_type"],
+                metadata={},
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "distillery_relations resolve_candidate accept: error promoting candidate"
+            )
+            return error_response("INTERNAL", "Failed to accept relation candidate")
+
+        return success_response(
+            {
+                "action": "resolve_candidate",
+                "relation_id": resolve_relation_id,
+                "decision": "accept",
+                "promoted": True,
+                "from_id": candidate["from_id"],
+                "to_id": candidate["to_id"],
+                "relation_type": candidate["relation_type"],
             }
         )
 

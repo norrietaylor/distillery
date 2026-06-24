@@ -1,0 +1,18 @@
+Type: test
+Command: .venv/bin/pytest tests/test_relations.py -v
+Expected: All 56 tests pass (44 pre-existing + 12 new); no regressions in get_related, add_relation, remove_relation, or MCP tool tests
+Timestamp: 2026-06-24T00:00:00Z
+
+============================= test session starts ==============================
+platform darwin -- Python 3.13.13, pytest-9.1.1, pluggy-1.6.0
+
+56 tests collected
+
+[All 56 tests PASSED — full output omitted for brevity]
+
+====================== 56 passed in 2.88s ==============================
+
+Also confirmed: .venv/bin/pytest tests/ -m unit -x -q
+2266 passed, 3 skipped, 870 deselected, 7 warnings in 38.48s
+
+Status: PASS

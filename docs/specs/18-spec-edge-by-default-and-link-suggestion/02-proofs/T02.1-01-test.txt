@@ -1,0 +1,25 @@
+Type: test
+Command: .venv/bin/pytest tests/test_relations.py -v -k "candidate"
+Expected: 12 tests pass covering R2.1 (add_relation_candidate), R2.2 (list_relation_candidates), R2.4 (get_related exclusion)
+Timestamp: 2026-06-24T00:00:00Z
+
+============================= test session starts ==============================
+platform darwin -- Python 3.13.13, pytest-9.1.1, pluggy-1.6.0
+asyncio: mode=Mode.AUTO
+
+tests/test_relations.py::test_add_relation_candidate_returns_uuid PASSED
+tests/test_relations.py::test_add_relation_candidate_metadata_fields PASSED
+tests/test_relations.py::test_add_relation_candidate_no_new_table PASSED
+tests/test_relations.py::test_add_relation_candidate_idempotent PASSED
+tests/test_relations.py::test_add_relation_candidate_idempotent_when_live_edge_exists PASSED
+tests/test_relations.py::test_add_relation_candidate_invalid_from_id PASSED
+tests/test_relations.py::test_add_relation_candidate_invalid_to_id PASSED
+tests/test_relations.py::test_list_relation_candidates_returns_pending_only PASSED
+tests/test_relations.py::test_list_relation_candidates_ordered_by_score_descending PASSED
+tests/test_relations.py::test_list_relation_candidates_fields PASSED
+tests/test_relations.py::test_get_related_excludes_pending_candidates PASSED
+tests/test_relations.py::test_get_related_still_returns_live_edges_when_candidate_also_exists PASSED
+
+====================== 12 passed, 44 deselected in 0.69s =======================
+
+Status: PASS

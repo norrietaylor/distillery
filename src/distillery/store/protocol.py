@@ -581,6 +581,52 @@ class DistilleryStore(Protocol):
         """
         ...
 
+    async def add_relation_candidate(
+        self,
+        from_id: str,
+        to_id: str,
+        relation_type: str,
+        suggestion_score: float,
+    ) -> str:
+        """Persist a pending relation candidate as an ``entry_relations`` row.
+
+        Writes the candidate with ``metadata.review_status = "pending"`` and
+        ``metadata.suggestion_score = suggestion_score``.  Idempotent: if a row
+        for the same ``(from_id, to_id, relation_type)`` already exists (as a
+        live edge or an existing pending candidate) the existing row's UUID is
+        returned without modification.  No new database table is introduced.
+
+        Args:
+            from_id: UUID string of the source entry.
+            to_id: UUID string of the target entry.
+            relation_type: Relation type label (e.g. ``"related"``).
+            suggestion_score: Confidence score from the suggester (0.0–1.0).
+
+        Returns:
+            The UUID string of the relation row (existing or newly created).
+
+        Raises:
+            ValueError: If ``suggestion_score`` is outside ``0.0–1.0``, or if
+                either ``from_id`` or ``to_id`` does not exist in the store.
+        """
+        ...
+
+    async def list_relation_candidates(self) -> list[dict[str, Any]]:
+        """Return all pending relation candidates ordered by score descending.
+
+        Pending candidates are ``entry_relations`` rows whose metadata carries
+        ``review_status = "pending"``.  Only such rows are returned; live edges
+        (no ``review_status`` or ``review_status != "pending"``) are excluded.
+
+        Returns:
+            List of dicts with keys: ``id``, ``from_id``, ``to_id``,
+            ``relation_type``, ``suggestion_score`` (float), ``created_at``
+            (ISO 8601 str), ``weight`` (float | None), ``metadata``
+            (dict | None).  Ordered by ``suggestion_score`` descending (ties
+            broken by ascending ``created_at``).
+        """
+        ...
+
     async def promote_entities(
         self,
         threshold: int,
@@ -673,6 +719,61 @@ class DistilleryStore(Protocol):
             entries that carry it, sorted by count descending then tag
             ascending.  Returns an empty dict when the store contains no
             active entries with matching tags.
+        """
+        ...
+
+    async def get_link_suggestion_seeds(self, limit: int) -> list[str]:
+        """Return entry IDs for low-degree / orphan nodes to seed the link-suggestion sweep.
+
+        Selects active (non-archived) entries that are structural candidates for
+        edge creation: true orphans (no row in ``entry_relations`` as either
+        endpoint) first, then low-degree nodes (fewest relations), both ordered
+        so the most-neglected entries are swept first.  The result is bounded by
+        *limit* to prevent runaway scans on large graphs.
+
+        The caller passes ``config.link_suggestion.max_candidates_per_run`` as
+        *limit*; this method never scores all non-existent edges globally.
+
+        Args:
+            limit: Maximum number of entry IDs to return.  Must be a positive
+                integer.
+
+        Returns:
+            List of entry UUID strings, length at most *limit*, ordered by
+            ascending relation-degree then ascending ``created_at`` (oldest
+            orphan / lowest-degree node first).  Never includes archived entries.
+        """
+        ...
+
+    async def suggest_links(
+        self,
+        *,
+        auto_create_threshold: float = 0.85,
+        review_floor: float = 0.60,
+        max_candidates_per_run: int = 200,
+        max_neighbours_per_seed: int = 10,
+    ) -> dict[str, int]:
+        """Sweep low-degree nodes, score candidate edges, and route by threshold.
+
+        The headless link-suggestion core (issue #653 step 3).  Generates
+        candidate edges for each seed node, routes by stored-embedding cosine
+        score, and returns count totals.  Performs no LLM or embedding
+        inference.  All writes are idempotent, so a second consecutive run
+        reports ``edges_created == 0`` and ``candidates_queued == 0``.
+
+        Args:
+            auto_create_threshold: Score at/above which a pair becomes a live
+                edge.  Defaults to ``0.85``.
+            review_floor: Minimum score for a pair to be queued for review
+                rather than discarded.  Defaults to ``0.60``.
+            max_candidates_per_run: Upper bound on the number of seed nodes
+                swept in a single run.  Defaults to ``200``.
+            max_neighbours_per_seed: Cap on candidate targets considered per
+                seed from each source.  Defaults to ``10``.
+
+        Returns:
+            Counts dict with keys ``edges_created``, ``candidates_queued``,
+            ``discarded``, and ``nodes_scanned``.
         """
         ...
 

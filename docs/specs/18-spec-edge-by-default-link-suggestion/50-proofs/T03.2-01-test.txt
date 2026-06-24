@@ -1,0 +1,28 @@
+Type: test
+Command: pytest tests/test_relations.py -k suggest_links -v
+Expected: all T03.2 suggest_links tests PASS
+Timestamp: 2026-06-24T17:35:37Z
+----------------------------------------------------------------------
+============================= test session starts ==============================
+platform darwin -- Python 3.13.13, pytest-9.1.1, pluggy-1.6.0 -- /Users/norrie/code/distillery/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /Users/norrie/code/distillery
+configfile: pyproject.toml
+plugins: anyio-4.14.0, cov-7.1.0, timeout-2.4.0, asyncio-1.4.0, httpx-0.36.2
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 85 items / 76 deselected / 9 selected
+
+tests/test_relations.py::test_suggest_links_auto_creates_high_confidence_pair PASSED [ 11%]
+tests/test_relations.py::test_suggest_links_queues_mid_band_pair PASSED  [ 22%]
+tests/test_relations.py::test_suggest_links_discards_sub_floor PASSED    [ 33%]
+tests/test_relations.py::test_suggest_links_performs_no_embedding_inference PASSED [ 44%]
+tests/test_relations.py::test_suggest_links_respects_candidate_bound PASSED [ 55%]
+tests/test_relations.py::test_suggest_links_skips_existing_pending_candidate PASSED [ 66%]
+tests/test_relations.py::test_suggest_links_skips_existing_live_edge_reverse_direction PASSED [ 77%]
+tests/test_relations.py::test_suggest_links_second_run_converges_to_zero PASSED [ 88%]
+tests/test_relations.py::test_suggest_links_returns_all_count_keys PASSED [100%]
+
+======================= 9 passed, 76 deselected in 0.65s =======================

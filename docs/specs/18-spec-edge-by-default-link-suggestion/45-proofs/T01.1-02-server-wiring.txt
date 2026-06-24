@@ -1,0 +1,44 @@
+PROOF: Server Configuration Wiring Verification
+================================================
+
+Requirement: Verify that the MCP server correctly passes AutoLinkConfig through to DuckDBStore.
+
+Location 1: src/distillery/mcp/server.py lines 183-185 (lifespan setup)
+---
+            store = DuckDBStore(
+                ...
+                auto_link_enabled=config.auto_link.enabled,
+                auto_link_threshold=config.auto_link.threshold,
+                auto_link_max_links=config.auto_link.max_links,
+            )
+---
+
+Location 2: src/distillery/mcp/server.py lines 235-237 (background store factory)
+---
+        store = DuckDBStore(
+            db_path=db_path,
+            embedding_provider=ep,
+            s3_region=config.storage.s3_region,
+            s3_endpoint=config.storage.s3_endpoint,
+            auto_link_enabled=config.auto_link.enabled,
+            auto_link_threshold=config.auto_link.threshold,
+            auto_link_max_links=config.auto_link.max_links,
+        )
+---
+
+Verification:
+✓ Both locations correctly extract config.auto_link fields
+✓ All three fields (enabled, threshold, max_links) are passed unchanged
+✓ The wiring is identical in both paths (lifespan and background factory)
+✓ DuckDBStore __init__ signature accepts these parameters with proper defaults
+
+Status: PASS
+Default Configuration:
+  - enabled: True (changed from False per issue #629 edge-by-default requirement)
+  - threshold: 0.85 (unchanged)
+  - max_links: 5 (unchanged)
+
+The server correctly implements the config contract:
+- Config loads with enabled=True by default
+- Server passes the config value through unchanged to store layer
+- Store layer respects the passed value and enables auto-linking by default
