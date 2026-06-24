@@ -822,6 +822,39 @@ async def test_add_relation_candidate_returns_uuid(store) -> None:  # type: igno
     assert len(relation_id) > 0
 
 
+# ---------------------------------------------------------------------------
+# mentions relation type
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_add_relation_mentions_type(store) -> None:  # type: ignore[no-untyped-def]
+    """add_relation accepts 'mentions' relation type."""
+    from distillery.models import EntryType
+
+    # Create a regular entry and an entity entry
+    from_id = await _store_entry(store, content="entry A")
+    entity_entry = make_entry(
+        entry_type=EntryType.ENTITY,
+        metadata={"canonical_name": "Cloudflare", "source_tag": "entity/cloudflare"},
+        content="Cloudflare entity node",
+    )
+    await store.store(entity_entry)
+    to_id = entity_entry.id
+
+    # Add a mentions relation
+    relation_id = await store.add_relation(from_id, to_id, "mentions")
+
+    assert isinstance(relation_id, str)
+    assert len(relation_id) > 0
+
+    # Verify the relation was stored correctly
+    related = await store.get_related(from_id, direction="outgoing")
+    assert len(related) == 1
+    assert related[0]["relation_type"] == "mentions"
+    assert related[0]["to_id"] == to_id
+
+
 @pytest.mark.unit
 async def test_add_relation_candidate_metadata_fields(store) -> None:  # type: ignore[no-untyped-def]
     """Pending candidate row carries review_status='pending' and suggestion_score (R2.1)."""
@@ -1645,7 +1678,7 @@ async def test_handle_relations_suggest_links_returns_four_counts() -> None:
         await _store_with_vector(store, provider, "b", _unit_vec_with_cosine(0.95))
 
         cfg_stub = type("C", (), {"link_suggestion": LinkSuggestionConfig(), "enabled": True})()
-        result = await _handle_relations(store, {"action": "suggest_links"}, config=cfg_stub)
+        result = await _handle_relations(store, {"action": "suggest_links"}, cfg=cfg_stub)
         data = _parse(result)
 
         assert "error" not in data or data.get("error") is False
@@ -1671,11 +1704,11 @@ async def test_handle_relations_suggest_links_convergence() -> None:
 
         cfg_stub = type("C", (), {"link_suggestion": LinkSuggestionConfig()})()
 
-        first = await _handle_relations(store, {"action": "suggest_links"}, config=cfg_stub)
+        first = await _handle_relations(store, {"action": "suggest_links"}, cfg=cfg_stub)
         first_data = _parse(first)
         assert first_data["edges_created"] + first_data["candidates_queued"] >= 1
 
-        second = await _handle_relations(store, {"action": "suggest_links"}, config=cfg_stub)
+        second = await _handle_relations(store, {"action": "suggest_links"}, cfg=cfg_stub)
         second_data = _parse(second)
         assert second_data["edges_created"] == 0
         assert second_data["candidates_queued"] == 0
@@ -1694,7 +1727,7 @@ async def test_handle_relations_suggest_links_disabled_returns_zero_counts() -> 
     disabled_cfg = LinkSuggestionConfig(enabled=False)
     cfg_stub = type("C", (), {"link_suggestion": disabled_cfg})()
 
-    result = await _handle_relations(fake_store, {"action": "suggest_links"}, config=cfg_stub)
+    result = await _handle_relations(fake_store, {"action": "suggest_links"}, cfg=cfg_stub)
     data = _parse(result)
 
     assert data["enabled"] is False
@@ -1714,8 +1747,58 @@ async def test_handle_relations_suggest_links_store_error_returns_internal() -> 
     fake_store.suggest_links.side_effect = RuntimeError("db exploded")
     cfg_stub = type("C", (), {"link_suggestion": LinkSuggestionConfig()})()
 
-    result = await _handle_relations(fake_store, {"action": "suggest_links"}, config=cfg_stub)
+    result = await _handle_relations(fake_store, {"action": "suggest_links"}, cfg=cfg_stub)
     data = _parse(result)
 
     assert data["error"] is True
     assert data["code"] == "INTERNAL"
+
+
+@pytest.mark.unit
+async def test_handle_relations_add_mentions(store) -> None:  # type: ignore[no-untyped-def]
+    """MCP tool accepts 'mentions' relation type in add action."""
+    from distillery.models import EntryType
+
+    a = await _store_entry(store, content="entry A")
+    entity_entry = make_entry(
+        entry_type=EntryType.ENTITY,
+        metadata={"canonical_name": "Cloudflare", "source_tag": "entity/cloudflare"},
+        content="Cloudflare entity",
+    )
+    await store.store(entity_entry)
+    b = entity_entry.id
+
+    result = await _handle_relations(
+        store,
+        {"action": "add", "from_id": a, "to_id": b, "relation_type": "mentions"},
+    )
+    data = _parse(result)
+    assert "error" not in data or data.get("error") is False
+    assert data["relation_type"] == "mentions"
+
+
+@pytest.mark.unit
+async def test_all_preexisting_relation_types_still_work(store) -> None:  # type: ignore[no-untyped-def]
+    """All pre-existing relation types continue to work unchanged."""
+    a = await _store_entry(store, content="entry A")
+    b = await _store_entry(store, content="entry B")
+
+    # Test all pre-existing types
+    preexisting_types = {
+        "link",
+        "corrects",
+        "supersedes",
+        "related",
+        "blocks",
+        "depends_on",
+        "citation",
+        "duplicate",
+        "merge_source",
+        "sync_source",
+    }
+
+    for rel_type in preexisting_types:
+        # Each type should be accepted
+        relation_id = await store.add_relation(a, b, rel_type)
+        assert isinstance(relation_id, str)
+        assert len(relation_id) > 0

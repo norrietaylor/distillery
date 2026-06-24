@@ -31,6 +31,7 @@ class EntryType(StrEnum):
         DIGEST: A periodic digest or summary covering a date range.
         GITHUB: A GitHub artifact reference (issue, PR, discussion, release).
         FEED: An ambient feed item captured from a monitored source.
+        ENTITY: A first-class graph node representing a recurring entity or concept.
     """
 
     SESSION = "session"
@@ -45,6 +46,7 @@ class EntryType(StrEnum):
     DIGEST = "digest"
     GITHUB = "github"
     FEED = "feed"
+    ENTITY = "entity"
 
 
 class EntrySource(StrEnum):
@@ -220,6 +222,15 @@ TYPE_METADATA_SCHEMAS: dict[str, dict[str, Any]] = {
         },
         "constraints": {
             "source_type": ["rss", "github"],
+        },
+    },
+    "entity": {
+        "required": {
+            "canonical_name": "str",
+            "source_tag": "str",
+        },
+        "optional": {
+            "aliases": "list[str]",
         },
     },
 }

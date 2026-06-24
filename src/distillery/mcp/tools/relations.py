@@ -64,13 +64,15 @@ _VALID_RELATION_TYPES = {
     "duplicate",
     "merge_source",
     "sync_source",
+    "mentions",
+    "chunk",
 }
 
 
 async def _handle_relations(
     store: Any,
     arguments: dict[str, Any],
-    config: Any = None,
+    cfg: Any = None,
 ) -> list[types.TextContent]:
     """Handle the ``distillery_relations`` tool.
 
@@ -80,6 +82,9 @@ async def _handle_relations(
     Args:
         store: An initialised storage backend with relation methods.
         arguments: Parsed tool arguments dict.
+        cfg: Optional DistilleryConfig — used by action='promote_entities'
+            (tags.entity_promotion_threshold) and action='suggest_links'
+            (link_suggestion.*); falls back to load_config() when omitted.
 
     Returns:
         A structured MCP success or error response.
@@ -102,11 +107,13 @@ async def _handle_relations(
         "list_candidates",
         "resolve_candidate",
         "suggest_links",
+        "promote_entities",
     ):
         return error_response(
             "INVALID_PARAMS",
             "action must be one of 'add', 'get', 'remove', 'traverse', 'metrics', "
-            f"'reconcile', 'list_candidates', 'resolve_candidate', 'suggest_links'; got: {action!r}",
+            "'reconcile', 'list_candidates', 'resolve_candidate', 'suggest_links', "
+            f"'promote_entities'; got: {action!r}",
         )
 
     # ------------------------------------------------------------------
@@ -396,6 +403,7 @@ async def _handle_relations(
                 "action": "reconcile",
                 "metadata_links": counts.get("metadata_links", 0),
                 "wikilink_links": counts.get("wikilink_links", 0),
+                "content_ref_links": counts.get("content_ref_links", 0),
                 "total": counts.get("total", 0),
             }
         )
@@ -426,9 +434,9 @@ async def _handle_relations(
 
         # Resolve LinkSuggestionConfig: prefer injected config, fall back to
         # loading from disk so the action works with the default call signature
-        # (no config kwarg) and inside the scheduled maintenance webhook.
-        if config is not None:
-            ls_cfg: LinkSuggestionConfig = config.link_suggestion
+        # (no cfg kwarg) and inside the scheduled maintenance webhook.
+        if cfg is not None:
+            ls_cfg: LinkSuggestionConfig = cfg.link_suggestion
         else:
             try:
                 loaded = load_config()
@@ -566,6 +574,33 @@ async def _handle_relations(
                 "from_id": candidate["from_id"],
                 "to_id": candidate["to_id"],
                 "relation_type": candidate["relation_type"],
+            }
+        )
+
+    # ------------------------------------------------------------------
+    # action == "promote_entities"
+    # ------------------------------------------------------------------
+    if action == "promote_entities":
+        threshold = 3  # default
+        reserved_prefixes: list[str] | None = None
+        if cfg is not None:
+            tags_cfg = getattr(cfg, "tags", None)
+            if tags_cfg is not None:
+                threshold = getattr(tags_cfg, "entity_promotion_threshold", threshold)
+                reserved_prefixes = getattr(tags_cfg, "reserved_prefixes", None)
+        try:
+            counts = await store.promote_entities(threshold, reserved_prefixes)
+        except Exception:  # noqa: BLE001
+            logger.exception("distillery_relations promote_entities: unexpected error")
+            return error_response("INTERNAL", "Failed to promote entities")
+
+        return success_response(
+            {
+                "action": "promote_entities",
+                "entities_created": counts.get("entities_created", 0),
+                "entities_reused": counts.get("entities_reused", 0),
+                "mentions_created": counts.get("mentions_created", 0),
+                "threshold": threshold,
             }
         )
 

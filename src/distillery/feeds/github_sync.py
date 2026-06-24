@@ -27,7 +27,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 
@@ -62,6 +62,23 @@ _MAX_CONTENT_LENGTH = 8000
 # Matches: #123, Closes #123, Fixes #123, Resolves #123, closes #123, etc.
 _XREF_PATTERN = re.compile(
     r"(?:(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+)?#(\d+)",
+    re.IGNORECASE,
+)
+
+# Pattern for PR closing keywords — these indicate a PR closes/fixes an issue,
+# i.e. a structural "citation" relationship (the PR cites/resolves the issue).
+# Matches: "Closes #42", "Fixes #42", "Resolves #42", "close #42", etc.
+_CLOSING_KEYWORD_PATTERN = re.compile(
+    r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)\b",
+    re.IGNORECASE,
+)
+
+# Pattern for tracked-by references in sub-issue bodies.
+# GitHub inserts "Tracked by #<number>" or "tracked by owner/repo#<number>"
+# when an issue is a sub-issue of an epic tracked via GitHub's task list.
+# We match the local-repo form (#N) since cross-repo sub-issues are rare.
+_TRACKED_BY_PATTERN = re.compile(
+    r"\btracked\s+by\s+#(\d+)\b",
     re.IGNORECASE,
 )
 
@@ -213,6 +230,102 @@ def _extract_cross_refs(text: str) -> list[int]:
         return []
     numbers = {int(m.group(1)) for m in _XREF_PATTERN.finditer(text)}
     return sorted(numbers)
+
+
+# Literal type for the two structural edge kinds emitted by gh-sync.
+StructuralRefKind = Literal["citation", "depends_on"]
+
+
+@dataclass(frozen=True)
+class StructuralRef:
+    """A typed cross-reference extracted from a GitHub payload.
+
+    Carries enough information to choose the correct edge type when
+    materializing relations in a downstream step (T03.2).
+
+    Attributes
+    ----------
+    number:
+        The referenced issue/PR number within the same repository.
+    kind:
+        ``"citation"`` — PR closing-keyword reference to an issue (PR → issue).
+        ``"depends_on"`` — sub-issue tracked-by / parent reference to an epic
+        (sub-issue → epic).
+    """
+
+    number: int
+    kind: StructuralRefKind
+
+
+def _extract_structural_refs(
+    issue: dict[str, Any],
+    body_text: str,
+) -> list[StructuralRef]:
+    """Extract typed structural references from a GitHub payload.
+
+    Two relationship types are recognised from fields already present in the
+    payload — no additional GitHub API calls are made:
+
+    **PR → issue (citation)**
+        When the payload has a ``pull_request`` key (i.e. the item is a PR),
+        closing keywords (``Closes``, ``Fixes``, ``Resolves`` and their
+        conjugations) in ``body_text`` indicate that the PR resolves the
+        referenced issue.  Each such reference yields a
+        ``StructuralRef(number=N, kind="citation")``.
+
+    **Sub-issue → epic (depends_on)**
+        When the payload includes a ``parent`` key (GitHub sub-issues REST
+        API) or ``body_text`` contains ``"Tracked by #N"`` (GitHub inserts
+        this text in sub-issue bodies), the referenced number is the parent
+        epic.  Each such reference yields a
+        ``StructuralRef(number=N, kind="depends_on")``.
+
+    Plain ``#N`` mentions (no closing keyword, no tracked-by) are *not*
+    returned here — they continue to be handled by :func:`_extract_cross_refs`
+    as ``link`` relations.
+
+    Parameters
+    ----------
+    issue:
+        Parsed JSON from the GitHub issues/PRs endpoint.
+    body_text:
+        The combined body text to scan (usually the pre-built entry content
+        or the raw ``issue["body"]``).
+
+    Returns
+    -------
+    list[StructuralRef]
+        Deduplicated, sorted (by number, then kind) list of structural refs.
+        Empty list when none are found.
+    """
+    seen: set[tuple[int, str]] = set()
+    refs: list[StructuralRef] = []
+
+    def _add(number: int, kind: StructuralRefKind) -> None:
+        key = (number, kind)
+        if key not in seen:
+            seen.add(key)
+            refs.append(StructuralRef(number=number, kind=kind))
+
+    is_pr = "pull_request" in issue
+
+    if is_pr:
+        # Closing-keyword refs in the PR body → citation edges.
+        for m in _CLOSING_KEYWORD_PATTERN.finditer(body_text):
+            _add(int(m.group(1)), "citation")
+    else:
+        # Sub-issue parent via REST API ``parent`` field (GitHub sub-issues).
+        parent = issue.get("parent")
+        if isinstance(parent, dict):
+            parent_number = parent.get("number")
+            if isinstance(parent_number, int):
+                _add(parent_number, "depends_on")
+
+        # Sub-issue tracked-by text in the body (GitHub task list).
+        for m in _TRACKED_BY_PATTERN.finditer(body_text):
+            _add(int(m.group(1)), "depends_on")
+
+    return sorted(refs, key=lambda r: (r.number, r.kind))
 
 
 def _build_content(
@@ -591,6 +704,73 @@ class GitHubSyncAdapter:
                     break  # Found it, no need to check other ref_type.
         return relation_ids
 
+    async def _create_structural_edges(
+        self,
+        entry_id: str,
+        structural_refs: list[StructuralRef],
+    ) -> list[str]:
+        """Create typed structural edges (citation / depends_on) for an entry.
+
+        For each :class:`StructuralRef`, the target is resolved by
+        ``external_id`` (trying both ``issue`` and ``pr`` forms).  When the
+        referenced entry is absent from the store the ref is skipped silently
+        (logged at DEBUG level, non-fatal).  Edge writes are idempotent: if
+        the relation already exists :meth:`~DistilleryStore.add_relation`
+        returns the existing relation ID without creating a duplicate.
+
+        Parameters
+        ----------
+        entry_id:
+            UUID of the source entry (the PR or sub-issue being synced).
+        structural_refs:
+            Typed refs extracted by :func:`_extract_structural_refs`.
+
+        Returns
+        -------
+        list[str]
+            UUIDs of created (or pre-existing) relation rows.
+        """
+        relation_ids: list[str] = []
+        for ref in structural_refs:
+            target: Entry | None = None
+            # Resolve by trying both ref_type variants — the referenced number
+            # could be an issue or a PR depending on the repository's workflow.
+            for ref_type in ("issue", "pr"):
+                ext_id = _make_external_id(self._owner, self._repo, ref_type, ref.number)
+                target = await self._find_existing(ext_id)
+                if target is not None:
+                    break
+            if target is None:
+                logger.debug(
+                    "Structural ref #%d (%s) not found in store; skipping",
+                    ref.number,
+                    ref.kind,
+                )
+                continue
+            try:
+                rel_id = await self._store.add_relation(
+                    from_id=entry_id,
+                    to_id=target.id,
+                    relation_type=ref.kind,
+                )
+                relation_ids.append(rel_id)
+                logger.debug(
+                    "Created %s edge %s -> %s (ref #%d)",
+                    ref.kind,
+                    entry_id,
+                    target.id,
+                    ref.number,
+                )
+            except ValueError:
+                logger.warning(
+                    "Failed to create %s edge %s -> %s (ref #%d)",
+                    ref.kind,
+                    entry_id,
+                    target.id,
+                    ref.number,
+                )
+        return relation_ids
+
     async def sync(
         self,
         client: httpx.AsyncClient | None = None,
@@ -626,8 +806,9 @@ class GitHubSyncAdapter:
         created = 0
         updated = 0
         relations_created: list[str] = []
-        # Collect pending cross-refs to resolve after all items are stored.
+        # Collect pending cross-refs and structural refs to resolve after all items are stored.
         pending_xrefs: list[tuple[str, list[int]]] = []
+        pending_structural: list[tuple[str, list[StructuralRef]]] = []
 
         for issue in issues:
             number = issue.get("number", 0)
@@ -684,9 +865,19 @@ class GitHubSyncAdapter:
             if cross_refs:
                 pending_xrefs.append((entry_id, cross_refs))
 
+            # Extract typed structural refs (citation / depends_on); defer resolution.
+            structural_refs = _extract_structural_refs(issue, entry.content)
+            if structural_refs:
+                pending_structural.append((entry_id, structural_refs))
+
         # Second pass: resolve cross-references now that all items are stored.
         for entry_id, cross_refs in pending_xrefs:
             new_rels = await self._create_cross_ref_relations(entry_id, cross_refs)
+            relations_created.extend(new_rels)
+
+        # Second pass: resolve structural edges (citation / depends_on).
+        for entry_id, structural_refs in pending_structural:
+            new_rels = await self._create_structural_edges(entry_id, structural_refs)
             relations_created.extend(new_rels)
 
         # Update last sync timestamp.
@@ -752,8 +943,8 @@ class GitHubSyncAdapter:
         self,
         issues: list[dict[str, Any]],
         client: httpx.AsyncClient | None = None,
-    ) -> tuple[int, int, list[tuple[str, list[int]]]]:
-        """Store or update a batch of issues and return (created, updated, pending_xrefs).
+    ) -> tuple[int, int, list[tuple[str, list[int]]], list[tuple[str, list[StructuralRef]]]]:
+        """Store or update a batch of issues and return pending ref pairs.
 
         Each issue in the batch is processed individually: comments are
         fetched, the content is truncated if oversized, and the entry is
@@ -761,12 +952,13 @@ class GitHubSyncAdapter:
 
         Returns
         -------
-        tuple[int, int, list[tuple[str, list[int]]]]
-            ``(created_count, updated_count, pending_xref_pairs)``
+        tuple[int, int, list[tuple[str, list[int]]], list[tuple[str, list[StructuralRef]]]]
+            ``(created_count, updated_count, pending_xref_pairs, pending_structural_pairs)``
         """
         created = 0
         updated = 0
         pending_xrefs: list[tuple[str, list[int]]] = []
+        pending_structural: list[tuple[str, list[StructuralRef]]] = []
 
         for issue in issues:
             number = issue.get("number", 0)
@@ -816,7 +1008,12 @@ class GitHubSyncAdapter:
             if cross_refs:
                 pending_xrefs.append((entry_id, cross_refs))
 
-        return created, updated, pending_xrefs
+            # Collect typed structural refs (citation / depends_on).
+            structural_refs = _extract_structural_refs(issue, entry.content)
+            if structural_refs:
+                pending_structural.append((entry_id, structural_refs))
+
+        return created, updated, pending_xrefs, pending_structural
 
     async def sync_batched(
         self,
@@ -849,6 +1046,7 @@ class GitHubSyncAdapter:
         total_created = 0
         total_updated = 0
         all_pending_xrefs: list[tuple[str, list[int]]] = []
+        all_pending_structural: list[tuple[str, list[StructuralRef]]] = []
         all_relations: list[str] = []
         pages_processed = 0
         errors: list[str] = []
@@ -874,12 +1072,13 @@ class GitHubSyncAdapter:
                 total_fetched += len(batch)
 
                 try:
-                    created, updated, pending_xrefs = await self._process_issue_batch(
-                        batch, client=client
+                    created, updated, pending_xrefs, pending_structural = (
+                        await self._process_issue_batch(batch, client=client)
                     )
                     total_created += created
                     total_updated += updated
                     all_pending_xrefs.extend(pending_xrefs)
+                    all_pending_structural.extend(pending_structural)
                     pages_processed += 1
 
                     if on_page is not None:
@@ -900,6 +1099,14 @@ class GitHubSyncAdapter:
                     all_relations.extend(new_rels)
                 except Exception as exc:  # noqa: BLE001
                     errors.append(f"Cross-ref resolution failed for {entry_id}: {exc}")
+
+            # Third pass: resolve structural edges (citation / depends_on).
+            for entry_id, structural_refs in all_pending_structural:
+                try:
+                    new_rels = await self._create_structural_edges(entry_id, structural_refs)
+                    all_relations.extend(new_rels)
+                except Exception as exc:  # noqa: BLE001
+                    errors.append(f"Structural edge resolution failed for {entry_id}: {exc}")
         finally:
             if should_close:
                 await client.aclose()

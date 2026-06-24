@@ -33,6 +33,7 @@ from distillery.mcp.tools.relations import _handle_relations
 from distillery.mcp.tools.search import _handle_find_similar
 from distillery.store.duckdb import DuckDBStore
 from distillery.store.migrations import (
+    backfill_relations_from_content_refs,
     backfill_relations_from_metadata,
     backfill_relations_from_wikilinks,
     run_pending_migrations,
@@ -582,9 +583,7 @@ def test_wikilink_backfill_matches_uppercase_hex_prefix() -> None:
 
         inserted = backfill_relations_from_wikilinks(conn)
         assert inserted == 1
-        rows = conn.execute(
-            "SELECT from_id, to_id, relation_type FROM entry_relations"
-        ).fetchall()
+        rows = conn.execute("SELECT from_id, to_id, relation_type FROM entry_relations").fetchall()
         assert rows == [(src_id, tgt_id, "link")]
     finally:
         conn.close()
@@ -675,3 +674,198 @@ async def test_reconcile_wikilink_ambiguous_prefix_skipped(store: DuckDBStore) -
     # Neither candidate gets the edge.
     rows = await store.get_related(src_id, direction="outgoing")
     assert rows == []
+
+
+# ---------------------------------------------------------------------------
+# In-content reference resolution (issue #653 step 4) — backfill helper
+# ---------------------------------------------------------------------------
+
+
+def test_content_ref_url_matches_external_id() -> None:
+    """A content URL equal to another entry's external_id yields a citation edge."""
+    conn = duckdb.connect(":memory:")
+    try:
+        _setup_through_8(conn)
+        url = "https://github.com/owner/repo/pull/12"
+        _insert_entry(conn, "b", metadata={"external_id": url})
+        conn.execute(
+            "INSERT INTO entries (id, content, entry_type, source, author, embedding) "
+            "VALUES ('a', ?, 'inbox', 'manual', 'tester', ?)",
+            [f"please see {url} for context", _EMBEDDING],
+        )
+
+        inserted = backfill_relations_from_content_refs(conn)
+        assert inserted == 1
+        rows = conn.execute("SELECT from_id, to_id, relation_type FROM entry_relations").fetchall()
+        assert rows == [("a", "b", "citation")]
+    finally:
+        conn.close()
+
+
+def test_content_ref_hash_number_matches_external_id() -> None:
+    """A bare ``#<n>`` ref resolves to an entry whose external_id ends in that number."""
+    conn = duckdb.connect(":memory:")
+    try:
+        _setup_through_8(conn)
+        _insert_entry(conn, "issue", metadata={"external_id": "owner/repo#7"})
+        conn.execute(
+            "INSERT INTO entries (id, content, entry_type, source, author, embedding) "
+            "VALUES ('a', 'as discussed in #7 we should ship', 'inbox', 'manual', 'tester', ?)",
+            [_EMBEDDING],
+        )
+
+        inserted = backfill_relations_from_content_refs(conn)
+        assert inserted == 1
+        rows = conn.execute("SELECT from_id, to_id, relation_type FROM entry_relations").fetchall()
+        assert rows == [("a", "issue", "citation")]
+    finally:
+        conn.close()
+
+
+def test_content_ref_hash_matches_issue_prefixed_external_id() -> None:
+    """``#7`` resolves to an external_id shaped like ``owner/repo#issue-7``."""
+    conn = duckdb.connect(":memory:")
+    try:
+        _setup_through_8(conn)
+        _insert_entry(conn, "issue", metadata={"external_id": "owner/repo#issue-7"})
+        conn.execute(
+            "INSERT INTO entries (id, content, entry_type, source, author, embedding) "
+            "VALUES ('a', 'fixes #7', 'inbox', 'manual', 'tester', ?)",
+            [_EMBEDDING],
+        )
+
+        assert backfill_relations_from_content_refs(conn) == 1
+        rows = conn.execute("SELECT from_id, to_id FROM entry_relations").fetchall()
+        assert rows == [("a", "issue")]
+    finally:
+        conn.close()
+
+
+def test_content_ref_is_idempotent() -> None:
+    """A second pass over the same content adds no further citation edges."""
+    conn = duckdb.connect(":memory:")
+    try:
+        _setup_through_8(conn)
+        url = "https://github.com/owner/repo/pull/12"
+        _insert_entry(conn, "b", metadata={"external_id": url})
+        conn.execute(
+            "INSERT INTO entries (id, content, entry_type, source, author, embedding) "
+            "VALUES ('a', ?, 'inbox', 'manual', 'tester', ?)",
+            [f"see {url}", _EMBEDDING],
+        )
+
+        assert backfill_relations_from_content_refs(conn) == 1
+        assert backfill_relations_from_content_refs(conn) == 0
+        count = conn.execute(
+            "SELECT COUNT(*) FROM entry_relations WHERE relation_type = 'citation'"
+        ).fetchone()
+        assert count is not None and count[0] == 1
+    finally:
+        conn.close()
+
+
+def test_content_ref_skips_self_edge() -> None:
+    """An entry citing a URL that matches its own external_id gets no self-edge."""
+    conn = duckdb.connect(":memory:")
+    try:
+        _setup_through_8(conn)
+        url = "https://github.com/owner/repo/pull/12"
+        conn.execute(
+            "INSERT INTO entries (id, content, entry_type, source, author, metadata, embedding) "
+            "VALUES ('a', ?, 'inbox', 'manual', 'tester', ?, ?)",
+            [f"this very entry: {url}", json.dumps({"external_id": url}), _EMBEDDING],
+        )
+
+        assert backfill_relations_from_content_refs(conn) == 0
+        rows = conn.execute("SELECT COUNT(*) FROM entry_relations").fetchone()
+        assert rows is not None and rows[0] == 0
+    finally:
+        conn.close()
+
+
+def test_content_ref_skips_nonexistent_target() -> None:
+    """A URL / ``#<n>`` ref with no matching stored entry produces no edge."""
+    conn = duckdb.connect(":memory:")
+    try:
+        _setup_through_8(conn)
+        conn.execute(
+            "INSERT INTO entries (id, content, entry_type, source, author, embedding) "
+            "VALUES ('a', 'see https://example.com/nope/999 and #999', 'inbox', "
+            "'manual', 'tester', ?)",
+            [_EMBEDDING],
+        )
+
+        assert backfill_relations_from_content_refs(conn) == 0
+        rows = conn.execute("SELECT COUNT(*) FROM entry_relations").fetchone()
+        assert rows is not None and rows[0] == 0
+    finally:
+        conn.close()
+
+
+def test_content_ref_ambiguous_number_skipped() -> None:
+    """Two entries whose external_ids map to the same number produce no ``#`` edge."""
+    conn = duckdb.connect(":memory:")
+    try:
+        _setup_through_8(conn)
+        _insert_entry(conn, "x", metadata={"external_id": "owner/repo#issue-7"})
+        _insert_entry(conn, "y", metadata={"external_id": "other/proj#pr-7"})
+        conn.execute(
+            "INSERT INTO entries (id, content, entry_type, source, author, embedding) "
+            "VALUES ('a', 'ref #7', 'inbox', 'manual', 'tester', ?)",
+            [_EMBEDDING],
+        )
+
+        assert backfill_relations_from_content_refs(conn) == 0
+        rows = conn.execute("SELECT COUNT(*) FROM entry_relations").fetchone()
+        assert rows is not None and rows[0] == 0
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# In-content reference resolution — reconcile_relations() store integration
+# ---------------------------------------------------------------------------
+
+
+async def test_reconcile_materializes_citation_from_content_url(store: DuckDBStore) -> None:
+    """reconcile_relations() links a content URL to the entry whose external_id matches."""
+    url = "https://github.com/owner/repo/pull/12"
+    b_id = await store.store(make_entry(content="PR body", metadata={"external_id": url}))
+    a_id = await store.store(make_entry(content=f"discussed in {url} earlier"))
+
+    counts = await store.reconcile_relations()
+    assert counts["content_ref_links"] == 1
+    # Separate mechanisms remain distinct keys.
+    assert counts["metadata_links"] == 0
+    assert counts["wikilink_links"] == 0
+
+    rows = await store.get_related(a_id, direction="outgoing")
+    assert {(r["to_id"], r["relation_type"]) for r in rows} == {(b_id, "citation")}
+
+
+async def test_reconcile_content_ref_idempotent(store: DuckDBStore) -> None:
+    """A second reconcile reports content_ref_links == 0 and keeps exactly one edge."""
+    url = "https://github.com/owner/repo/pull/12"
+    b_id = await store.store(make_entry(content="PR body", metadata={"external_id": url}))
+    a_id = await store.store(make_entry(content=f"see {url}"))
+
+    first = await store.reconcile_relations()
+    second = await store.reconcile_relations()
+
+    assert first["content_ref_links"] == 1
+    assert second["content_ref_links"] == 0
+    rows = await store.get_related(a_id, direction="outgoing")
+    assert len(rows) == 1
+    assert rows[0]["to_id"] == b_id
+
+
+async def test_reconcile_handler_still_reports_legacy_keys(store: DuckDBStore) -> None:
+    """The reconcile action response keeps metadata_links and wikilink_links keys."""
+    url = "https://github.com/owner/repo/pull/12"
+    await store.store(make_entry(content="PR body", metadata={"external_id": url}))
+    await store.store(make_entry(content=f"see {url}"))
+
+    payload = parse_mcp_response(await _handle_relations(store, {"action": "reconcile"}))
+    assert "metadata_links" in payload
+    assert "wikilink_links" in payload
+    assert "content_ref_links" in payload
