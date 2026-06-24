@@ -76,6 +76,14 @@ fastembed = [
     # update in bench/results/.
     "fastembed==0.8.0",
 ]
+# Observability. Optional: the server runs unchanged without it, and even
+# when installed it stays dark until LOGFIRE_TOKEN / OTEL_EXPORTER_OTLP_ENDPOINT
+# is set. Logfire is the OTLP SDK + UI; the otlp exporter enables dual-export
+# to a self-hosted collector (e.g. the GCP Cloud Run otel-collector).
+otel = [
+    "logfire[asgi,httpx,system-metrics]>=2.0",
+    "opentelemetry-exporter-otlp>=1.20",
+]
 
 [project.scripts]
 distillery = "distillery.cli:main"
@@ -147,6 +155,17 @@ ignore_missing_imports = true
 module = [
     "networkx",
     "networkx.*",
+]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# logfire + opentelemetry are gated behind the optional [otel] extra and are
+# not installed in the base dev/CI environment. observability.py guards every
+# import; treat them as untyped so mypy --strict passes without the extra.
+module = [
+    "logfire",
+    "logfire.*",
+    "opentelemetry.*",
 ]
 ignore_missing_imports = true
 

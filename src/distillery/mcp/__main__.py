@@ -121,6 +121,13 @@ def main(argv: list[str] | None = None) -> int:
 
         config = load_config()
 
+        # Configure telemetry before the server handles any request. No-op
+        # unless LOGFIRE_TOKEN / OTEL_EXPORTER_OTLP_ENDPOINT is set, and never
+        # raises (see distillery.observability.configure_observability).
+        from distillery.observability import configure_observability
+
+        configure_observability()
+
         if args.transport == "http":
             host = (
                 args.host if args.host is not None else os.environ.get("DISTILLERY_HOST", "0.0.0.0")
@@ -238,6 +245,12 @@ def main(argv: list[str] | None = None) -> int:
                         await _mcp_app(scope, receive, send)
 
                 final_app = _combined_app
+
+            # Wrap the outermost ASGI app with per-request spans (captures
+            # X-Request-ID for log<->trace correlation). No-op when disabled.
+            from distillery.observability import instrument_asgi_app
+
+            final_app = instrument_asgi_app(final_app)
 
             import uvicorn as _uvicorn
 
