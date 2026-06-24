@@ -1,0 +1,6 @@
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+========= 2280 passed, 3 skipped, 870 deselected, 6 warnings in 37.54s =========
+exit code: 0

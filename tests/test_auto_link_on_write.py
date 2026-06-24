@@ -16,11 +16,13 @@ Acceptance covered:
   * flag OFF → NO semantic edges created (current behaviour preserved).
   * re-running ingest is idempotent (no duplicate edges).
   * the throttle cap (``max_links``) is respected.
+  * feed poll-ingest (FeedPoller → store) inherits auto-link (R1.2).
 """
 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -345,5 +347,100 @@ async def test_config_default_disabled_creates_no_edges(
 
         total = store.connection.execute("SELECT COUNT(*) FROM entry_relations").fetchone()
         assert total is not None and total[0] == 0
+    finally:
+        await store.close()
+
+
+async def test_feed_poll_ingest_auto_links(
+    controlled_embedding_provider: ControlledEmbeddingProvider,
+) -> None:
+    """R1.2: auto-link fires on the feed poll-ingest path (FeedPoller → store.store).
+
+    FeedPoller calls ``self._store.store(entry)`` for each accepted feed item,
+    which is the same write path exercised by the direct ``store()`` tests.
+    This test wires a real DuckDBStore (auto-link ON) to a FeedPoller whose
+    adapter is replaced by a stub so no network calls are made.  After a
+    successful poll the ingested entry must have a ``related`` edge to the
+    pre-existing near-neighbour.
+    """
+    from distillery.config import (
+        DistilleryConfig,
+        FeedsConfig,
+        FeedSourceConfig,
+        FeedsThresholdsConfig,
+    )
+    from distillery.feeds.models import FeedItem
+    from distillery.feeds.poller import FeedPoller
+
+    # The feed item text and the pre-existing neighbour share the same _NEAR
+    # vector so cosine similarity is 1.0 (normalised 1.0 > threshold 0.85).
+    feed_text = "feed item near content"
+    controlled_embedding_provider.register("pre-existing near", _NEAR)
+    controlled_embedding_provider.register(feed_text, _NEAR)
+
+    store = DuckDBStore(
+        db_path=":memory:",
+        embedding_provider=controlled_embedding_provider,
+        auto_link_enabled=True,
+        auto_link_threshold=0.85,
+        auto_link_max_links=5,
+    )
+    await store.initialize()
+    try:
+        # Register a feed source so the poller has something to poll.
+        source_url = "https://example.com/rss"
+        await store.add_feed_source(
+            url=source_url,
+            source_type="rss",
+            poll_interval_minutes=60,
+        )
+
+        # Pre-populate the near-neighbour AFTER the store is initialised so
+        # its vector is already in the HNSW index when the poller runs.
+        neighbour_id = await store.store(make_entry(content="pre-existing near"))
+
+        # Stub the adapter so no network I/O occurs.
+        feed_item = FeedItem(
+            source_url=source_url,
+            source_type="rss",
+            item_id="poll-item-1",
+            title=None,
+            content=feed_text,
+        )
+        mock_adapter = MagicMock()
+        mock_adapter.fetch.return_value = [feed_item]
+
+        # digest threshold 0.0 ensures the item is stored regardless of its
+        # relevance score (score >= 0.0 always holds).
+        cfg = DistilleryConfig()
+        cfg.feeds = FeedsConfig(
+            sources=[FeedSourceConfig(url=source_url, source_type="rss")],
+            thresholds=FeedsThresholdsConfig(alert=0.85, digest=0.0),
+        )
+
+        with patch("distillery.feeds.poller._build_adapter", return_value=mock_adapter):
+            poller = FeedPoller(store=store, config=cfg, relevance_threshold=0.0)
+            summary = await poller.poll()
+
+        assert summary.total_stored == 1, (
+            f"Expected 1 item stored, got {summary.total_stored}; "
+            f"errors: {[r.errors for r in summary.results]}"
+        )
+
+        # Find the newly stored feed entry.
+        all_entries = await store.list_entries(
+            filters={"metadata.external_id": "poll-item-1"}, limit=1, offset=0
+        )
+        assert len(all_entries) == 1, "Polled entry not found in store"
+        polled_id = str(all_entries[0].id)
+
+        # The polled entry must be linked to the pre-existing near-neighbour.
+        rows = await store.get_related(polled_id, direction="outgoing")
+        to_ids = {r["to_id"] for r in rows}
+        assert neighbour_id in to_ids, (
+            f"Expected auto-link edge from polled entry to neighbour {neighbour_id}; "
+            f"got outgoing edges: {to_ids}"
+        )
+        assert {r["relation_type"] for r in rows} == {"related"}
     finally:
         await store.close()
