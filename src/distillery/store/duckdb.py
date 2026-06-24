@@ -2330,7 +2330,11 @@ class DuckDBStore:
         """
         from distillery.store.protocol import SearchResult
 
-        embedding = self._embedding_provider.embed(query)
+        # Embed off-thread so the Jina HTTP round-trip (+ time.sleep retries on
+        # 429/5xx) does not block the event loop — mirrors ``store`` (issue
+        # #558). On the event loop a blocking embed starves the Fly health
+        # check during concurrent feed polls, which de-routes the machine.
+        embedding = await asyncio.to_thread(self._embedding_provider.embed, query)
         use_hybrid = self._hybrid_search and self._fts_available
 
         def _sync() -> list[SearchResult]:
@@ -2492,7 +2496,10 @@ class DuckDBStore:
         """
         from distillery.store.protocol import SearchResult
 
-        embedding = self._embedding_provider.embed(content)
+        # Embed off-thread so the blocking Jina round-trip does not run on the
+        # event loop — mirrors ``store`` and ``search`` (issue #558). Keeps the
+        # loop free to service the Fly health check under concurrent load.
+        embedding = await asyncio.to_thread(self._embedding_provider.embed, content)
 
         def _sync() -> list[SearchResult]:
             conn = self.connection
