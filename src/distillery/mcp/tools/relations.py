@@ -108,12 +108,13 @@ async def _handle_relations(
         "resolve_candidate",
         "suggest_links",
         "promote_entities",
+        "canonicalize_tags",
     ):
         return error_response(
             "INVALID_PARAMS",
             "action must be one of 'add', 'get', 'remove', 'traverse', 'metrics', "
             "'reconcile', 'list_candidates', 'resolve_candidate', 'suggest_links', "
-            f"'promote_entities'; got: {action!r}",
+            f"'promote_entities', 'canonicalize_tags'; got: {action!r}",
         )
 
     # ------------------------------------------------------------------
@@ -583,13 +584,15 @@ async def _handle_relations(
     if action == "promote_entities":
         threshold = 3  # default
         reserved_prefixes: list[str] | None = None
+        aliases: dict[str, str] | None = None
         if cfg is not None:
             tags_cfg = getattr(cfg, "tags", None)
             if tags_cfg is not None:
                 threshold = getattr(tags_cfg, "entity_promotion_threshold", threshold)
                 reserved_prefixes = getattr(tags_cfg, "reserved_prefixes", None)
+                aliases = getattr(tags_cfg, "aliases", None)
         try:
-            counts = await store.promote_entities(threshold, reserved_prefixes)
+            counts = await store.promote_entities(threshold, reserved_prefixes, aliases)
         except Exception:  # noqa: BLE001
             logger.exception("distillery_relations promote_entities: unexpected error")
             return error_response("INTERNAL", "Failed to promote entities")
@@ -601,6 +604,38 @@ async def _handle_relations(
                 "entities_reused": counts.get("entities_reused", 0),
                 "mentions_created": counts.get("mentions_created", 0),
                 "threshold": threshold,
+            }
+        )
+
+    # ------------------------------------------------------------------
+    # action == "canonicalize_tags"
+    # ------------------------------------------------------------------
+    if action == "canonicalize_tags":
+        aliases_map: dict[str, str] = {}
+        reserved: list[str] | None = None
+        normalize_namespaces = False
+        if cfg is not None:
+            tags_cfg = getattr(cfg, "tags", None)
+            if tags_cfg is not None:
+                aliases_map = getattr(tags_cfg, "aliases", None) or {}
+                reserved = getattr(tags_cfg, "reserved_prefixes", None)
+                normalize_namespaces = bool(getattr(tags_cfg, "enforce_namespaces", False))
+        try:
+            counts = await store.canonicalize_existing_tags(
+                aliases_map,
+                reserved,
+                normalize_namespaces,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("distillery_relations canonicalize_tags: unexpected error")
+            return error_response("INTERNAL", "Failed to canonicalize tags")
+
+        return success_response(
+            {
+                "action": "canonicalize_tags",
+                "entries_scanned": counts.get("entries_scanned", 0),
+                "entries_rewritten": counts.get("entries_rewritten", 0),
+                "tags_collapsed": counts.get("tags_collapsed", 0),
             }
         )
 

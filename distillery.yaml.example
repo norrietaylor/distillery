@@ -270,3 +270,14 @@ tags:
   # classifier.  Setting this key explicitly (including to []) overrides the
   # default.  Example: ["kind", "system"] reserves both namespaces.
   reserved_prefixes: ["kind"]
+
+  # Controlled-vocabulary alias map: collapse fragmented tag spellings onto a
+  # single canonical tag (issue #653, ontology #3). Both keys and values must be
+  # valid tags. Chains (a -> b -> c) are flattened at load time; cycles are
+  # rejected. Aliases are applied by the canonicalize_tags backfill
+  # (distillery_relations action="canonicalize_tags") and by entity promotion,
+  # so an aliased variant promotes to the same entity node as its canonical
+  # form. Default (key omitted): {} — no aliasing.
+  # aliases:
+  #   "domain/sandbox": "domain/build/sandboxing"
+  #   "entity/cloudflare-sandboxes": "entity/cloudflare"

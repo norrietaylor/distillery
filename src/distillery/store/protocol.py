@@ -687,14 +687,17 @@ class DistilleryStore(Protocol):
         self,
         threshold: int,
         reserved_prefixes: list[str] | None = None,
+        aliases: dict[str, str] | None = None,
     ) -> dict[str, int]:
         """Promote recurring ``entity/*`` and ``tech/*`` tags to entity nodes.
 
-        Scans the tag vocabulary, normalises each ``entity/*`` and ``tech/*``
-        tag through the existing ``normalize_tag`` path so variant spellings
-        (``entity/cloudflare/workers`` vs ``entity/cloudflare-workers``)
-        collapse to one canonical key, and for every canonical tag appearing on
-        at least *threshold* entries:
+        Scans the tag vocabulary, resolves each tag through the controlled-
+        vocabulary *aliases* map and then the ``normalize_tag`` separator-
+        collapse so variant spellings (``entity/cloudflare/workers`` vs
+        ``entity/cloudflare-workers``) and declared aliases
+        (``entity/cloudflare-sandboxes`` -> ``entity/cloudflare``) converge to
+        one canonical key, and for every canonical ``entity/*`` / ``tech/*`` tag
+        appearing on at least *threshold* entries:
 
           * finds-or-creates exactly one ``entity`` entry keyed idempotently on
             the canonical tag (stored as ``metadata.source_tag``); no duplicate
@@ -714,11 +717,49 @@ class DistilleryStore(Protocol):
                 ``config.tags.reserved_prefixes``).  ``entity`` and ``tech`` are
                 always treated as reserved for promotion regardless of this
                 argument.  ``None`` is treated as an empty list.
+            aliases: Controlled-vocabulary ``alias -> canonical`` map (typically
+                ``config.tags.aliases``) applied before the separator-collapse so
+                aliased variants promote to the same node.  ``None`` is treated
+                as an empty map.
 
         Returns:
             Dict with ``entities_created`` (new entity nodes inserted),
             ``entities_reused`` (qualifying tags whose node already existed),
             and ``mentions_created`` (``mentions`` edges inserted).
+        """
+        ...
+
+    async def canonicalize_existing_tags(
+        self,
+        aliases: dict[str, str],
+        reserved_prefixes: list[str] | None = None,
+        normalize_namespaces: bool = False,
+    ) -> dict[str, int]:
+        """Rewrite stored tags through the controlled vocabulary (issue #653).
+
+        Backfill for ontology #3: scans every non-archived entry and rewrites
+        its tag list via :func:`distillery.feeds.tags.canonicalize_tags`
+        (alias substitution, then optional namespace normalization, then an
+        order-preserving dedupe). Only entries whose tag list actually changes
+        are written, so the operation is idempotent — a second run rewrites zero
+        rows. Embeddings are not recomputed (tags do not feed embeddings) and
+        ``updated_at`` is left untouched so recency signals are preserved.
+
+        Run this before a full :meth:`promote_entities` re-run so entity nodes
+        key off the canonical tag form.
+
+        Args:
+            aliases: Flattened ``alias -> canonical`` map
+                (``config.tags.aliases``).
+            reserved_prefixes: Prefixes eligible for namespace normalization
+                (only used when *normalize_namespaces* is true). ``None`` is an
+                empty list.
+            normalize_namespaces: When true, also apply the ``normalize_tag``
+                separator-collapse (typically ``config.tags.enforce_namespaces``).
+
+        Returns:
+            Dict with ``entries_scanned``, ``entries_rewritten`` and
+            ``tags_collapsed`` (total tags removed by within-entry dedupe).
         """
         ...
 

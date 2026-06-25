@@ -31,7 +31,7 @@ from urllib.parse import unquote, urlparse
 
 import duckdb
 
-from distillery.feeds.tags import normalize_tag
+from distillery.feeds.tags import canonicalize_tag, canonicalize_tags
 from distillery.models import Entry, EntrySource, EntryStatus, EntryType, validate_metadata
 from distillery.store.migrations import (
     _CREATE_META_TABLE,
@@ -4681,6 +4681,7 @@ class DuckDBStore:
         self,
         threshold: int,
         reserved_prefixes: list[str],
+        aliases: dict[str, str],
     ) -> tuple[dict[str, list[str]], dict[str, str]]:
         """Read-only first pass: compute the promotion plan.
 
@@ -4688,6 +4689,10 @@ class DuckDBStore:
         ``canonical_members`` maps each qualifying canonical tag to the sorted
         list of entry IDs carrying it, and ``existing_nodes`` maps a canonical
         ``source_tag`` to the id of an already-stored entity node.
+
+        Tags are resolved through the controlled-vocabulary *aliases* map before
+        the separator-collapse, so an aliased variant promotes to the same node
+        as its canonical form (issue #653, ontology #3).
         """
         assert self._conn is not None
         rows = self._conn.execute(
@@ -4700,7 +4705,12 @@ class DuckDBStore:
             for tag in tags_col:
                 if not isinstance(tag, str):
                     continue
-                canonical = normalize_tag(tag, reserved_prefixes)
+                canonical = canonicalize_tag(
+                    tag,
+                    aliases=aliases,
+                    reserved_prefixes=reserved_prefixes,
+                    normalize_namespaces=True,
+                )
                 if not (canonical.startswith("entity/") or canonical.startswith("tech/")):
                     continue
                 members.setdefault(canonical, set()).add(entry_id)
@@ -4833,6 +4843,7 @@ class DuckDBStore:
         self,
         threshold: int,
         reserved_prefixes: list[str] | None = None,
+        aliases: dict[str, str] | None = None,
     ) -> dict[str, int]:
         """Promote recurring ``entity/*`` and ``tech/*`` tags to entity nodes.
 
@@ -4843,7 +4854,7 @@ class DuckDBStore:
         # the configured reserved prefixes.
         prefixes = sorted({*(reserved_prefixes or []), "entity", "tech"})
         canonical_members, existing_nodes = await self._run_sync(
-            self._sync_promote_entities_plan, threshold, prefixes
+            self._sync_promote_entities_plan, threshold, prefixes, aliases or {}
         )
         # Embed the canonical names for nodes that don't yet exist, off the SQL
         # lock (issue #558 pattern).
@@ -4855,6 +4866,80 @@ class DuckDBStore:
             embeddings[canonical] = await asyncio.to_thread(self._embedding_provider.embed, name)
         return await self._run_sync(
             self._sync_promote_entities_write, canonical_members, embeddings
+        )
+
+    def _sync_canonicalize_existing_tags(
+        self,
+        aliases: dict[str, str],
+        reserved_prefixes: list[str],
+        normalize_namespaces: bool,
+    ) -> dict[str, int]:
+        """Rewrite every active entry's tags through the controlled vocabulary.
+
+        Idempotent: only entries whose canonicalized tag list differs from the
+        stored one are updated, so a second run rewrites zero rows. ``updated_at``
+        is left untouched so this mechanical migration does not distort recency
+        signals, and embeddings are not recomputed (tags do not feed embeddings).
+        """
+        assert self._conn is not None
+        conn = self._conn
+        rows = conn.execute(
+            "SELECT id, tags FROM entries WHERE status != 'archived'"
+        ).fetchall()
+        updates: list[tuple[list[str], str]] = []
+        entries_scanned = 0
+        tags_collapsed = 0
+        for entry_id, tags_col in rows:
+            entries_scanned += 1
+            old_tags = [t for t in (tags_col or []) if isinstance(t, str)]
+            if not old_tags:
+                continue
+            new_tags = canonicalize_tags(
+                old_tags,
+                aliases=aliases,
+                reserved_prefixes=reserved_prefixes,
+                normalize_namespaces=normalize_namespaces,
+            )
+            if new_tags != old_tags:
+                updates.append((new_tags, entry_id))
+                tags_collapsed += len(old_tags) - len(new_tags)
+
+        if updates:
+            try:
+                conn.execute("BEGIN TRANSACTION")
+                for new_tags, entry_id in updates:
+                    conn.execute(
+                        "UPDATE entries SET tags = ? WHERE id = ?",
+                        [new_tags, entry_id],
+                    )
+                conn.execute("COMMIT")
+            except Exception:
+                with contextlib.suppress(Exception):
+                    conn.execute("ROLLBACK")
+                raise
+            self._checkpoint_after_write(conn)
+
+        return {
+            "entries_scanned": entries_scanned,
+            "entries_rewritten": len(updates),
+            "tags_collapsed": tags_collapsed,
+        }
+
+    async def canonicalize_existing_tags(
+        self,
+        aliases: dict[str, str],
+        reserved_prefixes: list[str] | None = None,
+        normalize_namespaces: bool = False,
+    ) -> dict[str, int]:
+        """Rewrite stored tags through the controlled vocabulary (issue #653).
+
+        See :meth:`distillery.store.protocol.DistilleryStore.canonicalize_existing_tags`.
+        """
+        return await self._run_sync(
+            self._sync_canonicalize_existing_tags,
+            aliases,
+            reserved_prefixes or [],
+            normalize_namespaces,
         )
 
     def _sync_get_all_related_entry_ids(self) -> set[str]:

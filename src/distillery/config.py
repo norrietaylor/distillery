@@ -250,11 +250,19 @@ class TagsConfig:
             must appear before it qualifies for entity promotion. Entity/*
             and tech/* tags appearing on at least this many entries are
             candidates for promotion to entity nodes. Defaults to ``3``.
+        aliases: Controlled-vocabulary ``alias -> canonical`` map used to
+            de-fragment tags (issue #653, ontology #3). Variant spellings of a
+            concept (e.g. ``domain/sandbox`` and ``domain/build/sandboxing``)
+            map to a single canonical tag. Both keys and values must be valid
+            tags. Chains (``a -> b -> c``) are flattened at parse time so the
+            stored map is single-hop; cycles are rejected. Defaults to ``{}``
+            (no aliasing — inert on upgrade).
     """
 
     enforce_namespaces: bool = False
     reserved_prefixes: list[str] = field(default_factory=lambda: ["kind"])
     entity_promotion_threshold: int = 3
+    aliases: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -893,6 +901,51 @@ def _parse_link_suggestion(raw: dict[str, Any]) -> LinkSuggestionConfig:
     )
 
 
+# Full hierarchical tag grammar: segments ``[a-z0-9][a-z0-9-]*`` joined by ``/``.
+# Mirrors ``distillery.models.validate_tag`` so alias keys/values are validated at
+# config-load time without importing the model layer.
+_FULL_TAG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)*$")
+
+
+def _flatten_alias_map(aliases: dict[str, str]) -> dict[str, str]:
+    """Resolve alias chains to a single hop and reject cycles.
+
+    ``{"a": "b", "b": "c"}`` flattens to ``{"a": "c", "b": "c"}`` so the runtime
+    lookup is O(1) and idempotent. A key mapping to itself is a permitted no-op.
+    A true cycle (``a -> b -> a``) raises ``ValueError``.
+    """
+    flat: dict[str, str] = {}
+    for key in aliases:
+        seen = [key]
+        cur = key
+        while cur in aliases:
+            nxt = aliases[cur]
+            if nxt == cur:  # self-map: terminal, no-op
+                break
+            if nxt in seen:
+                raise ValueError(
+                    "tags.aliases contains a cycle: " + " -> ".join([*seen, nxt])
+                )
+            seen.append(nxt)
+            cur = nxt
+        flat[key] = cur
+    return flat
+
+
+def _parse_alias_map(raw: Any) -> dict[str, str]:
+    """Parse, validate, and flatten the ``tags.aliases`` mapping."""
+    if not isinstance(raw, dict):
+        raise ValueError(f"tags.aliases must be a mapping, got: {type(raw).__name__}")
+    aliases: dict[str, str] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str) or not _FULL_TAG_RE.fullmatch(key):
+            raise ValueError(f"tags.aliases key is not a valid tag: {key!r}")
+        if not isinstance(value, str) or not _FULL_TAG_RE.fullmatch(value):
+            raise ValueError(f"tags.aliases value is not a valid tag: {value!r}")
+        aliases[key] = value
+    return _flatten_alias_map(aliases)
+
+
 def _parse_tags(raw: dict[str, Any]) -> TagsConfig:
     """Parse the ``tags`` section from a raw YAML mapping.
 
@@ -905,14 +958,18 @@ def _parse_tags(raw: dict[str, Any]) -> TagsConfig:
             - ``entity_promotion_threshold`` (int, default ``3``) — minimum
               number of entries on which a tag must appear before qualifying
               for entity promotion.
+            - ``aliases`` (mapping[str, str], default ``{}``) — controlled-
+              vocabulary ``alias -> canonical`` map; chains are flattened and
+              cycles rejected at parse time.
 
     Returns:
         A populated :class:`TagsConfig` instance.
 
     Raises:
         ValueError: If ``enforce_namespaces`` is not a boolean,
-            ``reserved_prefixes`` is not a list, or
-            ``entity_promotion_threshold`` is not a positive integer.
+            ``reserved_prefixes`` is not a list,
+            ``entity_promotion_threshold`` is not a positive integer, or
+            ``aliases`` is not a valid (flattenable, acyclic) tag map.
     """
     if not isinstance(raw, dict):
         raise ValueError(f"tags must be a YAML mapping, got: {type(raw).__name__}")
@@ -928,6 +985,8 @@ def _parse_tags(raw: dict[str, Any]) -> TagsConfig:
             f"tags.entity_promotion_threshold must be a positive integer, got: {threshold}"
         )
 
+    aliases = _parse_alias_map(raw["aliases"]) if "aliases" in raw else {}
+
     if "reserved_prefixes" in raw:
         prefixes_raw = raw["reserved_prefixes"]
         if not isinstance(prefixes_raw, list):
@@ -939,10 +998,15 @@ def _parse_tags(raw: dict[str, Any]) -> TagsConfig:
             enforce_namespaces=enforce_raw,
             reserved_prefixes=reserved_prefixes,
             entity_promotion_threshold=threshold,
+            aliases=aliases,
         )
 
     # Absent ``reserved_prefixes`` → use dataclass default (``["kind"]``).
-    return TagsConfig(enforce_namespaces=enforce_raw, entity_promotion_threshold=threshold)
+    return TagsConfig(
+        enforce_namespaces=enforce_raw,
+        entity_promotion_threshold=threshold,
+        aliases=aliases,
+    )
 
 
 def _parse_feed_source(raw: dict[str, Any], index: int) -> FeedSourceConfig:
