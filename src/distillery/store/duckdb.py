@@ -66,6 +66,25 @@ _WARN_AFTER_CHECKPOINT_FAILURES = 3
 # so a bloating WAL under checkpoint starvation is invisible to it.
 _DISK_BACKPRESSURE_FREE_BYTES = 256 * 1024 * 1024
 
+# Default DuckDB resource caps applied at connection init (issue #655).  None
+# were set before, so DuckDB sized its buffer manager off total host RAM and
+# spawned a worker thread per core — both unbounded under a concurrent feed
+# poll, which has a history of OOM kills (the memory limit was bumped
+# 512MB → 1024 → 2048 in prior incidents).  An explicit ~1GB ceiling and a
+# small thread count keep the writer cheap and predictable on a small Fly VM.
+# Both are overridable via the constructor for larger deployments.
+_DEFAULT_MEMORY_LIMIT_MB = 1024
+_DEFAULT_THREADS = 2
+
+# Interval (seconds) between idle-checkpoint sweeps (issue #655).  Under
+# continuous concurrent writes (poller + gh-sync) the per-write CHECKPOINT can
+# never acquire the writer lock, so the WAL grows unbounded and every read
+# replays an ever-larger WAL → latency degrades monotonically.  A background
+# task issues a *plain* CHECKPOINT during quiet windows (only when the writer
+# lock is free) so the WAL is flushed without ever blocking — or deadlocking —
+# a writer.  It deliberately NEVER escalates to FORCE CHECKPOINT (issue #648).
+_DEFAULT_IDLE_CHECKPOINT_INTERVAL_S = 60.0
+
 # Valid relation types — must match the set in mcp/tools/relations.py.
 _VALID_RELATION_TYPES = {
     "link",
@@ -209,11 +228,20 @@ class DuckDBStore:
         auto_link_enabled: bool = False,
         auto_link_threshold: float = 0.85,
         auto_link_max_links: int = 5,
+        memory_limit_mb: int | None = _DEFAULT_MEMORY_LIMIT_MB,
+        threads: int | None = _DEFAULT_THREADS,
     ) -> None:
         self._db_path = db_path
         self._embedding_provider = embedding_provider
         self._s3_region = s3_region
         self._s3_endpoint = s3_endpoint
+        # Explicit DuckDB resource caps applied at connection init (issue #655).
+        # ``None`` for either leaves DuckDB's default in place (host-RAM-sized
+        # buffer manager / one thread per core).  Non-positive values are
+        # treated as "unset" so a misconfiguration cannot pass an invalid
+        # PRAGMA to DuckDB.
+        self._memory_limit_mb = memory_limit_mb if memory_limit_mb and memory_limit_mb > 0 else None
+        self._threads = threads if threads and threads > 0 else None
         self._conn: duckdb.DuckDBPyConnection | None = None
         # Independent read-only handle on the same database, used by health
         # probes (``probe_readiness``/``count_entries``/``list_feed_sources``)
@@ -285,6 +313,12 @@ class DuckDBStore:
         # MCP/webhook layer reads it to fail fast with ``503 Retry-After``
         # and to report ``degraded`` status without waiting on a probe.
         self._terminal_failure: BaseException | None = None
+        # Background idle-checkpoint loop (issue #655).  ``None`` until
+        # ``start_idle_checkpoint`` is called from inside a running event loop
+        # (e.g. the server lifespan).  Flushes the WAL during quiet windows so
+        # it never grows unbounded under continuous concurrent writers.
+        self._idle_checkpoint_task: asyncio.Task[None] | None = None
+        self._idle_checkpoint_interval = _DEFAULT_IDLE_CHECKPOINT_INTERVAL_S
 
     # ------------------------------------------------------------------
     # Cloud path helpers
@@ -316,10 +350,36 @@ class DuckDBStore:
         parent = Path(self._db_path).parent
         parent.mkdir(parents=True, exist_ok=True)
 
+    def _apply_resource_pragmas(self, conn: duckdb.DuckDBPyConnection) -> None:
+        """Apply explicit ``memory_limit`` / ``threads`` PRAGMAs (issue #655).
+
+        DuckDB otherwise sizes its buffer manager off total host RAM and spawns
+        one worker thread per core — both unbounded, which under a concurrent
+        feed poll has OOM-killed the process (the limit was bumped
+        512MB → 1024 → 2048 in prior incidents) and oversubscribed the CPU.
+        Setting an explicit ~1GB ceiling and a small thread count keeps the
+        writer's resource use bounded and predictable.
+
+        Best-effort: a PRAGMA failure (e.g. an exotic DuckDB build) is logged
+        and swallowed so the store still opens with DuckDB's defaults rather
+        than failing init.
+        """
+        if self._memory_limit_mb is not None:
+            try:
+                conn.execute(f"PRAGMA memory_limit='{self._memory_limit_mb}MB'")
+            except duckdb.Error as exc:  # pragma: no cover — exotic builds only
+                logger.warning("Could not set DuckDB memory_limit PRAGMA: %s", exc)
+        if self._threads is not None:
+            try:
+                conn.execute(f"PRAGMA threads={self._threads}")
+            except duckdb.Error as exc:  # pragma: no cover — exotic builds only
+                logger.warning("Could not set DuckDB threads PRAGMA: %s", exc)
+
     def _open_connection(self) -> duckdb.DuckDBPyConnection:
         """Open (or create) the DuckDB database and return a connection."""
         self._ensure_parent_dir()
         conn = duckdb.connect(self._db_path)
+        self._apply_resource_pragmas(conn)
 
         # Lock down permissions only for local files that exist on disk.
         is_local = (
@@ -1178,6 +1238,9 @@ class DuckDBStore:
         Holds ``_conn_lock`` so the close cannot race an in-flight
         ``_run_sync`` worker still mutating the connection (issue #416).
         """
+        # Stop the idle-checkpoint loop *before* taking the conn lock so it can
+        # never run a CHECKPOINT against a connection we are about to close.
+        await self.stop_idle_checkpoint()
         if self._conn is None:
             return
         # Once shutdown begins, stop accepting new deferred touches so a read
@@ -1215,6 +1278,101 @@ class DuckDBStore:
             self._conn = None
             self._initialized = False
             logger.info("DuckDBStore connection closed")
+
+    # ------------------------------------------------------------------
+    # Idle-checkpoint loop (issue #655)
+    # ------------------------------------------------------------------
+
+    def start_idle_checkpoint(
+        self, *, interval_s: float = _DEFAULT_IDLE_CHECKPOINT_INTERVAL_S
+    ) -> None:
+        """Start a background task that checkpoints the WAL when the writer is idle.
+
+        Under continuous concurrent writes (the feed poller + gh-sync), the
+        per-write ``CHECKPOINT`` can never acquire the single DuckDB writer lock,
+        so the WAL grows unbounded and every read replays an ever-larger WAL —
+        read latency then degrades monotonically (issue #655).  This loop issues
+        a *plain* ``CHECKPOINT`` only during quiet windows: it skips entirely
+        whenever ``_conn_lock`` is held (a writer is active), so it never blocks
+        or queues behind a writer, and it never escalates to ``FORCE CHECKPOINT``
+        (which can deadlock under contention — issue #648).
+
+        Must be called from inside a running event loop (e.g. the server
+        lifespan).  Idempotent: a second call while the loop is already running
+        is a no-op.  No-op for in-memory databases, which have no WAL to flush.
+        """
+        if self._db_path == ":memory:":
+            return
+        if self._idle_checkpoint_task is not None and not self._idle_checkpoint_task.done():
+            return
+        self._idle_checkpoint_interval = interval_s
+        self._idle_checkpoint_task = asyncio.create_task(
+            self._idle_checkpoint_loop(), name="duckdb-idle-checkpoint"
+        )
+
+    async def stop_idle_checkpoint(self) -> None:
+        """Cancel the background idle-checkpoint loop if it is running."""
+        task = self._idle_checkpoint_task
+        if task is None:
+            return
+        self._idle_checkpoint_task = None
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    async def _idle_checkpoint_loop(self) -> None:
+        """Periodically flush the WAL during quiet windows (issue #655)."""
+        while True:
+            try:
+                await asyncio.sleep(self._idle_checkpoint_interval)
+            except asyncio.CancelledError:
+                raise
+            # Shield the sweep so a cancel (from stop_idle_checkpoint/close)
+            # waits for any in-flight CHECKPOINT worker to finish instead of
+            # releasing _conn_lock mid-checkpoint and leaving an orphan thread
+            # racing close()'s connection teardown (issue #416).
+            sweep = asyncio.ensure_future(self._idle_checkpoint_once())
+            try:
+                await asyncio.shield(sweep)
+            except asyncio.CancelledError:
+                with contextlib.suppress(Exception):
+                    await sweep
+                raise
+            except Exception:  # noqa: BLE001 — a stray error must not kill the loop
+                logger.debug("Idle checkpoint sweep failed (non-fatal)", exc_info=True)
+
+    async def _idle_checkpoint_once(self) -> None:
+        """Run one plain CHECKPOINT iff the writer lock is currently free.
+
+        The ``locked()`` pre-check guarantees we never queue behind an active
+        writer: if a write is in flight we simply skip this sweep and try again
+        next interval.  Holding ``_conn_lock`` for the (non-blocking) plain
+        ``CHECKPOINT`` keeps the single-connection-one-thread invariant
+        (issue #416).  Failures are swallowed — the WAL just stays larger until
+        the next quiet window.
+        """
+        conn = self._conn
+        if conn is None or self._terminal_failure is not None:
+            return
+        lock = self._get_conn_lock()
+        # Skip rather than wait: a held lock means a writer is active, which is
+        # exactly when a plain CHECKPOINT would fail anyway.  Never block here.
+        if lock.locked():
+            logger.debug("Idle checkpoint skipped — writer active")
+            return
+        async with lock:
+            conn = self._conn
+            if conn is None:
+                return
+            try:
+                await asyncio.to_thread(conn.execute, "CHECKPOINT")
+                self._checkpoint_failures = 0
+                logger.debug("Idle checkpoint flushed WAL")
+            except duckdb.Error as exc:
+                # Another *connection*/process (e.g. gh-sync) may still hold a
+                # write transaction; plain CHECKPOINT fails fast and we retry
+                # next interval.  Never escalate to FORCE (issue #648).
+                logger.debug("Idle checkpoint skipped (non-fatal): %s", exc)
 
     @property
     def connection(self) -> duckdb.DuckDBPyConnection:

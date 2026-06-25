@@ -1582,3 +1582,77 @@ class TestGitHubReleasesPollEndToEnd:
 
         called_url = client.get.call_args.args[0]
         assert called_url.endswith("/repos/owner/repo/releases")
+
+
+# ---------------------------------------------------------------------------
+# FeedPoller.poll — bounded source concurrency (issue #655)
+# ---------------------------------------------------------------------------
+
+
+class TestFeedPollerConcurrencyBound:
+    """The per-cycle fan-out is bounded by a semaphore (issue #655).
+
+    An unbounded ``asyncio.gather`` over ~79 sources saturated the thread pool
+    and the single DuckDB writer lock; the poller now caps how many sources are
+    fetched + scored + stored concurrently.  These tests assert the bound holds
+    while still polling every source.
+    """
+
+    def _rss_source(self, idx: int) -> FeedSourceConfig:
+        return FeedSourceConfig(
+            url=f"https://example.com/rss/{idx}",
+            source_type="rss",
+            trust_weight=1.0,
+        )
+
+    async def test_concurrency_never_exceeds_limit(self) -> None:
+        import threading
+
+        n_sources = 20
+        max_concurrent = 5
+        sources = [self._rss_source(i) for i in range(n_sources)]
+        store = _make_store(feed_sources=[_source_to_dict(s) for s in sources])
+        cfg = _make_config(sources=sources, digest_threshold=1.1)  # store nothing
+
+        # Track in-flight fetches.  ``adapter.fetch`` runs in a worker thread via
+        # ``asyncio.to_thread`` so several can truly overlap — guard the counters
+        # with a lock and sleep briefly so overlap is observable if it occurs.
+        lock = threading.Lock()
+        in_flight = 0
+        peak = 0
+
+        def _fetch() -> list[FeedItem]:
+            nonlocal in_flight, peak
+            with lock:
+                in_flight += 1
+                peak = max(peak, in_flight)
+            import time
+
+            time.sleep(0.02)
+            with lock:
+                in_flight -= 1
+            return [_make_feed_item(item_id="x")]
+
+        def _build(*_args: object, **_kwargs: object) -> MagicMock:
+            adapter = MagicMock()
+            adapter.fetch.side_effect = _fetch
+            return adapter
+
+        with patch("distillery.feeds.poller._build_adapter", side_effect=_build):
+            poller = FeedPoller(store=store, config=cfg, max_concurrent_sources=max_concurrent)
+            summary = await poller.poll()
+
+        # Every source was still polled …
+        assert summary.sources_polled == n_sources
+        # … but never more than the configured number at once.
+        assert peak <= max_concurrent
+        # The bound was actually exercised (sanity: more than one ran at a time).
+        assert peak > 1
+
+    async def test_limit_clamped_to_at_least_one(self) -> None:
+        sources = [self._rss_source(0)]
+        store = _make_store(feed_sources=[_source_to_dict(s) for s in sources])
+        cfg = _make_config(sources=sources)
+        # A non-positive limit must be clamped to 1, never deadlock the poll.
+        poller = FeedPoller(store=store, config=cfg, max_concurrent_sources=0)
+        assert poller._max_concurrent_sources == 1
