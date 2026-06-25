@@ -77,6 +77,8 @@ This relations lookup is best-effort — never block the briefing on it. Treat a
 
 Collect correction pairs `(corrector_entry, original_entry)`, limit to 5 chains. If no candidate entries carry correction metadata, omit the Corrections section.
 
+> Scope: this surfaces corrections found among the 50 most recent entries (the Step 4a fetch) — the same coverage the briefing has always had. There is no project-wide metadata filter, so older corrections on very active projects may not appear; the section reflects recent correction activity, not an exhaustive audit.
+
 **4c. Expiring soon (non-fatal):**
 
 From the 50 entries fetched in Step 4a, post-filter for entries where `metadata.expires_at` is set and falls within the next 7 days (between today and today + 7 days inclusive). Sort ascending by `expires_at`. If no entries have an upcoming `expires_at`, omit the Expiring Soon section.
@@ -113,7 +115,13 @@ If the response contains more than one author group, set `team_mode = true`. If 
 
 Only execute if `team_mode = true`.
 
-Reuse the 50 entries already fetched in Step 4a (same project, newest-first) — no extra `distillery_list` call is needed, since summary mode carries `author`, `entry_type`, and `created_at`. Filter to those created within the past 7 days, group by author, and for each author count entries by `entry_type`. If Step 4a yielded no entries within the past 7 days, omit the Team Activity section.
+Issue a dedicated 7-day-windowed query — do NOT reuse the Step 4a newest-50 sample, which undercounts author activity once a project has more than 50 entries in the window:
+
+```python
+distillery_list(project=<project>, date_from=<now - 7 days, ISO 8601>, output_mode="summary", limit=200)
+```
+
+Summary mode carries `author`, `entry_type`, and `created_at`. Group the returned entries by author and, for each author, count entries by `entry_type`. The `limit=200` cap bounds the call while covering the 7-day window for all but the most active projects (far beyond the prior newest-N sample). If the query returns nothing, omit the Team Activity section.
 
 **4h. Related from team (team mode only, non-fatal):**
 
@@ -342,7 +350,7 @@ Generated: 2026-04-08 09:15 UTC
 - Team mode is activated by `--team` flag or auto-detected: `distillery_list(group_by="author", project=<project>)` returning >1 author group
 - Header shows `(solo)` or `(team)` based on detected mode
 - Team sections (6, 7, 8) are additive — solo sections are always rendered unchanged
-- Team activity groups entries by author from the past 7 days only — entries older than 7 days are excluded
+- Team activity uses a dedicated 7-day-windowed `distillery_list(date_from=<now-7d>, output_mode="summary", limit=200)` query (NOT the Step 4a newest-50 sample, which would undercount busy projects), grouped by author; entries older than 7 days are excluded
 - Related from team uses `distillery_search` without author filter — all authors are included
 - Pending review uses `status="pending_review"` — limited to 5 entries
 - Team aggregate call failure is non-fatal — fall back to solo mode
