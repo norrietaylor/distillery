@@ -206,6 +206,62 @@ class DistilleryStore(Protocol):
         """
         ...
 
+    async def find_similar_by_id(
+        self,
+        source_entry_id: str,
+        threshold: float,
+        limit: int,
+    ) -> list[SearchResult] | None:
+        """Single-seed similarity using the entry's STORED embedding.
+
+        Reuses the entry's already-computed embedding vector — no re-embed and
+        no embedding-budget spend.
+
+        Args:
+            source_entry_id: UUID string of the entry whose stored embedding is
+                used as the similarity probe.
+            threshold: Minimum cosine similarity (inclusive) in ``[0.0, 1.0]``.
+            limit: Maximum number of results to return.
+
+        Returns:
+            List of ``SearchResult`` objects (archived excluded; the seed itself
+            is NOT excluded — the caller handles self/linked exclusion), sorted
+            by descending score; or ``None`` when the entry is missing or has no
+            stored embedding (so the caller can fall back to the embed path).
+        """
+        ...
+
+    async def find_similar_by_ids(
+        self,
+        source_entry_ids: list[str],
+        threshold: float,
+        limit: int,
+        exclude_linked: bool,
+    ) -> dict[str, list[SearchResult]]:
+        """Batch similarity using each entry's STORED embedding.
+
+        For a list of source entry ids, reuses each entry's already-stored
+        embedding vector (no re-embed, no embedding-budget spend) and runs all
+        similarity queries in one read acquisition.
+
+        Args:
+            source_entry_ids: UUID strings of the seed entries.
+            threshold: Minimum cosine similarity (inclusive) in ``[0.0, 1.0]``.
+            limit: Maximum number of results to return per seed.
+            exclude_linked: When ``True``, results for each seed also exclude
+                ids linked to that seed via ``entry_relations`` (either
+                direction, any relation_type). The seed itself is always
+                self-excluded.
+
+        Returns:
+            Dict keyed by every requested id; each value is the list of
+            ``SearchResult`` objects for that seed (archived, self, and — when
+            *exclude_linked* — linked ids removed), sorted by descending score
+            and capped at *limit*. A seed with no stored embedding maps to an
+            empty list rather than raising.
+        """
+        ...
+
     @overload
     async def list_entries(
         self,
