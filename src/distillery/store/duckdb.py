@@ -2608,16 +2608,28 @@ class DuckDBStore:
                 where_sql = "WHERE " + " AND ".join(where_clauses)
 
             # --- Vector search (always performed) ---
-            # Use array_cosine_distance + ASC ordering so DuckDB's HNSW cosine
-            # index (migration 6) can serve the top-k via an index scan instead
-            # of a full-table cosine scan. distance = 1 - cosine_similarity, so
-            # ascending distance is the same ordering as descending similarity.
+            # Unfiltered cosine queries order by array_cosine_distance ASC so
+            # DuckDB's HNSW cosine index (migration 6) can serve the top-k via
+            # an index scan. DuckDB's HNSW applies WHERE predicates AFTER the
+            # index scan (post-filtering), which can return fewer than `limit`
+            # rows once a filter is present, so filtered queries stay on the
+            # exact array_cosine_similarity scan to preserve the full result
+            # count and ordering (CR review, PR #693). Both expressions yield
+            # the same displayed cosine similarity in [0, 1].
+            dims = self._embedding_provider.dimensions
+            if where_sql:
+                score_select = f"array_cosine_similarity(embedding, ?::FLOAT[{dims}]) AS score"
+                order_sql = "ORDER BY score DESC"
+                score_col = "score"
+            else:
+                score_select = f"array_cosine_distance(embedding, ?::FLOAT[{dims}]) AS distance"
+                order_sql = "ORDER BY distance ASC"
+                score_col = "distance"
             sql = (
-                f"SELECT {self._ENTRY_COLUMNS}, "
-                f"array_cosine_distance(embedding, ?::FLOAT[{self._embedding_provider.dimensions}]) AS distance "
+                f"SELECT {self._ENTRY_COLUMNS}, {score_select} "
                 f"FROM entries "
                 f"{where_sql} "
-                f"ORDER BY distance ASC "
+                f"{order_sql} "
                 f"LIMIT ?"
             )
             # Fetch more candidates for fusion when hybrid is active.
@@ -2634,7 +2646,11 @@ class DuckDBStore:
             cosine_score: dict[str, float] = {}
             for rank, row in enumerate(rows, start=1):
                 row_dict = dict(zip(col_names, row, strict=True))
-                distance = float(row_dict.pop("distance"))
+                raw = float(row_dict.pop(score_col))
+                # Map cosine similarity in [-1, 1] to a displayed score in
+                # [0, 1]. array_cosine_distance = 1 - similarity, so both paths
+                # produce identical scores: (similarity + 1) / 2.
+                similarity = raw if score_col == "score" else 1.0 - raw
                 entry = self._row_to_entry(
                     tuple(row_dict.values()),
                     list(row_dict.keys()),
@@ -2642,10 +2658,7 @@ class DuckDBStore:
                 entry_map[entry.id] = entry
                 vector_ranks[entry.id] = rank
                 entry_created[entry.id] = entry.created_at
-                # distance = 1 - cosine_similarity; map similarity [-1, 1] to a
-                # displayed score in [0, 1] => (2 - distance) / 2. Identical to
-                # the previous (raw_cosine + 1) / 2 mapping.
-                cosine_score[entry.id] = (2.0 - distance) / 2.0
+                cosine_score[entry.id] = (similarity + 1.0) / 2.0
 
             if not use_hybrid:
                 # Vector-only: return raw cosine similarity (mapped to [0, 1]).
@@ -2654,7 +2667,7 @@ class DuckDBStore:
                 results: list[SearchResult] = []
                 for row in rows[:limit]:
                     row_dict = dict(zip(col_names, row, strict=True))
-                    row_dict.pop("distance")
+                    row_dict.pop(score_col)
                     eid = row_dict["id"]
                     results.append(SearchResult(entry=entry_map[eid], score=cosine_score[eid]))
                 return results
