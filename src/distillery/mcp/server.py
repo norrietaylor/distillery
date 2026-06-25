@@ -1059,6 +1059,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         conflict_check: bool = False,
         llm_responses: list[dict[str, Any]] | None = None,
         source_entry_id: str | None = None,
+        source_entry_ids: list[str] | None = None,
         exclude_linked: bool = False,
         accept_action: str | None = None,
     ) -> list[types.TextContent]:
@@ -1083,17 +1084,28 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             LLM conflict verdicts. Each item: { entry_id: str, is_conflict: bool, reasoning: str }.
           - source_entry_id (str, optional): Anchor entry whose content is used
             as the similarity probe when content is omitted, and whose id is
-            self-excluded from results. Required when exclude_linked=true.
+            self-excluded from results. Required when exclude_linked=true. When
+            set without content/dedup/conflict/accept_action, reuses the entry's
+            STORED embedding (no re-embed, no embedding-budget spend).
+          - source_entry_ids (list[str], optional): BATCH mode. Up to 50 seed
+            ids. Reuses each seed's STORED embedding (no re-embed, no
+            embedding-budget spend) and runs all similarity queries in ONE
+            round-trip. Standalone — cannot be combined with content,
+            source_entry_id, dedup_action, conflict_check, accept_action, or
+            llm_responses (INVALID_PARAMS). Honours threshold, limit, and
+            exclude_linked per seed; each seed always self-excludes.
           - exclude_linked (bool, optional, default=false): When true, filters out
-            entries already linked to source_entry_id via entry_relations
-            (any direction, any relation_type). Surfaces hidden connections.
+            entries already linked to source_entry_id (or, in batch mode, to each
+            seed) via entry_relations (any direction, any relation_type).
+            Surfaces hidden connections.
           - accept_action (str, optional): When set, persists an
             entry_relations row from source_entry_id to each result above
             threshold. Valid: ['link' → related, 'merge' → merge_source,
             'duplicate' → duplicate]. Requires source_entry_id. Idempotent via
             the unique (from_id, to_id, relation_type) index.
 
-        RETURNS (success): { results: [{ score: float, entry: {...} }], count: int, threshold: float,
+        RETURNS (success, single/content): { results: [{ score: float, entry: {...} }], count: int,
+          threshold: float,
           dedup?: { action: str, similar_entries: list },
           conflict_candidates?: list, conflict_evaluation?: dict,
           excluded_linked_count?: int }
@@ -1102,6 +1114,12 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
           (when exclude_linked=true) and the self-exclusion of source_entry_id
           itself (when source_entry_id == candidate); a non-zero value is
           therefore possible even with exclude_linked=false.
+        RETURNS (success, batch / source_entry_ids):
+          { results_by_seed: { "<seed_id>": { results: [{ score: float, entry: {...} }],
+              count: int, excluded_count: int } },
+            seed_count: int, threshold: float }
+          A seed with no stored embedding maps to an empty results list (not an
+          error). excluded_count is best-effort (reported as 0 in batch mode).
         RETURNS (error): { error: true, code: "INVALID_PARAMS" | "NOT_FOUND" | "BUDGET_EXCEEDED" | "INTERNAL", message: "..." }
 
         RELATED: distillery_store (stores with automatic dedup/conflict checks),
@@ -1119,6 +1137,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 content=content,
                 llm_responses=llm_responses,
                 source_entry_id=source_entry_id,
+                source_entry_ids=source_entry_ids,
                 accept_action=accept_action,
             ),
         )

@@ -18,7 +18,7 @@ effort: high
 
 Investigate compiles comprehensive context on a topic by executing a 4-phase retrieval: seed search, relationship expansion (with hidden-connection gap fill), tag expansion, and gap filling. It combines semantic search with explicit relationship traversal to surface context that keyword search alone misses.
 
-<!-- Recent changes: Phases 1 and 2 are fused into a single distillery_search(expand_graph=true, expand_hops=2, output_mode="full") call — server-side BFS returns the seeds plus their 2-hop graph neighbours (each with provenance/depth/parent_id/relation_type and inline content) in one round-trip, replacing the prior 1 search + up-to-20 traverse + N get fan-out (#651). Phase 2b find_similar calls run in bounded parallel batches (~4) and reuse the seed's stored embedding (source_entry_id → no re-embed, no budget spend). Relationship traversal is skipped when the seed set has no relations (sparse-graph short-circuit). -->
+<!-- Recent changes: Phases 1 and 2 are fused into a single distillery_search(expand_graph=true, expand_hops=2, output_mode="full") call — server-side BFS returns the seeds plus their 2-hop graph neighbours (each with provenance/depth/parent_id/relation_type and inline content) in one round-trip, replacing the prior 1 search + up-to-20 traverse + N get fan-out (#651). Phase 2b now issues a single batched distillery_find_similar(source_entry_ids=[...]) call (top ≤20 seeds) that reuses each seed's stored embedding (no re-embed, no budget spend) and runs all seeds server-side in one round-trip, returning results_by_seed — replacing the prior per-seed fan-out in bounded parallel batches (~4); the 502-under-concurrency concern is moot now that it is one call. Relationship traversal is skipped when the seed set has no relations (sparse-graph short-circuit). -->
 
 
 ## When to Use
@@ -130,28 +130,26 @@ returns not found for the `--entry` uuid, report the error and stop.
 
 **Phase 2b — Hidden Connections (gap fill via similarity):**
 
-For each **seed** (a Phase 1 `provenance="search"` entry), surface entries that are semantically similar to the seed but are NOT already linked to it via any relation (i.e., absent from `entry_relations` in either direction):
+For the **seeds** (Phase 1 `provenance="search"` entries), surface entries that are semantically similar to each seed but are NOT already linked to it via any relation (i.e., absent from `entry_relations` in either direction). Issue **ONE batched call** for up to the top 20 seeds by Phase 1 relevance score:
 
 ```python
 distillery_find_similar(
-    source_entry_id="<seed_id>",
+    source_entry_ids=[<top ≤20 seed ids by Phase-1 relevance>],
     exclude_linked=True,
     threshold=0.7,
     limit=5,
 )
 ```
 
-Passing `source_entry_id` reuses the seed's **already-stored embedding** — no re-embedding round-trip and no embedding-budget spend.
+Batch mode reuses each seed's **already-stored embedding** — no re-embedding round-trip and no embedding-budget spend — and runs all seeds in a single server-side read, returning everything in **one round-trip**. Cap at the top 20 seeds; skip the rest. When the sparse-graph short-circuit fired (Phase 1-2 `expanded_count` = 0), Phase 2b is the primary expansion lever — still run it.
 
-**Issue these calls in bounded parallel batches of ~4** (start the next batch only after the current returns). The seeds are independent, so batching is far faster than one-call-per-turn; keep batches small — the hosted endpoint has returned `Streamable HTTP error` (502) under heavier concurrency. Cap Phase 2b at the top 20 seeds by Phase 1 relevance score; skip the rest. When the sparse-graph short-circuit fired (Phase 1-2 `expanded_count` = 0), Phase 2b is the primary expansion lever — still run it.
-
-The response envelope includes `excluded_linked_count` (number of linked entries filtered out before scoring). The remaining hits are unlinked-but-semantically-related candidates.
+The response is `results_by_seed`, a map keyed by each seed id: `{ "<seed_id>": { results: [...], count, excluded_count } }`, plus `seed_count` and `threshold`. Each seed always self-excludes; with `exclude_linked=True`, linked entries are filtered out per seed. A seed with no stored embedding maps to an empty `results` list (not an error). Iterate `results_by_seed`: the hits are unlinked-but-semantically-related candidates.
 
 Add each returned entry id (not already in the result set) tagged as discovered in Phase 2b ("potentially related"). Do NOT add these to the Relationship Map — they have no recorded edge. Cite them in the Context Summary and the Sources table with a `potentially related` marker so the user knows the connection is inferred from embeddings, not stored as a relation.
 
-Report: `Phase 2b (Hidden Connections): <N> potentially related entries across <S> seeds (excluded_linked total: <X>).`
+Report: `Phase 2b (Hidden Connections): <N> potentially related entries across <S> seeds.`
 
-If `distillery_find_similar` returns zero entries for every seed, note this in the Phase 2b report and continue.
+If `results_by_seed` yields zero entries for every seed, note this in the Phase 2b report and continue.
 
 ---
 
@@ -323,7 +321,7 @@ Investigated "<topic>": <N> entries across <phases> phases, <K> relationship edg
 - Deduplicate the result set by entry ID across all phases — each entry counted once
 - Record which phase first discovered each entry
 - Phases 1-2 use one `distillery_search(expand_graph=true, expand_hops=2, output_mode="full")` call (server-side BFS); the `--entry` variant uses `distillery_get` + one `distillery_relations(action="traverse", hops=2, direction="both")`. Do not recurse into graph-expanded entries.
-- Phase 2b runs `distillery_find_similar(source_entry_id=<seed>, exclude_linked=true, threshold=0.7, limit=5)` per seed in bounded parallel batches of ~4, capped to the top 20 seeds; `source_entry_id` reuses the stored embedding (no re-embed)
+- Phase 2b runs ONE batched `distillery_find_similar(source_entry_ids=[<top ≤20 seeds>], exclude_linked=true, threshold=0.7, limit=5)` call (capped to the top 20 seeds); batch mode reuses each seed's stored embedding (no re-embed, no budget) and returns all seeds in one round-trip as `results_by_seed`
 - Phase 2b candidates are tagged `potentially related` — never include them in the Relationship Map (they have no stored edge); cite them with `[Entry <short-id>, potentially related]` in the Context Summary
 - Loop limits: up to 3 `distillery_search` calls in Phase 3, up to 3 targeted searches in Phase 4
 - Track relation edges separately from the result set entry count
@@ -331,7 +329,7 @@ Investigated "<topic>": <N> entries across <phases> phases, <K> relationship edg
 - If `--entry <uuid>` is provided and `distillery_get` returns not found, report the error and stop
 - Apply `--project` filter to all `distillery_search` calls in Phase 1 and Phase 4 when provided
 - `distillery_relations` returning empty `nodes`/`edges` for an entry is not an error — record 0 edges and continue
-- `distillery_find_similar` returning zero entries (after `exclude_linked` filtering) is not an error — record 0 candidates for that seed and continue
+- `distillery_find_similar` batch mode returning an empty `results` list for a seed (after `exclude_linked` filtering, or because the seed has no stored embedding) is not an error — record 0 candidates for that seed and continue
 - On MCP errors, see CONVENTIONS.md error handling — display and stop
 - No retry loops — report errors and stop
 - Display-only — this skill never stores output

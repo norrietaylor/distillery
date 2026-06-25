@@ -2805,6 +2805,132 @@ class DuckDBStore:
         # independent read handle so it never queues behind a write (#663).
         return await self._run_read(_sync)
 
+    def _similar_from_embedding(
+        self,
+        conn: Any,
+        embedding: list[float],
+        threshold: float,
+        limit: int,
+    ) -> list[SearchResult]:
+        """Cosine-similarity query for a precomputed embedding.
+
+        Mirrors :meth:`find_similar`'s SQL exactly — excludes archived
+        (soft-deleted) entries and converts the API's normalized ``[0, 1]``
+        threshold to DuckDB's raw ``[-1, 1]`` cosine range — but takes a vector
+        directly instead of embedding ``content``. Runs on whatever handle the
+        caller passes; the public batch entry points wrap it in ``_run_read``.
+        """
+        from distillery.store.protocol import SearchResult
+
+        dims = self._embedding_provider.dimensions
+        sql = (
+            f"SELECT {self._ENTRY_COLUMNS}, "
+            f"array_cosine_similarity(embedding, ?::FLOAT[{dims}]) AS score "
+            f"FROM entries "
+            f"WHERE status != ? "
+            f"AND array_cosine_similarity(embedding, ?::FLOAT[{dims}]) >= ? "
+            f"ORDER BY score DESC "
+            f"LIMIT ?"
+        )
+        # Convert normalized [0, 1] threshold to raw [-1, 1] for SQL comparison.
+        raw_threshold = threshold * 2.0 - 1.0
+        params: list[Any] = [
+            embedding,
+            EntryStatus.ARCHIVED.value,
+            embedding,
+            raw_threshold,
+            limit,
+        ]
+        result = conn.execute(sql, params)
+        col_names = [desc[0] for desc in result.description]
+
+        results: list[SearchResult] = []
+        for row in result.fetchall():
+            row_dict = dict(zip(col_names, row, strict=True))
+            raw_score = float(row_dict.pop("score"))
+            score = (raw_score + 1.0) / 2.0
+            entry = self._row_to_entry(
+                tuple(row_dict.values()),
+                list(row_dict.keys()),
+            )
+            results.append(SearchResult(entry=entry, score=score))
+        return results
+
+    async def find_similar_by_id(
+        self,
+        source_entry_id: str,
+        threshold: float,
+        limit: int,
+    ) -> list[SearchResult] | None:
+        """Single-seed similarity using the entry's STORED embedding.
+
+        Reuses the entry's already-computed embedding vector — no re-embed and
+        no embedding-budget spend. Returns ``None`` when the entry is missing or
+        has no stored embedding (so the caller can fall back to the embed path);
+        otherwise returns the cosine-similarity matches (archived excluded,
+        self NOT excluded — the caller handles self/linked exclusion to preserve
+        the existing handler behaviour). One ``_run_read`` acquisition.
+        """
+
+        def _sync(conn: Any) -> list[SearchResult] | None:
+            row = conn.execute(
+                "SELECT embedding FROM entries WHERE id = ?", [source_entry_id]
+            ).fetchone()
+            if row is None or row[0] is None:
+                return None
+            vec = list(row[0])
+            return self._similar_from_embedding(conn, vec, threshold, limit)
+
+        return await self._run_read(_sync)
+
+    async def find_similar_by_ids(
+        self,
+        source_entry_ids: list[str],
+        threshold: float,
+        limit: int,
+        exclude_linked: bool,
+    ) -> dict[str, list[SearchResult]]:
+        """Batch similarity using each entry's STORED embedding.
+
+        For a LIST of source entry ids, reuses each entry's already-stored
+        embedding vector (no re-embed, no embedding-budget spend) and runs ALL
+        similarity queries in ONE ``_run_read`` acquisition. For each id: fetch
+        its stored embedding; if NULL/missing, map to ``[]``; otherwise run the
+        cosine query, always self-exclude the seed id, and — when
+        *exclude_linked* — also exclude ids linked to the seed via
+        ``entry_relations`` (``from_id`` or ``to_id`` matches the seed, either
+        direction). Over-fetches ``limit + 50`` candidates before exclusion so up
+        to *limit* survive, then truncates to *limit*.
+
+        Returns a dict keyed by every requested id (preserving duplicates is not
+        guaranteed — a later id overwrites an earlier identical one).
+        """
+
+        def _sync(conn: Any) -> dict[str, list[SearchResult]]:
+            out: dict[str, list[SearchResult]] = {}
+            for sid in source_entry_ids:
+                row = conn.execute("SELECT embedding FROM entries WHERE id = ?", [sid]).fetchone()
+                if row is None or row[0] is None:
+                    out[sid] = []
+                    continue
+                vec = list(row[0])
+                candidates = self._similar_from_embedding(conn, vec, threshold, limit + 50)
+                exclude = {sid}
+                if exclude_linked:
+                    rels = conn.execute(
+                        "SELECT from_id, to_id FROM entry_relations WHERE from_id = ? OR to_id = ?",
+                        [sid, sid],
+                    ).fetchall()
+                    for f, t in rels:
+                        if f != sid:
+                            exclude.add(f)
+                        if t != sid:
+                            exclude.add(t)
+                out[sid] = [r for r in candidates if r.entry.id not in exclude][:limit]
+            return out
+
+        return await self._run_read(_sync)
+
     @overload
     async def list_entries(
         self,

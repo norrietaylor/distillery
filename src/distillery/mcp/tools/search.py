@@ -48,6 +48,12 @@ _ACCEPT_ACTION_TO_RELATION_TYPE: dict[str, str] = {
     "duplicate": "duplicate",
 }
 
+# Maximum number of seed ids accepted by the ``distillery_find_similar`` batch
+# mode (``source_entry_ids``). Bounds one round-trip's work to the /investigate
+# Phase 2b cap (top 20 seeds) plus headroom; larger lists are rejected with
+# INVALID_PARAMS.
+_FIND_SIMILAR_BATCH_MAX_SEEDS = 50
+
 # ---------------------------------------------------------------------------
 # Output-mode shaping (issue #631)
 # ---------------------------------------------------------------------------
@@ -463,6 +469,13 @@ async def _handle_find_similar(
     """
     from distillery.mcp.budget import EmbeddingBudgetError
 
+    # --- batch mode (source_entry_ids) ------------------------------------
+    # Reuses each seed's STORED embedding — no re-embed, no budget spend — and
+    # runs all similarity queries in ONE store read acquisition. Standalone:
+    # mutually exclusive with the embed-based modes below.
+    if "source_entry_ids" in arguments and arguments.get("source_entry_ids") is not None:
+        return await _handle_find_similar_batch(store, arguments)
+
     # --- new graph-extension parameters (parsed first so we can use them
     # when validating content/source_entry_id requirements below) ---------
     err_source_id_type = validate_type(arguments, "source_entry_id", str, "string")
@@ -560,31 +573,59 @@ async def _handle_find_similar(
             "Field 'llm_responses' requires conflict_check=true",
         )
 
-    # --- embedding budget check (1 embed call) ----------------------------
-    if cfg is not None:
+    # --- stored-vector fast path (single source_entry_id) -------------------
+    # When the probe is a source entry's own content (no explicit ``content``)
+    # and no embed-dependent mode is active, reuse the seed's STORED embedding
+    # via ``find_similar_by_id`` — skipping both the Jina round-trip and the
+    # embedding-budget spend. Falls back to the embed path when the entry has no
+    # stored embedding (returns None).
+    search_results = None
+    can_reuse_stored_vector = (
+        source_entry_id is not None
+        and not content_provided
+        and not dedup_action
+        and not conflict_check
+        and accept_action is None
+    )
+    if can_reuse_stored_vector:
         try:
-            await store.record_embedding_usage(
-                count=1, daily_limit=cfg.rate_limit.embedding_budget_daily
+            assert source_entry_id is not None
+            search_results = await store.find_similar_by_id(
+                source_entry_id=source_entry_id, threshold=threshold, limit=limit
             )
-        except EmbeddingBudgetError:
-            return error_response("BUDGET_EXCEEDED", "Embedding budget exceeded")
+        except Exception:  # noqa: BLE001
+            logger.exception("Error in distillery_find_similar (stored-vector path)")
+            return error_response("INTERNAL", "find_similar failed")
 
-    try:
-        search_results = await store.find_similar(content=content, threshold=threshold, limit=limit)
-    except EmbeddingProviderError as exc:
-        logger.warning(
-            "Upstream embedding provider failed during find_similar "
-            "(provider=%s endpoint=%s status=%s retry_after=%s): %s",
-            exc.provider,
-            exc.endpoint,
-            exc.status_code,
-            exc.retry_after,
-            exc,
-        )
-        return upstream_error_response(exc)
-    except Exception:  # noqa: BLE001
-        logger.exception("Error in distillery_find_similar")
-        return error_response("INTERNAL", "find_similar failed")
+    # --- embed path (content probe or no stored embedding) -----------------
+    if search_results is None:
+        # 1 embed call.
+        if cfg is not None:
+            try:
+                await store.record_embedding_usage(
+                    count=1, daily_limit=cfg.rate_limit.embedding_budget_daily
+                )
+            except EmbeddingBudgetError:
+                return error_response("BUDGET_EXCEEDED", "Embedding budget exceeded")
+
+        try:
+            search_results = await store.find_similar(
+                content=content, threshold=threshold, limit=limit
+            )
+        except EmbeddingProviderError as exc:
+            logger.warning(
+                "Upstream embedding provider failed during find_similar "
+                "(provider=%s endpoint=%s status=%s retry_after=%s): %s",
+                exc.provider,
+                exc.endpoint,
+                exc.status_code,
+                exc.retry_after,
+                exc,
+            )
+            return upstream_error_response(exc)
+        except Exception:  # noqa: BLE001
+            logger.exception("Error in distillery_find_similar")
+            return error_response("INTERNAL", "find_similar failed")
 
     # --- graph-extension filtering (self + linked exclusion) ---------------
     excluded_linked_count = 0
@@ -818,6 +859,119 @@ async def _handle_find_similar(
                 )
 
     return success_response(payload)
+
+
+# ---------------------------------------------------------------------------
+# _handle_find_similar_batch (source_entry_ids)
+# ---------------------------------------------------------------------------
+
+# Embed-based modes that batch mode forbids — batch mode is standalone and
+# spends zero embedding budget, so combining it with any of these is a caller
+# error rather than a silent partial behaviour.
+_BATCH_FORBIDDEN_PARAMS = (
+    "content",
+    "source_entry_id",
+    "dedup_action",
+    "conflict_check",
+    "accept_action",
+    "llm_responses",
+)
+
+
+async def _handle_find_similar_batch(
+    store: Any,
+    arguments: dict[str, Any],
+) -> list[types.TextContent]:
+    """Batch path of ``distillery_find_similar`` (``source_entry_ids``).
+
+    Reuses each seed's STORED embedding (no re-embed, no embedding-budget spend)
+    and runs all similarity queries in ONE store read acquisition. Standalone:
+    combining ``source_entry_ids`` with any embed-based mode
+    (``content``/``source_entry_id``/``dedup_action``/``conflict_check``/
+    ``accept_action``/``llm_responses``) is rejected with INVALID_PARAMS.
+
+    Returns a payload keyed by seed id::
+
+        {"results_by_seed": {"<seed_id>": {"results": [{"score", "entry"}],
+            "count": N, "excluded_count": X}},
+         "seed_count": K, "threshold": 0.7}
+    """
+    # Batch mode is standalone: reject embed-based companions up-front.
+    conflicting = [p for p in _BATCH_FORBIDDEN_PARAMS if arguments.get(p) is not None]
+    if conflicting:
+        return error_response(
+            "INVALID_PARAMS",
+            "source_entry_ids (batch mode) is standalone and cannot be combined with "
+            f"{', '.join(sorted(conflicting))}",
+        )
+
+    raw_ids = arguments.get("source_entry_ids")
+    if not isinstance(raw_ids, list):
+        return error_response(
+            "INVALID_PARAMS", "Field 'source_entry_ids' must be a list of strings"
+        )
+    if len(raw_ids) == 0:
+        return error_response("INVALID_PARAMS", "Field 'source_entry_ids' must be a non-empty list")
+    if len(raw_ids) > _FIND_SIMILAR_BATCH_MAX_SEEDS:
+        return error_response(
+            "INVALID_PARAMS",
+            f"Field 'source_entry_ids' accepts at most {_FIND_SIMILAR_BATCH_MAX_SEEDS} ids "
+            f"(got {len(raw_ids)})",
+        )
+    for sid in raw_ids:
+        if not isinstance(sid, str) or sid.strip() == "":
+            return error_response(
+                "INVALID_PARAMS", "Field 'source_entry_ids' must be a list of non-empty strings"
+            )
+    # De-dupe while preserving order so one stored vector is fetched per id.
+    seed_ids: list[str] = list(dict.fromkeys(raw_ids))
+
+    threshold_raw = arguments.get("threshold", 0.8)
+    err_threshold = validate_type(arguments, "threshold", (int, float), "number")
+    if err_threshold:
+        return error_response("INVALID_PARAMS", err_threshold)
+    threshold = float(threshold_raw) if threshold_raw is not None else 0.8
+    if not (0.0 <= threshold <= 1.0):
+        return error_response("INVALID_PARAMS", "Field 'threshold' must be in [0.0, 1.0]")
+
+    limit_result = validate_limit(arguments.get("limit", 10), min_val=1, max_val=200, default=10)
+    if isinstance(limit_result, tuple):
+        return error_response(*limit_result)
+    limit = limit_result
+
+    exclude_linked: bool = bool(arguments.get("exclude_linked", False))
+
+    # ONE read acquisition for all seeds — zero embedding budget spent (the
+    # stored vectors are reused, so record_embedding_usage is never called).
+    try:
+        results_by_id = await store.find_similar_by_ids(seed_ids, threshold, limit, exclude_linked)
+    except Exception:  # noqa: BLE001
+        logger.exception("Error in distillery_find_similar (batch path)")
+        return error_response("INTERNAL", "find_similar batch failed")
+
+    results_by_seed: dict[str, Any] = {}
+    for sid in seed_ids:
+        seed_results = results_by_id.get(sid, [])
+        shaped = [{"score": round(sr.score, 6), "entry": sr.entry.to_dict()} for sr in seed_results]
+        # ``excluded_count`` (best-effort): the store performs the self/linked
+        # exclusion internally over an over-fetched candidate window and returns
+        # only the survivors, so the per-seed count of dropped candidates is not
+        # observable here. It is reported as 0 and documented as best-effort;
+        # callers needing exact exclusion accounting should use the single-seed
+        # path with ``exclude_linked`` (which surfaces ``excluded_linked_count``).
+        results_by_seed[sid] = {
+            "results": shaped,
+            "count": len(shaped),
+            "excluded_count": 0,
+        }
+
+    return success_response(
+        {
+            "results_by_seed": results_by_seed,
+            "seed_count": len(seed_ids),
+            "threshold": threshold,
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
