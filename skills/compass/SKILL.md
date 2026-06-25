@@ -51,7 +51,7 @@ If no topic is provided (and no `--entry`), ask:
 
 > What topic would you like to orient on? (e.g., "sandbox networking", "agent eval harnesses") — `/compass <topic>`.
 
-Extract from arguments. Every flag is borrowed verbatim from `radar`/`investigate`, so nothing new must be learned:
+Extract from arguments. Most flags are borrowed from `radar`/`investigate` (so little is new to learn); `--sources` is compass-specific:
 
 | Flag | Description |
 |------|-------------|
@@ -60,6 +60,7 @@ Extract from arguments. Every flag is borrowed verbatim from `radar`/`investigat
 | `--entry <uuid>` | Seed the Internal Position from this specific entry instead of a topic search |
 | `--store` | Store the assessment as a knowledge entry (default: display-only) |
 | `--include-evergreen` | Include older / first-poll backfill items in the ambient candidate set (default: excluded) |
+| `--sources` | Append the full per-entry Sources table (default: off; sources are otherwise cited inline) |
 
 Compute `published_after = (now - <days>).isoformat()` where `<days>` is `--days` if provided, otherwise 30. Bare invocation (`/compass <topic>`) runs the whole flow with defaults.
 
@@ -194,7 +195,7 @@ Record the returned `entry_id`. On MCP errors, see CONVENTIONS.md error handling
 
 ## Output Format
 
-Guidance-first order — the verdict leads, the evidence follows. Omit any empty section.
+Guidance-first order — the verdict leads, the evidence follows. Omit any empty section. The inline `[Entry <short-id>, internal|ambient]` citations in every section are the default audit trail; the full `## Sources` table is appended only with `--sources` — by default a one-line summary stands in for it.
 
 ```text
 # Compass: <topic>
@@ -239,10 +240,7 @@ Oriented "<topic>": <I> internal + <A> ambient entries, <S> seams (window=<days>
 
 ## Sources
 
-| Short ID | Type | Author | Date | Provenance |
-|----------|------|--------|------|------------|
-| 1a2b3c4d | [feed] | — | 2026-06-12 | ambient |
-| 9f8e7d6c | [github] | Alice | 2026-05-30 | internal |
+Sources: <N> internal, <M> ambient entries cited inline (run `/compass <topic> --sources` for the full table).
 
 ---
 
@@ -253,6 +251,17 @@ Tags: compass, assessment, ambient
 ```
 
 The stored block at the bottom appears only when `--store` was passed and a new entry was created.
+
+By default the `## Sources` section is just the one-line summary above (the inline `[Entry <short-id>, internal|ambient]` citations are the audit trail). ONLY when `--sources` is passed, that summary line is replaced by the full per-entry table:
+
+```text
+## Sources
+
+| Short ID | Type | Author | Date | Provenance |
+|----------|------|--------|------|------------|
+| 1a2b3c4d | [feed] | — | 2026-06-12 | ambient |
+| 9f8e7d6c | [github] | Alice | 2026-05-30 | internal |
+```
 
 ## Rules
 
@@ -272,6 +281,7 @@ The stored block at the bottom appears only when `--store` was passed and a new 
 - A disjoint result (no overlap between corpora on a term) is itself a finding — report it and feed it to the Assessment as an Exposed candidate
 - Loop limits: up to 2 concept-terms per direction in Step 6, one scoped `distillery_search` call per term (entry_type list covers feeds+bookmarks in that one call), so ≤4 cross-queries total
 - Display-only by default; store only with `--store`
+- `--sources` controls the Sources table: default OFF → emit the one-line summary `Sources: <N> internal, <M> ambient entries cited inline (run /compass <topic> --sources for the full table).`; ON → append the full per-entry table instead. The inline `[Entry <short-id>, internal|ambient]` citations always carry short-id + provenance regardless and are the default audit trail
 - When storing: follow CONVENTIONS.md dedup-on-store (create/skip/merge/link), use `entry_type="digest"`, include `compass` in tags, and metadata `period_start`/`period_end` as ISO 8601 dates
 - `distillery_search` returning empty results is not an error — record 0 and continue
 - Omit sections with no content — never display empty sections
