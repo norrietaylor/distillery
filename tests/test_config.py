@@ -1325,12 +1325,12 @@ class TestWebhookConfigParsing:
 class TestAutoLinkConfig:
     """Semantic auto-link config parsing / defaults / validation (issue #629)."""
 
-    def test_defaults_enabled(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """No config file → auto-link is on by default, with default threshold and cap."""
+    def test_defaults_disabled(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """No config file → auto-link is off by default, with default threshold and cap."""
         monkeypatch.chdir(tmp_path)
         monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
         cfg = load_config()
-        assert cfg.auto_link.enabled is True
+        assert cfg.auto_link.enabled is False
         assert cfg.auto_link.threshold == pytest.approx(0.85)
         assert cfg.auto_link.max_links == 5
 
