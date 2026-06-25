@@ -743,8 +743,11 @@ class TestSyncAutoPopulatesFields:
         entries = await store.list_entries(filters={"entry_type": "github"}, limit=10, offset=0)
         entry = entries[0]
 
-        assert entry.metadata["published_at"] == "2026-04-01T08:00:00Z"
-        assert entry.metadata["updated_at"] == "2026-04-02T09:30:00Z"
+        # Normalised to the poller's +00:00 form (not the raw GitHub ...Z) so the
+        # store's lexicographic published_at compare stays consistent (#669).
+        assert entry.metadata["published_at"] == "2026-04-01T08:00:00+00:00"
+        assert entry.metadata["updated_at"] == "2026-04-02T09:30:00+00:00"
+        assert not entry.metadata["published_at"].endswith("Z")
         # The GitHub object's own creation time is distinct from the ingest time.
         assert entry.metadata["published_at"] != entry.created_at.isoformat()
 
