@@ -55,31 +55,33 @@ This is a display-only skill with no configurable lookback window. Team mode is 
 
 Execute all calls in sequence. Non-fatal calls are noted — continue if they fail.
 
-**4a. Recent entries:**
+**4a. Recent entries (project-wide fetch):**
 
 ```python
-distillery_list(project=<project>, limit=10, output_mode="full")
+distillery_list(project=<project>, limit=50, output_mode="summary")
 ```
 
-Returns the 10 most recent entries for the project, sorted newest first. Record all returned entries.
+This single project-scoped, newest-first fetch backs three sections — Recent Entries, Corrections, and Expiring Soon — so they share one round-trip instead of issuing duplicate project lists. Use `output_mode="summary"` (NOT `full`): summary returns the full `metadata` blob (incl. `expires_at`, `corrects` / `corrected_by`) plus a ~200-char `content_preview` per entry — enough for the 100-char previews these sections render — while keeping the response to a few tens of KB instead of the ~80 KB that `output_mode="full"` returned at `limit=50`.
+
+For **Recent Entries (Section 1)**, take the first 10 entries of this result (already sorted newest first). Record all 50 returned entries for reuse by the steps below.
 
 **4b. Corrections (non-fatal):**
 
-```python
-distillery_list(project=<project>, limit=50, output_mode="full")
-```
-
-From the result, collect all entry IDs. For each entry that has `metadata.corrects` or `metadata.corrected_by` set, or for entries with `entry_type` that suggests a correction chain, call:
+From the entries fetched in Step 4a, identify candidate correction entries: those whose `metadata` carries `corrects` or `corrected_by`. For each such candidate, resolve the correction pair best-effort:
 
 ```python
 distillery_relations(action="get", entry_id=<id>, relation_type="corrects")
 ```
 
-Collect entries with outgoing `corrects` relations (the correction) and their targets (the original entry). Build a list of correction pairs: `(corrector_entry, original_entry)`. Limit to 5 correction chains. If this call fails, omit the Corrections section.
+This relations lookup is best-effort — never block the briefing on it. Treat an empty/sparse result as a non-error (skip that pair and continue). If a lookup returns an `INTERNAL` error whose message contains `"NetworkX not installed"`, emit a single one-line note `Run \`pip install distillery-mcp[graph]\` to enable relation lookups.` and stop issuing further relation lookups for this section. When the relation lookup is unavailable, fall back to pairing from the `metadata.corrects` / `metadata.corrected_by` ids resolved against the entries already fetched above.
+
+Collect correction pairs `(corrector_entry, original_entry)`, limit to 5 chains. If no candidate entries carry correction metadata, omit the Corrections section.
+
+> Scope: this surfaces corrections found among the 50 most recent entries (the Step 4a fetch) — the same coverage the briefing has always had. There is no project-wide metadata filter, so older corrections on very active projects may not appear; the section reflects recent correction activity, not an exhaustive audit.
 
 **4c. Expiring soon (non-fatal):**
 
-From the entries returned in Step 4a, and the 50 fetched in Step 4b, post-filter for entries where `expires_at` is set and falls within the next 7 days (between today and today + 7 days inclusive). Sort ascending by `expires_at`. If no entries have an upcoming `expires_at`, omit the Expiring Soon section.
+From the 50 entries fetched in Step 4a, post-filter for entries where `metadata.expires_at` is set and falls within the next 7 days (between today and today + 7 days inclusive). Sort ascending by `expires_at`. If no entries have an upcoming `expires_at`, omit the Expiring Soon section.
 
 **4d. Stale knowledge (non-fatal):**
 
@@ -113,11 +115,13 @@ If the response contains more than one author group, set `team_mode = true`. If 
 
 Only execute if `team_mode = true`.
 
+Issue a dedicated 7-day-windowed query — do NOT reuse the Step 4a newest-50 sample, which undercounts author activity once a project has more than 50 entries in the window:
+
 ```python
-distillery_list(project=<project>, limit=20, output_mode="full")
+distillery_list(project=<project>, date_from=<now - 7 days, ISO 8601>, output_mode="summary", limit=200)
 ```
 
-From the returned entries, filter to those created within the past 7 days. Group by author. For each author, count entries by `entry_type`. If this call fails or yields no entries, omit the Team Activity section.
+Summary mode carries `author`, `entry_type`, and `created_at`. Group the returned entries by author and, for each author, count entries by `entry_type`. The `limit=200` cap bounds the call while covering the 7-day window for all but the most active projects (far beyond the prior newest-N sample). If the query returns nothing, omit the Team Activity section.
 
 **4h. Related from team (team mode only, non-fatal):**
 
@@ -330,7 +334,7 @@ Generated: 2026-04-08 09:15 UTC
 ## Rules
 
 - NEVER use Bash, Python, or any tool not listed in allowed-tools
-- Always call `distillery_list(limit=1)` first as the MCP health check; stop if it fails.
+- MCP availability is the once-per-conversation `distillery_status()` check (Step 1, see CONVENTIONS.md) — skip it if already confirmed this conversation. Do NOT issue a separate `distillery_list(limit=1)` health probe; the recent-entries call (Step 4a) is the first real data call and proves availability.
 - If a required (non-optional) MCP tool call fails, report the error to the user and STOP. Do not attempt workarounds.
 - If a call is marked non-fatal below (corrections, stale knowledge, unresolved items, team-mode probes, and team sections 6/7/8), omit that section and continue.
 - Auto-detect project from `basename $(git rev-parse --show-toplevel)` when `--project` is not provided
@@ -340,16 +344,16 @@ Generated: 2026-04-08 09:15 UTC
 - Type badges are uppercase: `[SESSION]`, `[BOOKMARK]`, `[MINUTES]`, `[REFERENCE]`, `[FEED]`, `[DIGEST]`, `[GITHUB]`, `[INBOX]`, `[IDEA]`, `[PERSON]`, `[PROJECT]`
 - Relative timestamps use human-readable form: "just now", "5 minutes ago", "2 hours ago", "3 days ago"
 - Expiring-soon filter is applied client-side from already-fetched entries — no extra MCP call needed
-- Corrections section uses `distillery_relations(action="get", relation_type="corrects")` — failure is non-fatal
+- Corrections section detects candidates from `metadata.corrects` / `metadata.corrected_by` in the Step 4a `output_mode="summary"` list (summary carries full `metadata`), then resolves pairs via `distillery_relations(action="get", relation_type="corrects")` — this relation lookup is best-effort: empty/sparse results and a `"NetworkX not installed"` `INTERNAL` error are non-fatal (emit the one-line `pip install distillery-mcp[graph]` note and fall back to metadata-only pairing)
 - Stale knowledge failure is non-fatal — omit the section and continue
 - Unresolved failure is non-fatal — omit the section and continue
 - Team mode is activated by `--team` flag or auto-detected: `distillery_list(group_by="author", project=<project>)` returning >1 author group
 - Header shows `(solo)` or `(team)` based on detected mode
 - Team sections (6, 7, 8) are additive — solo sections are always rendered unchanged
-- Team activity groups entries by author from the past 7 days only — entries older than 7 days are excluded
+- Team activity uses a dedicated 7-day-windowed `distillery_list(date_from=<now-7d>, output_mode="summary", limit=200)` query (NOT the Step 4a newest-50 sample, which would undercount busy projects), grouped by author; entries older than 7 days are excluded
 - Related from team uses `distillery_search` without author filter — all authors are included
 - Pending review uses `status="pending_review"` — limited to 5 entries
 - Team aggregate call failure is non-fatal — fall back to solo mode
 - Team activity, related from team, and pending review failures are non-fatal — omit each failed section
-- On MCP errors in fatal calls (`distillery_list(limit=1)` health check), see CONVENTIONS.md error handling — display and stop
+- On MCP errors in fatal calls (Step 1 `distillery_status()` health check, Step 4a recent-entries list), see CONVENTIONS.md error handling — display and stop
 - No retry loops — report errors and stop
