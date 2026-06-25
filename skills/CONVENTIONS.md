@@ -420,9 +420,15 @@ are rejected.  Pre-existing entries have no `kind/*` tag; *absence of
 
 ## Provenance
 
-Search results must include: entry ID, `[type]` badge, author, created date, similarity %.
+Search results must include: entry ID, `[type]` badge, author, effective date (see below), similarity %.
 
 Format: `ID: <uuid> | Author: <name> | Project: <project> | <date>`
+
+## Effective Date (chronology)
+
+Whenever a skill renders, sorts, or groups entries by date, use the entry's **effective date**: `metadata.published_at` when present, else `created_at`.
+
+`metadata.published_at` is the source's real creation/publication time — gh-sync sets it to the GitHub object's `created_at`, and the feed poller sets it to the item's publish time. The bare `created_at` of an imported entry is the *ingest* timestamp; a batch import (all of gh-sync) collapses every entry onto the import day, so using it for chronology produces silently-wrong timelines (issue #669). Native entries (`/distill`, `/minutes`, etc.) have no `published_at`, so they correctly fall back to `created_at`.
 
 ## Corrections
 
