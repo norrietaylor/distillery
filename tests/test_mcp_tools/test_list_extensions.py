@@ -734,13 +734,17 @@ class TestEntryTypeList:
         returned_types = {e["entry_type"] for e in data["entries"]}
         assert returned_types == {"session"}
 
-    @pytest.mark.unit
-    async def test_empty_entry_type_list_returns_error(self, store: Any) -> None:
-        result = await _handle_list(
-            store=store,
-            arguments={"entry_type": [], "limit": 50},
-        )
-        data = parse_mcp_response(result)
-        assert data["error"] is True
-        assert data["code"] == "INVALID_PARAMS"
-        assert "entry_type" in data["message"]
+
+# Kept out of the integration-marked TestEntryTypeList (uses the bare ``store``
+# fixture, no mixed-type data) so it carries a single ``unit`` marker rather than
+# being double-selected by both ``-m unit`` and ``-m integration``.
+@pytest.mark.unit
+async def test_empty_entry_type_list_returns_error(store: Any) -> None:
+    result = await _handle_list(
+        store=store,
+        arguments={"entry_type": [], "limit": 50},
+    )
+    data = parse_mcp_response(result)
+    assert data["error"] is True
+    assert data["code"] == "INVALID_PARAMS"
+    assert "entry_type" in data["message"]
