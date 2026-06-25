@@ -161,7 +161,7 @@ Generated: <YYYY-MM-DD HH:MM> UTC
 
 Take the 10 most recent entries from Step 4a and re-sort them by **effective date** descending (see the Effective Date convention in CONVENTIONS.md — `metadata.published_at` when present, else `created_at`), so gh-sync/feed imports order by their true source time rather than the shared ingest timestamp. Show one line each:
 
-```
+```text
 - [<TYPE>] <content preview, max 100 chars> — <relative timestamp>
 ```
 
