@@ -1,6 +1,7 @@
 ---
 name: radar
 description: "Generate an ambient intelligence digest from recent feed activity with source suggestions"
+min_server_version: "0.7.0"  # distillery_relations action="metrics" (bridges/communities)
 allowed-tools:
   - "mcp__*__distillery_status"
   - "mcp__*__distillery_search"

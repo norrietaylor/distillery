@@ -174,19 +174,19 @@ class AutoLinkConfig:
     index, and capped at :attr:`max_links` edges per entry to respect the
     embedding/query budget.
 
-    Enabled by default — set :attr:`enabled` ``False`` to disable semantic
-    edge creation so the write path behaves exactly as before.
+    Disabled by default — set :attr:`enabled` ``True`` to enable semantic
+    edge creation; while off, the write path behaves exactly as before.
 
     Attributes:
         enabled: Whether to create semantic ``related`` edges on ingest.
-            Defaults to ``True``.
+            Defaults to ``False``.
         threshold: Normalised cosine similarity score in ``[0.0, 1.0]`` at or
             above which a neighbour is linked.  Defaults to ``0.85``.
         max_links: Maximum number of ``related`` edges to create per stored
             entry (throttle).  Must be a positive integer.  Defaults to ``5``.
     """
 
-    enabled: bool = True
+    enabled: bool = False
     threshold: float = 0.85
     max_links: int = 5
 

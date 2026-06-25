@@ -46,13 +46,14 @@ Distillery captures the highest-value transformation — from noise to signal �
 
 ## Skills
 
-Distillery provides 14 Claude Code slash commands:
+Distillery provides 15 Claude Code slash commands:
 
 | Skill | Purpose | Example |
 |-------|---------|---------|
 | `/distill` | Capture session knowledge with dedup detection | `/distill "We decided to use DuckDB for local storage"` |
 | `/recall` | Semantic search with provenance | `/recall distributed caching strategies` |
 | `/pour` | Multi-entry synthesis with citations | `/pour how does our auth system work?` |
+| `/compass` | Contrast internal knowledge vs. ambient intelligence for a directional assessment | `/compass our caching strategy` |
 | `/bookmark` | Store URLs with auto-generated summaries | `/bookmark https://example.com/article #caching` |
 | `/minutes` | Meeting notes with append updates | `/minutes --update standup-2026-03-22` |
 | `/classify` | Classify entries and triage review queue | `/classify --inbox` |
@@ -74,7 +75,7 @@ claude plugin marketplace add norrietaylor/distillery
 claude plugin install distillery
 ```
 
-This installs all 14 skills. The plugin **does not configure an MCP server automatically** — run `/setup` (below) to add one. The recommended setup runs **locally** via `uvx --from 'distillery-mcp[fastembed]>=0.6.0' distillery-mcp` — a private, self-contained knowledge base on your machine, with on-device `fastembed` embeddings (no API key required). Requires Python 3.11+ and [`uv`](https://docs.astral.sh/uv/) (install: `curl -LsSf https://astral.sh/uv/install.sh | sh`).
+This installs all 15 skills. The plugin **does not configure an MCP server automatically** — run `/setup` (below) to add one. The recommended setup runs **locally** via `uvx --from 'distillery-mcp[fastembed]>=0.6.0' distillery-mcp` — a private, self-contained knowledge base on your machine, with on-device `fastembed` embeddings (no API key required). Requires Python 3.11+ and [`uv`](https://docs.astral.sh/uv/) (install: `curl -LsSf https://astral.sh/uv/install.sh | sh`).
 
 ### Step 2 (Optional): Use Jina or OpenAI Instead
 

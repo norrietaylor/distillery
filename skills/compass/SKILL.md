@@ -1,6 +1,7 @@
 ---
 name: compass
 description: "Contrast internal implementation knowledge against ambient intelligence, find where they meet, and emit a directional assessment (ahead / exposed / decide / confirm)"
+min_server_version: "0.7.0"  # distillery_search entry_type list form
 allowed-tools:
   - "mcp__*__distillery_status"
   - "mcp__*__distillery_search"

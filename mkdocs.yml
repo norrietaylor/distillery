@@ -76,6 +76,7 @@ nav:
     - /classify: skills/classify.md
     - /watch: skills/watch.md
     - /radar: skills/radar.md
+    - /compass: skills/compass.md
     - /tune: skills/tune.md
     - /setup: skills/setup.md
     - /digest: skills/digest.md
