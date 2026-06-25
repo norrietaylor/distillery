@@ -467,6 +467,7 @@ The following skills are available in `skills/`:
 | `/gh-sync` | `gh-sync/` | distillery_store, distillery_get, distillery_update, distillery_list, distillery_relations | Sync GitHub issues and PRs into the knowledge base |
 | `/investigate` | `investigate/` | distillery_search, distillery_get, distillery_relations, distillery_list | Deep context builder combining semantic search with relationship traversal |
 | `/briefing` | `briefing/` | distillery_list, distillery_relations, distillery_search | Solo-first knowledge dashboard with optional team mode |
+| `/compass` | `compass/` | distillery_search, distillery_find_similar, distillery_relations, distillery_list, distillery_store | Contrast internal implementation against ambient intelligence and emit a directional assessment |
 
 ## Custom Agents
 
