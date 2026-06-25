@@ -614,6 +614,20 @@ class GitHubSyncAdapter:
             if isinstance(top_merged, str) and top_merged:
                 merged_at = top_merged
 
+        # The GitHub object's own timestamps. ``published_at`` mirrors the feed
+        # convention (``metadata.published_at`` = real publication time) so
+        # synthesis skills can render true chronology instead of the batch
+        # ingest timestamp, which collapses every imported entry onto the import
+        # day (issue #669).
+        published_at: str | None = None
+        gh_created = issue.get("created_at")
+        if isinstance(gh_created, str) and gh_created:
+            published_at = gh_created
+        gh_updated_at: str | None = None
+        gh_updated = issue.get("updated_at")
+        if isinstance(gh_updated, str) and gh_updated:
+            gh_updated_at = gh_updated
+
         metadata: dict[str, Any] = {
             "repo": f"{self._owner}/{self._repo}",
             "ref_type": ref_type,
@@ -631,6 +645,11 @@ class GitHubSyncAdapter:
             "gh_number": number,
             "gh_url": html_url,
             "merged_at": merged_at,
+            # Real GitHub creation/update times (issue #669). published_at is the
+            # chronology source for synthesis skills; mirrors the feed poller's
+            # metadata.published_at convention.
+            "published_at": published_at,
+            "updated_at": gh_updated_at,
             # Persisted so ``_compute_backfill_updates`` can heal older entries
             # that lost author attribution (see legacy_authors branch below).
             # Store the raw GitHub login (or ``None`` when missing) so an
