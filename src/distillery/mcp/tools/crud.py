@@ -1703,6 +1703,13 @@ async def _handle_list(
 
     filters = _build_filters_from_arguments(arguments)
 
+    # ``entry_type`` accepts a single type or a list of types (OR-matched via
+    # the store's IN-clause).  Reject an explicitly empty list at the handler
+    # so it surfaces as INVALID_PARAMS rather than an opaque INTERNAL from the
+    # store-level guard (mirrors the empty-``status``-list behaviour).
+    if filters is not None and filters.get("entry_type") == []:
+        return error_response("INVALID_PARAMS", "entry_type filter list must not be empty")
+
     # review mode implicitly filters to pending_review status (takes precedence
     # over any default/visible-status logic).
     if output_mode == "review":

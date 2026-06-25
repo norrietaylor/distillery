@@ -800,7 +800,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
     @server.tool
     async def distillery_list(  # noqa: PLR0913
         ctx: Context,
-        entry_type: str | None = None,
+        entry_type: str | list[str] | None = None,
         author: str | None = None,
         project: str | None = None,
         tags: list[str] | None = None,
@@ -836,7 +836,9 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         or ``include_archived=true`` to add archived entries to the default view.
 
         PARAMS:
-          - entry_type (str, optional): Filter by type. Valid: [session, bookmark, minutes,
+          - entry_type (str | list[str], optional): Filter by type, or a list of types
+            matched with OR (e.g. ["session", "reference"]) — pair with group_by to
+            aggregate across several types in one call. Valid: [session, bookmark, minutes,
             meeting, reference, idea, inbox, github, person, project, digest, feed].
           - author (str, optional): Filter by author.
           - project (str, optional): Filter by project scope.
