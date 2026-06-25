@@ -351,6 +351,41 @@ class TestHandlerBatch:
         assert data.get("error") is True
         assert data["code"] == "INVALID_PARAMS"
 
+    async def test_defaulted_booleans_do_not_trigger_conflict(
+        self,
+        store: DuckDBStore,
+        embedding_provider: ControlledEmbeddingProvider,
+        cfg: DistilleryConfig,
+    ) -> None:
+        # The server wrapper (distillery_find_similar) ALWAYS forwards
+        # dedup_action/conflict_check/exclude_linked with their defaults, even
+        # for a bare batch call. Those defaulted falses must NOT be read as
+        # combining embed modes — regression: every public batch call returned
+        # INVALID_PARAMS ("cannot be combined with conflict_check, dedup_action")
+        # because the handler used `arguments.get(p) is not None`.
+        embedding_provider.register("seedD", _UNIT_A)
+        embedding_provider.register("matchD", _UNIT_A)
+        seed = await store.store(make_entry(content="seedD"))
+        match = await store.store(make_entry(content="matchD"))
+
+        # Args exactly as src/distillery/mcp/server.py builds them for a bare
+        # distillery_find_similar(source_entry_ids=[...]) call.
+        args = {
+            "threshold": 0.5,
+            "limit": 5,
+            "dedup_action": False,
+            "conflict_check": False,
+            "exclude_linked": False,
+            "source_entry_ids": [seed],
+        }
+        response = await _handle_find_similar(store, args, cfg=cfg)
+        data = parse_mcp_response(response)
+
+        assert "error" not in data, data
+        assert data["seed_count"] == 1
+        result_ids = {r["entry"]["id"] for r in data["results_by_seed"][seed]["results"]}
+        assert match in result_ids
+
 
 # ===========================================================================
 # MCP handler: single source_entry_id path now reuses the stored vector

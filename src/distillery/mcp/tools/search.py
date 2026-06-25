@@ -877,6 +877,12 @@ _BATCH_FORBIDDEN_PARAMS = (
     "llm_responses",
 )
 
+# Subset of the forbidden params that the server wrapper always forwards with a
+# default (``False``) rather than omitting when unset. These are conflicts only
+# when truthy — otherwise a plain batch call (which carries the defaults) would
+# be wrongly rejected as combining modes.
+_BATCH_FORBIDDEN_DEFAULTED_BOOLS = frozenset({"dedup_action", "conflict_check"})
+
 
 async def _handle_find_similar_batch(
     store: Any,
@@ -896,8 +902,18 @@ async def _handle_find_similar_batch(
             "count": N, "excluded_count": X}},
          "seed_count": K, "threshold": 0.7}
     """
-    # Batch mode is standalone: reject embed-based companions up-front.
-    conflicting = [p for p in _BATCH_FORBIDDEN_PARAMS if arguments.get(p) is not None]
+    # Batch mode is standalone: reject embed-based companions up-front. The
+    # server wrapper always forwards the defaulted booleans (dedup_action,
+    # conflict_check) even when unset, so for those we flag only a truthy value;
+    # the rest are forwarded via _omit_none and so are absent unless supplied.
+    conflicting: list[str] = []
+    for p in _BATCH_FORBIDDEN_PARAMS:
+        value = arguments.get(p)
+        if p in _BATCH_FORBIDDEN_DEFAULTED_BOOLS:
+            if value:
+                conflicting.append(p)
+        elif value is not None:
+            conflicting.append(p)
     if conflicting:
         return error_response(
             "INVALID_PARAMS",
