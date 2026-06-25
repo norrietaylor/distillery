@@ -58,7 +58,7 @@ All notable changes to this project will be documented in this file.
 - label briefing example fence as text for markdownlint (CR #683) *(skills)*
 - render effective date (published_at) in pour/investigate (#669) *(skills)*
 - /compass — reconcile cross-query budget to ≤4 (CR #679) *(skills)*
-- document link_suggestion validation checks in _validate *(config)*
+- document link_suggestion validation checks in `_validate` *(config)*
 - add spec 18 — edge-by-default + link-suggestion (#653 steps 3-4) *(specs)*
 - scope scheduling-deprecation rule to local deployments *(setup)*
 - classify setup transport from status, not config parsing *(skills)*
