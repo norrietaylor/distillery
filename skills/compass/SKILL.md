@@ -36,14 +36,13 @@ It pairs with the existing skills: `radar` senses the surroundings, `investigate
 
 See CONVENTIONS.md — skip if already confirmed this conversation.
 
-### Step 2: Determine Author & Project
+### Step 2: Determine Project
 
-Determine author and project per CONVENTIONS.md (Author & Project Resolution). Although `/compass` is display-only unless `--store` is passed, project is needed to scope both corpus searches via `--project`, and author is used for project-resolution context and for the dedup-on-store check.
+Determine project per CONVENTIONS.md (Author & Project Resolution). Although `/compass` is display-only unless `--store` is passed, project is needed to scope both corpus searches via `--project`.
 
-- **Author**: `git config user.name` → `DISTILLERY_AUTHOR` env var → ask user. Cache for the conversation.
 - **Project**: `--project` flag if provided → `basename $(git rev-parse --show-toplevel)` → ask user. Cache for the conversation.
 
-If already resolved earlier in the conversation, reuse the cached values.
+If already resolved earlier in the conversation, reuse the cached value. Resolve **author** only inside Step 9, and only when `--store` is passed — display-only runs never need it.
 
 ### Step 3: Parse Arguments
 
@@ -134,13 +133,18 @@ This is the comparative step. It does **not** rely on the two mechanisms that lo
 # product-terms extracted from the ambient cluster → query the internal corpus
 distillery_search(query="<product-term from ambient>", limit=10, project="<project if specified>")
 
-# implementation-terms extracted from the internal cluster → query the ambient corpus
+# implementation-terms extracted from the internal cluster → query the ambient corpus.
+# The ambient corpus is feeds AND bookmarks; distillery_search's entry_type is
+# single-valued, so issue one call per ambient type (bookmarks are not
+# poller-windowed, so omit published_after there — mirrors Step 5/6).
 distillery_search(query="<impl-term from internal>", entry_type="feed", limit=10,
                   published_after="<now - days, ISO>", include_evergreen=<bool>,
                   project="<project if specified>")
+distillery_search(query="<impl-term from internal>", entry_type="bookmark", limit=10,
+                  project="<project if specified>")
 ```
 
-Run up to 3 such cross-queries per direction (≤6 total). Any entry returned that already sits in the *other* corpus's result set is a **seam** — a place where the two corpora actually connect on a shared concept under different vocabulary. Record the matched concept and the entry ids on both sides.
+A cross-query **hit** — non-empty results when a term lifted from one cluster is run against the *other* corpus — is a **seam**: the two corpora connect on a shared concept expressed in different vocabulary. The seam is the *concept*, **not** a shared entry — entries are single-provenance and never appear in both corpus result sets, so never define a seam by entry-id overlap. Record the bridging concept, the source-cluster entry/entries that yielded the term, and the target-corpus hit entries. Cap at **2 concept-terms per direction** (the internal→ambient direction issues a feed + bookmark search per term, so ≤6 cross-queries total).
 
 **Report a DISJOINT result as itself a finding.** If a product-term from the ambient cluster returns nothing internal, that is a real signal: *"the field is discussing X; we have no captured position on X."* Carry these disjoint terms into the Assessment as **Exposed** candidates.
 
@@ -176,7 +180,7 @@ Each bullet is one actionable sentence plus citations — e.g. *"Exposed: the no
 
 ### Step 9: Dedup Check + Store (only when `--store`)
 
-Default is display-only. When `--store` is passed, follow the CONVENTIONS.md dedup-on-store pattern before writing.
+Default is display-only. When `--store` is passed, first resolve **author** (deferred from Step 2): `git config user.name` → `DISTILLERY_AUTHOR` env var → ask user. Then follow the CONVENTIONS.md dedup-on-store pattern before writing.
 
 ```python
 distillery_find_similar(content="<assessment summary>", dedup_action=True)
@@ -277,7 +281,7 @@ The stored block at the bottom appears only when `--store` was passed and a new 
 - Graph bridges are best-effort and the rare case — never required, never the primary seam path; a sparse-graph empty result is not an error
 - NEVER claim a seam that embedding similarity alone produced — a seam requires cross-vocabulary evidence or a real graph edge
 - A disjoint result (no overlap between corpora on a term) is itself a finding — report it and feed it to the Assessment as an Exposed candidate
-- Loop limits: up to 3 cross-vocabulary queries per direction (≤6 total) in Step 6
+- Loop limits: up to 2 concept-terms per direction in Step 6 (internal→ambient runs a feed + bookmark search per term, so ≤6 cross-queries total)
 - Display-only by default; store only with `--store`
 - When storing: follow CONVENTIONS.md dedup-on-store (create/skip/merge/link), use `entry_type="digest"`, include `compass` in tags, and metadata `period_start`/`period_end` as ISO 8601 dates
 - When `distillery_relations(action="metrics")` returns the `"NetworkX not installed"` `INTERNAL` error, emit the one-line `pip install distillery-mcp[graph]` note and continue — treat any other relations error per CONVENTIONS.md error handling
