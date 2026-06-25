@@ -97,7 +97,7 @@ Always create a pull request for changes — never push directly to `main`. Crea
 
 ## Skills
 
-15 skills live in `skills/<name>/SKILL.md` with YAML frontmatter. Shared conventions are in `skills/CONVENTIONS.md`. All skills follow the same pattern: check MCP availability, determine author (git config > env > ask), determine project (git repo name > flag > ask), execute, confirm.
+15 skills live in `skills/<name>/SKILL.md` with YAML frontmatter. Shared conventions are in `skills/CONVENTIONS.md`. All skills follow the same pattern: check MCP availability, determine project (git repo name > flag > ask), execute, confirm. Author (git config > env > ask) is resolved only by store-writing skills; display-only skills (`/recall`, `/pour`, `/compass`, …) skip it.
 
 - **Knowledge capture**: `/distill`, `/bookmark`, `/minutes`
 - **Knowledge retrieval**: `/recall`, `/pour`, `/compass` (contrast internal knowledge vs. ambient intelligence for a directional assessment), `/classify`
