@@ -738,6 +738,18 @@ class DistilleryStore(Protocol):
         """
         ...
 
+    async def audit_relation_schema(self) -> list[dict[str, Any]]:
+        """Audit existing edges against the typed relation schema (issue #653).
+
+        Groups every live edge by ``(from_type, relation_type, to_type)`` and
+        returns the groups that violate
+        :data:`distillery.relations.schema.RELATION_SCHEMA`, each as a dict with
+        ``from_type``, ``relation_type``, ``to_type`` and ``count`` (descending
+        by count). An empty list means the corpus is schema-clean — the signal to
+        flip ``relations.enforce_schema`` to ``True``.
+        """
+        ...
+
     async def get_metadata(self, key: str) -> str | None:
         """Read a value from the ``_meta`` key-value table.
 
