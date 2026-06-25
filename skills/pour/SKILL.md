@@ -159,7 +159,7 @@ Heading `# Pour: <Topic>`, then sections Summary, Timeline, Key Decisions, Contr
 - `--sources` controls the Source Attribution table: default OFF → emit the one-line summary `Sources: <N> entries cited inline (run /pour <topic> --sources for the full table).` (when `--graph` is set, append `— <S> search, <G> structurally-related` so the search-vs-graph split survives without the Provenance column); ON → render the full per-entry table instead. The inline `[Entry <short-id>]` citations (and the `, structurally related` markers under `--graph`) are always present and are the default audit trail
 - Omit sections with no content
 - On MCP errors, see CONVENTIONS.md error handling -- display and stop
-- Loop limits (bounded to cap sequential-search latency): 2 follow-up + 2 tag-derived searches (Pass 2), 1 gap-filling search (Pass 3), 5 refinement rounds (Step 7) — worst case 7 searches per pour
+- Loop limits (bounded to cap sequential-search latency): Pass 1 = 2 (1a + 1b), Pass 2 = 2 follow-up + 2 tag-derived, Pass 3 = 1 gap-filling — worst case 7 searches for the initial synthesis. Step 7 adds up to 5 further on-demand refinement searches (user-driven, not part of the capped initial budget).
 - Apply `--project` filter to every `distillery_search` call when provided
 - `--graph` defaults OFF — never pass `expand_graph=true` without explicit user opt-in via the flag; without `--graph`, all `distillery_search` calls and synthesis behavior remain unchanged (no provenance column, no "structurally related" labels, no graph_expansion totals)
 - When `--graph` is set, apply `expand_graph=true, expand_hops=1` to every `distillery_search` call (Pass 1a, 1b, Pass 2 concept and tag-derived, Pass 3, and any Step 7 refinement search)
