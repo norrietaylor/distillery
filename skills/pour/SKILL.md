@@ -42,6 +42,7 @@ Extract from arguments:
 - **Topic**: main query string (everything except flags)
 - **--project**: if present, scope all searches to that project
 - **--graph**: if present (off by default), enable graph-expanded retrieval — every `distillery_search` call below is invoked with `expand_graph=true, expand_hops=1` so the seed semantic-search results are augmented with 1-hop structural neighbours from `entry_relations`. Score discount is 0.5 per hop. Each result carries `provenance: "search" | "graph"`, `depth`, and `parent_id`. The envelope adds `graph_expansion: {seed_count, expanded_count}`. Never expand without explicit user opt-in via this flag.
+- **--sources**: append the full per-entry Sources table (default: off; sources are cited inline). By default the table is omitted and a one-line summary stands in (Step 6).
 
 ### Step 3: Multi-Pass Retrieval
 
@@ -118,7 +119,13 @@ Example: `The team adopted DuckDB after evaluating SQLite and PostgreSQL [Entry 
 
 ### Step 6: Source Attribution
 
-Table of all cited entries:
+By DEFAULT (no `--sources`), do NOT render the table — the inline `[Entry <short-id>]` citations are the audit trail. Emit a single summary line instead so provenance still tracks:
+
+Sources: <N> entries cited inline (run `/pour <topic> --sources` for the full table).
+
+When `--graph` is set, append the retrieval-path split to that line so the search-vs-graph audit trail (otherwise only in the table's Provenance column) is preserved: `Sources: <N> entries cited inline — <S> search, <G> structurally-related (run /pour <topic> --sources for the full table).` (`<S>` = `provenance="search"`, `<G>` = `provenance="graph"`, `<S> + <G> = <N>`.)
+
+ONLY when `--sources` is passed, render the full table of all cited entries instead of the summary line:
 
 | # | Short ID | Type | Author | Date | Preview | Similarity |
 |---|----------|------|--------|------|---------|------------|
@@ -129,19 +136,19 @@ Table of all cited entries:
 - **Preview**: first 40 chars of content
 - **Similarity**: highest score from any pass, as percentage
 
-When `--graph` is set, add a **Provenance** column showing `search` or `graph` (and for graph entries, append the `parent_id` short-id, e.g., `graph (via 550e8400)`), so the audit trail makes the retrieval path explicit.
+When `--graph` is set (and `--sources` is on), add a **Provenance** column showing `search` or `graph` (and for graph entries, append the `parent_id` short-id, e.g., `graph (via 550e8400)`), so the audit trail makes the retrieval path explicit.
 
 ### Step 7: Interactive Refinement
 
 Ask: `Would you like to go deeper on any sub-topic, or is this sufficient?`
 
-If the user identifies a sub-topic: run a focused search (limit=10) — passing `expand_graph=true, expand_hops=1` if `--graph` is set — deduplicate against cited entries, produce a `## Refinement: <Sub-topic>` addendum with synthesis and an Additional Sources table (with Provenance column when `--graph` is set), then ask again. Maximum 5 refinement rounds.
+If the user identifies a sub-topic: run a focused search (limit=10) — passing `expand_graph=true, expand_hops=1` if `--graph` is set — deduplicate against cited entries, produce a `## Refinement: <Sub-topic>` addendum with synthesis and — only when `--sources` is set — an Additional Sources table (with Provenance column when `--graph` is also set); without `--sources` the addendum's new entries are cited inline and folded into the summary count, then ask again. Maximum 5 refinement rounds.
 
 When satisfied: `Synthesis complete. X entries cited across Y sections.`
 
 ## Output Format
 
-Heading `# Pour: <Topic>`, then sections Summary, Timeline, Key Decisions, Contradictions, Knowledge Gaps, Sources as described above. Refinement addendums appended if requested. Fewer than 2 entries triggers the fallback display instead.
+Heading `# Pour: <Topic>`, then sections Summary, Timeline, Key Decisions, Contradictions, Knowledge Gaps, Sources as described above. By default the Sources section is the one-line summary (`Sources: <N> entries cited inline …`); the full per-entry table is appended only with `--sources`. Refinement addendums appended if requested. Fewer than 2 entries triggers the fallback display instead.
 
 ## Rules
 
@@ -149,6 +156,7 @@ Heading `# Pour: <Topic>`, then sections Summary, Timeline, Key Decisions, Contr
 - If an MCP tool call fails, report the error to the user and STOP. Do not attempt workarounds.
 - Always use `[Entry <short-id>]` citation format (short-id = first 8 chars of UUID)
 - Every factual claim must trace to an entry -- never synthesize without citing
+- `--sources` controls the Source Attribution table: default OFF → emit the one-line summary `Sources: <N> entries cited inline (run /pour <topic> --sources for the full table).` (when `--graph` is set, append `— <S> search, <G> structurally-related` so the search-vs-graph split survives without the Provenance column); ON → render the full per-entry table instead. The inline `[Entry <short-id>]` citations (and the `, structurally related` markers under `--graph`) are always present and are the default audit trail
 - Omit sections with no content
 - On MCP errors, see CONVENTIONS.md error handling -- display and stop
 - Loop limits: 3 follow-up searches (Pass 2), 2 gap-filling searches (Pass 3), 5 refinement rounds (Step 7)
