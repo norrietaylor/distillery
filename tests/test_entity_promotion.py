@@ -107,6 +107,75 @@ async def test_promote_entities_is_idempotent(store) -> None:  # type: ignore[no
     assert len(nodes) == 1
 
 
+async def test_promote_entities_collapses_aliases(store) -> None:  # type: ignore[no-untyped-def]
+    """An aliased variant promotes to the same node as its canonical form (#653)."""
+    a = await _store_entry(store, content="alias", tags=["entity/cloudflare-sandboxes"])
+    b = await _store_entry(store, content="canonical", tags=["entity/cloudflare"])
+    c = await _store_entry(store, content="canonical too", tags=["entity/cloudflare"])
+
+    aliases = {"entity/cloudflare-sandboxes": "entity/cloudflare"}
+    counts = await store.promote_entities(threshold=3, aliases=aliases)
+
+    assert counts["entities_created"] == 1
+    assert counts["mentions_created"] == 3
+
+    nodes = await store.list_entries({"entry_type": EntryType.ENTITY.value}, limit=10, offset=0)
+    assert len(nodes) == 1
+    assert nodes[0].metadata["source_tag"] == "entity/cloudflare"
+    for entry_id in (a, b, c):
+        related = await store.get_related(entry_id, relation_type="mentions")
+        assert len(related) == 1
+        assert related[0]["to_id"] == nodes[0].id
+
+
+async def test_canonicalize_existing_tags_rewrites_and_dedupes(store) -> None:  # type: ignore[no-untyped-def]
+    """Backfill rewrites aliased tags and dedupes within an entry (#653)."""
+    a = await _store_entry(store, content="frag", tags=["domain/sandbox", "tech/duckdb"])
+    # Carries BOTH an alias and its canonical target -> collapses to one tag.
+    b = await _store_entry(
+        store, content="both", tags=["domain/sandbox", "domain/build/sandboxing"]
+    )
+    aliases = {"domain/sandbox": "domain/build/sandboxing"}
+
+    counts = await store.canonicalize_existing_tags(aliases)
+
+    assert counts["entries_scanned"] == 2
+    assert counts["entries_rewritten"] == 2
+    assert counts["tags_collapsed"] == 1  # entry b: 2 tags -> 1
+
+    ea = await store.get(a)
+    assert set(ea.tags) == {"domain/build/sandboxing", "tech/duckdb"}
+    eb = await store.get(b)
+    assert eb.tags == ["domain/build/sandboxing"]
+
+
+async def test_canonicalize_existing_tags_is_idempotent(store) -> None:  # type: ignore[no-untyped-def]
+    """A second backfill run rewrites zero rows."""
+    await _store_entry(store, content="frag", tags=["domain/sandbox"])
+    aliases = {"domain/sandbox": "domain/build/sandboxing"}
+
+    first = await store.canonicalize_existing_tags(aliases)
+    assert first["entries_rewritten"] == 1
+
+    second = await store.canonicalize_existing_tags(aliases)
+    assert second["entries_rewritten"] == 0
+
+
+async def test_canonicalize_then_promote_uses_canonical_node(store) -> None:  # type: ignore[no-untyped-def]
+    """Backfill before promote: aliased entries land on the canonical entity node."""
+    for i in range(3):
+        await _store_entry(store, content=f"e{i}", tags=["entity/cloudflare-sandboxes"])
+    aliases = {"entity/cloudflare-sandboxes": "entity/cloudflare"}
+
+    await store.canonicalize_existing_tags(aliases)
+    counts = await store.promote_entities(threshold=3, aliases=aliases)
+
+    assert counts["entities_created"] == 1
+    nodes = await store.list_entries({"entry_type": EntryType.ENTITY.value}, limit=10, offset=0)
+    assert len(nodes) == 1
+    assert nodes[0].metadata["source_tag"] == "entity/cloudflare"
+
+
 async def test_promote_entities_missing_embedding_does_not_raise(store) -> None:  # type: ignore[no-untyped-def]
     """Regression: missing embedding (concurrent deletion) is skipped, not KeyError.
 
@@ -120,7 +189,7 @@ async def test_promote_entities_missing_embedding_does_not_raise(store) -> None:
     # Obtain the canonical set by calling the plan step, then strip the
     # embedding so the write step sees the concurrent-deletion scenario.
     canonical_members, _ = await store._run_sync(
-        store._sync_promote_entities_plan, 3, ["entity", "tech"]
+        store._sync_promote_entities_plan, 3, ["entity", "tech"], {}
     )
     # Deliberately omit the embedding for "entity/acme" to reproduce the race.
     empty_embeddings: dict[str, list[float]] = {}

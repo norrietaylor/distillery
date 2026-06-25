@@ -1373,7 +1373,9 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         graph metrics (bridges, communities) on the relations subgraph.
 
         PARAMS:
-          - action (str, required): Operation. Valid: [add, get, remove, traverse, metrics, promote_entities].
+          - action (str, required): Operation. Valid: [add, get, remove, traverse, metrics,
+            reconcile, list_candidates, resolve_candidate, suggest_links, promote_entities,
+            canonicalize_tags].
           - from_id (str, required for add): Source entry UUID.
           - to_id (str, required for add): Target entry UUID.
           - relation_type (str, required for add, optional for get/traverse): Relation type.

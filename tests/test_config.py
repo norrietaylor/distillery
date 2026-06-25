@@ -683,6 +683,71 @@ class TestTagsConfig:
         assert cfg.tags.enforce_namespaces is False
         assert "system" in cfg.tags.reserved_prefixes
 
+    def test_tags_aliases_default_empty(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            tags:
+              enforce_namespaces: false
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.tags.aliases == {}
+
+    def test_tags_aliases_parsed(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            tags:
+              aliases:
+                "domain/sandbox": "domain/build/sandboxing"
+                "entity/cloudflare-sandboxes": "entity/cloudflare"
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.tags.aliases["domain/sandbox"] == "domain/build/sandboxing"
+        assert cfg.tags.aliases["entity/cloudflare-sandboxes"] == "entity/cloudflare"
+
+    def test_tags_aliases_chain_is_flattened(self, tmp_path: Path) -> None:
+        """``a -> b -> c`` flattens so both a and b resolve to c."""
+        yaml_content = """\
+            tags:
+              aliases:
+                "domain/a": "domain/b"
+                "domain/b": "domain/c"
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.tags.aliases["domain/a"] == "domain/c"
+        assert cfg.tags.aliases["domain/b"] == "domain/c"
+
+    def test_tags_aliases_cycle_raises(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            tags:
+              aliases:
+                "domain/a": "domain/b"
+                "domain/b": "domain/a"
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="cycle"):
+            load_config(str(p))
+
+    def test_tags_aliases_invalid_key_raises(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            tags:
+              aliases:
+                "Domain/Sandbox": "domain/build/sandboxing"
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="aliases key"):
+            load_config(str(p))
+
+    def test_tags_aliases_invalid_value_raises(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            tags:
+              aliases:
+                "domain/sandbox": "domain//bad"
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="aliases value"):
+            load_config(str(p))
+
 
 # ---------------------------------------------------------------------------
 # FeedsConfig: dataclass defaults and loading
