@@ -57,6 +57,7 @@ ln -s ~/.claude/distillery/skills/digest      ~/.claude/skills/digest
 ln -s ~/.claude/distillery/skills/gh-sync     ~/.claude/skills/gh-sync
 ln -s ~/.claude/distillery/skills/investigate  ~/.claude/skills/investigate
 ln -s ~/.claude/distillery/skills/briefing    ~/.claude/skills/briefing
+ln -s ~/.claude/distillery/skills/compass     ~/.claude/skills/compass
 ln -s ~/.claude/distillery/skills/setup     ~/.claude/skills/setup
 ```
 
@@ -219,6 +220,7 @@ distillery health
 | `/gh-sync` | "sync GitHub", "import issues" | Sync GitHub issues/PRs into the knowledge base |
 | `/investigate` | "investigate", "deep context" | Deep context builder with relationship traversal |
 | `/briefing` | "team briefing", "dashboard" | Team knowledge dashboard with metrics and activity |
+| `/compass` | "where do we stand vs the field", "ahead or behind", "what should we do about" | Internal vs ambient directional assessment (ahead / exposed / decide / confirm) |
 | `/setup` | "setup", "configure distillery" | Onboarding wizard — connectivity, connector registration, auto-poll |
 
 ## Troubleshooting
