@@ -2021,18 +2021,25 @@ class TestStatusStaysResponsiveUnderWriteContention:
             await asyncio.sleep(0.05)
 
             async def _reads() -> None:
+                # Counts are race-tolerant (>= 5, <= 15): now that these reads run
+                # on the independent read handle, they can legitimately observe any
+                # of the 10 in-flight writes that have already committed — the three
+                # reads sample at different instants, so an exact count is racy. The
+                # regression guard is the <1s latency assertion below (reads must not
+                # queue behind the writer lock); the counts just confirm the reads
+                # return the seeded rows and a coherent result.
                 # Default list mode.
                 entries = await store.list_entries(filters=None, limit=100, offset=0)
-                assert len(entries) == 5
+                assert 5 <= len(entries) <= 15
                 # Stats mode (delegates to _get_entry_stats).
                 stats = await store.list_entries(filters=None, limit=100, offset=0, output="stats")
                 assert isinstance(stats, dict)
-                assert stats["total_entries"] == 5
+                assert 5 <= stats["total_entries"] <= 15
                 # group_by mode (delegates to aggregate_entries).
                 grouped = await store.aggregate_entries(
                     group_by="entry_type", filters=None, limit=10
                 )
-                assert grouped["total_entries"] == 5
+                assert 5 <= grouped["total_entries"] <= 15
 
             start = asyncio.get_event_loop().time()
             await asyncio.wait_for(_reads(), timeout=2.0)
