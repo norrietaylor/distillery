@@ -41,6 +41,8 @@ Determine project per CONVENTIONS.md (Author & Project Resolution). Although `/c
 
 - **Project**: `--project` flag if provided → `basename $(git rev-parse --show-toplevel)` → ask user. Cache for the conversation.
 
+**Soft scope + auto-widen.** When `--project` is **explicitly supplied**, honor it strictly on every search (no widening). When the project is only inferred from the cwd repo (no `--project`), treat it as a *soft preference*: run the searches scoped to it, but if the Internal Position search (Step 4) returns **no entries**, retry the searches **unscoped** (drop the project filter) — the topic often lives in another project than the cwd — and note `Re-scoped to all projects (cwd project '<name>' had no coverage).` in the report.
+
 If already resolved earlier in the conversation, reuse the cached value. Resolve **author** only inside Step 9, and only when `--store` is passed — display-only runs never need it.
 
 ### Step 3: Parse Arguments
@@ -260,7 +262,7 @@ The stored block at the bottom appears only when `--store` was passed and a new 
 - Always use `[Entry <short-id>]` citation format (short-id = first 8 chars of UUID); mark each citation `internal` or `ambient`
 - Every Assessment bullet must cite at least one entry — never assert a verdict without evidence
 - Deduplicate each corpus's result set by entry id; an entry belongs to exactly one provenance (internal vs ambient) — never double-count
-- Apply `--project` to ALL searches (internal and ambient) when set
+- Apply `--project` to ALL searches (internal and ambient) when EXPLICITLY set (strict, no widening); when project is only inferred from the cwd repo, scope softly and auto-widen to unscoped if Internal Position returns nothing (Step 2)
 - Internal Position uses ONE plain `distillery_search(entry_type=["session","github","minutes","reference","idea"], output_mode="summary")` call — NO graph expansion (the graph is too sparse to help); the `--entry` variant uses one `distillery_get` then that same scoped search
 - Ambient Signal filters on `published_after` (publication time), not ingest time; first-poll backfill (`metadata.backfill=true`) is excluded unless `--include-evergreen`
 - Default ambient window is 30 days — respect `--days`
