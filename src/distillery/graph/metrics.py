@@ -106,3 +106,50 @@ def link_prediction(
         ebunch = None
     ranked = sorted(nx.adamic_adar_index(undirected, ebunch), key=lambda t: t[2], reverse=True)
     return [(u, v, float(p)) for u, v, p in ranked[:k]]
+
+
+def mean_degree(g: Any) -> float:
+    """Mean node degree on the undirected projection (``2·|E| / |V|``).
+
+    A graph-health signal: how densely connected the average node is. Computed
+    on the undirected projection so reciprocal directed edges collapse to one,
+    matching the other structural metrics in this module. Guards an empty graph
+    -> ``0.0``.
+    """
+    _require_networkx()
+    n = int(g.number_of_nodes())
+    if n == 0:
+        return 0.0
+    undirected = g.to_undirected() if g.is_directed() else g
+    return 2.0 * int(undirected.number_of_edges()) / n
+
+
+def connected_component_count(g: Any) -> int:
+    """Number of connected components on the undirected projection.
+
+    A graph-health signal: a fragmented graph has many small components; a
+    healthy one consolidates toward few large components. Guards an empty graph
+    -> ``0``.
+    """
+    _require_networkx()
+    if int(g.number_of_nodes()) == 0:
+        return 0
+    undirected = g.to_undirected() if g.is_directed() else g
+    return int(nx.number_connected_components(undirected))
+
+
+def largest_component_fraction(g: Any) -> float:
+    """Fraction of nodes in the largest connected component (``[0, 1]``).
+
+    A graph-health signal paired with ``connected_component_count``: a value
+    near 1 means most linked entries form a single giant component (good for
+    traversal); a low value means the graph is shattered into islands. Computed
+    on the undirected projection. Guards an empty graph -> ``0.0``.
+    """
+    _require_networkx()
+    n = int(g.number_of_nodes())
+    if n == 0:
+        return 0.0
+    undirected = g.to_undirected() if g.is_directed() else g
+    largest = max((len(c) for c in nx.connected_components(undirected)), default=0)
+    return largest / n

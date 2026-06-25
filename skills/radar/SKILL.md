@@ -229,6 +229,16 @@ inline in the rendered output via the heading.
 
 **Optional stale flag:** For each community, if `updated_at` is available on every member and EVERY member has `updated_at < now - 60 days`, mark the community with a `[stale]` tag in its line. Skip the stale check silently if `updated_at` is not available without an extra fetch.
 
+**6d. Graph health:**
+
+Call `distillery_relations(action="metrics", metric="health", scope="global", limit=1)`. If `--project` was specified, also pass `project=<name>`.
+
+If 6b already emitted the `pip install distillery-mcp[graph]` note (NetworkX missing), skip this subsection. On success, render a one-line summary at the **top** of the Knowledge Structure section (above Orphans) so the reader sees the overall shape before the detail:
+
+`Graph health: orphan rate <orphan_rate as %>, <edge_count> edges over <graph_node_count>/<total_entries> nodes, mean degree <mean_degree>, <connected_component_count> components (largest <largest_component_fraction as %>).`
+
+Frame the goal inline: a falling `orphan_rate` and a `largest_component_fraction` approaching 1.0 indicate a consolidating, traversable graph.
+
 ### Step 7: Check for Duplicates (if --store specified)
 
 If `--store` was specified, check for duplicate digests before storing.

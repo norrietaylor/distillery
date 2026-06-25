@@ -452,6 +452,85 @@ async def test_metrics_orphans_returns_unlinked_ids(store) -> None:  # type: ign
     assert data["orphan_rate"] == 0.6
 
 
+async def test_metrics_health_returns_consolidated_snapshot(store) -> None:  # type: ignore[no-untyped-def]
+    """metric='health' adds mean_degree, connected_component_count and
+    largest_component_fraction to the standard totals block (issue #653)."""
+    pytest.importorskip("networkx")
+
+    await _seed_star_relations(store)  # star A->{B,C,D}: 4 nodes, 3 edges, 1 component
+
+    data = _parse(
+        await _handle_relations(store, {"action": "metrics", "metric": "health", "scope": "global"})
+    )
+    assert data.get("error") is not True
+    assert data["metric"] == "health"
+    # Standard totals block.
+    assert data["total_entries"] == 4
+    assert data["graph_node_count"] == 4
+    assert data["edge_count"] == 3
+    assert data["orphan_rate"] == 0.0
+    # Health-only scalar fields.
+    assert data["mean_degree"] == 1.5  # 2 * 3 / 4
+    assert data["connected_component_count"] == 1
+    assert data["largest_component_fraction"] == 1.0
+    # Health carries no per-node results.
+    assert data["results"] == []
+    assert data["count"] == 0
+
+
+async def test_metrics_health_empty_graph(store) -> None:  # type: ignore[no-untyped-def]
+    """With entries but no relations, health reports an empty graph: zero degree,
+    zero components, and an orphan_rate of 1.0."""
+    pytest.importorskip("networkx")
+
+    for i in range(3):
+        await _store_entry(store, content=f"orphan {i}")
+
+    data = _parse(
+        await _handle_relations(store, {"action": "metrics", "metric": "health", "scope": "global"})
+    )
+    assert data.get("error") is not True
+    assert data["graph_node_count"] == 0
+    assert data["edge_count"] == 0
+    assert data["orphan_rate"] == 1.0
+    assert data["mean_degree"] == 0.0
+    assert data["connected_component_count"] == 0
+    assert data["largest_component_fraction"] == 0.0
+
+
+async def test_metrics_health_components_fragmented(store) -> None:  # type: ignore[no-untyped-def]
+    """Two disjoint edges -> two components, largest holding half the nodes."""
+    pytest.importorskip("networkx")
+
+    ids = {name: await _store_entry(store, content=f"entry {name}") for name in "ABXY"}
+    await store.add_relation(ids["A"], ids["B"], "link")
+    await store.add_relation(ids["X"], ids["Y"], "link")
+
+    data = _parse(
+        await _handle_relations(store, {"action": "metrics", "metric": "health", "scope": "global"})
+    )
+    assert data.get("error") is not True
+    assert data["connected_component_count"] == 2
+    assert data["largest_component_fraction"] == 0.5
+    assert data["mean_degree"] == 1.0  # 2 * 2 / 4
+
+
+async def test_metrics_health_omits_scalars_for_other_metrics(store) -> None:  # type: ignore[no-untyped-def]
+    """The health-only scalar fields must NOT appear on other metrics, keeping
+    their response envelope unchanged."""
+    pytest.importorskip("networkx")
+
+    await _seed_star_relations(store)
+    data = _parse(
+        await _handle_relations(
+            store, {"action": "metrics", "metric": "bridges", "scope": "global"}
+        )
+    )
+    assert "mean_degree" not in data
+    assert "connected_component_count" not in data
+    assert "largest_component_fraction" not in data
+
+
 async def test_metrics_orphans_sample_is_capped(store, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     """metric='orphans' returns at most the sample cap of unlinked IDs."""
     pytest.importorskip("networkx")

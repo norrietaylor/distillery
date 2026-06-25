@@ -44,7 +44,7 @@ _ORPHANS_SAMPLE_CAP = 50
 # are soft-deleted and excluded from total_entries / orphan_rate.
 _NON_ARCHIVED_STATUSES = ["active", "pending_review"]
 
-_VALID_METRICS = {"bridges", "communities", "constraint", "link_prediction", "orphans"}
+_VALID_METRICS = {"bridges", "communities", "constraint", "link_prediction", "orphans", "health"}
 _VALID_SCOPES = {"global", "ego"}
 
 # ---------------------------------------------------------------------------
@@ -904,8 +904,11 @@ async def _handle_metrics(  # noqa: PLR0911, PLR0912
     from distillery.graph.metrics import (
         bridges,
         communities,
+        connected_component_count,
         constraint,
+        largest_component_fraction,
         link_prediction,
+        mean_degree,
         orphan_rate,
     )
 
@@ -985,6 +988,10 @@ async def _handle_metrics(  # noqa: PLR0911, PLR0912
     edge_count = g.number_of_edges()
     rate = orphan_rate(graph_node_count=graph_node_count, total_entries=total_entries)
 
+    # Extra scalar fields surfaced only by metric="health"; empty for others so
+    # the response envelope for the existing metrics is unchanged.
+    health_extra: dict[str, Any] = {}
+
     # ----- compute metric -----
     try:
         if metric == "bridges":
@@ -1011,6 +1018,16 @@ async def _handle_metrics(  # noqa: PLR0911, PLR0912
                 filters=total_filters,
             )
             results = [{"id": entry_id} for entry_id in orphan_ids]
+        elif metric == "health":
+            # Consolidated graph-health snapshot: the scalar totals (computed
+            # above) plus degree/component structure. No per-node results — the
+            # signal is in the top-level fields (orphan_rate trend, fragmentation).
+            results = []
+            health_extra = {
+                "mean_degree": round(mean_degree(g), 6),
+                "connected_component_count": connected_component_count(g),
+                "largest_component_fraction": round(largest_component_fraction(g), 6),
+            }
         else:  # metric == "communities"
             comms = communities(g)
             comms_sorted = sorted(comms, key=lambda c: len(c), reverse=True)[:limit]
@@ -1029,6 +1046,7 @@ async def _handle_metrics(  # noqa: PLR0911, PLR0912
             "total_entries": total_entries,
             "graph_node_count": graph_node_count,
             "orphan_rate": round(rate, 6),
+            **health_extra,
             "results": results,
             "count": len(results),
             "computed_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),

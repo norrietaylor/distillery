@@ -1391,7 +1391,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
           - relation_id (str, required for remove): UUID of the relation to delete.
           - hops (int, optional for traverse, default=2): BFS depth, capped at [1, 3].
           - metric (str, required for metrics): Graph metric to compute.
-            Valid: [bridges, communities, constraint, link_prediction, orphans].
+            Valid: [bridges, communities, constraint, link_prediction, orphans, health].
             Requires the [graph] optional extra.
           - scope (str, optional for metrics, default="global"): Subgraph scope.
             Valid: [global, ego]. ``"ego"`` requires ``entry_id``.
@@ -1401,7 +1401,10 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             (strongest structural-hole brokers); ``link_prediction`` = top predicted
             edges by Adamic-Adar (pass ``entry_id`` to score adjacencies for one entry);
             ``orphans`` = sample (<=50) of entry IDs absent from the relations graph
-            (unlinked entries — feeds a linking / gap-scan pass).
+            (unlinked entries — feeds a linking / gap-scan pass); ``health`` = a
+            consolidated graph-health snapshot (no per-node results) adding
+            ``mean_degree``, ``connected_component_count`` and
+            ``largest_component_fraction`` to the standard totals block.
           - project / tags / date_from / date_to (optional, metrics global scope):
             restrict the entries whose relations participate in the graph.
 
@@ -1415,7 +1418,9 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             node_count: int, edge_count: int } (traverse) or
           { action: "metrics", metric: str, scope: str, node_count: int, edge_count: int,
             total_entries: int, graph_node_count: int, orphan_rate: float,
-            results: list, count: int, computed_at: str, cache_hit: bool } (metrics).
+            results: list, count: int, computed_at: str, cache_hit: bool } (metrics),
+            plus mean_degree: float, connected_component_count: int and
+            largest_component_fraction: float when metric="health".
             ``orphan_rate`` = 1 - graph_node_count/total_entries (graph-health signal;
             0.0 when total_entries is 0). Or
           { action: "promote_entities", entities_created: int, entities_reused: int,
