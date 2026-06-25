@@ -3009,9 +3009,7 @@ class DuckDBStore:
             return await self._get_entry_stats(filters, stale_days=stale_days)
 
         # ----- default list mode -----
-        def _sync() -> list[Entry]:
-            conn = self.connection
-
+        def _sync(conn: Any) -> list[Entry]:
             where_clauses, params = self._build_filter_clauses(filters)
 
             if stale_days is not None:
@@ -3038,7 +3036,10 @@ class DuckDBStore:
             rows = result.fetchall()
             return [self._row_to_entry(row, col_names) for row in rows]
 
-        return await self._run_sync(_sync)
+        # Read-only SELECT routed via the independent read handle so a list
+        # never queues behind a slow write on ``_conn_lock`` (the #670
+        # contention class). ``accessed_at`` is only a stale-filter WHERE clause.
+        return await self._run_read(_sync)
 
     async def _get_entry_stats(
         self,
@@ -3054,9 +3055,7 @@ class DuckDBStore:
         if stale_days is not None and stale_days < 0:
             raise ValueError("stale_days must be non-negative")
 
-        def _sync() -> dict[str, Any]:
-            conn = self.connection
-
+        def _sync(conn: Any) -> dict[str, Any]:
             where_clauses, params = self._build_filter_clauses(filters)
 
             if stale_days is not None:
@@ -3113,7 +3112,10 @@ class DuckDBStore:
                 "storage_bytes": storage_bytes,
             }
 
-        return await self._run_sync(_sync)
+        # Read-only aggregate routed via the independent read handle so the
+        # ``output="stats"`` path of ``list_entries`` never queues behind a
+        # write on ``_conn_lock`` (the #670 contention class).
+        return await self._run_read(_sync)
 
     async def count_entries(
         self,
@@ -3183,8 +3185,7 @@ class DuckDBStore:
             raise ValueError("stale_days must be non-negative")
         group_expr = _AGGREGATE_EXPR_MAP[group_by]
 
-        def _sync() -> dict[str, Any]:
-            conn = self.connection
+        def _sync(conn: Any) -> dict[str, Any]:
             where_clauses, params = self._build_filter_clauses(filters)
             if stale_days is not None:
                 where_clauses.append(
@@ -3266,7 +3267,10 @@ class DuckDBStore:
                 "total_entries": total_entries,
             }
 
-        return await self._run_sync(_sync)
+        # Read-only grouped aggregate routed via the independent read handle so
+        # it never queues behind a write on ``_conn_lock`` (the #670 contention
+        # class). ``accessed_at`` is only a stale-filter WHERE clause.
+        return await self._run_read(_sync)
 
     # ------------------------------------------------------------------
     # Audit logging

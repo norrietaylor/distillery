@@ -1897,7 +1897,10 @@ class TestConnectionLockSerialization:
         await s.initialize()
         # ``initialize`` does not go through ``_run_sync`` so lock is still None.
         assert s._conn_lock is None  # noqa: SLF001
-        await s.list_entries(filters=None, limit=1, offset=0)
+        # ``list_entries`` now runs on the read handle (``_run_read``), so it no
+        # longer arms ``_conn_lock``; use a write (``store``) to trigger the
+        # first ``_run_sync`` call.
+        await s.store(make_entry(content="lazy-lock trigger"))
         assert s._conn_lock is not None  # noqa: SLF001
         await s.close()
 
@@ -1984,6 +1987,57 @@ class TestStatusStaysResponsiveUnderWriteContention:
             await asyncio.wait_for(_status(), timeout=2.0)
             elapsed = asyncio.get_event_loop().time() - start
             assert elapsed < 1.0, f"status probes took {elapsed:.3f}s under write load"
+
+            await asyncio.gather(*writers)
+        finally:
+            await store.close()
+
+    async def test_list_and_aggregate_respond_while_writes_are_in_flight(self) -> None:
+        """list_entries / aggregate_entries answer in <1s under write load.
+
+        Regression for taking ``list_entries`` (default-list + ``output="stats"``
+        paths) and ``aggregate_entries`` off the single writer lock: they now run
+        on the independent read handle via ``_run_read`` instead of ``_run_sync``
+        (the #670 contention class).  Seed the store, fire concurrent
+        embedding-bound writes (500ms/embed) that hold the writer, then assert the
+        reads complete quickly *and* return correct results.
+        """
+        import asyncio
+
+        provider = _SlowEmbeddingProvider(delay=0.5)
+        store = DuckDBStore(db_path=":memory:", embedding_provider=provider)
+        await store.initialize()
+        try:
+            # Seed 5 entries before the contention so the reads have data.
+            for i in range(5):
+                await store.store(make_entry(content=f"seed {i}"))
+
+            # Fire 10 embedding-bound writes; each holds a worker for ~500ms.
+            writers = [
+                asyncio.create_task(store.store(make_entry(content=f"slow write {i}")))
+                for i in range(10)
+            ]
+            # Give the writers a moment to start embedding off-thread.
+            await asyncio.sleep(0.05)
+
+            async def _reads() -> None:
+                # Default list mode.
+                entries = await store.list_entries(filters=None, limit=100, offset=0)
+                assert len(entries) == 5
+                # Stats mode (delegates to _get_entry_stats).
+                stats = await store.list_entries(filters=None, limit=100, offset=0, output="stats")
+                assert isinstance(stats, dict)
+                assert stats["total_entries"] == 5
+                # group_by mode (delegates to aggregate_entries).
+                grouped = await store.aggregate_entries(
+                    group_by="entry_type", filters=None, limit=10
+                )
+                assert grouped["total_entries"] == 5
+
+            start = asyncio.get_event_loop().time()
+            await asyncio.wait_for(_reads(), timeout=2.0)
+            elapsed = asyncio.get_event_loop().time() - start
+            assert elapsed < 1.0, f"list/aggregate reads took {elapsed:.3f}s under write load"
 
             await asyncio.gather(*writers)
         finally:
