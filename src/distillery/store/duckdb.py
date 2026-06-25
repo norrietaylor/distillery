@@ -31,6 +31,7 @@ from urllib.parse import unquote, urlparse
 
 import duckdb
 
+from distillery import observability
 from distillery.feeds.tags import normalize_tag
 from distillery.models import Entry, EntrySource, EntryStatus, EntryType, validate_metadata
 from distillery.store.migrations import (
@@ -2596,7 +2597,8 @@ class DuckDBStore:
         # 429/5xx) does not block the event loop — mirrors ``store`` (issue
         # #558). On the event loop a blocking embed starves the Fly health
         # check during concurrent feed polls, which de-routes the machine.
-        embedding = await asyncio.to_thread(self._embedding_provider.embed, query)
+        with observability.span("store.search.embed"):
+            embedding = await asyncio.to_thread(self._embedding_provider.embed, query)
         use_hybrid = self._hybrid_search and self._fts_available
 
         def _sync(conn: duckdb.DuckDBPyConnection) -> list[SearchResult]:
@@ -2606,12 +2608,28 @@ class DuckDBStore:
                 where_sql = "WHERE " + " AND ".join(where_clauses)
 
             # --- Vector search (always performed) ---
+            # Unfiltered cosine queries order by array_cosine_distance ASC so
+            # DuckDB's HNSW cosine index (migration 6) can serve the top-k via
+            # an index scan. DuckDB's HNSW applies WHERE predicates AFTER the
+            # index scan (post-filtering), which can return fewer than `limit`
+            # rows once a filter is present, so filtered queries stay on the
+            # exact array_cosine_similarity scan to preserve the full result
+            # count and ordering (CR review, PR #693). Both expressions yield
+            # the same displayed cosine similarity in [0, 1].
+            dims = self._embedding_provider.dimensions
+            if where_sql:
+                score_select = f"array_cosine_similarity(embedding, ?::FLOAT[{dims}]) AS score"
+                order_sql = "ORDER BY score DESC"
+                score_col = "score"
+            else:
+                score_select = f"array_cosine_distance(embedding, ?::FLOAT[{dims}]) AS distance"
+                order_sql = "ORDER BY distance ASC"
+                score_col = "distance"
             sql = (
-                f"SELECT {self._ENTRY_COLUMNS}, "
-                f"array_cosine_similarity(embedding, ?::FLOAT[{self._embedding_provider.dimensions}]) AS score "
+                f"SELECT {self._ENTRY_COLUMNS}, {score_select} "
                 f"FROM entries "
                 f"{where_sql} "
-                f"ORDER BY score DESC "
+                f"{order_sql} "
                 f"LIMIT ?"
             )
             # Fetch more candidates for fusion when hybrid is active.
@@ -2628,7 +2646,11 @@ class DuckDBStore:
             cosine_score: dict[str, float] = {}
             for rank, row in enumerate(rows, start=1):
                 row_dict = dict(zip(col_names, row, strict=True))
-                raw_cosine = float(row_dict.pop("score"))
+                raw = float(row_dict.pop(score_col))
+                # Map cosine similarity in [-1, 1] to a displayed score in
+                # [0, 1]. array_cosine_distance = 1 - similarity, so both paths
+                # produce identical scores: (similarity + 1) / 2.
+                similarity = raw if score_col == "score" else 1.0 - raw
                 entry = self._row_to_entry(
                     tuple(row_dict.values()),
                     list(row_dict.keys()),
@@ -2636,8 +2658,7 @@ class DuckDBStore:
                 entry_map[entry.id] = entry
                 vector_ranks[entry.id] = rank
                 entry_created[entry.id] = entry.created_at
-                # Map raw cosine similarity in [-1, 1] to a displayed score in [0, 1].
-                cosine_score[entry.id] = (raw_cosine + 1.0) / 2.0
+                cosine_score[entry.id] = (similarity + 1.0) / 2.0
 
             if not use_hybrid:
                 # Vector-only: return raw cosine similarity (mapped to [0, 1]).
@@ -2646,7 +2667,7 @@ class DuckDBStore:
                 results: list[SearchResult] = []
                 for row in rows[:limit]:
                     row_dict = dict(zip(col_names, row, strict=True))
-                    row_dict.pop("score")
+                    row_dict.pop(score_col)
                     eid = row_dict["id"]
                     results.append(SearchResult(entry=entry_map[eid], score=cosine_score[eid]))
                 return results
@@ -2724,7 +2745,8 @@ class DuckDBStore:
         # Reads run on the independent read handle so a search never queues
         # behind a write on ``_conn_lock`` (#663 follow-up). ``accessed_at`` is
         # stamped out of band via the deferred flusher.
-        results = await self._run_read(_sync)
+        with observability.span("store.search.rank", hybrid=use_hybrid, limit=limit):
+            results = await self._run_read(_sync)
         self._mark_accessed(r.entry.id for r in results)
         return results
 
