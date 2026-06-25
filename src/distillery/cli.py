@@ -689,6 +689,9 @@ def _cmd_poll(config_path: str | None, fmt: str, source_url: str | None) -> int:
             auto_link_enabled=cfg.auto_link.enabled,
             auto_link_threshold=cfg.auto_link.threshold,
             auto_link_max_links=cfg.auto_link.max_links,
+            tag_aliases=cfg.tags.aliases,
+            tag_reserved_prefixes=cfg.tags.reserved_prefixes,
+            tag_normalize_namespaces=cfg.tags.enforce_namespaces,
         )
         await store.initialize()
 
@@ -845,6 +848,9 @@ def _cmd_retag(
             auto_link_enabled=cfg.auto_link.enabled,
             auto_link_threshold=cfg.auto_link.threshold,
             auto_link_max_links=cfg.auto_link.max_links,
+            tag_aliases=cfg.tags.aliases,
+            tag_reserved_prefixes=cfg.tags.reserved_prefixes,
+            tag_normalize_namespaces=cfg.tags.enforce_namespaces,
         )
         await store.initialize()
 
@@ -970,6 +976,9 @@ def _cmd_gh_backfill(
             auto_link_enabled=cfg.auto_link.enabled,
             auto_link_threshold=cfg.auto_link.threshold,
             auto_link_max_links=cfg.auto_link.max_links,
+            tag_aliases=cfg.tags.aliases,
+            tag_reserved_prefixes=cfg.tags.reserved_prefixes,
+            tag_normalize_namespaces=cfg.tags.enforce_namespaces,
         )
         await store.initialize()
         try:
@@ -1293,6 +1302,9 @@ def _cmd_import(
             auto_link_enabled=cfg.auto_link.enabled,
             auto_link_threshold=cfg.auto_link.threshold,
             auto_link_max_links=cfg.auto_link.max_links,
+            tag_aliases=cfg.tags.aliases,
+            tag_reserved_prefixes=cfg.tags.reserved_prefixes,
+            tag_normalize_namespaces=cfg.tags.enforce_namespaces,
         )
         await store.initialize()
 
@@ -1994,6 +2006,9 @@ def _cmd_maintenance_classify(
             auto_link_enabled=cfg.auto_link.enabled,
             auto_link_threshold=cfg.auto_link.threshold,
             auto_link_max_links=cfg.auto_link.max_links,
+            tag_aliases=cfg.tags.aliases,
+            tag_reserved_prefixes=cfg.tags.reserved_prefixes,
+            tag_normalize_namespaces=cfg.tags.enforce_namespaces,
         )
         try:
             await store.initialize()
