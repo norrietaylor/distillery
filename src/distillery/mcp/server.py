@@ -937,7 +937,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
     async def distillery_search(  # noqa: PLR0913
         ctx: Context,
         query: str,
-        entry_type: str | None = None,
+        entry_type: str | list[str] | None = None,
         author: str | None = None,
         project: str | None = None,
         tags: list[str] | None = None,
@@ -979,7 +979,8 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
 
         PARAMS:
           - query (str, required): Natural-language search query.
-          - entry_type (str, optional): Filter by type.
+          - entry_type (str | list[str], optional): Filter by type, or a list of
+            types matched with OR (e.g. ["session", "reference"]).
           - author (str, optional): Filter by author.
           - project (str, optional): Filter by project scope.
           - tags (list[str], optional): Filter by tags (AND match).
