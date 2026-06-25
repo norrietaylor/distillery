@@ -590,6 +590,7 @@ class DistilleryStore(Protocol):
         entry_id: str,
         direction: str = "both",
         relation_type: str | None = None,
+        include_retired: bool = False,
     ) -> list[dict[str, Any]]:
         """Return relations for an entry, optionally filtered by direction and type.
 
@@ -600,6 +601,9 @@ class DistilleryStore(Protocol):
                 (default, returns all).
             relation_type: Optional filter restricting results to rows with
                 this ``relation_type`` value.  ``None`` returns all types.
+            include_retired: When ``False`` (default), soft-retired edges whose
+                bi-temporal window has closed (``invalid_at`` in the past, or
+                ``valid_at`` in the future) are excluded (issue #653 curation).
 
         Returns:
             List of dicts, each containing keys: ``id``, ``from_id``,
@@ -622,18 +626,54 @@ class DistilleryStore(Protocol):
         """
         ...
 
-    async def list_relations(self) -> list[dict[str, Any]]:
-        """Return every row from ``entry_relations`` as a list of dicts.
+    async def list_relations(self, include_retired: bool = False) -> list[dict[str, Any]]:
+        """Return rows from ``entry_relations`` as a list of dicts.
 
-        Intended for graph metrics computation that needs the entire relations
-        subgraph in one shot.  Implementations must run any underlying sync
-        I/O off the event loop so async callers are not blocked.
+        Intended for graph metrics computation that needs the relations subgraph
+        in one shot.  Implementations must run any underlying sync I/O off the
+        event loop so async callers are not blocked.
+
+        Args:
+            include_retired: When ``False`` (default), soft-retired edges (closed
+                bi-temporal window) are excluded so metrics reflect live
+                structure (issue #653 curation).
 
         Returns:
             List of dicts with keys: ``id``, ``from_id``, ``to_id``,
             ``relation_type``, ``created_at`` (ISO 8601 str), ``weight``
             (float | None), ``valid_at`` / ``invalid_at`` (ISO 8601 str | None),
             ``metadata`` (dict | None).  Ordered by ascending ``created_at``.
+        """
+        ...
+
+    async def retire_relation(
+        self, relation_id: str, invalid_at: str | datetime | None = None
+    ) -> bool:
+        """Soft-retire a relation by setting its ``invalid_at`` (issue #653 curation).
+
+        Preferred over :meth:`remove_relation` (a hard delete): the edge stays in
+        the table and is excluded from default reads/metrics, but remains
+        auditable and can be brought back with :meth:`revalidate_relation`.
+        Idempotent — re-retiring resets the timestamp.
+
+        Args:
+            relation_id: UUID of the ``entry_relations`` row to retire.
+            invalid_at: Instant the edge stopped being true; ``None`` means now.
+
+        Returns:
+            ``True`` if the row existed, ``False`` otherwise.
+        """
+        ...
+
+    async def revalidate_relation(self, relation_id: str) -> bool:
+        """Clear a relation's ``invalid_at`` so it is live again (issue #653).
+
+        The inverse of :meth:`retire_relation`. ``add_relation``'s attribute
+        upsert cannot reset ``invalid_at`` to NULL, so this is the supported way
+        to un-retire an edge.
+
+        Returns:
+            ``True`` if the row existed, ``False`` otherwise.
         """
         ...
 

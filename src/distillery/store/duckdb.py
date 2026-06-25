@@ -101,6 +101,16 @@ _VALID_RELATION_TYPES = {
     "chunk",
 }
 
+# Bi-temporal "currently live" filter for relation reads (issue #653, curation).
+# An edge is live when it has started (valid_at null or in the past) and has not
+# been retired (invalid_at null or in the future). Soft-retired edges
+# (invalid_at set to now/past) are excluded from reads, traversal, and graph
+# metrics unless a caller explicitly asks to include them.
+_RELATION_LIVE_CLAUSE = (
+    "(valid_at IS NULL OR valid_at <= CURRENT_TIMESTAMP) "
+    "AND (invalid_at IS NULL OR invalid_at > CURRENT_TIMESTAMP)"
+)
+
 
 class EntriesIntegrityError(RuntimeError):
     """Raised when a post-bulk-rewrite read-back of ``entries`` fails.
@@ -4370,6 +4380,7 @@ class DuckDBStore:
         entry_id: str,
         direction: str,
         relation_type: str | None,
+        include_retired: bool = False,
     ) -> list[dict[str, Any]]:
         """Synchronous implementation of get_related(); called via asyncio.to_thread."""
         assert self._conn is not None
@@ -4401,6 +4412,10 @@ class DuckDBStore:
             "json_extract_string(metadata, '$.review_status') IS DISTINCT FROM 'pending')"
         )
 
+        # Exclude soft-retired edges (bi-temporal window) unless asked otherwise.
+        if not include_retired:
+            conditions.append(_RELATION_LIVE_CLAUSE)
+
         where_clause = " AND ".join(conditions)
         sql = (
             f"SELECT {self._RELATION_SELECT_COLUMNS} "
@@ -4414,6 +4429,7 @@ class DuckDBStore:
         entry_id: str,
         direction: str = "both",
         relation_type: str | None = None,
+        include_retired: bool = False,
     ) -> list[dict[str, Any]]:
         """Return relations for an entry, optionally filtered by direction and type.
 
@@ -4422,6 +4438,10 @@ class DuckDBStore:
             direction: One of ``"outgoing"``, ``"incoming"``, or ``"both"``
                 (default).
             relation_type: Optional filter restricting results to this type.
+            include_retired: When ``False`` (default), soft-retired edges (those
+                whose bi-temporal window has closed — ``invalid_at`` in the past,
+                or ``valid_at`` in the future) are excluded. Pass ``True`` to
+                include them (issue #653 curation).
 
         Returns:
             List of dicts with keys: ``id``, ``from_id``, ``to_id``,
@@ -4429,7 +4449,9 @@ class DuckDBStore:
             (float | None), ``valid_at`` / ``invalid_at`` (ISO 8601 str | None),
             ``metadata`` (dict | None).
         """
-        return await self._run_sync(self._sync_get_related, entry_id, direction, relation_type)
+        return await self._run_sync(
+            self._sync_get_related, entry_id, direction, relation_type, include_retired
+        )
 
     def _sync_remove_relation(self, relation_id: str) -> bool:
         """Synchronous implementation of remove_relation(); called via asyncio.to_thread."""
@@ -4455,22 +4477,29 @@ class DuckDBStore:
         """
         return await self._run_sync(self._sync_remove_relation, relation_id)
 
-    def _sync_list_relations(self) -> list[dict[str, Any]]:
+    def _sync_list_relations(self, include_retired: bool = False) -> list[dict[str, Any]]:
         """Synchronous implementation of list_relations(); called via asyncio.to_thread."""
         assert self._conn is not None
+        where = "" if include_retired else f" WHERE {_RELATION_LIVE_CLAUSE}"
         rows = self._conn.execute(
-            f"SELECT {self._RELATION_SELECT_COLUMNS} FROM entry_relations ORDER BY created_at ASC"
+            f"SELECT {self._RELATION_SELECT_COLUMNS} FROM entry_relations{where} "
+            "ORDER BY created_at ASC"
         ).fetchall()
         return [self._relation_row_to_dict(row) for row in rows]
 
-    async def list_relations(self) -> list[dict[str, Any]]:
-        """Return every row from ``entry_relations`` as a list of dicts.
+    async def list_relations(self, include_retired: bool = False) -> list[dict[str, Any]]:
+        """Return rows from ``entry_relations`` as a list of dicts.
 
         Used by graph metrics (``distillery_relations`` action="metrics") to
-        assemble the full subgraph for global-scope analysis. Goes through
+        assemble the subgraph for global-scope analysis. Goes through
         :meth:`_run_sync` so the async event loop is never blocked by sync
         DuckDB I/O and the shared connection is serialised under the same
         lock as every other store operation.
+
+        Args:
+            include_retired: When ``False`` (default), soft-retired edges (closed
+                bi-temporal window) are excluded so graph metrics reflect only
+                live structure (issue #653 curation).
 
         Returns:
             List of dicts with keys: ``id``, ``from_id``, ``to_id``,
@@ -4478,7 +4507,54 @@ class DuckDBStore:
             (float | None), ``valid_at`` / ``invalid_at`` (ISO 8601 str | None),
             ``metadata`` (dict | None).  Ordered by ascending ``created_at``.
         """
-        return await self._run_sync(self._sync_list_relations)
+        return await self._run_sync(self._sync_list_relations, include_retired)
+
+    def _sync_retire_relation(self, relation_id: str, invalid_at: str | datetime | None) -> bool:
+        """Soft-retire a relation by setting ``invalid_at`` (default: now).
+
+        Idempotent: re-retiring an already-retired edge just resets the
+        timestamp. Returns whether the row existed. Preferred over
+        :meth:`remove_relation` (a hard delete) so the edge stays auditable and
+        can be revalidated.
+        """
+        assert self._conn is not None
+        invalid_dt = self._coerce_relation_timestamp(invalid_at) or datetime.now(UTC)
+        found = (
+            self._conn.execute(
+                "UPDATE entry_relations SET invalid_at = ? WHERE id = ? RETURNING id",
+                [invalid_dt, relation_id],
+            ).fetchone()
+            is not None
+        )
+        if found:
+            self._checkpoint_after_write(self._conn)
+            logger.debug("Retired relation id=%s invalid_at=%s", relation_id, invalid_dt)
+        return found
+
+    async def retire_relation(
+        self, relation_id: str, invalid_at: str | datetime | None = None
+    ) -> bool:
+        """Soft-retire a relation (set its ``invalid_at``). See protocol."""
+        return await self._run_sync(self._sync_retire_relation, relation_id, invalid_at)
+
+    def _sync_revalidate_relation(self, relation_id: str) -> bool:
+        """Clear ``invalid_at`` so a retired relation becomes live again."""
+        assert self._conn is not None
+        found = (
+            self._conn.execute(
+                "UPDATE entry_relations SET invalid_at = NULL WHERE id = ? RETURNING id",
+                [relation_id],
+            ).fetchone()
+            is not None
+        )
+        if found:
+            self._checkpoint_after_write(self._conn)
+            logger.debug("Revalidated relation id=%s", relation_id)
+        return found
+
+    async def revalidate_relation(self, relation_id: str) -> bool:
+        """Clear a relation's ``invalid_at`` so it is live again. See protocol."""
+        return await self._run_sync(self._sync_revalidate_relation, relation_id)
 
     def _sync_add_relation_candidate(
         self,
