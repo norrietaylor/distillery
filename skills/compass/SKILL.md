@@ -125,7 +125,7 @@ If both ambient searches return nothing, the field (as captured) is silent on th
 
 This is the comparative step. It does **not** rely on the two mechanisms that look obvious but do not bridge the two corpora — see the design corrections below — so it uses **cross-vocabulary search** as the primary path.
 
-**6a. Cross-vocabulary search (primary path).** Internal entries speak implementation-language (symbols, file paths, library names — e.g. `gvproxy`, `vsock`, `SCM_RIGHTS`); ambient entries speak product-language (patterns, product names, capabilities — e.g. `egress-proxy for credentials`, `microVM`). Extract 2–4 concrete entities/patterns/product-terms from each cluster and query the *other* corpus with them:
+**6a. Cross-vocabulary search (primary path).** Internal entries speak implementation-language (symbols, file paths, library names — e.g. `gvproxy`, `vsock`, `SCM_RIGHTS`); ambient entries speak product-language (patterns, product names, capabilities — e.g. `egress-proxy for credentials`, `microVM`). Extract **up to 2** concrete entities/patterns/product-terms from each cluster (the cap below) and query the *other* corpus with them:
 
 ```python
 # product-terms lifted from the ambient cluster → query the INTERNAL corpus
@@ -270,7 +270,7 @@ The stored block at the bottom appears only when `--store` was passed and a new 
 - /compass is non-graph: never use `expand_graph` or `distillery_relations` — the graph is too sparse to connect the corpora
 - NEVER claim a seam that embedding similarity alone produced — a seam requires cross-vocabulary evidence
 - A disjoint result (no overlap between corpora on a term) is itself a finding — report it and feed it to the Assessment as an Exposed candidate
-- Loop limits: up to 2 concept-terms per direction in Step 6 (internal→ambient runs a feed + bookmark search per term, so ≤6 cross-queries total)
+- Loop limits: up to 2 concept-terms per direction in Step 6, one scoped `distillery_search` call per term (entry_type list covers feeds+bookmarks in that one call), so ≤4 cross-queries total
 - Display-only by default; store only with `--store`
 - When storing: follow CONVENTIONS.md dedup-on-store (create/skip/merge/link), use `entry_type="digest"`, include `compass` in tags, and metadata `period_start`/`period_end` as ISO 8601 dates
 - `distillery_search` returning empty results is not an error — record 0 and continue
