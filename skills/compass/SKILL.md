@@ -51,7 +51,7 @@ If no topic is provided (and no `--entry`), ask:
 
 > What topic would you like to orient on? (e.g., "sandbox networking", "agent eval harnesses") — `/compass <topic>`.
 
-Extract from arguments. Every flag is borrowed verbatim from `radar`/`investigate`, so nothing new must be learned:
+Extract from arguments. Most flags are borrowed from `radar`/`investigate` (so little is new to learn); `--sources` is compass-specific:
 
 | Flag | Description |
 |------|-------------|
