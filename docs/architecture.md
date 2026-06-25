@@ -33,7 +33,7 @@ Distillery is built as a 4-layer system where skills (SKILL.md files) drive all 
 
   <!-- Layer 1: Skills -->
   <rect class="d-layer" x="30" y="16" width="700" height="96" rx="12"/>
-  <text class="d-label" x="50" y="36">14 Claude Code Skills</text>
+  <text class="d-label" x="50" y="36">15 Claude Code Skills</text>
   <rect class="d-pill" x="50" y="44" width="62" height="26" rx="6"/><text class="d-pill-text" x="81" y="61" text-anchor="middle">/distill</text>
   <rect class="d-pill" x="120" y="44" width="56" height="26" rx="6"/><text class="d-pill-text" x="148" y="61" text-anchor="middle">/recall</text>
   <rect class="d-pill" x="184" y="44" width="50" height="26" rx="6"/><text class="d-pill-text" x="209" y="61" text-anchor="middle">/pour</text>
@@ -49,6 +49,7 @@ Distillery is built as a 4-layer system where skills (SKILL.md files) drive all 
   <rect class="d-pill" x="114" y="76" width="70" height="26" rx="6"/><text class="d-pill-text" x="149" y="93" text-anchor="middle">/gh-sync</text>
   <rect class="d-pill" x="192" y="76" width="86" height="26" rx="6"/><text class="d-pill-text" x="235" y="93" text-anchor="middle">/investigate</text>
   <rect class="d-pill" x="286" y="76" width="68" height="26" rx="6"/><text class="d-pill-text" x="320" y="93" text-anchor="middle">/briefing</text>
+  <rect class="d-pill" x="362" y="76" width="76" height="26" rx="6"/><text class="d-pill-text" x="400" y="93" text-anchor="middle">/compass</text>
 
   <!-- Connector -->
   <line class="d-line" x1="380" y1="112" x2="380" y2="128"/>
@@ -144,7 +145,7 @@ Distillery is built as a 4-layer system where skills (SKILL.md files) drive all 
 
 | Layer | What it does | Key files |
 |-------|-------------|-----------|
-| **Skills** | 14 SKILL.md files — portable, version-controlled slash commands. Not Python code. | `skills/*/SKILL.md` |
+| **Skills** | 15 SKILL.md files — portable, version-controlled slash commands. Not Python code. | `skills/*/SKILL.md` |
 | **MCP Server** | Tools exposed over stdio (local) or streamable-HTTP (team). Built on FastMCP 2.x/3.x with `@server.tool` decorators. | `src/distillery/mcp/server.py` |
 | **Webhook API** | REST endpoints mounted under `/api/*` for orchestrated operations. The active endpoint is `POST /api/maintenance` (full poll → rescore → classify-batch pipeline). Individual scheduling endpoints — `POST /api/poll`, `POST /api/rescore`, `POST /api/classify-batch` (also reachable at `POST /api/hooks/poll`, `/api/hooks/rescore`, `/api/hooks/classify-batch` during the deprecation window) — are deprecated in favour of Claude Code routines and the orchestrated maintenance endpoint. Bearer token auth, per-endpoint cooldowns persisted to DuckDB. Mounted alongside MCP in HTTP mode. | `src/distillery/mcp/webhooks.py` |
 | **Auth** | MCP: GitHub OAuth with org-restricted access. Webhooks: bearer token via `DISTILLERY_WEBHOOK_SECRET`. Middleware handles logging, rate limiting, security headers, budget tracking. | `src/distillery/mcp/auth.py`, `middleware.py`, `budget.py` |
@@ -214,6 +215,7 @@ distillery/
 │   ├── gh-sync/SKILL.md
 │   ├── investigate/SKILL.md
 │   ├── briefing/SKILL.md
+│   ├── compass/SKILL.md
 │   └── CONVENTIONS.md
 ├── src/distillery/
 │   ├── models.py            # Entry, SearchResult, enums

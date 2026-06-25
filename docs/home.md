@@ -18,13 +18,14 @@ Runs locally over stdio or as a hosted HTTP service with GitHub OAuth for team a
 
 ## Skills
 
-Distillery provides 14 Claude Code slash commands:
+Distillery provides 15 Claude Code slash commands:
 
 | Skill | Purpose | Example |
 |-------|---------|---------|
 | [`/distill`](skills/distill.md) | Capture session knowledge with dedup detection | `/distill "We decided to use DuckDB for local storage"` |
 | [`/recall`](skills/recall.md) | Semantic search with provenance | `/recall distributed caching strategies` |
 | [`/pour`](skills/pour.md) | Multi-entry synthesis with citations | `/pour how does our auth system work?` |
+| [`/compass`](skills/compass.md) | Internal vs ambient directional assessment | `/compass agent eval harnesses` |
 | [`/bookmark`](skills/bookmark.md) | Store URLs with auto-generated summaries | `/bookmark https://example.com/article #caching` |
 | [`/minutes`](skills/minutes.md) | Meeting notes with append updates | `/minutes --update standup-2026-03-22` |
 | [`/classify`](skills/classify.md) | Classify entries and triage review queue | `/classify --inbox` |
@@ -46,7 +47,7 @@ claude plugin marketplace add norrietaylor/distillery
 claude plugin install distillery
 ```
 
-This installs all 14 skills. The plugin **does not configure an MCP server automatically** — run `/setup` to add one. The recommended setup runs **locally** via `uvx --from 'distillery-mcp[fastembed]>=0.6.0' distillery-mcp` — a private, self-contained knowledge base on your machine, with on-device `fastembed` embeddings (no API key required). Requires Python 3.11+ and [`uv`](https://docs.astral.sh/uv/).
+This installs all 15 skills. The plugin **does not configure an MCP server automatically** — run `/setup` to add one. The recommended setup runs **locally** via `uvx --from 'distillery-mcp[fastembed]>=0.6.0' distillery-mcp` — a private, self-contained knowledge base on your machine, with on-device `fastembed` embeddings (no API key required). Requires Python 3.11+ and [`uv`](https://docs.astral.sh/uv/).
 
 !!! tip "Install uv"
     `curl -LsSf https://astral.sh/uv/install.sh | sh`

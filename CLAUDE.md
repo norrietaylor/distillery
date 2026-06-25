@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is Distillery
 
-Distillery is a knowledge-base system for Claude Code. It stores, searches, and classifies knowledge entries using DuckDB with vector similarity search (VSS/HNSW). It includes ambient intelligence features that poll external feeds (GitHub, RSS) and score relevance using embeddings. It exposes functionality via an MCP server (stdio or streamable-HTTP transport) with 16 tools, orchestrated by 14 Claude Code skills (`/distill`, `/recall`, `/pour`, `/bookmark`, `/minutes`, `/classify`, `/watch`, `/radar`, `/tune`, `/digest`, `/gh-sync`, `/investigate`, `/briefing`, `/setup`). HTTP transport supports GitHub OAuth for team access. REST webhook endpoints (`/hooks/poll`, `/hooks/rescore`, `/hooks/classify-batch`, `/api/maintenance`) run alongside the MCP server for automated scheduling via GitHub Actions cron.
+Distillery is a knowledge-base system for Claude Code. It stores, searches, and classifies knowledge entries using DuckDB with vector similarity search (VSS/HNSW). It includes ambient intelligence features that poll external feeds (GitHub, RSS) and score relevance using embeddings. It exposes functionality via an MCP server (stdio or streamable-HTTP transport) with 16 tools, orchestrated by 15 Claude Code skills (`/distill`, `/recall`, `/pour`, `/compass`, `/bookmark`, `/minutes`, `/classify`, `/watch`, `/radar`, `/tune`, `/digest`, `/gh-sync`, `/investigate`, `/briefing`, `/setup`). HTTP transport supports GitHub OAuth for team access. REST webhook endpoints (`/hooks/poll`, `/hooks/rescore`, `/hooks/classify-batch`, `/api/maintenance`) run alongside the MCP server for automated scheduling via GitHub Actions cron.
 
 ## Commands
 
@@ -97,10 +97,10 @@ Always create a pull request for changes — never push directly to `main`. Crea
 
 ## Skills
 
-14 skills live in `skills/<name>/SKILL.md` with YAML frontmatter. Shared conventions are in `skills/CONVENTIONS.md`. All skills follow the same pattern: check MCP availability, determine author (git config > env > ask), determine project (git repo name > flag > ask), execute, confirm.
+15 skills live in `skills/<name>/SKILL.md` with YAML frontmatter. Shared conventions are in `skills/CONVENTIONS.md`. All skills follow the same pattern: check MCP availability, determine author (git config > env > ask), determine project (git repo name > flag > ask), execute, confirm.
 
 - **Knowledge capture**: `/distill`, `/bookmark`, `/minutes`
-- **Knowledge retrieval**: `/recall`, `/pour`, `/classify`
+- **Knowledge retrieval**: `/recall`, `/pour`, `/compass` (contrast internal knowledge vs. ambient intelligence for a directional assessment), `/classify`
 - **Ambient intelligence**: `/watch` (manage feed sources — `rss` and `github` types only), `/radar` (digest + source suggestions), `/tune` (adjust thresholds — alert >= digest)
 - **Team**: `/digest` (team activity summary), `/gh-sync` (GitHub issue/PR sync), `/investigate` (deep context builder), `/briefing` (team dashboard)
 - **Onboarding**: `/setup` (MCP connectivity wizard — local transport uses `CronCreate`; hosted/team uses GitHub Actions webhook scheduler)

@@ -1,6 +1,6 @@
 # Plugin Install
 
-The Distillery plugin packages all fourteen knowledge-base skills for distribution and installation via the Claude Code plugin mechanism. Once installed, the skills are available in every project without copying files.
+The Distillery plugin packages all fifteen knowledge-base skills for distribution and installation via the Claude Code plugin mechanism. Once installed, the skills are available in every project without copying files.
 
 ## Install via Plugin Marketplace (Recommended)
 
