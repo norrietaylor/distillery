@@ -64,17 +64,17 @@ With `--graph`: `distillery_search(query="<topic>", limit=20, project="<project 
 
 Deduplicate Pass 1a and 1b results by entry ID, keeping the higher similarity score. Record all entries and scores. When `--graph` is set, also record each entry's `provenance` (`search` or `graph`), `depth`, and `parent_id`; if the same entry appears via both provenances across passes, prefer `provenance="search"` (the stronger signal).
 
-**Pass 2 -- Follow-up Searches (up to 3) + Tag Expansion (up to 3):**
+**Pass 2 -- Follow-up Searches (up to 2) + Tag Expansion (up to 2):**
 
 Analyze Pass 1 for related concepts, people, sub-topics, or terms not directly covered by the original query. For each significant one:
 
 `distillery_search(query="<related concept>", limit=10, project="<project if specified>")` (add `expand_graph=true, expand_hops=1` when `--graph` is set)
 
-**Tag-based expansion:** Extract tags from Pass 1 results and identify their namespace prefixes (e.g., tags like `domain/authentication`, `domain/oauth` → namespace prefix `domain`). Call `distillery_list(group_by="tags", project="<project if specified>", limit=200)` to get tag frequencies across the knowledge base. From the returned tag groups, filter to those matching the namespace prefixes and rank by count. Convert the top-ranked tag segments to search queries by taking the leaf segment and replacing hyphens with spaces (e.g., `domain/oauth` → `"oauth"`, `domain/session-management` → `"session management"`). Run up to 3 `distillery_search` calls from these ranked tag-derived queries, skipping any that duplicate an existing Pass 2 concept query. (Add `expand_graph=true, expand_hops=1` when `--graph` is set.)
+**Tag-based expansion:** Extract tags from Pass 1 results and identify their namespace prefixes (e.g., tags like `domain/authentication`, `domain/oauth` → namespace prefix `domain`). Call `distillery_list(group_by="tags", project="<project if specified>", limit=200)` to get tag frequencies across the knowledge base. From the returned tag groups, filter to those matching the namespace prefixes and rank by count. Convert the top-ranked tag segments to search queries by taking the leaf segment and replacing hyphens with spaces (e.g., `domain/oauth` → `"oauth"`, `domain/session-management` → `"session management"`). Run up to 2 `distillery_search` calls from these ranked tag-derived queries, skipping any that duplicate an existing Pass 2 concept query. (Add `expand_graph=true, expand_hops=1` when `--graph` is set.)
 
 Report: `Tag expansion: discovered <N> related topics from tag vocabulary.` (Omit this line entirely if no tags are found in Pass 1 results — Pass 2 proceeds with concept-based queries only.)
 
-**Pass 3 -- Gap-filling (up to 2):**
+**Pass 3 -- Gap-filling (up to 1):**
 
 If earlier passes reveal references to specific projects, decisions, or events not yet returned:
 
@@ -159,7 +159,7 @@ Heading `# Pour: <Topic>`, then sections Summary, Timeline, Key Decisions, Contr
 - `--sources` controls the Source Attribution table: default OFF → emit the one-line summary `Sources: <N> entries cited inline (run /pour <topic> --sources for the full table).` (when `--graph` is set, append `— <S> search, <G> structurally-related` so the search-vs-graph split survives without the Provenance column); ON → render the full per-entry table instead. The inline `[Entry <short-id>]` citations (and the `, structurally related` markers under `--graph`) are always present and are the default audit trail
 - Omit sections with no content
 - On MCP errors, see CONVENTIONS.md error handling -- display and stop
-- Loop limits: 3 follow-up searches (Pass 2), 2 gap-filling searches (Pass 3), 5 refinement rounds (Step 7)
+- Loop limits (bounded to cap sequential-search latency): 2 follow-up + 2 tag-derived searches (Pass 2), 1 gap-filling search (Pass 3), 5 refinement rounds (Step 7) — worst case 7 searches per pour
 - Apply `--project` filter to every `distillery_search` call when provided
 - `--graph` defaults OFF — never pass `expand_graph=true` without explicit user opt-in via the flag; without `--graph`, all `distillery_search` calls and synthesis behavior remain unchanged (no provenance column, no "structurally related" labels, no graph_expansion totals)
 - When `--graph` is set, apply `expand_graph=true, expand_hops=1` to every `distillery_search` call (Pass 1a, 1b, Pass 2 concept and tag-derived, Pass 3, and any Step 7 refinement search)
