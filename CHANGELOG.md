@@ -1,6 +1,170 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.7.0] - 2026-06-25
+
+### Bug Fixes
+
+- declare min_server_version 0.7.0 on /compass and /radar *(skills)*
+- default semantic auto-link to opt-in (revert edge-by-default) *(config)*
+- normalize gh-sync published_at + adopt effective date in briefing (CR #683) *(feeds)*
+- capture GitHub created_at as metadata.published_at (#669) *(feeds)*
+- /briefing — dedicated 7-day team-activity query + corrections scope note *(skills)*
+- defer /compass author to --store; full ambient corpus + concept seams *(skills)*
+- treat defaulted dedup/conflict flags as non-conflicting in batch mode *(search)*
+- address CR on #671 — shield idle-checkpoint sweep; strengthen test *(store)*
+- address CR review on #670 — flush lifecycle, rollback, dead code *(store)*
+- embed search/find_similar queries off the event loop *(store)*
+- address CR — drop double-export, fix mypy, harden init *(observability)*
+- degrade suggest_links to cosine-only when networkx is absent *(store)*
+- validate suggestion_score range + clarify spec docs (CR #661) *(store)*
+- normalize promotable tags before prefix check; deterministic URL backfill *(store)*
+- add word boundaries to closing/tracked-by xref patterns *(feeds)*
+- enforce integer type for entity_promotion_threshold in _validate *(config)*
+- drop entity from classifier entry_type choices *(classification)*
+- gracefully skip concurrent-deletion in promote_entities write pass *(store)*
+- add "chunk" to relation-type vocabulary *(store)*
+- real cooldown + terminal-failure recheck for link-suggestion phase *(mcp)*
+- guard NULL embeddings in _sync_cosine_candidates *(store)*
+- flip AutoLinkConfig.enabled default to True (edge-by-default #629) *(config)*
+- align auto-link exclude_linked with shipped primitive; guard non-mapping auto_link config (#637) *(store)*
+- address CodeRabbit on #633 *(mcp)*
+- address CodeRabbit on #630 *(store)*
+- align allowed-tools with what each skill actually uses *(skills)*
+- remove orphaned userConfig from plugin.json *(skills)*
+- update plugin manifest tests; remove PreCompact handler *(skills)*
+- stop auto-installing MCP server; remove 30-prompt distill nudge *(skills)*
+- self-heal on stale GCS FUSE file handle + surface error ids *(store)*
+- bump pyjwt, cryptography, python-multipart, starlette for High CVEs *(deps)*
+- checkpoint WAL after every write path *(store)*
+- make budget check and increment atomic in record_and_check *(mcp)*
+- use per-call cursors in budget to avoid DuckDB result-set race *(mcp)*
+- reject inverted relation validity windows *(store)*
+- guard against empty content in dedup check *(classification)*
+- handle null comment user in gh-sync content builder *(feeds)*
+- exclude archived entries from find_similar *(store)*
+- don't cache transient org-membership check failures *(auth)*
+- sort Jina embeddings by index to preserve input order *(embedding)*
+
+### CI/CD
+
+- auto-deploy gominimal/distillery-gominimal on publish *(supply-chain)*
+
+### Documentation
+
+- scope author resolution to store-writing skills (CR #689)
+- refresh for v0.7.0 — add /compass, bump skill count 14→15
+- /compass — fix flag-provenance claim (--sources is compass-specific) *(skills)*
+- label briefing example fence as text for markdownlint (CR #683) *(skills)*
+- render effective date (published_at) in pour/investigate (#669) *(skills)*
+- /compass — reconcile cross-query budget to ≤4 (CR #679) *(skills)*
+- document link_suggestion validation checks in `_validate` *(config)*
+- add spec 18 — edge-by-default + link-suggestion (#653 steps 3-4) *(specs)*
+- scope scheduling-deprecation rule to local deployments *(setup)*
+- classify setup transport from status, not config parsing *(skills)*
+- clarify API key config paths in CONVENTIONS.md *(skills)*
+- correct built-in graph metrics claim *(spikes)*
+- update changelog for v0.6.2
+
+### Features
+
+- /pour — make the Sources table opt-in (--sources), summary line by default *(skills)*
+- /compass — make the Sources table opt-in (--sources), summary line by default *(skills)*
+- /compass soft-scope + auto-widen to all projects on empty cwd scope *(skills)*
+- distillery_search entry_type accepts str | list[str] *(search)*
+- add /compass — internal vs ambient directional assessment (#652) *(skills)*
+- carry relation_type on graph-expanded results *(search)*
+- add Logfire + OTLP dual-export instrumentation (dark by default) *(observability)*
+- resolve in-content URLs/#refs to citation edges in reconcile (T04.1) *(store)*
+- wire distillery_relations action="promote_entities" (T02.3) *(mcp)*
+- implement promote_entities() for entity-node promotion (T02.2) *(store)*
+- materialize citation/depends_on edges during gh-sync (T03.2) *(feeds)*
+- add store-side relation-type validation for mentions relation *(store)*
+- add ENTITY entry type and entity metadata schema (T01.1) *(models)*
+- extract typed structural refs from gh-sync payload *(feeds)*
+- add entity_promotion_threshold to TagsConfig *(config)*
+- add link-suggestion phase to _run_maintenance (T04.1) *(mcp)*
+- add distillery_relations action="suggest_links" (T03.3) *(mcp)*
+- add suggest_links candidate generation + threshold routing (T03.2) *(store)*
+- add LinkSuggestionConfig + get_link_suggestion_seeds (T03.1) *(config,store)*
+- add list_candidates + resolve_candidate actions to distillery_relations (T02.2) *(mcp)*
+- add relation-candidate persistence + exclusion from get_related (T02.1) *(store)*
+- skip routine setup for hosted deployments *(setup)*
+- graph-based post-recommendation spikes over Distillery *(spikes)*
+- temporal + weighted edge metadata on relations *(store)*
+- add constraint + link_prediction graph metrics *(mcp)*
+
+### Miscellaneous
+
+- bump version to 0.7.0 *(release)*
+- untrack force-committed proof artifacts
+- bump langchain from 1.2.14 to 1.3.9 *(deps)*
+- bump aiohttp from 3.14.0 to 3.14.1 *(deps)*
+- bump grype python-3.14 suppressions to 3.14.6-r1
+- update grype header to current SBOM baseline (3.14.6-r0 + glibc 2.43-r8)
+- refresh grype suppressions for python-3.14 3.14.6-r0 rebuild
+- bump starlette from 1.0.0 to 1.0.1 *(deps)*
+
+### Performance
+
+- /compass goes non-graph (radar-style) + scoped single-call searches *(skills)*
+- /briefing — lighter corrections payload, fewer round-trips, best-effort relations *(skills)*
+- take list_entries and aggregate_entries off the writer lock *(store)*
+- radar mines tags in one distillery_list call, not six *(skills)*
+- batch find_similar reuses stored vectors (Phase 2b 20→1 round-trip) *(search)*
+- /investigate fuses Phase 1+2 into one expand_graph call *(skills)*
+- cap DuckDB resources and flush WAL during idle windows *(store)*
+- bound feed-poller source concurrency with a semaphore *(feeds)*
+- take search() and find_similar() off the writer lock too *(store)*
+- take get() off the writer lock; defer accessed_at *(store)*
+- batch checkpoint and exclude linked pairs in suggest_links sweep *(store)*
+
+### Styling
+
+- sort imports in test_mcp_common (ruff I001) *(tests)*
+- split semicolon-chained statements in network.py *(spikes)*
+
+### Testing
+
+- make list/aggregate contention test count race-tolerant *(store)*
+- single-mark empty entry_type test, out of the integration class *(mcp)*
+- add R4.3 response-shape and disabled-gating tests for maintenance link_suggestion *(mcp)*
+- cross-path + idempotency coverage for auto-link on ingest (T01.2) *(store)*
+- cap per-test wall-clock with pytest-timeout to prevent CI hangs
+- give ingest_doc pagination stubs explicit ids (#627) *(mcp)*
+
+### Cli
+
+- add filtered export by type/tag/source/status (#634)
+
+### Feeds
+
+- make feed-size cap configurable (default 10 MiB)
+- content-bearing GitHub releases sync mode (#625)
+- tighten auto-tagger, persist per-item relevance, normalize namespaces (#628)
+
+### Mcp
+
+- surface content_ref_links in reconcile action response *(relations)*
+- scope total_entries filters to global metrics (#635)
+- address review for #635
+- surface orphan rate in distillery_relations metrics (#635)
+- add output_mode to distillery_search to cut retrieval token cost (#631)
+- add distillery_ingest_doc for arbitrary document ingestion (#627)
+
+### Store
+
+- sanitize budget error text + checkpoint the budget write (#655)
+- serialize embedding-budget counter under _conn_lock (#655)
+- drop FORCE CHECKPOINT escalation that could deadlock the writer
+- gate FORCE CHECKPOINT to writer-contention failures (#648)
+- force-checkpoint + disk backpressure to bound WAL under concurrent writers (#648)
+- fail loud if WAL restore fails after reopen error (#647)
+- quarantine any un-replayable WAL instead of re-raising (#647)
+- config-gated semantic auto-link on ingest (#629)
+- AND-match multi-tag filter (intersection) (#626)
+- categorize budget-check failures into distinct codes (#557)
+
 ## [0.6.2] - 2026-06-04
 
 ### Bug Fixes
