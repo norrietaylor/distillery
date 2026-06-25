@@ -159,15 +159,15 @@ Generated: <YYYY-MM-DD HH:MM> UTC
 
 **Section 1 — Recent Entries:**
 
-For each of the 10 most recent entries from Step 4a, show one line:
+Take the 10 most recent entries from Step 4a and re-sort them by **effective date** descending (see the Effective Date convention in CONVENTIONS.md — `metadata.published_at` when present, else `created_at`), so gh-sync/feed imports order by their true source time rather than the shared ingest timestamp. Show one line each:
 
-```
+```text
 - [<TYPE>] <content preview, max 100 chars> — <relative timestamp>
 ```
 
 - `[TYPE]` badge: entry type in uppercase, e.g., `[SESSION]`, `[BOOKMARK]`, `[MINUTES]`
 - Content preview: first 100 characters of entry content, truncated with `…` if longer
-- Relative timestamp: human-readable age, e.g., "2 hours ago", "3 days ago", "just now"
+- Relative timestamp: human-readable age computed from the entry's **effective date** (`metadata.published_at` when present, else `created_at`), e.g., "2 hours ago", "3 days ago", "just now" — never the bare ingest `created_at` for imported entries
 
 **Section 2 — Corrections:**
 

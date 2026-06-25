@@ -106,7 +106,9 @@ Example: `The team adopted DuckDB after evaluating SQLite and PostgreSQL [Entry 
 
 **Provenance distinction (when `--graph` is set):** Entries with `provenance="search"` matched the query semantically; entries with `provenance="graph"` did not match the query directly but were pulled in as 1-hop structural neighbours of a search-matched entry. In the prose, label graph-only entries as "structurally related" (e.g., `[Entry abc12345, structurally related]`) and call out *why* they appear — e.g., "linked to [Entry 550e8400] via `entry_relations`". Treat search-matched entries as primary signal; graph-only entries provide supporting context (downstream impacts, prior decisions a search-matched entry references, etc.). The synthesis should make this distinction visible to the user so they understand why each entry appears.
 
-**b. Timeline (omit if all entries same day)** -- Chronological evolution with dates, descriptions, and citations.
+**b. Timeline (omit if all entries same day)** -- Chronological evolution with dates, descriptions, and citations. Order by and render each entry's **effective date** (see below), not the raw `created_at`.
+
+> **Effective date:** use `metadata.published_at` when present, else fall back to `created_at`. gh-sync sets `published_at` to the GitHub object's real creation time and feed entries to the item's publication time; the bare `created_at` of an imported entry is the batch *ingest* timestamp, which collapses every imported entry onto one day and corrupts chronology (issue #669).
 
 **c. Key Decisions (omit if none)** -- Bullet list: what was decided, by whom, when, rationale, citation.
 
@@ -123,6 +125,7 @@ Table of all cited entries:
 | 1 | 550e8400 | [session] | Alice Smith | 2026-03-15 | We decided to use DuckDB for... | 92% |
 
 - **Short ID**: first 8 chars of UUID
+- **Date**: the entry's effective date — `metadata.published_at` when present, else `created_at` (see Timeline note; avoids showing the ingest date for gh-sync/feed entries)
 - **Preview**: first 40 chars of content
 - **Similarity**: highest score from any pass, as percentage
 

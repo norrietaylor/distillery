@@ -280,6 +280,8 @@ def _mock_issue(
     is_pr: bool = False,
     labels: list[dict[str, str]] | None = None,
     assignees: list[dict[str, str]] | None = None,
+    created_at: str = "2026-04-01T08:00:00Z",
+    updated_at: str = "2026-04-02T09:30:00Z",
 ) -> dict:
     """Build a mock GitHub issue API response."""
     issue: dict = {
@@ -291,6 +293,8 @@ def _mock_issue(
         "labels": labels or [],
         "assignees": assignees or [],
         "user": {"login": "author"},
+        "created_at": created_at,
+        "updated_at": updated_at,
     }
     if is_pr:
         issue["pull_request"] = {"url": f"https://api.github.com/repos/test/repo/pulls/{number}"}
@@ -705,6 +709,47 @@ class TestSyncAutoPopulatesFields:
         # Convenience metadata fields requested by the issue.
         assert entry.metadata["gh_number"] == 42
         assert entry.metadata["gh_url"].endswith("/issues/42")
+
+    @pytest.mark.integration
+    async def test_metadata_captures_github_timestamps(
+        self,
+        store,
+        httpx_mock,  # type: ignore[no-untyped-def]
+    ) -> None:
+        """published_at/updated_at mirror the GitHub object's real times (issue #669).
+
+        The entry's own created_at is the ingest timestamp; chronology must come
+        from metadata.published_at (the GitHub object's created_at).
+        """
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/acme/widgets/issues\?.*"),
+            json=[
+                _mock_issue(
+                    number=42,
+                    created_at="2026-04-01T08:00:00Z",
+                    updated_at="2026-04-02T09:30:00Z",
+                )
+            ],
+        )
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/acme/widgets/issues/42/comments.*"),
+            json=[],
+        )
+
+        adapter = GitHubSyncAdapter(store=store, url="acme/widgets")
+        result = await adapter.sync()
+        assert result.created == 1
+
+        entries = await store.list_entries(filters={"entry_type": "github"}, limit=10, offset=0)
+        entry = entries[0]
+
+        # Normalised to the poller's +00:00 form (not the raw GitHub ...Z) so the
+        # store's lexicographic published_at compare stays consistent (#669).
+        assert entry.metadata["published_at"] == "2026-04-01T08:00:00+00:00"
+        assert entry.metadata["updated_at"] == "2026-04-02T09:30:00+00:00"
+        assert not entry.metadata["published_at"].endswith("Z")
+        # The GitHub object's own creation time is distinct from the ingest time.
+        assert entry.metadata["published_at"] != entry.created_at.isoformat()
 
     @pytest.mark.integration
     async def test_pr_gets_merged_state_tag(

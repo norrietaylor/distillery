@@ -114,6 +114,24 @@ def _sanitize_tag_segment(raw: str) -> str:
     return collapsed
 
 
+def _normalize_github_ts(raw: Any) -> str | None:
+    """Normalise a GitHub ISO-8601 timestamp to the feed poller's ``+00:00`` form.
+
+    The store compares ``metadata.published_at`` lexicographically (``/radar``'s
+    published_after bound, ``duckdb.py``), and the poller stores
+    ``datetime.isoformat()`` (``+00:00``).  GitHub returns the ``...Z`` form, so
+    re-emit it in the same offset form to keep equal instants string-comparable
+    (issue #669).  Returns ``None`` for missing/blank input and the original
+    string when it is unparseable — better to keep the value than drop it.
+    """
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).isoformat()
+    except ValueError:
+        return raw
+
+
 def _derive_state_tag_value(issue: dict[str, Any]) -> str | None:
     """Return ``"merged"``/``"closed"``/``"open"`` for the issue, or ``None``.
 
@@ -614,6 +632,15 @@ class GitHubSyncAdapter:
             if isinstance(top_merged, str) and top_merged:
                 merged_at = top_merged
 
+        # The GitHub object's own timestamps. ``published_at`` mirrors the feed
+        # convention (``metadata.published_at`` = real publication time) so
+        # synthesis skills can render true chronology instead of the batch
+        # ingest timestamp, which collapses every imported entry onto the import
+        # day (issue #669).  Normalised to the poller's ``+00:00`` form so the
+        # store's lexicographic published_at compare stays consistent.
+        published_at = _normalize_github_ts(issue.get("created_at"))
+        gh_updated_at = _normalize_github_ts(issue.get("updated_at"))
+
         metadata: dict[str, Any] = {
             "repo": f"{self._owner}/{self._repo}",
             "ref_type": ref_type,
@@ -631,6 +658,11 @@ class GitHubSyncAdapter:
             "gh_number": number,
             "gh_url": html_url,
             "merged_at": merged_at,
+            # Real GitHub creation/update times (issue #669). published_at is the
+            # chronology source for synthesis skills; mirrors the feed poller's
+            # metadata.published_at convention.
+            "published_at": published_at,
+            "updated_at": gh_updated_at,
             # Persisted so ``_compute_backfill_updates`` can heal older entries
             # that lost author attribution (see legacy_authors branch below).
             # Store the raw GitHub login (or ``None`` when missing) so an

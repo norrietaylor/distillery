@@ -227,7 +227,7 @@ List each entry that has at least one relation. Show relation type and a short l
 
 **c. Timeline (omit if all entries same day or fewer than 3 entries):**
 
-Chronological list of entries, ordered by `created_at`:
+Chronological list of entries, ordered by each entry's **effective date**: `metadata.published_at` when present, else `created_at`. gh-sync sets `published_at` to the GitHub object's real creation time and feed entries to the item's publish time; the bare `created_at` of an imported entry is the batch *ingest* timestamp and collapses every imported entry onto one day, corrupting the timeline (issue #669).
 
 | Date | Short ID | Type | Author | Summary |
 |------|----------|------|--------|---------|
@@ -262,6 +262,7 @@ Table of all entries in the result set:
 
 - **Phase**: discovery phase (`1`, `2`, `2b`, `3`, `4`)
 - **Short ID**: first 8 chars of UUID
+- **Date**: the entry's effective date — `metadata.published_at` when present, else `created_at` (see Timeline note; avoids the ingest date for gh-sync/feed entries)
 - **Relation Edges**: number of relation edges this entry participates in. For Phase 2b entries this is `0 (potentially related)` — they are similarity-only candidates with no stored relation.
 - **Preview**: first 40 chars of content, or `title` metadata field if present
 
