@@ -80,10 +80,14 @@ proceed to 3b. Report: `Using <N> user-supplied topic(s): <comma-separated>.`
 
 *Path 2 — Namespace-diverse interest profile (default):*
 
-Build an interest profile that excludes feed-ingested content. Make separate
-`distillery_list(group_by="tags", entry_type=<type>)` calls for curated
-types: `session`, `reference`, `bookmark`, `idea`, `note`, and `minutes`.
-Merge the group counts across all responses to obtain a combined count map.
+Build an interest profile that excludes feed-ingested content. Make a single
+call that aggregates tag counts across all curated types at once:
+
+`distillery_list(group_by="tags", entry_type=["session", "reference", "bookmark", "idea", "minutes"])`
+
+The grouped counts come back already merged across the curated types in this
+one call (the `entry_type` list is OR-matched), so use the returned group
+counts directly as the combined count map — no client-side merging needed.
 
 Then select **5 namespace-diverse tags**, *not* the raw top-5 by count. A
 tag's namespace is its hierarchical path with the leaf segment removed,
@@ -149,7 +153,7 @@ This fallback applies only to Path 2 (auto-derived interest profile). If
 `--topic` was supplied, Step 3b always has at least one query and 3c is
 skipped.
 
-If none of the curated-type `group_by="tags"` calls return any tags, fall back to:
+If the curated-type `group_by="tags"` call returns no tags, fall back to:
 
 `distillery_list(entry_type="feed", limit=<limit>, output_mode="summary", published_after=<iso>, include_evergreen=<bool>, project=<name?>)`
 
@@ -159,7 +163,7 @@ other projects when the user explicitly scoped the request.
 
 Report: `Retrieved <total> entries via recent listing (fallback, window=<days>d).`
 
-If the curated-type `group_by="tags"` calls themselves error, treat that as an MCP error per the Rules section below — report and stop.
+If the curated-type `group_by="tags"` call itself errors, treat that as an MCP error per the Rules section below — report and stop.
 
 **3d. Empty results:**
 

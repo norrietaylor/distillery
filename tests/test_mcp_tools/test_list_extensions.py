@@ -661,3 +661,86 @@ class TestMutualExclusivity:
         )
         data = parse_mcp_response(result)
         assert not data.get("error")
+
+
+# ---------------------------------------------------------------------------
+# entry_type as a list (OR / IN-clause) — radar single-aggregate path
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+async def store_with_mixed_types(store: Any) -> Any:  # type: ignore[return]
+    """Store with one entry per curated type plus an excluded ``inbox`` entry.
+
+    Curated (mined by /radar): session, reference, bookmark, idea, minutes.
+    The non-curated ``inbox`` entry must never appear when filtering by the
+    curated list (proves the IN-clause excludes other types).
+    """
+    entries = [
+        make_entry(content="s", entry_type=EntryType.SESSION, tags=["alpha"]),
+        make_entry(content="r", entry_type=EntryType.REFERENCE, tags=["alpha", "beta"]),
+        make_entry(content="b", entry_type=EntryType.BOOKMARK, tags=["beta"]),
+        make_entry(content="i", entry_type=EntryType.IDEA, tags=["gamma"]),
+        make_entry(content="m", entry_type=EntryType.MINUTES, tags=["alpha"]),
+        make_entry(content="x", entry_type=EntryType.INBOX, tags=["alpha", "beta", "gamma"]),
+    ]
+    for e in entries:
+        await store.store(e)
+    return store
+
+
+@pytest.mark.integration
+class TestEntryTypeList:
+    async def test_entry_type_list_or_match(self, store_with_mixed_types: Any) -> None:
+        """A list of entry_types matches entries of EITHER type (OR / IN-clause)."""
+        result = await _handle_list(
+            store=store_with_mixed_types,
+            arguments={"entry_type": ["session", "reference"], "limit": 50},
+        )
+        data = parse_mcp_response(result)
+        assert not data.get("error")
+        returned_types = {e["entry_type"] for e in data["entries"]}
+        assert returned_types == {"session", "reference"}
+
+    async def test_group_by_tags_aggregates_across_type_list(
+        self, store_with_mixed_types: Any
+    ) -> None:
+        """group_by=tags with an entry_type list merges counts across types in one call."""
+        result = await _handle_list(
+            store=store_with_mixed_types,
+            arguments={
+                "group_by": "tags",
+                "entry_type": ["session", "reference", "bookmark", "idea", "minutes"],
+                "limit": 50,
+            },
+        )
+        data = parse_mcp_response(result)
+        assert not data.get("error")
+        by_tag = {g["value"]: g["count"] for g in data["groups"]}
+        # alpha: session + reference + minutes = 3; beta: reference + bookmark = 2;
+        # gamma: idea = 1.  The inbox entry (alpha/beta/gamma) is excluded.
+        assert by_tag.get("alpha") == 3
+        assert by_tag.get("beta") == 2
+        assert by_tag.get("gamma") == 1
+
+    async def test_single_string_entry_type_still_works(self, store_with_mixed_types: Any) -> None:
+        """Backward compat: a plain string entry_type filters to that one type."""
+        result = await _handle_list(
+            store=store_with_mixed_types,
+            arguments={"entry_type": "session", "limit": 50},
+        )
+        data = parse_mcp_response(result)
+        assert not data.get("error")
+        returned_types = {e["entry_type"] for e in data["entries"]}
+        assert returned_types == {"session"}
+
+    @pytest.mark.unit
+    async def test_empty_entry_type_list_returns_error(self, store: Any) -> None:
+        result = await _handle_list(
+            store=store,
+            arguments={"entry_type": [], "limit": 50},
+        )
+        data = parse_mcp_response(result)
+        assert data["error"] is True
+        assert data["code"] == "INVALID_PARAMS"
+        assert "entry_type" in data["message"]

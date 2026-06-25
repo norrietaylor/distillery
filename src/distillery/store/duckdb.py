@@ -2345,6 +2345,8 @@ class DuckDBStore:
         if "entry_type" in filters:
             val = filters["entry_type"]
             if isinstance(val, list):
+                if not val:
+                    raise ValueError("entry_type filter list must not be empty")
                 placeholders = ", ".join("?" for _ in val)
                 clauses.append(f"entry_type IN ({placeholders})")
                 params.extend(str(v) for v in val)
