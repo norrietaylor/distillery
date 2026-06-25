@@ -4,9 +4,8 @@ description: "Contrast internal implementation knowledge against ambient intelli
 allowed-tools:
   - "mcp__*__distillery_status"
   - "mcp__*__distillery_search"
-  - "mcp__*__distillery_list"
+  - "mcp__*__distillery_get"
   - "mcp__*__distillery_find_similar"
-  - "mcp__*__distillery_relations"
   - "mcp__*__distillery_store"
 context: fork
 effort: high
@@ -20,7 +19,7 @@ Compass contrasts **internal implementation** knowledge (sessions, github, minut
 
 It pairs with the existing skills: `radar` senses the surroundings, `investigate` maps the internal terrain — `compass` puts the two together and points somewhere. The assessment is the product; the corpora sections are the evidence.
 
-<!-- Design note (#652): two corrections are baked into "Where They Meet". (1) Graph `bridges` are NOT a reliable seam-finder — a live KB showed orphan_rate 0.9977, so global bridges return almost nothing; treat them as the rare case, not the primary path. (2) Embedding `find_similar` from an internal seed returns only MORE internal entries — implementation-language ("gvproxy, vsock") and product-language ("egress-proxy creds, microVM") occupy different embedding neighborhoods, so similarity alone does NOT bridge vocabularies. The seam step is therefore cross-vocabulary search: extract concrete entities/patterns/product-terms from one cluster and query the other corpus, and report a disjoint result as itself a finding. -->
+<!-- Design note (#652): /compass is NON-GRAPH (radar-style) — plain semantic search only, no expand_graph / no distillery_relations. Rationale: the knowledge graph is sparse (a live KB showed orphan_rate 0.9977; global `bridges` returned almost nothing), so graph expansion adds latency without signal. Seams are found by CROSS-VOCABULARY search — not graph edges and not embedding similarity: `find_similar` from an internal seed returns only MORE internal entries (implementation-language like "gvproxy, vsock" and product-language like "egress-proxy creds, microVM" occupy different embedding neighborhoods). The seam step extracts concrete entities/patterns/product-terms from one cluster and queries the other corpus; a disjoint result is itself a finding. -->
 
 ## When to Use
 
@@ -62,34 +61,31 @@ Extract from arguments. Every flag is borrowed verbatim from `radar`/`investigat
 
 Compute `published_after = (now - <days>).isoformat()` where `<days>` is `--days` if provided, otherwise 30. Bare invocation (`/compass <topic>`) runs the whole flow with defaults.
 
-### Step 4: Internal Position (investigate-style)
+### Step 4: Internal Position (non-graph search)
 
-Map the internal terrain with one graph-expanded search over the implementation corpora (sessions, github, minutes, reference, idea). This fuses the seed search and a 2-hop relationship traversal server-side, returning seeds plus their graph neighbours — with inline content — in ONE round-trip:
+Map the internal terrain with ONE plain semantic search scoped to the implementation corpora — **no graph expansion**. The knowledge graph is sparse (orphan-heavy), so a graph walk adds latency without signal; this mirrors radar's pure-search approach. `entry_type` is a list, so a single OR-matched call covers all implementation types:
 
 ```python
 distillery_search(
     query="<topic>",
-    expand_graph=True,
-    expand_hops=2,
-    limit=20,
-    output_mode="full",
+    entry_type=["session", "github", "minutes", "reference", "idea"],
+    limit=15,
+    output_mode="summary",
     project="<project if specified>",
 )
 ```
 
-The envelope is `{results: [...], count, graph_expansion: {seed_count, expanded_count}}`. Each result carries `provenance` (`"search"` = seed, `"graph"` = reached via a relation), and graph results add `depth`, `parent_id`, and `relation_type`. Keep the **internal result set** keyed by entry id; tag each entry `provenance="internal"` in the Sources table.
+Keep the **internal result set** keyed by entry id; tag each entry `provenance="internal"` in the Sources table. summary mode carries title, tags, author, created_at, full `metadata`, and a ~200-char content preview — enough for the assessment without the cost of full content. Scoping to the curated implementation types keeps `feed`/`bookmark` entries out of the internal set (they belong to the ambient corpus, Step 5).
 
-When the topic is implementation-flavoured, the seeds are typically curated types (`session`, `github`, `minutes`, `reference`, `idea`). Note any ambient-type entries (`feed`, `bookmark`) that surface here — they belong to the ambient corpus and are folded into Step 5 instead of double-counted.
-
-**`--entry <uuid>` variant:** when seeding from a specific entry, traverse its relationships directly — it is the sole seed, so this is one traverse, not a fan-out:
+**`--entry <uuid>` variant:** load the seed entry directly (no graph traversal) and use its content as the topic probe:
 
 ```python
-distillery_relations(action="traverse", entry_id="<uuid>", hops=2, direction="both")
+distillery_get(entry_id="<uuid>")
 ```
 
-Record the seed and each traversed node as internal. If the traverse returns empty `nodes`/`edges`, that is not an error — record the seed alone and continue.
+Record the seed as internal, derive a topic from its title/content, then run the scoped `distillery_search` above with that topic to gather the surrounding internal terrain. If `distillery_get` returns not found, report the error and stop.
 
-Report: `Internal Position: <seed_count> seeds + <expanded_count> via relationships (hops=2).`
+Report: `Internal Position: <N> internal entries (scoped to session/github/minutes/reference/idea).`
 
 If `seed_count` is 0, the internal corpus is silent on this topic — note it plainly (see Step 7 edge cases) and continue to Step 5; a disjoint result is itself a finding.
 
@@ -130,35 +126,26 @@ This is the comparative step. It does **not** rely on the two mechanisms that lo
 **6a. Cross-vocabulary search (primary path).** Internal entries speak implementation-language (symbols, file paths, library names — e.g. `gvproxy`, `vsock`, `SCM_RIGHTS`); ambient entries speak product-language (patterns, product names, capabilities — e.g. `egress-proxy for credentials`, `microVM`). Extract 2–4 concrete entities/patterns/product-terms from each cluster and query the *other* corpus with them:
 
 ```python
-# product-terms extracted from the ambient cluster → query the internal corpus
-distillery_search(query="<product-term from ambient>", limit=10, project="<project if specified>")
+# product-terms lifted from the ambient cluster → query the INTERNAL corpus
+distillery_search(query="<product-term from ambient>",
+                  entry_type=["session", "github", "minutes", "reference", "idea"],
+                  limit=10, project="<project if specified>")
 
-# implementation-terms extracted from the internal cluster → query the ambient corpus.
-# The ambient corpus is feeds AND bookmarks; distillery_search's entry_type is
-# single-valued, so issue one call per ambient type (bookmarks are not
-# poller-windowed, so omit published_after there — mirrors Step 5/6).
-distillery_search(query="<impl-term from internal>", entry_type="feed", limit=10,
-                  published_after="<now - days, ISO>", include_evergreen=<bool>,
-                  project="<project if specified>")
-distillery_search(query="<impl-term from internal>", entry_type="bookmark", limit=10,
-                  project="<project if specified>")
+# implementation-terms lifted from the internal cluster → query the AMBIENT corpus.
+# entry_type is a list, so ONE scoped call covers feeds + bookmarks. The window is
+# dropped here — a seam check only asks whether the concept exists in ambient at all.
+distillery_search(query="<impl-term from internal>",
+                  entry_type=["feed", "bookmark"],
+                  limit=10, project="<project if specified>")
 ```
 
-A cross-query **hit** — non-empty results when a term lifted from one cluster is run against the *other* corpus — is a **seam**: the two corpora connect on a shared concept expressed in different vocabulary. The seam is the *concept*, **not** a shared entry — entries are single-provenance and never appear in both corpus result sets, so never define a seam by entry-id overlap. Record the bridging concept, the source-cluster entry/entries that yielded the term, and the target-corpus hit entries. Cap at **2 concept-terms per direction** (the internal→ambient direction issues a feed + bookmark search per term, so ≤6 cross-queries total).
+A cross-query **hit** — non-empty results when a term lifted from one cluster is run against the *other* corpus — is a **seam**: the two corpora connect on a shared concept expressed in different vocabulary. The seam is the *concept*, **not** a shared entry — entries are single-provenance and never appear in both corpus result sets, so never define a seam by entry-id overlap. Record the bridging concept, the source-cluster entry/entries that yielded the term, and the target-corpus hit entries. Cap at **2 concept-terms per direction** (one scoped call each, so ≤4 cross-queries total).
 
 **Report a DISJOINT result as itself a finding.** If a product-term from the ambient cluster returns nothing internal, that is a real signal: *"the field is discussing X; we have no captured position on X."* Carry these disjoint terms into the Assessment as **Exposed** candidates.
 
-**6b. Graph bridges (rare case, best-effort — NOT the primary path).** A genuine graph edge between an internal and an ambient entry is the strongest possible seam, but on a sparse graph it almost never exists (a live KB measured `orphan_rate=0.9977`, `bridges` returned `node_count=2`). Check best-effort and only if cheap:
+**Do NOT use embedding `find_similar` to bridge.** `find_similar` from an internal seed returns only *more internal* entries (implementation-language and product-language occupy different embedding neighborhoods). A seam must be backed by cross-vocabulary search (6a) — **never** claim a seam that embedding similarity alone produced. (Graph bridges are deliberately not used: the graph is too sparse to connect the corpora — see the design note.)
 
-```python
-distillery_relations(action="metrics", metric="bridges", scope="global", limit=5)
-```
-
-If this returns the `INTERNAL` "NetworkX not installed" error, emit the one-line note `Run \`pip install distillery-mcp[graph]\` to enable bridges.` and skip the rest of 6b — do not treat it as a hard failure. If `results` is empty or no bridge connects an internal id to an ambient id, say so in one line and move on. Never block the seam analysis on graph bridges.
-
-**Do NOT use embedding `find_similar` to bridge.** `find_similar` from an internal seed returns only *more internal* entries (implementation-language and product-language occupy different embedding neighborhoods). A seam must be backed by cross-vocabulary search (6a) or a real graph edge (6b) — **never** claim a seam that embedding similarity alone produced.
-
-Report: `Where They Meet: <S> cross-vocabulary seams, <D> disjoint ambient terms, <G> graph bridges.`
+Report: `Where They Meet: <S> cross-vocabulary seams, <D> disjoint ambient terms.`
 
 ### Step 7: Synthesize Assessment
 
@@ -232,7 +219,7 @@ Oriented "<topic>": <I> internal + <A> ambient entries, <S> seams (window=<days>
 
 ## Internal Position
 
-<2–3 paragraph narrative of what we have captured, with [Entry <short-id>] citations and the relationship map if relations exist. Omit body if sparse internal — state so.>
+<2–3 paragraph narrative of what we have captured, with [Entry <short-id>] citations. Omit body if sparse internal — state so.>
 
 ---
 
@@ -244,7 +231,7 @@ Oriented "<topic>": <I> internal + <A> ambient entries, <S> seams (window=<days>
 
 ## Where They Meet
 
-<Cross-vocabulary seams (matched concept + both-side entry ids), disjoint ambient terms ("the field is discussing X; we have no captured position on X"), and any graph bridge found. Omit if neither corpus has entries.>
+<Cross-vocabulary seams (matched concept + both-side entry ids) and disjoint ambient terms ("the field is discussing X; we have no captured position on X"). Omit if neither corpus has entries.>
 
 ---
 
@@ -274,18 +261,17 @@ The stored block at the bottom appears only when `--store` was passed and a new 
 - Every Assessment bullet must cite at least one entry — never assert a verdict without evidence
 - Deduplicate each corpus's result set by entry id; an entry belongs to exactly one provenance (internal vs ambient) — never double-count
 - Apply `--project` to ALL searches (internal and ambient) when set
-- Internal Position uses one `distillery_search(expand_graph=true, expand_hops=2, output_mode="full")` call; the `--entry` variant uses one `distillery_relations(action="traverse", hops=2, direction="both")`
+- Internal Position uses ONE plain `distillery_search(entry_type=["session","github","minutes","reference","idea"], output_mode="summary")` call — NO graph expansion (the graph is too sparse to help); the `--entry` variant uses one `distillery_get` then that same scoped search
 - Ambient Signal filters on `published_after` (publication time), not ingest time; first-poll backfill (`metadata.backfill=true`) is excluded unless `--include-evergreen`
 - Default ambient window is 30 days — respect `--days`
 - "Where They Meet" is cross-vocabulary search, NOT embedding similarity: extract entities/product-terms from one cluster and query the other corpus
-- Graph bridges are best-effort and the rare case — never required, never the primary seam path; a sparse-graph empty result is not an error
-- NEVER claim a seam that embedding similarity alone produced — a seam requires cross-vocabulary evidence or a real graph edge
+- /compass is non-graph: never use `expand_graph` or `distillery_relations` — the graph is too sparse to connect the corpora
+- NEVER claim a seam that embedding similarity alone produced — a seam requires cross-vocabulary evidence
 - A disjoint result (no overlap between corpora on a term) is itself a finding — report it and feed it to the Assessment as an Exposed candidate
 - Loop limits: up to 2 concept-terms per direction in Step 6 (internal→ambient runs a feed + bookmark search per term, so ≤6 cross-queries total)
 - Display-only by default; store only with `--store`
 - When storing: follow CONVENTIONS.md dedup-on-store (create/skip/merge/link), use `entry_type="digest"`, include `compass` in tags, and metadata `period_start`/`period_end` as ISO 8601 dates
-- When `distillery_relations(action="metrics")` returns the `"NetworkX not installed"` `INTERNAL` error, emit the one-line `pip install distillery-mcp[graph]` note and continue — treat any other relations error per CONVENTIONS.md error handling
-- `distillery_relations`/`distillery_search` returning empty results is not an error — record 0 and continue
+- `distillery_search` returning empty results is not an error — record 0 and continue
 - Omit sections with no content — never display empty sections
 - On MCP errors, see CONVENTIONS.md error handling — display and stop
 - No retry loops — report errors and stop
