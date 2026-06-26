@@ -34,6 +34,11 @@ import duckdb
 from distillery import observability
 from distillery.feeds.tags import normalize_tag
 from distillery.models import Entry, EntrySource, EntryStatus, EntryType, validate_metadata
+from distillery.relations.schema import (
+    VALID_RELATION_TYPES,
+    triple_allowed,
+    validate_relation_triple,
+)
 from distillery.store.migrations import (
     _CREATE_META_TABLE,
     backfill_relations_from_content_refs,
@@ -86,21 +91,10 @@ _DEFAULT_THREADS = 2
 # a writer.  It deliberately NEVER escalates to FORCE CHECKPOINT (issue #648).
 _DEFAULT_IDLE_CHECKPOINT_INTERVAL_S = 60.0
 
-# Valid relation types — must match the set in mcp/tools/relations.py.
-_VALID_RELATION_TYPES = {
-    "link",
-    "corrects",
-    "supersedes",
-    "related",
-    "blocks",
-    "depends_on",
-    "citation",
-    "duplicate",
-    "merge_source",
-    "sync_source",
-    "mentions",
-    "chunk",
-}
+# Valid relation types — single source of truth lives in relations.schema; this
+# alias preserves the existing internal name (issue #653 de-duplicated the copy
+# that used to be maintained here in parallel with mcp/tools/relations.py).
+_VALID_RELATION_TYPES = VALID_RELATION_TYPES
 
 
 class EntriesIntegrityError(RuntimeError):
@@ -229,6 +223,7 @@ class DuckDBStore:
         auto_link_enabled: bool = False,
         auto_link_threshold: float = 0.85,
         auto_link_max_links: int = 5,
+        enforce_relation_schema: bool = False,
         memory_limit_mb: int | None = _DEFAULT_MEMORY_LIMIT_MB,
         threads: int | None = _DEFAULT_THREADS,
     ) -> None:
@@ -275,6 +270,10 @@ class DuckDBStore:
         self._auto_link_enabled: bool = auto_link_enabled
         self._auto_link_threshold: float = auto_link_threshold
         self._auto_link_max_links: int = auto_link_max_links
+        # Typed relation-schema enforcement (issue #653, ontology #1). OFF by
+        # default (warn-only) so an already-populated graph built before any
+        # schema is never retroactively rejected; flip on after a clean audit.
+        self._enforce_relation_schema: bool = enforce_relation_schema
         # Serializes access to the shared ``DuckDBPyConnection``.  DuckDB
         # connections are **not** thread-safe for concurrent use, but every
         # store operation funnels through ``asyncio.to_thread`` which runs
@@ -3983,6 +3982,21 @@ class DuckDBStore:
         row = self._conn.execute("SELECT id FROM entries WHERE id = ?", [entry_id]).fetchone()
         return row is not None
 
+    def _sync_entry_type(self, entry_id: str) -> str | None:
+        """Return *entry_id*'s ``entry_type``, or ``None`` if it does not exist.
+
+        Doubles as an existence probe (``None`` ⇔ absent) so the relation write
+        path can fetch the endpoint type and check existence in one query — used
+        by :meth:`_sync_add_relation` to validate the typed relation schema
+        without an extra round-trip (issue #653, ontology #1). Archived entries
+        are considered present (same rule as :meth:`_sync_entry_exists`).
+        """
+        assert self._conn is not None
+        row = self._conn.execute(
+            "SELECT entry_type FROM entries WHERE id = ?", [entry_id]
+        ).fetchone()
+        return str(row[0]) if row is not None else None
+
     def _sync_diagnose_missing_entry(self, entry_id: str) -> dict[str, Any]:
         """Collect cross-table visibility info for *entry_id* on the error path.
 
@@ -4106,10 +4120,13 @@ class DuckDBStore:
                 f"Invalid relation_type {relation_type!r}. "
                 f"Must be one of: {', '.join(sorted(_VALID_RELATION_TYPES))}."
             )
-        # Validate that both entries exist (including archived — preserves historical links).
-        # Routes through :meth:`_sync_entry_exists` so this lookup uses the same SQL shape
-        # as every other existence check; see issue #515 for the asymmetry this prevents.
-        if not self._sync_entry_exists(from_id):
+        # Validate that both entries exist (including archived — preserves historical links)
+        # and capture their entry_types for the typed-relation-schema check below. The
+        # type fetch doubles as the existence probe (None ⇔ absent), so it adds no extra
+        # round-trip over the previous _sync_entry_exists call; see issue #515 for the
+        # asymmetry the single shared SQL shape prevents.
+        from_type = self._sync_entry_type(from_id)
+        if from_type is None:
             diag = self._sync_diagnose_missing_entry(from_id)
             logger.warning(
                 "add_relation rejected: from_id=%r not in entries; diagnostic=%s",
@@ -4117,7 +4134,8 @@ class DuckDBStore:
                 diag,
             )
             raise ValueError(f"Entry not found: from_id={from_id!r} (diagnostic={diag})")
-        if not self._sync_entry_exists(to_id):
+        to_type = self._sync_entry_type(to_id)
+        if to_type is None:
             diag = self._sync_diagnose_missing_entry(to_id)
             logger.warning(
                 "add_relation rejected: to_id=%r not in entries; diagnostic=%s",
@@ -4173,6 +4191,13 @@ class DuckDBStore:
                 len(set_parts),
             )
             return relation_id
+        # Typed relation-schema check (issue #653, ontology #1) — applied only to
+        # NEW edges. Re-asserts (existing is not None, handled above) skip it so
+        # attribute upserts on grandfathered edges — e.g. retiring an edge via
+        # invalid_at — never fail even if the triple predates the schema.
+        validate_relation_triple(
+            from_type, relation_type, to_type, enforce=self._enforce_relation_schema
+        )
         relation_id = str(uuid.uuid4())
         self._conn.execute(
             "INSERT INTO entry_relations "
@@ -4684,6 +4709,43 @@ class DuckDBStore:
             references) and ``total`` (sum across all mechanisms).
         """
         return await self._run_sync(self._sync_reconcile_relations)
+
+    def _sync_audit_relation_schema(self) -> list[dict[str, Any]]:
+        """Read-only audit of existing edges against the typed relation schema.
+
+        Groups every live edge by ``(from_type, relation_type, to_type)`` (via a
+        join to ``entries`` on both endpoints) and returns the groups that
+        :func:`distillery.relations.schema.triple_allowed` rejects, with counts.
+        Edges whose endpoints no longer exist are excluded by the join (a
+        separate integrity concern). Run this before flipping
+        ``relations.enforce_schema`` to ``True`` (issue #653, ontology #1).
+        """
+        assert self._conn is not None
+        rows = self._conn.execute(
+            "SELECT ef.entry_type AS from_type, r.relation_type AS rel, "
+            "       et.entry_type AS to_type, COUNT(*) AS n "
+            "FROM entry_relations r "
+            "JOIN entries ef ON ef.id = r.from_id "
+            "JOIN entries et ON et.id = r.to_id "
+            "GROUP BY 1, 2, 3"
+        ).fetchall()
+        violations: list[dict[str, Any]] = []
+        for from_type, rel, to_type, n in rows:
+            if not triple_allowed(str(from_type), str(rel), str(to_type)):
+                violations.append(
+                    {
+                        "from_type": str(from_type),
+                        "relation_type": str(rel),
+                        "to_type": str(to_type),
+                        "count": int(n),
+                    }
+                )
+        violations.sort(key=lambda v: v["count"], reverse=True)
+        return violations
+
+    async def audit_relation_schema(self) -> list[dict[str, Any]]:
+        """See :meth:`distillery.store.protocol.DistilleryStore.audit_relation_schema`."""
+        return await self._run_sync(self._sync_audit_relation_schema)
 
     # ------------------------------------------------------------------
     # Entity-node promotion (issue #653 step 1)

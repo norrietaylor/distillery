@@ -135,28 +135,30 @@ async def test_add_relation_accepts_archived_entries(store) -> None:  # type: ig
 
 @pytest.mark.unit
 async def test_add_relation_uses_shared_existence_helper(store) -> None:  # type: ignore[no-untyped-def]
-    """_sync_add_relation routes its existence check through _sync_entry_exists.
+    """_sync_add_relation routes its existence check through _sync_entry_type.
 
-    Locks in the structural alignment that closes issue #515. If a future
-    refactor reintroduces a divergent SELECT in _sync_add_relation, this
-    test (which monkeypatches the helper) will fail.
+    Locks in the structural alignment that closes issue #515. _sync_add_relation
+    now fetches each endpoint's entry_type (which doubles as the existence probe,
+    same ``entries WHERE id = ?`` shape as the read path; issue #653 ontology #1).
+    If a future refactor reintroduces a divergent SELECT in _sync_add_relation,
+    this test (which monkeypatches the helper) will fail.
     """
     from_id = await _store_entry(store, content="entry A")
     to_id = await _store_entry(store, content="entry B")
 
-    # Force the helper to reject every id — _sync_add_relation must observe
-    # that and raise. If _sync_add_relation bypasses the helper with its
-    # own inline SELECT, the call would succeed and this test would fail.
-    def _always_missing(_entry_id: str) -> bool:
-        return False
+    # Force the helper to report every id missing (None) — _sync_add_relation
+    # must observe that and raise. If it bypasses the helper with its own inline
+    # SELECT, the call would succeed and this test would fail.
+    def _always_missing(_entry_id: str) -> str | None:
+        return None
 
-    store._sync_entry_exists = _always_missing  # type: ignore[method-assign]
+    store._sync_entry_type = _always_missing  # type: ignore[method-assign]
     try:
         with pytest.raises(ValueError, match="Entry not found"):
             await store.add_relation(from_id, to_id, "link")
     finally:
         # Restore the bound method so subsequent fixture teardown is clean.
-        del store._sync_entry_exists
+        del store._sync_entry_type
 
 
 @pytest.mark.unit

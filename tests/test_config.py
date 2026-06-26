@@ -684,6 +684,34 @@ class TestTagsConfig:
         assert "system" in cfg.tags.reserved_prefixes
 
 
+class TestRelationsConfig:
+    def test_enforce_schema_defaults_false(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        cfg = load_config()
+        assert cfg.relations.enforce_schema is False
+
+    def test_enforce_schema_parsed_true(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            relations:
+              enforce_schema: true
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.relations.enforce_schema is True
+
+    def test_enforce_schema_invalid_type_raises(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            relations:
+              enforce_schema: "yes"
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="enforce_schema"):
+            load_config(str(p))
+
+
 # ---------------------------------------------------------------------------
 # FeedsConfig: dataclass defaults and loading
 # ---------------------------------------------------------------------------

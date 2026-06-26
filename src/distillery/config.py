@@ -231,6 +231,23 @@ class LinkSuggestionConfig:
 
 
 @dataclass
+class RelationsConfig:
+    """Relation-graph schema configuration (issue #653, ontology #1).
+
+    Attributes:
+        enforce_schema: When ``True``, creating an edge whose
+            ``(from_type, relation, to_type)`` triple is not in
+            :data:`distillery.relations.schema.RELATION_SCHEMA` is rejected.
+            When ``False`` (default), violations are logged (warn-only) but the
+            edge is still created — a safe default for an already-populated graph
+            built before any schema existed. Flip to ``True`` only after an audit
+            (``distillery_relations action="audit_schema"``) returns clean.
+    """
+
+    enforce_schema: bool = False
+
+
+@dataclass
 class TagsConfig:
     """Tag namespace configuration.
 
@@ -559,6 +576,7 @@ class DistilleryConfig:
     auto_link: AutoLinkConfig = field(default_factory=AutoLinkConfig)
     link_suggestion: LinkSuggestionConfig = field(default_factory=LinkSuggestionConfig)
     tags: TagsConfig = field(default_factory=TagsConfig)
+    relations: RelationsConfig = field(default_factory=RelationsConfig)
     feeds: FeedsConfig = field(default_factory=FeedsConfig)
     rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
@@ -891,6 +909,28 @@ def _parse_link_suggestion(raw: dict[str, Any]) -> LinkSuggestionConfig:
         review_floor=review_floor,
         max_candidates_per_run=max_candidates_per_run,
     )
+
+
+def _parse_relations(raw: dict[str, Any]) -> RelationsConfig:
+    """Parse the ``relations`` section from a raw YAML mapping (issue #653).
+
+    Args:
+        raw: Mapping (typically from YAML) containing any of:
+            - ``enforce_schema`` (bool, default ``False``)
+
+    Returns:
+        A populated :class:`RelationsConfig` instance.
+
+    Raises:
+        ValueError: If ``raw`` is not a mapping or ``enforce_schema`` is not a
+            boolean.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError(f"relations must be a YAML mapping, got: {type(raw).__name__}")
+    enforce_raw = raw.get("enforce_schema", False)
+    if not isinstance(enforce_raw, bool):
+        raise ValueError(f"relations.enforce_schema must be a boolean, got: {enforce_raw!r}")
+    return RelationsConfig(enforce_schema=enforce_raw)
 
 
 def _parse_tags(raw: dict[str, Any]) -> TagsConfig:
@@ -1728,6 +1768,7 @@ def load_config(config_path: str | None = None) -> DistilleryConfig:
     auto_link_raw = raw.get("auto_link", {}) or {}
     link_suggestion_raw = raw.get("link_suggestion", {}) or {}
     tags_raw = raw.get("tags", {}) or {}
+    relations_raw = raw.get("relations", {}) or {}
     feeds_raw = raw.get("feeds", {}) or {}
     rate_limit_raw = raw.get("rate_limit", {}) or {}
     server_raw = raw.get("server", {})
@@ -1743,6 +1784,7 @@ def load_config(config_path: str | None = None) -> DistilleryConfig:
         auto_link=_parse_auto_link(auto_link_raw),
         link_suggestion=_parse_link_suggestion(link_suggestion_raw),
         tags=_parse_tags(tags_raw),
+        relations=_parse_relations(relations_raw),
         feeds=_parse_feeds(feeds_raw),
         rate_limit=_parse_rate_limit(rate_limit_raw),
         server=_parse_server(server_raw),

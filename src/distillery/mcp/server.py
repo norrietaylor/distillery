@@ -183,6 +183,7 @@ def _build_background_store_factory(
             auto_link_enabled=config.auto_link.enabled,
             auto_link_threshold=config.auto_link.threshold,
             auto_link_max_links=config.auto_link.max_links,
+            enforce_relation_schema=config.relations.enforce_schema,
         )
         await store.initialize()
         return store
@@ -235,6 +236,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 auto_link_enabled=config.auto_link.enabled,
                 auto_link_threshold=config.auto_link.threshold,
                 auto_link_max_links=config.auto_link.max_links,
+                enforce_relation_schema=config.relations.enforce_schema,
             )
             await store.initialize()
             # Flush the WAL during quiet windows so it never grows unbounded
@@ -1374,7 +1376,9 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         graph metrics (bridges, communities) on the relations subgraph.
 
         PARAMS:
-          - action (str, required): Operation. Valid: [add, get, remove, traverse, metrics, promote_entities].
+          - action (str, required): Operation. Valid: [add, get, remove, traverse, metrics,
+            reconcile, list_candidates, resolve_candidate, suggest_links, promote_entities,
+            audit_schema].
           - from_id (str, required for add): Source entry UUID.
           - to_id (str, required for add): Target entry UUID.
           - relation_type (str, required for add, optional for get/traverse): Relation type.

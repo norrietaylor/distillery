@@ -270,3 +270,14 @@ tags:
   # classifier.  Setting this key explicitly (including to []) overrides the
   # default.  Example: ["kind", "system"] reserves both namespaces.
   reserved_prefixes: ["kind"]
+
+# ---------------------------------------------------------------------------
+# Relation-graph schema settings (issue #653, ontology #1)
+# ---------------------------------------------------------------------------
+relations:
+  # When true, creating an edge whose (from_type, relation, to_type) triple is
+  # not in the relation ontology is rejected. When false (default), violations
+  # are logged (warn-only) but the edge is still created — the safe default for
+  # a graph populated before any schema existed. Audit first with
+  # `distillery_relations action="audit_schema"`; flip to true once it is clean.
+  enforce_schema: false
