@@ -27,6 +27,7 @@ from urllib.parse import urlparse
 
 import httpx
 from fastmcp.server.auth import AccessToken
+from fastmcp.server.auth.oauth_proxy import OAuthProxy
 from fastmcp.server.auth.providers.github import GitHubProvider
 
 from distillery.config import DistilleryConfig, parse_env_allowed_orgs
@@ -92,6 +93,21 @@ def _load_machine_tokens() -> list[tuple[str, AccessToken]]:
     return [(raw, access)]
 
 
+def match_machine_token(
+    machine_tokens: list[tuple[str, AccessToken]], token: str
+) -> AccessToken | None:
+    """Return the AccessToken for a matching pre-shared machine token, else None.
+
+    Constant-time comparison. Shared by the GitHub and GitLab providers so the
+    machine-token path stays provider-agnostic.
+    """
+    for candidate, access in machine_tokens:
+        if hmac.compare_digest(token.encode(), candidate.encode()):
+            logger.debug("Authenticated machine token (identity=%s)", access.client_id)
+            return access
+    return None
+
+
 class _MachineTokenGitHubProvider(GitHubProvider):
     """``GitHubProvider`` that also accepts pre-shared machine tokens.
 
@@ -118,10 +134,9 @@ class _MachineTokenGitHubProvider(GitHubProvider):
 
     async def verify_token(self, token: str) -> AccessToken | None:
         """Verify a bearer token: machine tokens first, then the OAuth proxy."""
-        for candidate, access in self._machine_tokens:
-            if hmac.compare_digest(token.encode(), candidate.encode()):
-                logger.debug("Authenticated machine token (identity=%s)", access.client_id)
-                return access
+        access = match_machine_token(self._machine_tokens, token)
+        if access is not None:
+            return access
         return await super().verify_token(token)
 
 
@@ -343,7 +358,7 @@ _CLAUDE_CODE_CLIENT_METADATA = {
 }
 
 
-async def pre_register_claude_code_client(provider: GitHubProvider) -> None:
+async def pre_register_claude_code_client(provider: OAuthProxy) -> None:
     """Seed the OAuth client store with the Claude Code CIMD metadata.
 
     This avoids a runtime CIMD fetch to ``claude.ai`` which can fail when

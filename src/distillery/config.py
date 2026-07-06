@@ -11,6 +11,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import yaml
 
@@ -457,7 +458,8 @@ class ServerAuthConfig:
     """Server authentication configuration.
 
     Attributes:
-        provider: Authentication provider. One of ``'github'`` or ``'none'``.
+        provider: Authentication provider. One of ``'github'``, ``'gitlab'``
+            or ``'none'``.
         client_id_env: Name of the environment variable holding the OAuth
             client ID.
         client_secret_env: Name of the environment variable holding the OAuth
@@ -467,9 +469,17 @@ class ServerAuthConfig:
             any GitHub user can authenticate (open-access mode).  Can also be
             set via the ``DISTILLERY_ALLOWED_ORGS`` environment variable
             (comma-separated); env values are merged with YAML values.
+            GitHub-only.
         membership_cache_ttl_seconds: How long to cache org-membership results
             in seconds.  Default is 3600 (1 hour).  Set to a smaller value if
             you need revoked memberships to take effect sooner.
+        instance_url: Base URL of the GitLab instance (``provider: gitlab``
+            only).  Default is ``https://gitlab.com``.
+        allowed_groups: GitLab group full-paths whose members may access the
+            server (``provider: gitlab`` only).  An allowed group admits its
+            whole subtree (``acme`` admits ``acme/dev``).  Empty list means
+            instance login alone is sufficient — permitted for self-hosted
+            instances, rejected for gitlab.com (see docs/adr/0001).
     """
 
     provider: str = "none"
@@ -477,6 +487,8 @@ class ServerAuthConfig:
     client_secret_env: str = "GITHUB_CLIENT_SECRET"
     allowed_orgs: list[str] = field(default_factory=list)
     membership_cache_ttl_seconds: int = 3600
+    instance_url: str = "https://gitlab.com"
+    allowed_groups: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -868,17 +880,13 @@ def _parse_link_suggestion(raw: dict[str, Any]) -> LinkSuggestionConfig:
 
     enabled_raw = raw.get("enabled", True)
     if not isinstance(enabled_raw, bool):
-        raise ValueError(
-            f"link_suggestion.enabled must be a boolean, got: {enabled_raw!r}"
-        )
+        raise ValueError(f"link_suggestion.enabled must be a boolean, got: {enabled_raw!r}")
 
     auto_create_threshold = _parse_float_field(
         raw, "auto_create_threshold", 0.85, "link_suggestion.auto_create_threshold"
     )
 
-    review_floor = _parse_float_field(
-        raw, "review_floor", 0.60, "link_suggestion.review_floor"
-    )
+    review_floor = _parse_float_field(raw, "review_floor", 0.60, "link_suggestion.review_floor")
 
     max_candidates_per_run_raw = raw.get("max_candidates_per_run", 200)
     max_candidates_per_run = _parse_strict_int(
@@ -1408,6 +1416,11 @@ def _parse_server(raw: dict[str, Any]) -> ServerConfig:
         raise ValueError("server.auth.allowed_orgs must be a YAML list")
     allowed_orgs = [str(o).strip() for o in allowed_orgs_raw if str(o).strip()]
 
+    allowed_groups_raw = auth_raw.get("allowed_groups", []) or []
+    if not isinstance(allowed_groups_raw, list):
+        raise ValueError("server.auth.allowed_groups must be a YAML list")
+    allowed_groups = [str(g).strip().strip("/") for g in allowed_groups_raw if str(g).strip()]
+
     ttl_raw = auth_raw.get("membership_cache_ttl_seconds", 3600)
     membership_cache_ttl_seconds = _parse_strict_int(
         ttl_raw, "server.auth.membership_cache_ttl_seconds"
@@ -1420,6 +1433,8 @@ def _parse_server(raw: dict[str, Any]) -> ServerConfig:
             client_secret_env=str(auth_raw.get("client_secret_env", "GITHUB_CLIENT_SECRET")),
             allowed_orgs=allowed_orgs,
             membership_cache_ttl_seconds=membership_cache_ttl_seconds,
+            instance_url=str(auth_raw.get("instance_url", "https://gitlab.com")).rstrip("/"),
+            allowed_groups=allowed_groups,
         ),
         http_rate_limit=_parse_http_rate_limit(rl_raw),
         webhooks=_parse_webhooks(webhooks_raw),
@@ -1602,8 +1617,7 @@ def _validate(config: DistilleryConfig) -> None:
     threshold = config.tags.entity_promotion_threshold
     if not isinstance(threshold, int) or isinstance(threshold, bool) or threshold <= 0:
         raise ValueError(
-            "tags.entity_promotion_threshold must be a positive integer, "
-            f"got: {threshold}"
+            f"tags.entity_promotion_threshold must be a positive integer, got: {threshold}"
         )
 
     # Validate feeds thresholds.
@@ -1644,7 +1658,7 @@ def _validate(config: DistilleryConfig) -> None:
         )
 
     # Validate server.auth.provider
-    valid_auth_providers = {"github", "none"}
+    valid_auth_providers = {"github", "gitlab", "none"}
     if config.server.auth.provider not in valid_auth_providers:
         raise ValueError(
             f"server.auth.provider must be one of {sorted(valid_auth_providers)}, "
@@ -1659,6 +1673,29 @@ def _validate(config: DistilleryConfig) -> None:
             "server.auth.allowed_orgs requires server.auth.provider = 'github', "
             f"got: {config.server.auth.provider!r}"
         )
+
+    # Validate allowed_groups: non-empty list requires GitLab auth provider.
+    if config.server.auth.allowed_groups and config.server.auth.provider != "gitlab":
+        raise ValueError(
+            "server.auth.allowed_groups requires server.auth.provider = 'gitlab', "
+            f"got: {config.server.auth.provider!r}"
+        )
+
+    if config.server.auth.provider == "gitlab":
+        instance_host = urlparse(config.server.auth.instance_url).hostname or ""
+        if not instance_host:
+            raise ValueError(
+                "server.auth.instance_url must be a valid absolute http(s) URL, "
+                f"got: {config.server.auth.instance_url!r}"
+            )
+        # On gitlab.com an authenticated user is anyone on the internet, so a
+        # group restriction is mandatory (ADR-0001). Self-hosted instances may
+        # leave allowed_groups empty: instance login is the boundary.
+        if instance_host == "gitlab.com" and not config.server.auth.allowed_groups:
+            raise ValueError(
+                "server.auth.allowed_groups must be non-empty when instance_url is "
+                "gitlab.com: an authenticated gitlab.com user is anyone on the internet."
+            )
 
     if config.server.auth.membership_cache_ttl_seconds <= 0:
         raise ValueError(
