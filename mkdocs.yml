@@ -32,6 +32,7 @@ theme:
 
 exclude_docs: |
   specs/
+  adr/
 
 plugins:
   - search
@@ -89,6 +90,7 @@ nav:
   - Team Access:
     - Team Member Guide: team/team-setup.md
     - Operator Deployment: team/deployment.md
+    - GitLab Authentication: team/gitlab-auth.md
   - Architecture: architecture.md
   - Benchmarks: benchmarks.md
   - Contributing: contributing.md

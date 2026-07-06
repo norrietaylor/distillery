@@ -14,7 +14,7 @@ Look for any Distillery MCP server entry in these config files to determine if a
 
 ## State: Needs Authentication
 
-A Distillery MCP server entry exists (in `plugin.json`, `.mcp.json`, or `~/.claude.json`) but `distillery_list(limit=1)` is unavailable or fails (including auth-related failures). This typically means the server is configured with HTTP transport and GitHub OAuth, but the user has not completed the OAuth flow yet.
+A Distillery MCP server entry exists (in `plugin.json`, `.mcp.json`, or `~/.claude.json`) but `distillery_list(limit=1)` is unavailable or fails (including auth-related failures). This typically means the server is configured with HTTP transport and OAuth (GitHub or GitLab, per the server's `server.auth.provider`), but the user has not completed the OAuth flow yet.
 
 Display:
 
@@ -27,7 +27,7 @@ The MCP server is configured but needs authentication.
 To authenticate:
 1. Press Ctrl+. (or Cmd+.) to open the MCP server menu
 2. Select the Distillery server (it will show "needs authentication")
-3. Press Enter — your browser will open for GitHub OAuth
+3. Press Enter — your browser will open for the server's OAuth provider (GitHub or GitLab)
 4. Authorize the app in your browser
 5. Return here and run /distillery:setup again
 
