@@ -127,7 +127,12 @@ def _op_name(fn: Callable[..., Any]) -> str:
     lambdas (``DuckDBStore.get.<locals>.<lambda>`` → ``get``).  For closures the
     enclosing method name is the meaningful one.
     """
-    qualname = getattr(fn, "__qualname__", None) or repr(fn)
+    qualname: str | None = getattr(fn, "__qualname__", None)
+    if qualname is None:
+        # repr text can itself contain dots and "<locals>" (e.g. a callable
+        # instance of a locally defined class) — return it verbatim rather
+        # than splitting it like a qualname.
+        return repr(fn)
     parts = qualname.split(".")
     if "<locals>" in parts:
         # Last occurrence: the innermost enclosing function names the operation.

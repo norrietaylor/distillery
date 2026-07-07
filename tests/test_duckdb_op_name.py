@@ -8,6 +8,8 @@ selection unreliable.
 
 from __future__ import annotations
 
+import functools
+
 import pytest
 
 from distillery.store.duckdb import DuckDBStore, _op_name
@@ -36,10 +38,21 @@ def test_lambda_uses_enclosing_function_name() -> None:
     assert _op_name(get()) == "get"
 
 
-def test_callable_without_qualname_falls_back_to_repr() -> None:
-    class _Op:
-        def __call__(self) -> None:
-            pass
+def test_callable_without_qualname_falls_back_to_verbatim_repr() -> None:
+    # functools.partial instances expose no __qualname__.
+    fn = functools.partial(sorted)
+    assert _op_name(fn) == repr(fn)
 
-    name = _op_name(_Op())
-    assert name  # repr-derived, never empty
+
+def test_local_callable_instance_repr_is_not_split_like_a_qualname() -> None:
+    # The instance repr contains dots and "<locals>"; it must come back
+    # verbatim, not collapse to the enclosing function name ("outer").
+    def outer():
+        class _Op:
+            def __call__(self) -> None:
+                pass
+
+        return _Op()
+
+    inst = outer()
+    assert _op_name(inst) == repr(inst)
