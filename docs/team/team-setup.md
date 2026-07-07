@@ -4,9 +4,9 @@ Connect your Claude Code installation to a hosted Distillery MCP server and auth
 
 ## Prerequisites
 
-- A hosted Distillery instance running with GitHub OAuth or GitLab authentication enabled (this guide shows the GitHub flow; the GitLab flow is identical with GitLab in place of GitHub — see [GitLab Authentication](gitlab-auth.md))
+- A hosted Distillery instance running with either GitHub OAuth or GitLab authentication enabled. This guide covers GitHub deployments; for a GitLab-backed server, see [GitLab Authentication](gitlab-auth.md) for the operator setup — as a team member you follow the same steps below, with your browser opening GitLab instead of GitHub
 - The **server URL** from your team operator (e.g., `https://distillery.myteam.com/mcp`)
-- A GitHub account
+- A GitHub account (or an account on your team's GitLab instance, for GitLab deployments)
 - Claude Code installed locally
 
 ## Step 1: Add the Server to Claude Code

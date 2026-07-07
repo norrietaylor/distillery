@@ -14,10 +14,12 @@ deployments.
 ## Consequences
 
 - **Revocation latency:** removing a user from an allowed group only takes
-  effect when their token expires and they re-authenticate. The immediate
-  lockout lever is blocking the user in GitLab, which kills authentication
-  itself. This is accepted deliberately — do not "fix" it by adding a
-  per-request GitLab API membership check without revisiting this ADR.
+  effect when their token expires and they re-authenticate. The fastest
+  lockout lever is blocking the user in GitLab: it prevents new logins and
+  stops token refresh, ending existing sessions at the current token
+  lifetime — nothing revokes an already-issued token instantly. This is
+  accepted deliberately — do not "fix" it by adding a per-request GitLab API
+  membership check without revisiting this ADR.
 - Exactly one identity provider per deployment (`github` | `gitlab` | `none`);
   the `login` claim is a single namespace (GitLab OIDC `nickname` maps onto it).
 - `allowed_groups` (GitLab group full-paths) uses subtree matching: `acme`

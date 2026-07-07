@@ -14,7 +14,9 @@ result into the FastMCP-issued token — there is no GitLab equivalent of
 ``OrgMembershipChecker`` and no per-request GitLab API call. A user matching
 no allowed group gets no identity claims embedded, and :meth:`verify_token`
 fails closed on every request. Group removal therefore takes effect at token
-expiry; immediate lockout is "block the user in GitLab".
+expiry; the fastest lockout lever is blocking the user in GitLab, which
+prevents new logins and token refresh (nothing revokes an issued token
+instantly).
 
 GitLab OAuth access tokens are opaque (not JWTs), so the proxy verifies the
 OIDC ``id_token`` against the instance's JWKS instead

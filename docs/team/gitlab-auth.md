@@ -57,7 +57,7 @@ server:
 
 ### Revocation semantics
 
-Group membership is read once, at login, from the OIDC `groups` claim; there are no per-request GitLab API calls. Removing a user from an allowed group takes effect when their token expires and they re-authenticate. For **immediate** lockout, block (or deactivate) the user in GitLab — that disables authentication itself.
+Group membership is read once, at login, from the OIDC `groups` claim; there are no per-request GitLab API calls. Removing a user from an allowed group takes effect when their token expires and they re-authenticate. The fastest lockout lever is blocking (or deactivating) the user in GitLab: it prevents any new login, and existing sessions end when the current GitLab token lifetime runs out — a blocked user's token can no longer be refreshed. No lever revokes an already-issued token instantly.
 
 ## Notes
 
