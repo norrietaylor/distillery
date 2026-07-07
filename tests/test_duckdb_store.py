@@ -2604,6 +2604,72 @@ class TestIdleCheckpoint:
 # ---------------------------------------------------------------------------
 
 
+class TestDeferredIndex:
+    """``store(defer_index=True)`` skips the per-write FTS rebuild + checkpoint;
+    ``flush_index()`` performs them once for the batch (perf fix for the
+    O(entries × total_rows) rebuild storm on bulk ingest)."""
+
+    async def test_defer_index_skips_rebuild_and_checkpoint(self, store, monkeypatch) -> None:
+        rebuilds = 0
+        checkpoints = 0
+        real_rebuild = store._rebuild_fts_index
+        real_ckpt = store._checkpoint_after_write
+
+        def _count_rebuild(conn):
+            nonlocal rebuilds
+            rebuilds += 1
+            return real_rebuild(conn)
+
+        def _count_ckpt(conn):
+            nonlocal checkpoints
+            checkpoints += 1
+            return real_ckpt(conn)
+
+        monkeypatch.setattr(store, "_rebuild_fts_index", _count_rebuild)
+        monkeypatch.setattr(store, "_checkpoint_after_write", _count_ckpt)
+
+        await store.store(make_entry(content="deferred one"), defer_index=True)
+        await store.store(make_entry(content="deferred two"), defer_index=True)
+        assert rebuilds == 0
+        assert checkpoints == 0
+
+        # A single flush does exactly one rebuild + one checkpoint for the batch.
+        await store.flush_index()
+        assert rebuilds == 1
+        assert checkpoints == 1
+
+    async def test_default_store_still_rebuilds_per_write(self, store, monkeypatch) -> None:
+        rebuilds = 0
+        real_rebuild = store._rebuild_fts_index
+
+        def _count_rebuild(conn):
+            nonlocal rebuilds
+            rebuilds += 1
+            return real_rebuild(conn)
+
+        monkeypatch.setattr(store, "_rebuild_fts_index", _count_rebuild)
+        await store.store(make_entry(content="eager"))
+        assert rebuilds == 1
+
+    async def test_deferred_entry_is_retrievable_and_searchable_after_flush(self, store) -> None:
+        entry = make_entry(content="deferred but findable")
+        eid = await store.store(entry, defer_index=True)
+
+        # Row + embedding are committed, so it is retrievable and vector-
+        # searchable immediately, before any flush.
+        assert await store.get(eid) is not None
+        results = await store.search("deferred but findable", filters=None, limit=5)
+        assert any(r.entry.id == eid for r in results)
+
+        # Flush makes the deferred write durable/BM25-indexed; retrieval holds.
+        await store.flush_index()
+        assert await store.get(eid) is not None
+
+    async def test_flush_index_is_safe_with_nothing_deferred(self, store) -> None:
+        # Calling flush on a quiescent store must not raise.
+        await store.flush_index()
+
+
 class TestObservabilitySpans:
     """The store funnels emit one ``db {operation}`` span per operation."""
 

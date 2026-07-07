@@ -403,6 +403,10 @@ class GitHubSyncAdapter:
         project: str | None = None,
     ) -> None:
         self._store = store
+        # Set once any issue/PR is stored or updated with ``defer_index=True``,
+        # so the deferred FTS rebuild + checkpoint is flushed even when a page
+        # errors after committing rows or the sync is cancelled mid-run.
+        self._pending_index_flush = False
         self._owner, self._repo = _parse_github_url(url)
         self._token = token or os.environ.get("GITHUB_TOKEN", "")
         self._author_override = author
@@ -410,6 +414,24 @@ class GitHubSyncAdapter:
         # with entries created via /distill, /bookmark, etc.
         self._project = project if project is not None else self._repo
         self._metadata_key = f"gh_sync_last_{self._owner}/{self._repo}"
+
+    async def _flush_pending_index(self) -> None:
+        """Flush the deferred FTS rebuild + checkpoint if a bulk write is owed.
+
+        Store/update calls during a sync run with ``defer_index=True`` to avoid
+        an O(items × total_rows) rebuild storm; this collapses them to one
+        rebuild + checkpoint. ``shield`` lets it finish even while the sync is
+        being cancelled, so committed rows never linger un-checkpointed. A
+        no-op when nothing was deferred; failure is non-fatal (the rows are
+        committed and vector-searchable, and the next run's flush catches up).
+        """
+        if not self._pending_index_flush:
+            return
+        self._pending_index_flush = False
+        try:
+            await asyncio.shield(self._store.flush_index())
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("GitHubSyncAdapter: deferred index flush failed: %s", exc)
 
     @property
     def owner(self) -> str:
@@ -881,13 +903,16 @@ class GitHubSyncAdapter:
                         "tags": entry.tags,
                         "project": entry.project,
                     },
+                    defer_index=True,
                 )
                 entry_id = existing.id
                 updated += 1
+                self._pending_index_flush = True
             else:
                 # Store new entry.
-                entry_id = await self._store.store(entry)
+                entry_id = await self._store.store(entry, defer_index=True)
                 created += 1
+                self._pending_index_flush = True
 
             # Parse cross-references; defer resolution until all items stored.
             all_text = entry.content
@@ -901,6 +926,12 @@ class GitHubSyncAdapter:
             structural_refs = _extract_structural_refs(issue, entry.content)
             if structural_refs:
                 pending_structural.append((entry_id, structural_refs))
+
+        # Flush the deferred FTS rebuild + checkpoint once for the whole batch
+        # (stores/updates above ran with defer_index=True). sync_batched() —
+        # the production path — additionally flushes per page and in a
+        # cancellation-safe finally; this legacy path flushes once here.
+        await self._flush_pending_index()
 
         # Second pass: resolve cross-references now that all items are stored.
         for entry_id, cross_refs in pending_xrefs:
@@ -1028,12 +1059,15 @@ class GitHubSyncAdapter:
                         "tags": entry.tags,
                         "project": entry.project,
                     },
+                    defer_index=True,
                 )
                 entry_id = existing.id
                 updated += 1
+                self._pending_index_flush = True
             else:
-                entry_id = await self._store.store(entry)
+                entry_id = await self._store.store(entry, defer_index=True)
                 created += 1
+                self._pending_index_flush = True
 
             cross_refs = _extract_cross_refs(entry.content)
             cross_refs = [r for r in cross_refs if r != number]
@@ -1104,9 +1138,12 @@ class GitHubSyncAdapter:
                 total_fetched += len(batch)
 
                 try:
-                    created, updated, pending_xrefs, pending_structural = (
-                        await self._process_issue_batch(batch, client=client)
-                    )
+                    (
+                        created,
+                        updated,
+                        pending_xrefs,
+                        pending_structural,
+                    ) = await self._process_issue_batch(batch, client=client)
                     total_created += created
                     total_updated += updated
                     all_pending_xrefs.extend(pending_xrefs)
@@ -1140,6 +1177,13 @@ class GitHubSyncAdapter:
                 except Exception as exc:  # noqa: BLE001
                     errors.append(f"Structural edge resolution failed for {entry_id}: {exc}")
         finally:
+            # Flush the whole run's deferred FTS rebuild + checkpoint once
+            # (stores/updates in _process_issue_batch ran with
+            # defer_index=True). In ``finally`` so committed rows are indexed +
+            # checkpointed even when a page errored or the sync was cancelled /
+            # timed out mid-run — one O(total_rows) rebuild instead of one per
+            # issue. No-op when nothing was stored.
+            await self._flush_pending_index()
             if should_close:
                 await client.aclose()
 

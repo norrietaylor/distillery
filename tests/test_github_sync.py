@@ -365,6 +365,45 @@ class TestGitHubSyncAdapterSync:
         assert "A comment" in entry.content
 
     @pytest.mark.integration
+    async def test_sync_defers_fts_rebuild_to_single_flush(  # type: ignore[no-untyped-def]
+        self, store, httpx_mock, monkeypatch
+    ) -> None:
+        """Bulk sync rebuilds the FTS index once for the batch, not per entry."""
+        httpx_mock.add_response(
+            url=re.compile(r".*/repos/test/repo/issues\?.*"),
+            json=[_mock_issue(number=n, title=f"Issue {n}") for n in (1, 2, 3)],
+        )
+        # One comments fetch per issue (responses are consumed once in this
+        # pytest-httpx version).
+        for _ in range(3):
+            httpx_mock.add_response(
+                url=re.compile(r".*/repos/test/repo/issues/\d+/comments.*"),
+                json=[],
+            )
+
+        rebuilds = 0
+        real_rebuild = store._rebuild_fts_index
+
+        def _count_rebuild(conn):  # type: ignore[no-untyped-def]
+            nonlocal rebuilds
+            rebuilds += 1
+            return real_rebuild(conn)
+
+        monkeypatch.setattr(store, "_rebuild_fts_index", _count_rebuild)
+
+        adapter = GitHubSyncAdapter(store=store, url="test/repo")
+        result = await adapter.sync_batched()
+
+        assert result.created == 3
+        # Three issues stored, but the FTS index is rebuilt exactly once — via
+        # the deferred end-of-run flush — instead of once per issue.
+        assert rebuilds == 1
+        entries = await store.list_entries(
+            filters={"entry_type": "github"}, limit=10, offset=0
+        )
+        assert len(entries) == 3
+
+    @pytest.mark.integration
     async def test_sync_creates_pr_entries(self, store, httpx_mock) -> None:  # type: ignore[no-untyped-def]
         """PRs should have ref_type=pr."""
         httpx_mock.add_response(

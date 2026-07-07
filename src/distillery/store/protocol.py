@@ -69,16 +69,33 @@ class DistilleryStore(Protocol):
         """
         ...
 
-    async def store(self, entry: Entry) -> str:
+    async def store(self, entry: Entry, *, defer_index: bool = False) -> str:
         """Persist a new entry and return its ID.
 
         Args:
             entry: The ``Entry`` instance to persist.  The ``id`` field is
                 used as the primary key; callers should allow ``Entry`` to
                 auto-generate one via ``uuid.uuid4()``.
+            defer_index: When ``True``, skip the per-write full-text index
+                rebuild and WAL checkpoint. The row (and its embedding) are
+                still inserted and immediately visible to vector search, but
+                it is not BM25-searchable until a later :meth:`flush_index`.
+                Bulk writers (the feed poller) set this to avoid an
+                O(entries × total_rows) rebuild storm, then call
+                :meth:`flush_index` once at the end of the batch.
 
         Returns:
             The string representation of the stored entry's UUID.
+        """
+        ...
+
+    async def flush_index(self) -> None:
+        """Rebuild the full-text index and checkpoint the WAL.
+
+        Pairs with ``store(..., defer_index=True)``: bulk writers defer the
+        per-write rebuild/checkpoint and call this once after the batch so
+        the O(total_rows) FTS rebuild runs a single time instead of per
+        entry. A no-op-safe operation to call when nothing was deferred.
         """
         ...
 
@@ -114,7 +131,9 @@ class DistilleryStore(Protocol):
         """
         ...
 
-    async def update(self, entry_id: str, updates: dict[str, Any]) -> Entry:
+    async def update(
+        self, entry_id: str, updates: dict[str, Any], *, defer_index: bool = False
+    ) -> Entry:
         """Apply a partial update to an existing entry.
 
         Increments ``version`` by 1 and refreshes ``updated_at`` to the
@@ -125,6 +144,9 @@ class DistilleryStore(Protocol):
             entry_id: The UUID string of the entry to update.
             updates: A dict of field names to new values.  Only writable
                 fields are accepted.
+            defer_index: When ``True``, skip the per-write FTS rebuild and
+                checkpoint; the caller must invoke :meth:`flush_index` once
+                after the batch. See :meth:`store` for the rationale.
 
         Returns:
             The updated ``Entry`` reflecting all applied changes.
