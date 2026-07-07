@@ -143,6 +143,13 @@ _JOBS_MAX = 100
 # never misclassified.
 _ACTIVE_JOB_TTL_SECONDS: int = 1800  # 30 minutes
 
+# Upper bound on how long the opt-in ``?wait=true`` path (see
+# :func:`_dispatch_async`) holds a request open awaiting its job. Tied to the
+# stale-job TTL: a job that runs past this is already considered dead by
+# :func:`_is_stale`, so blocking longer only pins the request slot. On timeout
+# the handler falls back to the 202 contract; the job keeps running (shielded).
+_SYNC_WAIT_MAX_SECONDS: int = _ACTIVE_JOB_TTL_SECONDS
+
 
 @dataclass
 class _JobStatus:
@@ -162,6 +169,17 @@ class _JobStatus:
 _jobs: OrderedDict[str, _JobStatus] = OrderedDict()
 _active_job_by_endpoint: dict[str, str] = {}
 _jobs_lock = asyncio.Lock()
+
+
+def _wants_sync_wait(request: Request) -> bool:
+    """True when the caller asked to block until the async job finishes.
+
+    Opt-in via ``?wait=1|true|yes`` (case-insensitive). Used by schedulers on
+    autosuspend platforms to keep the machine alive for a full poll (see
+    :func:`_dispatch_async`). Absent/other values keep the default 202 async
+    behaviour.
+    """
+    return request.query_params.get("wait", "").strip().lower() in ("1", "true", "yes")
 
 
 def _is_stale(job: _JobStatus, *, now: datetime | None = None) -> bool:
@@ -1531,6 +1549,58 @@ def create_webhook_app(
             _execute_job(job, state, runner, parsed),
             name=f"webhook-{endpoint}-{job.id}",
         )
+
+        # Opt-in synchronous mode (``?wait=true``): hold the HTTP request open
+        # until the job finishes, then return its terminal result instead of a
+        # 202. This exists for platforms that autosuspend idle machines: Fly's
+        # autosuspend fires when no request is in flight and freezes/kills the
+        # detached task mid-run (issue #507 — the stale-job sweep only cleans
+        # up the corpse afterwards). Keeping the request in flight blocks
+        # autosuspend for the duration, so the scheduler's long-lived POST
+        # lets the whole poll — and its deferred end-of-run index flush — run
+        # to completion in one alive window. Autosuspend still fires once this
+        # returns; interactive MCP clients omit the flag and keep the 202
+        # fire-and-forget behaviour.
+        if _wants_sync_wait(request):
+            try:
+                # Bounded: a hung job must not pin the request slot forever
+                # (CR #700). ``shield`` keeps the job running when the wait
+                # times out — on timeout we fall back to the 202 contract and
+                # the caller re-attaches via ``status_url`` / the stale sweep
+                # reaps it.
+                await asyncio.wait_for(
+                    asyncio.shield(job.task), timeout=_SYNC_WAIT_MAX_SECONDS
+                )
+            except TimeoutError:
+                logger.warning(
+                    "Webhook %s (job=%s): sync wait exceeded %ds — returning 202",
+                    endpoint,
+                    job.id,
+                    _SYNC_WAIT_MAX_SECONDS,
+                )
+                return JSONResponse(
+                    {
+                        "ok": True,
+                        "job_id": job.id,
+                        "state": job.state,
+                        "status_url": f"{root_path}/jobs/{job.id}",
+                    },
+                    status_code=202,
+                )
+            except Exception:  # noqa: BLE001 — _execute_job records its own error
+                logger.exception("Webhook %s (job=%s): awaited job raised", endpoint, job.id)
+            succeeded = job.state == "succeeded"
+            return JSONResponse(
+                {
+                    "ok": succeeded,
+                    "job_id": job.id,
+                    "state": job.state,
+                    "result": job.result,
+                    "error": job.error,
+                    "status_url": f"{root_path}/jobs/{job.id}",
+                },
+                status_code=200 if succeeded else 500,
+            )
 
         return JSONResponse(
             {
