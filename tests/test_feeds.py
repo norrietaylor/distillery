@@ -1450,7 +1450,7 @@ class TestPollCycleTopicTagIntegration:
 
         stored_entries: list = []
 
-        async def capture_store(entry: object) -> None:
+        async def capture_store(entry: object, *, defer_index: bool = False) -> None:
             stored_entries.append(entry)
 
         store.store.side_effect = capture_store
@@ -1504,7 +1504,7 @@ class TestPollCycleTopicTagIntegration:
 
         stored_entries: list = []
 
-        async def capture_store(entry: object) -> None:
+        async def capture_store(entry: object, *, defer_index: bool = False) -> None:
             stored_entries.append(entry)
 
         store.store.side_effect = capture_store
@@ -1851,7 +1851,7 @@ class TestPerSourceThresholdOverrides:
 
         stored: list = []
 
-        async def capture_store(entry: object) -> None:
+        async def capture_store(entry: object, *, defer_index: bool = False) -> None:
             stored.append(entry)
 
         store.store.side_effect = capture_store
@@ -1914,7 +1914,7 @@ class TestPerSourceThresholdOverrides:
 
         stored: list = []
 
-        async def capture_store(entry: object) -> None:
+        async def capture_store(entry: object, *, defer_index: bool = False) -> None:
             stored.append(entry)
 
         store.store.side_effect = capture_store

@@ -813,6 +813,18 @@ class FeedPoller:
                     summary.sources_errored += 1
                 # Liveness is already persisted inside ``_poll_source``.
 
+        # Per-entry stores ran with ``defer_index=True`` (skipping the FTS
+        # rebuild + checkpoint), so flush once now to make the whole poll's
+        # new entries BM25-searchable and durably checkpointed — one
+        # O(total_rows) rebuild instead of one per entry. Failure is
+        # non-fatal: the rows are committed and vector-searchable, and the
+        # next poll's flush (or the idle-checkpoint loop) will catch up.
+        if summary.total_stored > 0:
+            try:
+                await self._store.flush_index()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("FeedPoller: deferred index flush failed: %s", exc)
+
         summary.finished_at = datetime.now(tz=UTC)
         return summary
 
@@ -1059,7 +1071,15 @@ class FeedPoller:
                     tags_config=self._tags_config,
                 )
                 entry = Entry(**kwargs)
-                await self._store.store(entry)
+                # Defer the per-write FTS rebuild + checkpoint: with ~79
+                # sources ingesting concurrently, a full O(total_rows) FTS
+                # rebuild after every single insert makes a poll
+                # O(entries × total_rows) and starves reads for minutes
+                # (the write-queue stall). poll() calls flush_index() once
+                # after the gather instead. The row + embedding are still
+                # committed here, so intra-poll dedup (vector similarity)
+                # sees it immediately.
+                await self._store.store(entry, defer_index=True)
                 batch_entry_ids.add(str(entry.id))
                 result.items_stored += 1
                 logger.debug(

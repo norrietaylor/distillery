@@ -122,7 +122,7 @@ def _make_store_for_poller(
     store = AsyncMock()
     captured: list[Entry] = stored_entries if stored_entries is not None else []
 
-    async def _capture_store(entry: Entry) -> str:
+    async def _capture_store(entry: Entry, *, defer_index: bool = False) -> str:
         captured.append(entry)
         return str(entry.id)
 

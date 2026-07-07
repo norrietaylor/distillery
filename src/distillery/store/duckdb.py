@@ -1916,13 +1916,21 @@ class DuckDBStore:
                 inserted += 1
         return inserted
 
-    def _sync_store(self, entry: Entry, embedding: list[float]) -> str:
+    def _sync_store(
+        self, entry: Entry, embedding: list[float], *, rebuild_index: bool = True
+    ) -> str:
         """Synchronous implementation of store(); called via asyncio.to_thread.
 
         *embedding* is computed by :meth:`store` off-thread *before* the SQL
         lock is acquired (issue #558), so this method only does the SQL
         critical section — keeping ``_conn_lock`` held for milliseconds, not
         the full embedding round-trip.
+
+        When *rebuild_index* is ``False`` the FTS rebuild and post-write
+        checkpoint are skipped — the caller (a bulk writer) is responsible
+        for calling :meth:`flush_index` once after the batch. The insert and
+        embedding are still committed, so vector search sees the row
+        immediately; only BM25 lags until the deferred flush.
         """
         validate_metadata(entry.entry_type.value, entry.metadata)
         conn = self.connection
@@ -1965,19 +1973,25 @@ class DuckDBStore:
         # entry to its embedding-neighbours above threshold so feed-heavy
         # instances stop accumulating graph orphans. No-op when disabled.
         self._auto_link_semantic(conn, entry.id, embedding)
-        # Rebuild FTS index so new content is searchable via BM25.
-        self._rebuild_fts_index(conn)
-        # Flush WAL so the new row survives ungraceful termination.
-        # See :meth:`_checkpoint_after_write` for why this matters (issue #346).
-        self._checkpoint_after_write(conn)
+        if rebuild_index:
+            # Rebuild FTS index so new content is searchable via BM25.
+            self._rebuild_fts_index(conn)
+            # Flush WAL so the new row survives ungraceful termination.
+            # See :meth:`_checkpoint_after_write` for why this matters (issue #346).
+            self._checkpoint_after_write(conn)
         logger.debug("Stored entry id=%s", entry.id)
         return entry.id
 
-    async def store(self, entry: Entry) -> str:
+    async def store(self, entry: Entry, *, defer_index: bool = False) -> str:
         """Persist a new entry and return its ID.
 
         The entry's content is embedded via the configured embedding provider
         before insertion.
+
+        When *defer_index* is ``True`` the per-write FTS rebuild and WAL
+        checkpoint are skipped; the caller must invoke :meth:`flush_index`
+        once after the batch. See the protocol docstring for the rationale
+        (avoids an O(entries × total_rows) rebuild storm on bulk ingest).
 
         Returns:
             The UUID string of the stored entry.
@@ -1986,7 +2000,24 @@ class DuckDBStore:
         # overlap their embedding round-trips instead of serialising on
         # ``_conn_lock`` (issue #558).
         embedding = await asyncio.to_thread(self._embedding_provider.embed, entry.content)
-        return await self._run_sync(self._sync_store, entry, embedding)
+        return await self._run_sync(
+            self._sync_store, entry, embedding, rebuild_index=not defer_index
+        )
+
+    def _sync_flush_index(self) -> None:
+        """Rebuild the FTS index and checkpoint; called via asyncio.to_thread."""
+        conn = self.connection
+        self._rebuild_fts_index(conn)
+        self._checkpoint_after_write(conn)
+
+    async def flush_index(self) -> None:
+        """Rebuild the FTS index and checkpoint the WAL (once, under the lock).
+
+        Pairs with ``store(..., defer_index=True)``. Runs the same
+        rebuild + checkpoint that a non-deferred write does, but once for a
+        whole batch instead of per entry.
+        """
+        await self._run_sync(self._sync_flush_index)
 
     def _sync_store_batch(
         self, entries: Sequence[Entry], embeddings: list[list[float]]
