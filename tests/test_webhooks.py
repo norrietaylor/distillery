@@ -149,6 +149,46 @@ async def test_auth_valid_token_returns_202(
         assert final["state"] == "succeeded"
 
 
+@pytest.mark.unit
+async def test_poll_wait_true_blocks_and_returns_terminal_result(
+    store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """POST /poll?wait=true holds the request open and returns 200 with the
+    terminal job state inline (no 202 / no /jobs polling) — the autosuspend-
+    safe path that keeps the machine alive for the whole poll."""
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+    config = _make_config()
+    shared = _make_shared_state(store)
+    app = create_webhook_app(shared, config)
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        resp = client.post("/poll?wait=true", headers=_AUTH_HEADER)
+
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+        body = resp.json()
+        assert body["ok"] is True
+        assert body["state"] == "succeeded"  # ran to completion within the request
+        assert isinstance(body["job_id"], str) and body["job_id"]
+        assert body["result"] is not None  # terminal poll summary is inline
+
+
+@pytest.mark.unit
+async def test_poll_without_wait_still_returns_202(
+    store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Default behaviour is unchanged: no ``wait`` param → 202 fire-and-forget."""
+    monkeypatch.setenv("DISTILLERY_WEBHOOK_SECRET", _SECRET)
+    config = _make_config()
+    shared = _make_shared_state(store)
+    app = create_webhook_app(shared, config)
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        resp = client.post("/poll?wait=maybe", headers=_AUTH_HEADER)
+        assert resp.status_code == 202, f"Expected 202, got {resp.status_code}: {resp.text}"
+        assert resp.json()["state"] == "queued"
+        _wait_for_job(client, resp.json()["job_id"])
+
+
 def _make_request_with_auth(header_value: str) -> Request:
     """Build a minimal Starlette :class:`Request` carrying *header_value* as Authorization."""
     scope = {
