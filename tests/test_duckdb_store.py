@@ -2602,3 +2602,26 @@ class TestIdleCheckpoint:
 # ``pytestmark = pytest.mark.integration`` at the top, and double-marking
 # makes marker-based selection unreliable.
 # ---------------------------------------------------------------------------
+
+
+class TestObservabilitySpans:
+    """The store funnels emit one ``db {operation}`` span per operation."""
+
+    async def test_funnels_emit_db_operation_spans(self, store, monkeypatch) -> None:
+        import distillery.store.duckdb as duckdb_mod
+
+        recorded: list[tuple[str, str]] = []
+
+        def _recording_span(name: str, **attributes):
+            assert name == "db {operation}"
+            recorded.append((attributes["operation"], attributes["lock"]))
+            return contextlib.nullcontext()
+
+        monkeypatch.setattr(duckdb_mod, "span", _recording_span)
+
+        entry = make_entry(content="span probe")
+        await store.store(entry)  # bound method through _run_sync
+        await store.get(entry.id)  # lambda through _run_read
+
+        assert ("_sync_store", "conn") in recorded
+        assert ("get", "read") in recorded
