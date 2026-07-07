@@ -143,6 +143,13 @@ _JOBS_MAX = 100
 # never misclassified.
 _ACTIVE_JOB_TTL_SECONDS: int = 1800  # 30 minutes
 
+# Upper bound on how long the opt-in ``?wait=true`` path (see
+# :func:`_dispatch_async`) holds a request open awaiting its job. Tied to the
+# stale-job TTL: a job that runs past this is already considered dead by
+# :func:`_is_stale`, so blocking longer only pins the request slot. On timeout
+# the handler falls back to the 202 contract; the job keeps running (shielded).
+_SYNC_WAIT_MAX_SECONDS: int = _ACTIVE_JOB_TTL_SECONDS
+
 
 @dataclass
 class _JobStatus:
@@ -1556,7 +1563,30 @@ def create_webhook_app(
         # fire-and-forget behaviour.
         if _wants_sync_wait(request):
             try:
-                await job.task
+                # Bounded: a hung job must not pin the request slot forever
+                # (CR #700). ``shield`` keeps the job running when the wait
+                # times out — on timeout we fall back to the 202 contract and
+                # the caller re-attaches via ``status_url`` / the stale sweep
+                # reaps it.
+                await asyncio.wait_for(
+                    asyncio.shield(job.task), timeout=_SYNC_WAIT_MAX_SECONDS
+                )
+            except TimeoutError:
+                logger.warning(
+                    "Webhook %s (job=%s): sync wait exceeded %ds — returning 202",
+                    endpoint,
+                    job.id,
+                    _SYNC_WAIT_MAX_SECONDS,
+                )
+                return JSONResponse(
+                    {
+                        "ok": True,
+                        "job_id": job.id,
+                        "state": job.state,
+                        "status_url": f"{root_path}/jobs/{job.id}",
+                    },
+                    status_code=202,
+                )
             except Exception:  # noqa: BLE001 — _execute_job records its own error
                 logger.exception("Webhook %s (job=%s): awaited job raised", endpoint, job.id)
             succeeded = job.state == "succeeded"
