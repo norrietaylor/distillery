@@ -34,6 +34,7 @@ import duckdb
 from distillery import observability
 from distillery.feeds.tags import normalize_tag
 from distillery.models import Entry, EntrySource, EntryStatus, EntryType, validate_metadata
+from distillery.observability import span
 from distillery.store.migrations import (
     _CREATE_META_TABLE,
     backfill_relations_from_content_refs,
@@ -116,6 +117,28 @@ class EntriesIntegrityError(RuntimeError):
     unreadable column and the caller must fail loud rather than report
     success.
     """
+
+
+def _op_name(fn: Callable[..., Any]) -> str:
+    """Low-cardinality operation label for the ``db {operation}`` spans.
+
+    The store funnels receive three callable shapes: bound ``_sync_*`` methods
+    (``DuckDBStore._sync_store`` → ``_sync_store``), closures defined inside the
+    public coroutine (``DuckDBStore.search.<locals>._sync`` → ``search``), and
+    lambdas (``DuckDBStore.get.<locals>.<lambda>`` → ``get``).  For closures the
+    enclosing method name is the meaningful one.
+    """
+    qualname: str | None = getattr(fn, "__qualname__", None)
+    if qualname is None:
+        # repr text can itself contain dots and "<locals>" (e.g. a callable
+        # instance of a locally defined class) — return it verbatim rather
+        # than splitting it like a qualname.
+        return repr(fn)
+    parts = qualname.split(".")
+    if "<locals>" in parts:
+        # Last occurrence: the innermost enclosing function names the operation.
+        return parts[len(parts) - 1 - parts[::-1].index("<locals>") - 1]
+    return parts[-1]
 
 
 def _sql_escape(value: str) -> str:
@@ -1508,62 +1531,67 @@ class DuckDBStore:
         path when a prior uncaught exception poisoned the connection;
         running ``ROLLBACK`` after the failed read restores the connection
         so the next call succeeds rather than cascading the same error.
+
+        Emits a ``db {operation}`` span (no-op when telemetry is off) that
+        covers lock wait plus execution, so writer-lock contention (issues
+        #416/#558) is visible per operation in the trace timeline.
         """
-        async with self._get_conn_lock():
-            try:
-                return await asyncio.to_thread(fn, *args, **kwargs)
-            except duckdb.FatalException as exc:
-                # A ``FatalException`` carrying "has been invalidated"
-                # permanently poisons the connection: every later operation
-                # raises the same fatal forever, so a ``ROLLBACK`` cannot
-                # recover it.  Rather than loop 500s indefinitely (one
-                # incident ran 7.5 days writing 32 MB of identical stacks —
-                # issue #583), record the failure, log at CRITICAL, and ask
-                # the supervisor (launchd/systemd) to restart us via SIGTERM.
-                # The fresh process either replays the WAL cleanly or fails
-                # visibly at startup.  Non-invalidating fatals fall through to
-                # the generic rollback path below.
-                if "has been invalidated" in str(exc):
-                    self._signal_supervisor_restart(exc, "connection terminally invalidated")
+        with span("db {operation}", operation=_op_name(fn), lock="conn"):
+            async with self._get_conn_lock():
+                try:
+                    return await asyncio.to_thread(fn, *args, **kwargs)
+                except duckdb.FatalException as exc:
+                    # A ``FatalException`` carrying "has been invalidated"
+                    # permanently poisons the connection: every later operation
+                    # raises the same fatal forever, so a ``ROLLBACK`` cannot
+                    # recover it.  Rather than loop 500s indefinitely (one
+                    # incident ran 7.5 days writing 32 MB of identical stacks —
+                    # issue #583), record the failure, log at CRITICAL, and ask
+                    # the supervisor (launchd/systemd) to restart us via SIGTERM.
+                    # The fresh process either replays the WAL cleanly or fails
+                    # visibly at startup.  Non-invalidating fatals fall through to
+                    # the generic rollback path below.
+                    if "has been invalidated" in str(exc):
+                        self._signal_supervisor_restart(exc, "connection terminally invalidated")
+                        raise
+                    conn = self._conn
+                    if conn is not None:
+                        await asyncio.to_thread(self._rollback_quietly, conn)
                     raise
-                conn = self._conn
-                if conn is not None:
-                    await asyncio.to_thread(self._rollback_quietly, conn)
-                raise
-            except duckdb.IOException as exc:
-                # A stale file handle (the GCS FUSE object generation changed
-                # under our open handle — see ``_is_stale_file_handle``) cannot
-                # be recovered by ``ROLLBACK``: the OS-level handle is dead, so
-                # every later read fails identically until the file is
-                # re-opened.  Restart the process rather than loop 500s; the
-                # fresh instance opens a clean handle.  Other IO errors fall
-                # through to the generic rollback path below.
-                if self._is_stale_file_handle(exc):
-                    self._signal_supervisor_restart(
-                        exc, "file handle is stale (FUSE object generation changed)"
-                    )
+                except duckdb.IOException as exc:
+                    # A stale file handle (the GCS FUSE object generation changed
+                    # under our open handle — see ``_is_stale_file_handle``) cannot
+                    # be recovered by ``ROLLBACK``: the OS-level handle is dead, so
+                    # every later read fails identically until the file is
+                    # re-opened.  Restart the process rather than loop 500s; the
+                    # fresh instance opens a clean handle.  Other IO errors fall
+                    # through to the generic rollback path below.
+                    if self._is_stale_file_handle(exc):
+                        self._signal_supervisor_restart(
+                            exc, "file handle is stale (FUSE object generation changed)"
+                        )
+                        raise
+                    conn = self._conn
+                    if conn is not None:
+                        await asyncio.to_thread(self._rollback_quietly, conn)
                     raise
-                conn = self._conn
-                if conn is not None:
-                    await asyncio.to_thread(self._rollback_quietly, conn)
-                raise
-            except Exception:
-                # Catching ``Exception`` — not ``BaseException`` — so that
-                # ``asyncio.CancelledError`` does not trigger rollback.
-                # When a task is cancelled while awaiting
-                # ``asyncio.to_thread(fn, …)`` the worker thread executing
-                # *fn* keeps running (Python has no safe way to forcibly
-                # stop a thread), so issuing ``conn.rollback()`` from a
-                # second worker thread would race against the still-live
-                # first one on the shared DuckDB connection.  On
-                # cancellation we simply re-raise; on ordinary exceptions
-                # *fn* has already returned control so the rollback is
-                # safe.  The rollback runs while we still hold the lock
-                # so the connection is single-threaded throughout.
-                conn = self._conn
-                if conn is not None:
-                    await asyncio.to_thread(self._rollback_quietly, conn)
-                raise
+                except Exception:
+                    # Catching ``Exception`` — not ``BaseException`` — so that
+                    # ``asyncio.CancelledError`` does not trigger rollback.
+                    # When a task is cancelled while awaiting
+                    # ``asyncio.to_thread(fn, …)`` the worker thread executing
+                    # *fn* keeps running (Python has no safe way to forcibly
+                    # stop a thread), so issuing ``conn.rollback()`` from a
+                    # second worker thread would race against the still-live
+                    # first one on the shared DuckDB connection.  On
+                    # cancellation we simply re-raise; on ordinary exceptions
+                    # *fn* has already returned control so the rollback is
+                    # safe.  The rollback runs while we still hold the lock
+                    # so the connection is single-threaded throughout.
+                    conn = self._conn
+                    if conn is not None:
+                        await asyncio.to_thread(self._rollback_quietly, conn)
+                    raise
 
     async def _run_read(self, fn: Callable[[duckdb.DuckDBPyConnection], _T]) -> _T:
         """Run a read-only *fn* against the independent read handle.
@@ -1591,26 +1619,31 @@ class DuckDBStore:
         *fn* must be read-only.  Any error leaves the read handle untouched
         (no rollback): a SELECT cannot poison ``_read_conn`` the way a failed
         write poisons ``_conn``.
+
+        Emits a ``db {operation}`` span (no-op when telemetry is off) that
+        covers read-lock wait plus execution, so a slow search delaying the
+        readiness probe (see above) shows up per operation in the trace.
         """
         read_conn = self._read_conn
         if read_conn is None:
             raise RuntimeError(
                 "DuckDBStore has not been initialized. Call 'await store.initialize()' first."
             )
-        async with self._get_read_lock():
-            try:
-                return await asyncio.to_thread(fn, read_conn)
-            except duckdb.IOException as exc:
-                # The read handle is a ``cursor()`` of ``_conn`` over the same
-                # backing file, so it goes stale together with it when the
-                # FUSE object generation changes.  No rollback (a SELECT never
-                # poisons the read handle); restart so a fresh process re-opens
-                # the file, then re-raise for this request.
-                if self._is_stale_file_handle(exc):
-                    self._signal_supervisor_restart(
-                        exc, "read handle is stale (FUSE object generation changed)"
-                    )
-                raise
+        with span("db {operation}", operation=_op_name(fn), lock="read"):
+            async with self._get_read_lock():
+                try:
+                    return await asyncio.to_thread(fn, read_conn)
+                except duckdb.IOException as exc:
+                    # The read handle is a ``cursor()`` of ``_conn`` over the same
+                    # backing file, so it goes stale together with it when the
+                    # FUSE object generation changes.  No rollback (a SELECT never
+                    # poisons the read handle); restart so a fresh process re-opens
+                    # the file, then re-raise for this request.
+                    if self._is_stale_file_handle(exc):
+                        self._signal_supervisor_restart(
+                            exc, "read handle is stale (FUSE object generation changed)"
+                        )
+                    raise
 
     # ------------------------------------------------------------------
     # Deferred accessed_at tracking (issue #663 follow-up)
