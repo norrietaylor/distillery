@@ -131,7 +131,9 @@ class DistilleryStore(Protocol):
         """
         ...
 
-    async def update(self, entry_id: str, updates: dict[str, Any]) -> Entry:
+    async def update(
+        self, entry_id: str, updates: dict[str, Any], *, defer_index: bool = False
+    ) -> Entry:
         """Apply a partial update to an existing entry.
 
         Increments ``version`` by 1 and refreshes ``updated_at`` to the
@@ -142,6 +144,9 @@ class DistilleryStore(Protocol):
             entry_id: The UUID string of the entry to update.
             updates: A dict of field names to new values.  Only writable
                 fields are accepted.
+            defer_index: When ``True``, skip the per-write FTS rebuild and
+                checkpoint; the caller must invoke :meth:`flush_index` once
+                after the batch. See :meth:`store` for the rationale.
 
         Returns:
             The updated ``Entry`` reflecting all applied changes.

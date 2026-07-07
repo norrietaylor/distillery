@@ -230,6 +230,58 @@ class TestPollerBackfillFlag:
         assert "backfill" not in by_url["https://old.com/rss"].metadata
 
 
+class TestDeferredIndexFlushOnPoll:
+    """The poller defers the per-write FTS rebuild and flushes once per cycle.
+
+    The flush must be keyed on the commit-point flag, not the counted
+    ``PollResult`` totals, so committed-but-deferred rows are still indexed +
+    checkpointed when a source errors after storing or the poll is cancelled
+    mid-gather (CR #699, issue #404)."""
+
+    async def test_normal_poll_flushes_index_once(self) -> None:
+        store = _make_store_for_poller([_source_dict(last_polled_at=None)])
+        cfg = _make_poller_config()
+        with patch("distillery.feeds.poller._build_adapter") as mock_build:
+            adapter = MagicMock()
+            adapter.fetch.return_value = [_make_feed_item("a1")]
+            mock_build.return_value = adapter
+            poller = FeedPoller(store=store, config=cfg)
+            summary = await poller.poll()
+        assert summary.total_stored == 1
+        store.flush_index.assert_awaited_once()
+
+    async def test_flush_runs_when_source_errors_after_deferred_store(self, monkeypatch) -> None:
+        # A source commits a deferred write (sets the flag) then raises before
+        # returning a PollResult, so its rows never reach ``total_stored`` —
+        # the flush must still run off the commit-point flag.
+        store = _make_store_for_poller([_source_dict(last_polled_at=None)])
+        cfg = _make_poller_config()
+        poller = FeedPoller(store=store, config=cfg)
+
+        async def _store_then_boom(source: Any, scorer: Any, **_kwargs: Any) -> None:
+            poller._pending_index_flush = True  # simulate a committed deferred store
+            raise RuntimeError("cancelled after store")
+
+        monkeypatch.setattr(poller, "_poll_source", _store_then_boom)
+        with patch("distillery.feeds.poller._build_adapter"):
+            summary = await poller.poll()
+
+        assert summary.total_stored == 0  # the errored source contributed no count
+        store.flush_index.assert_awaited_once()  # but the committed row was flushed
+
+    async def test_no_flush_when_nothing_stored(self) -> None:
+        # Empty fetch → no deferred writes → no wasted full-table FTS rebuild.
+        store = _make_store_for_poller([_source_dict(last_polled_at=None)])
+        cfg = _make_poller_config()
+        with patch("distillery.feeds.poller._build_adapter") as mock_build:
+            adapter = MagicMock()
+            adapter.fetch.return_value = []
+            mock_build.return_value = adapter
+            poller = FeedPoller(store=store, config=cfg)
+            await poller.poll()
+        store.flush_index.assert_not_awaited()
+
+
 # ---------------------------------------------------------------------------
 # DuckDBStore: published_after / published_before / exclude_backfill filters
 # ---------------------------------------------------------------------------

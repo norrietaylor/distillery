@@ -608,6 +608,11 @@ class FeedPoller:
     ) -> None:
         self._store = store
         self._config = config
+        # Set once any source commits a ``defer_index=True`` write, so poll()
+        # flushes the FTS rebuild + checkpoint even when the counted
+        # ``PollResult`` totals miss it — e.g. a source cancelled/errored after
+        # storing, or poll() itself cancelled mid-gather (issue #404).
+        self._pending_index_flush = False
         # Bound the per-cycle fan-out: at most ``max_concurrent_sources`` sources
         # are fetched + scored + stored at once (issue #655).  Values < 1 are
         # clamped to 1 so a misconfiguration can never deadlock the poll.
@@ -775,55 +780,60 @@ class FeedPoller:
                     is_backfill=source.url in first_poll_urls,
                 )
 
-        results = await asyncio.gather(
-            *(_poll_source_bounded(source) for source in sources),
-            return_exceptions=True,
-        )
+        try:
+            results = await asyncio.gather(
+                *(_poll_source_bounded(source) for source in sources),
+                return_exceptions=True,
+            )
 
-        for idx, result in enumerate(results):
-            if isinstance(result, BaseException):
-                # Unexpected exception escaping ``_poll_source`` — its own
-                # ``finally`` clause did not get to run (e.g. raised before
-                # the wrapping ``try``), so record liveness one more time
-                # here so the source isn't left as "never polled".
-                err_result = PollResult(
-                    source_url=sources[idx].url,
-                    source_type=sources[idx].source_type,
-                    errors=[f"Unexpected error: {result}"],
-                )
-                summary.results.append(err_result)
-                summary.sources_polled += 1
-                summary.sources_errored += 1
-                logger.warning(
-                    "FeedPoller: unexpected error polling %s: %s",
-                    sources[idx].url,
-                    result,
-                )
-                await self._persist_poll_status(err_result)
-            else:
-                summary.results.append(result)
-                summary.total_fetched += result.items_fetched
-                summary.total_stored += result.items_stored
-                summary.total_skipped_dedup += result.items_skipped_dedup
-                summary.total_below_threshold += result.items_below_threshold
-                summary.total_items_enriched += result.items_enriched
-                summary.total_enrichment_errors += result.enrichment_errors
-                summary.sources_polled += 1
-                if result.errors:
+            for idx, result in enumerate(results):
+                if isinstance(result, BaseException):
+                    # Unexpected exception escaping ``_poll_source`` — its own
+                    # ``finally`` clause did not get to run (e.g. raised before
+                    # the wrapping ``try``), so record liveness one more time
+                    # here so the source isn't left as "never polled".
+                    err_result = PollResult(
+                        source_url=sources[idx].url,
+                        source_type=sources[idx].source_type,
+                        errors=[f"Unexpected error: {result}"],
+                    )
+                    summary.results.append(err_result)
+                    summary.sources_polled += 1
                     summary.sources_errored += 1
-                # Liveness is already persisted inside ``_poll_source``.
-
-        # Per-entry stores ran with ``defer_index=True`` (skipping the FTS
-        # rebuild + checkpoint), so flush once now to make the whole poll's
-        # new entries BM25-searchable and durably checkpointed — one
-        # O(total_rows) rebuild instead of one per entry. Failure is
-        # non-fatal: the rows are committed and vector-searchable, and the
-        # next poll's flush (or the idle-checkpoint loop) will catch up.
-        if summary.total_stored > 0:
-            try:
-                await self._store.flush_index()
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("FeedPoller: deferred index flush failed: %s", exc)
+                    logger.warning(
+                        "FeedPoller: unexpected error polling %s: %s",
+                        sources[idx].url,
+                        result,
+                    )
+                    await self._persist_poll_status(err_result)
+                else:
+                    summary.results.append(result)
+                    summary.total_fetched += result.items_fetched
+                    summary.total_stored += result.items_stored
+                    summary.total_skipped_dedup += result.items_skipped_dedup
+                    summary.total_below_threshold += result.items_below_threshold
+                    summary.total_items_enriched += result.items_enriched
+                    summary.total_enrichment_errors += result.enrichment_errors
+                    summary.sources_polled += 1
+                    if result.errors:
+                        summary.sources_errored += 1
+                    # Liveness is already persisted inside ``_poll_source``.
+        finally:
+            # Per-entry stores ran with ``defer_index=True`` (skipping the FTS
+            # rebuild + checkpoint), so flush once now — one O(total_rows)
+            # rebuild instead of one per entry. Gate on the commit-point flag,
+            # not ``summary.total_stored``, and run in ``finally`` so committed
+            # rows are still made BM25-searchable + checkpointed when a source
+            # errored after storing, or poll() was cancelled mid-gather (issue
+            # #404). ``shield`` lets the rebuild + checkpoint finish even while
+            # poll() is being cancelled, so rows never linger un-checkpointed
+            # until the next cycle. Failure is non-fatal.
+            if self._pending_index_flush:
+                self._pending_index_flush = False
+                try:
+                    await asyncio.shield(self._store.flush_index())
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("FeedPoller: deferred index flush failed: %s", exc)
 
         summary.finished_at = datetime.now(tz=UTC)
         return summary
@@ -1080,6 +1090,12 @@ class FeedPoller:
                 # committed here, so intra-poll dedup (vector similarity)
                 # sees it immediately.
                 await self._store.store(entry, defer_index=True)
+                # Row is committed but its FTS rebuild + checkpoint are
+                # deferred to poll()'s single end-of-cycle flush. Mark that a
+                # flush is owed now, at the commit point, so it happens even if
+                # this source or the whole poll is cancelled before the counted
+                # totals are assembled (issue #404).
+                self._pending_index_flush = True
                 batch_entry_ids.add(str(entry.id))
                 result.items_stored += 1
                 logger.debug(
