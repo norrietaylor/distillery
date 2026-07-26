@@ -135,7 +135,9 @@ def main(argv: list[str] | None = None) -> int:
             port_env = os.environ.get("DISTILLERY_PORT")
             port = args.port if args.port is not None else (int(port_env) if port_env else 8000)
 
-            auth = None
+            from fastmcp.server.auth.oauth_proxy import OAuthProxy
+
+            auth: OAuthProxy | None = None
             org_checker = None
             provider_name = config.server.auth.provider
             if provider_name == "github":
@@ -156,6 +158,16 @@ def main(argv: list[str] | None = None) -> int:
                 from distillery.mcp.auth import pre_register_claude_code_client
 
                 asyncio.run(pre_register_claude_code_client(auth))
+            elif provider_name == "gitlab":
+                from distillery.mcp.auth import (
+                    _patch_cimd_localhost_redirect,
+                    pre_register_claude_code_client,
+                )
+                from distillery.mcp.gitlab_auth import build_gitlab_auth
+
+                _patch_cimd_localhost_redirect()
+                auth = build_gitlab_auth(config)
+                asyncio.run(pre_register_claude_code_client(auth))
             elif provider_name == "none":
                 logger.warning(
                     "HTTP server running without authentication (server.auth.provider is 'none')",
@@ -163,7 +175,7 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 raise ValueError(
                     f"Unknown auth provider {provider_name!r} for HTTP transport. "
-                    f"Supported values: 'github', 'none'."
+                    f"Supported values: 'github', 'gitlab', 'none'."
                 )
 
             server = create_server(config=config, auth=auth)
@@ -186,10 +198,11 @@ def main(argv: list[str] | None = None) -> int:
                     return
                 await store.write_audit_log(user_id, operation, entry_id, action, outcome)
 
-            # Attach callback to auth provider (if org-restricted).
+            # Attach callback to auth provider (if org- or group-gated).
             from distillery.mcp.auth import OrgRestrictedGitHubProvider
+            from distillery.mcp.gitlab_auth import GitLabProvider
 
-            if isinstance(auth, OrgRestrictedGitHubProvider):
+            if isinstance(auth, OrgRestrictedGitHubProvider | GitLabProvider):
                 auth._audit_callback = _auth_audit_cb
             http_app = server.http_app(
                 path="/mcp",
