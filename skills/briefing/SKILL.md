@@ -145,6 +145,14 @@ distillery_list(status="pending_review", limit=5, output_mode="full")
 
 Returns entries awaiting classification. If this call fails or returns nothing, omit the Pending Review section.
 
+**4j. Graph health (non-fatal, both modes):**
+
+```python
+distillery_relations(action="metrics", metric="health", scope="global", project=<project>)
+```
+
+Returns a consolidated graph-health snapshot for the project's relations subgraph. Record `orphan_rate`, `edge_count`, `graph_node_count`, `total_entries`, `mean_degree`, `connected_component_count`, and `largest_component_fraction`. If the call returns an `INTERNAL` error whose message contains `"NetworkX not installed"`, or fails for any other reason, omit the Graph Health section and continue (non-fatal). A high `orphan_rate` (→ 1.0) means most entries are unlinked; the goal is to see it trend down over time.
+
 ### Step 5: Synthesize Briefing
 
 Produce the briefing in markdown. Omit any section entirely if it has no data.
@@ -297,6 +305,14 @@ Generated: 2026-04-08 09:15 UTC
 ## Unresolved
 
 - [SESSION] Spike: evaluate pgvector as an alternative to DuckDB… — 5 days ago
+
+---
+
+## Graph Health
+
+- Orphan rate: 41.2% (1,902 of 3,242 entries unlinked) — trending down is the goal
+- Edges: 4,317 across 1,340 linked nodes — mean degree 6.4
+- Components: 12 (largest holds 94% of linked nodes)
 ```
 
 Team mode appends these additional sections after the solo sections (`/briefing --team` or auto-detected when >1 author):
@@ -347,6 +363,7 @@ Generated: 2026-04-08 09:15 UTC
 - Corrections section detects candidates from `metadata.corrects` / `metadata.corrected_by` in the Step 4a `output_mode="summary"` list (summary carries full `metadata`), then resolves pairs via `distillery_relations(action="get", relation_type="corrects")` — this relation lookup is best-effort: empty/sparse results and a `"NetworkX not installed"` `INTERNAL` error are non-fatal (emit the one-line `pip install distillery-mcp[graph]` note and fall back to metadata-only pairing)
 - Stale knowledge failure is non-fatal — omit the section and continue
 - Unresolved failure is non-fatal — omit the section and continue
+- Graph Health uses `distillery_relations(action="metrics", metric="health")` — failure (incl. `NetworkX not installed`) is non-fatal; omit the section and continue. Render `orphan_rate` as a percentage; the line should frame the trend goal (orphan rate ↓)
 - Team mode is activated by `--team` flag or auto-detected: `distillery_list(group_by="author", project=<project>)` returning >1 author group
 - Header shows `(solo)` or `(team)` based on detected mode
 - Team sections (6, 7, 8) are additive — solo sections are always rendered unchanged
