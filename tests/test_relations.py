@@ -356,14 +356,16 @@ async def test_add_relation_edge_attributes_round_trip(store) -> None:  # type: 
         metadata={"source": "spike", "n": 3},
     )
 
-    (row,) = await store.get_related(a)
+    # invalid_at is in the past, so the edge is soft-retired — read it back with
+    # include_retired to verify attribute persistence (issue #653 curation).
+    (row,) = await store.get_related(a, include_retired=True)
     assert row["weight"] == 0.75
     assert row["valid_at"] == "2026-01-01T00:00:00Z"
     assert row["invalid_at"] == "2026-06-01T12:30:00Z"
     assert row["metadata"] == {"source": "spike", "n": 3}
 
     # list_relations returns the same shape.
-    (listed,) = await store.list_relations()
+    (listed,) = await store.list_relations(include_retired=True)
     assert listed["weight"] == 0.75
     assert listed["metadata"] == {"source": "spike", "n": 3}
 
@@ -394,7 +396,8 @@ async def test_add_relation_reassert_upserts_attributes(store) -> None:  # type:
     second = await store.add_relation(a, b, "related", weight=0.9, invalid_at="2026-06-01T00:00:00")
 
     assert first == second  # same row, no duplicate
-    (row,) = await store.get_related(a)
+    # The upserted invalid_at is in the past -> retired; read with include_retired.
+    (row,) = await store.get_related(a, include_retired=True)
     assert row["weight"] == 0.9  # upserted
     assert row["invalid_at"] == "2026-06-01T00:00:00Z"
 

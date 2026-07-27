@@ -108,12 +108,14 @@ async def _handle_relations(
         "resolve_candidate",
         "suggest_links",
         "promote_entities",
+        "retire",
+        "revalidate",
     ):
         return error_response(
             "INVALID_PARAMS",
             "action must be one of 'add', 'get', 'remove', 'traverse', 'metrics', "
             "'reconcile', 'list_candidates', 'resolve_candidate', 'suggest_links', "
-            f"'promote_entities'; got: {action!r}",
+            f"'promote_entities', 'retire', 'revalidate'; got: {action!r}",
         )
 
     # ------------------------------------------------------------------
@@ -236,9 +238,14 @@ async def _handle_relations(
                 )
             get_relation_type = get_relation_type_raw.strip() or None
 
+        include_retired = bool(arguments.get("include_retired", False))
+
         try:
             relations = await store.get_related(
-                entry_id, direction=direction, relation_type=get_relation_type
+                entry_id,
+                direction=direction,
+                relation_type=get_relation_type,
+                include_retired=include_retired,
             )
         except Exception:  # noqa: BLE001
             logger.exception("distillery_relations get: unexpected error")
@@ -249,6 +256,7 @@ async def _handle_relations(
                 "entry_id": entry_id,
                 "direction": direction,
                 "relation_type": get_relation_type,
+                "include_retired": include_retired,
                 "relations": relations,
                 "count": len(relations),
             }
@@ -602,6 +610,49 @@ async def _handle_relations(
                 "mentions_created": counts.get("mentions_created", 0),
                 "threshold": threshold,
             }
+        )
+
+    # ------------------------------------------------------------------
+    # action == "retire" (soft-retire an edge via invalid_at)
+    # ------------------------------------------------------------------
+    if action == "retire":
+        retire_id_raw = arguments.get("relation_id")
+        if not isinstance(retire_id_raw, str) or not retire_id_raw.strip():
+            return error_response("INVALID_PARAMS", "relation_id is required for action='retire'")
+        retire_id = retire_id_raw.strip()
+        invalid_at_raw = arguments.get("invalid_at")
+        if invalid_at_raw is not None and not isinstance(invalid_at_raw, str):
+            return error_response("INVALID_PARAMS", "invalid_at must be an ISO 8601 string")
+        try:
+            retired = await store.retire_relation(retire_id, invalid_at_raw)
+        except ValueError as exc:
+            return error_response("INVALID_PARAMS", f"Cannot retire relation: {exc}")
+        except Exception:  # noqa: BLE001
+            logger.exception("distillery_relations retire: unexpected error")
+            return error_response("INTERNAL", "Failed to retire relation")
+
+        return success_response(
+            {"action": "retire", "relation_id": retire_id, "retired": retired}
+        )
+
+    # ------------------------------------------------------------------
+    # action == "revalidate" (clear invalid_at so an edge is live again)
+    # ------------------------------------------------------------------
+    if action == "revalidate":
+        reval_id_raw = arguments.get("relation_id")
+        if not isinstance(reval_id_raw, str) or not reval_id_raw.strip():
+            return error_response(
+                "INVALID_PARAMS", "relation_id is required for action='revalidate'"
+            )
+        reval_id = reval_id_raw.strip()
+        try:
+            revalidated = await store.revalidate_relation(reval_id)
+        except Exception:  # noqa: BLE001
+            logger.exception("distillery_relations revalidate: unexpected error")
+            return error_response("INTERNAL", "Failed to revalidate relation")
+
+        return success_response(
+            {"action": "revalidate", "relation_id": reval_id, "revalidated": revalidated}
         )
 
     # ------------------------------------------------------------------
