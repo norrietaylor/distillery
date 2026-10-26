@@ -125,7 +125,7 @@ jobs:
 
       - name: Upload SBOM artifact
         if: always()
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: sbom-${{ matrix.target }}.cdx.json
           path: sbom-${{ matrix.target }}.cdx.json
@@ -133,7 +133,7 @@ jobs:
 
       - name: Upload Grype report artifact
         if: always()
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: grype-report-${{ matrix.target }}.json
           path: grype-report-${{ matrix.target }}.json

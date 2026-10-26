@@ -189,7 +189,7 @@ jobs:
 
       - name: Upload Cell A seed artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cell-a-seed-${{ matrix.seed }}
           path: bench/results/graph_regression_cell_a/**
