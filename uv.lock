@@ -808,7 +808,7 @@ requires-dist = [
     { name = "fastmcp", specifier = ">=2.12.0,<4.0" },
     { name = "httpx", specifier = ">=0.24.0,<1.0" },
     { name = "huggingface-hub", marker = "extra == 'dev'", specifier = ">=0.24,<1.0" },
-    { name = "logfire", extras = ["asgi", "httpx", "system-metrics"], marker = "extra == 'otel'", specifier = ">=2.0,<5" },
+    { name = "logfire", extras = ["asgi", "httpx", "system-metrics"], marker = "extra == 'otel'", specifier = ">=2.0,<6" },
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.5" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.0" },
     { name = "networkx", marker = "extra == 'graph'", specifier = ">=3.2,<4.0" },
@@ -1892,20 +1892,47 @@ wheels = [
 
 [[package]]
 name = "logfire"
-version = "3.5.1"
+version = "5.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "logfire-sdk" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/09/08/8e5388d272d1d90e7a9f60fb2efadfbea65d7058e396f82da4ef1cfc730b/logfire-5.3.0.tar.gz", hash = "sha256:b3be3e29b14147fdf8a0e3ca3aa5b3e8b96d5e2539d6ea8c7e5eecec2dd40490", size = 3228, upload-time = "2026-10-23T15:11:01.751Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/44/a8/200e8f24fa205c045a0622e6d2c032c51b7b335b3b54f987106ed832db7b/logfire-5.3.0-py3-none-any.whl", hash = "sha256:8949827f0e92c8eec373310feadd92fe9f87605d6a212e82a7a5491068d56b84", size = 3066, upload-time = "2026-10-23T15:10:56.791Z" },
+]
+
+[package.optional-dependencies]
+asgi = [
+    { name = "logfire-sdk", extra = ["asgi"] },
+]
+httpx = [
+    { name = "logfire-sdk", extra = ["httpx"] },
+]
+system-metrics = [
+    { name = "logfire-sdk", extra = ["system-metrics"] },
+]
+
+[[package]]
+name = "logfire-sdk"
+version = "5.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "certifi" },
     { name = "executing" },
+    { name = "opentelemetry-api" },
     { name = "opentelemetry-exporter-otlp-proto-http" },
     { name = "opentelemetry-instrumentation" },
     { name = "opentelemetry-sdk" },
+    { name = "opentelemetry-semantic-conventions" },
     { name = "protobuf" },
+    { name = "requests" },
     { name = "rich" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b3/7a/e918a1f1ba62eaf1b20917a37b8fb820800e78a21eaf42677f925fb15f14/logfire-3.5.1.tar.gz", hash = "sha256:8ac97284af1e266257d640dcca584528ee015024e84f512ecef6e2cedd581f1d", size = 264880, upload-time = "2025-02-04T16:05:54.097Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/22/c9/8c93f9eac2eb7e4eecad8a7074e16063bcc81fe6fa68e314599c8abc0a5e/logfire_sdk-5.3.0.tar.gz", hash = "sha256:a90a220724d5e09f9a0d792ae01b2aa9ed6b59f9b99c17cfc00d57bb5916ef87", size = 1443999, upload-time = "2026-10-23T15:11:03.98Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/78/13/8c181b24daaddcf7f259e63e914a1b19e645f06c7ea025e0bea0553c0f29/logfire-3.5.1-py3-none-any.whl", hash = "sha256:8821ef5c83e566354a63d35cff4486ae91103d86f1677fe61632178b40a3e081", size = 178547, upload-time = "2025-02-04T16:05:50.222Z" },
+    { url = "https://files.pythonhosted.org/packages/d4/7f/315b7895de489b6c7b8c8bd1a6089d573d8c24ca247b38c43f4d720e7472/logfire_sdk-5.3.0-py3-none-any.whl", hash = "sha256:160a8e280a949001caf4563d2836bd29cdb61b209774cb9634893c0cc5d60e0b", size = 992445, upload-time = "2026-10-23T15:10:59.952Z" },
 ]
 
 [package.optional-dependencies]

@@ -84,7 +84,7 @@ otel = [
     # Upper-bounded: the secret-scrubbing defaults and the env-driven OTLP
     # export behaviour observability.py relies on are logfire internals that
     # can shift across majors, so a major bump is a deliberate, reviewed change.
-    "logfire[asgi,httpx,system-metrics]>=2.0,<5",
+    "logfire[asgi,httpx,system-metrics]>=2.0,<6",
     "opentelemetry-exporter-otlp>=1.20,<2",
 ]
 
