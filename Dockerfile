@@ -21,7 +21,7 @@
 
 ARG PYTHON_TAG=latest
 ARG PYTHON_VERSION=3.13
-ARG UV_VERSION=0.11.3
+ARG UV_VERSION=0.13.1
 
 # Pinned `uv` binary. Pulled in via a separate stage so we can parameterise
 # the version via the UV_VERSION build arg in the `COPY --from=` below.
