@@ -20,7 +20,7 @@
 # base image's own python is unused.
 
 ARG PYTHON_TAG=latest
-ARG PYTHON_VERSION=3.13
+ARG PYTHON_VERSION=3.14
 ARG UV_VERSION=0.13.1
 
 # Pinned `uv` binary. Pulled in via a separate stage so we can parameterise
