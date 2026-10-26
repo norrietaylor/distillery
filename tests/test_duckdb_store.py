@@ -1254,6 +1254,8 @@ class TestCorruptWalQuarantine:
         import uuid
 
         conn = duckdb.connect(db_path)
+        # entries carries an HNSW index; writes need the extension loaded.
+        conn.execute("LOAD vss")
         conn.execute("PRAGMA disable_checkpoint_on_shutdown")
         # Insert directly into the existing ``entries`` table so the WAL
         # carries real, replayable records.

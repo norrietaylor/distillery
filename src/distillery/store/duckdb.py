@@ -461,7 +461,7 @@ class DuckDBStore:
             elif not already_loaded:
                 cursor.execute("LOAD vss;")
 
-            cursor.execute("SET hnsw_enable_experimental_persistence = true;")
+            cursor.execute("SET GLOBAL hnsw_enable_experimental_persistence = true;")
             self._vss_available = True
             logger.info("VSS extension loaded with HNSW persistence enabled")
         except (duckdb.IOException, duckdb.CatalogException, duckdb.Error) as exc:
@@ -2477,7 +2477,7 @@ class DuckDBStore:
             # Match entries where any tag equals the prefix exactly or starts with
             # "prefix/" to avoid partial-segment matches (e.g. "project/billing"
             # must not match "project/billing-v2/api").
-            clauses.append("len(list_filter(tags, t -> t = ? OR starts_with(t, ?))) > 0")
+            clauses.append("len(list_filter(tags, lambda t: t = ? OR starts_with(t, ?))) > 0")
             params.append(prefix)
             params.append(prefix + "/")
 
@@ -2611,9 +2611,9 @@ class DuckDBStore:
             return []
         try:
             sql = (
-                "SELECT id, fts_main_entries.match_bm25(id, ?) AS bm25 "
-                "FROM entries "
-                "WHERE bm25 IS NOT NULL "
+                "SELECT id, bm25 FROM ("
+                "SELECT id, fts_main_entries.match_bm25(id, ?) AS bm25 FROM entries"
+                ") WHERE bm25 IS NOT NULL "
                 "ORDER BY bm25 DESC "
                 "LIMIT ?"
             )
