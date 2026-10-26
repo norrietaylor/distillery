@@ -74,7 +74,7 @@ fastembed = [
     # Pinned exactly for benchmark reproducibility — anyone reruns the bench
     # offline and gets byte-identical embeddings.  Bump only with a SHA panel
     # update in bench/results/.
-    "fastembed==0.8.0",
+    "fastembed==0.9.0",
 ]
 # Observability. Optional: the server runs unchanged without it, and even
 # when installed it stays dark until LOGFIRE_TOKEN / OTEL_EXPORTER_OTLP_ENDPOINT
