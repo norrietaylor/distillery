@@ -49,7 +49,8 @@ jobs:
           push: false
           tags: distillery-${{ matrix.target }}:scan
           cache-from: type=gha,scope=${{ matrix.target }}
-          cache-to: type=gha,scope=${{ matrix.target }},mode=max
+          # ignore-error keeps a full or refused cache from failing the build.
+          cache-to: type=gha,scope=${{ matrix.target }},mode=max,ignore-error=true
           build-args: |
             BUILD_SHA=${{ github.sha }}
 
