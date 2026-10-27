@@ -32,18 +32,19 @@ jobs:
 
       # Install from uv.lock (not a fresh pip resolve) so CI tests exactly the
       # dependency set that ships — Dependabot lock bumps auto-merge on this
-      # check. The otel extra is included because the Docker image ships it.
+      # check. --locked fails on a stale lock; --no-sync stops later steps
+      # from re-resolving. The otel extra is included because the image ships it.
       - name: Install dependencies
-        run: uv sync --frozen --extra dev --extra otel
+        run: uv sync --locked --extra dev --extra otel
 
       - name: Lint (ruff)
-        run: uv run ruff check src/ tests/
+        run: uv run --no-sync ruff check src/ tests/
 
       - name: Type check (mypy)
-        run: uv run mypy --strict src/
+        run: uv run --no-sync mypy --strict src/
 
       - name: Test (pytest + coverage)
-        run: uv run pytest -m "not bench" --cov=src/distillery --cov-report=xml --cov-report=term-missing --cov-fail-under=80
+        run: uv run --no-sync pytest -m "not bench" --cov=src/distillery --cov-report=xml --cov-report=term-missing --cov-fail-under=80
 
       - name: Upload coverage report
         if: always()
