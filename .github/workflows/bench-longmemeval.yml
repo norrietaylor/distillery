@@ -97,7 +97,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -272,7 +272,7 @@ jobs:
 
       - name: Upload bench results artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bench-results-${{ matrix.retrieval }}-${{ matrix.granularity }}-recency-${{ matrix.recency }}-${{ matrix.embed }}-${{ github.run_id }}
           path: bench/results/**
@@ -295,7 +295,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5

@@ -31,8 +31,10 @@ from urllib.parse import unquote, urlparse
 
 import duckdb
 
+from distillery import observability
 from distillery.feeds.tags import normalize_tag
 from distillery.models import Entry, EntrySource, EntryStatus, EntryType, validate_metadata
+from distillery.observability import span
 from distillery.store.migrations import (
     _CREATE_META_TABLE,
     backfill_relations_from_content_refs,
@@ -115,6 +117,28 @@ class EntriesIntegrityError(RuntimeError):
     unreadable column and the caller must fail loud rather than report
     success.
     """
+
+
+def _op_name(fn: Callable[..., Any]) -> str:
+    """Low-cardinality operation label for the ``db {operation}`` spans.
+
+    The store funnels receive three callable shapes: bound ``_sync_*`` methods
+    (``DuckDBStore._sync_store`` → ``_sync_store``), closures defined inside the
+    public coroutine (``DuckDBStore.search.<locals>._sync`` → ``search``), and
+    lambdas (``DuckDBStore.get.<locals>.<lambda>`` → ``get``).  For closures the
+    enclosing method name is the meaningful one.
+    """
+    qualname: str | None = getattr(fn, "__qualname__", None)
+    if qualname is None:
+        # repr text can itself contain dots and "<locals>" (e.g. a callable
+        # instance of a locally defined class) — return it verbatim rather
+        # than splitting it like a qualname.
+        return repr(fn)
+    parts = qualname.split(".")
+    if "<locals>" in parts:
+        # Last occurrence: the innermost enclosing function names the operation.
+        return parts[len(parts) - 1 - parts[::-1].index("<locals>") - 1]
+    return parts[-1]
 
 
 def _sql_escape(value: str) -> str:
@@ -437,7 +461,7 @@ class DuckDBStore:
             elif not already_loaded:
                 cursor.execute("LOAD vss;")
 
-            cursor.execute("SET hnsw_enable_experimental_persistence = true;")
+            cursor.execute("SET GLOBAL hnsw_enable_experimental_persistence = true;")
             self._vss_available = True
             logger.info("VSS extension loaded with HNSW persistence enabled")
         except (duckdb.IOException, duckdb.CatalogException, duckdb.Error) as exc:
@@ -1507,62 +1531,67 @@ class DuckDBStore:
         path when a prior uncaught exception poisoned the connection;
         running ``ROLLBACK`` after the failed read restores the connection
         so the next call succeeds rather than cascading the same error.
+
+        Emits a ``db {operation}`` span (no-op when telemetry is off) that
+        covers lock wait plus execution, so writer-lock contention (issues
+        #416/#558) is visible per operation in the trace timeline.
         """
-        async with self._get_conn_lock():
-            try:
-                return await asyncio.to_thread(fn, *args, **kwargs)
-            except duckdb.FatalException as exc:
-                # A ``FatalException`` carrying "has been invalidated"
-                # permanently poisons the connection: every later operation
-                # raises the same fatal forever, so a ``ROLLBACK`` cannot
-                # recover it.  Rather than loop 500s indefinitely (one
-                # incident ran 7.5 days writing 32 MB of identical stacks —
-                # issue #583), record the failure, log at CRITICAL, and ask
-                # the supervisor (launchd/systemd) to restart us via SIGTERM.
-                # The fresh process either replays the WAL cleanly or fails
-                # visibly at startup.  Non-invalidating fatals fall through to
-                # the generic rollback path below.
-                if "has been invalidated" in str(exc):
-                    self._signal_supervisor_restart(exc, "connection terminally invalidated")
+        with span("db {operation}", operation=_op_name(fn), lock="conn"):
+            async with self._get_conn_lock():
+                try:
+                    return await asyncio.to_thread(fn, *args, **kwargs)
+                except duckdb.FatalException as exc:
+                    # A ``FatalException`` carrying "has been invalidated"
+                    # permanently poisons the connection: every later operation
+                    # raises the same fatal forever, so a ``ROLLBACK`` cannot
+                    # recover it.  Rather than loop 500s indefinitely (one
+                    # incident ran 7.5 days writing 32 MB of identical stacks —
+                    # issue #583), record the failure, log at CRITICAL, and ask
+                    # the supervisor (launchd/systemd) to restart us via SIGTERM.
+                    # The fresh process either replays the WAL cleanly or fails
+                    # visibly at startup.  Non-invalidating fatals fall through to
+                    # the generic rollback path below.
+                    if "has been invalidated" in str(exc):
+                        self._signal_supervisor_restart(exc, "connection terminally invalidated")
+                        raise
+                    conn = self._conn
+                    if conn is not None:
+                        await asyncio.to_thread(self._rollback_quietly, conn)
                     raise
-                conn = self._conn
-                if conn is not None:
-                    await asyncio.to_thread(self._rollback_quietly, conn)
-                raise
-            except duckdb.IOException as exc:
-                # A stale file handle (the GCS FUSE object generation changed
-                # under our open handle — see ``_is_stale_file_handle``) cannot
-                # be recovered by ``ROLLBACK``: the OS-level handle is dead, so
-                # every later read fails identically until the file is
-                # re-opened.  Restart the process rather than loop 500s; the
-                # fresh instance opens a clean handle.  Other IO errors fall
-                # through to the generic rollback path below.
-                if self._is_stale_file_handle(exc):
-                    self._signal_supervisor_restart(
-                        exc, "file handle is stale (FUSE object generation changed)"
-                    )
+                except duckdb.IOException as exc:
+                    # A stale file handle (the GCS FUSE object generation changed
+                    # under our open handle — see ``_is_stale_file_handle``) cannot
+                    # be recovered by ``ROLLBACK``: the OS-level handle is dead, so
+                    # every later read fails identically until the file is
+                    # re-opened.  Restart the process rather than loop 500s; the
+                    # fresh instance opens a clean handle.  Other IO errors fall
+                    # through to the generic rollback path below.
+                    if self._is_stale_file_handle(exc):
+                        self._signal_supervisor_restart(
+                            exc, "file handle is stale (FUSE object generation changed)"
+                        )
+                        raise
+                    conn = self._conn
+                    if conn is not None:
+                        await asyncio.to_thread(self._rollback_quietly, conn)
                     raise
-                conn = self._conn
-                if conn is not None:
-                    await asyncio.to_thread(self._rollback_quietly, conn)
-                raise
-            except Exception:
-                # Catching ``Exception`` — not ``BaseException`` — so that
-                # ``asyncio.CancelledError`` does not trigger rollback.
-                # When a task is cancelled while awaiting
-                # ``asyncio.to_thread(fn, …)`` the worker thread executing
-                # *fn* keeps running (Python has no safe way to forcibly
-                # stop a thread), so issuing ``conn.rollback()`` from a
-                # second worker thread would race against the still-live
-                # first one on the shared DuckDB connection.  On
-                # cancellation we simply re-raise; on ordinary exceptions
-                # *fn* has already returned control so the rollback is
-                # safe.  The rollback runs while we still hold the lock
-                # so the connection is single-threaded throughout.
-                conn = self._conn
-                if conn is not None:
-                    await asyncio.to_thread(self._rollback_quietly, conn)
-                raise
+                except Exception:
+                    # Catching ``Exception`` — not ``BaseException`` — so that
+                    # ``asyncio.CancelledError`` does not trigger rollback.
+                    # When a task is cancelled while awaiting
+                    # ``asyncio.to_thread(fn, …)`` the worker thread executing
+                    # *fn* keeps running (Python has no safe way to forcibly
+                    # stop a thread), so issuing ``conn.rollback()`` from a
+                    # second worker thread would race against the still-live
+                    # first one on the shared DuckDB connection.  On
+                    # cancellation we simply re-raise; on ordinary exceptions
+                    # *fn* has already returned control so the rollback is
+                    # safe.  The rollback runs while we still hold the lock
+                    # so the connection is single-threaded throughout.
+                    conn = self._conn
+                    if conn is not None:
+                        await asyncio.to_thread(self._rollback_quietly, conn)
+                    raise
 
     async def _run_read(self, fn: Callable[[duckdb.DuckDBPyConnection], _T]) -> _T:
         """Run a read-only *fn* against the independent read handle.
@@ -1590,26 +1619,31 @@ class DuckDBStore:
         *fn* must be read-only.  Any error leaves the read handle untouched
         (no rollback): a SELECT cannot poison ``_read_conn`` the way a failed
         write poisons ``_conn``.
+
+        Emits a ``db {operation}`` span (no-op when telemetry is off) that
+        covers read-lock wait plus execution, so a slow search delaying the
+        readiness probe (see above) shows up per operation in the trace.
         """
         read_conn = self._read_conn
         if read_conn is None:
             raise RuntimeError(
                 "DuckDBStore has not been initialized. Call 'await store.initialize()' first."
             )
-        async with self._get_read_lock():
-            try:
-                return await asyncio.to_thread(fn, read_conn)
-            except duckdb.IOException as exc:
-                # The read handle is a ``cursor()`` of ``_conn`` over the same
-                # backing file, so it goes stale together with it when the
-                # FUSE object generation changes.  No rollback (a SELECT never
-                # poisons the read handle); restart so a fresh process re-opens
-                # the file, then re-raise for this request.
-                if self._is_stale_file_handle(exc):
-                    self._signal_supervisor_restart(
-                        exc, "read handle is stale (FUSE object generation changed)"
-                    )
-                raise
+        with span("db {operation}", operation=_op_name(fn), lock="read"):
+            async with self._get_read_lock():
+                try:
+                    return await asyncio.to_thread(fn, read_conn)
+                except duckdb.IOException as exc:
+                    # The read handle is a ``cursor()`` of ``_conn`` over the same
+                    # backing file, so it goes stale together with it when the
+                    # FUSE object generation changes.  No rollback (a SELECT never
+                    # poisons the read handle); restart so a fresh process re-opens
+                    # the file, then re-raise for this request.
+                    if self._is_stale_file_handle(exc):
+                        self._signal_supervisor_restart(
+                            exc, "read handle is stale (FUSE object generation changed)"
+                        )
+                    raise
 
     # ------------------------------------------------------------------
     # Deferred accessed_at tracking (issue #663 follow-up)
@@ -1882,13 +1916,21 @@ class DuckDBStore:
                 inserted += 1
         return inserted
 
-    def _sync_store(self, entry: Entry, embedding: list[float]) -> str:
+    def _sync_store(
+        self, entry: Entry, embedding: list[float], *, rebuild_index: bool = True
+    ) -> str:
         """Synchronous implementation of store(); called via asyncio.to_thread.
 
         *embedding* is computed by :meth:`store` off-thread *before* the SQL
         lock is acquired (issue #558), so this method only does the SQL
         critical section — keeping ``_conn_lock`` held for milliseconds, not
         the full embedding round-trip.
+
+        When *rebuild_index* is ``False`` the FTS rebuild and post-write
+        checkpoint are skipped — the caller (a bulk writer) is responsible
+        for calling :meth:`flush_index` once after the batch. The insert and
+        embedding are still committed, so vector search sees the row
+        immediately; only BM25 lags until the deferred flush.
         """
         validate_metadata(entry.entry_type.value, entry.metadata)
         conn = self.connection
@@ -1931,19 +1973,25 @@ class DuckDBStore:
         # entry to its embedding-neighbours above threshold so feed-heavy
         # instances stop accumulating graph orphans. No-op when disabled.
         self._auto_link_semantic(conn, entry.id, embedding)
-        # Rebuild FTS index so new content is searchable via BM25.
-        self._rebuild_fts_index(conn)
-        # Flush WAL so the new row survives ungraceful termination.
-        # See :meth:`_checkpoint_after_write` for why this matters (issue #346).
-        self._checkpoint_after_write(conn)
+        if rebuild_index:
+            # Rebuild FTS index so new content is searchable via BM25.
+            self._rebuild_fts_index(conn)
+            # Flush WAL so the new row survives ungraceful termination.
+            # See :meth:`_checkpoint_after_write` for why this matters (issue #346).
+            self._checkpoint_after_write(conn)
         logger.debug("Stored entry id=%s", entry.id)
         return entry.id
 
-    async def store(self, entry: Entry) -> str:
+    async def store(self, entry: Entry, *, defer_index: bool = False) -> str:
         """Persist a new entry and return its ID.
 
         The entry's content is embedded via the configured embedding provider
         before insertion.
+
+        When *defer_index* is ``True`` the per-write FTS rebuild and WAL
+        checkpoint are skipped; the caller must invoke :meth:`flush_index`
+        once after the batch. See the protocol docstring for the rationale
+        (avoids an O(entries × total_rows) rebuild storm on bulk ingest).
 
         Returns:
             The UUID string of the stored entry.
@@ -1952,7 +2000,24 @@ class DuckDBStore:
         # overlap their embedding round-trips instead of serialising on
         # ``_conn_lock`` (issue #558).
         embedding = await asyncio.to_thread(self._embedding_provider.embed, entry.content)
-        return await self._run_sync(self._sync_store, entry, embedding)
+        return await self._run_sync(
+            self._sync_store, entry, embedding, rebuild_index=not defer_index
+        )
+
+    def _sync_flush_index(self) -> None:
+        """Rebuild the FTS index and checkpoint; called via asyncio.to_thread."""
+        conn = self.connection
+        self._rebuild_fts_index(conn)
+        self._checkpoint_after_write(conn)
+
+    async def flush_index(self) -> None:
+        """Rebuild the FTS index and checkpoint the WAL (once, under the lock).
+
+        Pairs with ``store(..., defer_index=True)``. Runs the same
+        rebuild + checkpoint that a non-deferred write does, but once for a
+        whole batch instead of per entry.
+        """
+        await self._run_sync(self._sync_flush_index)
 
     def _sync_store_batch(
         self, entries: Sequence[Entry], embeddings: list[list[float]]
@@ -2122,6 +2187,8 @@ class DuckDBStore:
         entry_id: str,
         updates: dict[str, Any],
         embedding: list[float] | None,
+        *,
+        rebuild_index: bool = True,
     ) -> Entry:
         """
         Apply partial updates to an existing entry and return its updated representation.
@@ -2230,12 +2297,15 @@ class DuckDBStore:
         # forward-only sync mirroring mechanism #1's "additive" semantic.
         if "metadata" in updates and isinstance(updates["metadata"], dict):
             self._fan_out_related_entries(conn, entry_id, updates["metadata"])
-        # Rebuild FTS index when content changes.
-        if "content" in updates:
-            self._rebuild_fts_index(conn)
-        # Flush WAL so the update survives ungraceful termination.
-        # See :meth:`_checkpoint_after_write` for why this matters (issue #346).
-        self._checkpoint_after_write(conn)
+        if rebuild_index:
+            # Rebuild FTS index when content changes.
+            if "content" in updates:
+                self._rebuild_fts_index(conn)
+            # Flush WAL so the update survives ungraceful termination.
+            # See :meth:`_checkpoint_after_write` for why this matters (issue #346).
+            self._checkpoint_after_write(conn)
+        # else: a bulk writer deferred the rebuild + checkpoint and will call
+        # flush_index() once for the batch (see store(..., defer_index=True)).
         logger.debug("Updated entry id=%s", entry_id)
 
         # Re-fetch to return the updated state.
@@ -2249,12 +2319,18 @@ class DuckDBStore:
             raise KeyError(f"Entry disappeared after update: id={entry_id!r}")
         return self._row_to_entry(row, col_names)
 
-    async def update(self, entry_id: str, updates: dict[str, Any]) -> Entry:
+    async def update(
+        self, entry_id: str, updates: dict[str, Any], *, defer_index: bool = False
+    ) -> Entry:
         """Apply a partial update to an existing entry.
 
         Increments ``version`` by 1 and refreshes ``updated_at`` to the
         current UTC time.  Attempts to update ``id``, ``created_at``, or
         ``source`` are rejected with a ``ValueError``.
+
+        When *defer_index* is ``True`` the per-write FTS rebuild and WAL
+        checkpoint are skipped; the caller must invoke :meth:`flush_index`
+        once after the batch (see :meth:`store` for the rationale).
 
         Raises:
             ValueError: If ``updates`` contains any immutable field.
@@ -2269,7 +2345,9 @@ class DuckDBStore:
         embedding: list[float] | None = None
         if "content" in updates:
             embedding = await asyncio.to_thread(self._embedding_provider.embed, updates["content"])
-        return await self._run_sync(self._sync_update, entry_id, updates, embedding)
+        return await self._run_sync(
+            self._sync_update, entry_id, updates, embedding, rebuild_index=not defer_index
+        )
 
     def _sync_delete(self, entry_id: str) -> bool:
         """Synchronous implementation of delete(); called via asyncio.to_thread."""
@@ -2399,7 +2477,7 @@ class DuckDBStore:
             # Match entries where any tag equals the prefix exactly or starts with
             # "prefix/" to avoid partial-segment matches (e.g. "project/billing"
             # must not match "project/billing-v2/api").
-            clauses.append("len(list_filter(tags, t -> t = ? OR starts_with(t, ?))) > 0")
+            clauses.append("len(list_filter(tags, lambda t: t = ? OR starts_with(t, ?))) > 0")
             params.append(prefix)
             params.append(prefix + "/")
 
@@ -2533,9 +2611,9 @@ class DuckDBStore:
             return []
         try:
             sql = (
-                "SELECT id, fts_main_entries.match_bm25(id, ?) AS bm25 "
-                "FROM entries "
-                "WHERE bm25 IS NOT NULL "
+                "SELECT id, bm25 FROM ("
+                "SELECT id, fts_main_entries.match_bm25(id, ?) AS bm25 FROM entries"
+                ") WHERE bm25 IS NOT NULL "
                 "ORDER BY bm25 DESC "
                 "LIMIT ?"
             )
@@ -2596,7 +2674,8 @@ class DuckDBStore:
         # 429/5xx) does not block the event loop — mirrors ``store`` (issue
         # #558). On the event loop a blocking embed starves the Fly health
         # check during concurrent feed polls, which de-routes the machine.
-        embedding = await asyncio.to_thread(self._embedding_provider.embed, query)
+        with observability.span("store.search.embed"):
+            embedding = await asyncio.to_thread(self._embedding_provider.embed, query)
         use_hybrid = self._hybrid_search and self._fts_available
 
         def _sync(conn: duckdb.DuckDBPyConnection) -> list[SearchResult]:
@@ -2606,12 +2685,28 @@ class DuckDBStore:
                 where_sql = "WHERE " + " AND ".join(where_clauses)
 
             # --- Vector search (always performed) ---
+            # Unfiltered cosine queries order by array_cosine_distance ASC so
+            # DuckDB's HNSW cosine index (migration 6) can serve the top-k via
+            # an index scan. DuckDB's HNSW applies WHERE predicates AFTER the
+            # index scan (post-filtering), which can return fewer than `limit`
+            # rows once a filter is present, so filtered queries stay on the
+            # exact array_cosine_similarity scan to preserve the full result
+            # count and ordering (CR review, PR #693). Both expressions yield
+            # the same displayed cosine similarity in [0, 1].
+            dims = self._embedding_provider.dimensions
+            if where_sql:
+                score_select = f"array_cosine_similarity(embedding, ?::FLOAT[{dims}]) AS score"
+                order_sql = "ORDER BY score DESC"
+                score_col = "score"
+            else:
+                score_select = f"array_cosine_distance(embedding, ?::FLOAT[{dims}]) AS distance"
+                order_sql = "ORDER BY distance ASC"
+                score_col = "distance"
             sql = (
-                f"SELECT {self._ENTRY_COLUMNS}, "
-                f"array_cosine_similarity(embedding, ?::FLOAT[{self._embedding_provider.dimensions}]) AS score "
+                f"SELECT {self._ENTRY_COLUMNS}, {score_select} "
                 f"FROM entries "
                 f"{where_sql} "
-                f"ORDER BY score DESC "
+                f"{order_sql} "
                 f"LIMIT ?"
             )
             # Fetch more candidates for fusion when hybrid is active.
@@ -2628,7 +2723,11 @@ class DuckDBStore:
             cosine_score: dict[str, float] = {}
             for rank, row in enumerate(rows, start=1):
                 row_dict = dict(zip(col_names, row, strict=True))
-                raw_cosine = float(row_dict.pop("score"))
+                raw = float(row_dict.pop(score_col))
+                # Map cosine similarity in [-1, 1] to a displayed score in
+                # [0, 1]. array_cosine_distance = 1 - similarity, so both paths
+                # produce identical scores: (similarity + 1) / 2.
+                similarity = raw if score_col == "score" else 1.0 - raw
                 entry = self._row_to_entry(
                     tuple(row_dict.values()),
                     list(row_dict.keys()),
@@ -2636,8 +2735,7 @@ class DuckDBStore:
                 entry_map[entry.id] = entry
                 vector_ranks[entry.id] = rank
                 entry_created[entry.id] = entry.created_at
-                # Map raw cosine similarity in [-1, 1] to a displayed score in [0, 1].
-                cosine_score[entry.id] = (raw_cosine + 1.0) / 2.0
+                cosine_score[entry.id] = (similarity + 1.0) / 2.0
 
             if not use_hybrid:
                 # Vector-only: return raw cosine similarity (mapped to [0, 1]).
@@ -2646,7 +2744,7 @@ class DuckDBStore:
                 results: list[SearchResult] = []
                 for row in rows[:limit]:
                     row_dict = dict(zip(col_names, row, strict=True))
-                    row_dict.pop("score")
+                    row_dict.pop(score_col)
                     eid = row_dict["id"]
                     results.append(SearchResult(entry=entry_map[eid], score=cosine_score[eid]))
                 return results
@@ -2724,7 +2822,8 @@ class DuckDBStore:
         # Reads run on the independent read handle so a search never queues
         # behind a write on ``_conn_lock`` (#663 follow-up). ``accessed_at`` is
         # stamped out of band via the deferred flusher.
-        results = await self._run_read(_sync)
+        with observability.span("store.search.rank", hybrid=use_hybrid, limit=limit):
+            results = await self._run_read(_sync)
         self._mark_accessed(r.entry.id for r in results)
         return results
 

@@ -25,13 +25,21 @@ Auto-instrumentation captures the high-value signals with no hot-path changes:
 * ``instrument_system_metrics`` — host/runtime CPU, memory and swap utilisation.
 * ``instrument_asgi`` (via :func:`instrument_asgi_app`) — one span per HTTP
   request (method, route, status, duration). Headers are not captured.
+* ``LogfireLoggingHandler`` on the root logger — stdlib log records (the
+  server's existing ``logger.info/warning/exception`` calls) are forwarded as
+  Logfire logs correlated with the active span; ``logger.exception`` records
+  carry the traceback and group into exception issues.
 
-DuckDB and NetworkX have no OTel instrumentor; :func:`span` is the seam for the
-store/graph cost-centre spans (added separately).
+DuckDB and NetworkX have no OTel instrumentor; :func:`span` is the seam for
+such cost-centre spans. The store funnels (``DuckDBStore._run_sync`` /
+``_run_read``) use it to emit one ``db {operation}`` span per store operation,
+covering lock wait plus execution.
 
 Secret safety: Logfire's default scrubber redacts secret-shaped attributes
 (authorization, api-key, token, cookie, ...) and runs upstream of the OTLP
-fan-out, so secrets are redacted on both the Logfire and collector paths.
+fan-out, so secrets are redacted on both the Logfire and collector paths. The
+logging handler additionally carries :class:`distillery.security.SecretRedactFilter`
+so known API-key formats are redacted from log messages before export.
 """
 
 from __future__ import annotations
@@ -118,6 +126,24 @@ def configure_observability() -> bool:
             logger.warning(
                 "logfire.instrument_%s failed; that signal is disabled", name, exc_info=True
             )
+
+    try:
+        # Forward stdlib logging to Logfire so the server's existing
+        # logger.info/warning/exception calls appear as logs (and grouped
+        # exception issues) correlated with the active span. The stderr
+        # handler from basicConfig is untouched. The handler carries its own
+        # SecretRedactFilter: the one _configure_logging attaches to the
+        # "distillery" logger does not run for records propagated from child
+        # loggers, and handler-level filters do.
+        from distillery.security import SecretRedactFilter
+
+        handler = logfire.LogfireLoggingHandler()
+        handler.addFilter(SecretRedactFilter())
+        logging.getLogger().addHandler(handler)
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "LogfireLoggingHandler attach failed; stdlib logs are not forwarded", exc_info=True
+        )
 
     logger.info(
         "Observability configured (logfire=%s, otlp_endpoint=%s)",
