@@ -220,9 +220,10 @@ jobs:
           # layer cache. This prevents a Dockerfile change in one PR
           # from poisoning cached layers used by other PRs' staging
           # builds. GH Actions cache eviction handles cleanup as PRs
-          # go stale.
+          # go stale. ignore-error keeps a full or refused cache from
+          # failing the build.
           cache-from: type=gha,scope=staging-pr-${{ needs.resolve.outputs.pr_number }}
-          cache-to: type=gha,scope=staging-pr-${{ needs.resolve.outputs.pr_number }},mode=max
+          cache-to: type=gha,scope=staging-pr-${{ needs.resolve.outputs.pr_number }},mode=max,ignore-error=true
           build-args: |
             BUILD_SHA=${{ needs.resolve.outputs.head_sha }}
 
