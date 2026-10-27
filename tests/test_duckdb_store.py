@@ -1254,8 +1254,10 @@ class TestCorruptWalQuarantine:
         import uuid
 
         conn = duckdb.connect(db_path)
-        # entries carries an HNSW index; writes need the extension loaded.
-        conn.execute("LOAD vss")
+        # entries carries an HNSW index when vss is available; writes then
+        # need the extension loaded.  Without vss the store made no index.
+        with contextlib.suppress(duckdb.IOException):
+            conn.execute("LOAD vss")
         conn.execute("PRAGMA disable_checkpoint_on_shutdown")
         # Insert directly into the existing ``entries`` table so the WAL
         # carries real, replayable records.
