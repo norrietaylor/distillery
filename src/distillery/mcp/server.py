@@ -1367,6 +1367,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         valid_at: str | None = None,
         invalid_at: str | None = None,
         metadata: dict[str, Any] | None = None,
+        include_retired: bool = False,
     ) -> list[types.TextContent]:
         """Manage typed relations between knowledge entries.
 
@@ -1378,7 +1379,10 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         PARAMS:
           - action (str, required): Operation. Valid: [add, get, remove, traverse, metrics,
             reconcile, list_candidates, resolve_candidate, suggest_links, promote_entities,
-            audit_schema].
+            audit_schema, retire, revalidate]. ``retire`` soft-retires an edge (sets
+            invalid_at; pass relation_id and optional invalid_at ISO 8601 — defaults to
+            now); ``revalidate`` clears invalid_at. ``get`` accepts include_retired
+            (default false) to include soft-retired edges.
           - from_id (str, required for add): Source entry UUID.
           - to_id (str, required for add): Target entry UUID.
           - relation_type (str, required for add, optional for get/traverse): Relation type.
@@ -1462,6 +1466,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                     valid_at=valid_at,
                     invalid_at=invalid_at,
                     metadata=metadata,
+                    include_retired=include_retired,
                 ),
             ),
             cfg=c["config"],
