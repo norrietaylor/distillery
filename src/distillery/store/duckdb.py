@@ -2851,7 +2851,15 @@ class DuckDBStore:
         with observability.span("store.search.rank", hybrid=use_hybrid, limit=limit):
             results = await self._run_read(_sync)
         if self._fts_index_missing:
-            await self._run_sync(self._sync_heal_fts_index)
+            # Shield the rebuild so a cancelled search waits for the DuckDB
+            # worker instead of releasing _conn_lock mid-rebuild (issue #416).
+            heal = asyncio.ensure_future(self._run_sync(self._sync_heal_fts_index))
+            try:
+                await asyncio.shield(heal)
+            except asyncio.CancelledError:
+                with contextlib.suppress(Exception):
+                    await heal
+                raise
         self._mark_accessed(r.entry.id for r in results)
         return results
 
