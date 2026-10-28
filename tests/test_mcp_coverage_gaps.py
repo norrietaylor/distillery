@@ -410,9 +410,12 @@ class TestStoreGaps:
         )
         cfg.tags.reserved_prefixes = ["system"]
         cfg.tags.aliases = {"topic/release": "system/release"}
-        entry_id = await store.store(make_entry(content="x", tags=["system/imported"]))
+        entry_id = await store.store(
+            make_entry(content="x", tags=["system/imported", "topic/release"])
+        )
 
-        for tags in (["system/new"], ["topic/release"]):
+        # A retained legacy tag that now aliases into a reserved prefix is rejected.
+        for tags in (["system/new"], ["topic/release"], ["system/imported", "topic/release"]):
             response = await _handle_update(store, {"entry_id": entry_id, "tags": tags}, cfg=cfg)
             data = parse_mcp_response(response)
             assert data["code"] == "INVALID_PARAMS", tags

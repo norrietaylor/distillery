@@ -1455,7 +1455,8 @@ async def _handle_update(
 
     # --- reserved prefix enforcement (match distillery_store guard) ---------
     # The store canonicalizes update tags, so an alias could otherwise land a
-    # reserved tag. Tags already on the entry stay allowed (e.g. imported ones).
+    # reserved tag. Reserved tags already on the entry stay allowed (e.g.
+    # imported ones); a retained non-reserved tag is still checked post-alias.
     if cfg is not None and cfg.tags.reserved_prefixes and "tags" in updates:
         current = await store.get(entry_id)
         kept = set(current.tags) if current is not None else set()
@@ -1464,7 +1465,7 @@ async def _handle_update(
                 return error_response(
                     "INVALID_PARAMS", f"Each tag must be a string, got: {type(tag).__name__}"
                 )
-            if tag in kept:
+            if tag in kept and tag.split("/")[0] in cfg.tags.reserved_prefixes:
                 continue
             top = _reserved_prefix(tag, cfg)
             if top is not None:
