@@ -239,3 +239,25 @@ async def test_correct_empty_tags_clears(store: DuckDBStore, original_entry: str
     new = await store.get(data["correction_entry_id"])
     assert new is not None
     assert new.tags == []
+
+
+async def test_correct_inherited_tags_reserved_prefix(store: DuckDBStore) -> None:
+    """Inherited reserved tags pass; an inherited tag aliased into a reserved
+    prefix is rejected because apply_correction canonicalizes it (#653)."""
+    from distillery.config import DistilleryConfig, StorageConfig
+
+    cfg = DistilleryConfig(storage=StorageConfig(database_path=":memory:"))
+    cfg.tags.reserved_prefixes = ["system"]
+    reserved_id = await store.store(make_entry(content="a", tags=["system/imported"]))
+    legacy_id = await store.store(make_entry(content="b", tags=["topic/release"]))
+
+    ok = await _handle_correct(
+        store=store, arguments={"wrong_entry_id": reserved_id, "content": "a2"}, cfg=cfg
+    )
+    assert "error" not in parse_mcp_response(ok)
+
+    cfg.tags.aliases = {"topic/release": "system/release"}
+    rejected = await _handle_correct(
+        store=store, arguments={"wrong_entry_id": legacy_id, "content": "b2"}, cfg=cfg
+    )
+    assert parse_mcp_response(rejected)["code"] == "INVALID_PARAMS"

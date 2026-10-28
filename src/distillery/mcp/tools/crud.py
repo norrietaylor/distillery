@@ -2235,16 +2235,18 @@ async def _handle_correct(
     tags = list(arguments["tags"]) if explicit_tags else list(original.tags)
 
     # --- reserved prefix enforcement (match distillery_store guard) ---------
-    # Only validate when the caller explicitly supplied ``tags``: inherited
-    # tags from the original entry (e.g. imported/internal sources carrying
-    # reserved-prefix tags) must not block legitimate corrections when the
-    # caller never touched the tag list.
-    if cfg is not None and cfg.tags.reserved_prefixes and explicit_tags:
+    # Inherited tags that are already reserved (e.g. from imported/internal
+    # sources) must not block a correction when the caller never touched the
+    # tag list. Inherited non-reserved tags are still checked post-alias, since
+    # apply_correction canonicalizes them.
+    if cfg is not None and cfg.tags.reserved_prefixes:
         for tag in tags:
             if not isinstance(tag, str):
                 return error_response(
                     "INVALID_PARAMS", f"Each tag must be a string, got: {type(tag).__name__}"
                 )
+            if not explicit_tags and tag.split("/")[0] in cfg.tags.reserved_prefixes:
+                continue
             top = _reserved_prefix(tag, cfg)
             if top is not None:
                 return error_response(

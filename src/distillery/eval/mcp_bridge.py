@@ -642,7 +642,7 @@ class MCPBridge:
         if name == "distillery_get":
             return await _handle_get(store=store, arguments=args)
         if name == "distillery_update":
-            return await _handle_update(store=store, arguments=args)
+            return await _handle_update(store=store, arguments=args, cfg=config)
         if name == "distillery_list":
             return await _handle_list(store=store, arguments=args)
         if name == "distillery_aggregate":
