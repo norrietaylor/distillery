@@ -144,6 +144,34 @@ async def test_promote_entities_reuses_node_created_before_alias(store) -> None:
     assert len(nodes) == 1
 
 
+async def test_promote_entities_merges_duplicate_alias_node(store) -> None:  # type: ignore[no-untyped-def]
+    """When both variants were promoted before an alias, the alias node is
+    archived and every entry mentions only the canonical node (#653)."""
+    alias_ids = [
+        await _store_entry(store, content=f"alias {i}", tags=["entity/cloudflare-sandboxes"])
+        for i in range(3)
+    ]
+    canon_ids = [
+        await _store_entry(store, content=f"canon {i}", tags=["entity/cloudflare"])
+        for i in range(3)
+    ]
+    first = await store.promote_entities(threshold=3)
+    assert first["entities_created"] == 2
+
+    aliases = {"entity/cloudflare-sandboxes": "entity/cloudflare"}
+    second = await store.promote_entities(threshold=3, aliases=aliases)
+
+    assert second["entities_merged"] == 1
+    nodes = await store.list_entries(
+        {"entry_type": EntryType.ENTITY.value, "status": "active"}, limit=10, offset=0
+    )
+    assert len(nodes) == 1
+    assert nodes[0].metadata["source_tag"] == "entity/cloudflare"
+    for entry_id in alias_ids + canon_ids:
+        related = await store.get_related(entry_id, relation_type="mentions")
+        assert [r["to_id"] for r in related] == [nodes[0].id]
+
+
 async def test_canonicalize_existing_tags_verifies_touched_rows(store) -> None:  # type: ignore[no-untyped-def]
     """The backfill reads back the rewritten rows before reporting success."""
     rewritten = await _store_entry(store, content="frag", tags=["domain/sandbox"])
@@ -221,7 +249,7 @@ async def test_promote_entities_missing_embedding_does_not_raise(store) -> None:
 
     # Obtain the canonical set by calling the plan step, then strip the
     # embedding so the write step sees the concurrent-deletion scenario.
-    canonical_members, _ = await store._run_sync(
+    canonical_members, _, _ = await store._run_sync(
         store._sync_promote_entities_plan, 3, ["entity", "tech"], {}
     )
     # Deliberately omit the embedding for "entity/acme" to reproduce the race.
@@ -229,7 +257,7 @@ async def test_promote_entities_missing_embedding_does_not_raise(store) -> None:
 
     # Must not raise KeyError.
     result = await store._run_sync(
-        store._sync_promote_entities_write, canonical_members, empty_embeddings, {}
+        store._sync_promote_entities_write, canonical_members, empty_embeddings, {}, {}
     )
 
     # The canonical was skipped — no entity node created in this pass.

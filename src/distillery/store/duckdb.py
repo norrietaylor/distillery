@@ -4781,14 +4781,16 @@ class DuckDBStore:
         threshold: int,
         reserved_prefixes: list[str],
         aliases: dict[str, str],
-    ) -> tuple[dict[str, list[str]], dict[str, str]]:
+    ) -> tuple[dict[str, list[str]], dict[str, str], dict[str, list[str]]]:
         """Read-only first pass: compute the promotion plan.
 
-        Returns ``(canonical_members, existing_nodes)`` where
+        Returns ``(canonical_members, existing_nodes, duplicate_nodes)`` where
         ``canonical_members`` maps each qualifying canonical tag to the sorted
         list of entry IDs carrying it, and ``existing_nodes`` maps a canonical
         tag to the id of an already-stored entity node whose ``source_tag``
-        canonicalizes to it.
+        canonicalizes to it, and ``duplicate_nodes`` maps a canonical tag to any
+        further nodes that canonicalize to it (variants promoted before an
+        alias merged them).
 
         Tags are resolved through the controlled-vocabulary *aliases* map before
         the separator-collapse, so an aliased variant promotes to the same node
@@ -4820,8 +4822,10 @@ class DuckDBStore:
         }
 
         existing_nodes: dict[str, str] = {}
+        duplicate_nodes: dict[str, list[str]] = {}
         node_rows = self._conn.execute(
-            "SELECT id, metadata FROM entries WHERE entry_type = 'entity'"
+            "SELECT id, metadata FROM entries "
+            "WHERE entry_type = 'entity' AND status != 'archived' ORDER BY created_at, id"
         ).fetchall()
         for node_id, metadata_raw in node_rows:
             try:
@@ -4840,28 +4844,38 @@ class DuckDBStore:
                     reserved_prefixes=reserved_prefixes,
                     normalize_namespaces=True,
                 )
-                if canonical == source_tag or canonical not in existing_nodes:
+                kept = existing_nodes.get(canonical)
+                if kept is None:
                     existing_nodes[canonical] = node_id
+                    continue
+                if canonical == source_tag:
+                    existing_nodes[canonical] = node_id
+                    node_id = kept
+                duplicate_nodes.setdefault(canonical, []).append(node_id)
 
-        return canonical_members, existing_nodes
+        return canonical_members, existing_nodes, duplicate_nodes
 
     def _sync_promote_entities_write(
         self,
         canonical_members: dict[str, list[str]],
         embeddings: dict[str, list[float]],
         existing_nodes: dict[str, str],
+        duplicate_nodes: dict[str, list[str]],
     ) -> dict[str, int]:
         """Write pass: find-or-create entity nodes and ``mentions`` edges.
 
         Re-checks node existence inside the transaction so a node created
         concurrently (or on a prior run) is reused rather than duplicated.
         Falls back to the plan's *existing_nodes* for nodes stored under a
-        pre-alias ``source_tag``.
+        pre-alias ``source_tag``. Each node in *duplicate_nodes* loses its
+        ``mentions`` edges (members are re-linked to the kept node below) and is
+        archived, so other edges to it survive and the merge can be undone.
         """
         assert self._conn is not None
         conn = self._conn
         entities_created = 0
         entities_reused = 0
+        entities_merged = 0
         mentions_created = 0
         try:
             conn.execute("BEGIN TRANSACTION")
@@ -4870,17 +4884,31 @@ class DuckDBStore:
                 # Find-or-create the entity node keyed on the canonical tag.
                 existing = conn.execute(
                     "SELECT id FROM entries WHERE entry_type = 'entity' "
+                    "AND status != 'archived' "
                     "AND json_extract_string(metadata, '$.source_tag') = ?",
                     [canonical],
                 ).fetchone()
                 if existing is None and canonical in existing_nodes:
                     existing = conn.execute(
-                        "SELECT id FROM entries WHERE entry_type = 'entity' AND id = ?",
+                        "SELECT id FROM entries "
+                        "WHERE entry_type = 'entity' AND status != 'archived' AND id = ?",
                         [existing_nodes[canonical]],
                     ).fetchone()
                 if existing is not None:
                     node_id = str(existing[0])
                     entities_reused += 1
+                    for dup_id in duplicate_nodes.get(canonical, []):
+                        if dup_id == node_id:
+                            continue
+                        conn.execute(
+                            "DELETE FROM entry_relations "
+                            "WHERE to_id = ? AND relation_type = 'mentions'",
+                            [dup_id],
+                        )
+                        conn.execute(
+                            "UPDATE entries SET status = 'archived' WHERE id = ?", [dup_id]
+                        )
+                        entities_merged += 1
                 else:
                     name = self._canonical_name_from_tag(canonical)
                     node = Entry(
@@ -4953,6 +4981,7 @@ class DuckDBStore:
         return {
             "entities_created": entities_created,
             "entities_reused": entities_reused,
+            "entities_merged": entities_merged,
             "mentions_created": mentions_created,
         }
 
@@ -4970,7 +4999,7 @@ class DuckDBStore:
         # a promotion-target tag collapse to one canonical node regardless of
         # the configured reserved prefixes.
         prefixes = sorted({*(reserved_prefixes or []), "entity", "tech"})
-        canonical_members, existing_nodes = await self._run_sync(
+        canonical_members, existing_nodes, duplicate_nodes = await self._run_sync(
             self._sync_promote_entities_plan, threshold, prefixes, aliases or {}
         )
         # Embed the canonical names for nodes that don't yet exist, off the SQL
@@ -4982,7 +5011,11 @@ class DuckDBStore:
             name = self._canonical_name_from_tag(canonical)
             embeddings[canonical] = await asyncio.to_thread(self._embedding_provider.embed, name)
         return await self._run_sync(
-            self._sync_promote_entities_write, canonical_members, embeddings, existing_nodes
+            self._sync_promote_entities_write,
+            canonical_members,
+            embeddings,
+            existing_nodes,
+            duplicate_nodes,
         )
 
     def _sync_canonicalize_existing_tags(

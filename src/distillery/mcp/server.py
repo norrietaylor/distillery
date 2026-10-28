@@ -1427,14 +1427,17 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             ``orphan_rate`` = 1 - graph_node_count/total_entries (graph-health signal;
             0.0 when total_entries is 0). Or
           { action: "promote_entities", entities_created: int, entities_reused: int,
-            mentions_created: int, threshold: int } (promote_entities).
+            entities_merged: int, mentions_created: int, threshold: int }
+            (promote_entities).
             Scans ``entity/*`` and ``tech/*`` tags and promotes any canonical tag
             meeting the configured ``tags.entity_promotion_threshold`` to an ENTITY
-            entry node, linking each tagged entry with a ``mentions`` edge. Idempotent. Or
+            entry node, linking each tagged entry with a ``mentions`` edge. Nodes for
+            variants an alias now merges are archived (``entities_merged``). Idempotent. Or
           { action: "canonicalize_tags", entries_scanned: int, entries_rewritten: int,
             tags_collapsed: int } (canonicalize_tags).
-            Rewrites every entry's tags through the alias map (plus namespace
-            normalization when ``tags.enforce_namespaces`` is set). Idempotent.
+            Rewrites every non-archived entry's tags through the alias map (plus
+            namespace normalization when ``tags.enforce_namespaces`` is set); archived
+            entries are skipped. Idempotent.
         RETURNS (error): { error: true, code: "NOT_FOUND" | "INVALID_PARAMS" | "INTERNAL", message: "..." }
 
         RELATED: distillery_correct (creates 'corrects' relations automatically),

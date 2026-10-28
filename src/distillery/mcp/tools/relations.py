@@ -602,6 +602,7 @@ async def _handle_relations(
                 "action": "promote_entities",
                 "entities_created": counts.get("entities_created", 0),
                 "entities_reused": counts.get("entities_reused", 0),
+                "entities_merged": counts.get("entities_merged", 0),
                 "mentions_created": counts.get("mentions_created", 0),
                 "threshold": threshold,
             }
