@@ -575,6 +575,7 @@ class DistilleryConfig:
         auto_link: Semantic auto-link settings for the write path.
         link_suggestion: Scheduled link-suggestion job settings.
         tags: Tag namespace enforcement settings.
+        relations: Relation-graph schema enforcement settings.
         feeds: Ambient feed monitoring settings.
         rate_limit: Rate limiting and resource budget settings.
         server: Server (HTTP transport) settings.
