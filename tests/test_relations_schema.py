@@ -170,6 +170,16 @@ async def test_audit_relation_schema_clean_when_only_legal(store) -> None:  # ty
     assert violations == []
 
 
+async def test_audit_relation_schema_ignores_pending_candidates(store) -> None:  # type: ignore[no-untyped-def]
+    """Pending candidates are not live edges, so the audit skips them."""
+    a = await _store_entry(store, content="a")  # inbox
+    b = await _store_entry(store, content="b")  # inbox
+    await store.add_relation_candidate(a, b, "depends_on", 0.9)  # illegal, but pending
+
+    violations = await store.audit_relation_schema()
+    assert violations == []
+
+
 # ---------------------------------------------------------------------------
 # MCP action: audit_schema
 # ---------------------------------------------------------------------------

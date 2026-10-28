@@ -123,7 +123,8 @@ async def _handle_search(
     Parameters:
         store: Initialised :class:`~distillery.store.duckdb.DuckDBStore`.
         arguments: Dictionary containing at minimum the key `query` (str). May include
-            optional filter keys (e.g., `entry_type`, `author`, `project`, `tags`,
+            optional filter keys (e.g., `entry_type` — a single type str or a
+            list of types matched with OR, `author`, `project`, `tags`,
             `status`, `date_from`, `date_to`), `limit` (int), the additive
             graph-expansion params `expand_graph` (bool) and `expand_hops` (int, 1 or 2),
             and `output_mode` (str: "summary" | "full" | "ids", default "summary").
@@ -186,6 +187,14 @@ async def _handle_search(
             return error_response("BUDGET_EXCEEDED", "Embedding budget exceeded")
 
     filters = _build_filters_from_arguments(arguments)
+
+    # ``entry_type`` accepts a single type or a list of types (OR-matched via
+    # the store's IN-clause).  Reject an explicitly empty list here so it
+    # surfaces as INVALID_PARAMS rather than an opaque INTERNAL from the
+    # store-level guard (mirrors ``_handle_list``).
+    if filters is not None and filters.get("entry_type") == []:
+        return error_response("INVALID_PARAMS", "entry_type filter list must not be empty")
+
     filter_result = _apply_default_status_filter(filters, arguments)
     if isinstance(filter_result, list):
         # Error response from status-filter validation.

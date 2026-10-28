@@ -247,53 +247,44 @@ async def test_store_batch_auto_links_each_entry(
     assert {r["relation_type"] for r in rows2} == {"related"}
 
 
-async def test_default_config_enables_auto_link(
+async def test_default_config_disables_auto_link(
     controlled_embedding_provider: ControlledEmbeddingProvider,
 ) -> None:
-    """Store instantiated with defaults (no args) has auto_link enabled (edge-by-default)."""
+    """Defaults are OFF at both layers: store __init__ and AutoLinkConfig (kill switch is opt-in)."""
     controlled_embedding_provider.register("source", _NEAR)
     controlled_embedding_provider.register("near one", _NEAR)
 
-    # Instantiate with no explicit auto_link arguments — should use defaults
-    # from DuckDBStore.__init__ signature (auto_link_enabled=False param default).
-    # However, the config module now defaults AutoLinkConfig.enabled to True,
-    # and when a config is loaded (or created with defaults), the server passes
-    # enabled=True to DuckDBStore. This test verifies that default-construction
-    # preserves backwards-compat: no args → enabled=False (store layer default).
-    # But when created via config (the production path), enabled=True (config default).
-
-    # For this test, we verify the store-level default (no args) is still False
-    # to ensure we don't break stateless unit tests that rely on the old behaviour.
+    # Store-level default (no auto_link args) is False: stateless unit tests
+    # that rely on the old behaviour keep working.
     default_store = DuckDBStore(
         db_path=":memory:",
         embedding_provider=controlled_embedding_provider,
     )
     await default_store.initialize()
     try:
-        # Verify the store-level default is still False (for test compatibility)
         assert default_store._auto_link_enabled is False
     finally:
         await default_store.close()
 
-    # But when config loads with defaults, it now returns enabled=True
+    # Config-level default is also False — auto-link is opt-in, not edge-by-default.
     from distillery.config import AutoLinkConfig
 
     cfg = AutoLinkConfig()
-    assert cfg.enabled is True
+    assert cfg.enabled is False
 
 
-async def test_config_default_enabled_true_creates_edges(
+async def test_config_enabled_creates_edges(
     controlled_embedding_provider: ControlledEmbeddingProvider,
 ) -> None:
-    """With config default (enabled=True), a store created via config creates edges."""
+    """With auto_link explicitly enabled, a store created via config creates edges."""
     controlled_embedding_provider.register("source", _NEAR)
     controlled_embedding_provider.register("near one", _NEAR)
 
-    # Simulate what the MCP server does: load config (which now defaults
-    # enabled=True), then pass it to DuckDBStore.
+    # Simulate the MCP server with a deployment that opts in (enabled=True),
+    # then pass it to DuckDBStore.
     from distillery.config import AutoLinkConfig
 
-    cfg = AutoLinkConfig()
+    cfg = AutoLinkConfig(enabled=True)
     assert cfg.enabled is True
 
     # Create store with config-provided value
