@@ -1354,6 +1354,7 @@ async def _handle_update(
     store: Any,
     arguments: dict[str, Any],
     last_modified_by: str = "",
+    cfg: DistilleryConfig | None = None,
 ) -> list[types.TextContent]:
     """Implement the ``distillery_update`` tool.
 
@@ -1361,6 +1362,7 @@ async def _handle_update(
         store: Initialised ``DuckDBStore``.
         arguments: Raw MCP tool arguments dict (must contain ``entry_id`` plus
             at least one updatable field).
+        cfg: Loaded config; enables reserved-prefix enforcement on ``tags``.
 
     Returns:
         MCP content list with the serialised updated entry or an error.
@@ -1450,6 +1452,27 @@ async def _handle_update(
     tags_err = validate_type(updates, "tags", list, "list of strings")
     if tags_err:
         return error_response("INVALID_PARAMS", tags_err)
+
+    # --- reserved prefix enforcement (match distillery_store guard) ---------
+    # The store canonicalizes update tags, so an alias could otherwise land a
+    # reserved tag. Tags already on the entry stay allowed (e.g. imported ones).
+    if cfg is not None and cfg.tags.reserved_prefixes and "tags" in updates:
+        current = await store.get(entry_id)
+        kept = set(current.tags) if current is not None else set()
+        for tag in updates["tags"]:
+            if not isinstance(tag, str):
+                return error_response(
+                    "INVALID_PARAMS", f"Each tag must be a string, got: {type(tag).__name__}"
+                )
+            if tag in kept:
+                continue
+            top = _reserved_prefix(tag, cfg)
+            if top is not None:
+                return error_response(
+                    "INVALID_PARAMS",
+                    f"Tag {tag!r} uses reserved prefix {top!r}. "
+                    "Only internal sources may use this namespace.",
+                )
 
     metadata_err = validate_type(updates, "metadata", dict, "object")
     if metadata_err:

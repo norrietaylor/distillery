@@ -738,7 +738,9 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         )
         if expires_at is not _UNSET:
             args["expires_at"] = expires_at
-        result = await _handle_update(store=c["store"], arguments=args, last_modified_by=user)
+        result = await _handle_update(
+            store=c["store"], arguments=args, last_modified_by=user, cfg=c["config"]
+        )
         await _audit(c, user, "distillery_update", entry_id, "update", result)
         return result
 
