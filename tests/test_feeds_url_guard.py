@@ -8,6 +8,7 @@ Covers:
 from __future__ import annotations
 
 import socket
+import threading
 
 import httpx
 import pytest
@@ -17,6 +18,7 @@ from distillery.feeds.url_guard import (
     ResponseTooLargeError,
     UnsafeURLError,
     _ip_is_public,
+    _pin_dns,
     fetch_feed_bytes,
     validate_public_url,
 )
@@ -231,3 +233,57 @@ class TestFetchFeedBytes:
 
         with _client(handler) as client, pytest.raises(httpx.HTTPStatusError):
             fetch_feed_bytes(client, f"http://{_PUBLIC}/feed", {})
+
+
+# ---------------------------------------------------------------------------
+# _pin_dns concurrency (#709)
+# ---------------------------------------------------------------------------
+
+
+class TestPinDnsConcurrency:
+    def test_overlapping_pins_do_not_leak(self) -> None:
+        """Interleaved enter/exit across threads leaves no pin behind (#709).
+
+        Order: A enters, B enters, A exits, B exits — the sequence that used to
+        leave A's stub installed on ``socket.getaddrinfo`` for good.
+        """
+        a_in, b_in, a_out = threading.Event(), threading.Event(), threading.Event()
+        seen: dict[str, object] = {}
+
+        def run_a() -> None:
+            with _pin_dns("pin-a.invalid", "203.0.113.1"):
+                a_in.set()
+                b_in.wait(5)
+                seen["a"] = socket.getaddrinfo("pin-a.invalid", 80)[0][4][0]
+                seen["a_sees_b"] = "pin-b.invalid" in str(_lookup("pin-b.invalid"))
+            a_out.set()
+
+        def run_b() -> None:
+            a_in.wait(5)
+            with _pin_dns("pin-b.invalid", "203.0.113.2"):
+                b_in.set()
+                a_out.wait(5)
+                seen["b"] = socket.getaddrinfo("pin-b.invalid", 80)[0][4][0]
+
+        threads = [threading.Thread(target=run_a), threading.Thread(target=run_b)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(10)
+
+        assert seen == {"a": "203.0.113.1", "a_sees_b": False, "b": "203.0.113.2"}
+        resolver = socket.getaddrinfo
+        with _pin_dns("pin-c.invalid", "203.0.113.3"):
+            pass
+        assert socket.getaddrinfo is resolver
+        for host in ("pin-a.invalid", "pin-b.invalid"):
+            with pytest.raises(socket.gaierror):
+                socket.getaddrinfo(host, 80)
+
+
+def _lookup(host: str) -> object:
+    """Resolve *host*, returning the error instead of raising."""
+    try:
+        return socket.getaddrinfo(host, 80)
+    except OSError as exc:
+        return exc
