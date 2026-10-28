@@ -667,10 +667,10 @@ class DuckDBStore:
 
         1. ``CHECKPOINT`` to flush the WAL and force re-encoding of the touched
            row groups into the main database file.
-        2. Materialise the touched columns (``id``, ``content``, ``metadata``,
-           ``embedding``) for the affected ids, calling ``fetchall()`` so DuckDB
-           actually scans the data pages rather than returning catalog
-           statistics.  ``embedding`` (FLOAT[1024]) is a corruption target named
+        2. Materialise the touched columns (``id``, ``content``, ``tags``,
+           ``metadata``, ``embedding``) for the affected ids, calling
+           ``fetchall()`` so DuckDB actually scans the data pages rather than
+           returning catalog statistics.  ``embedding`` (FLOAT[1024]) is a corruption target named
            in issue #584, so it must be read back too — a torn rewrite isolated
            to the embedding column would otherwise go undetected.
         3. Run ``PRAGMA storage_info('entries')`` as a bounded integrity sweep
@@ -698,7 +698,7 @@ class DuckDBStore:
                 # pages (a corrupt dictionary/raw page errors or SIGSEGVs here,
                 # whereas COUNT(*) would silently succeed).
                 conn.execute(
-                    "SELECT id, content, metadata, embedding FROM entries WHERE id = ANY(?)",
+                    "SELECT id, content, tags, metadata, embedding FROM entries WHERE id = ANY(?)",
                     [ids],
                 ).fetchall()
             # Bounded integrity sweep over the storage metadata of the table.
@@ -5035,6 +5035,7 @@ class DuckDBStore:
                     conn.execute("ROLLBACK")
                 raise
             self._checkpoint_after_write(conn)
+            self._sync_verify_entries_readable([entry_id for _, entry_id in updates])
 
         return {
             "entries_scanned": entries_scanned,

@@ -144,6 +144,23 @@ async def test_promote_entities_reuses_node_created_before_alias(store) -> None:
     assert len(nodes) == 1
 
 
+async def test_canonicalize_existing_tags_verifies_touched_rows(store) -> None:  # type: ignore[no-untyped-def]
+    """The backfill reads back the rewritten rows before reporting success."""
+    rewritten = await _store_entry(store, content="frag", tags=["domain/sandbox"])
+    await _store_entry(store, content="clean", tags=["tech/duckdb"])
+    verified: list[list[str]] = []
+    original = store._sync_verify_entries_readable
+
+    def spy(entry_ids):  # type: ignore[no-untyped-def]
+        verified.append(list(entry_ids))
+        original(entry_ids)
+
+    store._sync_verify_entries_readable = spy
+    await store.canonicalize_existing_tags({"domain/sandbox": "domain/build/sandboxing"})
+
+    assert verified == [[rewritten]]
+
+
 async def test_canonicalize_existing_tags_rewrites_and_dedupes(store) -> None:  # type: ignore[no-untyped-def]
     """Backfill rewrites aliased tags and dedupes within an entry (#653)."""
     a = await _store_entry(store, content="frag", tags=["domain/sandbox", "tech/duckdb"])
