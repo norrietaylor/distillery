@@ -4870,8 +4870,8 @@ class DuckDBStore:
         join to ``entries`` on both endpoints) and returns the groups that
         :func:`distillery.relations.schema.triple_allowed` rejects, with counts.
         Edges whose endpoints no longer exist are excluded by the join (a
-        separate integrity concern), and pending relation candidates are
-        excluded as they are in traversal. Run this before flipping
+        separate integrity concern), and pending candidates and retired edges
+        are excluded as they are in traversal. Run this before flipping
         ``relations.enforce_schema`` to ``True`` (issue #653, ontology #1).
         """
         assert self._conn is not None
@@ -4881,8 +4881,9 @@ class DuckDBStore:
             "FROM entry_relations r "
             "JOIN entries ef ON ef.id = r.from_id "
             "JOIN entries et ON et.id = r.to_id "
-            "WHERE r.metadata IS NULL OR "
-            "json_extract_string(r.metadata, '$.review_status') IS DISTINCT FROM 'pending' "
+            "WHERE (r.metadata IS NULL OR "
+            "json_extract_string(r.metadata, '$.review_status') IS DISTINCT FROM 'pending') "
+            f"AND {_RELATION_LIVE_CLAUSE} "
             "GROUP BY 1, 2, 3"
         ).fetchall()
         violations: list[dict[str, Any]] = []

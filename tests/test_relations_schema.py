@@ -170,6 +170,17 @@ async def test_audit_relation_schema_clean_when_only_legal(store) -> None:  # ty
     assert violations == []
 
 
+async def test_audit_relation_schema_ignores_retired_edges(store) -> None:  # type: ignore[no-untyped-def]
+    """Retired edges are not live, so the audit skips them."""
+    a = await _store_entry(store, content="a")  # inbox
+    b = await _store_entry(store, content="b")  # inbox
+    rid = await store.add_relation(a, b, "depends_on")  # illegal (inbox->inbox)
+    await store.retire_relation(rid)
+
+    violations = await store.audit_relation_schema()
+    assert violations == []
+
+
 async def test_audit_relation_schema_ignores_pending_candidates(store) -> None:  # type: ignore[no-untyped-def]
     """Pending candidates are not live edges, so the audit skips them."""
     a = await _store_entry(store, content="a")  # inbox
