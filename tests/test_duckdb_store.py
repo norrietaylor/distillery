@@ -1565,6 +1565,38 @@ class TestBM25Search:
         assert results == []
 
 
+class TestFtsSelfHeal:
+    """A lost FTS index is rebuilt once instead of failing every search (#685)."""
+
+    async def test_search_rebuilds_missing_fts_index(
+        self, hybrid_store: DuckDBStore, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        await hybrid_store.store(make_entry(content="The quick brown fox jumps over the lazy dog"))
+        hybrid_store.connection.execute("PRAGMA drop_fts_index('entries')")
+        assert hybrid_store._bm25_search(hybrid_store.connection, "fox", limit=10) == []  # noqa: SLF001
+
+        await hybrid_store.search("quick fox", filters=None, limit=10)
+
+        assert hybrid_store._fts_available  # noqa: SLF001
+        results = hybrid_store._bm25_search(hybrid_store.connection, "fox", limit=10)  # noqa: SLF001
+        assert len(results) == 1
+        # The search path's read handle sees the rebuilt index too.
+        caplog.clear()
+        await hybrid_store.search("quick fox", filters=None, limit=10)
+        assert "BM25 search failed" not in caplog.text
+
+    async def test_search_does_not_rebuild_present_index(
+        self, hybrid_store: DuckDBStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        await hybrid_store.store(make_entry(content="The quick brown fox jumps over the lazy dog"))
+        rebuilds: list[object] = []
+        monkeypatch.setattr(hybrid_store, "_rebuild_fts_index", rebuilds.append)
+
+        await hybrid_store.search("quick fox", filters=None, limit=10)
+
+        assert rebuilds == []
+
+
 class TestHybridSearch:
     """End-to-end tests for hybrid search (BM25 + vector RRF)."""
 

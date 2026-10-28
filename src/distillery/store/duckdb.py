@@ -283,6 +283,9 @@ class DuckDBStore:
         self._initialized: bool = False
         self._vss_available: bool = False
         self._fts_available: bool = False
+        # Set by a read that found ``match_bm25`` missing; the next ``search``
+        # checks and, if needed, rebuilds the index under the write lock (#685).
+        self._fts_index_missing: bool = False
         self._checkpoint_failures: int = 0
         self._hybrid_search: bool = hybrid_search
         self._rrf_k: int = rrf_k
@@ -2619,8 +2622,32 @@ class DuckDBStore:
             rows = conn.execute(sql, [query, limit]).fetchall()
             return [(row[0], rank) for rank, row in enumerate(rows, start=1)]
         except duckdb.Error as exc:
+            if isinstance(exc, duckdb.CatalogException) and "match_bm25" in str(exc):
+                self._fts_index_missing = True
             logger.warning("BM25 search failed, falling back to vector-only: %s", exc)
             return []
+
+    def _sync_heal_fts_index(self) -> None:
+        """Rebuild the FTS index if a read found ``match_bm25`` missing (#685).
+
+        A process can lose ``fts_main_entries`` (e.g. FTS DDL not surviving an
+        abrupt stop, #349) while ``_fts_available`` stays true, which silently
+        drops every search to vector-only until a restart.  A read can also
+        miss the macro transiently while a write is mid-rebuild, so check it is
+        really gone before paying for an O(rows) rebuild.  If the rebuild fails,
+        :meth:`_rebuild_fts_index` clears ``_fts_available`` and search stays
+        cleanly vector-only.
+        """
+        self._fts_index_missing = False
+        conn = self.connection
+        present = conn.execute(
+            "SELECT 1 FROM duckdb_functions() "
+            "WHERE schema_name = 'fts_main_entries' AND function_name = 'match_bm25' "
+            "LIMIT 1"
+        ).fetchone()
+        if present is None:
+            logger.warning("FTS index missing; rebuilding it")
+            self._rebuild_fts_index(conn)
 
     def _recency_weight(self, created_at: datetime) -> float:
         """Compute a recency decay weight in ``[recency_min_weight, 1.0]``.
@@ -2823,6 +2850,8 @@ class DuckDBStore:
         # stamped out of band via the deferred flusher.
         with observability.span("store.search.rank", hybrid=use_hybrid, limit=limit):
             results = await self._run_read(_sync)
+        if self._fts_index_missing:
+            await self._run_sync(self._sync_heal_fts_index)
         self._mark_accessed(r.entry.id for r in results)
         return results
 
