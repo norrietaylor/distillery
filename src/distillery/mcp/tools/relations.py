@@ -18,6 +18,7 @@ from distillery.mcp.tools._common import (
     error_response,
     success_response,
 )
+from distillery.relations.schema import VALID_RELATION_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -53,20 +54,9 @@ _VALID_SCOPES = {"global", "ego"}
 
 _VALID_DIRECTIONS = {"outgoing", "incoming", "both"}
 
-_VALID_RELATION_TYPES = {
-    "link",
-    "corrects",
-    "supersedes",
-    "related",
-    "blocks",
-    "depends_on",
-    "citation",
-    "duplicate",
-    "merge_source",
-    "sync_source",
-    "mentions",
-    "chunk",
-}
+# Single source of truth in relations.schema (issue #653 de-duplicated the copy
+# that used to be maintained here in parallel with store/duckdb.py).
+_VALID_RELATION_TYPES = VALID_RELATION_TYPES
 
 
 async def _handle_relations(
@@ -108,12 +98,13 @@ async def _handle_relations(
         "resolve_candidate",
         "suggest_links",
         "promote_entities",
+        "audit_schema",
     ):
         return error_response(
             "INVALID_PARAMS",
             "action must be one of 'add', 'get', 'remove', 'traverse', 'metrics', "
             "'reconcile', 'list_candidates', 'resolve_candidate', 'suggest_links', "
-            f"'promote_entities'; got: {action!r}",
+            f"'promote_entities', 'audit_schema'; got: {action!r}",
         )
 
     # ------------------------------------------------------------------
@@ -601,6 +592,25 @@ async def _handle_relations(
                 "entities_reused": counts.get("entities_reused", 0),
                 "mentions_created": counts.get("mentions_created", 0),
                 "threshold": threshold,
+            }
+        )
+
+    # ------------------------------------------------------------------
+    # action == "audit_schema"
+    # ------------------------------------------------------------------
+    if action == "audit_schema":
+        try:
+            violations = await store.audit_relation_schema()
+        except Exception:  # noqa: BLE001
+            logger.exception("distillery_relations audit_schema: unexpected error")
+            return error_response("INTERNAL", "Failed to audit relation schema")
+
+        return success_response(
+            {
+                "action": "audit_schema",
+                "violations": violations,
+                "count": len(violations),
+                "clean": len(violations) == 0,
             }
         )
 

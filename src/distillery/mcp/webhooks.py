@@ -496,6 +496,7 @@ async def _ensure_store(
             auto_link_enabled=config.auto_link.enabled,
             auto_link_threshold=config.auto_link.threshold,
             auto_link_max_links=config.auto_link.max_links,
+            enforce_relation_schema=config.relations.enforce_schema,
         )
         await store.initialize()
 
