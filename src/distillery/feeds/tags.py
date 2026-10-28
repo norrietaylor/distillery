@@ -89,9 +89,10 @@ def canonicalize_tag(
        tag collapse (``entity/cloudflare/workers`` -> ``entity/cloudflare-workers``).
 
     Alias substitution runs first so an operator-declared merge wins over the
-    mechanical separator-collapse. Idempotent given a flattened (chain-free,
-    cycle-free) alias map: ``canonicalize_tag(canonicalize_tag(t)) ==
-    canonicalize_tag(t)``. Grammar validation stays the caller's responsibility
+    mechanical separator-collapse. The two steps repeat until the tag stops
+    changing, so a hop that only appears after normalization is still followed
+    and ``canonicalize_tag(canonicalize_tag(t)) == canonicalize_tag(t)`` for a
+    cycle-free alias map. Grammar validation stays the caller's responsibility
     (the :class:`~distillery.models.Entry` constructor still validates tags).
 
     Args:
@@ -105,11 +106,19 @@ def canonicalize_tag(
     Returns:
         The canonical tag string (unchanged when no rule applies).
     """
+    # Repeat until nothing changes: an alias target can normalize into another
+    # alias key, which a single pass would leave half-resolved.  ``seen`` stops
+    # a cycle that only appears after normalization.
     result = tag
-    if aliases:
-        result = aliases.get(result, result)
-    if normalize_namespaces:
-        result = normalize_tag(result, list(reserved_prefixes))
+    seen: set[str] = set()
+    while result not in seen:
+        seen.add(result)
+        step = aliases.get(result, result) if aliases else result
+        if normalize_namespaces:
+            step = normalize_tag(step, list(reserved_prefixes))
+        if step == result:
+            break
+        result = step
     return result
 
 

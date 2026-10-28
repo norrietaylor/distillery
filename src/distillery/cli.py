@@ -692,6 +692,7 @@ def _cmd_poll(config_path: str | None, fmt: str, source_url: str | None) -> int:
             tag_aliases=cfg.tags.aliases,
             tag_reserved_prefixes=cfg.tags.reserved_prefixes,
             tag_normalize_namespaces=cfg.tags.enforce_namespaces,
+            enforce_relation_schema=cfg.relations.enforce_schema,
         )
         await store.initialize()
 
@@ -851,6 +852,7 @@ def _cmd_retag(
             tag_aliases=cfg.tags.aliases,
             tag_reserved_prefixes=cfg.tags.reserved_prefixes,
             tag_normalize_namespaces=cfg.tags.enforce_namespaces,
+            enforce_relation_schema=cfg.relations.enforce_schema,
         )
         await store.initialize()
 
@@ -979,6 +981,7 @@ def _cmd_gh_backfill(
             tag_aliases=cfg.tags.aliases,
             tag_reserved_prefixes=cfg.tags.reserved_prefixes,
             tag_normalize_namespaces=cfg.tags.enforce_namespaces,
+            enforce_relation_schema=cfg.relations.enforce_schema,
         )
         await store.initialize()
         try:
@@ -1305,6 +1308,7 @@ def _cmd_import(
             tag_aliases=cfg.tags.aliases,
             tag_reserved_prefixes=cfg.tags.reserved_prefixes,
             tag_normalize_namespaces=cfg.tags.enforce_namespaces,
+            enforce_relation_schema=cfg.relations.enforce_schema,
         )
         await store.initialize()
 
@@ -2009,6 +2013,7 @@ def _cmd_maintenance_classify(
             tag_aliases=cfg.tags.aliases,
             tag_reserved_prefixes=cfg.tags.reserved_prefixes,
             tag_normalize_namespaces=cfg.tags.enforce_namespaces,
+            enforce_relation_schema=cfg.relations.enforce_schema,
         )
         try:
             await store.initialize()

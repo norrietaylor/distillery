@@ -186,6 +186,7 @@ def _build_background_store_factory(
             tag_aliases=config.tags.aliases,
             tag_reserved_prefixes=config.tags.reserved_prefixes,
             tag_normalize_namespaces=config.tags.enforce_namespaces,
+            enforce_relation_schema=config.relations.enforce_schema,
         )
         await store.initialize()
         return store
@@ -241,6 +242,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 tag_aliases=config.tags.aliases,
                 tag_reserved_prefixes=config.tags.reserved_prefixes,
                 tag_normalize_namespaces=config.tags.enforce_namespaces,
+                enforce_relation_schema=config.relations.enforce_schema,
             )
             await store.initialize()
             # Flush the WAL during quiet windows so it never grows unbounded
@@ -943,7 +945,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
     async def distillery_search(  # noqa: PLR0913
         ctx: Context,
         query: str,
-        entry_type: str | None = None,
+        entry_type: str | list[str] | None = None,
         author: str | None = None,
         project: str | None = None,
         tags: list[str] | None = None,
@@ -985,7 +987,8 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
 
         PARAMS:
           - query (str, required): Natural-language search query.
-          - entry_type (str, optional): Filter by type.
+          - entry_type (str | list[str], optional): Filter by type, or a list of
+            types matched with OR (e.g. ["session", "reference"]).
           - author (str, optional): Filter by author.
           - project (str, optional): Filter by project scope.
           - tags (list[str], optional): Filter by tags (AND match).
@@ -1370,6 +1373,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         valid_at: str | None = None,
         invalid_at: str | None = None,
         metadata: dict[str, Any] | None = None,
+        include_retired: bool = False,
     ) -> list[types.TextContent]:
         """Manage typed relations between knowledge entries.
 
@@ -1381,7 +1385,10 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         PARAMS:
           - action (str, required): Operation. Valid: [add, get, remove, traverse, metrics,
             reconcile, list_candidates, resolve_candidate, suggest_links, promote_entities,
-            canonicalize_tags].
+            canonicalize_tags, audit_schema, retire, revalidate]. ``retire`` soft-retires an
+            edge (sets invalid_at; pass relation_id and optional invalid_at ISO 8601 —
+            defaults to now); ``revalidate`` clears invalid_at. ``get`` accepts
+            include_retired (default false) to include soft-retired edges.
           - from_id (str, required for add): Source entry UUID.
           - to_id (str, required for add): Target entry UUID.
           - relation_type (str, required for add, optional for get/traverse): Relation type.
@@ -1399,7 +1406,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
           - relation_id (str, required for remove): UUID of the relation to delete.
           - hops (int, optional for traverse, default=2): BFS depth, capped at [1, 3].
           - metric (str, required for metrics): Graph metric to compute.
-            Valid: [bridges, communities, constraint, link_prediction, orphans].
+            Valid: [bridges, communities, constraint, link_prediction, orphans, health].
             Requires the [graph] optional extra.
           - scope (str, optional for metrics, default="global"): Subgraph scope.
             Valid: [global, ego]. ``"ego"`` requires ``entry_id``.
@@ -1409,7 +1416,10 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             (strongest structural-hole brokers); ``link_prediction`` = top predicted
             edges by Adamic-Adar (pass ``entry_id`` to score adjacencies for one entry);
             ``orphans`` = sample (<=50) of entry IDs absent from the relations graph
-            (unlinked entries — feeds a linking / gap-scan pass).
+            (unlinked entries — feeds a linking / gap-scan pass); ``health`` = a
+            consolidated graph-health snapshot (no per-node results) adding
+            ``mean_degree``, ``connected_component_count`` and
+            ``largest_component_fraction`` to the standard totals block.
           - project / tags / date_from / date_to (optional, metrics global scope):
             restrict the entries whose relations participate in the graph.
 
@@ -1423,14 +1433,23 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             node_count: int, edge_count: int } (traverse) or
           { action: "metrics", metric: str, scope: str, node_count: int, edge_count: int,
             total_entries: int, graph_node_count: int, orphan_rate: float,
-            results: list, count: int, computed_at: str, cache_hit: bool } (metrics).
+            results: list, count: int, computed_at: str, cache_hit: bool } (metrics),
+            plus mean_degree: float, connected_component_count: int and
+            largest_component_fraction: float when metric="health".
             ``orphan_rate`` = 1 - graph_node_count/total_entries (graph-health signal;
             0.0 when total_entries is 0). Or
           { action: "promote_entities", entities_created: int, entities_reused: int,
-            mentions_created: int, threshold: int } (promote_entities).
+            entities_merged: int, mentions_created: int, threshold: int }
+            (promote_entities).
             Scans ``entity/*`` and ``tech/*`` tags and promotes any canonical tag
             meeting the configured ``tags.entity_promotion_threshold`` to an ENTITY
-            entry node, linking each tagged entry with a ``mentions`` edge. Idempotent.
+            entry node, linking each tagged entry with a ``mentions`` edge. Nodes for
+            variants an alias now merges are archived (``entities_merged``). Idempotent. Or
+          { action: "canonicalize_tags", entries_scanned: int, entries_rewritten: int,
+            tags_collapsed: int } (canonicalize_tags).
+            Rewrites every non-archived entry's tags through the alias map (plus
+            namespace normalization when ``tags.enforce_namespaces`` is set); archived
+            entries are skipped. Idempotent.
         RETURNS (error): { error: true, code: "NOT_FOUND" | "INVALID_PARAMS" | "INTERNAL", message: "..." }
 
         RELATED: distillery_correct (creates 'corrects' relations automatically),
@@ -1460,6 +1479,7 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                     valid_at=valid_at,
                     invalid_at=invalid_at,
                     metadata=metadata,
+                    include_retired=include_retired,
                 ),
             ),
             cfg=c["config"],

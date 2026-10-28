@@ -51,6 +51,20 @@ ignore:
       type: apk
     reason: "CPython 3.14.6-r1 — High; bz2.BZ2Decompressor objects can be reused after a decompression error, leading to use-after-error if the application catches OSError and retries on the same object.  Not exploitable in Distillery: no bz2 usage anywhere in src/ or in declared dependencies (verified by grep on 2026-06-11) — the module merely ships in the base image's stdlib.  No fixed python-3.14 build released by Wolfi/CPython yet.  Revisit on the next Chainguard base-image rebuild.  Reviewed: 2026-06-18"
 
+  - vulnerability: CVE-2026-11940
+    package:
+      name: python-3.14
+      version: 3.14.6-r1
+      type: apk
+    reason: "CPython 3.14.6-r1 — High (7.8); tarfile.extractall() 'data'/'tar' filter bypass: a crafted archive with a hardlink referencing a symlink at a deeper path recreates the symlink at a shallower one, escaping the destination directory (incomplete fix of CVE-2025-4330).  Not exploitable in Distillery: no tarfile usage anywhere in src/ (verified by grep on 2026-07-06); the only runtime-dependency match is fastmcp's CLI dev-apps helper, which the server never imports — the module merely ships in the base image's stdlib and no untrusted archives are ever extracted.  No fixed python-3.14 build released by Wolfi/CPython yet (grype fix state empty).  Revisit on the next Chainguard base-image rebuild.  Reviewed: 2026-07-06"
+
+  - vulnerability: CVE-2026-11972
+    package:
+      name: python-3.14
+      version: 3.14.6-r1
+      type: apk
+    reason: "CPython 3.14.6-r1 — High (8.2); tarfile in streaming mode (mode='r|') mishandles EOF, so a truncated/crafted archive parses in an infinite loop (DoS).  Not exploitable in Distillery: no tarfile usage anywhere in src/ (verified by grep on 2026-07-06, same sweep as CVE-2026-11940) and the server never parses tar archives, trusted or otherwise.  No fixed python-3.14 build released by Wolfi/CPython yet (grype fix state empty).  Revisit on the next Chainguard base-image rebuild.  Reviewed: 2026-07-06"
+
 
 # Fail on critical and high severity vulnerabilities.
 # This is also enforced in the CI workflow via --severity-cutoff=high,

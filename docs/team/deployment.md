@@ -84,9 +84,9 @@ classification:
 
 | Field | Values | Description |
 |-------|--------|-------------|
-| `provider` | `github`, `none` | Auth provider. `none` allows unauthenticated access (dev only) |
-| `client_id_env` | env var name | Environment variable holding GitHub Client ID |
-| `client_secret_env` | env var name | Environment variable holding GitHub Client Secret |
+| `provider` | `github`, `gitlab`, `none` | Auth provider. `none` allows unauthenticated access (dev only). For `gitlab`, see [GitLab Authentication](gitlab-auth.md) |
+| `client_id_env` | env var name | Environment variable holding the OAuth Client ID |
+| `client_secret_env` | env var name | Environment variable holding the OAuth Client Secret |
 
 **storage**
 

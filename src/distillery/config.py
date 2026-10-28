@@ -11,6 +11,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import yaml
 
@@ -174,19 +175,19 @@ class AutoLinkConfig:
     index, and capped at :attr:`max_links` edges per entry to respect the
     embedding/query budget.
 
-    Enabled by default — set :attr:`enabled` ``False`` to disable semantic
-    edge creation so the write path behaves exactly as before.
+    Disabled by default — set :attr:`enabled` ``True`` to enable semantic
+    edge creation; while off, the write path behaves exactly as before.
 
     Attributes:
         enabled: Whether to create semantic ``related`` edges on ingest.
-            Defaults to ``True``.
+            Defaults to ``False``.
         threshold: Normalised cosine similarity score in ``[0.0, 1.0]`` at or
             above which a neighbour is linked.  Defaults to ``0.85``.
         max_links: Maximum number of ``related`` edges to create per stored
             entry (throttle).  Must be a positive integer.  Defaults to ``5``.
     """
 
-    enabled: bool = True
+    enabled: bool = False
     threshold: float = 0.85
     max_links: int = 5
 
@@ -228,6 +229,23 @@ class LinkSuggestionConfig:
     auto_create_threshold: float = 0.85
     review_floor: float = 0.60
     max_candidates_per_run: int = 200
+
+
+@dataclass
+class RelationsConfig:
+    """Relation-graph schema configuration (issue #653, ontology #1).
+
+    Attributes:
+        enforce_schema: When ``True``, creating an edge whose
+            ``(from_type, relation, to_type)`` triple is not in
+            :data:`distillery.relations.schema.RELATION_SCHEMA` is rejected.
+            When ``False`` (default), violations are logged (warn-only) but the
+            edge is still created — a safe default for an already-populated graph
+            built before any schema existed. Flip to ``True`` only after an audit
+            (``distillery_relations action="audit_schema"``) returns clean.
+    """
+
+    enforce_schema: bool = False
 
 
 @dataclass
@@ -465,7 +483,8 @@ class ServerAuthConfig:
     """Server authentication configuration.
 
     Attributes:
-        provider: Authentication provider. One of ``'github'`` or ``'none'``.
+        provider: Authentication provider. One of ``'github'``, ``'gitlab'``
+            or ``'none'``.
         client_id_env: Name of the environment variable holding the OAuth
             client ID.
         client_secret_env: Name of the environment variable holding the OAuth
@@ -475,9 +494,17 @@ class ServerAuthConfig:
             any GitHub user can authenticate (open-access mode).  Can also be
             set via the ``DISTILLERY_ALLOWED_ORGS`` environment variable
             (comma-separated); env values are merged with YAML values.
+            GitHub-only.
         membership_cache_ttl_seconds: How long to cache org-membership results
             in seconds.  Default is 3600 (1 hour).  Set to a smaller value if
             you need revoked memberships to take effect sooner.
+        instance_url: Base URL of the GitLab instance (``provider: gitlab``
+            only).  Default is ``https://gitlab.com``.
+        allowed_groups: GitLab group full-paths whose members may access the
+            server (``provider: gitlab`` only).  An allowed group admits its
+            whole subtree (``acme`` admits ``acme/dev``).  Empty list means
+            instance login alone is sufficient — permitted for self-hosted
+            instances, rejected for gitlab.com (see docs/adr/0001).
     """
 
     provider: str = "none"
@@ -485,6 +512,8 @@ class ServerAuthConfig:
     client_secret_env: str = "GITHUB_CLIENT_SECRET"
     allowed_orgs: list[str] = field(default_factory=list)
     membership_cache_ttl_seconds: int = 3600
+    instance_url: str = "https://gitlab.com"
+    allowed_groups: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -554,6 +583,7 @@ class DistilleryConfig:
         auto_link: Semantic auto-link settings for the write path.
         link_suggestion: Scheduled link-suggestion job settings.
         tags: Tag namespace enforcement settings.
+        relations: Relation-graph schema enforcement settings.
         feeds: Ambient feed monitoring settings.
         rate_limit: Rate limiting and resource budget settings.
         server: Server (HTTP transport) settings.
@@ -567,6 +597,7 @@ class DistilleryConfig:
     auto_link: AutoLinkConfig = field(default_factory=AutoLinkConfig)
     link_suggestion: LinkSuggestionConfig = field(default_factory=LinkSuggestionConfig)
     tags: TagsConfig = field(default_factory=TagsConfig)
+    relations: RelationsConfig = field(default_factory=RelationsConfig)
     feeds: FeedsConfig = field(default_factory=FeedsConfig)
     rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
@@ -876,17 +907,13 @@ def _parse_link_suggestion(raw: dict[str, Any]) -> LinkSuggestionConfig:
 
     enabled_raw = raw.get("enabled", True)
     if not isinstance(enabled_raw, bool):
-        raise ValueError(
-            f"link_suggestion.enabled must be a boolean, got: {enabled_raw!r}"
-        )
+        raise ValueError(f"link_suggestion.enabled must be a boolean, got: {enabled_raw!r}")
 
     auto_create_threshold = _parse_float_field(
         raw, "auto_create_threshold", 0.85, "link_suggestion.auto_create_threshold"
     )
 
-    review_floor = _parse_float_field(
-        raw, "review_floor", 0.60, "link_suggestion.review_floor"
-    )
+    review_floor = _parse_float_field(raw, "review_floor", 0.60, "link_suggestion.review_floor")
 
     max_candidates_per_run_raw = raw.get("max_candidates_per_run", 200)
     max_candidates_per_run = _parse_strict_int(
@@ -944,6 +971,28 @@ def _parse_alias_map(raw: Any) -> dict[str, str]:
             raise ValueError(f"tags.aliases value is not a valid tag: {value!r}")
         aliases[key] = value
     return _flatten_alias_map(aliases)
+
+
+def _parse_relations(raw: dict[str, Any]) -> RelationsConfig:
+    """Parse the ``relations`` section from a raw YAML mapping (issue #653).
+
+    Args:
+        raw: Mapping (typically from YAML) containing any of:
+            - ``enforce_schema`` (bool, default ``False``)
+
+    Returns:
+        A populated :class:`RelationsConfig` instance.
+
+    Raises:
+        ValueError: If ``raw`` is not a mapping or ``enforce_schema`` is not a
+            boolean.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError(f"relations must be a YAML mapping, got: {type(raw).__name__}")
+    enforce_raw = raw.get("enforce_schema", False)
+    if not isinstance(enforce_raw, bool):
+        raise ValueError(f"relations.enforce_schema must be a boolean, got: {enforce_raw!r}")
+    return RelationsConfig(enforce_schema=enforce_raw)
 
 
 def _parse_tags(raw: dict[str, Any]) -> TagsConfig:
@@ -1472,6 +1521,11 @@ def _parse_server(raw: dict[str, Any]) -> ServerConfig:
         raise ValueError("server.auth.allowed_orgs must be a YAML list")
     allowed_orgs = [str(o).strip() for o in allowed_orgs_raw if str(o).strip()]
 
+    allowed_groups_raw = auth_raw.get("allowed_groups", []) or []
+    if not isinstance(allowed_groups_raw, list):
+        raise ValueError("server.auth.allowed_groups must be a YAML list")
+    allowed_groups = [str(g).strip().strip("/") for g in allowed_groups_raw if str(g).strip()]
+
     ttl_raw = auth_raw.get("membership_cache_ttl_seconds", 3600)
     membership_cache_ttl_seconds = _parse_strict_int(
         ttl_raw, "server.auth.membership_cache_ttl_seconds"
@@ -1484,6 +1538,8 @@ def _parse_server(raw: dict[str, Any]) -> ServerConfig:
             client_secret_env=str(auth_raw.get("client_secret_env", "GITHUB_CLIENT_SECRET")),
             allowed_orgs=allowed_orgs,
             membership_cache_ttl_seconds=membership_cache_ttl_seconds,
+            instance_url=str(auth_raw.get("instance_url", "https://gitlab.com")).rstrip("/"),
+            allowed_groups=allowed_groups,
         ),
         http_rate_limit=_parse_http_rate_limit(rl_raw),
         webhooks=_parse_webhooks(webhooks_raw),
@@ -1666,8 +1722,7 @@ def _validate(config: DistilleryConfig) -> None:
     threshold = config.tags.entity_promotion_threshold
     if not isinstance(threshold, int) or isinstance(threshold, bool) or threshold <= 0:
         raise ValueError(
-            "tags.entity_promotion_threshold must be a positive integer, "
-            f"got: {threshold}"
+            f"tags.entity_promotion_threshold must be a positive integer, got: {threshold}"
         )
 
     # Validate feeds thresholds.
@@ -1708,7 +1763,7 @@ def _validate(config: DistilleryConfig) -> None:
         )
 
     # Validate server.auth.provider
-    valid_auth_providers = {"github", "none"}
+    valid_auth_providers = {"github", "gitlab", "none"}
     if config.server.auth.provider not in valid_auth_providers:
         raise ValueError(
             f"server.auth.provider must be one of {sorted(valid_auth_providers)}, "
@@ -1723,6 +1778,29 @@ def _validate(config: DistilleryConfig) -> None:
             "server.auth.allowed_orgs requires server.auth.provider = 'github', "
             f"got: {config.server.auth.provider!r}"
         )
+
+    # Validate allowed_groups: non-empty list requires GitLab auth provider.
+    if config.server.auth.allowed_groups and config.server.auth.provider != "gitlab":
+        raise ValueError(
+            "server.auth.allowed_groups requires server.auth.provider = 'gitlab', "
+            f"got: {config.server.auth.provider!r}"
+        )
+
+    if config.server.auth.provider == "gitlab":
+        instance_host = urlparse(config.server.auth.instance_url).hostname or ""
+        if not instance_host:
+            raise ValueError(
+                "server.auth.instance_url must be a valid absolute http(s) URL, "
+                f"got: {config.server.auth.instance_url!r}"
+            )
+        # On gitlab.com an authenticated user is anyone on the internet, so a
+        # group restriction is mandatory (ADR-0001). Self-hosted instances may
+        # leave allowed_groups empty: instance login is the boundary.
+        if instance_host == "gitlab.com" and not config.server.auth.allowed_groups:
+            raise ValueError(
+                "server.auth.allowed_groups must be non-empty when instance_url is "
+                "gitlab.com: an authenticated gitlab.com user is anyone on the internet."
+            )
 
     if config.server.auth.membership_cache_ttl_seconds <= 0:
         raise ValueError(
@@ -1792,6 +1870,7 @@ def load_config(config_path: str | None = None) -> DistilleryConfig:
     auto_link_raw = raw.get("auto_link", {}) or {}
     link_suggestion_raw = raw.get("link_suggestion", {}) or {}
     tags_raw = raw.get("tags", {}) or {}
+    relations_raw = raw.get("relations", {}) or {}
     feeds_raw = raw.get("feeds", {}) or {}
     rate_limit_raw = raw.get("rate_limit", {}) or {}
     server_raw = raw.get("server", {})
@@ -1807,6 +1886,7 @@ def load_config(config_path: str | None = None) -> DistilleryConfig:
         auto_link=_parse_auto_link(auto_link_raw),
         link_suggestion=_parse_link_suggestion(link_suggestion_raw),
         tags=_parse_tags(tags_raw),
+        relations=_parse_relations(relations_raw),
         feeds=_parse_feeds(feeds_raw),
         rate_limit=_parse_rate_limit(rate_limit_raw),
         server=_parse_server(server_raw),

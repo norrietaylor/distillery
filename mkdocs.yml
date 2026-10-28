@@ -32,6 +32,7 @@ theme:
 
 exclude_docs: |
   specs/
+  adr/
 
 plugins:
   - search
@@ -76,6 +77,7 @@ nav:
     - /classify: skills/classify.md
     - /watch: skills/watch.md
     - /radar: skills/radar.md
+    - /compass: skills/compass.md
     - /tune: skills/tune.md
     - /setup: skills/setup.md
     - /digest: skills/digest.md
@@ -88,6 +90,7 @@ nav:
   - Team Access:
     - Team Member Guide: team/team-setup.md
     - Operator Deployment: team/deployment.md
+    - GitLab Authentication: team/gitlab-auth.md
   - Architecture: architecture.md
   - Benchmarks: benchmarks.md
   - Contributing: contributing.md

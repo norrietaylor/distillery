@@ -14,8 +14,11 @@ from distillery.graph.builders import build_relations_graph  # noqa: E402
 from distillery.graph.metrics import (  # noqa: E402
     bridges,
     communities,
+    connected_component_count,
     constraint,
+    largest_component_fraction,
     link_prediction,
+    mean_degree,
     orphan_rate,
 )
 
@@ -142,3 +145,67 @@ def test_orphan_rate_clamps_when_nodes_exceed_total() -> None:
     """graph_node_count > total_entries (archived-but-linked nodes) clamps to
     0.0 instead of going negative (issue #635 review)."""
     assert orphan_rate(graph_node_count=2, total_entries=1) == 0.0
+
+
+def _two_components() -> list[dict[str, str]]:
+    """Two disjoint edges: {A,B} and {X,Y} — two components, four nodes."""
+    return [
+        {"from_id": "A", "to_id": "B", "relation_type": "link"},
+        {"from_id": "X", "to_id": "Y", "relation_type": "link"},
+    ]
+
+
+def _triangle() -> list[dict[str, str]]:
+    """Triangle A-B-C: 3 undirected edges over 3 nodes."""
+    return [
+        {"from_id": "A", "to_id": "B", "relation_type": "link"},
+        {"from_id": "B", "to_id": "C", "relation_type": "link"},
+        {"from_id": "C", "to_id": "A", "relation_type": "link"},
+    ]
+
+
+def test_mean_degree_empty_graph() -> None:
+    assert mean_degree(build_relations_graph([], directed=True)) == 0.0
+
+
+def test_mean_degree_triangle() -> None:
+    """3 undirected edges over 3 nodes -> 2·3/3 = 2.0."""
+    assert mean_degree(build_relations_graph(_triangle(), directed=True)) == 2.0
+
+
+def test_mean_degree_collapses_reciprocal_edges() -> None:
+    """A->B and B->A collapse to one undirected edge: 2·1/2 = 1.0."""
+    rels = [
+        {"from_id": "A", "to_id": "B", "relation_type": "link"},
+        {"from_id": "B", "to_id": "A", "relation_type": "related"},
+    ]
+    assert mean_degree(build_relations_graph(rels, directed=True)) == 1.0
+
+
+def test_connected_component_count_empty_graph() -> None:
+    assert connected_component_count(build_relations_graph([], directed=True)) == 0
+
+
+def test_connected_component_count_single() -> None:
+    g = build_relations_graph(_shared_neighbors(), directed=True)
+    assert connected_component_count(g) == 1
+
+
+def test_connected_component_count_multiple() -> None:
+    g = build_relations_graph(_two_components(), directed=True)
+    assert connected_component_count(g) == 2
+
+
+def test_largest_component_fraction_empty_graph() -> None:
+    assert largest_component_fraction(build_relations_graph([], directed=True)) == 0.0
+
+
+def test_largest_component_fraction_single_component() -> None:
+    g = build_relations_graph(_shared_neighbors(), directed=True)
+    assert largest_component_fraction(g) == 1.0
+
+
+def test_largest_component_fraction_two_equal_components() -> None:
+    """Two disjoint edges -> largest component is 2 of 4 nodes -> 0.5."""
+    g = build_relations_graph(_two_components(), directed=True)
+    assert largest_component_fraction(g) == 0.5

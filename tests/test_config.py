@@ -749,6 +749,34 @@ class TestTagsConfig:
             load_config(str(p))
 
 
+class TestRelationsConfig:
+    def test_enforce_schema_defaults_false(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
+        cfg = load_config()
+        assert cfg.relations.enforce_schema is False
+
+    def test_enforce_schema_parsed_true(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            relations:
+              enforce_schema: true
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        cfg = load_config(str(p))
+        assert cfg.relations.enforce_schema is True
+
+    def test_enforce_schema_invalid_type_raises(self, tmp_path: Path) -> None:
+        yaml_content = """\
+            relations:
+              enforce_schema: "yes"
+        """
+        p = write_yaml(tmp_path, yaml_content)
+        with pytest.raises(ValueError, match="enforce_schema"):
+            load_config(str(p))
+
+
 # ---------------------------------------------------------------------------
 # FeedsConfig: dataclass defaults and loading
 # ---------------------------------------------------------------------------
@@ -1390,12 +1418,12 @@ class TestWebhookConfigParsing:
 class TestAutoLinkConfig:
     """Semantic auto-link config parsing / defaults / validation (issue #629)."""
 
-    def test_defaults_enabled(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """No config file → auto-link is on by default, with default threshold and cap."""
+    def test_defaults_disabled(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """No config file → auto-link is off by default, with default threshold and cap."""
         monkeypatch.chdir(tmp_path)
         monkeypatch.delenv(CONFIG_ENV_VAR, raising=False)
         cfg = load_config()
-        assert cfg.auto_link.enabled is True
+        assert cfg.auto_link.enabled is False
         assert cfg.auto_link.threshold == pytest.approx(0.85)
         assert cfg.auto_link.max_links == 5
 
