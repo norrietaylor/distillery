@@ -128,6 +128,22 @@ async def test_promote_entities_collapses_aliases(store) -> None:  # type: ignor
         assert related[0]["to_id"] == nodes[0].id
 
 
+async def test_promote_entities_reuses_node_created_before_alias(store) -> None:  # type: ignore[no-untyped-def]
+    """A node promoted before an alias existed is reused, not duplicated (#653)."""
+    for i in range(3):
+        await _store_entry(store, content=f"alias {i}", tags=["entity/cloudflare-sandboxes"])
+    first = await store.promote_entities(threshold=3)
+    assert first["entities_created"] == 1
+
+    aliases = {"entity/cloudflare-sandboxes": "entity/cloudflare"}
+    second = await store.promote_entities(threshold=3, aliases=aliases)
+
+    assert second["entities_created"] == 0
+    assert second["entities_reused"] == 1
+    nodes = await store.list_entries({"entry_type": EntryType.ENTITY.value}, limit=10, offset=0)
+    assert len(nodes) == 1
+
+
 async def test_canonicalize_existing_tags_rewrites_and_dedupes(store) -> None:  # type: ignore[no-untyped-def]
     """Backfill rewrites aliased tags and dedupes within an entry (#653)."""
     a = await _store_entry(store, content="frag", tags=["domain/sandbox", "tech/duckdb"])
@@ -196,7 +212,7 @@ async def test_promote_entities_missing_embedding_does_not_raise(store) -> None:
 
     # Must not raise KeyError.
     result = await store._run_sync(
-        store._sync_promote_entities_write, canonical_members, empty_embeddings
+        store._sync_promote_entities_write, canonical_members, empty_embeddings, {}
     )
 
     # The canonical was skipped — no entity node created in this pass.

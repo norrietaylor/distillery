@@ -4787,7 +4787,8 @@ class DuckDBStore:
         Returns ``(canonical_members, existing_nodes)`` where
         ``canonical_members`` maps each qualifying canonical tag to the sorted
         list of entry IDs carrying it, and ``existing_nodes`` maps a canonical
-        ``source_tag`` to the id of an already-stored entity node.
+        tag to the id of an already-stored entity node whose ``source_tag``
+        canonicalizes to it.
 
         Tags are resolved through the controlled-vocabulary *aliases* map before
         the separator-collapse, so an aliased variant promotes to the same node
@@ -4831,7 +4832,16 @@ class DuckDBStore:
                 continue
             source_tag = meta.get("source_tag")
             if isinstance(source_tag, str) and source_tag:
-                existing_nodes[source_tag] = node_id
+                # Key by the canonical form so a node promoted before an alias
+                # existed is reused; an exact source_tag match still wins.
+                canonical = canonicalize_tag(
+                    source_tag,
+                    aliases=aliases,
+                    reserved_prefixes=reserved_prefixes,
+                    normalize_namespaces=True,
+                )
+                if canonical == source_tag or canonical not in existing_nodes:
+                    existing_nodes[canonical] = node_id
 
         return canonical_members, existing_nodes
 
@@ -4839,11 +4849,14 @@ class DuckDBStore:
         self,
         canonical_members: dict[str, list[str]],
         embeddings: dict[str, list[float]],
+        existing_nodes: dict[str, str],
     ) -> dict[str, int]:
         """Write pass: find-or-create entity nodes and ``mentions`` edges.
 
         Re-checks node existence inside the transaction so a node created
         concurrently (or on a prior run) is reused rather than duplicated.
+        Falls back to the plan's *existing_nodes* for nodes stored under a
+        pre-alias ``source_tag``.
         """
         assert self._conn is not None
         conn = self._conn
@@ -4860,6 +4873,11 @@ class DuckDBStore:
                     "AND json_extract_string(metadata, '$.source_tag') = ?",
                     [canonical],
                 ).fetchone()
+                if existing is None and canonical in existing_nodes:
+                    existing = conn.execute(
+                        "SELECT id FROM entries WHERE entry_type = 'entity' AND id = ?",
+                        [existing_nodes[canonical]],
+                    ).fetchone()
                 if existing is not None:
                     node_id = str(existing[0])
                     entities_reused += 1
@@ -4964,7 +4982,7 @@ class DuckDBStore:
             name = self._canonical_name_from_tag(canonical)
             embeddings[canonical] = await asyncio.to_thread(self._embedding_provider.embed, name)
         return await self._run_sync(
-            self._sync_promote_entities_write, canonical_members, embeddings
+            self._sync_promote_entities_write, canonical_members, embeddings, existing_nodes
         )
 
     def _sync_canonicalize_existing_tags(
