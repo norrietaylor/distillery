@@ -229,8 +229,10 @@ class TestReadAfterWriteFailure:
         # exception escapes, restoring the connection for subsequent reads.
         original_sync_store = store._sync_store  # type: ignore[attr-defined]
 
-        def failing_sync_store(entry: object, embedding: object) -> str:
-            original_sync_store(entry, embedding)  # do the write, then raise
+        def failing_sync_store(
+            entry: object, embedding: object, *, rebuild_index: bool = True
+        ) -> str:
+            original_sync_store(entry, embedding, rebuild_index=rebuild_index)
             raise RuntimeError("simulated post-write failure")
 
         store._sync_store = failing_sync_store  # type: ignore[attr-defined,method-assign]

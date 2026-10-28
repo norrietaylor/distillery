@@ -1,6 +1,6 @@
 # Skills Overview
 
-Distillery provides 14 Claude Code slash commands organized into five categories: knowledge capture, knowledge retrieval, ambient intelligence, team skills, and onboarding.
+Distillery provides 15 Claude Code slash commands organized into five categories: knowledge capture, knowledge retrieval, ambient intelligence, team skills, and onboarding.
 
 ## Knowledge Capture
 
@@ -16,6 +16,7 @@ Distillery provides 14 Claude Code slash commands organized into five categories
 |-------|---------|
 | [`/recall`](recall.md) | Semantic search over the knowledge base |
 | [`/pour`](pour.md) | Multi-entry synthesis with citations and gap analysis |
+| [`/compass`](compass.md) | Contrast internal knowledge against ambient signal; emit a directional assessment |
 | [`/classify`](classify.md) | Classify entries by type and triage the review queue |
 
 ## Ambient Intelligence

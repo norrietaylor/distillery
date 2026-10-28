@@ -1,0 +1,24 @@
+version: 2
+updates:
+  # Minor/patch bumps are grouped into one weekly PR that
+  # dependabot-auto-merge.yml approves and merges once required checks pass.
+  # Majors stay as individual PRs for human review.
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: [dependencies]
+    groups:
+      minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: [dependencies]
+    groups:
+      minor-patch:
+        update-types: [minor, patch]

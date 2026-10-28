@@ -47,6 +47,7 @@
 - [x] `/radar` — interest-driven feed digest with AI source suggestions
 - [x] `/watch` — add/remove/list monitored feed sources
 - [x] `/tune` — adjust relevance thresholds and trust weights
+- [x] `/compass` — contrast internal knowledge against ambient intelligence; emit a directional assessment (ahead / exposed / decide / confirm)
 - [x] Feed polling architecture — `FeedPoller` with configurable intervals
 - [x] Source adapters — GitHub events (REST API) and RSS/Atom
 - [x] Relevance scoring pipeline — embedding-based cosine similarity
@@ -68,7 +69,7 @@
 ### Entry Relations & Corrections
 - [x] `entry_relations` table with backfill migration
 - [x] `distillery_correct` tool for structured corrections
-- [x] `distillery_relations` tool for managing entry links
+- [x] `distillery_relations` tool for managing entry links, graph traversal, and structural metrics (bridges, communities, constraint, link prediction, orphans)
 
 ### New Entry Fields
 - [x] `expires_at` — time-limited entries with UTC normalization

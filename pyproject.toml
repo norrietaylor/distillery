@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "distillery-mcp"
-version = "0.6.2"
+version = "0.7.0"
 description = "Persistent shared memory for Claude Code — MCP server with DuckDB vector search, semantic dedup, and ambient intelligence for team knowledge"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -37,7 +37,7 @@ dependencies = [
     "duckdb~=1.5.0",
     "pyyaml>=6.0,<7.0",
     "httpx>=0.24.0,<1.0",
-    "fastmcp>=2.12.0,<4.0",
+    "fastmcp>=2.12.0,<5.0",
     "defusedxml>=0.7.0,<1.0",
     # Transitive via fastmcp/starlette; pin floor for GHSA-pp6c-gr5w-3c5g
     # and GHSA-5rvq-cxj2-64vf (fixed in 0.0.30).
@@ -74,7 +74,7 @@ fastembed = [
     # Pinned exactly for benchmark reproducibility — anyone reruns the bench
     # offline and gets byte-identical embeddings.  Bump only with a SHA panel
     # update in bench/results/.
-    "fastembed==0.8.0",
+    "fastembed==0.9.0",
 ]
 # Observability. Optional: the server runs unchanged without it, and even
 # when installed it stays dark until LOGFIRE_TOKEN / OTEL_EXPORTER_OTLP_ENDPOINT
@@ -84,7 +84,7 @@ otel = [
     # Upper-bounded: the secret-scrubbing defaults and the env-driven OTLP
     # export behaviour observability.py relies on are logfire internals that
     # can shift across majors, so a major bump is a deliberate, reviewed change.
-    "logfire[asgi,httpx,system-metrics]>=2.0,<5",
+    "logfire[asgi,httpx,system-metrics]>=2.0,<6",
     "opentelemetry-exporter-otlp>=1.20,<2",
 ]
 
