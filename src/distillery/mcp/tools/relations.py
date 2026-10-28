@@ -620,13 +620,11 @@ async def _handle_relations(
         if not isinstance(retire_id_raw, str) or not retire_id_raw.strip():
             return error_response("INVALID_PARAMS", "relation_id is required for action='retire'")
         retire_id = retire_id_raw.strip()
-        invalid_at_raw = arguments.get("invalid_at")
-        if invalid_at_raw is not None and not isinstance(invalid_at_raw, str):
-            return error_response("INVALID_PARAMS", "invalid_at must be an ISO 8601 string")
+        retire_invalid_at, err = _validate_optional_timestamp(arguments, "invalid_at")
+        if err is not None:
+            return err
         try:
-            retired = await store.retire_relation(retire_id, invalid_at_raw)
-        except ValueError as exc:
-            return error_response("INVALID_PARAMS", f"Cannot retire relation: {exc}")
+            retired = await store.retire_relation(retire_id, retire_invalid_at)
         except Exception:  # noqa: BLE001
             logger.exception("distillery_relations retire: unexpected error")
             return error_response("INTERNAL", "Failed to retire relation")

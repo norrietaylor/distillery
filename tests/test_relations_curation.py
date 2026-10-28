@@ -147,3 +147,21 @@ async def test_mcp_retire_requires_relation_id(store) -> None:  # type: ignore[n
     data = json.loads((await _handle_relations(store, {"action": "retire"}))[0].text)
     assert data["error"] is True
     assert data["code"] == "INVALID_PARAMS"
+
+
+async def test_mcp_retire_rejects_malformed_invalid_at(store) -> None:  # type: ignore[no-untyped-def]
+    from distillery.mcp.tools.relations import _handle_relations
+
+    a = await _store_entry(store, content="a")
+    b = await _store_entry(store, content="b")
+    rid = await _edge(store, a, b)
+
+    data = json.loads(
+        (
+            await _handle_relations(
+                store, {"action": "retire", "relation_id": rid, "invalid_at": "not-a-date"}
+            )
+        )[0].text
+    )
+    assert data["code"] == "INVALID_PARAMS"
+    assert data["message"] == "invalid_at must be a valid ISO 8601 timestamp, got: 'not-a-date'"
