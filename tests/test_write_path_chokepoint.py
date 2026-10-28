@@ -62,6 +62,16 @@ async def test_update_canonicalizes_and_returns_canonical(store) -> None:  # typ
     assert set((await store.get(e.id)).tags) == {"domain/build/sandboxing", "tech/duckdb"}
 
 
+async def test_apply_correction_canonicalizes(store) -> None:  # type: ignore[no-untyped-def]
+    store._tag_aliases = _ALIASES
+    original_id = await store.store(make_entry(content="wrong", tags=["tech/duckdb"]))
+    new_id = await store.apply_correction(
+        make_entry(content="right", tags=["domain/sandbox"]), original_id
+    )
+
+    assert (await store.get(new_id)).tags == ["domain/build/sandboxing"]
+
+
 async def test_inert_by_default_preserves_tags(store) -> None:  # type: ignore[no-untyped-def]
     """With no alias map and no namespace normalization, tags are stored verbatim."""
     e = make_entry(content="x", tags=["domain/sandbox", "tech/duckdb"])

@@ -381,6 +381,29 @@ class TestStoreGaps:
         assert data["error"] is True
         assert data["code"] == "INVALID_PARAMS"
 
+    async def test_store_rejects_tag_aliased_into_reserved_prefix(
+        self, store: DuckDBStore
+    ) -> None:
+        """An alias cannot smuggle a tag into a reserved namespace (#653)."""
+        cfg = DistilleryConfig(
+            storage=StorageConfig(database_path=":memory:"),
+        )
+        cfg.tags.reserved_prefixes = ["system"]
+        cfg.tags.aliases = {"topic/release": "system/release"}
+        response = await _handle_store(
+            store,
+            {
+                "content": "test",
+                "entry_type": "inbox",
+                "author": "bob",
+                "tags": ["topic/release"],
+            },
+            cfg=cfg,
+        )
+        data = parse_mcp_response(response)
+        assert data["error"] is True
+        assert data["code"] == "INVALID_PARAMS"
+
     async def test_store_non_string_tag_in_reserved_check(self, store: DuckDBStore) -> None:
         """Non-string tag triggers INVALID_PARAMS during reserved prefix check."""
         cfg = DistilleryConfig(

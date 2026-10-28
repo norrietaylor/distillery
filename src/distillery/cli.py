@@ -1393,6 +1393,8 @@ def _cmd_import(
                 conn.execute("DELETE FROM entries")
                 conn.execute("DELETE FROM feed_sources")
 
+            # Restore writes bypass the store, so tags are kept exactly as
+            # exported (no alias canonicalization) and round trips stay equal.
             for entry, embedding in staged_rows:
                 conn.execute(
                     "INSERT INTO entries "

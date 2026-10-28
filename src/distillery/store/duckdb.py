@@ -4431,7 +4431,7 @@ class DuckDBStore:
                     new_entry.source.value,
                     new_entry.author,
                     new_entry.project,
-                    list(new_entry.tags),
+                    self._canonicalize_entry_tags(new_entry.tags),
                     new_entry.status.value,
                     new_entry.verification.value,
                     json.dumps(new_entry.metadata),
