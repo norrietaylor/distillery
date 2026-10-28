@@ -18,6 +18,7 @@ from distillery.mcp.tools._common import (
     error_response,
     success_response,
 )
+from distillery.relations.schema import VALID_RELATION_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -53,20 +54,9 @@ _VALID_SCOPES = {"global", "ego"}
 
 _VALID_DIRECTIONS = {"outgoing", "incoming", "both"}
 
-_VALID_RELATION_TYPES = {
-    "link",
-    "corrects",
-    "supersedes",
-    "related",
-    "blocks",
-    "depends_on",
-    "citation",
-    "duplicate",
-    "merge_source",
-    "sync_source",
-    "mentions",
-    "chunk",
-}
+# Single source of truth in relations.schema (issue #653 de-duplicated the copy
+# that used to be maintained here in parallel with store/duckdb.py).
+_VALID_RELATION_TYPES = VALID_RELATION_TYPES
 
 
 async def _handle_relations(
@@ -109,12 +99,16 @@ async def _handle_relations(
         "suggest_links",
         "promote_entities",
         "canonicalize_tags",
+        "audit_schema",
+        "retire",
+        "revalidate",
     ):
         return error_response(
             "INVALID_PARAMS",
             "action must be one of 'add', 'get', 'remove', 'traverse', 'metrics', "
             "'reconcile', 'list_candidates', 'resolve_candidate', 'suggest_links', "
-            f"'promote_entities', 'canonicalize_tags'; got: {action!r}",
+            "'promote_entities', 'canonicalize_tags', 'audit_schema', 'retire', "
+            f"'revalidate'; got: {action!r}",
         )
 
     # ------------------------------------------------------------------
@@ -237,9 +231,14 @@ async def _handle_relations(
                 )
             get_relation_type = get_relation_type_raw.strip() or None
 
+        include_retired = bool(arguments.get("include_retired", False))
+
         try:
             relations = await store.get_related(
-                entry_id, direction=direction, relation_type=get_relation_type
+                entry_id,
+                direction=direction,
+                relation_type=get_relation_type,
+                include_retired=include_retired,
             )
         except Exception:  # noqa: BLE001
             logger.exception("distillery_relations get: unexpected error")
@@ -250,6 +249,7 @@ async def _handle_relations(
                 "entry_id": entry_id,
                 "direction": direction,
                 "relation_type": get_relation_type,
+                "include_retired": include_retired,
                 "relations": relations,
                 "count": len(relations),
             }
@@ -638,6 +638,66 @@ async def _handle_relations(
                 "entries_rewritten": counts.get("entries_rewritten", 0),
                 "tags_collapsed": counts.get("tags_collapsed", 0),
             }
+        )
+
+    # ------------------------------------------------------------------
+    # action == "audit_schema"
+    # ------------------------------------------------------------------
+    if action == "audit_schema":
+        try:
+            violations = await store.audit_relation_schema()
+        except Exception:  # noqa: BLE001
+            logger.exception("distillery_relations audit_schema: unexpected error")
+            return error_response("INTERNAL", "Failed to audit relation schema")
+
+        return success_response(
+            {
+                "action": "audit_schema",
+                "violations": violations,
+                "count": len(violations),
+                "clean": len(violations) == 0,
+            }
+        )
+
+    # ------------------------------------------------------------------
+    # action == "retire" (soft-retire an edge via invalid_at)
+    # ------------------------------------------------------------------
+    if action == "retire":
+        retire_id_raw = arguments.get("relation_id")
+        if not isinstance(retire_id_raw, str) or not retire_id_raw.strip():
+            return error_response("INVALID_PARAMS", "relation_id is required for action='retire'")
+        retire_id = retire_id_raw.strip()
+        retire_invalid_at, err = _validate_optional_timestamp(arguments, "invalid_at")
+        if err is not None:
+            return err
+        try:
+            retired = await store.retire_relation(retire_id, retire_invalid_at)
+        except Exception:  # noqa: BLE001
+            logger.exception("distillery_relations retire: unexpected error")
+            return error_response("INTERNAL", "Failed to retire relation")
+
+        return success_response(
+            {"action": "retire", "relation_id": retire_id, "retired": retired}
+        )
+
+    # ------------------------------------------------------------------
+    # action == "revalidate" (clear invalid_at so an edge is live again)
+    # ------------------------------------------------------------------
+    if action == "revalidate":
+        reval_id_raw = arguments.get("relation_id")
+        if not isinstance(reval_id_raw, str) or not reval_id_raw.strip():
+            return error_response(
+                "INVALID_PARAMS", "relation_id is required for action='revalidate'"
+            )
+        reval_id = reval_id_raw.strip()
+        try:
+            revalidated = await store.revalidate_relation(reval_id)
+        except Exception:  # noqa: BLE001
+            logger.exception("distillery_relations revalidate: unexpected error")
+            return error_response("INTERNAL", "Failed to revalidate relation")
+
+        return success_response(
+            {"action": "revalidate", "relation_id": reval_id, "revalidated": revalidated}
         )
 
     # ------------------------------------------------------------------

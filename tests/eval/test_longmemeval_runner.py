@@ -275,20 +275,16 @@ async def test_granularity_turn_yields_more_entries_than_session() -> None:
 async def test_recency_off_vs_on_changes_ordering() -> None:
     """The recency toggle changes the ordering for a date-sensitive case.
 
-    Hand-craft a question with two haystack sessions that have **near
-    identical lexical relevance** to the query but very different
-    dates:
+    Hand-craft a question with two haystack sessions with very
+    different dates:
 
-    * ``recent_session`` — same keyword content, dated *today*.
-    * ``old_session`` — same keyword content, dated *3 years ago*.
+    * ``old_session`` — the stronger match, dated *3 years ago*.
+    * ``recent_session`` — a weaker match, dated *today*.
 
-    With ``recency=on`` the older session should be down-weighted via
-    the linear decay; the recent session should rank above it.  With
-    ``recency=off`` (``recency_min_weight=1.0``) the multiplier is
-    neutralised and the two should tie — the order then depends on
-    DuckDB's stable-but-unspecified tie-break.  We assert that at
-    minimum the two orderings differ, *or* that the recent session
-    wins under ``on`` and either is acceptable under ``off``.
+    With ``recency=off`` (``recency_min_weight=1.0``) the multiplier is
+    neutralised and the stronger old session ranks first.  With
+    ``recency=on`` its score is halved by the decay and the recent
+    session overtakes it.
     """
     today = datetime.now(tz=UTC)
     long_ago = today - timedelta(days=1100)  # ~3 years; far past 90-day window
@@ -306,9 +302,13 @@ async def test_recency_off_vs_on_changes_ordering() -> None:
         "answer_session_ids": ["recent_session", "old_session"],
         "haystack_session_ids": ["old_session", "recent_session"],
         "haystack_dates": [_fmt(long_ago), _fmt(today)],
+        # The old session is the stronger match in both BM25 and vector
+        # rank, so ``off`` deterministically ranks it first; identical text
+        # would tie and leave the order to set iteration.  The 0.5 decay
+        # under ``on`` is enough to flip it.
         "haystack_sessions": [
             [{"role": "user", "content": "I am moving to Lisbon next month."}],
-            [{"role": "user", "content": "I am moving to Lisbon next month."}],
+            [{"role": "user", "content": "I might relocate to Portugal, maybe Lisbon."}],
         ],
     }
 
@@ -340,9 +340,9 @@ async def test_recency_off_vs_on_changes_ordering() -> None:
     assert on_order[0] == "recent_session", (
         f"recency=on should rank the recent session first when relevance is tied; got {on_order}"
     )
-    # And ``recency=off`` must yield a *different* top-1, *or* a
-    # different overall ordering — otherwise the toggle was a no-op.
-    assert off_order != on_order or off_order[0] == "old_session", (
+    # And ``recency=off`` must rank the stronger old session first —
+    # otherwise the toggle was a no-op.
+    assert off_order[0] == "old_session", (
         f"Recency toggle had no effect: on={on_order} off={off_order}. "
         f"Either the multiplier is not propagating or the test data "
         f"isn't date-sensitive enough."
