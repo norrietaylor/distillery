@@ -170,6 +170,11 @@ async def test_promote_entities_merges_duplicate_alias_node(store) -> None:  # t
     for entry_id in alias_ids + canon_ids:
         related = await store.get_related(entry_id, relation_type="mentions")
         assert [r["to_id"] for r in related] == [nodes[0].id]
+    archived = await store.list_entries(
+        {"entry_type": EntryType.ENTITY.value, "status": "archived"}, limit=10, offset=0
+    )
+    assert len(archived) == 1
+    assert await store.get_related(archived[0].id, relation_type="mentions") == []
 
 
 async def test_canonicalize_existing_tags_verifies_touched_rows(store) -> None:  # type: ignore[no-untyped-def]

@@ -5023,6 +5023,7 @@ class DuckDBStore:
             conn.execute("BEGIN TRANSACTION")
             for canonical in sorted(canonical_members):
                 member_ids = canonical_members[canonical]
+                merged: set[str] = set()
                 # Find-or-create the entity node keyed on the canonical tag.
                 existing = conn.execute(
                     "SELECT id FROM entries WHERE entry_type = 'entity' "
@@ -5050,6 +5051,7 @@ class DuckDBStore:
                         conn.execute(
                             "UPDATE entries SET status = 'archived' WHERE id = ?", [dup_id]
                         )
+                        merged.add(dup_id)
                         entities_merged += 1
                 else:
                     name = self._canonical_name_from_tag(canonical)
@@ -5098,9 +5100,10 @@ class DuckDBStore:
                     node_id = node.id
                     entities_created += 1
 
-                # Link every entry carrying the canonical tag to the node.
+                # Link every entry carrying the canonical tag to the node. A
+                # merged duplicate carries the variant tag too, so skip it.
                 for from_id in member_ids:
-                    if from_id == node_id:
+                    if from_id == node_id or from_id in merged:
                         continue
                     inserted = conn.execute(
                         "INSERT OR IGNORE INTO entry_relations "
