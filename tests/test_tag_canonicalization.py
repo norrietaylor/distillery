@@ -66,6 +66,31 @@ def test_idempotent_with_flattened_map() -> None:
     assert once == twice == "domain/build/sandboxing"
 
 
+def test_alias_hop_after_namespace_normalize() -> None:
+    """An alias target that normalizes into another alias key is followed to
+    the end, so one call reaches the fixed point."""
+    aliases = {
+        "project/sbx": "entity/cloudflare/workers",
+        "entity/cloudflare-workers": "entity/cloudflare",
+    }
+
+    def canon(tag: str) -> str:
+        return canonicalize_tag(
+            tag, aliases=aliases, reserved_prefixes=["entity"], normalize_namespaces=True
+        )
+
+    assert canon("project/sbx") == "entity/cloudflare"
+    assert canon(canon("project/sbx")) == "entity/cloudflare"
+
+
+def test_alias_cycle_after_namespace_normalize_terminates() -> None:
+    aliases = {"entity/a/b": "entity/c", "entity/c": "entity/a/b"}
+    result = canonicalize_tag(
+        "entity/a/b", aliases=aliases, reserved_prefixes=["entity"], normalize_namespaces=True
+    )
+    assert result in {"entity/a-b", "entity/c", "entity/a/b"}
+
+
 def test_canonicalize_tags_dedupes_preserving_order() -> None:
     """Aliasing two tags onto one canonical form collapses to a single tag,
     keeping first-seen order."""
