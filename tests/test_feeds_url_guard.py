@@ -241,12 +241,18 @@ class TestFetchFeedBytes:
 
 
 class TestPinDnsConcurrency:
-    def test_overlapping_pins_do_not_leak(self) -> None:
+    def test_overlapping_pins_do_not_leak(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Interleaved enter/exit across threads leaves no pin behind (#709).
 
         Order: A enters, B enters, A exits, B exits — the sequence that used to
         leave A's stub installed on ``socket.getaddrinfo`` for good.
         """
+
+        # Unpinned lookups fail instantly instead of waiting on real DNS.
+        def _nxdomain(host: object, port: object, *args: object, **kwargs: object) -> object:
+            raise socket.gaierror(socket.EAI_NONAME, "Name or service not known")
+
+        monkeypatch.setattr("distillery.feeds.url_guard._real_getaddrinfo", _nxdomain)
         a_in, b_in, a_out = threading.Event(), threading.Event(), threading.Event()
         seen: dict[str, object] = {}
 
