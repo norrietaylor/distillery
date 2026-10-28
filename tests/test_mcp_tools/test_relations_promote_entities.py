@@ -69,6 +69,7 @@ async def test_promote_entities_happy_path(store) -> None:  # type: ignore[no-un
     assert data["action"] == "promote_entities"
     assert data["entities_created"] == 1
     assert data["entities_reused"] == 0
+    assert data["entities_merged"] == 0
     assert data["mentions_created"] == 2
     assert data["threshold"] == 2
 

@@ -32,7 +32,7 @@ from urllib.parse import unquote, urlparse
 import duckdb
 
 from distillery import observability
-from distillery.feeds.tags import normalize_tag
+from distillery.feeds.tags import canonicalize_tag, canonicalize_tags
 from distillery.models import Entry, EntrySource, EntryStatus, EntryType, validate_metadata
 from distillery.observability import span
 from distillery.relations.schema import (
@@ -676,10 +676,10 @@ class DuckDBStore:
 
         1. ``CHECKPOINT`` to flush the WAL and force re-encoding of the touched
            row groups into the main database file.
-        2. Materialise the touched columns (``id``, ``content``, ``metadata``,
-           ``embedding``) for the affected ids, calling ``fetchall()`` so DuckDB
-           actually scans the data pages rather than returning catalog
-           statistics.  ``embedding`` (FLOAT[1024]) is a corruption target named
+        2. Materialise the touched columns (``id``, ``content``, ``tags``,
+           ``metadata``, ``embedding``) for the affected ids, calling
+           ``fetchall()`` so DuckDB actually scans the data pages rather than
+           returning catalog statistics.  ``embedding`` (FLOAT[1024]) is a corruption target named
            in issue #584, so it must be read back too — a torn rewrite isolated
            to the embedding column would otherwise go undetected.
         3. Run ``PRAGMA storage_info('entries')`` as a bounded integrity sweep
@@ -707,7 +707,7 @@ class DuckDBStore:
                 # pages (a corrupt dictionary/raw page errors or SIGSEGVs here,
                 # whereas COUNT(*) would silently succeed).
                 conn.execute(
-                    "SELECT id, content, metadata, embedding FROM entries WHERE id = ANY(?)",
+                    "SELECT id, content, tags, metadata, embedding FROM entries WHERE id = ANY(?)",
                     [ids],
                 ).fetchall()
             # Bounded integrity sweep over the storage metadata of the table.
@@ -4922,13 +4922,21 @@ class DuckDBStore:
         self,
         threshold: int,
         reserved_prefixes: list[str],
-    ) -> tuple[dict[str, list[str]], dict[str, str]]:
+        aliases: dict[str, str],
+    ) -> tuple[dict[str, list[str]], dict[str, str], dict[str, list[str]]]:
         """Read-only first pass: compute the promotion plan.
 
-        Returns ``(canonical_members, existing_nodes)`` where
+        Returns ``(canonical_members, existing_nodes, duplicate_nodes)`` where
         ``canonical_members`` maps each qualifying canonical tag to the sorted
         list of entry IDs carrying it, and ``existing_nodes`` maps a canonical
-        ``source_tag`` to the id of an already-stored entity node.
+        tag to the id of an already-stored entity node whose ``source_tag``
+        canonicalizes to it, and ``duplicate_nodes`` maps a canonical tag to any
+        further nodes that canonicalize to it (variants promoted before an
+        alias merged them).
+
+        Tags are resolved through the controlled-vocabulary *aliases* map before
+        the separator-collapse, so an aliased variant promotes to the same node
+        as its canonical form (issue #653, ontology #3).
         """
         assert self._conn is not None
         rows = self._conn.execute(
@@ -4941,7 +4949,12 @@ class DuckDBStore:
             for tag in tags_col:
                 if not isinstance(tag, str):
                     continue
-                canonical = normalize_tag(tag, reserved_prefixes)
+                canonical = canonicalize_tag(
+                    tag,
+                    aliases=aliases,
+                    reserved_prefixes=reserved_prefixes,
+                    normalize_namespaces=True,
+                )
                 if not (canonical.startswith("entity/") or canonical.startswith("tech/")):
                     continue
                 members.setdefault(canonical, set()).add(entry_id)
@@ -4951,8 +4964,10 @@ class DuckDBStore:
         }
 
         existing_nodes: dict[str, str] = {}
+        duplicate_nodes: dict[str, list[str]] = {}
         node_rows = self._conn.execute(
-            "SELECT id, metadata FROM entries WHERE entry_type = 'entity'"
+            "SELECT id, metadata FROM entries "
+            "WHERE entry_type = 'entity' AND status != 'archived' ORDER BY created_at, id"
         ).fetchall()
         for node_id, metadata_raw in node_rows:
             try:
@@ -4963,38 +4978,81 @@ class DuckDBStore:
                 continue
             source_tag = meta.get("source_tag")
             if isinstance(source_tag, str) and source_tag:
-                existing_nodes[source_tag] = node_id
+                # Key by the canonical form so a node promoted before an alias
+                # existed is reused; an exact source_tag match still wins.
+                canonical = canonicalize_tag(
+                    source_tag,
+                    aliases=aliases,
+                    reserved_prefixes=reserved_prefixes,
+                    normalize_namespaces=True,
+                )
+                kept = existing_nodes.get(canonical)
+                if kept is None:
+                    existing_nodes[canonical] = node_id
+                    continue
+                if canonical == source_tag:
+                    existing_nodes[canonical] = node_id
+                    node_id = kept
+                duplicate_nodes.setdefault(canonical, []).append(node_id)
 
-        return canonical_members, existing_nodes
+        return canonical_members, existing_nodes, duplicate_nodes
 
     def _sync_promote_entities_write(
         self,
         canonical_members: dict[str, list[str]],
         embeddings: dict[str, list[float]],
+        existing_nodes: dict[str, str],
+        duplicate_nodes: dict[str, list[str]],
     ) -> dict[str, int]:
         """Write pass: find-or-create entity nodes and ``mentions`` edges.
 
         Re-checks node existence inside the transaction so a node created
         concurrently (or on a prior run) is reused rather than duplicated.
+        Falls back to the plan's *existing_nodes* for nodes stored under a
+        pre-alias ``source_tag``. Each node in *duplicate_nodes* loses its
+        ``mentions`` edges (members are re-linked to the kept node below) and is
+        archived, so other edges to it survive and the merge can be undone.
         """
         assert self._conn is not None
         conn = self._conn
         entities_created = 0
         entities_reused = 0
+        entities_merged = 0
         mentions_created = 0
         try:
             conn.execute("BEGIN TRANSACTION")
             for canonical in sorted(canonical_members):
                 member_ids = canonical_members[canonical]
+                merged: set[str] = set()
                 # Find-or-create the entity node keyed on the canonical tag.
                 existing = conn.execute(
                     "SELECT id FROM entries WHERE entry_type = 'entity' "
+                    "AND status != 'archived' "
                     "AND json_extract_string(metadata, '$.source_tag') = ?",
                     [canonical],
                 ).fetchone()
+                if existing is None and canonical in existing_nodes:
+                    existing = conn.execute(
+                        "SELECT id FROM entries "
+                        "WHERE entry_type = 'entity' AND status != 'archived' AND id = ?",
+                        [existing_nodes[canonical]],
+                    ).fetchone()
                 if existing is not None:
                     node_id = str(existing[0])
                     entities_reused += 1
+                    for dup_id in duplicate_nodes.get(canonical, []):
+                        if dup_id == node_id:
+                            continue
+                        conn.execute(
+                            "DELETE FROM entry_relations "
+                            "WHERE to_id = ? AND relation_type = 'mentions'",
+                            [dup_id],
+                        )
+                        conn.execute(
+                            "UPDATE entries SET status = 'archived' WHERE id = ?", [dup_id]
+                        )
+                        merged.add(dup_id)
+                        entities_merged += 1
                 else:
                     name = self._canonical_name_from_tag(canonical)
                     node = Entry(
@@ -5042,9 +5100,10 @@ class DuckDBStore:
                     node_id = node.id
                     entities_created += 1
 
-                # Link every entry carrying the canonical tag to the node.
+                # Link every entry carrying the canonical tag to the node. A
+                # merged duplicate carries the variant tag too, so skip it.
                 for from_id in member_ids:
-                    if from_id == node_id:
+                    if from_id == node_id or from_id in merged:
                         continue
                     inserted = conn.execute(
                         "INSERT OR IGNORE INTO entry_relations "
@@ -5067,6 +5126,7 @@ class DuckDBStore:
         return {
             "entities_created": entities_created,
             "entities_reused": entities_reused,
+            "entities_merged": entities_merged,
             "mentions_created": mentions_created,
         }
 
@@ -5074,6 +5134,7 @@ class DuckDBStore:
         self,
         threshold: int,
         reserved_prefixes: list[str] | None = None,
+        aliases: dict[str, str] | None = None,
     ) -> dict[str, int]:
         """Promote recurring ``entity/*`` and ``tech/*`` tags to entity nodes.
 
@@ -5083,8 +5144,8 @@ class DuckDBStore:
         # a promotion-target tag collapse to one canonical node regardless of
         # the configured reserved prefixes.
         prefixes = sorted({*(reserved_prefixes or []), "entity", "tech"})
-        canonical_members, existing_nodes = await self._run_sync(
-            self._sync_promote_entities_plan, threshold, prefixes
+        canonical_members, existing_nodes, duplicate_nodes = await self._run_sync(
+            self._sync_promote_entities_plan, threshold, prefixes, aliases or {}
         )
         # Embed the canonical names for nodes that don't yet exist, off the SQL
         # lock (issue #558 pattern).
@@ -5095,7 +5156,86 @@ class DuckDBStore:
             name = self._canonical_name_from_tag(canonical)
             embeddings[canonical] = await asyncio.to_thread(self._embedding_provider.embed, name)
         return await self._run_sync(
-            self._sync_promote_entities_write, canonical_members, embeddings
+            self._sync_promote_entities_write,
+            canonical_members,
+            embeddings,
+            existing_nodes,
+            duplicate_nodes,
+        )
+
+    def _sync_canonicalize_existing_tags(
+        self,
+        aliases: dict[str, str],
+        reserved_prefixes: list[str],
+        normalize_namespaces: bool,
+    ) -> dict[str, int]:
+        """Rewrite every active entry's tags through the controlled vocabulary.
+
+        Idempotent: only entries whose canonicalized tag list differs from the
+        stored one are updated, so a second run rewrites zero rows. ``updated_at``
+        is left untouched so this mechanical migration does not distort recency
+        signals, and embeddings are not recomputed (tags do not feed embeddings).
+        """
+        assert self._conn is not None
+        conn = self._conn
+        rows = conn.execute(
+            "SELECT id, tags FROM entries WHERE status != 'archived'"
+        ).fetchall()
+        updates: list[tuple[list[str], str]] = []
+        entries_scanned = 0
+        tags_collapsed = 0
+        for entry_id, tags_col in rows:
+            entries_scanned += 1
+            old_tags = [t for t in (tags_col or []) if isinstance(t, str)]
+            if not old_tags:
+                continue
+            new_tags = canonicalize_tags(
+                old_tags,
+                aliases=aliases,
+                reserved_prefixes=reserved_prefixes,
+                normalize_namespaces=normalize_namespaces,
+            )
+            if new_tags != old_tags:
+                updates.append((new_tags, entry_id))
+                tags_collapsed += len(old_tags) - len(new_tags)
+
+        if updates:
+            try:
+                conn.execute("BEGIN TRANSACTION")
+                for new_tags, entry_id in updates:
+                    conn.execute(
+                        "UPDATE entries SET tags = ? WHERE id = ?",
+                        [new_tags, entry_id],
+                    )
+                conn.execute("COMMIT")
+            except Exception:
+                with contextlib.suppress(Exception):
+                    conn.execute("ROLLBACK")
+                raise
+            self._checkpoint_after_write(conn)
+            self._sync_verify_entries_readable([entry_id for _, entry_id in updates])
+
+        return {
+            "entries_scanned": entries_scanned,
+            "entries_rewritten": len(updates),
+            "tags_collapsed": tags_collapsed,
+        }
+
+    async def canonicalize_existing_tags(
+        self,
+        aliases: dict[str, str],
+        reserved_prefixes: list[str] | None = None,
+        normalize_namespaces: bool = False,
+    ) -> dict[str, int]:
+        """Rewrite stored tags through the controlled vocabulary (issue #653).
+
+        See :meth:`distillery.store.protocol.DistilleryStore.canonicalize_existing_tags`.
+        """
+        return await self._run_sync(
+            self._sync_canonicalize_existing_tags,
+            aliases,
+            reserved_prefixes or [],
+            normalize_namespaces,
         )
 
     def _sync_get_all_related_entry_ids(self) -> set[str]:

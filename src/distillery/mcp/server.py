@@ -1379,10 +1379,10 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         PARAMS:
           - action (str, required): Operation. Valid: [add, get, remove, traverse, metrics,
             reconcile, list_candidates, resolve_candidate, suggest_links, promote_entities,
-            audit_schema, retire, revalidate]. ``retire`` soft-retires an edge (sets
-            invalid_at; pass relation_id and optional invalid_at ISO 8601 — defaults to
-            now); ``revalidate`` clears invalid_at. ``get`` accepts include_retired
-            (default false) to include soft-retired edges.
+            canonicalize_tags, audit_schema, retire, revalidate]. ``retire`` soft-retires an
+            edge (sets invalid_at; pass relation_id and optional invalid_at ISO 8601 —
+            defaults to now); ``revalidate`` clears invalid_at. ``get`` accepts
+            include_retired (default false) to include soft-retired edges.
           - from_id (str, required for add): Source entry UUID.
           - to_id (str, required for add): Target entry UUID.
           - relation_type (str, required for add, optional for get/traverse): Relation type.
@@ -1433,10 +1433,17 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
             ``orphan_rate`` = 1 - graph_node_count/total_entries (graph-health signal;
             0.0 when total_entries is 0). Or
           { action: "promote_entities", entities_created: int, entities_reused: int,
-            mentions_created: int, threshold: int } (promote_entities).
+            entities_merged: int, mentions_created: int, threshold: int }
+            (promote_entities).
             Scans ``entity/*`` and ``tech/*`` tags and promotes any canonical tag
             meeting the configured ``tags.entity_promotion_threshold`` to an ENTITY
-            entry node, linking each tagged entry with a ``mentions`` edge. Idempotent.
+            entry node, linking each tagged entry with a ``mentions`` edge. Nodes for
+            variants an alias now merges are archived (``entities_merged``). Idempotent. Or
+          { action: "canonicalize_tags", entries_scanned: int, entries_rewritten: int,
+            tags_collapsed: int } (canonicalize_tags).
+            Rewrites every non-archived entry's tags through the alias map (plus
+            namespace normalization when ``tags.enforce_namespaces`` is set); archived
+            entries are skipped. Idempotent.
         RETURNS (error): { error: true, code: "NOT_FOUND" | "INVALID_PARAMS" | "INTERNAL", message: "..." }
 
         RELATED: distillery_correct (creates 'corrects' relations automatically),
