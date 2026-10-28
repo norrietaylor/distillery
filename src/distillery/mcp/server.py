@@ -183,6 +183,9 @@ def _build_background_store_factory(
             auto_link_enabled=config.auto_link.enabled,
             auto_link_threshold=config.auto_link.threshold,
             auto_link_max_links=config.auto_link.max_links,
+            tag_aliases=config.tags.aliases,
+            tag_reserved_prefixes=config.tags.reserved_prefixes,
+            tag_normalize_namespaces=config.tags.enforce_namespaces,
             enforce_relation_schema=config.relations.enforce_schema,
         )
         await store.initialize()
@@ -236,6 +239,9 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
                 auto_link_enabled=config.auto_link.enabled,
                 auto_link_threshold=config.auto_link.threshold,
                 auto_link_max_links=config.auto_link.max_links,
+                tag_aliases=config.tags.aliases,
+                tag_reserved_prefixes=config.tags.reserved_prefixes,
+                tag_normalize_namespaces=config.tags.enforce_namespaces,
                 enforce_relation_schema=config.relations.enforce_schema,
             )
             await store.initialize()
@@ -732,7 +738,9 @@ def create_server(config: DistilleryConfig | None = None, auth: Any | None = Non
         )
         if expires_at is not _UNSET:
             args["expires_at"] = expires_at
-        result = await _handle_update(store=c["store"], arguments=args, last_modified_by=user)
+        result = await _handle_update(
+            store=c["store"], arguments=args, last_modified_by=user, cfg=c["config"]
+        )
         await _audit(c, user, "distillery_update", entry_id, "update", result)
         return result
 

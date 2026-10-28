@@ -23,6 +23,7 @@ from mcp import types
 
 from distillery.config import DistilleryConfig
 from distillery.embedding.errors import EmbeddingProviderError
+from distillery.feeds.tags import canonicalize_tag
 from distillery.mcp.tools._common import (
     error_response,
     internal_error_response,
@@ -37,6 +38,25 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Storage path helpers (duplicated here to avoid circular imports with server)
 # ---------------------------------------------------------------------------
+
+
+def _reserved_prefix(tag: str, cfg: DistilleryConfig) -> str | None:
+    """Return the reserved top-level prefix *tag* falls under, if any.
+
+    Checks the canonical form too: an alias can map an ordinary tag into a
+    reserved namespace, and the store persists the canonical form (issue #653).
+    """
+    canonical = canonicalize_tag(
+        tag,
+        aliases=cfg.tags.aliases,
+        reserved_prefixes=cfg.tags.reserved_prefixes,
+        normalize_namespaces=cfg.tags.enforce_namespaces,
+    )
+    for candidate in (tag, canonical):
+        top = candidate.split("/")[0]
+        if top in cfg.tags.reserved_prefixes:
+            return top
+    return None
 
 
 def _is_remote_db_path(path: str) -> bool:
@@ -374,8 +394,8 @@ async def _handle_store(
         tags_to_check: list[str] = tags_raw
         if entry_source_str not in _reserved_allowed_sources:
             for tag in tags_to_check:
-                top = tag.split("/")[0]
-                if top in cfg.tags.reserved_prefixes:
+                top = _reserved_prefix(tag, cfg)
+                if top is not None:
                     return error_response(
                         "INVALID_PARAMS",
                         f"Tag {tag!r} uses reserved prefix {top!r}. "
@@ -799,8 +819,8 @@ def _validate_batch_item(
         and source_str not in _reserved_allowed_sources
     ):
         for tag in final_tags:
-            top = tag.split("/")[0]
-            if top in cfg.tags.reserved_prefixes:
+            top = _reserved_prefix(tag, cfg)
+            if top is not None:
                 return None, {
                     "code": "INVALID_PARAMS",
                     "message": (
@@ -1334,6 +1354,7 @@ async def _handle_update(
     store: Any,
     arguments: dict[str, Any],
     last_modified_by: str = "",
+    cfg: DistilleryConfig | None = None,
 ) -> list[types.TextContent]:
     """Implement the ``distillery_update`` tool.
 
@@ -1341,6 +1362,7 @@ async def _handle_update(
         store: Initialised ``DuckDBStore``.
         arguments: Raw MCP tool arguments dict (must contain ``entry_id`` plus
             at least one updatable field).
+        cfg: Loaded config; enables reserved-prefix enforcement on ``tags``.
 
     Returns:
         MCP content list with the serialised updated entry or an error.
@@ -1430,6 +1452,28 @@ async def _handle_update(
     tags_err = validate_type(updates, "tags", list, "list of strings")
     if tags_err:
         return error_response("INVALID_PARAMS", tags_err)
+
+    # --- reserved prefix enforcement (match distillery_store guard) ---------
+    # The store canonicalizes update tags, so an alias could otherwise land a
+    # reserved tag. Reserved tags already on the entry stay allowed (e.g.
+    # imported ones); a retained non-reserved tag is still checked post-alias.
+    if cfg is not None and cfg.tags.reserved_prefixes and "tags" in updates:
+        current = await store.get(entry_id)
+        kept = set(current.tags) if current is not None else set()
+        for tag in updates["tags"]:
+            if not isinstance(tag, str):
+                return error_response(
+                    "INVALID_PARAMS", f"Each tag must be a string, got: {type(tag).__name__}"
+                )
+            if tag in kept and tag.split("/")[0] in cfg.tags.reserved_prefixes:
+                continue
+            top = _reserved_prefix(tag, cfg)
+            if top is not None:
+                return error_response(
+                    "INVALID_PARAMS",
+                    f"Tag {tag!r} uses reserved prefix {top!r}. "
+                    "Only internal sources may use this namespace.",
+                )
 
     metadata_err = validate_type(updates, "metadata", dict, "object")
     if metadata_err:
@@ -2191,18 +2235,20 @@ async def _handle_correct(
     tags = list(arguments["tags"]) if explicit_tags else list(original.tags)
 
     # --- reserved prefix enforcement (match distillery_store guard) ---------
-    # Only validate when the caller explicitly supplied ``tags``: inherited
-    # tags from the original entry (e.g. imported/internal sources carrying
-    # reserved-prefix tags) must not block legitimate corrections when the
-    # caller never touched the tag list.
-    if cfg is not None and cfg.tags.reserved_prefixes and explicit_tags:
+    # Inherited tags that are already reserved (e.g. from imported/internal
+    # sources) must not block a correction when the caller never touched the
+    # tag list. Inherited non-reserved tags are still checked post-alias, since
+    # apply_correction canonicalizes them.
+    if cfg is not None and cfg.tags.reserved_prefixes:
         for tag in tags:
             if not isinstance(tag, str):
                 return error_response(
                     "INVALID_PARAMS", f"Each tag must be a string, got: {type(tag).__name__}"
                 )
-            top = tag.split("/")[0]
-            if top in cfg.tags.reserved_prefixes:
+            if not explicit_tags and tag.split("/")[0] in cfg.tags.reserved_prefixes:
+                continue
+            top = _reserved_prefix(tag, cfg)
+            if top is not None:
                 return error_response(
                     "INVALID_PARAMS",
                     f"Tag {tag!r} uses reserved prefix {top!r}. "

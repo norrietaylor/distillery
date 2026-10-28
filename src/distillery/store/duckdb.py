@@ -256,6 +256,9 @@ class DuckDBStore:
         auto_link_enabled: bool = False,
         auto_link_threshold: float = 0.85,
         auto_link_max_links: int = 5,
+        tag_aliases: dict[str, str] | None = None,
+        tag_reserved_prefixes: list[str] | None = None,
+        tag_normalize_namespaces: bool = False,
         enforce_relation_schema: bool = False,
         memory_limit_mb: int | None = _DEFAULT_MEMORY_LIMIT_MB,
         threads: int | None = _DEFAULT_THREADS,
@@ -306,6 +309,12 @@ class DuckDBStore:
         self._auto_link_enabled: bool = auto_link_enabled
         self._auto_link_threshold: float = auto_link_threshold
         self._auto_link_max_links: int = auto_link_max_links
+        # Controlled-vocabulary tag canonicalization on the write path (issue
+        # #653, ontology #3). Empty alias map + normalize disabled is a no-op, so
+        # the store behaves byte-for-byte as before unless a deployment opts in.
+        self._tag_aliases: dict[str, str] = tag_aliases or {}
+        self._tag_reserved_prefixes: list[str] = tag_reserved_prefixes or []
+        self._tag_normalize_namespaces: bool = tag_normalize_namespaces
         # Typed relation-schema enforcement (issue #653, ontology #1). OFF by
         # default (warn-only) so an already-populated graph built before any
         # schema is never retroactively rejected; flip on after a clean audit.
@@ -1928,6 +1937,25 @@ class DuckDBStore:
                 inserted += 1
         return inserted
 
+    def _canonicalize_entry_tags(self, tags: list[str]) -> list[str]:
+        """Apply the configured controlled vocabulary to a tag list (issue #653).
+
+        Alias substitution, optional namespace normalization, and an
+        order-preserving dedupe — the single write-path choke-point that keeps
+        the tag vocabulary controlled for *new* writes (complementing the
+        one-time ``canonicalize_existing_tags`` backfill). Inert (returns the
+        tags unchanged) when no alias map and no namespace normalization are
+        configured, so an un-configured store writes byte-for-byte as before.
+        """
+        if not self._tag_aliases and not self._tag_normalize_namespaces:
+            return list(tags)
+        return canonicalize_tags(
+            tags,
+            aliases=self._tag_aliases,
+            reserved_prefixes=self._tag_reserved_prefixes,
+            normalize_namespaces=self._tag_normalize_namespaces,
+        )
+
     def _sync_store(
         self, entry: Entry, embedding: list[float], *, rebuild_index: bool = True
     ) -> str:
@@ -1961,7 +1989,7 @@ class DuckDBStore:
             entry.source.value,
             entry.author,
             entry.project,
-            list(entry.tags),
+            self._canonicalize_entry_tags(entry.tags),
             entry.status.value,
             entry.verification.value,
             json.dumps(entry.metadata),
@@ -2072,7 +2100,7 @@ class DuckDBStore:
                     entry.source.value,
                     entry.author,
                     entry.project,
-                    list(entry.tags),
+                    self._canonicalize_entry_tags(entry.tags),
                     entry.status.value,
                     entry.verification.value,
                     json.dumps(entry.metadata),
@@ -2281,7 +2309,7 @@ class DuckDBStore:
             elif key == "metadata" and isinstance(value, dict):
                 set_params.append(json.dumps(value))
             elif key == "tags" and isinstance(value, list):
-                set_params.append(list(value))
+                set_params.append(self._canonicalize_entry_tags(value))
             else:
                 set_params.append(value)
 
@@ -4440,7 +4468,7 @@ class DuckDBStore:
                     new_entry.source.value,
                     new_entry.author,
                     new_entry.project,
-                    list(new_entry.tags),
+                    self._canonicalize_entry_tags(new_entry.tags),
                     new_entry.status.value,
                     new_entry.verification.value,
                     json.dumps(new_entry.metadata),

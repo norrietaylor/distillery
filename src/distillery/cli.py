@@ -689,6 +689,9 @@ def _cmd_poll(config_path: str | None, fmt: str, source_url: str | None) -> int:
             auto_link_enabled=cfg.auto_link.enabled,
             auto_link_threshold=cfg.auto_link.threshold,
             auto_link_max_links=cfg.auto_link.max_links,
+            tag_aliases=cfg.tags.aliases,
+            tag_reserved_prefixes=cfg.tags.reserved_prefixes,
+            tag_normalize_namespaces=cfg.tags.enforce_namespaces,
             enforce_relation_schema=cfg.relations.enforce_schema,
         )
         await store.initialize()
@@ -846,6 +849,9 @@ def _cmd_retag(
             auto_link_enabled=cfg.auto_link.enabled,
             auto_link_threshold=cfg.auto_link.threshold,
             auto_link_max_links=cfg.auto_link.max_links,
+            tag_aliases=cfg.tags.aliases,
+            tag_reserved_prefixes=cfg.tags.reserved_prefixes,
+            tag_normalize_namespaces=cfg.tags.enforce_namespaces,
             enforce_relation_schema=cfg.relations.enforce_schema,
         )
         await store.initialize()
@@ -972,6 +978,9 @@ def _cmd_gh_backfill(
             auto_link_enabled=cfg.auto_link.enabled,
             auto_link_threshold=cfg.auto_link.threshold,
             auto_link_max_links=cfg.auto_link.max_links,
+            tag_aliases=cfg.tags.aliases,
+            tag_reserved_prefixes=cfg.tags.reserved_prefixes,
+            tag_normalize_namespaces=cfg.tags.enforce_namespaces,
             enforce_relation_schema=cfg.relations.enforce_schema,
         )
         await store.initialize()
@@ -1296,6 +1305,9 @@ def _cmd_import(
             auto_link_enabled=cfg.auto_link.enabled,
             auto_link_threshold=cfg.auto_link.threshold,
             auto_link_max_links=cfg.auto_link.max_links,
+            tag_aliases=cfg.tags.aliases,
+            tag_reserved_prefixes=cfg.tags.reserved_prefixes,
+            tag_normalize_namespaces=cfg.tags.enforce_namespaces,
             enforce_relation_schema=cfg.relations.enforce_schema,
         )
         await store.initialize()
@@ -1381,6 +1393,8 @@ def _cmd_import(
                 conn.execute("DELETE FROM entries")
                 conn.execute("DELETE FROM feed_sources")
 
+            # Restore writes bypass the store, so tags are kept exactly as
+            # exported (no alias canonicalization) and round trips stay equal.
             for entry, embedding in staged_rows:
                 conn.execute(
                     "INSERT INTO entries "
@@ -1998,6 +2012,9 @@ def _cmd_maintenance_classify(
             auto_link_enabled=cfg.auto_link.enabled,
             auto_link_threshold=cfg.auto_link.threshold,
             auto_link_max_links=cfg.auto_link.max_links,
+            tag_aliases=cfg.tags.aliases,
+            tag_reserved_prefixes=cfg.tags.reserved_prefixes,
+            tag_normalize_namespaces=cfg.tags.enforce_namespaces,
             enforce_relation_schema=cfg.relations.enforce_schema,
         )
         try:
