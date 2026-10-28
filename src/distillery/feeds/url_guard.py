@@ -18,12 +18,13 @@ Two entry points:
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import ipaddress
 import logging
 import socket
+import threading
 from collections.abc import Iterator
 from typing import Any
-from unittest.mock import patch
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -141,6 +142,29 @@ def validate_public_url(url: str) -> None:
             raise UnsafeURLError(f"host {host!r} resolves to a non-public address")
 
 
+# The ``(hostname, ip)`` pin for the current fetch. A ContextVar rather than a
+# per-fetch swap of ``socket.getaddrinfo``: the poller fetches concurrently in
+# worker threads, each with its own context, and overlapping swaps of the
+# process-global leaked stubs that chained until every lookup in the process
+# hit RecursionError (#709).
+_dns_pin: contextvars.ContextVar[tuple[str, str] | None] = contextvars.ContextVar(
+    "url_guard_dns_pin", default=None
+)
+_real_getaddrinfo = socket.getaddrinfo
+_install_lock = threading.Lock()
+
+
+def _pinned_getaddrinfo(host: Any, port: Any, *args: Any, **kwargs: Any) -> Any:
+    """``socket.getaddrinfo`` that honours the current context's pin."""
+    pin = _dns_pin.get()
+    if pin is not None and host == pin[0]:
+        ip = pin[1]
+        family = socket.AF_INET6 if ":" in ip else socket.AF_INET
+        # Mirror the 5-tuple shape of ``getaddrinfo`` for SOCK_STREAM/TCP.
+        return [(family, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (ip, port))]
+    return _real_getaddrinfo(host, port, *args, **kwargs)
+
+
 @contextlib.contextmanager
 def _pin_dns(hostname: str, ip: str) -> Iterator[None]:
     """Pin ``socket.getaddrinfo(hostname, ...)`` to a single, pre-validated IP.
@@ -153,21 +177,18 @@ def _pin_dns(hostname: str, ip: str) -> Iterator[None]:
     *hostname*; lookups of other hosts pass through untouched.
 
     Implementation note: ``httpcore`` 1.x calls ``socket.create_connection``
-    which delegates to ``socket.getaddrinfo``; patching that function is
-    therefore sufficient for both ``http`` and ``https`` requests.
+    which delegates to ``socket.getaddrinfo``, so a dispatcher installed there
+    covers both ``http`` and ``https`` requests. It is installed once and left
+    in place; the pin itself only lives in this context.
     """
-
-    original = socket.getaddrinfo
-
-    def _stub(host: Any, port: Any, *args: Any, **kwargs: Any) -> Any:
-        if host == hostname:
-            family = socket.AF_INET6 if ":" in ip else socket.AF_INET
-            # Mirror the 5-tuple shape of ``getaddrinfo`` for SOCK_STREAM/TCP.
-            return [(family, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (ip, port))]
-        return original(host, port, *args, **kwargs)
-
-    with patch("socket.getaddrinfo", _stub):
+    with _install_lock:
+        if socket.getaddrinfo is not _pinned_getaddrinfo:
+            socket.getaddrinfo = _pinned_getaddrinfo
+    token = _dns_pin.set((hostname, ip))
+    try:
         yield
+    finally:
+        _dns_pin.reset(token)
 
 
 def fetch_feed_bytes(
