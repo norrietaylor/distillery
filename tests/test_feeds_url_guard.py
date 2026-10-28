@@ -253,16 +253,16 @@ class TestPinDnsConcurrency:
         def run_a() -> None:
             with _pin_dns("pin-a.invalid", "203.0.113.1"):
                 a_in.set()
-                b_in.wait(5)
+                assert b_in.wait(5)
                 seen["a"] = socket.getaddrinfo("pin-a.invalid", 80)[0][4][0]
-                seen["a_sees_b"] = "pin-b.invalid" in str(_lookup("pin-b.invalid"))
+                seen["a_on_b"] = _lookup("pin-b.invalid")
             a_out.set()
 
         def run_b() -> None:
-            a_in.wait(5)
+            assert a_in.wait(5)
             with _pin_dns("pin-b.invalid", "203.0.113.2"):
                 b_in.set()
-                a_out.wait(5)
+                assert a_out.wait(5)
                 seen["b"] = socket.getaddrinfo("pin-b.invalid", 80)[0][4][0]
 
         threads = [threading.Thread(target=run_a), threading.Thread(target=run_b)]
@@ -271,7 +271,9 @@ class TestPinDnsConcurrency:
         for t in threads:
             t.join(10)
 
-        assert seen == {"a": "203.0.113.1", "a_sees_b": False, "b": "203.0.113.2"}
+        # A never sees B's pin: the lookup goes to the real resolver and fails.
+        assert isinstance(seen.pop("a_on_b"), socket.gaierror)
+        assert seen == {"a": "203.0.113.1", "b": "203.0.113.2"}
         resolver = socket.getaddrinfo
         with _pin_dns("pin-c.invalid", "203.0.113.3"):
             pass
