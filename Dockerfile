@@ -12,9 +12,16 @@
 # extension cache are copied in. Estimated final size: ~200 MB (vs 383 MB
 # on the previous Wolfi-base image, ~40% reduction). See issue #419 for the
 # size/CVE-surface analysis that motivated this migration.
+#
+# The interpreter itself is a uv-managed CPython (PYTHON_VERSION), installed
+# in the builder under /opt/python and copied into the runtime stage. Only
+# Chainguard's `latest` tags are freely available and they track the newest
+# CPython (3.15+), for which the locked dependencies ship no wheels. The
+# base image's own python is unused.
 
 ARG PYTHON_TAG=latest
-ARG UV_VERSION=0.11.3
+ARG PYTHON_VERSION=3.14
+ARG UV_VERSION=0.13.1
 
 # Pinned `uv` binary. Pulled in via a separate stage so we can parameterise
 # the version via the UV_VERSION build arg in the `COPY --from=` below.
@@ -26,6 +33,8 @@ FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
 # ─────────────────────────────────────────────────────────────────────
 FROM cgr.dev/chainguard/python:${PYTHON_TAG}-dev AS builder
 
+ARG PYTHON_VERSION
+
 # The `-dev` variant runs as `nonroot` by default. Switch to root so we can
 # copy the `uv` binary into /usr/local/bin and write to /app.
 USER root
@@ -34,11 +43,15 @@ COPY --from=uv /uv /usr/local/bin/uv
 # Speed/size knobs for uv:
 #   - copy link mode avoids hardlink fallbacks across mounted layers
 #   - bytecode compile up front so the runtime image has no first-call cost
-#   - never download a different Python: use the one provided by the base
+#   - use only the uv-managed interpreter installed below, never the base's
 ENV UV_LINK_MODE=copy \
     UV_COMPILE_BYTECODE=1 \
-    UV_PYTHON_DOWNLOADS=never \
+    UV_PYTHON=${PYTHON_VERSION} \
+    UV_PYTHON_PREFERENCE=only-managed \
+    UV_PYTHON_INSTALL_DIR=/opt/python \
     UV_PROJECT_ENVIRONMENT=/app/.venv
+
+RUN uv python install ${PYTHON_VERSION}
 
 WORKDIR /app
 
@@ -84,9 +97,11 @@ LABEL org.opencontainers.image.source="https://github.com/norrietaylor/distiller
 
 WORKDIR /app
 
-# Copy the prebuilt virtualenv and DuckDB extension cache from the builder.
-# Both are owned by uid 65532 (`nonroot`), the default user in the
-# Chainguard distroless image.
+# Copy the uv-managed interpreter (same path, so the venv's python symlink
+# resolves), the prebuilt virtualenv and the DuckDB extension cache from the
+# builder. The venv and cache are owned by uid 65532 (`nonroot`), the default
+# user in the Chainguard distroless image.
+COPY --from=builder /opt/python /opt/python
 COPY --from=builder --chown=65532:65532 /app/.venv /app/.venv
 COPY --from=builder --chown=65532:65532 /home/nonroot/.duckdb /home/nonroot/.duckdb
 

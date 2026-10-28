@@ -42,6 +42,7 @@ Extract from arguments:
 - **Topic**: main query string (everything except flags)
 - **--project**: if present, scope all searches to that project
 - **--graph**: if present (off by default), enable graph-expanded retrieval — every `distillery_search` call below is invoked with `expand_graph=true, expand_hops=1` so the seed semantic-search results are augmented with 1-hop structural neighbours from `entry_relations`. Score discount is 0.5 per hop. Each result carries `provenance: "search" | "graph"`, `depth`, and `parent_id`. The envelope adds `graph_expansion: {seed_count, expanded_count}`. Never expand without explicit user opt-in via this flag.
+- **--sources**: append the full per-entry Sources table (default: off; sources are cited inline). By default the table is omitted and a one-line summary stands in (Step 6).
 
 ### Step 3: Multi-Pass Retrieval
 
@@ -63,17 +64,17 @@ With `--graph`: `distillery_search(query="<topic>", limit=20, project="<project 
 
 Deduplicate Pass 1a and 1b results by entry ID, keeping the higher similarity score. Record all entries and scores. When `--graph` is set, also record each entry's `provenance` (`search` or `graph`), `depth`, and `parent_id`; if the same entry appears via both provenances across passes, prefer `provenance="search"` (the stronger signal).
 
-**Pass 2 -- Follow-up Searches (up to 3) + Tag Expansion (up to 3):**
+**Pass 2 -- Follow-up Searches (up to 2) + Tag Expansion (up to 2):**
 
 Analyze Pass 1 for related concepts, people, sub-topics, or terms not directly covered by the original query. For each significant one:
 
 `distillery_search(query="<related concept>", limit=10, project="<project if specified>")` (add `expand_graph=true, expand_hops=1` when `--graph` is set)
 
-**Tag-based expansion:** Extract tags from Pass 1 results and identify their namespace prefixes (e.g., tags like `domain/authentication`, `domain/oauth` → namespace prefix `domain`). Call `distillery_list(group_by="tags", project="<project if specified>", limit=200)` to get tag frequencies across the knowledge base. From the returned tag groups, filter to those matching the namespace prefixes and rank by count. Convert the top-ranked tag segments to search queries by taking the leaf segment and replacing hyphens with spaces (e.g., `domain/oauth` → `"oauth"`, `domain/session-management` → `"session management"`). Run up to 3 `distillery_search` calls from these ranked tag-derived queries, skipping any that duplicate an existing Pass 2 concept query. (Add `expand_graph=true, expand_hops=1` when `--graph` is set.)
+**Tag-based expansion:** Extract tags from Pass 1 results and identify their namespace prefixes (e.g., tags like `domain/authentication`, `domain/oauth` → namespace prefix `domain`). Call `distillery_list(group_by="tags", project="<project if specified>", limit=200)` to get tag frequencies across the knowledge base. From the returned tag groups, filter to those matching the namespace prefixes and rank by count. Convert the top-ranked tag segments to search queries by taking the leaf segment and replacing hyphens with spaces (e.g., `domain/oauth` → `"oauth"`, `domain/session-management` → `"session management"`). Run up to 2 `distillery_search` calls from these ranked tag-derived queries, skipping any that duplicate an existing Pass 2 concept query. (Add `expand_graph=true, expand_hops=1` when `--graph` is set.)
 
 Report: `Tag expansion: discovered <N> related topics from tag vocabulary.` (Omit this line entirely if no tags are found in Pass 1 results — Pass 2 proceeds with concept-based queries only.)
 
-**Pass 3 -- Gap-filling (up to 2):**
+**Pass 3 -- Gap-filling (up to 1):**
 
 If earlier passes reveal references to specific projects, decisions, or events not yet returned:
 
@@ -106,7 +107,9 @@ Example: `The team adopted DuckDB after evaluating SQLite and PostgreSQL [Entry 
 
 **Provenance distinction (when `--graph` is set):** Entries with `provenance="search"` matched the query semantically; entries with `provenance="graph"` did not match the query directly but were pulled in as 1-hop structural neighbours of a search-matched entry. In the prose, label graph-only entries as "structurally related" (e.g., `[Entry abc12345, structurally related]`) and call out *why* they appear — e.g., "linked to [Entry 550e8400] via `entry_relations`". Treat search-matched entries as primary signal; graph-only entries provide supporting context (downstream impacts, prior decisions a search-matched entry references, etc.). The synthesis should make this distinction visible to the user so they understand why each entry appears.
 
-**b. Timeline (omit if all entries same day)** -- Chronological evolution with dates, descriptions, and citations.
+**b. Timeline (omit if all entries same day)** -- Chronological evolution with dates, descriptions, and citations. Order by and render each entry's **effective date** (see below), not the raw `created_at`.
+
+> **Effective date:** use `metadata.published_at` when present, else fall back to `created_at`. gh-sync sets `published_at` to the GitHub object's real creation time and feed entries to the item's publication time; the bare `created_at` of an imported entry is the batch *ingest* timestamp, which collapses every imported entry onto one day and corrupts chronology (issue #669).
 
 **c. Key Decisions (omit if none)** -- Bullet list: what was decided, by whom, when, rationale, citation.
 
@@ -116,29 +119,36 @@ Example: `The team adopted DuckDB after evaluating SQLite and PostgreSQL [Entry 
 
 ### Step 6: Source Attribution
 
-Table of all cited entries:
+By DEFAULT (no `--sources`), do NOT render the table — the inline `[Entry <short-id>]` citations are the audit trail. Emit a single summary line instead so provenance still tracks:
+
+Sources: <N> entries cited inline (run `/pour <topic> --sources` for the full table).
+
+When `--graph` is set, append the retrieval-path split to that line so the search-vs-graph audit trail (otherwise only in the table's Provenance column) is preserved: `Sources: <N> entries cited inline — <S> search, <G> structurally-related (run /pour <topic> --sources for the full table).` (`<S>` = `provenance="search"`, `<G>` = `provenance="graph"`, `<S> + <G> = <N>`.)
+
+ONLY when `--sources` is passed, render the full table of all cited entries instead of the summary line:
 
 | # | Short ID | Type | Author | Date | Preview | Similarity |
 |---|----------|------|--------|------|---------|------------|
 | 1 | 550e8400 | [session] | Alice Smith | 2026-03-15 | We decided to use DuckDB for... | 92% |
 
 - **Short ID**: first 8 chars of UUID
+- **Date**: the entry's effective date — `metadata.published_at` when present, else `created_at` (see Timeline note; avoids showing the ingest date for gh-sync/feed entries)
 - **Preview**: first 40 chars of content
 - **Similarity**: highest score from any pass, as percentage
 
-When `--graph` is set, add a **Provenance** column showing `search` or `graph` (and for graph entries, append the `parent_id` short-id, e.g., `graph (via 550e8400)`), so the audit trail makes the retrieval path explicit.
+When `--graph` is set (and `--sources` is on), add a **Provenance** column showing `search` or `graph` (and for graph entries, append the `parent_id` short-id, e.g., `graph (via 550e8400)`), so the audit trail makes the retrieval path explicit.
 
 ### Step 7: Interactive Refinement
 
 Ask: `Would you like to go deeper on any sub-topic, or is this sufficient?`
 
-If the user identifies a sub-topic: run a focused search (limit=10) — passing `expand_graph=true, expand_hops=1` if `--graph` is set — deduplicate against cited entries, produce a `## Refinement: <Sub-topic>` addendum with synthesis and an Additional Sources table (with Provenance column when `--graph` is set), then ask again. Maximum 5 refinement rounds.
+If the user identifies a sub-topic: run a focused search (limit=10) — passing `expand_graph=true, expand_hops=1` if `--graph` is set — deduplicate against cited entries, produce a `## Refinement: <Sub-topic>` addendum with synthesis and — only when `--sources` is set — an Additional Sources table (with Provenance column when `--graph` is also set); without `--sources` the addendum's new entries are cited inline and folded into the summary count, then ask again. Maximum 5 refinement rounds.
 
 When satisfied: `Synthesis complete. X entries cited across Y sections.`
 
 ## Output Format
 
-Heading `# Pour: <Topic>`, then sections Summary, Timeline, Key Decisions, Contradictions, Knowledge Gaps, Sources as described above. Refinement addendums appended if requested. Fewer than 2 entries triggers the fallback display instead.
+Heading `# Pour: <Topic>`, then sections Summary, Timeline, Key Decisions, Contradictions, Knowledge Gaps, Sources as described above. By default the Sources section is the one-line summary (`Sources: <N> entries cited inline …`); the full per-entry table is appended only with `--sources`. Refinement addendums appended if requested. Fewer than 2 entries triggers the fallback display instead.
 
 ## Rules
 
@@ -146,9 +156,10 @@ Heading `# Pour: <Topic>`, then sections Summary, Timeline, Key Decisions, Contr
 - If an MCP tool call fails, report the error to the user and STOP. Do not attempt workarounds.
 - Always use `[Entry <short-id>]` citation format (short-id = first 8 chars of UUID)
 - Every factual claim must trace to an entry -- never synthesize without citing
+- `--sources` controls the Source Attribution table: default OFF → emit the one-line summary `Sources: <N> entries cited inline (run /pour <topic> --sources for the full table).` (when `--graph` is set, append `— <S> search, <G> structurally-related` so the search-vs-graph split survives without the Provenance column); ON → render the full per-entry table instead. The inline `[Entry <short-id>]` citations (and the `, structurally related` markers under `--graph`) are always present and are the default audit trail
 - Omit sections with no content
 - On MCP errors, see CONVENTIONS.md error handling -- display and stop
-- Loop limits: 3 follow-up searches (Pass 2), 2 gap-filling searches (Pass 3), 5 refinement rounds (Step 7)
+- Loop limits (bounded to cap sequential-search latency): Pass 1 = 2 (1a + 1b), Pass 2 = 2 follow-up + 2 tag-derived, Pass 3 = 1 gap-filling — worst case 7 searches for the initial synthesis. Step 7 adds up to 5 further on-demand refinement searches (user-driven, not part of the capped initial budget).
 - Apply `--project` filter to every `distillery_search` call when provided
 - `--graph` defaults OFF — never pass `expand_graph=true` without explicit user opt-in via the flag; without `--graph`, all `distillery_search` calls and synthesis behavior remain unchanged (no provenance column, no "structurally related" labels, no graph_expansion totals)
 - When `--graph` is set, apply `expand_graph=true, expand_hops=1` to every `distillery_search` call (Pass 1a, 1b, Pass 2 concept and tag-derived, Pass 3, and any Step 7 refinement search)
