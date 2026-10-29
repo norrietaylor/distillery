@@ -34,7 +34,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "duckdb~=1.5.0",
+    "duckdb>=1.5,<2.1",
     "pyyaml>=6.0,<7.0",
     "httpx>=0.24.0,<1.0",
     "fastmcp>=2.12.0,<5.0",
