@@ -400,7 +400,7 @@ jobs:
       # second layer of defence on top of the verify-paths step above.
       - name: Create auto-PR
         id: cpr
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@v8
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           branch: ${{ steps.pr-meta.outputs.branch }}
